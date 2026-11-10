@@ -443,7 +443,7 @@ fn recorded(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 fn run_command(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     for (i, name) in COMMAND_VARS.iter().enumerate() {
         let symbol = cx.intern(name);
-        cx.variable_set(symbol, saved[SAVED_VARS + i])?;
+        cx.store_variable(symbol, saved[SAVED_VARS + i])?;
     }
     let mut args = vec![saved[FUNCTION]];
     let mut tail = saved[ARGS];

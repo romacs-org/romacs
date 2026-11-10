@@ -5,17 +5,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Pinned, verified, on-demand font fixtures for Romacs tests"
+description = "Pinned font fixtures for Romacs tests, read from a local cache"
 publish = false
-
-[dependencies]
-flate2.workspace = true
-fs4.workspace = true
-sha2.workspace = true
-tar.workspace = true
-thiserror.workspace = true
-ureq.workspace = true
-zip.workspace = true
 
 [lints]
 workspace = true

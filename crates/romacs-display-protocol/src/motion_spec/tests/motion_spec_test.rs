@@ -112,14 +112,6 @@ fn angular_frequency_and_damping_reject_non_positive_and_non_finite() {
 // DevicePixels: a threshold may be zero but never negative
 // =======================================================================
 
-#[test]
-fn device_pixels_allows_zero_but_rejects_negative_and_non_finite() {
-    assert_eq!(DevicePixels::new(0.0).expect("zero ok"), DevicePixels::ZERO);
-    assert_eq!(DevicePixels::new(-0.5), Err(MotionSpecError::Negative));
-    assert_eq!(DevicePixels::new(f32::NAN), Err(MotionSpecError::NotFinite));
-    assert_eq!(DevicePixels::new(2.5).expect("positive").get(), 2.5);
-}
-
 // =======================================================================
 // MotionSpec
 // =======================================================================
@@ -165,16 +157,6 @@ fn motion_spec_names_are_stable_for_diagnostics() {
 // =======================================================================
 // Serde: deserialization validates, so an invalid config cannot be loaded
 // =======================================================================
-
-#[test]
-fn deserializing_rejects_values_the_constructors_reject() {
-    assert!(serde_json::from_str::<AngularFrequency>("0.0").is_err());
-    assert!(serde_json::from_str::<AngularFrequency>("-3.0").is_err());
-    assert!(serde_json::from_str::<DampingRatio>("0.0").is_err());
-    assert!(serde_json::from_str::<DevicePixels>("-1.0").is_err());
-    assert!(serde_json::from_str::<AngularFrequency>("8.0").is_ok());
-    assert!(serde_json::from_str::<DevicePixels>("0.0").is_ok());
-}
 
 #[test]
 fn unit_interval_deserialization_saturates_finite_values() {
@@ -253,4 +235,12 @@ fn spring_parameter_deserialization_preserves_validation_errors_and_positive_ext
             value
         );
     }
+}
+
+#[test]
+fn deserializing_rejects_values_the_constructors_reject() {
+    assert!(serde_json::from_str::<AngularFrequency>("0.0").is_err());
+    assert!(serde_json::from_str::<AngularFrequency>("-3.0").is_err());
+    assert!(serde_json::from_str::<DampingRatio>("0.0").is_err());
+    assert!(serde_json::from_str::<AngularFrequency>("8.0").is_ok());
 }

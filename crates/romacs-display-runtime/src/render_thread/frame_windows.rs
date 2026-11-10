@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use winit::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 use winit::event_loop::ActiveEventLoop;
-use winit::monitor::Fullscreen;
 use winit::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData, Window,
     WindowId,
@@ -25,7 +24,7 @@ use super::state::{
     TypingSpeedState, WindowChrome, effective_window_scale_factor, window_size_from_emacs_pixels,
 };
 use super::transitions::clear_frame_transition_textures;
-use crate::core::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use crate::host_types::GuiFrameGeometryHints;
 use romacs_display_protocol::effect_config::IdleDimConfig;
 use romacs_display_protocol::frame_time::EventTime;
@@ -34,9 +33,8 @@ use romacs_display_protocol::{
     PresentationFramePoint, PresentationId, PresentedHit, PresentedHitError, PresentedHitQuery,
     RetainedImageSet, SurfaceState,
 };
-use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
+use romacs_renderer_wgpu::WgpuGlyphAtlas;
 
-use crate::thread_comm::WindowFullscreenMode;
 
 /// How close together two titlebar clicks must be to count as a double click.
 const TITLEBAR_DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
@@ -244,58 +242,6 @@ fn request_ime_cursor_area(window: &dyn Window, position: Position, size: Size) 
     }
 }
 
-/// Make Option a command modifier the way GNU's compiled-in
-/// `ns-alternate-modifier` default does, or leave it composing characters
-/// when the policy maps Option to `none'.
-///
-/// macOS composes an Option chord in the window server, so AppKit hands over
-/// the composed character: Option+X arrives as `≈`, Option+Shift+, as `¯`.
-/// GNU never reads that when a control-like modifier is down.
-/// `keyDown:` takes its code from
-/// `[theEvent charactersIgnoringModifiers]` (`src/nsterm.m`), which applies
-/// Shift but not Option, and re-derives it with `ns_get_shifted_character` --
-/// `UCKeyTranslate` with only the shift-like modifier bits -- when a
-/// control-like modifier is also down.  With the default
-/// `ns-alternate-modifier` of `meta` those two agree, because Option is then
-/// never shift-like, so `nil_or_none` is false and only `shiftKey` is passed.
-///
-/// `OptionAsAlt` is winit's knob for exactly that split: its rewriting shapes
-/// make `characters` become `charactersIgnoringModifiers` whenever Option is
-/// down and Control and Command are not.  It has to happen here,
-/// at the window, rather than while translating a `KeyEvent`, because winit
-/// applies it before `interpretKeyEvents` -- so an Option chord that lands on
-/// a dead key (Option+E on the US layout) stops opening a preedit and starts
-/// arriving as a key event at all.
-///
-/// The shape is the *policy's* answer (`ModifierPolicy::option_as_alt_shape`),
-/// not a constant: `mac-option-modifier nil` (GNU's `none') must keep
-/// composing characters, so the knob is driven by the NS modifier policy
-/// shipped from Lisp.
-#[cfg(target_os = "macos")]
-pub(super) fn apply_option_key_policy(
-    window: &dyn Window,
-    shape: romacs_display_protocol::OptionAsAltShape,
-) {
-    use romacs_display_protocol::OptionAsAltShape as Shape;
-    use winit::platform::macos::{OptionAsAlt, WindowExtMacOS};
-
-    window.set_option_as_alt(match shape {
-        Shape::None => OptionAsAlt::None,
-        Shape::LeftOnly => OptionAsAlt::OnlyLeft,
-        Shape::RightOnly => OptionAsAlt::OnlyRight,
-        Shape::Both => OptionAsAlt::Both,
-    });
-}
-
-/// No other window system composes an Option/Alt chord into a different
-/// character, so Alt already reaches Emacs as a bare modifier there.
-#[cfg(not(target_os = "macos"))]
-pub(super) fn apply_option_key_policy(
-    _window: &dyn Window,
-    _shape: romacs_display_protocol::OptionAsAltShape,
-) {
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ActivePresentationTransition {
     pub activated: romacs_display_protocol::PresentationId,
@@ -429,7 +375,7 @@ impl InputMethodState {
 impl ChromeState {
     /// Apply a mouse press on a chrome hit during a popup interaction.
     /// Dismisses popup-related state and records the interaction.
-    pub fn press_with_popup(&mut self, press: &ChromePress) {
+    pub(crate) fn press_with_popup(&mut self, press: &ChromePress) {
         self.interaction.menu_bar_active = None;
         self.interaction.compact_bar_menu_active = None;
         let ChromePress::ToolBar(idx) = press;
@@ -474,7 +420,6 @@ pub(super) enum FrameLifecycle {
         last_ime_cursor_area: Option<ImeCursorArea>,
         chrome: WindowChrome,
         geometry_hints: Option<GuiFrameGeometryHints>,
-        fullscreen: Option<WindowFullscreenMode>,
     },
     /// Window with a live winit native window and wgpu surface.
     Active {
@@ -643,6 +588,7 @@ impl GuiFrameRenderState {
     }
 
     /// Project already-applied native controls; scenes never replay setters.
+    #[cfg(test)]
     pub(super) fn apply_frame_opacity(
         &mut self,
         controls: &crate::thread_comm::FrameOpacityState,
@@ -1138,19 +1084,6 @@ impl GuiFrameRenderState {
         self.pointer_appearance.selection_for(frame)
     }
 
-    pub(super) fn font_metrics(&self) -> (f32, f32, f32) {
-        self.compositor
-            .glyph_atlas
-            .as_ref()
-            .map_or((13.0, 17.0, 13.0 * 0.6), |atlas| {
-                (
-                    atlas.default_font_size(),
-                    atlas.default_line_height(),
-                    atlas.default_char_width(),
-                )
-            })
-    }
-
     pub(super) fn set_ime_preedit(&mut self, text: String, cursor_range: Option<(usize, usize)>) {
         self.input_method.replace_preedit(text, cursor_range);
         self.compositor.dirty = true;
@@ -1299,7 +1232,7 @@ impl GuiFrameRenderState {
 
     pub(super) fn set_current_frame(
         &mut self,
-        frame: Option<crate::core::frame_glyphs::FrameGlyphBuffer>,
+        frame: Option<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
         scroll_anchors: super::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: super::frame_compositor::ReflowImprintsByWindow,
@@ -1379,20 +1312,6 @@ impl GuiFrameRenderState {
         transition
     }
 
-    #[cfg(test)]
-    pub(super) fn with_chrome_interaction_mut(
-        &mut self,
-        f: impl FnOnce(&mut GuiChromeInteractionState),
-    ) -> bool {
-        let previous = self.chrome.interaction;
-        f(&mut self.chrome.interaction);
-        let changed = self.chrome.interaction != previous;
-        if changed {
-            self.compositor.dirty = true;
-        }
-        changed
-    }
-
     /// Take the retained presentation to draw from.
     ///
     /// Takes the acquisition proof because this drains the frame's one-shot
@@ -1454,21 +1373,21 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn chrome_mut(&mut self) -> &mut WindowChrome {
+    pub(crate) fn chrome_mut(&mut self) -> &mut WindowChrome {
         match self {
             Self::Active { native, .. } => &mut native.chrome,
             Self::Pending { chrome, .. } => chrome,
         }
     }
 
-    pub fn ime_enabled(&self) -> bool {
+    pub(crate) fn ime_enabled(&self) -> bool {
         match self {
             Self::Active { ime_enabled, .. } => *ime_enabled,
             Self::Pending { ime_enabled, .. } => *ime_enabled,
         }
     }
 
-    pub fn set_ime_enabled(&mut self, enabled: bool) {
+    pub(crate) fn set_ime_enabled(&mut self, enabled: bool) {
         match self {
             Self::Active {
                 ime_enabled: ie, ..
@@ -1479,7 +1398,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn mouse_hidden_for_typing(&self) -> bool {
+    pub(crate) fn mouse_hidden_for_typing(&self) -> bool {
         match self {
             Self::Active {
                 mouse_hidden_for_typing: m,
@@ -1492,7 +1411,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
+    pub(crate) fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
         match self {
             Self::Active {
                 mouse_hidden_for_typing: m,
@@ -1505,7 +1424,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn last_ime_cursor_area(&self) -> Option<ImeCursorArea> {
+    pub(crate) fn last_ime_cursor_area(&self) -> Option<ImeCursorArea> {
         match self {
             Self::Active {
                 last_ime_cursor_area,
@@ -1518,7 +1437,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn geometry_hints(&self) -> Option<GuiFrameGeometryHints> {
+    pub(crate) fn geometry_hints(&self) -> Option<GuiFrameGeometryHints> {
         match self {
             Self::Pending { geometry_hints, .. } => *geometry_hints,
             _ => None,
@@ -1590,7 +1509,7 @@ impl GuiFrameWindowState {
         surface_state
     }
 
-    pub fn handle_resize(
+    pub(crate) fn handle_resize(
         &mut self,
         device: &wgpu::Device,
         instance: &wgpu::Instance,
@@ -1650,16 +1569,10 @@ impl GuiFrameWindowState {
     /// Replay retained cosmetic state onto this frame's owner-held window.
     /// Never request a size: primary adoption must preserve native host geometry.
     pub(super) fn replay_pending_native_state(&self, window: &dyn Window) {
-        if let FrameLifecycle::Pending {
-            chrome, fullscreen, ..
-        } = &self.lifecycle
-        {
+        if let FrameLifecycle::Pending { chrome, .. } = &self.lifecycle {
             window.set_title(&chrome.title);
             if let Some(hints) = self.lifecycle.geometry_hints() {
                 apply_window_geometry_hints(window, hints);
-            }
-            if let Some(mode) = fullscreen {
-                apply_native_fullscreen_mode(window, *mode);
             }
         }
     }
@@ -1675,58 +1588,6 @@ impl GuiFrameWindowState {
             }
             FrameLifecycle::Pending { chrome, .. } => {
                 chrome.title = title;
-            }
-        }
-    }
-
-    pub(super) fn set_fullscreen_mode(&mut self, mode: WindowFullscreenMode) {
-        match &mut self.lifecycle {
-            FrameLifecycle::Pending { fullscreen, .. } => *fullscreen = Some(mode),
-            FrameLifecycle::Active { native, .. } => {
-                apply_native_fullscreen_mode(native.window.as_ref(), mode);
-                match mode {
-                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
-                        native.chrome.is_fullscreen = true;
-                    }
-                    WindowFullscreenMode::None | WindowFullscreenMode::Maximized => {
-                        native.chrome.is_fullscreen = false;
-                    }
-                    WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {}
-                }
-            }
-        }
-        self.render.compositor.dirty = true;
-    }
-
-    pub(super) fn request_inner_size(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> super::surface_resize::ResizeRequestOutcome {
-        use super::surface_resize::ResizeRequestOutcome;
-        match &mut self.lifecycle {
-            FrameLifecycle::Active { native, .. } => {
-                let content: PhysicalSize<u32> = window_size_from_emacs_pixels(width, height)
-                    .to_physical(native.window.scale_factor());
-                let insets = native.content_insets();
-                let (width, height) = insets.surface_size(content.width, content.height);
-                let size = PhysicalSize::new(width, height);
-                match native.window.request_surface_size(size.into()) {
-                    Some(size) => ResizeRequestOutcome::Applied {
-                        window: native.window.id(),
-                        size,
-                    },
-                    None => ResizeRequestOutcome::AwaitingConfigure,
-                }
-            }
-            FrameLifecycle::Pending {
-                width: pw,
-                height: ph,
-                ..
-            } => {
-                *pw = width;
-                *ph = height;
-                ResizeRequestOutcome::PendingRealization
             }
         }
     }
@@ -1754,20 +1615,6 @@ impl GuiFrameWindowState {
     pub(super) fn forget_applied_geometry_hints(&mut self) {
         if let FrameLifecycle::Active { native, .. } = &mut self.lifecycle {
             native.applied_geometry_hints = None;
-        }
-    }
-
-    pub(super) fn set_decorations(&mut self, decorated: bool) {
-        match &mut self.lifecycle {
-            FrameLifecycle::Active { native, .. } => {
-                native.chrome.decorations_enabled = decorated;
-                native.window_chrome.invalidate();
-                native.window.set_decorations(decorated);
-                self.render.compositor.dirty = true;
-            }
-            FrameLifecycle::Pending { chrome, .. } => {
-                chrome.decorations_enabled = decorated;
-            }
         }
     }
 
@@ -1918,11 +1765,11 @@ impl GuiFrameWindowState {
         self.lifecycle.chrome_mut()
     }
 
-    pub fn ime_enabled(&self) -> bool {
+    pub(crate) fn ime_enabled(&self) -> bool {
         self.lifecycle.ime_enabled()
     }
 
-    pub fn set_ime_enabled(&mut self, enabled: bool) {
+    pub(crate) fn set_ime_enabled(&mut self, enabled: bool) {
         self.lifecycle.set_ime_enabled(enabled);
     }
 
@@ -1985,30 +1832,6 @@ pub(crate) struct GuiFrameWindowManager {
     pub(super) chrome_defaults: WindowChrome,
     /// Whether future secondary frame windows should start with FPS enabled.
     pub(super) fps_enabled: bool,
-    /// The NS modifier policy's Option rewrite shape, applied to every live
-    /// window and to windows opened later (issue #442).
-    pub(super) option_as_alt: romacs_display_protocol::OptionAsAltShape,
-}
-
-fn apply_native_fullscreen_mode(window: &dyn Window, mode: WindowFullscreenMode) {
-    match mode {
-        WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
-            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-        }
-        WindowFullscreenMode::Maximized => {
-            window.set_fullscreen(None);
-            window.set_maximized(true);
-        }
-        WindowFullscreenMode::None => {
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-        }
-        WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {
-            tracing::warn!(
-                "partial fullscreen modes are not implemented by the native window backend"
-            );
-        }
-    }
 }
 
 /// A request to create a new OS window.
@@ -2018,7 +1841,6 @@ pub(crate) struct PendingWindow {
     pub height: u32,
     pub title: String,
     pub geometry_hints: GuiFrameGeometryHints,
-    pub fullscreen: Option<WindowFullscreenMode>,
 }
 
 impl GuiFrameWindowManager {
@@ -2033,7 +1855,6 @@ impl GuiFrameWindowManager {
             ready_replies: HashMap::new(),
             chrome_defaults: WindowChrome::default(),
             fps_enabled: false,
-            option_as_alt: romacs_display_protocol::OptionAsAltShape::Both,
         }
     }
 
@@ -2056,7 +1877,7 @@ impl GuiFrameWindowManager {
         })
     }
 
-    pub fn adopt_primary_frame_id(&mut self, emacs_frame_id: u64) {
+    pub(crate) fn adopt_primary_frame_id(&mut self, emacs_frame_id: u64) {
         let old_key = FrameKey::from_primary(self.primary_emacs_frame_id);
         self.primary_emacs_frame_id = Some(emacs_frame_id);
         if let Some(window_state) = self.windows.remove(&old_key) {
@@ -2070,15 +1891,15 @@ impl GuiFrameWindowManager {
     }
 
     #[allow(dead_code)] // used by the frame-window manager tests
-    pub fn primary_frame_id(&self) -> Option<u64> {
+    pub(crate) fn primary_frame_id(&self) -> Option<u64> {
         self.primary_emacs_frame_id
     }
 
-    pub fn primary_event_frame_id(&self) -> u64 {
+    pub(crate) fn primary_event_frame_id(&self) -> u64 {
         self.primary_emacs_frame_id.unwrap_or(0)
     }
 
-    pub fn is_primary_frame_id(&self, emacs_frame_id: u64) -> bool {
+    pub(crate) fn is_primary_frame_id(&self, emacs_frame_id: u64) -> bool {
         emacs_frame_id == 0 || self.primary_emacs_frame_id == Some(emacs_frame_id)
     }
 
@@ -2104,16 +1925,6 @@ impl GuiFrameWindowManager {
         let key = self.primary_frame_key();
         if let Some(window_state) = self.windows.get_mut(&key) {
             window_state.replay_pending_native_state(native.window.as_ref());
-            if let FrameLifecycle::Pending {
-                fullscreen: Some(mode),
-                ..
-            } = &window_state.lifecycle
-            {
-                native.chrome.is_fullscreen = matches!(
-                    mode,
-                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth
-                );
-            }
             let winit_id = native.window.id();
             let surface_state = native.surface_state();
             window_state.render.cursor.seed_focus(native.window.has_focus());
@@ -2137,11 +1948,11 @@ impl GuiFrameWindowManager {
         self.windows.remove(&key)
     }
 
-    pub fn is_primary_winit(&self, winit_id: WindowId) -> bool {
+    pub(crate) fn is_primary_winit(&self, winit_id: WindowId) -> bool {
         self.primary_winit_id == Some(winit_id)
     }
 
-    pub fn clear_primary_mapping(&mut self) {
+    pub(crate) fn clear_primary_mapping(&mut self) {
         if let Some(winit_id) = self.primary_winit_id.take() {
             self.winit_to_emacs.remove(&winit_id);
         }
@@ -2157,7 +1968,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Schedule a new window to be created on the next event loop iteration.
-    pub fn request_create(
+    pub(crate) fn request_create(
         &mut self,
         emacs_frame_id: u64,
         width: u32,
@@ -2171,20 +1982,19 @@ impl GuiFrameWindowManager {
             height,
             title,
             geometry_hints,
-            fullscreen: None,
         });
     }
 
     /// Schedule a window for destruction.
-    pub fn request_destroy(&mut self, emacs_frame_id: u64) {
+    pub(crate) fn request_destroy(&mut self, emacs_frame_id: u64) {
         self.pending_destroys.push(emacs_frame_id);
     }
 
-    pub fn destroy_pending(&self, emacs_frame_id: u64) -> bool {
+    pub(crate) fn destroy_pending(&self, emacs_frame_id: u64) -> bool {
         self.pending_destroys.contains(&emacs_frame_id)
     }
 
-    pub fn await_ready(
+    pub(crate) fn await_ready(
         &mut self,
         frame: u64,
         reply: crossbeam_channel::Sender<Result<(), String>>,
@@ -2212,7 +2022,7 @@ impl GuiFrameWindowManager {
 
     /// Process pending window creations. Must be called from the event loop
     /// (requires ActiveEventLoop for window creation).
-    pub fn process_creates(
+    pub(crate) fn process_creates(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
         comms: &crate::thread_comm::RenderComms,
@@ -2308,7 +2118,6 @@ impl GuiFrameWindowManager {
                     );
 
                     NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());
-                    apply_option_key_policy(window.as_ref(), self.option_as_alt);
                     apply_window_geometry_hints(window.as_ref(), req.geometry_hints);
 
                     let winit_id = window.id();
@@ -2376,12 +2185,6 @@ impl GuiFrameWindowManager {
                             render,
                         },
                     );
-                    if let Some(mode) = req.fullscreen
-                        && let Some(state) =
-                            self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
-                    {
-                        state.set_fullscreen_mode(mode);
-                    }
                     if let Some(state) =
                         self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
                         && let FrameLifecycle::Active { native, .. } = &mut state.lifecycle
@@ -2444,7 +2247,6 @@ impl GuiFrameWindowManager {
                     ..WindowChrome::default()
                 },
                 geometry_hints,
-                fullscreen: None,
             },
             render: GuiFrameRenderState::new_without_device(
                 frame,
@@ -2475,7 +2277,7 @@ impl GuiFrameWindowManager {
 
     /// Process pending window destructions, reporting the frames that went
     /// away so their GPU accounting can be retired with them.
-    pub fn process_destroys(&mut self) -> Vec<u64> {
+    pub(crate) fn process_destroys(&mut self) -> Vec<u64> {
         let pending = std::mem::take(&mut self.pending_destroys);
         let mut destroyed = Vec::new();
         for frame_id in pending {
@@ -2491,7 +2293,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Drop all windows and their wgpu surfaces (for clean shutdown).
-    pub fn destroy_all(&mut self) {
+    pub(crate) fn destroy_all(&mut self) {
         self.pending_creates.clear();
         self.pending_destroys.clear();
         self.ready_replies.clear();
@@ -2502,11 +2304,11 @@ impl GuiFrameWindowManager {
     }
 
     /// Look up the Emacs frame_id for a winit WindowId.
-    pub fn emacs_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+    pub(crate) fn emacs_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
         self.winit_to_emacs.get(&winit_id).copied()
     }
 
-    pub fn event_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+    pub(crate) fn event_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
         if self.is_primary_winit(winit_id) {
             Some(self.primary_event_frame_id())
         } else {
@@ -2575,7 +2377,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Get a window state by winit WindowId.
-    pub fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
+    pub(crate) fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
         if self.primary_winit_id == Some(winit_id) {
             return self.primary_window();
         }
@@ -2585,7 +2387,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Get a mutable window state by winit WindowId.
-    pub fn get_by_winit_mut(&mut self, winit_id: WindowId) -> Option<&mut GuiFrameWindowState> {
+    pub(crate) fn get_by_winit_mut(&mut self, winit_id: WindowId) -> Option<&mut GuiFrameWindowState> {
         if self.primary_winit_id == Some(winit_id) {
             return self.primary_window_mut();
         }
@@ -2671,51 +2473,6 @@ impl GuiFrameWindowManager {
     pub(super) fn clear_top_level_idle_dim(&mut self) {
         self.for_each_top_level_window_mut(|window_state| {
             window_state.render.clear_idle_dim();
-        });
-    }
-
-    pub(super) fn set_top_level_titlebar_height(&mut self, height: f32) {
-        self.chrome_defaults.titlebar_height = height;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.chrome_mut().titlebar_height = height;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    pub(super) fn set_top_level_corner_radius(&mut self, radius: f32) {
-        self.chrome_defaults.corner_radius = radius;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.chrome_mut().corner_radius = radius;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    /// Apply the NS modifier policy's Option rewrite shape to every live
-    /// window and remember it for windows opened later.
-    pub(super) fn apply_option_key_policy(
-        &mut self,
-        shape: romacs_display_protocol::OptionAsAltShape,
-    ) {
-        self.option_as_alt = shape;
-        self.for_each_top_level_window(|window_state| {
-            if let Some(window) = window_state.lifecycle.window() {
-                apply_option_key_policy(window.as_ref(), shape);
-            }
-        });
-    }
-
-    pub(super) fn set_top_level_fps_enabled(&mut self, enabled: bool) {
-        self.fps_enabled = enabled;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.render.overlays.fps.enabled = enabled;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    pub(super) fn set_top_level_decorations(&mut self, decorated: bool) {
-        self.chrome_defaults.decorations_enabled = decorated;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.set_decorations(decorated);
         });
     }
 
@@ -2899,11 +2656,6 @@ impl GuiFrameWindowManager {
             let FrameLifecycle::Active { native, .. } = &mut window_state.lifecycle else {
                 continue;
             };
-            #[cfg(all(feature = "gui-test-hooks", target_os = "linux"))]
-            if super::native_image_probe::fail_secondary_once() {
-                complete = false;
-                continue;
-            }
             let surface = match instance.create_surface(native.window.clone()) {
                 Ok(surface) => surface,
                 Err(error) => {

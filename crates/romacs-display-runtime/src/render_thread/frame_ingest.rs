@@ -4,143 +4,8 @@ use super::RenderApp;
 use super::frame_windows::{
     ActivePresentationTransition, GuiFrameRenderState, GuiFrameWindowState,
 };
-use crate::core::types::DisplayFrameId;
+use romacs_display_protocol::types::DisplayFrameId;
 use crate::render_thread::cursor::{CursorConfigSnapshot, CursorTarget};
-
-#[cfg(feature = "webview")]
-fn collect_frame_webviews(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
-    offset_x: f32,
-    offset_y: f32,
-    frame_clip: romacs_display_protocol::RootSurfaceRect,
-    scale: romacs_display_protocol::DeviceScale,
-    next_occurrence: &mut u64,
-    placements: &mut std::collections::HashMap<
-        romacs_display_protocol::WebViewId,
-        romacs_webview::ResolvedWebViewPlacement,
-    >,
-) {
-    for glyph in &frame.glyphs {
-        let crate::core::frame_glyphs::FrameGlyph::Xwidget {
-            window_id,
-            webview_id,
-            presentation,
-            ..
-        } = glyph
-        else {
-            continue;
-        };
-        // The native view is sized from the widget's own extent, GNU
-        // `xww->width`/`xww->height`, never from the glyph slot: layout may
-        // have cropped the slot at the right edge (`produce_xwidget_glyph`,
-        // src/xdisp.c:32577-32579, emacs-31.0.90) and GNU answers that by
-        // clipping the view, not resizing it (`x_draw_xwidget_glyph_string`,
-        // src/xwidget.c:2841-2849).  The clip below is that text-area clip.
-        let Ok(frame_to_root) = romacs_display_protocol::SpaceTranslation::<
-            romacs_display_protocol::FrameSpace,
-            romacs_display_protocol::RootSurfaceSpace,
-            romacs_display_protocol::LogicalPixels,
-        >::from_px(offset_x, offset_y) else {
-            continue;
-        };
-        let Ok(root_presentation) = presentation.translated(frame_to_root) else {
-            continue;
-        };
-        let Ok(Some(visible)) = root_presentation.resolve_visible(Some(frame_clip)) else {
-            continue;
-        };
-        let content_rect = visible.content_rect();
-        let visible_rect = visible.visible_rect();
-        *next_occurrence = next_occurrence.saturating_add(1);
-        let Ok(placement) = romacs_webview::ResolvedWebViewPlacement::new(
-            *webview_id,
-            romacs_webview::WebViewOccurrenceId::new(*next_occurrence),
-            *window_id,
-            content_rect,
-            visible_rect,
-            scale,
-        ) else {
-            continue;
-        };
-        // Portable native backends support one active occurrence. Frames are
-        // visited in renderer z-order, so a later/topmost occurrence wins.
-        placements.insert(*webview_id, placement);
-    }
-}
-
-/// Monotonic revision source for one top-level host's derived WebView scene.
-///
-/// A host scene combines one root frame and any number of child-frame
-/// presentations. Their evaluator presentation IDs are independent clocks,
-/// so a `max()` of those IDs can move backwards when a child disappears.
-/// This clock advances only when the resolved placement snapshot changes.
-/// Everything the resolved placements of one top-level host depend on,
-/// cheap enough to rebuild on every event-loop pass.
-///
-/// The glyph walk in `collect_frame_webviews` is a function of the presented
-/// root frame, the presented child frames with their placement and clip, and
-/// the native presentation mapping and device scale. Redisplay replaces a presentation
-/// wholesale (a new `PresentationId`), so equal inputs mean equal glyphs and
-/// the walk can be skipped; that is what makes an idle session with one web
-/// view stop paying O(glyphs) per pass.
-#[cfg(feature = "webview")]
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct WebViewPlacementInputs {
-    /// Root presentation, width and height; `None` before the first frame.
-    root: Option<(
-        romacs_display_protocol::frame_chrome::PresentationId,
-        f32,
-        f32,
-    )>,
-    scale: f32,
-    mapping: Option<romacs_display_protocol::PresentMapping>,
-    /// Child frames in renderer z-order: id, presentation, absolute offset,
-    /// clip in root.
-    children: Vec<(
-        u64,
-        romacs_display_protocol::frame_chrome::PresentationId,
-        f32,
-        f32,
-        romacs_display_protocol::PresentedClip,
-    )>,
-}
-
-#[cfg(feature = "webview")]
-#[derive(Default)]
-pub(super) struct WebViewSceneClock {
-    revision: u64,
-    placements: Vec<romacs_webview::ResolvedWebViewPlacement>,
-    /// The inputs `placements` were resolved from, so an unchanged
-    /// presentation reuses them instead of walking the glyph buffer again.
-    inputs: Option<WebViewPlacementInputs>,
-}
-
-#[cfg(feature = "webview")]
-impl WebViewSceneClock {
-    /// The host's scene for this pass.  `compute` -- the glyph walk -- runs
-    /// only when `inputs` differ from the inputs the cached placements came
-    /// from, and the revision advances only when the placements changed.
-    fn resolve_cached(
-        &mut self,
-        host: romacs_webview::HostWindowId,
-        inputs: WebViewPlacementInputs,
-        compute: impl FnOnce() -> Vec<romacs_webview::ResolvedWebViewPlacement>,
-    ) -> Result<romacs_webview::ResolvedWebViewScene, romacs_webview::WebViewSceneError> {
-        if self.inputs.as_ref() != Some(&inputs) {
-            let placements = compute();
-            if self.revision == 0 || self.placements != placements {
-                self.revision = self.revision.saturating_add(1);
-                self.placements = placements;
-            }
-            self.inputs = Some(inputs);
-        }
-        romacs_webview::ResolvedWebViewScene::try_new(
-            host,
-            romacs_webview::WebViewSceneRevision::new(self.revision),
-            self.placements.clone(),
-        )
-    }
-}
 
 struct CursorSyncOutcome {
     target: CursorTarget,
@@ -155,7 +20,6 @@ struct FrameIngestOutcome {
 }
 
 impl RenderApp {
-    #[cfg(feature = "core-free")]
     pub(super) fn ingest_paint(&mut self, scene: crate::thread_comm::PaintScene) {
         let crate::thread_comm::PaintScene { root: mut frame, children, text_animations } = scene;
         if self.frame_windows.primary_window().and_then(|window| window.lifecycle.native())
@@ -213,7 +77,7 @@ impl RenderApp {
 
     fn ingest_primary_paint(
         &mut self,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
@@ -263,7 +127,7 @@ impl RenderApp {
     /// Install or update FRAME, a child of the primary frame, in the
     /// primary window: its open, resize and drift animations, and the
     /// presentation events its activation or discard owes the producer.
-    fn update_primary_child(&mut self, frame: crate::core::frame_glyphs::FrameGlyphBuffer) {
+    fn update_primary_child(&mut self, frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer) {
         let frame_id = frame.frame_placement.frame();
         if let Some(ws) = self.frame_windows.primary_window_mut() {
             let old_presentation = ws
@@ -315,163 +179,9 @@ impl RenderApp {
         }
     }
 
-    #[cfg(feature = "webview")]
-    fn resolved_webview_placements(
-        window_state: &GuiFrameWindowState,
-    ) -> Vec<romacs_webview::ResolvedWebViewPlacement> {
-        let render = &window_state.render;
-        let Some(root) = render.compositor.current_frame.as_ref() else {
-            return Vec::new();
-        };
-        let Ok(scale) =
-            romacs_display_protocol::DeviceScale::new(window_state.scale_factor() as f32)
-        else {
-            return Vec::new();
-        };
-        let Some(mapping) = render.present_mapping() else {
-            return Vec::new();
-        };
-        let Some(root_clip) = mapping.visible_content_rect() else {
-            return Vec::new();
-        };
-        let offset_x = root_clip.x();
-        let offset_y = root_clip.y();
-        // Child clips are expressed in the editor's root scene; native
-        // placements additionally include the occupied native chrome area.
-        let Ok(scene_to_native) = romacs_display_protocol::SpaceTranslation::<
-            romacs_display_protocol::RootSurfaceSpace,
-            romacs_display_protocol::RootSurfaceSpace,
-            romacs_display_protocol::LogicalPixels,
-        >::from_px(offset_x, offset_y) else {
-            return Vec::new();
-        };
-        let mut occurrence = 0;
-        let mut placements = std::collections::HashMap::new();
-        collect_frame_webviews(
-            root,
-            offset_x,
-            offset_y,
-            root_clip,
-            scale,
-            &mut occurrence,
-            &mut placements,
-        );
-        for frame_id in render.compositor.child_frames.sorted_for_rendering() {
-            let Some(entry) = render.compositor.child_frames.frames.get(frame_id) else {
-                continue;
-            };
-            let clip = match entry.clip_in_root {
-                romacs_display_protocol::PresentedClip::Empty => continue,
-                romacs_display_protocol::PresentedClip::Rect(clip) => clip,
-            };
-            let Ok(clip) = scene_to_native.map_rect(clip) else {
-                continue;
-            };
-            let Ok(Some(clip)) = clip.try_intersection(root_clip) else {
-                continue;
-            };
-            collect_frame_webviews(
-                &entry.frame,
-                entry.abs_x + offset_x,
-                entry.abs_y + offset_y,
-                clip,
-                scale,
-                &mut occurrence,
-                &mut placements,
-            );
-        }
-        let mut placements = placements.into_values().collect::<Vec<_>>();
-        placements.sort_by_key(|placement| placement.occurrence());
-        placements
-    }
-
-    /// The inputs the host's resolved placements depend on; see
-    /// [`WebViewPlacementInputs`].
-    #[cfg(feature = "webview")]
-    fn webview_placement_inputs(window_state: &GuiFrameWindowState) -> WebViewPlacementInputs {
-        let render = &window_state.render;
-        let root = render
-            .compositor
-            .current_frame
-            .as_ref()
-            .map(|root| (root.presentation_id, root.width, root.height));
-        let children = render
-            .compositor
-            .child_frames
-            .sorted_for_rendering()
-            .iter()
-            .filter_map(|frame_id| {
-                let entry = render.compositor.child_frames.frames.get(frame_id)?;
-                Some((
-                    *frame_id,
-                    entry.frame.presentation_id,
-                    entry.abs_x,
-                    entry.abs_y,
-                    entry.clip_in_root,
-                ))
-            })
-            .collect();
-        WebViewPlacementInputs {
-            root,
-            scale: window_state.scale_factor() as f32,
-            mapping: render.present_mapping(),
-            children,
-        }
-    }
-
-    #[cfg(feature = "webview")]
-    pub(super) fn synchronize_webview_presentations(&mut self) {
-        let mut scenes = Vec::new();
-        let mut live_hosts = std::collections::HashSet::new();
-        let clocks = &mut self.webview_scene_clocks;
-        self.frame_windows
-            .for_each_top_level_window(|window_state| {
-                let host_id =
-                    romacs_webview::HostWindowId::new(window_state.render.emacs_frame_id);
-                live_hosts.insert(host_id);
-                let host = window_state
-                    .window()
-                    .cloned()
-                    .map(romacs_webview::WebViewHost::new);
-                // The glyph walk runs only when the presented frames changed.
-                let inputs = Self::webview_placement_inputs(window_state);
-                match clocks
-                    .entry(host_id)
-                    .or_default()
-                    .resolve_cached(host_id, inputs, || {
-                        Self::resolved_webview_placements(window_state)
-                    }) {
-                    Ok(scene) => scenes.push((scene, host)),
-                    Err(error) => {
-                        tracing::warn!(?host_id, %error, "invalid resolved WebView scene");
-                    }
-                }
-            });
-        clocks.retain(|host, _clock| live_hosts.contains(host));
-        let Some(system) = self.webview_system.as_mut() else {
-            return;
-        };
-        for stale in system
-            .presented_host_ids()
-            .into_iter()
-            .filter(|host| !live_hosts.contains(host))
-            .collect::<Vec<_>>()
-        {
-            system.unregister_host(stale);
-        }
-        for (scene, host) in scenes {
-            if let Some(host) = host {
-                system.register_host(scene.host(), host);
-            }
-            if let Err(error) = system.synchronize_presentation(scene) {
-                tracing::warn!(%error, "failed to synchronize WebView presentation");
-            }
-        }
-    }
-
     fn ingest_frame_window_root_frame(
         window_state: &mut GuiFrameWindowState,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         cursor_config: CursorConfigSnapshot,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
@@ -489,7 +199,7 @@ impl RenderApp {
 
     fn ingest_top_level_render_frame(
         render: &mut GuiFrameRenderState,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         cursor_config: CursorConfigSnapshot,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
@@ -746,22 +456,22 @@ impl RenderApp {
                     let mut other_count = 0usize;
                     for g in &frame.glyphs {
                         match g {
-                            crate::core::frame_glyphs::FrameGlyph::Char { .. } => char_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Background { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Char { .. } => char_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Background { .. } => {
                                 bg_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Border { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Border { .. } => {
                                 border_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::ScrollBar { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::ScrollBar { .. } => {
                                 scrollbar_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Image { .. } => image_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Stretch { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Image { .. } => image_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Stretch { .. } => {
                                 stretch_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Video { .. } => video_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Xwidget { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Video { .. } => video_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Xwidget { .. } => {
                                 webkit_count += 1
                             }
                             _ => other_count += 1,
@@ -771,7 +481,7 @@ impl RenderApp {
                     // can tell whether tab-line/header-line glyphs are emitted at
                     // all (and where) vs. silently dropped.
                     {
-                        use crate::core::frame_glyphs::FrameGlyph;
+                        use romacs_display_protocol::frame_glyphs::FrameGlyph;
                         let mut per_role: std::collections::HashMap<String, (usize, f32, String)> =
                             std::collections::HashMap::new();
                         for g in &frame.glyphs {
@@ -1106,9 +816,9 @@ impl RenderApp {
 /// text diff (romacs before-vs-after, or vs GNU) with no rebuild or screenshot.
 /// The face is resolved to final fg/bg (hex) + stipple size, so e.g. a text
 /// glyph and a stipple on the same cell reveal a face-id/color mismatch inline.
-fn dump_frame_glyphs_resolved(frame: &crate::core::frame_glyphs::FrameGlyphBuffer) -> String {
-    use crate::core::frame_glyphs::FrameGlyph;
-    use crate::core::types::Color;
+fn dump_frame_glyphs_resolved(frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer) -> String {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    use romacs_display_protocol::types::Color;
     let hx = |c: Color| -> String {
         let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         format!("#{:02x}{:02x}{:02x}", ch(c.r), ch(c.g), ch(c.b))
@@ -1238,7 +948,3 @@ fn dump_frame_glyphs_resolved(frame: &crate::core::frame_glyphs::FrameGlyphBuffe
     }
     out
 }
-
-#[cfg(all(test, feature = "webview"))]
-#[path = "frame_ingest/tests/frame_ingest_test.rs"]
-mod tests;

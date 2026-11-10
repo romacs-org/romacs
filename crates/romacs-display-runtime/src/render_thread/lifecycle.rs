@@ -1,5 +1,5 @@
 use super::RenderApp;
-use super::frame_windows::{FrameLifecycle, NativeTextInputPolicy, apply_option_key_policy};
+use super::frame_windows::{FrameLifecycle, NativeTextInputPolicy};
 use super::state::{
     RenderGpuContext, effective_window_scale_factor, window_size_from_emacs_pixels,
 };
@@ -163,7 +163,6 @@ impl RenderApp {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());
-                    apply_option_key_policy(window.as_ref(), self.frame_windows.option_as_alt);
 
                     if self.clipboard.is_err() {
                         self.clipboard = crate::clipboard::ClipboardService::for_display(
@@ -266,13 +265,12 @@ impl RenderApp {
             event_loop.exit();
             return;
         }
-        if self.gpu.is_none() {
-            if self.process_startup_commands() {
+        if self.gpu.is_none()
+            && self.process_startup_commands() {
                 self.handle_exiting();
                 event_loop.exit();
                 return;
             }
-        }
         if let Some(pending) = self.gpu_startup.take() {
             match pending.poll(&event_loop.create_proxy()) {
                 Ok(super::gpu_startup::GpuPoll::Pending(pending)) => {
@@ -303,7 +301,6 @@ impl RenderApp {
                 event_loop.exit();
                 return;
             }
-            self.comms.tooltip_context.invalidate();
             self.tooltips.shutdown();
             self.menus.cancel();
             self.menus.shutdown();
@@ -460,8 +457,6 @@ impl RenderApp {
 
         self.poll_frame();
         self.synchronize_toolbar_resources();
-        #[cfg(feature = "webview")]
-        self.synchronize_webview_presentations();
 
         // Frame ingestion is the ownership edge for image textures. Publish
         // the newest accepted/queued presentation fence before decode uploads,
@@ -477,8 +472,6 @@ impl RenderApp {
         // frame ingestion so visibility routing sees the newest accepted
         // root/child presentation.
         self.process_video_frames(now);
-
-        self.pump_glib();
 
         self.frame_windows.tick_top_level_cursor_animations(now);
 
@@ -508,11 +501,6 @@ impl RenderApp {
         }
         self.frame_windows.mark_active_top_level_visuals_dirty();
 
-        #[cfg(feature = "webview")]
-        if self.has_webkit_needing_redraw() {
-            self.frame_windows.mark_top_level_dirty();
-        }
-
         // Stage 2 of the frame scheduling plan: legacy activity latches are
         // reconciled into the persistent frame coordinator, which owns
         // one-shot redraw requests (coalesced per window) and the loop's
@@ -521,11 +509,6 @@ impl RenderApp {
         // immediately on its first frame after idle.
         self.draw_fresh_scene(now);
         self.declare_frame_demands(now);
-        // Publish per-window active demand for diagnostics (plan:
-        // Observability). Runs only on loop wakes that already reconcile
-        // demand: a fully idle loop publishes nothing and is never woken by
-        // the counters.
-        super::frame_stats::publish_window_demand(self.frame_coordinator.window_demand());
         // Service the schedule before arming the wait. A deadline that has
         // come due is work, not a timeout: GNU's timer_check runs every ripe
         // timer and only then yields the pselect wait
@@ -667,9 +650,8 @@ impl RenderApp {
             damage: Damage::FullLayer,
         };
 
-        // WebKit and shader-surface signals remain process-wide. Video is
+        // Shader-surface signals remain process-wide. Video is
         // presentation-indexed below and never wakes unrelated windows.
-        let webkit_active = self.has_webkit_needing_redraw();
         let surfaces_active = self.has_active_shader_surfaces();
         let frame_shader_installed = self
             .renderer
@@ -829,7 +811,6 @@ impl RenderApp {
             };
 
             for (active, reason, rate) in [
-                (webkit_active, DemandReason::Webkit, max_rate),
                 (surfaces_active, DemandReason::ShaderSurface, surface_rate),
             ] {
                 if active {
@@ -986,7 +967,7 @@ impl RenderApp {
     /// renderer will color-cycle. `None` represents no visible cycle work;
     /// otherwise the fastest enabled profile wins and is display-capped.
     pub(super) fn cursor_color_cycle_cadence(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
     ) -> Option<std::num::NonZeroU16> {
@@ -1010,7 +991,7 @@ impl RenderApp {
     /// frame coordinator: lifecycle code does not reconstruct the cadence,
     /// invalidation, or diagnostic reason independently.
     pub(super) fn cursor_color_cycle_demand(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         window_focused: bool,
@@ -1041,7 +1022,7 @@ impl RenderApp {
     pub(super) fn reconcile_cursor_color_cycle_demand(
         coordinator: &mut super::frame_sched::FrameCoordinator,
         id: super::frame_sched::NativeWindowId,
-        frame: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        frame: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         now: EventTime,
@@ -1139,18 +1120,8 @@ impl RenderApp {
             Err("display is shutting down".to_owned()),
         ));
 
-        // Drop the renderer first. Its WebView retirement queue waits for each
-        // exact GPU copy submission and releases the corresponding remote WPE
-        // lease. The WPE reactor must still be alive to consume those release
-        // commands and acknowledge the native buffers.
         drop(self.renderer.take());
         self.note_models_renderer_lost();
-        // Now no renderer-owned browser frame can refer back to WPE; stop the
-        // WebKit views and their reactor-local EGL/GObject state.
-        #[cfg(feature = "webview")]
-        {
-            self.webview_system = None;
-        }
         // Drop adopted primary state (surface holds wl_surface proxy if on Wayland)
         drop(self.frame_windows.take_primary_window());
         // Drop multi-window state (secondary surfaces)

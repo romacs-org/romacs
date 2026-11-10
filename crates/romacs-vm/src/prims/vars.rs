@@ -52,7 +52,7 @@ fn defvaralias(cx, new_alias: Value, base_variable: Value; optional docstring: V
     match (base_value, new_value) {
         // eval.c:682-685: old code that set NEW before the alias existed
         // keeps working. A void NEW leaves BASE void.
-        (None, Some(value)) => cx.variable_set(base_variable, value)?,
+        (None, Some(value)) => cx.variable_bound(base_variable, value)?,
         (None, None) => {}
         (Some(base), Some(new)) if !cx.eq(base, new) => cx.batch_warning("defvaralias", &format!(
             "Overwriting value of \u{2018}{}\u{2019} by aliasing to \u{2018}{}\u{2019}",

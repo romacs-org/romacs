@@ -1,11 +1,4 @@
 use super::*;
-use romacs_display_protocol::SelectionOwner;
-use std::collections::HashMap;
-
-#[derive(Default)]
-struct MemoryClipboard {
-    selections: HashMap<ClipboardSelection, String>,
-}
 
 struct BlockingClipboard {
     started: Sender<()>,
@@ -23,36 +16,6 @@ struct ExpiringClipboard {
     writes: Sender<Option<String>>,
 }
 
-impl ClipboardBackend for MemoryClipboard {
-    fn set_text(
-        &mut self,
-        selection: ClipboardSelection,
-        text: Option<&str>,
-    ) -> Result<(), String> {
-        if let Some(text) = text {
-            self.selections.insert(selection, text.to_owned());
-        } else {
-            self.selections.remove(&selection);
-        }
-        Ok(())
-    }
-
-    fn text(&mut self, selection: ClipboardSelection) -> Result<text_policy::TextRead, String> {
-        Ok(match self.selections.get(&selection) {
-            Some(text) => text_policy::TextRead::Text(text.clone()),
-            None => text_policy::TextRead::NoSelection,
-        })
-    }
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(if self.selections.contains_key(&selection) {
-            SelectionOwner::ThisProcess
-        } else {
-            SelectionOwner::None
-        })
-    }
-}
-
 impl ClipboardBackend for BlockingClipboard {
     fn set_text(
         &mut self,
@@ -67,10 +30,6 @@ impl ClipboardBackend for BlockingClipboard {
         self.release.recv().unwrap();
         Ok(text_policy::TextRead::Text("released".to_owned()))
     }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
-    }
 }
 
 impl ClipboardBackend for BlockingDropClipboard {
@@ -84,10 +43,6 @@ impl ClipboardBackend for BlockingDropClipboard {
 
     fn text(&mut self, _selection: ClipboardSelection) -> Result<text_policy::TextRead, String> {
         Ok(text_policy::TextRead::NoSelection)
-    }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
     }
 }
 
@@ -113,100 +68,6 @@ impl ClipboardBackend for ExpiringClipboard {
         self.release_read.recv().unwrap();
         Ok(text_policy::TextRead::NoSelection)
     }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
-    }
-}
-
-fn set_text(
-    service: &ClipboardService,
-    selection: ClipboardSelection,
-    text: Option<&str>,
-) -> Result<(), String> {
-    let (reply, result) = crossbeam_channel::bounded(1);
-    service.submit(ClipboardCommand::SetText {
-        selection,
-        text: text.map(str::to_owned),
-        expires_at: std::time::Instant::now() + Duration::from_secs(5),
-        reply,
-    });
-    result.recv().unwrap()
-}
-
-fn text(
-    service: &ClipboardService,
-    selection: ClipboardSelection,
-) -> Result<Option<String>, String> {
-    let (reply, result) = crossbeam_channel::bounded(1);
-    service.submit(ClipboardCommand::GetText {
-        selection,
-        expires_at: std::time::Instant::now() + Duration::from_secs(5),
-        reply,
-    });
-    result.recv().unwrap()
-}
-
-fn owner(
-    service: &ClipboardService,
-    selection: ClipboardSelection,
-) -> Result<SelectionOwner, String> {
-    let (reply, result) = crossbeam_channel::bounded(1);
-    service.submit(ClipboardCommand::GetOwnership {
-        selection,
-        expires_at: std::time::Instant::now() + Duration::from_secs(5),
-        reply,
-    });
-    result.recv().unwrap()
-}
-
-#[test]
-fn service_keeps_clipboard_and_primary_distinct_and_can_clear_them() {
-    let service = ClipboardService::with_backend(MemoryClipboard::default());
-
-    set_text(&service, ClipboardSelection::Clipboard, Some("copied")).unwrap();
-    set_text(&service, ClipboardSelection::Primary, Some("selected")).unwrap();
-    assert_eq!(
-        text(&service, ClipboardSelection::Clipboard).unwrap(),
-        Some("copied".to_owned())
-    );
-    assert_eq!(
-        text(&service, ClipboardSelection::Primary).unwrap(),
-        Some("selected".to_owned())
-    );
-
-    set_text(&service, ClipboardSelection::Clipboard, None).unwrap();
-    assert_eq!(text(&service, ClipboardSelection::Clipboard).unwrap(), None);
-    assert_eq!(
-        text(&service, ClipboardSelection::Primary).unwrap(),
-        Some("selected".to_owned())
-    );
-}
-
-#[test]
-fn service_reports_empty_primary_as_owned_until_it_is_disowned() {
-    let service = ClipboardService::with_backend(MemoryClipboard::default());
-
-    assert_eq!(
-        owner(&service, ClipboardSelection::Primary).unwrap(),
-        SelectionOwner::None
-    );
-
-    set_text(&service, ClipboardSelection::Primary, Some("")).unwrap();
-    assert_eq!(
-        text(&service, ClipboardSelection::Primary).unwrap(),
-        Some(String::new())
-    );
-    assert_eq!(
-        owner(&service, ClipboardSelection::Primary).unwrap(),
-        SelectionOwner::ThisProcess
-    );
-
-    set_text(&service, ClipboardSelection::Primary, None).unwrap();
-    assert_eq!(
-        owner(&service, ClipboardSelection::Primary).unwrap(),
-        SelectionOwner::None
-    );
 }
 
 #[test]
@@ -289,53 +150,5 @@ fn mutation_that_expires_behind_a_slow_read_is_never_executed() {
     assert_eq!(
         recorded_writes.try_recv(),
         Err(crossbeam_channel::TryRecvError::Empty)
-    );
-}
-
-#[cfg(not(target_os = "linux"))]
-#[test]
-fn private_selection_round_trips_owned_and_vacant_states() {
-    let mut selection = PrivateSelection::default();
-    assert_eq!(selection.load(), text_policy::TextRead::NoSelection);
-
-    selection.store(Some("selected"));
-    assert_eq!(
-        selection.load(),
-        text_policy::TextRead::Text("selected".to_owned())
-    );
-
-    selection.store(Some("reselected"));
-    assert_eq!(
-        selection.load(),
-        text_policy::TextRead::Text("reselected".to_owned())
-    );
-
-    selection.store(None);
-    assert_eq!(selection.load(), text_policy::TextRead::NoSelection);
-}
-
-/// GNU's NS port keeps PRIMARY in a private pasteboard instead of
-/// rejecting it (emacs-31.0.90 src/nsselect.m:56, :547), so every
-/// region deactivation under `select-active-regions` must succeed here.
-/// Only PRIMARY is touched: the system CLIPBOARD is left alone.
-#[cfg(not(target_os = "linux"))]
-#[test]
-fn arboard_backend_keeps_primary_in_process_local_state() {
-    let mut backend = ArboardClipboard::new().expect("system clipboard should open");
-
-    backend
-        .set_text(ClipboardSelection::Primary, Some("selected"))
-        .expect("PRIMARY store must not fail on this platform");
-    assert_eq!(
-        backend.text(ClipboardSelection::Primary),
-        Ok(text_policy::TextRead::Text("selected".to_owned()))
-    );
-
-    backend
-        .set_text(ClipboardSelection::Primary, None)
-        .expect("PRIMARY disown must not fail on this platform");
-    assert_eq!(
-        backend.text(ClipboardSelection::Primary),
-        Ok(text_policy::TextRead::NoSelection)
     );
 }

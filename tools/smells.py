@@ -141,8 +141,15 @@ def lint_census(root, lines):
 
 
 def run_clippy(root):
-    """Cargo's JSON message lines for the workspace's warnings."""
-    done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True)
+    """Cargo's JSON message lines for the workspace's warnings.
+
+    ROMACS_CLIPPY_TARGET_DIR, when set, is where clippy builds: one shared
+    directory instead of a full dev-profile tree inside every worktree's own
+    target, which checks run on every merge."""
+    env = dict(os.environ)
+    if env.get('ROMACS_CLIPPY_TARGET_DIR'):
+        env['CARGO_TARGET_DIR'] = env['ROMACS_CLIPPY_TARGET_DIR']
+    done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
     if done.returncode:
         raise ValueError(f'`{" ".join(CLIPPY)}` failed with {done.returncode}; a failed build counts nothing')
     return done.stdout.splitlines()

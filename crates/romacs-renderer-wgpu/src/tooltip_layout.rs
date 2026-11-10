@@ -34,7 +34,7 @@ impl TooltipLayout {
 
     /// The same atlas that paints supplies advances. Limits are expressed in
     /// default-font columns, but wrapping uses the actual styled glyph widths.
-    pub fn measure_with(
+    pub(crate) fn measure_with(
         request: &TooltipRequest,
         char_width: f32,
         line_height: f32,

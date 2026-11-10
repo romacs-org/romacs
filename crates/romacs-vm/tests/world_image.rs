@@ -105,6 +105,7 @@ fn act_in_role() -> bool {
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
         Ok("trim") => trim(),
+        Ok("alone") => alone(),
         _ => return false,
     }
     true
@@ -418,18 +419,16 @@ fn heap(store: &Path) {
 /// top gives its pages back, but for a bounded slack above the top; short
 /// free runs below the top keep theirs until an idle collection, even one
 /// that finds everything live, and the census then counts them released.
-/// Its collections use no threads, whose pool would land in the heap, which
-/// in a builder is the image.
 fn trim() {
     let block = vec![1u8; 64 << 20];
     let touched = resident();
     drop(block);
     let census = arena::census().unwrap();
     let (returned, slack) = (touched - resident() >= 48 << 20, census.above_top <= 4 << 20);
-    romacs_vm::set_gc_workers(4);
     let mut vm = Vm::new();
+    // On threads the trim follows the graves, later than the census below.
+    vm.set_gc_threads(1);
     vm.collect_garbage();
-    let alone = collector_threads() == 0;
     // 64 runs of 32 pages, each held apart by a live 10-page run.
     let (mut runs, mut apart) = (Vec::new(), Vec::new());
     for _ in 0..64 {
@@ -441,7 +440,7 @@ fn trim() {
     assert!(vm.collect_garbage_until_key());
     let after = arena::census().unwrap();
     let released = after.runs_released - kept.runs_released;
-    println!("WORLD-IMAGE {}", json!({"returned": returned, "slack": slack, "alone": alone,
+    println!("WORLD-IMAGE {}", json!({"returned": returned, "slack": slack,
                                        "collected": before - resident() >= 6 << 20 && released >= 6 << 20}));
     drop(apart);
 }
@@ -455,7 +454,33 @@ fn a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_pea
     let store = scratch.join("store");
     assert_eq!(outcome(&mut child_of(HEAP, "launch", &store)), restored());
     assert_eq!(outcome(&mut child_of(HEAP, "heap", &store)), json!({"outside": true, "used_kept": true}).to_string());
-    assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "alone": true, "collected": true}).to_string());
+    assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "collected": true}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const ALONE: &str = "only_a_builders_heap_is_an_image_and_only_it_collects_alone";
+
+/// Whether this process's heap will be an image, and whether a collection
+/// asked to use threads stayed on this one.
+fn alone() {
+    let mut vm = Vm::new();
+    vm.set_gc_threads(4);
+    vm.collect_garbage();
+    println!("WORLD-IMAGE {}", json!({"image": arena::heap_is_image(), "alone": collector_threads() == 0}));
+}
+
+/// A pool's allocations would land in a builder's heap, which is the image.
+/// Any other process on its first arena, one booted from source, is ordinary.
+#[test]
+fn only_a_builders_heap_is_an_image_and_only_it_collects_alone() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(ALONE);
+    let mut builder = child_of(ALONE, "alone", &scratch);
+    builder.env("ROMACS_WORLD_BUILD", &scratch);
+    assert_eq!(outcome(&mut builder), json!({"image": true, "alone": true}).to_string());
+    assert_eq!(outcome(&mut child_of(ALONE, "alone", &scratch)), json!({"image": false, "alone": false}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

@@ -893,10 +893,10 @@ pub fn restore_outcome() -> Restore {
 }
 
 /// Whether the heap is an arena whose used prefix will be an image: a
-/// builder's. What goes into it goes into the world, so nothing that depends
-/// on the moment belongs there.
+/// builder's, the only heap `write_image` will write. What goes into it goes
+/// into the world, so nothing that depends on the moment belongs there.
 pub fn heap_is_image() -> bool {
-    started() && !ADOPTED.load(Ordering::Acquire)
+    BACKING.load(Ordering::Relaxed) >= 0 && !ADOPTED.load(Ordering::Acquire)
 }
 
 /// Whether a heap table may take its one large reservation (`table.rs'): not

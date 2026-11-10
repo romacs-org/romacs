@@ -7,17 +7,17 @@
 use std::collections::HashMap;
 
 /// Default pool size, overridable with `ROMACS_MODEL_BUDGET_MB`.
-pub const DEFAULT_MODEL_BUDGET_MB: u64 = 512;
+pub(crate) const DEFAULT_MODEL_BUDGET_MB: u64 = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelBudget {
+pub(crate) struct ModelBudget {
     limit: u64,
     used: u64,
     reserved: HashMap<u32, u64>,
 }
 
 impl ModelBudget {
-    pub fn with_limit(limit: u64) -> Self {
+    pub(crate) fn with_limit(limit: u64) -> Self {
         Self {
             limit,
             used: 0,
@@ -39,10 +39,7 @@ impl ModelBudget {
         self.used
     }
 
-    pub fn limit(&self) -> u64 {
-        self.limit
-    }
-
+    #[cfg(test)]
     pub fn reserved(&self, id: u32) -> u64 {
         self.reserved.get(&id).copied().unwrap_or(0)
     }
@@ -79,7 +76,7 @@ impl ModelBudget {
     }
 
     /// Return everything `id` holds.
-    pub fn release_all(&mut self, id: u32) {
+    pub(crate) fn release_all(&mut self, id: u32) {
         if let Some(held) = self.reserved.remove(&id) {
             self.used -= held;
         }

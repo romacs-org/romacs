@@ -5,20 +5,26 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::{Receiver, SendError, Sender, TryRecvError, TrySendError, bounded};
-use romacs_display_protocol::{SealedFramePresentation, present_trace};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, bounded};
+#[cfg(test)]
+use crossbeam_channel::{SendError, TrySendError};
+use romacs_display_protocol::SealedFramePresentation;
+#[cfg(test)]
+use romacs_display_protocol::present_trace;
 
-pub struct QueuedPresentation {
+pub(crate) struct QueuedPresentation {
     pub(crate) state: SealedFramePresentation,
     pub(crate) skipped_predecessor: bool,
 }
 
 /// Proof that a revision was replaced while still in the mailbox. It was
 /// never acquired by the renderer and may be retired by the evaluator.
+#[cfg(test)]
 #[must_use = "retire the superseded evaluator presentation with discard"]
 #[derive(Debug)]
-pub struct SupersededPresentation(SealedFramePresentation);
+pub(crate) struct SupersededPresentation(SealedFramePresentation);
 
+#[cfg(test)]
 impl std::ops::Deref for SupersededPresentation {
     type Target = SealedFramePresentation;
     fn deref(&self) -> &Self::Target {
@@ -36,13 +42,20 @@ impl std::ops::Deref for QueuedPresentation {
 type Pending = Arc<Mutex<VecDeque<QueuedPresentation>>>;
 
 #[derive(Clone)]
-pub struct FrameSender {
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "production frames arrive through the paint host; the held sender keeps the frame mailbox connected and lets tests submit"
+    )
+)]
+pub(crate) struct FrameSender {
     pending: Pending,
     wake: Arc<Sender<()>>,
 }
 
 #[derive(Clone)]
-pub struct FrameReceiver {
+pub(crate) struct FrameReceiver {
     pending: Pending,
     wake: std::sync::Weak<Sender<()>>,
     available: Receiver<()>,
@@ -66,6 +79,7 @@ pub(super) fn channel() -> (FrameSender, FrameReceiver) {
 }
 
 impl FrameSender {
+    #[cfg(test)]
     /// Submit without waiting for rendering. The returned revision was never
     /// acquired by the consumer; the evaluator MUST retire its presentation
     /// and interaction records. Independent logical frames retain their own
@@ -138,6 +152,7 @@ impl FrameReceiver {
         }
     }
 
+    #[cfg(test)]
     pub fn recv(&self) -> Result<QueuedPresentation, crossbeam_channel::RecvError> {
         loop {
             match self.try_recv() {
@@ -149,10 +164,6 @@ impl FrameReceiver {
             // last frame and disconnect after the preceding empty check.
             let _ = self.available.recv();
         }
-    }
-
-    pub fn try_iter(&self) -> impl Iterator<Item = QueuedPresentation> + '_ {
-        std::iter::from_fn(|| self.try_recv().ok())
     }
 
     /// One finite batch for the synchronous fallback. Submissions arriving

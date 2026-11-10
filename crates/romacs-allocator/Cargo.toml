@@ -5,14 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Target-aware default allocator selection for Romacs"
+description = "The production allocator for Romacs: jemalloc"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 tikv-jemallocator = { version = "0.7", default-features = false }
 tikv-jemalloc-sys = { version = "0.7", default-features = false, features = ["stats"] }
-
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-mimalloc = { version = "0.1", default-features = false }
 
 [lints]
 workspace = true

@@ -15,7 +15,7 @@
 //! Under ROMACS_DIAGNOSTICS=1 each change of how an animation is drawn
 //! (scene and where, cells, or out of view) is a line on stderr.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
-use romacs_display_protocol::text_animation::{paint, TextAnimation};
+use romacs_display_protocol::text_animation::{TextAnimation, paint};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

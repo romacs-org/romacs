@@ -108,6 +108,7 @@ impl InputScroll {
         self.observed.push((input, token));
     }
 
+    #[cfg(test)]
     pub(in crate::render_thread) fn resolve(
         &mut self,
         frame: &FrameGlyphBuffer,

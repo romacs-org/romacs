@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -16,7 +16,7 @@ use gstreamer_video as gst_video;
 use romacs_display_protocol::types::VideoId;
 
 use crate::backend::{
-    BackendEvent, BackendInbox, BackendPublisher, DecodedFrame, DecodedFrameImport, DecoderBackend,
+    BackendEvent, BackendInbox, BackendPublisher, DecodedFrame, DecoderBackend,
     DecoderOutputGeneration, DecoderOutputRejection, DecoderReconfiguration, backend_bridge,
 };
 use crate::sampling::LinuxDrmDevice;
@@ -1028,7 +1028,6 @@ fn decode_sample(
             format,
             colorimetry,
             output_generation,
-            decoder_import: DecodedFrameImport::Deferred,
         }));
     }
 
@@ -1073,7 +1072,6 @@ fn decode_sample(
         format,
         colorimetry: VideoColorimetry::SRGB,
         output_generation,
-        decoder_import: DecodedFrameImport::Deferred,
     }))
 }
 
@@ -1437,6 +1435,8 @@ fn wait_for_decoder_write(
         if shutting_down.load(Ordering::Acquire) {
             return Ok(false);
         }
+        // SAFETY: `fds` is a live array of `fds.len()` pollfds whose
+        // descriptors the objects keep open.
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, 100) };
         if ready > 0 {
             if retain_unready_decoder_writes(&mut fds)? {
@@ -1504,17 +1504,14 @@ fn extract_dmabuf(
             } else {
                 return Err(format!("DMA-BUF object {memory_index} is not fd-backed"));
             };
-        let duplicated = unsafe { libc::dup(raw_fd) };
-        if duplicated < 0 {
-            return Err(format!(
-                "failed to duplicate DMA-BUF fd for object {memory_index}"
-            ));
-        }
-        objects.push(DmaBufObject {
-            // SAFETY: `dup` returned a new owned descriptor above.
-            fd: unsafe { OwnedFd::from_raw_fd(duplicated) },
-            modifier,
-        });
+        // SAFETY: the memory owns `raw_fd` and keeps it open while `buffer`,
+        // borrowed for this function, holds the memory.
+        let fd = unsafe { BorrowedFd::borrow_raw(raw_fd) }
+            .try_clone_to_owned()
+            .map_err(|error| {
+                format!("failed to duplicate DMA-BUF fd for object {memory_index}: {error}")
+            })?;
+        objects.push(DmaBufObject { fd, modifier });
     }
     let planes = (0..n_planes)
         .map(|plane| {

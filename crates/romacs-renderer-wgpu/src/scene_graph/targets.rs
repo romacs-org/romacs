@@ -8,8 +8,8 @@ use super::SceneError;
 use super::draw::{DrawList, Paint, Source, TargetId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-pub const SAMPLE_COUNT: u32 = 4;
+pub(crate) const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+pub(crate) const SAMPLE_COUNT: u32 = 4;
 
 /// Device pixel size of every target, after checking the list's contract:
 /// unique ids, sizes within the device limit, and samples only of targets

@@ -20,7 +20,7 @@ impl Leaf<'_> {
     /// nil. One at a time, so a `throw' out of one leaves the rest doomed.
     pub(crate) fn take_doomed_finalizer(&mut self) -> Value {
         while let Some(finalizer) = self.vm.doomed_finalizers.pop_front() {
-            if let data::Object::Finalizer(function) = &mut self.vm.objects[finalizer.payload() as usize - 1] {
+            if let data::Object::Finalizer(function) = self.vm.objects.entry_mut(finalizer.payload() as usize - 1) {
                 let function = std::mem::replace(function, Value::NIL);
                 if function != Value::NIL { return function; }
             }
@@ -30,6 +30,10 @@ impl Leaf<'_> {
     /// `Vm::gc_phases'.
     pub(crate) fn gc_phases(&mut self) -> Value {
         self.vm.gc_phases()
+    }
+    /// `Vm::suspended_activations`.
+    pub(crate) fn suspended_activations(&mut self) -> Value {
+        self.vm.suspended_activations()
     }
     /// The usage log's read of the collections since its last.
     pub(crate) fn take_collections(&mut self) -> Value {

@@ -77,11 +77,6 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              accounting.",
         ),
         (
-            "src/webview_cache.rs",
-            "Sized to the WPE browser frame, bounded by media_budget's WebKit \
-             accounting.",
-        ),
-        (
             "src/shader_surface_cache.rs",
             "Sized to the shader surface's own clamped extent (MAX_SURFACE_SIZE), \
              bounded by media_budget's Surface accounting and its eviction driver.",
@@ -101,17 +96,6 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              MAX_MODEL_EDGE_PX per side (model_target_px); bounded by the \
              model's own ModelBudget, admitted before allocation and never \
              evicted.",
-        ),
-        (
-            "src/external_buffer.rs",
-            "Sized to the imported platform buffer, whose extent comes from the \
-             producer; it backs one media surface and is charged with it.",
-        ),
-        (
-            "src/vulkan_dmabuf.rs",
-            "Sized to the imported DMA-BUF, whose extent comes from the \
-             producer (a WPE view or a video decoder); it backs one media \
-             surface and is charged with it.",
         ),
     ])
 }

@@ -800,6 +800,70 @@ thousandth a stack mark."
             (insert "x"))
           (treesit-parser-root-node (treesit-parser-create 'rust))))
 
+;;;; Syntax summaries (crates/romacs-vm/src/syntax_index.rs)
+
+(defun scaling--syntax-buffer (name n &optional lines)
+  "A buffer NAME of N copies of LINES (C-like code by default), in a C
+comment and string syntax, its summaries made by one parse to the end."
+  (with-current-buffer (get-buffer-create name)
+    (erase-buffer)
+    (let ((table (make-char-table 'syntax-table)))
+      (set-char-table-parent table (standard-syntax-table))
+      (dolist (entry '((?/ . ". 124b") (?* . ". 23") (?\n . "> b") (?\" . "\"") (?\\ . "\\") (?# . "' 14") (?| . "\" 23bn")))
+        (modify-syntax-entry (car entry) (cdr entry) table))
+      (set-syntax-table table))
+    (dotimes (i n)
+      (insert (or lines (format "int f%d(int a) { /* (c */ return a + \"s(\" + %d; } // d {\n" i i))))
+    (parse-partial-sexp (point-min) (point-max))
+    (current-buffer)))
+
+;; An edit near the top, then the state at the end: the edited leaf
+;; rescanned and the rest composed, nothing in N.
+(scaling-probe syntax-summaries-edit :n 4000 :budget 0.5
+  :setup (scaling--syntax-buffer " scaling-syntax-edit" n)
+  :body (with-current-buffer it
+          (dotimes (_ 20)
+            (goto-char 100)
+            (insert "x")
+            (parse-partial-sexp (point-min) (point-max)))))
+
+;; Nested comment starts typed near the top, each a new key for every node
+;; below it: each parse rescans the rest once (as the scanner would), and
+;; what a node keeps stays at four keys, whatever the history.
+(scaling-probe syntax-summaries-churn :n 2000
+  :setup (scaling--syntax-buffer " scaling-syntax-churn" n)
+  :body (with-current-buffer it
+          (dotimes (_ 10)
+            (goto-char 50)
+            (insert "#|")
+            (parse-partial-sexp (point-min) (point-max)))
+          (let ((bytes (plist-get (romacs-syntax-summaries-stats) :bytes)))
+            (when (> bytes (* 2 (buffer-size)))
+              (error "Syntax summaries hold %d bytes for %d characters" bytes (buffer-size))))))
+
+;; Erased and filled again, then edited: cut into leaves anew and served.
+(scaling-probe syntax-summaries-refill :n 2000
+  :setup (with-current-buffer (scaling--syntax-buffer " scaling-syntax-refill" n)
+           (cons (current-buffer) (buffer-string)))
+  :body (with-current-buffer (car it)
+          (erase-buffer)
+          (insert (cdr it))
+          (parse-partial-sexp (point-min) (point-max))
+          (goto-char 100)
+          (insert "x")
+          (parse-partial-sexp (point-min) (point-max))))
+
+;; Runs of `/', each a comment starter's first and second character, longer
+;; than a leaf: their leaf ends move or stay unsafe in one bounded search
+;; each, never a character at a time over the text.
+(scaling-probe syntax-summaries-starter-runs :n 400
+  :setup (scaling--syntax-buffer " scaling-syntax-runs" n (concat "a = b;\n" (make-string 3000 ?/) "\n"))
+  :body (with-current-buffer it
+          (dotimes (_ 5)
+            (goto-char 3)
+            (insert "x")
+            (parse-partial-sexp (point-min) (point-max)))))
+
 ;;;; Windows
 
 (scaling-probe windows :n 6
@@ -3026,6 +3090,30 @@ step, before the next step or the count's end."
                                                           :instructions (and start end (- end start))))))
                              (kill-emacs 0)))))
             (funcall step))))))))
+
+;; A flight recorder's step fingerprint (src/flight.rs) over N buffers, one
+;; edited before each step: a step looks at each buffer's tick and hashes
+;; only the text that changed, not every buffer's.
+(scaling-probe flight-fingerprint :n 200
+  :setup (let ((buffers (mapcar (lambda (name) (with-current-buffer (get-buffer-create name)
+                                                 (insert (make-string 4000 ?x))
+                                                 (current-buffer)))
+                                (scaling--names "scaling-flight" n))))
+           (romacs--flight-fingerprint)
+           (vconcat buffers))
+  :body (dotimes (i 50)
+          (with-current-buffer (aref it (% i (length it))) (insert "y"))
+          (romacs--flight-fingerprint)))
+
+;; A session that makes a buffer at each step: the steps' fingerprints
+;; look at every buffer's tick, a scan of the buffer list per step, as
+;; making a buffer already rebuilds that list (ticket buffers).
+(scaling-probe flight-buffer-steps :n 200
+  :known "ticket flight-steps: a flight step looks at each buffer's tick, as making a buffer rebuilds the buffer order (ticket buffers)"
+  :setup (scaling--names "scaling-flight-steps" n)
+  :body (dolist (name it)
+          (with-current-buffer (get-buffer-create name) (insert "x"))
+          (romacs--flight-fingerprint)))
 
 (provide 'scaling-probes)
 ;;; probes.el ends here

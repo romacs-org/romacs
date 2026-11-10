@@ -9,18 +9,6 @@ use crate::render_thread::frame_windows::GuiFrameRenderState;
 use romacs_display_protocol::effect_config::IdleDimConfig;
 
 impl GuiFrameRenderState {
-    pub(in crate::render_thread) fn menu_opened(&mut self) {
-        self.update_presented_pointer_motion(None);
-        self.mark_dirty();
-    }
-
-    pub(in crate::render_thread) fn set_visual_bell_start(&mut self, start: Option<EventTime>) {
-        self.overlays.visual_bell_start = start;
-        if start.is_some() {
-            self.compositor.dirty = true;
-        }
-    }
-
     pub(in crate::render_thread) fn record_typing_keypress(&mut self, now: EventTime) {
         self.overlays.typing_speed.key_press_times.push(now);
         self.compositor.dirty = true;
@@ -28,45 +16,6 @@ impl GuiFrameRenderState {
 
     pub(in crate::render_thread) fn record_idle_activity(&mut self, now: EventTime) {
         self.overlays.idle_dim.last_activity_time = now;
-        self.compositor.dirty = true;
-    }
-
-    pub(in crate::render_thread) fn trigger_visual_bell(
-        &mut self,
-        cursor_error_pulse_enabled: bool,
-        edge_snap_enabled: bool,
-        edge_snap_duration_ms: u32,
-        now: EventTime,
-    ) {
-        self.overlays.visual_bell_start = Some(now);
-        if cursor_error_pulse_enabled {
-            self.compositor
-                .renderer_effects
-                .trigger_cursor_error_pulse(now.into_instant());
-        }
-        if edge_snap_enabled {
-            let selected_info = self.compositor.current_frame.as_ref().and_then(|frame| {
-                frame
-                    .window_infos
-                    .iter()
-                    .find(|info| info.selected && !info.is_minibuffer)
-                    .cloned()
-            });
-            if let Some(info) = selected_info {
-                let at_top = info.window_start <= 1;
-                let at_bottom = info.window_end >= info.buffer_size;
-                if at_top || at_bottom {
-                    self.compositor.renderer_effects.trigger_edge_snap(
-                        info.bounds,
-                        info.mode_line_height,
-                        at_top,
-                        at_bottom,
-                        now.into_instant(),
-                        edge_snap_duration_ms,
-                    );
-                }
-            }
-        }
         self.compositor.dirty = true;
     }
 

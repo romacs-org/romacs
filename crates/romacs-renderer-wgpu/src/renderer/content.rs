@@ -18,8 +18,6 @@ use super::frame_pass::{BoxSpan, collect_frame_box_spans};
 use super::glyphs::{
     build_coverage_vertices, coverage_background_color, coverage_foreground_color,
 };
-#[cfg(all(feature = "webview", target_os = "linux"))]
-use super::layer_media::inline_webview_quad;
 use super::layer_media::{MediaQuad, clipped_media_rect, textured_quad_vertices_uv};
 use cosmic_text::SubpixelBin;
 use romacs_display_protocol::DeviceScale;
@@ -264,7 +262,6 @@ impl WgpuRenderer {
         let mut stipple_vertices: Vec<RectVertex> = Vec::new();
         let mut cursor_bg_vertices: Vec<RectVertex> = Vec::new();
         let mut cursor_vertices: Vec<RectVertex> = Vec::new();
-        let mut cursor_inverse_video = None;
         let mut fringe_vertices: Vec<RectVertex> = Vec::new();
         let mut scroll_bar_thumbs: Vec<(f32, f32, f32, f32, f32, Color)> = Vec::new();
 
@@ -547,7 +544,7 @@ impl WgpuRenderer {
                 &mut cursor_vertices,
             );
         }
-        cursor_inverse_video = self.active_cursor_inverse_video(frame, cursor_visible, animated_cursor.as_ref());
+        let cursor_inverse_video = self.active_cursor_inverse_video(frame, cursor_visible, animated_cursor.as_ref());
 
         // --- Step 2: Collect text glyphs (with overstrike and composed) ---
         let mut mask_data: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])> = Vec::new();
@@ -1717,37 +1714,6 @@ impl WgpuRenderer {
             }
 
             // --- Draw inline webkit views ---
-            #[cfg(all(feature = "webview", target_os = "linux"))]
-            {
-                pass.set_pipeline(_opaque_image_pl);
-                pass.set_bind_group(0, draw.binding(), &[]);
-
-                let mut webkit_quads = Vec::new();
-                for glyph in &frame.glyphs {
-                    if let Some(quad) = inline_webview_quad(glyph, offset_x, offset_y)
-                        && self.caches.webview.get(quad.id).is_some()
-                    {
-                        webkit_quads.push(quad);
-                    }
-                }
-                let webkit_vertices: Vec<GlyphVertex> = webkit_quads
-                    .iter()
-                    .flat_map(|quad| quad.vertices.iter().copied())
-                    .collect();
-                if let Some(upload) =
-                    self.arenas
-                        .image
-                        .upload(&self.device, &self.queue, &webkit_vertices)
-                {
-                    pass.set_vertex_buffer(0, upload.buffer_slice());
-                    for (i, quad) in webkit_quads.iter().enumerate() {
-                        if let Some(cached) = self.caches.webview.get(quad.id) {
-                            pass.set_bind_group(1, &cached.bind_group, &[]);
-                            pass.draw((i * 6) as u32..(i * 6 + 6) as u32, 0..1);
-                        }
-                    }
-                }
-            }
 
             // --- Draw cursors and borders (on top of everything) ---
             // The light around lit cursors, with them (`draw_cursor_glow').

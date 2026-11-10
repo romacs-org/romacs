@@ -80,7 +80,7 @@ fn cursor_type_kinds_are_the_published_cursor_styles() {
 
 #[test]
 fn unused_faces_do_not_multiply_unicode_bindings() {
-    let mut vm = Vm::new();
+    let vm = Vm::new();
     let face = vm.display_default_face().unwrap();
     let snapshot = romacs_layout_input::WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
