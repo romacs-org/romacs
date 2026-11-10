@@ -267,7 +267,7 @@ defsubr! { name = "self-insert-command", gnu = "cmds.c:263", effect = Global,
 fn self_insert_command(cx, n: Value; optional c: Value) -> Step {
     let count = n.integer_value().ok_or(Fault::Wrong("fixnump", n))?;
     let event = cx.intern("last-command-event");
-    let c = if c == Value::NIL { cx.variable_value(event)?.unwrap_or(Value::NIL) } else { cx.variable_set(event, c)?; c };
+    let c = if c == Value::NIL { cx.variable_value(event)?.unwrap_or(Value::NIL) } else { cx.store_variable(event, c)?; c };
     if count < 0 { return Err(Fault::Error(format!("Negative repetition argument {count}"))); }
     if half_missing(cx)? { return install_half(cx, self_insert, vec![n, c]); }
     self_insert(cx, Value::NIL, &[n, c])

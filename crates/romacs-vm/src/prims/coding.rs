@@ -232,7 +232,7 @@ fn set_safe_terminal_coding_system_internal(cx, coding: Value) {
     if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
     let coding = cx.coding_check(coding)?;
     let slot = cx.intern("#:vm2-safe-terminal-coding");
-    cx.variable_set(slot, coding)?;
+    cx.store_variable(slot, coding)?;
     Ok(Value::NIL)
 }}
 

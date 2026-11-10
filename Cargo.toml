@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/romacs-brand",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-layout-input",
@@ -15,8 +16,6 @@ members = [
     "crates/romacs-display-protocol",
     "crates/romacs-display-runtime",
     "crates/romacs-face",
-    "crates/romacs-introspect",
-    "crates/romacs-introspect-live",
     "crates/romacs-font",
     "crates/romacs-font-materializer",
     "crates/romacs-gui-oracle",

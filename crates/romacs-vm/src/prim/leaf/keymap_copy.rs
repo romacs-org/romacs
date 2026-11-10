@@ -39,8 +39,7 @@ impl Leaf<'_> {
         }
         let mut copy = (**original).clone();
         // Each entry is copied on its own: equal prefixes stay independent.
-        let mut entries = Vec::new();
-        copy.map_entries(&mut |value| entries.push(*value));
+        let entries = copy.entry_values();
         let mut copies = Vec::with_capacity(entries.len());
         for value in entries { copies.push(self.copy_keymap_item(value, depth)?); }
         let mut next = copies.into_iter();

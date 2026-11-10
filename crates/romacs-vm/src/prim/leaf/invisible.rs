@@ -109,16 +109,11 @@ impl Leaf<'_> {
     }
 
     fn character_property(&mut self, pos: Value, key: Value) -> super::super::Out {
-        // Threaded activations exclude the final 4096 stack slots. This
-        // non-evaluating property query uses two of them without reallocating
-        // the Vec and invalidating the engine's live register pointers.
-        let start = self.vm.stack.len().checked_sub(2)
-            .ok_or_else(|| Fault::Error("native property scratch unavailable".into()))?;
-        let saved = [self.vm.stack[start], self.vm.stack[start + 1]];
-        self.vm.stack[start..].copy_from_slice(&[pos, key]);
-        let value = self.vm.annotation_primitive(Primitive::GetCharProperty, start, 2);
-        self.vm.stack[start..].copy_from_slice(&saved);
-        value.map_err(Fault::Error)
+        // A non-evaluating query, on the kernel file: a running engine's
+        // registers stay where they are.
+        self.vm
+            .with_kernel_stack(&[pos, key], |vm, n| vm.annotation_primitive(Primitive::GetCharProperty, 0, n))
+            .map_err(Fault::Error)
     }
 
     /// TEXT_PROP_MEANS_INVISIBLE (xdisp.c invisible_prop) over the current

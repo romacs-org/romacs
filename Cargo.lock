@@ -3404,6 +3404,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-brand"
+version = "0.0.20"
+dependencies = [
+ "trybuild",
+]
+
+[[package]]
 name = "romacs-coordinate-contract"
 version = "0.1.0"
 
@@ -3616,27 +3623,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-introspect"
-version = "0.0.20"
-dependencies = [
- "regex",
- "serde_json",
- "sha2",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "romacs-introspect-live"
-version = "0.0.20"
-dependencies = [
- "romacs-introspect",
- "romacs-vm",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "romacs-layout-input"
 version = "0.0.20"
 dependencies = [
@@ -3813,6 +3799,7 @@ dependencies = [
  "num-integer",
  "rayon",
  "romacs-allocator",
+ "romacs-brand",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",

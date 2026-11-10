@@ -11,8 +11,6 @@
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
 use rust_tokens::{Token, tokens};
-// The shared lexer's own list, which this test has no use for.
-const _: &[&str] = rust_tokens::CONVERTED;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -116,7 +114,6 @@ const FIELDS: &[(&str, Class)] = &[
     // Each function's ops hold constants, traced from the code that is live.
     ("functions", Root),
     ("request_code", Root),
-    ("register_width", Free), ("spread_reserve", Free),
     // Lowered code, which adds nothing to its function's ops, and registers.
     ("execution", Root), ("spare_programs", Root),
     ("reader_trampolines", Free),
@@ -136,6 +133,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
+    // A native call's watched writes, from the write to its engine's drain;
+    // `may_collect` refuses while any waits (`watchers.rs`).
+    ("deferred_writes", Transient),
     ("dynamic", Root),
     // Custom symbols' entries are read with their symbol, and will shade at their store.
     ("conditions", Owed),
@@ -445,6 +445,8 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),
     ("text.rs:TextBody.coordinate", Plain), ("text.rs:TextBody.chunk", Plain), ("text.rs:TextBody.cold_chunks", Plain),
     ("text.rs:TextBody.cold_order", Plain), ("text.rs:TextBody.scanned_bytes", Plain), ("text.rs:TextBody.coordinate_steps", Plain),
+    // Parse-state summaries: positions and syntax codes, no Value.
+    ("text.rs:TextBody.syntax", Plain),
     // Text shared by indirect buffers, its properties among it: `TextBody`'s own write methods.
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),

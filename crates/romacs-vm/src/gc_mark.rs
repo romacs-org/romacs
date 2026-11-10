@@ -241,7 +241,7 @@ impl Vm {
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, caches: &self.caches, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
-            stacks: std::iter::once(self.stack.as_slice()).chain(self.suspended_stacks.iter().map(Vec::as_slice)).collect(),
+            stacks: self.register_roots(),
             in_obarray, local_binding, code_marks,
         }
     }
@@ -526,14 +526,7 @@ impl Marking {
             }
             Work::Registers(stack, range) => {
                 let units = range.len();
-                // A stack is sized for the widest function there is, so it is
-                // mostly NIL: a block of them is passed over by a test that
-                // vectorizes.
-                for block in view.stacks[stack][range].chunks(64) {
-                    if block.iter().fold(false, |any, &v| any | (v != Value::NIL)) {
-                        w.stack.extend(block.iter().copied().filter(keep));
-                    }
-                }
+                w.stack.extend(view.stacks[stack][range].iter().copied().filter(keep));
                 units
             }
             Work::VectorPart(i, range) => {

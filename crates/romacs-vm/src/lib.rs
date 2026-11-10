@@ -105,10 +105,7 @@ mod tzfile;
 mod undo;
 mod insdel;
 mod indirect;
-// Rooting as a type; public, hidden, so tests/rooting_brand.rs compiles
-// against it.
-#[doc(hidden)]
-pub mod brand;
+use romacs_brand as brand;
 mod gc;
 mod gc_check;
 mod gc_mark;
@@ -177,7 +174,9 @@ mod productivity;
 mod protocol;
 mod reader;
 mod regexp;
+mod syntax_index;
 mod syntax_scan;
+mod syntax_summary;
 mod surface;
 mod tails;
 mod prim;
@@ -1298,8 +1297,8 @@ pub struct Vm {
     command_point: (i64, Value),
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     change_prepared: bool,
-    /// The storage kernels' argument stack, reused across changes
-    /// (`insdel::edit_kernel').
+    /// The register file natives borrow for their arguments, reused across
+    /// calls (`Vm::with_kernel_stack'): empty between them.
     kernel_stack: Vec<Value>,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
@@ -1546,6 +1545,10 @@ pub struct Vm {
     /// The writer notifying watchers is an engine write suspended for it,
     /// whose own Values the write roots (`threaded::watched_write`).
     rooted_write: bool,
+    /// A native call's writes its watchers will hear (`watchers.rs`), each with
+    /// the buffer current then, until the engine that called it completes it.
+    /// Never traced: no collection runs while it holds any (`may_collect`).
+    deferred_writes: Vec<(watchers::NativeWrite, Value)>,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
@@ -1572,10 +1575,6 @@ pub struct Vm {
     special_cache: Vec<u64>,
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
-    register_width: usize,
-    /// Registers kept free at the stack's end for `apply`'s spread
-    /// arguments; it grows to fit the longest spread (GNU has no limit).
-    spread_reserve: usize,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
     /// lowered code kept), reused by the next nested run
@@ -1751,6 +1750,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     gc_holds,
     running_engines,
     rooted_write,
+    deferred_writes,
     gc_stress,
     allocation,
     suspended_stacks,
@@ -1772,7 +1772,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     special_cache,
     functions,
     request_code,
-    register_width,
     closures,
     cells,
     cell_pairs,
@@ -1801,7 +1800,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     dynamic,
     conditions,
     rooted,
-    spread_reserve,
     reader_trampolines,
     quit,
     force_quit_count,
@@ -1986,6 +1984,7 @@ impl Vm {
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,
+            deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
             names: NameMap::default(),
@@ -2003,8 +2002,6 @@ impl Vm {
             special_cache: Vec::new(),
             functions: vec![],
             request_code: request_code::RequestCode::default(),
-            register_width: 1,
-            spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),
@@ -3626,12 +3623,21 @@ impl Vm {
     }
     /// Unwinding pops every binding; one whose restore signals keeps its
     /// value, as GNU's popped entry does. That signal is dropped and the
-    /// escape already in flight kept (see `unbind_one`).
+    /// escape already in flight kept (see `unbind_one`), rooted across the
+    /// watchers, which may collect.
     fn unwind(&mut self, n: usize) {
         for _ in 0..n {
-            let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+            let mut escape = self.propagated_escape.take();
+            let pending = (std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+            let mut values = vec![];
+            if let Some(escape) = &mut escape { escape.visit_values(&mut |value| values.push(*value)); }
+            let frame = self.root_frame(&values);
             let _ = self.unbind_one();
-            (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+            let mut rooted = self.rooted_values(&frame).iter();
+            if let Some(escape) = &mut escape { escape.visit_values(&mut |value| *value = *rooted.next().expect("each value was rooted")); }
+            self.drop_frame(frame);
+            self.propagated_escape = escape;
+            (self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
         }
     }
     /// GNU `unbind_to` on normal completion: a restore that signals
@@ -3644,14 +3650,6 @@ impl Vm {
             }
         }
         Ok(())
-    }
-    /// Leave a region that finished with RESULT, popping its N bindings:
-    /// unbind on normal completion, unwind under an escape.
-    fn unbind_after<T>(&mut self, n: usize, result: Result<T>) -> Result<T> {
-        match result {
-            Ok(value) => self.unbind(n).map(|()| value),
-            Err(error) => { self.unwind(n); Err(error) }
-        }
     }
     /// GNU `unbind_to` for the innermost binding: pop it, then notify its
     /// watchers and restore (`do_one_unbind`). A watcher's signal, left in

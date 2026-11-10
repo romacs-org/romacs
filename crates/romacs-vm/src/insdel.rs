@@ -59,6 +59,8 @@ romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, in
 pub(crate) struct QuietInsertion {
     inhibited: bool,
     undo: Option<(usize, i64, bool)>,
+    /// `deactivate-mark`'s slot, which no watcher hears.
+    deactivate: usize,
 }
 
 /// TMEM: SYMBOL is in SET, a list, or SET is any other non-nil value.
@@ -420,6 +422,9 @@ impl Vm {
     /// no Lisp before or after it. Undo, when on, is then recorded by
     /// `quiet_inserted'.
     pub(crate) fn quiet_insertion(&mut self) -> Option<QuietInsertion> {
+        // Its watchers are Lisp, and this insertion is the one that runs none.
+        let deactivate = self.change_slots().deactivate;
+        if self.variable_trapped(self.indirect_variable(deactivate)) { return None; }
         let index = self.buffer_index().ok()?;
         let Object::Buffer(b) = &self.objects[index] else { return None };
         if b.properties.has_intervals() || !b.intervals.is_empty() { return None; }
@@ -428,7 +433,7 @@ impl Vm {
         let prepared = self.prepare_change(end, end).ok()?;
         if prepared.before || prepared.after { return None; }
         let undo = (self.undo_list_of(index) != Value::TRUE).then_some((index, end, unmodified));
-        Some(QuietInsertion { inhibited: prepared.inhibited, undo })
+        Some(QuietInsertion { inhibited: prepared.inhibited, undo, deactivate })
     }
 
     /// The rest of a quiet insertion once its text is in: record_insert,
@@ -439,34 +444,41 @@ impl Vm {
         if let Some((index, point, unmodified)) = quiet.undo {
             self.record_insert(index, point, length as i64, unmodified).map_err(Fault::Error)?;
         }
-        if !quiet.inhibited { self.mark_deactivated()?; }
+        if !quiet.inhibited { self.store_deactivated(quiet.deactivate)?; }
         Ok(())
     }
 
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        // This buffer's own binding is t already: only a watcher could tell.
+        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.deferred_writes.is_empty() {
+            return self.write_from_native(crate::watchers::NativeWrite::set(deactivate, Value::TRUE));
+        }
+        self.store_deactivated(deactivate)
+    }
+    /// `mark_deactivated` where no watcher hears it, DEACTIVATE being its slot.
+    fn store_deactivated(&mut self, deactivate: usize) -> Faulty<()> {
+        // This buffer's own binding is t already: nothing changes. An inherited
+        // t is not its own, so the write still makes the binding.
         let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
-        if local != deactivate && self.slots[local].value == Value::TRUE && !self.variable_trapped(deactivate) {
+        if local != deactivate && self.slots[local].value == Value::TRUE {
             return Ok(());
         }
-        self.set_variable_value(deactivate, Value::TRUE).map_err(Fault::Error)
+        self.assign_variable(deactivate, Value::TRUE).map_err(Fault::Error)
     }
 
     /// Run a storage kernel on ARGS outside the engine's registers, which
-    /// point into its own stack: the kernel gets the reused kernel stack.
+    /// point into its own stack: the kernel gets the reused kernel stack, and
+    /// the engine's stay traced beneath it, whatever the kernel comes to do.
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
-        let mut kernel = std::mem::take(&mut self.kernel_stack);
-        kernel.clear();
-        kernel.extend_from_slice(args);
-        let saved = std::mem::replace(&mut self.stack, kernel);
-        self.change_prepared = true;
-        let result = run(self, args.len());
-        self.change_prepared = false;
-        self.kernel_stack = std::mem::replace(&mut self.stack, saved);
-        result.map_err(Fault::Error)
+        self.with_kernel_stack(args, |vm, n| {
+            vm.change_prepared = true;
+            let result = run(vm, n);
+            vm.change_prepared = false;
+            result
+        })
+        .map_err(Fault::Error)
     }
 
     /// insert_from_string_1 / insert_1_both for one `insert' argument (a
@@ -648,5 +660,23 @@ impl Vm {
         }
         found.sort_unstable_by_key(|&(birth, ..)| std::cmp::Reverse(birth));
         Ok(found.into_iter().map(|(_, marker, position, insertion)| (marker, position, insertion)).collect())
+    }
+}
+
+#[cfg(test)]
+mod kernel_tests {
+    use crate::{Value, Vm};
+
+    /// A kernel runs outside the engine's registers, which stay traced beneath
+    /// it: what only they hold outlives a collection there.
+    #[test]
+    fn an_engines_registers_are_traced_under_a_kernel() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        let held = vm.alloc_cons(Value::NIL, Value::NIL);
+        vm.stack.push(held);
+        assert!(vm.edit_kernel(&[], |vm, _| { vm.collect(&mut []); Ok(Value::NIL) }).is_ok());
+        assert_eq!(vm.stack.pop(), Some(held));
+        assert!(!vm.conses.is_free(held.index(3).unwrap()), "the engine's register lost what it held");
     }
 }

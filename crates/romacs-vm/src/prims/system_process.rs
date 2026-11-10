@@ -160,7 +160,7 @@ fn locale_decoded(cx: &mut Leaf<'_>, bytes: Vec<u8>) -> Out {
     let last = cx.intern("last-coding-system-used");
     let saved = cx.variable_value(last)?.unwrap_or(Value::NIL);
     let text = cx.decode_output(bytes, coding);
-    cx.variable_set(last, saved)?;
+    cx.store_variable(last, saved)?;
     text
 }
 

@@ -62,7 +62,6 @@ impl Vm {
     fn install_slot(&mut self, function: Function, request: bool) -> usize {
         #[cfg(test)]
         INSTALLS.set(INSTALLS.get() + 1);
-        self.register_width = self.register_width.max(function.regs);
         let code = &mut self.request_code;
         let id = if request
             && let Some(id) = code.free.pop()

@@ -800,6 +800,70 @@ thousandth a stack mark."
             (insert "x"))
           (treesit-parser-root-node (treesit-parser-create 'rust))))
 
+;;;; Syntax summaries (crates/romacs-vm/src/syntax_index.rs)
+
+(defun scaling--syntax-buffer (name n &optional lines)
+  "A buffer NAME of N copies of LINES (C-like code by default), in a C
+comment and string syntax, its summaries made by one parse to the end."
+  (with-current-buffer (get-buffer-create name)
+    (erase-buffer)
+    (let ((table (make-char-table 'syntax-table)))
+      (set-char-table-parent table (standard-syntax-table))
+      (dolist (entry '((?/ . ". 124b") (?* . ". 23") (?\n . "> b") (?\" . "\"") (?\\ . "\\") (?# . "' 14") (?| . "\" 23bn")))
+        (modify-syntax-entry (car entry) (cdr entry) table))
+      (set-syntax-table table))
+    (dotimes (i n)
+      (insert (or lines (format "int f%d(int a) { /* (c */ return a + \"s(\" + %d; } // d {\n" i i))))
+    (parse-partial-sexp (point-min) (point-max))
+    (current-buffer)))
+
+;; An edit near the top, then the state at the end: the edited leaf
+;; rescanned and the rest composed, nothing in N.
+(scaling-probe syntax-summaries-edit :n 4000 :budget 0.5
+  :setup (scaling--syntax-buffer " scaling-syntax-edit" n)
+  :body (with-current-buffer it
+          (dotimes (_ 20)
+            (goto-char 100)
+            (insert "x")
+            (parse-partial-sexp (point-min) (point-max)))))
+
+;; Nested comment starts typed near the top, each a new key for every node
+;; below it: each parse rescans the rest once (as the scanner would), and
+;; what a node keeps stays at four keys, whatever the history.
+(scaling-probe syntax-summaries-churn :n 2000
+  :setup (scaling--syntax-buffer " scaling-syntax-churn" n)
+  :body (with-current-buffer it
+          (dotimes (_ 10)
+            (goto-char 50)
+            (insert "#|")
+            (parse-partial-sexp (point-min) (point-max)))
+          (let ((bytes (plist-get (romacs-syntax-summaries-stats) :bytes)))
+            (when (> bytes (* 2 (buffer-size)))
+              (error "Syntax summaries hold %d bytes for %d characters" bytes (buffer-size))))))
+
+;; Erased and filled again, then edited: cut into leaves anew and served.
+(scaling-probe syntax-summaries-refill :n 2000
+  :setup (with-current-buffer (scaling--syntax-buffer " scaling-syntax-refill" n)
+           (cons (current-buffer) (buffer-string)))
+  :body (with-current-buffer (car it)
+          (erase-buffer)
+          (insert (cdr it))
+          (parse-partial-sexp (point-min) (point-max))
+          (goto-char 100)
+          (insert "x")
+          (parse-partial-sexp (point-min) (point-max))))
+
+;; Runs of `/', each a comment starter's first and second character, longer
+;; than a leaf: their leaf ends move or stay unsafe in one bounded search
+;; each, never a character at a time over the text.
+(scaling-probe syntax-summaries-starter-runs :n 400
+  :setup (scaling--syntax-buffer " scaling-syntax-runs" n (concat "a = b;\n" (make-string 3000 ?/) "\n"))
+  :body (with-current-buffer it
+          (dotimes (_ 5)
+            (goto-char 3)
+            (insert "x")
+            (parse-partial-sexp (point-min) (point-max)))))
+
 ;;;; Windows
 
 (scaling-probe windows :n 6
@@ -2852,7 +2916,7 @@ closures over a mutable variable (each a closure and a cell)."
 ;; entry goes after the mark.  Every list here is live by the first round,
 ;; so the rounds do not grow with N: that each entry is traced once per
 ;; collection is `a_live_entry_is_traced_once_per_collection''s, in
-;; crates/romacs-vm/src/source_cache/tests.rs, not this probe's.
+;; crates/romacs-vm/src/source_cache/cache_tests.rs, not this probe's.
 (defvar scaling--lambda-lists nil
   "The lists the `gc-lambda-lists' probe calls and keeps.")
 

@@ -24,6 +24,60 @@ mod tests {
         WROTE.with(std::cell::Cell::get) - before
     }
 
+    /// A copy whose root lands where a freed table's was is still another
+    /// table to what keys on serials, and a new table and a literal read each
+    /// take a serial of their own.
+    #[test]
+    fn a_copy_where_a_freed_table_was_has_its_own_serial() {
+        let template = CharTable::new(Value::NIL);
+        let mut landed = 0;
+        for _ in 0..1000 {
+            let freed = CharTable::new(Value::NIL);
+            let (address, serial) = (Arc::as_ptr(&freed.root), freed.serial);
+            drop(freed);
+            let copy = template.clone();
+            if Arc::as_ptr(&copy.root) == address {
+                landed += 1;
+                assert_ne!(copy.serial, serial, "a copy where a freed table was took its serial");
+            }
+        }
+        assert!(landed > 0, "no copy landed where a freed table was: the case is not exercised");
+        let mut vm = Vm::new();
+        let literal = run(&mut vm, &format!("#^[nil nil test nil{}]", " nil".repeat(64)));
+        let made = run(&mut vm, "(make-char-table 'test)");
+        let serials = [vm.char_table_serial(literal), vm.char_table_serial(made), template.serial];
+        assert!(serials.iter().all(|&serial| serial != 0), "{serials:?}");
+        assert!(serials[0] != serials[1] && serials[0] != serials[2] && serials[1] != serials[2], "{serials:?}");
+    }
+
+    /// A read of the entries sees what a map would, in its order, once for a
+    /// node two slots share, and passes nothing to the funnel nor counts an edit.
+    #[test]
+    fn a_read_of_the_entries_is_a_maps_walk_and_writes_nothing() {
+        let int = |n| Value::integer(n).unwrap();
+        let mut table = CharTable::new(Value::NIL);
+        table.set(200, int(1)).unwrap();
+        table.set(300, int(2)).unwrap();
+        table.set(0x10005, int(3)).unwrap();
+        table.set_range(0x20000, 0x2ffff, int(4)).unwrap();
+        // A node two root slots share, made here by hand (`set-char-table-range`
+        // with a sub-char-table shares one too): the walk visits it once.
+        let shared = table.root.lock().unwrap().slots[0].clone();
+        table.root.lock().unwrap().slots[5] = shared;
+        let mut before = vec![];
+        table.map_entries(&mut |value| before.push(*value));
+        let edits = table.edits;
+        let mut read = vec![];
+        assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
+        assert_eq!(table.edits, edits, "a read counts no edit");
+        let mut after = vec![];
+        table.map_entries(&mut |value| after.push(*value));
+        assert_eq!(read, before, "a read sees what a map would, in its order");
+        assert_eq!(after, before, "a read leaves the entries as they were");
+        assert!(read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
+        assert_eq!(read.iter().filter(|&&v| v == int(1)).count(), 1, "the shared node once");
+    }
+
     /// Each way to write a table's contents tells the funnel what it stores.
     #[test]
     fn every_content_write_passes_the_funnel() {
@@ -389,6 +443,15 @@ impl Vm {
         Ok(value)
     }
 
+    /// TABLE's serial, which no other table has had (0 for a value that is
+    /// not a char table).
+    pub(crate) fn char_table_serial(&self, table: Value) -> u64 {
+        match self.object_if(table) {
+            Some(data::Object::CharTable(t)) => t.serial,
+            _ => 0,
+        }
+    }
+
     /// TABLE's own runs of one value, in character order, each slot of the
     /// table once: char_table_ref_and_range walked over the characters.
     pub(crate) fn char_table_edits(&self, table: Value) -> Result<u64> {
@@ -685,15 +748,46 @@ fn optimize_node<E>(node: &CharTableNodeHandle, same: &mut impl FnMut(Value, Val
 /// each Value a map writes back. The collector's barrier hooks here, and the
 /// write generation is bumped here. A node may be shared by several entries
 /// (a `CharTable`, a `SubCharTable`, a keymap cursor), so this is not
-/// `Table`'s barrier, which hooks one entry.
+/// `Table`'s barrier, which hooks one entry. It runs with the parent node
+/// locked, and a node it is handed may be that parent, so a hook must queue
+/// a `Node`'s handle, never lock it here.
 #[inline]
 fn wrote(_stored: &CharTableSlot) {
+    WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     #[cfg(test)]
     tests::WROTE.with(|n| n.set(n.get() + 1));
 }
 
+/// The writes to char tables' contents so far in this process, all tables
+/// counted together: what is derived from a table's contents (the syntax
+/// summaries) keys on it with the table's serial, so a write
+/// anywhere, through a parent or a node shared with another table
+/// included, renews the key.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) fn writes() -> u64 {
+    WRITES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The next table serial: one per table made, copied or read, never handed
+/// out twice in a process or across the world image it restores.
+static SERIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn fresh_serial() -> u64 {
+    SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+/// The counters a world image records: the next serial and the writes.
+pub(crate) fn image_counters() -> [u64; 2] {
+    [SERIALS.load(std::sync::atomic::Ordering::Relaxed), writes()]
+}
+/// Continue a restored world's COUNTERS: a table in it keeps its serial,
+/// and what was derived under its writes stays valid until the next one.
+pub(crate) fn restore_counters([serials, writes]: [u64; 2]) {
+    SERIALS.fetch_max(serials, std::sync::atomic::Ordering::Relaxed);
+    WRITES.fetch_max(writes, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The collector's own visit of HANDLE's Values, which forwarding rewrites in
 /// place past the funnel (`tests/no_remote_references.rs` keeps it there).
+/// `map_entries` and `entry_values` walk by it too, so their orders match.
 /// Callers may share SEEN across table and cursor roots during a collection.
 /// The visitor must not reenter these node locks or run Lisp callbacks.
 pub(super) fn collector_visit_node(
@@ -759,8 +853,11 @@ pub(super) struct CharTable {
     extras: Vec<Value>,
     /// Counts the writes to its characters, for what is derived from them.
     edits: u64,
+    /// This table among all others, made, copied or read (`fresh_serial`):
+    /// what derived data keys on, since an address may be reused or moved.
+    serial: u64,
 }
-romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits });
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits, serial });
 
 impl CharTable {
     /// Whether no character has a value, as a new table's: read without
@@ -786,6 +883,7 @@ impl Clone for CharTable {
             parent: self.parent,
             extras: self.extras.clone(),
             edits: 0,
+            serial: fresh_serial(),
         }
     }
 }
@@ -840,7 +938,7 @@ impl CharTable {
         self.extras.copy_from_slice(values);
     }
     pub fn new(purpose: Value) -> Self {
-        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0 }
+        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0, serial: fresh_serial() }
     }
     // Called before publication, in a leaf allocation window (never collects).
     pub fn initialize(&mut self, count: usize, init: Value) -> Result<()> {
@@ -963,6 +1061,13 @@ impl CharTable {
         drop(parent);
         self.reset_ascii();
         expanded
+    }
+    /// Every character entry's Value, by `map_entries`' own walk: a read,
+    /// whose visitor writes nothing, so nothing passes the funnel.
+    pub(crate) fn entry_values(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| out.push(*value));
+        out
     }
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.

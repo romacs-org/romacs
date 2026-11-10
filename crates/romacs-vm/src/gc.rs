@@ -495,6 +495,7 @@ impl Vm {
         self.unwinding = 0;
         self.aftermath_runs = 0;
         self.rooted_write = false;
+        self.deferred_writes.clear();
         self.site_leaf = (0, 0);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
@@ -543,15 +544,18 @@ impl Vm {
     /// collection may run only when no frame keeps heap Values in untraced
     /// Rust storage. Those are OWN unsuspended engines (the caller's own),
     /// no other running engine outside `suspended`, no open compiler
-    /// builder and no watcher notification from an unrooted native writer.
+    /// builder, no watcher notification from an unrooted native writer, and
+    /// no native write waiting for its engine (`deferred_writes`, untraced).
     /// Every other native frame on the stack holds its Values in traced
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended.len()) == own
+        self.gc_holds == 0 && self.deferred_writes.is_empty()
+            && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
-    /// Set the suspended engine's register stack aside for a nested run,
-    /// still traced, its allocation unmoved for the frames' raw pointers.
+    /// Set the register stack aside, still traced, its allocation unmoved for
+    /// the frames' raw pointers: an engine's for a nested run, or for a
+    /// storage kernel's.
     pub(crate) fn suspend_stack(&mut self) {
         let stack = std::mem::take(&mut self.stack);
         self.suspended_stacks.push(stack);
@@ -559,6 +563,22 @@ impl Vm {
     pub(crate) fn resume_stack(&mut self) {
         debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
         self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
+    }
+    /// RUN on ARGS in the reused kernel file, the current one set aside beneath
+    /// it, still traced, its allocation unmoved: the one way a native borrows
+    /// register slots (a storage kernel, a property query) without touching a
+    /// running engine's. RUN gets the arguments' count; they start at 0.
+    pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
+        self.suspend_stack();
+        self.stack = std::mem::take(&mut self.kernel_stack);
+        self.stack.clear();
+        self.stack.extend_from_slice(args);
+        let out = run(self, args.len());
+        // Untraced between calls: nothing it held may stay in it.
+        self.stack.clear();
+        self.kernel_stack = std::mem::take(&mut self.stack);
+        self.resume_stack();
+        out
     }
     /// SLOTS as a dense membership table over every symbol slot.
     fn slot_set<'a>(&self, slots: impl Iterator<Item = &'a usize>) -> Vec<bool> {
@@ -833,12 +853,12 @@ impl Vm {
                 // The buffer-keyed ephemeron owns a local value indirectly
                 // through a stable symbol-slot ID. The slot is NOT a global
                 // root: trace its moving Value only once its owner is live.
-                if (keep_all || k) && table.weakness == hash::Weakness::Key {
-                    if let Some(slot) = value.index_if(7).and_then(|i| i.checked_sub(1)) {
-                        if self.local_binding_slots.contains(&slot) && local_live.insert(slot) {
-                            pending.push(self.slots[slot].value);
-                        }
-                    }
+                if (keep_all || k) && table.weakness == hash::Weakness::Key
+                    && let Some(slot) = value.index_if(7).and_then(|i| i.checked_sub(1))
+                    && self.local_binding_slots.contains(&slot)
+                    && local_live.insert(slot)
+                {
+                    pending.push(self.slots[slot].value);
                 }
                 if keep_all || table.weakness.keep(k, v) {
                     if !k {
@@ -1117,6 +1137,8 @@ impl Vm {
         if !self.may_collect(0) {
             return false;
         }
+        // Every engine is suspended: trace each file only to its engine's top.
+        self.clear_dead_tails();
         let mut lap = Lap::start();
         let before = self.heap_objects();
         self.clear_collection_caches();
@@ -1329,10 +1351,12 @@ impl Vm {
             Some((cell.payload() as usize, pair))
         }).collect();
         self.cells.collector_compact(|v| rewrite(v));
+        // The traced register slots (`register_roots`); above the tops is NIL.
+        let tops = self.register_tops();
+        let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
         for v in roots
             .iter_mut()
-            .chain(self.stack.iter_mut())
-            .chain(self.suspended_stacks.iter_mut().flatten())
+            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
             .chain(self.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {

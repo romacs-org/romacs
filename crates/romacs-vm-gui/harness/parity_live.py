@@ -253,6 +253,9 @@ class Engine:
             raise
         value = read_sexp(response.read_text(encoding='utf-8'))
         response.unlink()
+        if value[0] is None:
+            # The probe could not read the request: its answer says why.
+            raise LispError(self.name, form, value[2])
         if value[0] != self.serial:
             raise RuntimeError(f'{self.name}: answer {value[0]} for request {self.serial}')
         if value[1] != 'ok':
@@ -503,12 +506,19 @@ def compare(gnu, romacs):
 
 # --- keys and readiness -------------------------------------------------------
 
+def _pressed(key):
+    """wtype's arguments for KEY under a modifier: a character is typed; a
+    keysym name (`space', `Return') is pressed with `-k', since typed it
+    would be its letters, each with the modifier held."""
+    return [key] if len(key) == 1 else ['-k', key]
+
+
 def M(key):
-    return ['-M', 'alt', key, '-m', 'alt']
+    return ['-M', 'alt', *_pressed(key), '-m', 'alt']
 
 
 def C(key):
-    return ['-M', 'ctrl', key, '-m', 'ctrl']
+    return ['-M', 'ctrl', *_pressed(key), '-m', 'ctrl']
 
 
 def K(*names):

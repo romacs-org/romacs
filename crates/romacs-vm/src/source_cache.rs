@@ -5,7 +5,7 @@ use std::path::PathBuf;
 mod persistent;
 mod prepared;
 #[cfg(test)]
-mod tests;
+mod cache_tests;
 mod tier;
 pub use prepared::PreparedHandle;
 pub use tier::DIRECT_NODE_LIMIT;

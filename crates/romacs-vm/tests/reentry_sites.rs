@@ -3,11 +3,12 @@
 //! production call site of such a call is listed, with how its frame keeps
 //! that rule, in `fixtures/reentry-sites.txt`. A new site, a site whose call
 //! count changed, or a listed site that no longer exists fails here until the
-//! fixture classifies it again. Files converted to rooting as a type
-//! (`rust_tokens::CONVERTED`) are the compiler's; this skips them.
+//! fixture classifies it again. A function that takes the permission (`brand::Gc`)
+//! is the compiler's and is not an entry; every call of an entry that does not take
+//! it is a site, in a converted module too, whose suspended bodies can collect.
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
-use rust_tokens::{tokens, Token, CONVERTED};
+use rust_tokens::{tokens, Token};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -16,18 +17,17 @@ const ENTRIES: &[&str] = &[
     "execute_raw", "execute_rooted", "execute_args", "execute", "reader_call", "eval_form_raw",
     "eval_source_raw", "load_file_raw", "autoload_do_load", "invoke_prepared_raw",
     "call_macro_expander", "expand_macro", "notify_watchers", "notify_watchers_at",
-    "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one", "unwind", "unbind",
-    "unbind_after", "unbind_forwarded", "checked_unbind", "loader_primitive", "eval_primitive",
-    "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy", "autoload_then",
-    "lambda_list_then", "lambda_list_raise", "lambda_list_closure", "nested_then", "bind_special",
-    "reentrant_load", "reentrant_step", "signal_hook", "call_debugger", "call_in_signal", "handler_callback", "finish_collection", "nested_with_room", "load_with_autoload_queue",
-    "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
-    "finish_request", "poll_collect", "poll_collect_unless_key", "collect_garbage", "collect_garbage_until_key", "collect_compacting",
-    "collect_until_key", "watched_write", "call_suspended",
-    "load_source_named", "variable_set", "notify", "prepared_function",
-    "prepare_source", "call_prepared_source", "call_prepared_source_raw", "call_prepared_source_propagating", "invoke_prepared_with", "eval_datum_raw", "cached_datum", "compile_guarded",
-    "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
-    "run_aftermath",
+    "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one",
+    "unwind", "unbind", "unbind_forwarded", "checked_unbind", "loader_primitive",
+    "eval_primitive", "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy",
+    "lambda_list_closure", "reentrant_load", "reentrant_step", 
+    "compile", "compile_request", "compile_lazy_request",
+    "cached_source_form", "finish_request", "collect_garbage", "collect_garbage_until_key",
+    "collect_compacting", "collect_until_key", "write_from_native",
+    "perform_write", "perform_rooted", "perform_deferred", "prepared_function", "prepare_source",
+    "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
+    "compile_walk", "compile_unit", "run_aftermath",
+    "call_prepared_source", "call_prepared_source_propagating", "invoke_prepared_with",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];
@@ -133,7 +133,7 @@ fn scan(dir: &Path, root: &Path, sites: &mut BTreeMap<Site, usize>) {
             }
             continue;
         }
-        if !relative.ends_with(".rs") || relative.ends_with("_tests.rs") || relative == "main.rs" || CONVERTED.contains(&relative.as_str()) {
+        if !relative.ends_with(".rs") || relative.ends_with("_tests.rs") || relative == "main.rs" {
             continue;
         }
         for (function, callee) in calls(&std::fs::read_to_string(&path).unwrap()) {
@@ -162,16 +162,19 @@ fn the_scanner_finds_calls_a_line_matcher_missed() {
             let _r = r#"vm.execute_raw(id) {"#;
             "done"
         }
-        fn generic(e: &mut Engine) { call_suspended::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
+        fn generic(e: &mut Engine) { reader_call::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
         fn reader_call(&mut self) {}
-        defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.variable_set(a, b)?; } }
+        defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.safe_call(a, b)?; } }
         fn collects(vm: &mut Vm) { let _: Vec<_> = it.collect(); vm.collect(&mut []); }
         #[cfg(test)]
         mod tests { fn t(vm: &mut Vm) { vm.reader_call(f, &[]); } }
         fn after(vm: &mut Vm) { vm.finish_request(o); }
+        fn in_a_leaf(m: &mut Mx) { m.leaf((), |vm, ()| vm.eval_form_raw(&form)); }
+        fn in_a_lend(e: &mut Engine) { e.code_suspended(|vm| vm.reader_call(f, &[])); }
     "##);
     let expect = [("helper", "reader_call"), ("spaced", "reader_call"), ("spaced", "execute_raw"),
-        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "call_suspended"), ("generic", "execute_args"), ("subr", "variable_set"), ("collects", "collect"), ("after", "finish_request")];
+        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "reader_call"), ("generic", "execute_args"), ("subr", "safe_call"), ("collects", "collect"), ("after", "finish_request"),
+        ("in_a_leaf", "eval_form_raw"), ("in_a_lend", "reader_call")];
     let expect: Vec<_> = expect.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect();
     assert_eq!(found, expect);
 }
@@ -215,4 +218,63 @@ fn every_reentry_call_site_is_classified() {
     }
     assert!(found.len() > 100, "the scan found {} sites", found.len());
     assert!(problems.is_empty(), "classify each site in tests/fixtures/reentry-sites.txt:\n{}", problems.join("\n"));
+}
+
+/// The `#[cfg(test)]` modules declared in SOURCE whose own file isn't named
+/// `*_tests.rs`, by that file: the scan skips test code by that name or by a
+/// `#[cfg(test)]` inside the file, so such a module's calls would be read as
+/// production sites. Attributes are taken on the lines before the `mod`.
+fn misnamed_test_modules(source: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut attributes: Vec<String> = vec![];
+    for line in source.lines().map(str::trim) {
+        let mut rest = line;
+        while let Some(attribute) = rest.strip_prefix("#[") {
+            let end = attribute.find(']').unwrap_or(attribute.len());
+            attributes.push(attribute[..end].replace(' ', ""));
+            rest = attribute.get(end + 1..).unwrap_or("").trim_start();
+        }
+        if rest.is_empty() {
+            continue;
+        }
+        let item = ["pub(crate) ", "pub(super) ", "pub "].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        if let Some(name) = item.strip_prefix("mod ").and_then(|m| m.strip_suffix(';')) {
+            if attributes.iter().any(|a| a == "cfg(test)") {
+                let file = attributes.iter().find_map(|a| a.strip_prefix("path=")).map_or(format!("{name}.rs"), |p| p.trim_matches('"').to_owned());
+                if !file.rsplit('/').next().unwrap_or(&file).ends_with("_tests.rs") {
+                    out.push(file);
+                }
+            }
+        }
+        attributes.clear();
+    }
+    out
+}
+
+/// Every source file under DIR, relative to ROOT, with its text.
+fn sources(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            sources(&path, root, out);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push((path.strip_prefix(root).unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&path).unwrap()));
+        }
+    }
+}
+
+/// A test module in a file of its own is named `*_tests.rs`, so the scan
+/// above skips it as the test code it is.
+#[test]
+fn a_test_module_in_its_own_file_is_named_for_its_tests() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![];
+    sources(&src, &src, &mut files);
+    let problems: Vec<String> = files.iter()
+        .flat_map(|(file, text)| misnamed_test_modules(text).into_iter().map(move |m| format!("{file}: #[cfg(test)] mod in {m}, not *_tests.rs")))
+        .collect();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let control = "#[cfg(test)]\nmod tests;\n#[cfg(test)]\nmod good_tests;\n#[cfg(test)]\n#[path = \"x_tests.rs\"]\nmod x;\n\
+                   #[path = \"y.rs\"]\n#[cfg(test)]\npub(crate) mod y;\n#[cfg(test)] mod z;\n#[cfg(test)]\nmod inline {}\nmod plain;\n";
+    assert_eq!(misnamed_test_modules(control), ["tests.rs", "y.rs", "z.rs"]);
 }
