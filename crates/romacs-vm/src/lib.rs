@@ -1334,14 +1334,14 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
-    /// object: cleared by every collection, which can move it.
+    /// object: dropped when that value dies, rewritten when it moves.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
     /// GNU's image caches (graphics.rs): facts of the images frames have
     /// loaded, their pixels the display host's.
     images: graphics::ImageCache,
     /// The closures `(lambda ...)' lists called as functions compiled to,
-    /// by the list object (`Vm::lambda_list_closure'): cleared by every
-    /// collection, which can move the lists and what their snapshots hold.
+    /// by the list object (`Vm::lambda_list_closure`): an ephemeron, each
+    /// entry traced while its list lives and moved with it (`Vm::weak_round`).
     lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
     /// The status bar's last fitted line (a `display::mode_line::Band'),
     /// kept for a click to read (`Vm::status_bar_target'); its object

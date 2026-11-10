@@ -74,3 +74,70 @@ fn a_band_shows_control_characters_as_gnu_display_does() {
     assert_eq!(runs, vec![(0..2, 'x'), (2..3, 'y'), (3..5, 'z')]);
     assert_eq!(stretches, vec![romacs_layout_input::Stretch { byte: 2, width: align }]);
 }
+
+/// The value of `romacs-mode-line-format`.
+fn segment(vm: &mut Vm) -> Value {
+    let slot = vm.slot("romacs-mode-line-format");
+    vm.slots[slot].value
+}
+
+/// The form's propertized string for `romacs-mode-line-format` as it is
+/// now: a rooted handle, the same one while the form is the cached one.
+fn segment_handle(vm: &mut Vm) -> std::sync::Arc<crate::handle::Rooted> {
+    let value = segment(vm);
+    match vm.band_format_form(value) {
+        Form::List(items) => match &items[1] {
+            Form::Object(object) => object.0.clone(),
+            other => panic!("a propertized string is an object: {other:?}"),
+        },
+        other => panic!("a list segment is a list: {other:?}"),
+    }
+}
+
+/// Set `romacs-mode-line-format` to a list with a propertized string, made
+/// after garbage, so that a moving collection has somewhere to move it.
+fn set_segment(vm: &mut Vm) {
+    vm.eval_source(
+        "(progn (defvar romacs-mode-line-format nil)
+                (let ((garbage (make-list 2000 (copy-sequence \"g\"))))
+                  (setq romacs-mode-line-format (list \"a\" (propertize \"b\" 'face 'bold) (length garbage)))))",
+    )
+    .unwrap();
+}
+
+/// A segment's form survives a collection, in place or moving: the entry's
+/// saved value is still the slot's, and the cached form comes back.
+#[test]
+fn a_mode_line_form_survives_collections() {
+    let mut vm = Vm::new();
+    set_segment(&mut vm);
+    let first = segment_handle(&mut vm);
+    let slot = vm.slot("romacs-mode-line-format");
+    for moving in [false, true] {
+        vm.set_gc_moving(moving);
+        let before = segment(&mut vm);
+        vm.collect_garbage();
+        // Stress collections may have compacted the segment already.
+        if moving && std::env::var_os("ROMACS_GC_STRESS").is_none() {
+            assert_ne!(segment(&mut vm), before, "the fixture must move the segment");
+        }
+        let saved = vm.mode_line_forms.get(&slot).map(|&(known, _)| known);
+        assert_eq!(saved, Some(segment(&mut vm)), "the entry follows the value (moving: {moving})");
+        assert!(std::sync::Arc::ptr_eq(&first, &segment_handle(&mut vm)), "the form is the cached one (moving: {moving})");
+    }
+}
+
+/// A segment's form goes when the value it was converted from dies: the
+/// slot can never hold that value again, so its entry is neither kept nor
+/// matched by a new object at the same index.
+#[test]
+fn a_dead_segment_value_takes_its_form() {
+    let mut vm = Vm::new();
+    set_segment(&mut vm);
+    segment_handle(&mut vm);
+    let slot = vm.slot("romacs-mode-line-format");
+    assert!(vm.mode_line_forms.contains_key(&slot), "converted, so cached");
+    vm.eval_source("(setq romacs-mode-line-format (list \"c\"))").unwrap();
+    vm.collect_garbage();
+    assert!(!vm.mode_line_forms.contains_key(&slot), "the old value died, so its entry did");
+}
