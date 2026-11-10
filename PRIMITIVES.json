@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f640a4e9cb7277bcee8ede593978789347d694d353f86fe4657ad5a2fadc837e",
+  "source_fingerprint": "86c71231881b4fe3bc94fa5f6a25ea086f803727dd13e2ecf015df1e8c8da82a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -392,7 +392,7 @@
   "backward-prefix-chars": {
    "name": "backward-prefix-chars",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:48"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:49"
   },
   "bare-symbol": {
    "name": "bare-symbol",
@@ -792,7 +792,7 @@
   "char-syntax": {
    "name": "char-syntax",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:12"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:13"
   },
   "char-table-extra-slot": {
    "name": "char-table-extra-slot",
@@ -1983,7 +1983,7 @@
   "forward-comment": {
    "name": "forward-comment",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:28"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:29"
   },
   "forward-line": {
    "name": "forward-line",
@@ -3350,7 +3350,7 @@
   "matching-paren": {
    "name": "matching-paren",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:25"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:26"
   },
   "max": {
    "name": "max",
@@ -3735,7 +3735,7 @@
   "parse-partial-sexp": {
    "name": "parse-partial-sexp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:51"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:52"
   },
   "plist-get": {
    "name": "plist-get",
@@ -5492,7 +5492,7 @@
   "romacs-syntax-summaries-stats": {
    "name": "romacs-syntax-summaries-stats",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:57"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:58"
   },
   "romacs-treesit-bundled-grammars": {
    "name": "romacs-treesit-bundled-grammars",
@@ -5557,12 +5557,12 @@
   "scan-lists": {
    "name": "scan-lists",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:38"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:39"
   },
   "scan-sexps": {
    "name": "scan-sexps",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:43"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:44"
   },
   "scroll-down": {
    "name": "scroll-down",
@@ -6422,7 +6422,7 @@
   "syntax-class-to-char": {
    "name": "syntax-class-to-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:15"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:16"
   },
   "syntax-table": {
    "name": "syntax-table",

@@ -108,6 +108,26 @@ pub(crate) enum Halt {
 }
 pub(crate) type R<T> = Result<T, Halt>;
 
+/// Where forw_comment goes on: the code after each update that can stop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ForwAt { Read, EscapeSkipped, Incomment, NestedChecks }
+
+impl ForwAt {
+    pub(crate) const ALL: [ForwAt; 4] = [ForwAt::Read, ForwAt::EscapeSkipped, ForwAt::Incomment, ForwAt::NestedChecks];
+}
+
+/// forw_comment's whole state between two steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Forw { pub at: ForwAt, pub from: Pos, pub nesting: i64, pub syntax: i32, pub code: i32, pub prev_syntax: i32 }
+
+/// forw_comment stopped for Lisp, at FORW.
+pub(crate) struct CommentHalt { pub halt: Halt, pub forw: Forw }
+impl From<CommentHalt> for Halt {
+    fn from(stopped: CommentHalt) -> Self {
+        stopped.halt
+    }
+}
+
 /// struct lisp_parse_state, as `parse-partial-sexp' reads and returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ParseState {
@@ -181,9 +201,72 @@ pub(crate) struct Scanner<'a, T: Text> {
     pub modiff: u64,
 }
 
-/// Labels of scan_sexps_forward.
-#[derive(Clone, Copy)]
-enum At { Top, AtComment, InComment, Quoted, Symbol, InString, QuotedInString, Stop, EndQuoted, Done }
+/// Labels of scan_sexps_forward: GNU's gotos, and the code after each step
+/// that can stop for Lisp (`inc_from!` names the label it goes on at).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum At {
+    Top, AtComment, InComment, Quoted, Symbol, InString, QuotedInString, Stop, EndQuoted, Done,
+    /// The start: a two-character comment starter may span FROM.
+    Begin,
+    /// The start of an exact continuation inside a comment, an escape pending.
+    SkipEscapedInComment,
+    /// After the escaped character's step.
+    CommentEscaped,
+    /// After a two-character comment starter's second step.
+    CommentStarted,
+    /// After Top's step: the dispatch on the character stepped over.
+    TopDispatch,
+    /// After the step into a comment starter that ends a symbol.
+    SymbolToComment,
+    /// After an escape's step inside a symbol.
+    SymbolQuoted,
+    /// After the step past a string's end.
+    StringEnded,
+    /// After the step past a comment's end.
+    CommentEnded,
+}
+impl At {
+    pub(crate) const ALL: [At; 19] = [
+        At::Top, At::AtComment, At::InComment, At::Quoted, At::Symbol, At::InString, At::QuotedInString, At::Stop,
+        At::EndQuoted, At::Done, At::Begin, At::SkipEscapedInComment, At::CommentEscaped, At::CommentStarted,
+        At::TopDispatch, At::SymbolToComment, At::SymbolQuoted, At::StringEnded, At::CommentEnded,
+    ];
+}
+
+/// A level of scan_sexps_forward: the start of its last sexp, and of the one
+/// before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Level { pub last: i64, pub prev: i64 }
+
+/// scan_sexps_forward's locals between two steps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Locals {
+    pub from: Pos,
+    pub prev_from: Pos,
+    pub prev_from_syntax: i32,
+    pub prev_prev_from_syntax: i32,
+    pub depth: i64,
+    pub mindepth: i64,
+    pub maxdepth: i64,
+    pub levels: Vec<Level>,
+    pub in_symbol: bool,
+    pub symbol_prev: i64,
+    pub spent: bool,
+}
+
+/// A parse stopped for Lisp, to go on at AT: GNU's scan calls Lisp and goes
+/// on, so what it read before is not read again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Suspended { pub at: At, pub locals: Locals, pub state: ParseState, pub forw: Option<Forw> }
+
+/// A parse's stop: HALT, and where it goes on, unless it stopped before
+/// reading anything.
+pub(crate) struct Stopped { pub halt: Halt, pub suspended: Option<Box<Suspended>> }
+impl From<Halt> for Stopped {
+    fn from(halt: Halt) -> Self {
+        Self { halt, suspended: None }
+    }
+}
 
 impl<T: Text> Scanner<'_, T> {
     fn update_forward(&self, charpos: i64) -> R<()> {
@@ -229,65 +312,97 @@ impl<T: Text> Scanner<'_, T> {
     }
 
     /// forw_comment: (found, position, incomment, last syntax).
-    fn forw_comment(&self, mut from: Pos, stop: i64, mut nesting: i64, style: i32, mut prev_syntax: i32)
-        -> R<(bool, Pos, i64, i32)> {
-        if nesting <= 0 { nesting = -1; }
-        let mut syntax = prev_syntax;
-        let mut code = syntax & 0xff;
-        let mut incomment = syntax != 0 && from.char < stop;
+    fn forw_comment(&self, from: Pos, stop: i64, nesting: i64, style: i32, prev_syntax: i32)
+        -> Result<(bool, Pos, i64, i32), CommentHalt> {
+        let nesting = if nesting <= 0 { -1 } else { nesting };
+        // GNU's incomment flag: a known syntax before FROM is checked as the
+        // first half of an ender or nested starter before FROM is read.
+        let at = if prev_syntax != 0 && from.char < stop { ForwAt::Incomment } else { ForwAt::Read };
+        self.forw_run(Forw { at, from, nesting, syntax: prev_syntax, code: prev_syntax & 0xff, prev_syntax }, stop, style)
+    }
+
+    /// forw_comment from FORW, which a stop for Lisp left: each label is the
+    /// code after the update that stopped.
+    fn forw_run(&self, forw: Forw, stop: i64, style: i32) -> Result<(bool, Pos, i64, i32), CommentHalt> {
+        let Forw { mut at, mut from, mut nesting, mut syntax, mut code, mut prev_syntax } = forw;
+        macro_rules! update {
+            ($next:expr) => {
+                if let Err(halt) = self.update_forward(from.char) {
+                    return Err(CommentHalt { halt, forw: Forw { at: $next, from, nesting, syntax, code, prev_syntax } });
+                }
+            };
+        }
         loop {
-            if !incomment {
-                if from.char == stop {
-                    let last = if code == SESCAPE || code == SCHARQUOTE || comend_first(syntax)
-                        || (nesting > 0 && comstart_first(syntax)) { syntax } else { SMAX };
-                    return Ok((false, from, nesting, last));
+            at = match at {
+                ForwAt::Read => {
+                    if from.char == stop {
+                        let last = if code == SESCAPE || code == SCHARQUOTE || comend_first(syntax)
+                            || (nesting > 0 && comstart_first(syntax)) { syntax } else { SMAX };
+                        return Ok((false, from, nesting, last));
+                    }
+                    prev_syntax = syntax;
+                    syntax = self.text.syntax(from);
+                    code = syntax & 0xff;
+                    if code == SENDCOMMENT && comment_style(syntax, 0) == style
+                        && (if nested(syntax) { nesting > 0 && { nesting -= 1; nesting == 0 } } else { nesting < 0 })
+                        && !(self.options.comment_end_can_be_escaped
+                             && ((prev_syntax & 0xff) == SESCAPE || (prev_syntax & 0xff) == SCHARQUOTE)) {
+                        break;
+                    }
+                    if code == SCOMMENT_FENCE && style == ST_COMMENT_STYLE { break; }
+                    if nesting > 0 && code == SCOMMENT && nested(syntax) && comment_style(syntax, 0) == style {
+                        nesting += 1;
+                    }
+                    if self.options.comment_end_can_be_escaped && (code == SESCAPE || code == SCHARQUOTE) {
+                        from = self.text.inc(from);
+                        update!(ForwAt::EscapeSkipped);
+                        ForwAt::EscapeSkipped
+                    } else {
+                        from = self.text.inc(from);
+                        update!(ForwAt::Incomment);
+                        ForwAt::Incomment
+                    }
                 }
-                prev_syntax = syntax;
-                syntax = self.text.syntax(from);
-                code = syntax & 0xff;
-                if code == SENDCOMMENT && comment_style(syntax, 0) == style
-                    && (if nested(syntax) { nesting > 0 && { nesting -= 1; nesting == 0 } } else { nesting < 0 })
-                    && !(self.options.comment_end_can_be_escaped
-                         && ((prev_syntax & 0xff) == SESCAPE || (prev_syntax & 0xff) == SCHARQUOTE)) {
-                    break;
+                ForwAt::EscapeSkipped => {
+                    if from.char == stop {
+                        ForwAt::Read
+                    } else {
+                        syntax = SMAX;
+                        code = syntax;
+                        from = self.text.inc(from);
+                        update!(ForwAt::Incomment);
+                        ForwAt::Incomment
+                    }
                 }
-                if code == SCOMMENT_FENCE && style == ST_COMMENT_STYLE { break; }
-                if nesting > 0 && code == SCOMMENT && nested(syntax) && comment_style(syntax, 0) == style {
-                    nesting += 1;
+                // forw_incomment:
+                ForwAt::Incomment => {
+                    if from.char < stop && comend_first(syntax) {
+                        let other = self.text.syntax(from);
+                        if comend_second(other) && comment_style(syntax, other) == style
+                            && (if nested(syntax) || nested(other) { nesting > 0 } else { nesting < 0 }) {
+                            syntax = SMAX;
+                            nesting -= 1;
+                            if nesting <= 0 { break; }
+                            from = self.text.inc(from);
+                            update!(ForwAt::NestedChecks);
+                        }
+                    }
+                    ForwAt::NestedChecks
                 }
-                if self.options.comment_end_can_be_escaped && (code == SESCAPE || code == SCHARQUOTE) {
-                    from = self.text.inc(from);
-                    self.update_forward(from.char)?;
-                    if from.char == stop { continue; }
-                    syntax = SMAX;
-                    code = syntax;
+                ForwAt::NestedChecks => {
+                    if nesting > 0 && from.char < stop && comstart_first(syntax) {
+                        let other = self.text.syntax(from);
+                        if comment_style(other, syntax) == style && comstart_second(other)
+                            && (nested(syntax) || nested(other)) {
+                            syntax = SMAX;
+                            from = self.text.inc(from);
+                            nesting += 1;
+                            update!(ForwAt::Read);
+                        }
+                    }
+                    ForwAt::Read
                 }
-                from = self.text.inc(from);
-                self.update_forward(from.char)?;
-            }
-            incomment = false;
-            // forw_incomment:
-            if from.char < stop && comend_first(syntax) {
-                let other = self.text.syntax(from);
-                if comend_second(other) && comment_style(syntax, other) == style
-                    && (if nested(syntax) || nested(other) { nesting > 0 } else { nesting < 0 }) {
-                    syntax = SMAX;
-                    nesting -= 1;
-                    if nesting <= 0 { break; }
-                    from = self.text.inc(from);
-                    self.update_forward(from.char)?;
-                }
-            }
-            if nesting > 0 && from.char < stop && comstart_first(syntax) {
-                let other = self.text.syntax(from);
-                if comment_style(other, syntax) == style && comstart_second(other)
-                    && (nested(syntax) || nested(other)) {
-                    syntax = SMAX;
-                    from = self.text.inc(from);
-                    self.update_forward(from.char)?;
-                    nesting += 1;
-                }
-            }
+            };
         }
         Ok((true, from, nesting, SMAX))
     }
@@ -823,20 +938,18 @@ impl<T: Text> Scanner<'_, T> {
     /// scan_sexps_forward: parse from FROM to END in STATE. COMMENTSTOP 1
     /// stops at a comment start, -1 also at comment ends and string
     /// boundaries.
-    #[allow(unused_assignments)] // INC_FROM's fields are not all read on every path.
     pub(crate) fn scan_sexps_forward(&mut self, state: &mut ParseState, from: Pos, end: i64,
                                      targetdepth: i64, stopbefore: bool, commentstop: i32) -> R<()> {
-        #[derive(Clone, Copy)]
-        struct Level { last: i64, prev: i64 }
+        self.parse(state, from, end, targetdepth, stopbefore, commentstop).map_err(|stopped| stopped.halt)
+    }
+
+    /// `scan_sexps_forward`, stopping for Lisp so that `resume` goes on.
+    pub(crate) fn parse(&mut self, state: &mut ParseState, from: Pos, end: i64,
+                        targetdepth: i64, stopbefore: bool, commentstop: i32) -> Result<(), Stopped> {
         const LEVELS: usize = 100;
-        let boundary_stop = commentstop == -1;
-        let mut from = from;
         let mut prev_from = from;
         if from.char != self.begv.char { prev_from = self.text.dec(prev_from); }
-        let mut depth = state.depth;
         let start_quoted = state.quoted;
-        let mut prev_prev_from_syntax = SMAX;
-        let mut prev_from_syntax = state.prev_syntax;
         let mut levels = vec![Level { last: -1, prev: -1 }];
         for start in &state.levelstarts {
             let level = levels.len() - 1;
@@ -849,38 +962,11 @@ impl<T: Text> Scanner<'_, T> {
         let exact = state.continuation;
         levels[level] = exact.map_or(Level { last: -1, prev: -1 }, |c| Level { last: c.top_last, prev: c.top_prev });
         state.quoted = false;
-        let mut mindepth = depth;
-        let mut maxdepth = depth;
-        let mut in_symbol = false;
-        // The current level's `prev' before END completed the symbol it is in.
-        let mut symbol_prev = -1;
-        let mut spent = false;
+        // A stop here has read nothing: the rerun starts again.
         self.setup(from.char, 1)?;
-
-        // INC_FROM.
-        macro_rules! inc_from {
-            () => {{
-                prev_from = from;
-                prev_prev_from_syntax = prev_from_syntax;
-                prev_from_syntax = self.text.syntax(prev_from);
-                from = self.text.inc(from);
-                if from.char < end { self.update_forward(from.char)?; }
-            }};
-        }
-        macro_rules! cur {
-            () => { levels.last_mut().expect("a current level") };
-        }
-
-        let mut at = if state.incomment != 0 {
+        let at = if state.incomment != 0 {
             if start_quoted && exact.is_some() && self.options.comment_end_can_be_escaped {
-                // forw_comment skips the character an escape quotes.
-                if from.char < end {
-                    inc_from!();
-                    prev_from_syntax = SMAX;
-                    At::InComment
-                } else {
-                    At::EndQuoted
-                }
+                At::SkipEscapedInComment
             } else {
                 At::InComment
             }
@@ -890,97 +976,190 @@ impl<T: Text> Scanner<'_, T> {
             At::Quoted
         } else if exact.is_some_and(|c| c.in_symbol) {
             At::Symbol
-        } else if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
-            inc_from!();
-            prev_from_syntax = SMAX;
-            At::AtComment
         } else {
-            At::Top
+            At::Begin
         };
+        let locals = Locals {
+            from, prev_from, prev_from_syntax: state.prev_syntax, prev_prev_from_syntax: SMAX,
+            depth: state.depth, mindepth: state.depth, maxdepth: state.depth, levels,
+            in_symbol: false, symbol_prev: -1, spent: false,
+        };
+        self.run(state, at, locals, None, (end, targetdepth, stopbefore, commentstop))
+    }
+
+    /// Go on with the parse SUSPENDED stopped, to END as it was asked to:
+    /// the state it ends in.
+    pub(crate) fn resume(&mut self, suspended: Suspended, end: i64, targetdepth: i64, stopbefore: bool,
+                         commentstop: i32) -> Result<ParseState, Stopped> {
+        let Suspended { at, locals, mut state, forw } = suspended;
+        self.run(&mut state, at, locals, forw, (end, targetdepth, stopbefore, commentstop))?;
+        Ok(state)
+    }
+
+    /// scan_sexps_forward's loop, from AT with LOCALS (and FORW, a comment
+    /// scan it stopped in): every step that can stop for Lisp names the
+    /// label it goes on at, and goes there, so that a resumed parse runs the
+    /// code an unstopped one does.
+    #[allow(unused_assignments)] // INC_FROM's fields are not all read on every path.
+    fn run(&mut self, state: &mut ParseState, at: At, locals: Locals, forw: Option<Forw>,
+           (end, targetdepth, stopbefore, commentstop): (i64, i64, bool, i32)) -> Result<(), Stopped> {
+        const LEVELS: usize = 100;
+        let boundary_stop = commentstop == -1;
+        let Locals {
+            mut from, mut prev_from, mut prev_from_syntax, mut prev_prev_from_syntax, mut depth, mut mindepth,
+            mut maxdepth, mut levels, mut in_symbol, mut symbol_prev, mut spent,
+        } = locals;
+        let mut forw = forw;
+        let mut at = at;
+
+        macro_rules! suspend {
+            ($halt:expr, $next:expr, $forw:expr) => {
+                Stopped {
+                    halt: $halt,
+                    suspended: Some(Box::new(Suspended {
+                        at: $next,
+                        locals: Locals {
+                            from, prev_from, prev_from_syntax, prev_prev_from_syntax, depth, mindepth, maxdepth,
+                            levels: std::mem::take(&mut levels), in_symbol, symbol_prev, spent,
+                        },
+                        state: state.clone(),
+                        forw: $forw,
+                    })),
+                }
+            };
+        }
+        // INC_FROM, going on at NEXT after a stop.
+        macro_rules! inc_from {
+            ($next:expr) => {{
+                prev_from = from;
+                prev_prev_from_syntax = prev_from_syntax;
+                prev_from_syntax = self.text.syntax(prev_from);
+                from = self.text.inc(from);
+                if from.char < end {
+                    if let Err(halt) = self.update_forward(from.char) {
+                        return Err(suspend!(halt, $next, None));
+                    }
+                }
+            }};
+        }
+        macro_rules! cur {
+            () => { levels.last_mut().expect("a current level") };
+        }
+
         loop {
             at = match at {
+                At::Begin => {
+                    if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
+                        inc_from!(At::CommentStarted);
+                        At::CommentStarted
+                    } else {
+                        At::Top
+                    }
+                }
+                At::SkipEscapedInComment => {
+                    // forw_comment skips the character an escape quotes.
+                    if from.char < end {
+                        inc_from!(At::CommentEscaped);
+                        At::CommentEscaped
+                    } else {
+                        At::EndQuoted
+                    }
+                }
+                At::CommentEscaped => {
+                    prev_from_syntax = SMAX;
+                    At::InComment
+                }
+                At::CommentStarted => {
+                    prev_from_syntax = SMAX;
+                    At::AtComment
+                }
                 At::Top => {
                     if from.char >= end { At::Done } else {
-                        inc_from!();
-                        if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
-                            inc_from!();
-                            prev_from_syntax = SMAX;
-                            At::AtComment
-                        } else if prefix(prev_from_syntax) {
-                            At::Top
-                        } else {
-                            let code = prev_from_syntax & 0xff;
-                            match code {
-                                SESCAPE | SCHARQUOTE | SWORD | SSYMBOL if stopbefore => At::Stop,
-                                SESCAPE | SCHARQUOTE => { cur!().last = prev_from.char; At::Quoted }
-                                SWORD | SSYMBOL => { cur!().last = prev_from.char; At::Symbol }
-                                SCOMMENT_FENCE => {
-                                    state.comstyle = ST_COMMENT_STYLE;
-                                    state.incomment = -1;
-                                    state.comstr_start = prev_from.char;
-                                    At::AtComment
-                                }
-                                SCOMMENT => {
-                                    state.comstyle = comment_style(prev_from_syntax, 0);
-                                    state.incomment = if nested(prev_from_syntax) { 1 } else { -1 };
-                                    state.comstr_start = prev_from.char;
-                                    At::AtComment
-                                }
-                                SOPEN => {
-                                    if stopbefore { At::Stop } else {
-                                        depth += 1;
-                                        maxdepth = maxdepth.max(depth);
-                                        cur!().last = prev_from.char;
-                                        if levels.len() < LEVELS {
-                                            levels.push(Level { last: -1, prev: -1 });
-                                        } else {
-                                            *cur!() = Level { last: -1, prev: -1 };
-                                        }
-                                        if targetdepth == depth { At::Done } else { At::Top }
+                        inc_from!(At::TopDispatch);
+                        At::TopDispatch
+                    }
+                }
+                At::TopDispatch => {
+                    if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
+                        inc_from!(At::CommentStarted);
+                        At::CommentStarted
+                    } else if prefix(prev_from_syntax) {
+                        At::Top
+                    } else {
+                        let code = prev_from_syntax & 0xff;
+                        match code {
+                            SESCAPE | SCHARQUOTE | SWORD | SSYMBOL if stopbefore => At::Stop,
+                            SESCAPE | SCHARQUOTE => { cur!().last = prev_from.char; At::Quoted }
+                            SWORD | SSYMBOL => { cur!().last = prev_from.char; At::Symbol }
+                            SCOMMENT_FENCE => {
+                                state.comstyle = ST_COMMENT_STYLE;
+                                state.incomment = -1;
+                                state.comstr_start = prev_from.char;
+                                At::AtComment
+                            }
+                            SCOMMENT => {
+                                state.comstyle = comment_style(prev_from_syntax, 0);
+                                state.incomment = if nested(prev_from_syntax) { 1 } else { -1 };
+                                state.comstr_start = prev_from.char;
+                                At::AtComment
+                            }
+                            SOPEN => {
+                                if stopbefore { At::Stop } else {
+                                    depth += 1;
+                                    maxdepth = maxdepth.max(depth);
+                                    cur!().last = prev_from.char;
+                                    if levels.len() < LEVELS {
+                                        levels.push(Level { last: -1, prev: -1 });
+                                    } else {
+                                        *cur!() = Level { last: -1, prev: -1 };
                                     }
-                                }
-                                SCLOSE => {
-                                    depth -= 1;
-                                    if depth < mindepth { mindepth = depth; }
-                                    if levels.len() > 1 { levels.pop(); }
-                                    let level = cur!();
-                                    level.prev = level.last;
                                     if targetdepth == depth { At::Done } else { At::Top }
                                 }
-                                SSTRING | SSTRING_FENCE => {
-                                    state.comstr_start = from.char - 1;
-                                    if stopbefore { At::Stop } else {
-                                        cur!().last = prev_from.char;
-                                        state.instring = if code == SSTRING {
-                                            self.text.char_at(prev_from) as i32
-                                        } else {
-                                            ST_STRING_STYLE
-                                        };
-                                        if boundary_stop { At::Done } else { At::InString }
-                                    }
-                                }
-                                _ => At::Top,
                             }
+                            SCLOSE => {
+                                depth -= 1;
+                                if depth < mindepth { mindepth = depth; }
+                                if levels.len() > 1 { levels.pop(); }
+                                let level = cur!();
+                                level.prev = level.last;
+                                if targetdepth == depth { At::Done } else { At::Top }
+                            }
+                            SSTRING | SSTRING_FENCE => {
+                                state.comstr_start = from.char - 1;
+                                if stopbefore { At::Stop } else {
+                                    cur!().last = prev_from.char;
+                                    state.instring = if code == SSTRING {
+                                        self.text.char_at(prev_from) as i32
+                                    } else {
+                                        ST_STRING_STYLE
+                                    };
+                                    if boundary_stop { At::Done } else { At::InString }
+                                }
+                            }
+                            _ => At::Top,
                         }
                     }
                 }
                 At::Quoted => {
-                    if from.char == end { At::EndQuoted } else { inc_from!(); At::Symbol }
+                    if from.char == end { At::EndQuoted } else {
+                        inc_from!(At::Symbol);
+                        At::Symbol
+                    }
                 }
                 At::Symbol => {
                     let mut next = None;
                     let mut ended = false;
                     while from.char < end {
                         if self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
-                            inc_from!();
-                            prev_from_syntax = SMAX;
-                            next = Some(At::AtComment);
+                            inc_from!(At::SymbolToComment);
+                            next = Some(At::SymbolToComment);
                             break;
                         }
                         match self.text.syntax(from) & 0xff {
                             SCHARQUOTE | SESCAPE => {
-                                inc_from!();
-                                if from.char == end { next = Some(At::EndQuoted); break; }
+                                inc_from!(At::SymbolQuoted);
+                                next = Some(At::SymbolQuoted);
+                                break;
                             }
                             SWORD | SSYMBOL | SQUOTE => {}
                             _ => {
@@ -988,7 +1167,7 @@ impl<T: Text> Scanner<'_, T> {
                                 break;
                             }
                         }
-                        inc_from!();
+                        inc_from!(At::Symbol);
                     }
                     in_symbol = next.is_none() && !ended;
                     symbol_prev = cur!().prev;
@@ -998,13 +1177,34 @@ impl<T: Text> Scanner<'_, T> {
                         At::Top
                     })
                 }
+                At::SymbolToComment => {
+                    in_symbol = false;
+                    symbol_prev = cur!().prev;
+                    prev_from_syntax = SMAX;
+                    At::AtComment
+                }
+                At::SymbolQuoted => {
+                    in_symbol = false;
+                    symbol_prev = cur!().prev;
+                    if from.char == end { At::EndQuoted } else {
+                        inc_from!(At::Symbol);
+                        At::Symbol
+                    }
+                }
                 At::AtComment => {
                     if commentstop != 0 || boundary_stop { At::Done } else { At::InComment }
                 }
                 At::InComment => {
-                    let prev = if from.char == self.begv.char { 0 } else { prev_from_syntax };
-                    let (found, out, incomment, last) =
-                        self.forw_comment(from, end, state.incomment, state.comstyle, prev)?;
+                    let stepped = if let Some(saved) = forw.take() {
+                        self.forw_run(saved, end, state.comstyle)
+                    } else {
+                        let prev = if from.char == self.begv.char { 0 } else { prev_from_syntax };
+                        self.forw_comment(from, end, state.incomment, state.comstyle, prev)
+                    };
+                    let (found, out, incomment, last) = match stepped {
+                        Ok(stepped) => stepped,
+                        Err(CommentHalt { halt, forw: saved }) => return Err(suspend!(halt, At::InComment, Some(saved))),
+                    };
                     from = out;
                     prev_from_syntax = last;
                     if !found {
@@ -1013,12 +1213,15 @@ impl<T: Text> Scanner<'_, T> {
                         let code = prev_from_syntax & 0xff;
                         if code == SESCAPE || code == SCHARQUOTE { At::EndQuoted } else { At::Done }
                     } else {
-                        inc_from!();
-                        state.incomment = 0;
-                        state.comstyle = 0;
-                        prev_from_syntax = SMAX;
-                        if boundary_stop { At::Done } else { At::Top }
+                        inc_from!(At::CommentEnded);
+                        At::CommentEnded
                     }
+                }
+                At::CommentEnded => {
+                    state.incomment = 0;
+                    state.comstyle = 0;
+                    prev_from_syntax = SMAX;
+                    if boundary_stop { At::Done } else { At::Top }
                 }
                 At::InString | At::QuotedInString => {
                     let nofence = state.instring != ST_STRING_STYLE;
@@ -1032,7 +1235,11 @@ impl<T: Text> Scanner<'_, T> {
                             if nofence && c as i32 == state.instring && c_code == SSTRING { break; }
                             match c_code {
                                 SSTRING_FENCE if !nofence => break,
-                                SCHARQUOTE | SESCAPE => { inc_from!(); quoted = true; }
+                                SCHARQUOTE | SESCAPE => {
+                                    // Going on inline is entering QuotedInString.
+                                    inc_from!(At::QuotedInString);
+                                    quoted = true;
+                                }
                                 _ => {}
                             }
                         }
@@ -1040,7 +1247,7 @@ impl<T: Text> Scanner<'_, T> {
                             quoted = false;
                             if from.char >= end { next = Some(At::EndQuoted); break; }
                         }
-                        inc_from!();
+                        inc_from!(At::InString);
                     }
                     match next {
                         Some(next) => next,
@@ -1049,10 +1256,13 @@ impl<T: Text> Scanner<'_, T> {
                             state.instring = -1;
                             let level = cur!();
                             level.prev = level.last;
-                            inc_from!();
-                            if boundary_stop { At::Done } else { At::Top }
+                            inc_from!(At::StringEnded);
+                            At::StringEnded
                         }
                     }
+                }
+                At::StringEnded => {
+                    if boundary_stop { At::Done } else { At::Top }
                 }
                 At::Stop => {
                     from = prev_from;
@@ -1082,134 +1292,5 @@ impl<T: Text> Scanner<'_, T> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    /// ASCII text with a per-character syntax.
-    pub(crate) struct Plain<F: Fn(u8) -> i32> { pub text: Vec<u8>, pub table: F }
-    impl<F: Fn(u8) -> i32> Text for Plain<F> {
-        fn char_at(&self, at: Pos) -> u32 { self.text.get(at.byte).copied().map_or(0, u32::from) }
-        fn inc(&self, at: Pos) -> Pos { Pos { char: at.char + 1, byte: at.byte + 1 } }
-        fn dec(&self, at: Pos) -> Pos { Pos { char: at.char - 1, byte: at.byte - 1 } }
-        fn pos(&self, charpos: i64) -> Pos { let c = charpos.clamp(1, self.text.len() as i64 + 1); Pos { char: c, byte: c as usize - 1 } }
-        fn syntax(&self, at: Pos) -> i32 { self.table_syntax(self.char_at(at)) }
-        fn table_syntax(&self, c: u32) -> i32 { (self.table)(c as u8) }
-    }
-    fn lisp(c: u8) -> i32 {
-        match c {
-            b'(' => SOPEN, b')' => SCLOSE, b'"' => SSTRING, b'\\' => SESCAPE, b';' => SCOMMENT,
-            b'\n' => SENDCOMMENT, b' ' => SWHITESPACE, b'\'' => SQUOTE | 1 << 20, _ => SWORD,
-        }
-    }
-    fn scan<T>(text: &str, f: impl FnOnce(&mut Scanner<'_, Plain<fn(u8) -> i32>>) -> T) -> T {
-        let plain = Plain { text: text.as_bytes().to_vec(), table: lisp as fn(u8) -> i32 };
-        let ppss = BTreeMap::new();
-        let options = Options { ignore_comments: true, open_paren_in_column_0_is_defun_start: true, ..Options::default() };
-        let mut scanner = Scanner { begv: plain.pos(1), zv: plain.pos(i64::MAX), text: &plain, options, ppss: &ppss, defun_start: None, modiff: 1 };
-        f(&mut scanner)
-    }
-
-    #[test]
-    fn sexps_skip_strings_comments_and_prefixes() {
-        assert_eq!(scan("(a \"b)\" ; c)\n d) e", |s| s.scan_lists(1, 1, 0, true)), Ok(Some(17)));
-        assert_eq!(scan("'(a) b", |s| s.scan_lists(1, 1, 0, true)), Ok(Some(5)));
-        assert_eq!(scan("(a) b", |s| s.scan_lists(6, -2, 0, true)), Ok(Some(1)));
-        assert_eq!(scan("(a b", |s| s.scan_lists(1, 1, 0, true)),
-                   Err(Halt::ScanError("Unbalanced parentheses", 1, 5)));
-        assert_eq!(scan("a) b", |s| s.scan_lists(1, 1, 1, false)), Ok(Some(3)));
-        assert_eq!(scan(" ) b", |s| s.scan_lists(1, 1, 0, false)),
-                   Err(Halt::ScanError("Containing expression ends prematurely", 2, 3)));
-    }
-
-    #[test]
-    fn comments_move_both_ways() {
-        assert_eq!(scan("  ; a\n ;b\nx", |s| s.forward_comment(s.text.pos(1), 5)).map(|(p, f)| (p.char, f)), Ok((11, false)));
-        assert_eq!(scan("x ; a\n ;b\n", |s| s.forward_comment(s.text.pos(11), -2)).map(|(p, f)| (p.char, f)), Ok((3, true)));
-    }
-
-    #[test]
-    fn partial_parse_reports_depth_strings_and_comments() {
-        let state = scan("(a (b \"c", |s| {
-            let mut state = ParseState::default();
-            s.scan_sexps_forward(&mut state, s.text.pos(1), 9, i64::MIN, false, 0).map(|()| state)
-        }).unwrap();
-        assert_eq!((state.depth, state.instring, state.comstr_start, state.levelstarts.clone(), state.location),
-                   (2, '"' as i32, 7, vec![Some(1), Some(4)], 9));
-    }
-
-    /// xorshift64*: the seeded randomness of the property tests.
-    pub(crate) struct Rng(pub u64);
-    impl Rng {
-        pub fn next(&mut self) -> u64 {
-            self.0 ^= self.0 >> 12;
-            self.0 ^= self.0 << 25;
-            self.0 ^= self.0 >> 27;
-            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
-        }
-        pub fn below(&mut self, n: usize) -> usize { (self.next() % n as u64) as usize }
-        pub fn chance(&mut self, percent: u64) -> bool { self.next() % 100 < percent }
-    }
-
-    /// A random syntax table over a small alphabet: every class a scan
-    /// knows, with random comment flags, styles, nesting and prefix.
-    pub(crate) fn random_table(rng: &mut Rng) -> [i32; 128] {
-        const CLASSES: [i32; 14] = [SWHITESPACE, 1, SWORD, SSYMBOL, SOPEN, SCLOSE, SQUOTE, SSTRING, SMATH, SESCAPE,
-                                    SCHARQUOTE, SCOMMENT, SENDCOMMENT, SCOMMENT_FENCE];
-        let mut table = [SWORD; 128];
-        for c in ALPHABET.iter().copied() {
-            let class = if rng.chance(8) { SSTRING_FENCE } else { CLASSES[rng.below(CLASSES.len())] };
-            let mut flags = 0;
-            for bit in 16..24 {
-                if rng.chance(if bit == 20 { 10 } else { 18 }) { flags |= 1 << bit; }
-            }
-            table[usize::from(c)] = class | flags;
-        }
-        table
-    }
-    pub(crate) const ALPHABET: &[u8] = b"abcdefghij \n";
-    /// The character position of offset AT.
-    pub(crate) fn position(at: usize) -> i64 {
-        i64::try_from(at).expect("a test text") + 1
-    }
-    pub(crate) fn random_text(rng: &mut Rng, len: usize) -> Vec<u8> {
-        (0..len).map(|_| ALPHABET[rng.below(ALPHABET.len())]).collect()
-    }
-
-    /// A scan stopped anywhere and resumed from its own state, with its
-    /// continuation, ends where one scan from the start does.
-    #[test]
-    fn a_scan_resumed_from_its_continuation_is_one_scan() {
-        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-        for case in 0..4000 {
-            let table = random_table(&mut rng);
-            let len = if case % 50 == 0 { 300 } else { rng.below(60) };
-            let mut text = random_text(&mut rng, len);
-            if case % 50 == 0 {
-                // Deep enough for the 100-level cap.
-                let open = ALPHABET.iter().copied().find(|&c| table[usize::from(c)] & 0xff == SOPEN);
-                if let Some(open) = open { for byte in text.iter_mut().take(150) { *byte = open; } }
-            }
-            let plain = Plain { text, table: |c: u8| table[usize::from(c)] };
-            let ppss = BTreeMap::new();
-            let options = Options { comment_end_can_be_escaped: rng.chance(50), ..Options::default() };
-            let mut scanner = Scanner { begv: plain.pos(1), zv: plain.pos(i64::MAX), text: &plain, options, ppss: &ppss, defun_start: None, modiff: 1 };
-            let end = position(len);
-            let from_at = rng.below(len + 1);
-            let from = position(from_at);
-            let mut mid = position(from_at + rng.below(len - from_at + 1));
-            // Not inside a two-character comment start (Continuation).
-            while mid > from && mid < end && comstart_first(plain.syntax(plain.pos(mid - 1))) && comstart_second(plain.syntax(plain.pos(mid))) { mid -= 1; }
-            let mut whole = ParseState::default();
-            scanner.scan_sexps_forward(&mut whole, plain.pos(from), end, i64::MIN, false, 0).unwrap();
-            let mut first = ParseState::default();
-            scanner.scan_sexps_forward(&mut first, plain.pos(from), mid, i64::MIN, false, 0).unwrap();
-            if first.continuation.is_some_and(|c| c.spent) { continue; }
-            let mut second = first.clone();
-            scanner.scan_sexps_forward(&mut second, plain.pos(mid), end, i64::MIN, false, 0).unwrap();
-            second.mindepth = second.mindepth.min(first.mindepth);
-            second.maxdepth = second.maxdepth.max(first.maxdepth);
-            assert_eq!(second, whole, "case {case}: {:?} split at {mid} of {from}..{end}, escaped ends {}",
-                       String::from_utf8_lossy(&plain.text), options.comment_end_can_be_escaped);
-        }
-    }
-}
+#[path = "syntax_scan_tests.rs"]
+pub(crate) mod tests;
