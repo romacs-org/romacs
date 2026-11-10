@@ -17,7 +17,7 @@ class BatchAdapter(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        sys.path.insert(0, str(run.ROOT / 'scripts'))
+        sys.path.insert(0, str(run.ROOT / 'tools/lib'))
         import gnu_oracle
         self.binary = gnu_oracle.require(os.environ.get('ROMACS_GNU_ORACLE')
                                         or os.environ.get('ROMACS_FORCE_ORACLE_PATH'))['path']

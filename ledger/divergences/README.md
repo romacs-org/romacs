@@ -2,7 +2,7 @@
 
 One file per divergence, named by its ID. A file holds the section the
 divergence belongs to, the table header and its row, and any longer
-explanation below. A new divergence is a new file; `tools/divergence_index.py
+explanation below. A new divergence is a new file; `tools/lib/divergence_index.py
 SYMBOL` finds the ones that name a symbol. Files named `U-...` hold entries
 that never had an ID. What follows is the ledgers' prose that belongs to no
 single entry.
@@ -269,7 +269,7 @@ deleted one.
   `buffer-local-restore-state`, `dolist` length guard, octal/`logior`/`setf`
   spellings; `macroexp.el`'s `cadr`), which R221 forbids: a number measured on
   an edited oracle file is not a number. GNU's files are restored byte for
-  byte (`tools/lisp_oracle.py check`), so the divergences no longer exist; the
+  byte (`tools/lib/lisp_oracle.py check`), so the divergences no longer exist; the
   VM gaps they hid are tickets G1-G8 in `reference/lisp-oracle/VM-GAPS.md`.
   The old row text is in git history (`git show 18e249d7:DIVERGENCES.md`).
 - **VM2-EXCUR1, VM2-RESTRICT1 — a unibyte buffer with a saved excursion
@@ -317,7 +317,7 @@ sections without an ID) is a `U-` file.
 ## romacs-face
 
 Reference: GNU Emacs 32.0.50 built at the pin 45b0f7699df (`$ROMACS_GNU_ORACLE -Q --batch`,
-checked by `scripts/gnu_oracle.py`), throwaway HOME. Fixtures before R228 came from
+checked by `tools/lib/gnu_oracle.py`), throwaway HOME. Fixtures before R228 came from
 `/usr/bin/emacs` at b28750b822d; regenerating at the pin changed only `separator-line`.
 This crate is not wired to redisplay yet. These are the contracts for wiring,
 not claims about the running editor. R90 removes Custom's machinery, not the

@@ -7,7 +7,7 @@
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
   "spec_sha256": "2a2e78269134c535265dc2c23017572e6843095895fdb7fbf5a0f1783fc8f9e2",
-  "recorder_sha256": "c59b43d202c546952e81a610fd98e842fc139fb089f0ab1c4297e06c0d24ee48",
+  "recorder_sha256": "d06cf8474081e267b0bde5aebaec64822018d74aef27251c79968fa3860a5419",
   "cases": [
     {
       "id": "required-arguments",

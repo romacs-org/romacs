@@ -468,6 +468,17 @@ closures over a mutable variable (each a closure and a cell)."
 (defvar scaling--retire-collections 0
   "`gcs-done' when the last `gc-retired-code' step ended.")
 
+;; Compiled `(lambda ...)' lists (source_cache.rs `lambda_lists'): what a
+;; collection costs with N live entries, each list called once.  An entry,
+;; its closure and the snapshot a call compares, is traced by the weak
+;; round that finds its list live (gc.rs `weak_round'), and a dead list's
+;; entry goes after the mark.  Every list here is live by the first round,
+;; so the rounds do not grow with N: that each entry is traced once per
+;; collection is `a_live_entry_is_traced_once_per_collection''s, in
+;; crates/romacs-vm/src/source_cache/cache_tests.rs, not this probe's.
+(defvar scaling--lambda-lists nil
+  "The lists the `gc-lambda-lists' probe calls and keeps.")
+
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
 ;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');

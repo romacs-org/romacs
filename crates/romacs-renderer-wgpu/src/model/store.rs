@@ -1328,5 +1328,4 @@ pub(crate) fn gpu_layers(scene: &ModelScene, layers: &[ModelHighlightLayer]) -> 
 }
 
 #[cfg(test)]
-#[path = "store/tests.rs"]
 mod tests;

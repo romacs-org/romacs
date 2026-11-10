@@ -59,7 +59,7 @@ fn popup_menus_read_gnus_text_menus_with_gnus_contract() {
             t)"));
         // The GUI lays the frame out, so `popup-menu' measures where the
         // menu goes as it would there.
-        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         let paint = |vm: &mut Vm| {
             let snapshot = vm.frame_snapshot(1280, 800).unwrap();

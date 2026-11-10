@@ -1195,24 +1195,6 @@ impl Vm {
     /// The mode-line format WINDOW shows (xdisp.c:28149): its
     /// `mode-line-format' parameter when non-nil, else its buffer's; none
     /// for a mini-window, a parameter `none', or a nil format.
-    /// Whether WINDOW shows the default `mode-line-format': no
-    /// `mode-line-format' parameter, and its buffer has no local value.
-    /// Only that format is Romacs's to replace (a pane label, VM2-STATUS-BAR):
-    /// a buffer that sets its own, nil included, shows it as in GNU.
-    pub(crate) fn window_shows_default_mode_line(&mut self, window: Value) -> Result<bool> {
-        let key = self.intern("mode-line-format");
-        let w = self.window(window)?;
-        if w.parameters.iter().any(|(k, v)| *k == key && *v != Value::NIL) { return Ok(false); }
-        let buffer = w.buffer;
-        let slot = self.slot("mode-line-format");
-        let slot = self.indirect_variable(slot);
-        if let Some(crate::forwarded::Fwd::Buffer(i)) = self.forwarding(slot) {
-            let index = buffer.index(0).map_err(|_| "buffer required")? - 1;
-            return Ok(!self.per_buffer_local_p(index, i));
-        }
-        let Some(table) = self.local_table(slot)? else { return Ok(true) };
-        Ok(self.declaration_hash_get(table, buffer)?.is_none())
-    }
     pub(crate) fn window_mode_line_format(&mut self, window: Value) -> Result<Option<Value>> {
         let (key, none, slot) = (self.intern("mode-line-format"), self.intern("none"), self.slot("mode-line-format"));
         let w = self.window(window)?;

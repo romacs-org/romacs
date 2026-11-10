@@ -3,7 +3,6 @@
 use romacs_display_protocol::{
     PresentationId,
     frame_time::{EventTime, observe_platform_now},
-    input_latency::{self, InputToken, PlatformTimestamp, PresentationObservation},
 };
 use romacs_renderer_wgpu::native_presentation::SwapchainTiming;
 use std::{
@@ -34,12 +33,7 @@ pub(super) struct Observer {
 impl Observer {
     pub(super) fn new() -> Self {
         Self {
-            path: std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("ROMACS_INPUT_LATENCY_FILE")
-                        .map(|p| PathBuf::from(p).with_extension("receipt"))
-                }),
+            path: std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").map(PathBuf::from),
             sessions: HashMap::new(),
             next_serial: 0,
             latest_written: 0,
@@ -55,7 +49,6 @@ impl Observer {
         layout: PresentationId,
         size: (u32, u32),
         scale: f64,
-        projected: &[InputToken],
     ) {
         if self.path.is_none() || (!self.sessions.contains_key(&frame) && self.sessions.len() >= 16)
         {
@@ -101,7 +94,6 @@ impl Observer {
             scale,
             requested: observe_platform_now(),
         });
-        input_latency::projected_requested(projected, frame, serial);
     }
 
     pub(super) fn deadline(&mut self, now: EventTime) -> Option<EventTime> {
@@ -137,14 +129,12 @@ impl Observer {
             for observation in observations {
                 let Some(index) = session.pending.iter().position(|pending| pending.serial == observation.present_id) else { continue; };
                 let pending = session.pending.remove(index).unwrap();
-                let time = PlatformTimestamp { clock_id: libc::CLOCK_MONOTONIC as u32, nanoseconds: observation.monotonic_ns };
-                let kind = PresentationObservation::FirstPixelOutput { uncertainty_ns: observation.uncertainty_ns };
-                input_latency::projected_observed(frame, pending.serial, time, kind);
-                input_latency::observed(pending.layout, time, kind);
+                let clock_id = libc::CLOCK_MONOTONIC as u32;
+                let nanoseconds = observation.monotonic_ns;
                 if pending.serial <= self.latest_written { continue; }
                 let receipt = format!("(:submission {} :frame {} :presentation {} :width {} :height {} :scale {} :outcome presented :observation native-first-pixel-output :uncertainty-ns {} :clock-id {} :seconds {} :nanoseconds {})\n",
                     pending.serial, frame, pending.layout.get(), pending.size.0, pending.size.1, pending.scale,
-                    observation.uncertainty_ns, time.clock_id, time.nanoseconds / 1_000_000_000, time.nanoseconds % 1_000_000_000);
+                    observation.uncertainty_ns, clock_id, nanoseconds / 1_000_000_000, nanoseconds % 1_000_000_000);
                 let temporary = path.with_extension("pending");
                 match std::fs::write(&temporary, receipt).and_then(|()| std::fs::rename(&temporary, path)) {
                     Ok(()) => self.latest_written = pending.serial,

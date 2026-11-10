@@ -17,7 +17,7 @@ thread of a synthetic store (`notmuch_fixture.py'; `hello', `search',
 theme's shot of a scene, top to bottom in --themes order
 (SHEET-SCENE.png).
 
-With --gnu EMACS, pinned GNU (`scripts/gnu_oracle.py' refuses any other)
+With --gnu EMACS, pinned GNU (`tools/lib/gnu_oracle.py' refuses any other)
 shows the same scenes first, as GNU-NAME, under the reference Rum
 configuration (crates/romacs-face/tests/gnu/rum-configured.el's inputs).
 
@@ -300,7 +300,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     runs = [(t, 'romacs', args.binary.resolve()) for t in args.themes.split(',') if t]
     if args.gnu:
-        gnu = subprocess.run(['python3', str(ROOT / 'scripts/gnu_oracle.py'), 'path'], capture_output=True, text=True,
+        gnu = subprocess.run(['python3', str(ROOT / 'tools/lib/gnu_oracle.py'), 'path'], capture_output=True, text=True,
                              env=dict(os.environ, ROMACS_GNU_ORACLE=args.gnu), check=True).stdout.strip()
         runs.insert(0, ('gnu-rum', 'gnu', Path(gnu)))
     report = {'themes': [name for name, _, _ in runs], 'scenes': {}, 'failures': [],

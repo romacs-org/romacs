@@ -1,8 +1,7 @@
 ;;; mode-line-windows.el --- scaling probe  -*- lexical-binding: t -*-
 
-;; N windows, each showing its own buffer and drawing its own line
-;; (VM2-MODE-LINE), a key typed in one: the others' lines are reused,
-;; not expanded again.
+;; N windows, each showing its own buffer, a key typed in one: the
+;; status bar expands the selected window's line alone (VM2-STATUS-BAR).
 (scaling-probe mode-line-windows :gui t :n 2 :steps 20
   :setup (progn
            (require 'romacs-mode-line)

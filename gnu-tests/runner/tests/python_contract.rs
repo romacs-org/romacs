@@ -63,6 +63,21 @@ fn runner_end_to_end_contract() {
 }
 
 #[test]
+fn runner_load_path_contract() {
+    python_class("LoadPath");
+}
+
+#[test]
+fn runner_honesty_contract() {
+    python_class("Honesty");
+}
+
+#[test]
+fn runner_native_catch_audit_contract() {
+    python_class("NativeCatchAudit");
+}
+
+#[test]
 fn real_ert_parser_contract() {
     python_contract("test_ert_report.py", "Parser");
 }

@@ -2,7 +2,7 @@
 """Record function's non-lambda identity semantics at the pinned GNU runtime."""
 import hashlib, json, pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(ROOT / 'tools/lib'))
 import gnu_oracle
 HERE = pathlib.Path(__file__).resolve().parent
 identity = gnu_oracle.require()

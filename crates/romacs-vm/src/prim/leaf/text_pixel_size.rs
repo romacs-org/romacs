@@ -1107,7 +1107,7 @@ fn limits(args: &TextSizeArgs) -> (Option<i64>, i64) {
 /// host's pixels: the text area, less the truncation or continuation
 /// glyph's advance in the default face when there is no right fringe to
 /// show its indicator in (xdisp.c:3510-3518). The host continues,
-/// truncates and word-wraps rows as GNU does (romacs-layout2 `WordBreaks').
+/// truncates and word-wraps rows as GNU does (romacs-layout `WordBreaks').
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
     let glyph = hosted.source().leaf().host_line_glyph(usize::from(cx.wrap != Wrap::Truncate))?;
     let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(glyph)?.0 };

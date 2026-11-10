@@ -13,11 +13,11 @@ use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, S
 pub(crate) struct BarKey {
     epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
-    lines: Vec<LineKey>,
+    line: LineKey,
 }
-romacs_snapshot::snapshot_struct!(BarKey { epoch, collections, faces, columns, focused, minibuffer, lines });
+romacs_snapshot::snapshot_struct!(BarKey { epoch, collections, faces, columns, focused, minibuffer, line });
 
-/// What one window's line in the bar depends on (`Vm::line_key').
+/// What the owner's line depends on (`Vm::line_key').
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct LineKey {
     id: u64, buffer: u64, name: Option<String>, format: u64, modiff: u64, modified: bool,
@@ -99,12 +99,8 @@ impl Vm {
         let base_name = if self.named(&table, "mode-line-active").is_some() { "mode-line-active" } else { "mode-line" };
         let base = self.named(&table, base_name).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
-        // The owner's line leads the bar, where it has one; its pills read
-        // whether its buffer is modified (`romacs-pill-modified').
-        let owner_chars = self.display_state.bar_parts.first().filter(|(_, id)| *id == window).map_or(0, |(chars, _)| chars.end);
-        let owner_chars = self.display_state.bar_kept.as_ref().map_or(owner_chars, |kept| kept.partition_point(|&i| i < owner_chars));
-        let owner_end = text.char_indices().nth(owner_chars).map_or(text.len(), |(at, _)| at);
-        let marks = self.band_marks(&text, &props, &segments, &table, base_name, if modified { owner_end } else { 0 })?;
+        // Its pills read whether its buffer is modified (`romacs-pill-modified').
+        let marks = self.band_marks(&text, &props, &segments, &table, base_name, if modified { text.len() } else { 0 })?;
         // The bar's faces: its base face first, then those its runs use.
         let mut faces = vec![table.face(base)];
         let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
@@ -145,21 +141,19 @@ impl Vm {
     /// What the bar's line shows depends on, as GNU's redisplay decides when
     /// to update a mode line (`update_mode_lines', a window's buffer, its
     /// point, start and size, the buffer's tick and modified state), for
-    /// OWNER and each context window, with the faces, the bar's COLUMNS,
-    /// FOCUSED, the minibuffer's state and the collections (cached values
-    /// move with them).
+    /// OWNER, with the faces, the bar's COLUMNS, FOCUSED, the minibuffer's
+    /// state and the collections (cached values move with them). No other
+    /// window's state is in it: output in another window's buffer leaves
+    /// the bar alone.
     fn bar_key(&mut self, owner: Value, focused: bool, columns: usize) -> Result<BarKey> {
-        let mut lines = vec![];
-        for window in std::iter::once(owner).chain(self.context_windows(owner)?) {
-            lines.push(self.line_key(window)?);
-        }
+        let line = self.line_key(owner)?;
         let [level, origin] = ["romacs--minibuf-level", "romacs--minibuf-selected-window"].map(|name| self.slot(name));
         Ok(BarKey {
             epoch: self.display_state.mode_line_epoch, collections: self.gc_stats.collections,
             // The owner's table changes with its buffer's remapping too.
             faces: (self.display_state.face_revision, self.window_faces(owner)?.id), columns, focused,
             minibuffer: (self.variable_value(level)?.0, self.variable_value(origin)?.0, self.selected_window_value()?.0),
-            lines,
+            line,
         })
     }
     /// What WINDOW's own line depends on (`bar_key').
@@ -232,10 +226,9 @@ impl Vm {
     /// character its `romacs-icon' alist maps to `none', then whole
     /// segments that have a `romacs-priority', the lowest first (of equal
     /// ones the later), until the rest is no wider; a segment without one
-    /// stays. Each shown character's index in the expanded text, when
-    /// anything was dropped.
-    pub(super) fn fit_band(&mut self, band: &mut mode_line::Band, columns: usize) -> Result<Option<Vec<usize>>> {
-        if band.segments.is_empty() && band.props.is_empty() { return Ok(None); }
+    /// stays.
+    pub(super) fn fit_band(&mut self, band: &mut mode_line::Band, columns: usize) -> Result<()> {
+        if band.segments.is_empty() && band.props.is_empty() { return Ok(()); }
         // Each character's byte and columns, once; a dropped flag each and
         // the running width, so every drop costs its own characters only.
         let rule = band.rule.clone();
@@ -281,8 +274,8 @@ impl Vm {
                 _ => merged.push(at..end),
             }
         }
-        if merged.is_empty() { return Ok(None); }
-        Ok(Some(band.drop_ranges(&merged)))
+        if !merged.is_empty() { band.drop_ranges(&merged); }
+        Ok(())
     }
     /// The segment PROJECTED names over BYTES, if it names one; its pill's
     /// text in its `romacs-pill-modified' face when MODIFIED.
@@ -371,81 +364,16 @@ impl Vm {
         }
         Ok(index)
     }
-    /// The bar's band (VM2-STATUS-BAR): OWNER's line, then the line of
-    /// each other window of the host frame that sets its own format (a
-    /// popup's, a side window's) as a context segment, all at COLUMNS and
-    /// fitted there; the click map of what it shows recorded. None when no
-    /// window has a line.
+    /// The bar's band (VM2-STATUS-BAR): OWNER's line at COLUMNS, fitted
+    /// there, and the click map of what it shows recorded. None when it has
+    /// no line. Only OWNER's: another window's own format, a terminal's or
+    /// a popup's, describes a buffer the bar does not.
     fn status_bar_band(&mut self, owner: Value, columns: usize) -> Result<Option<mode_line::Band>> {
-        let mut parts: Vec<(std::ops::Range<usize>, u64)> = vec![];
-        let mut bar: Option<mode_line::Band> = None;
-        let mut bar_chars = 0;
-        let separator = " │ ";
-        // By id: a line's `:eval' may collect, which moves windows.
-        let mut ids = vec![self.window(owner)?.id];
-        for window in self.context_windows(owner)? { ids.push(self.window(window)?.id); }
-        let mut by_id: std::collections::HashMap<u64, Value> = std::collections::HashMap::new();
-        let mut resolved_at = None;
-        for (i, id) in ids.into_iter().enumerate() {
-            if resolved_at != Some(self.gc_stats.collections) {
-                by_id = self.leaf_windows()?.into_iter().filter_map(|w| self.window(w).ok().map(|x| (x.id, w))).collect();
-                resolved_at = Some(self.gc_stats.collections);
-            }
-            let Some(&window) = by_id.get(&id) else { continue };
-            let Some(line) = self.window_line(window, columns)? else { continue };
-            let line = if i == 0 { line } else { self.plain_markers(line).into_context("mode-line-inactive") };
-            let length = line.text.chars().count();
-            match bar.as_mut() {
-                None => {
-                    parts.push((0..length, id));
-                    bar = Some(line);
-                    bar_chars = length;
-                }
-                Some(bar) => {
-                    let start = bar_chars + separator.chars().count();
-                    let separator_start = bar.text.len();
-                    parts.push((start..start + length, id));
-                    bar.append(line, separator, "mode-line-inactive");
-                    // A context goes with its separator when the bar drops it.
-                    if let Some((range, _)) = bar.segments.last_mut() { range.start = separator_start; }
-                    bar_chars = start + length;
-                }
-            }
-        }
-        self.display_state.bar_parts = parts;
-        self.display_state.bar_kept = None;
-        if let Some(band) = bar.as_mut() {
-            self.display_state.bar_kept = self.fit_band(band, columns)?;
-        }
-        Ok(bar)
-    }
-    /// LINE, a context's, with its `centre-align' and `right-align' markers
-    /// plain text: the bar's zones are the selected line's. A marker is a
-    /// segment and a projected property, a `:propertize''s symbol or a
-    /// string's own value: none stays.
-    fn plain_markers(&self, mut line: mode_line::Band) -> mode_line::Band {
-        let marker = |(name, value): &(&'static str, std::rc::Rc<Form>)| *name == "romacs-segment"
-            && matches!(self.ml_form_name(value).as_deref(), Some("right-align" | "centre-align"));
-        line.segments.retain(|(_, projected)| !projected.iter().any(marker));
-        for (_, projected) in line.props.iter_mut() {
-            if projected.iter().any(marker) {
-                *projected = std::rc::Rc::new(projected.iter().filter(|p| !marker(p)).cloned().collect());
-            }
-        }
-        line
-    }
-    /// The host frame's ordinary windows but OWNER whose line differs from
-    /// the default one (a buffer-local `mode-line-format' or a window
-    /// parameter), in the frame's order; a nil or `none' format has no line.
-    fn context_windows(&mut self, owner: Value) -> Result<Vec<Value>> {
-        let mut found = vec![];
-        for window in self.leaf_windows()? {
-            if window == owner || !self.bar_owns_mode_line(window) { continue; }
-            if !self.window_shows_default_mode_line(window)? && self.window_mode_line_format(window)?.is_some() {
-                found.push(window);
-            }
-        }
-        Ok(found)
+        let id = self.window(owner)?.id;
+        let mut band = self.window_line(owner, columns)?;
+        if let Some(band) = band.as_mut() { self.fit_band(band, columns)?; }
+        self.display_state.bar_line = band.as_ref().map(|band| (band.text.chars().count(), id));
+        Ok(band)
     }
     /// WINDOW's line as the bar shows it: its effective format expanded at
     /// COLUMNS with its buffer current and WINDOW selected, as GNU's
@@ -532,10 +460,10 @@ impl crate::window::Windows<'_> {
     /// `romacs--status-bar-target': for the status bar's shown character
     /// COLUMN, (WINDOW STRING COLUMN): the window whose line it is, and the
     /// bar's text as it was last painted, a string with the properties a
-    /// click reads; nil over a separator or with no bar.
+    /// click reads; nil past its line or with no bar.
     pub(crate) fn status_bar_target(&mut self, column: Value) -> std::result::Result<Value, crate::prim::Fault> {
         let at = column.integer_value().and_then(|c| usize::try_from(c).ok()).unwrap_or(0);
-        let Some((id, _)) = self.vm.display_state.bar_target(at) else { return Ok(Value::NIL) };
+        let Some(id) = self.vm.display_state.bar_target(at) else { return Ok(Value::NIL) };
         // The kept line as a string, built now: no Lisp runs, it allocates.
         let Some(line) = self.vm.status_bar_line.take() else { return Ok(Value::NIL) };
         let string = match line.downcast_ref::<mode_line::Band>() {

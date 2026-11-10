@@ -256,5 +256,4 @@ impl Drop for WaylandToplevelIconService {
 }
 
 #[cfg(test)]
-#[path = "wayland_toplevel_icon/tests/wayland_toplevel_icon_test.rs"]
 mod tests;

@@ -116,5 +116,4 @@ impl Readiness {
 }
 
 #[cfg(test)]
-#[path = "readiness/tests.rs"]
 mod tests;

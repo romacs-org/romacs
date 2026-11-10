@@ -764,5 +764,4 @@ pub enum ChromeLayoutError {
 }
 
 #[cfg(test)]
-#[path = "frame_chrome/tests/frame_chrome_test.rs"]
 mod tests;

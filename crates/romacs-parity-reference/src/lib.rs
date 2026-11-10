@@ -367,7 +367,7 @@ pub fn attest_against(
     let executable = resolve_executable(executable)?;
     let pdmp = dump_for(&executable);
 
-    // Order matters, and it is the same order `scripts/parity-reference-attest.sh`
+    // Order matters, and it is the same order `tools/parity-reference-attest.sh`
     // uses: the dump magic comes FIRST, because it is what tells a non-GNU peer
     // from a wrong GNU, and the shell attestor's --if-gnu mode has to make that
     // distinction before it runs anything.  The 32-byte build fingerprint that
@@ -576,7 +576,7 @@ fn hex(bytes: &[u8]) -> String {
 /// lower-snake key and a quote-free, escape-free value.  Anything else is
 /// REFUSED rather than skipped: a parser that shrugs at a line it does not
 /// understand is how a pin silently stops being checked, and the same rules are
-/// implemented in `scripts/parity-reference-attest.sh` with a test that holds
+/// implemented in `tools/parity-reference-attest.sh` with a test that holds
 /// the two readers together.
 pub fn parse_manifest(text: &str) -> Result<ReferenceManifest, String> {
     let mut fields: Vec<(String, String)> = Vec::new();
@@ -683,7 +683,7 @@ pub fn parse_manifest(text: &str) -> Result<ReferenceManifest, String> {
 
 /// Render a manifest back into the checked-in format's key block.
 ///
-/// Used by `cargo run -p romacs-parity-reference --bin pin-reference --` so that re-pinning writes the
+/// Used by `cargo run -p romacs-parity-reference --bin pin-reference` so that re-pinning writes the
 /// same bytes this crate parses.
 pub fn render_manifest_keys(manifest: &ReferenceManifest) -> String {
     format!(

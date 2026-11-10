@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Check the ownership boundary of runtime Lisp sources."""
+import os
+import pathlib
+import re
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+GUI_MODULES = (
+    'startup', 'find-file', 'buffer-switch', 'workspace-completion',
+    'editing', 'dired', 'install-command',
+)
+
+
+class LispLayoutTests(unittest.TestCase):
+    def test_runtime_roots_are_explicit(self):
+        for name in ('rlisp', 'gnu-lisp', 'rlisp/deps'):
+            self.assertTrue((ROOT / name).is_dir(), f'MISSING_LISP_ROOT: {name}')
+        for name in ('lisp', 'lisp-bundled', 'vendor-lisp'):
+            self.assertFalse((ROOT / name).exists(), f'RETIRED_LISP_ROOT: {name}')
+
+    def test_owned_modules_live_in_rlisp(self):
+        for name in GUI_MODULES:
+            self.assertTrue((ROOT / 'rlisp' / f'romacs-{name}.el').is_file(), name)
+            self.assertFalse((ROOT / 'crates/romacs-vm-gui/src' / f'{name}.el').exists(), name)
+        for name in ('prelude', 'minibuf', 'buffer_lifecycle'):
+            self.assertTrue((ROOT / 'rlisp/vm' / f'{name}.el').is_file(), name)
+            self.assertFalse((ROOT / 'crates/romacs-vm/src/prims' / f'{name}.el').exists(), name)
+
+    def test_development_consumers_use_the_current_gnu_root(self):
+        stale = re.compile(
+            r'''(?:\}/lisp(?:/|\b)|\$(?:root|ROOT)/lisp(?:/|\b)|'''
+            r'''(?:ROOT|root)\s*/\s*['"]lisp(?:/|['"]))'''
+        )
+        for directory in ('scripts', 'tools', 'crates', 'gnu-tests/tests'):
+            for parent, children, files in os.walk(ROOT / directory):
+                children[:] = [name for name in children if name not in ('target', '__pycache__')]
+                for name in files:
+                    file = pathlib.Path(parent) / name
+                    if file == pathlib.Path(__file__) or file.suffix not in ('.py', '.sh', '.rs', '.nix'):
+                        continue
+                    with self.subTest(file=file.relative_to(ROOT)):
+                        self.assertNotRegex(file.read_text(), stale, 'STALE_GNU_SOURCE_ROOT')
+
+    def test_packages_and_temporary_dependencies_are_in_rlisp(self):
+        for relative in ('gnosis/gnosis.el', 'hermes/hermes.el', 'jabber/jabber.el',
+                         'emacs-lisp/keymap-popup.el', 'deps/fsm/fsm.el',
+                         'deps/markdown-mode/markdown-mode.el', 'deps/websocket/websocket.el',
+                         'deps/README.md'):
+            self.assertTrue((ROOT / 'rlisp' / relative).is_file(), f'RLISP_PACKAGE_MISSING: {relative}')
+
+    def test_owned_lisp_has_minimal_honest_headers(self):
+        files = sorted((ROOT / 'rlisp').glob('*.el'))
+        files += sorted((ROOT / 'rlisp/vm').glob('*.el'))
+        files += [ROOT / 'rlisp/term/romacs-preload.el']
+        self.assertTrue(files, 'NO_OWNED_LISP_SOURCES')
+        for file in files:
+            source = file.read_text()
+            with self.subTest(file=file.relative_to(ROOT)):
+                self.assertIn('SPDX-License-Identifier: GPL-3.0-or-later', source)
+                self.assertIn(';;; Commentary:', source)
+                copyright_pattern = r'(?im)^;+.*Copyright.*(?:Free Software Foundation|FSF).*'
+                if file == ROOT / 'rlisp/romacs-ert-batch.el':
+                    # This adapter derives a GNU function and must retain its notice.
+                    upstream = (ROOT / 'gnu-lisp/emacs-lisp/ert.el').read_text()
+                    notices = re.findall(copyright_pattern, upstream)
+                    self.assertTrue(notices, 'GNU_ERT_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU ert.el', source)
+                elif file == ROOT / 'rlisp/romacs-frame.el':
+                    # Derives frame.el's background-mode function and faces.el's
+                    # color API, and must retain both notices.
+                    for upstream, notice in (('gnu-lisp/frame.el', ';; Copyright (C) 1993-1994, 1996-1997, 2000-2026 Free Software\n;; Foundation, Inc.'),
+                                             ('gnu-lisp/faces.el', ';; Copyright (C) 1992-2026 Free Software Foundation, Inc.')):
+                        self.assertIn(notice, (ROOT / upstream).read_text())
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU frame.el', source)
+                elif file == ROOT / 'rlisp/romacs-custom.el':
+                    # Derives custom.el's enable-theme and disable-theme.
+                    notices = re.findall(copyright_pattern, (ROOT / 'gnu-lisp/custom.el').read_text())
+                    self.assertTrue(notices, 'GNU_CUSTOM_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU custom.el', source)
+                elif file == ROOT / 'rlisp/romacs-keymap.el':
+                    # Derived from GNU src/keymap.c and src/keyboard.c, outside gnu-lisp/.
+                    self.assertIn(';; Copyright (C) 1985-1988, 1993-1995, 1998-2026 Free Software', source)
+                    self.assertIn(';; Copyright (C) 1985-1989, 1993-1997, 1999-2026 Free Software Foundation,', source)
+                    self.assertIn('Adapted from GNU src/keymap.c', source)
+                elif file == ROOT / 'rlisp/romacs-unidata.el':
+                    # Derived from admin/unidata/unidata-gen.el, outside gnu-lisp/.
+                    self.assertIn(';; Copyright (C) 2008-2026 Free Software Foundation, Inc.', source)
+                    self.assertIn('National Institute of Advanced Industrial Science and Technology (AIST)', source)
+                    self.assertIn('Adapted from GNU admin/unidata/unidata-gen.el', source)
+                elif file == ROOT / 'rlisp/romacs-orderless.el':
+                    # Derived from orderless.el (GNU ELPA, FSF copyright),
+                    # outside gnu-lisp/; retains its notice and names the commit.
+                    self.assertIn(';; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,', source)
+                    self.assertIn('derived from orderless.el by', source)
+                    self.assertIn('orderless commit e271a8e', source)
+                elif file == ROOT / 'rlisp/romacs-complete.el':
+                    # Derived from vertico.el and two of its extensions (GNU
+                    # ELPA, FSF copyright); retains its notice and names the commit.
+                    self.assertIn(';; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,', source)
+                    self.assertIn('derived from vertico.el by', source)
+                    self.assertIn('vertico commit c60d802', source)
+                elif file == ROOT / 'rlisp/romacs-theme.el':
+                    # Ports color.el's sRGB, CIE XYZ and Oklab conversions and
+                    # retains its notice.
+                    self.assertIn(';; Copyright (C) 2010-2026 Free Software Foundation, Inc.', (ROOT / 'gnu-lisp/color.el').read_text())
+                    self.assertIn(';; Portions Copyright (C) 2010-2026 Free Software Foundation, Inc., from\n;; GNU Emacs lisp/color.el', source)
+                elif file == ROOT / 'rlisp/romacs-theme-modus.el':
+                    # Generated from modus-themes.el (GNU ELPA, FSF copyright) by
+                    # tools/adapt-modus; retains its notice and names the version.
+                    self.assertIn(';; Copyright (C) 2019-2026  Free Software Foundation, Inc.', source)
+                    self.assertIn(';; Adapted from modus-themes.el 5.3.0 by Protesilaos Stavrou', source)
+                    self.assertRegex(source, r'sha256 [0-9a-f]{64}')
+                else:
+                    self.assertNotRegex(source, copyright_pattern)
+                self.assertNotIn('This file is part of GNU Emacs.', source)
+
+    def test_ported_rust_keeps_its_notice(self):
+        # src/fzf.rs ports fzf's matcher (MIT), which requires its notice.
+        source = (ROOT / 'crates/romacs-vm/src/fzf.rs').read_text()
+        self.assertTrue(source.startswith('// SPDX-License-Identifier: MIT\n'))
+        self.assertIn('// Copyright (c) 2013-2026 Junegunn Choi', source)
+        self.assertIn('commit\n// 26ff936df038b6a62ec42cf18db27b2ea2bb8ec3', source)
+        self.assertIn('// The above copyright notice and this permission notice shall be included in', source)
+
+
+if __name__ == '__main__':
+    unittest.main()

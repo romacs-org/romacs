@@ -87,7 +87,7 @@ impl CommandSender {
             }
             pending.queue.push_back(command);
         }
-        // Publish and notify under the same lock, as in the frame mailbox.
+        // Publish and notify under the same lock.
         let _ = self.wake.try_send(());
         Ok(())
     }

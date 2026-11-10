@@ -2446,12 +2446,13 @@ impl FrameDisplayState {
         })
     }
 
+    #[cfg(test)]
     /// Create a `FrameDisplayState` from an existing `FrameGlyphBuffer`.
     ///
     /// Copies transport metadata and the remaining non-row primitives
     /// (backgrounds, borders, cursors, and scroll bars). Row-owned glyphs are
     /// intentionally not reconstructed from their lossy flat projection.
-    pub fn from_frame_glyph_buffer(buf: &FrameGlyphBuffer) -> Self {
+    pub(crate) fn from_frame_glyph_buffer(buf: &FrameGlyphBuffer) -> Self {
         let frame_cols = (buf.width / buf.char_width.max(1.0)) as usize;
         let frame_rows = (buf.height / buf.char_height.max(1.0)) as usize;
         let mut state = Self::new(frame_cols, frame_rows, buf.char_width, buf.char_height);

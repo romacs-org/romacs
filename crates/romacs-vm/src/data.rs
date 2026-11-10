@@ -804,6 +804,12 @@ impl Vm {
         } else if (error == "Attempt to store non-byte value into unibyte string" || error.starts_with("Cannot convert character at index")) {
             let message = self.make_lisp_string(error.as_bytes().to_vec(), true);
             ("error", vec![message])
+        } else if error.contains("index out of range") && matches!(p, Primitive::GetProperty | Primitive::RawPropertiesAt) {
+            // validate_interval_range: the position as both ends.
+            ("args-out-of-range", vec![x, x])
+        } else if error.contains("index out of range") && p == Primitive::GetCharProperty {
+            // get_char_property_and_overlay signals with the position alone.
+            ("args-out-of-range", vec![x])
         } else if error.contains("index out of range") {
             ("args-out-of-range", vec![x, y])
         } else if error.contains("required") || error.contains("value type") {

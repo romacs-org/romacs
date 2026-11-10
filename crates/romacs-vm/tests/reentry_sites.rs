@@ -219,3 +219,62 @@ fn every_reentry_call_site_is_classified() {
     assert!(found.len() > 100, "the scan found {} sites", found.len());
     assert!(problems.is_empty(), "classify each site in tests/fixtures/reentry-sites.txt:\n{}", problems.join("\n"));
 }
+
+/// The `#[cfg(test)]` modules declared in SOURCE whose own file isn't named
+/// `*_tests.rs`, by that file: the scan skips test code by that name or by a
+/// `#[cfg(test)]` inside the file, so such a module's calls would be read as
+/// production sites. Attributes are taken on the lines before the `mod`.
+fn misnamed_test_modules(source: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut attributes: Vec<String> = vec![];
+    for line in source.lines().map(str::trim) {
+        let mut rest = line;
+        while let Some(attribute) = rest.strip_prefix("#[") {
+            let end = attribute.find(']').unwrap_or(attribute.len());
+            attributes.push(attribute[..end].replace(' ', ""));
+            rest = attribute.get(end + 1..).unwrap_or("").trim_start();
+        }
+        if rest.is_empty() {
+            continue;
+        }
+        let item = ["pub(crate) ", "pub(super) ", "pub "].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        if let Some(name) = item.strip_prefix("mod ").and_then(|m| m.strip_suffix(';')) {
+            if attributes.iter().any(|a| a == "cfg(test)") {
+                let file = attributes.iter().find_map(|a| a.strip_prefix("path=")).map_or(format!("{name}.rs"), |p| p.trim_matches('"').to_owned());
+                if !file.rsplit('/').next().unwrap_or(&file).ends_with("_tests.rs") {
+                    out.push(file);
+                }
+            }
+        }
+        attributes.clear();
+    }
+    out
+}
+
+/// Every source file under DIR, relative to ROOT, with its text.
+fn sources(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            sources(&path, root, out);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push((path.strip_prefix(root).unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&path).unwrap()));
+        }
+    }
+}
+
+/// A test module in a file of its own is named `*_tests.rs`, so the scan
+/// above skips it as the test code it is.
+#[test]
+fn a_test_module_in_its_own_file_is_named_for_its_tests() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![];
+    sources(&src, &src, &mut files);
+    let problems: Vec<String> = files.iter()
+        .flat_map(|(file, text)| misnamed_test_modules(text).into_iter().map(move |m| format!("{file}: #[cfg(test)] mod in {m}, not *_tests.rs")))
+        .collect();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let control = "#[cfg(test)]\nmod tests;\n#[cfg(test)]\nmod good_tests;\n#[cfg(test)]\n#[path = \"x_tests.rs\"]\nmod x;\n\
+                   #[path = \"y.rs\"]\n#[cfg(test)]\npub(crate) mod y;\n#[cfg(test)] mod z;\n#[cfg(test)]\nmod inline {}\nmod plain;\n";
+    assert_eq!(misnamed_test_modules(control), ["tests.rs", "y.rs", "z.rs"]);
+}

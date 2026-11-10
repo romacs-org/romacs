@@ -243,5 +243,4 @@ fn moves(animation: &TextAnimation, halted: bool) -> bool {
 }
 
 #[cfg(test)]
-#[path = "text_animations/tests/text_animations_test.rs"]
 mod tests;
