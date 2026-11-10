@@ -32,7 +32,7 @@ def run(root, *args):
 
 def exercise(root):
     def generate():
-        print(run(root, 'cargo', 'run', '-q', '-p', 'romacs-introspect-live',
+        print(run(root, 'cargo', 'run', '-q', '--profile', 'gate', '-p', 'romacs-introspect-live',
                   '--', '--write'), flush=True)
         print(run(root, 'python3', 'tools/divergence_index.py'), flush=True)
         print(run(root, 'python3', 'tools/primitive_index.py'), flush=True)
