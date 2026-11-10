@@ -30,14 +30,14 @@ fn batch_pos_visible_in_window_p_matches_pinned_gnu() {
 fn displayed_window_refuses_after_a_host_layout() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(column * 80, line * 24, line, column).unwrap();
     vm.eval_source(r#"(progn (set-buffer (get-buffer-create "visible")) (insert (make-string 100 ?x))
                              (set-window-buffer nil (current-buffer)) (goto-char (point-min)))"#).unwrap();
     // Before a host lays anything out the frame is like GNU's initial one.
     assert_eq!(vm.eval_source("(pos-visible-in-window-p 1)").unwrap().display().unwrap(), "nil");
     let snapshot = vm.frame_snapshot(column * 80, line * 24).unwrap();
-    let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
+    let (_, ends) = romacs_layout::layout_frame(&snapshot, 1).unwrap();
     vm.display_apply_layout(&ends).unwrap();
     let refused = vm.eval_source("(condition-case e (pos-visible-in-window-p 1) (error (car (cdr e))))").unwrap().display().unwrap();
     assert_eq!(refused, "\"VM2 pos-visible-in-window-p in a displayed window is unsupported\"");

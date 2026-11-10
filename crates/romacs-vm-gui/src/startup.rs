@@ -303,7 +303,7 @@ fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce
 }
 
 /// Where the bundled Lisp lives beside gnu-lisp/, declared once for
-/// [`runtime_load_path`] and the autoload generator (tools/bundled_autoloads.py).
+/// [`runtime_load_path`] and the autoload generator (tools/lib/bundled_autoloads.py).
 fn bundled_layout() -> Result<serde_json::Value, String> {
     serde_json::from_str(include_str!("../../../LISP-BUNDLED.json")).map_err(|e| format!("LISP-BUNDLED.json: {e}"))
 }
@@ -1881,7 +1881,7 @@ mod tests {
 
     #[test]
     fn preload_chain_is_the_warm_census_chain() {
-        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/lisp-census.py")).unwrap();
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/lisp-census")).unwrap();
         let start = script.find("BOOTSTRAP_CHAIN = [").expect("census chain") + "BOOTSTRAP_CHAIN = [".len();
         let list = &script[start..start + script[start..].find(']').unwrap()];
         let census: Vec<&str> = list.split(',').map(|s| s.trim().trim_matches('\'')).filter(|s| !s.is_empty()).collect();

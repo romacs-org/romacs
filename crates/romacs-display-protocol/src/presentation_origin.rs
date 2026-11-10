@@ -151,5 +151,4 @@ impl PresentationOrigin {
 }
 
 #[cfg(test)]
-#[path = "presentation_origin/tests/presentation_origin_test.rs"]
 mod tests;

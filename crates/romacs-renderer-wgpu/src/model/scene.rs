@@ -247,5 +247,4 @@ impl ModelScene {
 }
 
 #[cfg(test)]
-#[path = "scene/tests.rs"]
 mod tests;

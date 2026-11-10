@@ -15,7 +15,6 @@ fn trace_child(name: &str, enabled: bool) -> Option<Vec<serde_json::Value>> {
     child
         .args(["--exact", &format!("present_trace::tests::{name}")])
         .env(CHILD, "1")
-        .env_remove("ROMACS_INPUT_LATENCY_FILE")
         .env_remove("ROMACS_PRESENT_TRACE");
     if enabled {
         child.env("ROMACS_PRESENT_TRACE", &path);
@@ -101,11 +100,9 @@ fn span_disabled_does_not_create_trace() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn present_trace_only_input_receive_is_enabled_and_preserves_domain() {
-    if let Some(records) = trace_child(
-        "present_trace_only_input_receive_is_enabled_and_preserves_domain",
-        true,
-    ) {
+fn an_input_receive_keeps_its_clock_domain_and_sequence() {
+    if let Some(records) = trace_child("an_input_receive_keeps_its_clock_domain_and_sequence", true)
+    {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["stage"], "input_received");
         assert_eq!(records[0]["frame"], 7);
@@ -115,81 +112,8 @@ fn present_trace_only_input_receive_is_enabled_and_preserves_domain() {
         assert_eq!(records[0]["ns"], 123);
         return;
     }
-    assert!(
-        crate::input_latency::enabled(),
-        "presentation tracing must enable input capture independently"
-    );
-    assert!(
-        crate::input_latency::received(
-            7,
-            "key",
-            crate::input_latency::PlatformTimestamp {
-                clock_id: 17,
-                nanoseconds: 123
-            }
-        )
-        .is_some()
-    );
-    shutdown();
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn command_span_keeps_consumed_sequence_metadata_after_completion() {
-    if let Some(records) = trace_child(
-        "command_span_keeps_consumed_sequence_metadata_after_completion",
-        true,
-    ) {
-        let stages: Vec<_> = records
-            .iter()
-            .map(|r| r["stage"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            stages,
-            [
-                "input_received",
-                "input_received",
-                "command_start",
-                "command_end",
-                "command_start",
-                "command_end"
-            ]
-        );
-        assert_eq!(records[0]["input_sequence"], 1);
-        assert_eq!(records[1]["input_sequence"], 2);
-        for record in &records[2..4] {
-            assert_eq!(record["input_sequence"], 1);
-            assert_eq!(record["input_sequence_end"], 2);
-            assert_eq!(record["frame"], 7);
-            assert_eq!(record["presentation"], 0);
-        }
-        for record in &records[4..] {
-            assert!(record.get("input_sequence").is_none());
-            assert!(record.get("input_sequence_end").is_none());
-        }
-        return;
-    }
-    use crate::input_latency::{self, CommandInputs, PlatformTimestamp};
-    for ns in [123, 124] {
-        let token = input_latency::received(
-            7,
-            "key",
-            PlatformTimestamp {
-                clock_id: 1,
-                nanoseconds: ns,
-            },
-        )
-        .unwrap();
-        input_latency::consumed(token);
-    }
-    let command = CommandInputs::begin();
-    let span = command.trace_span(7);
-    command.complete(|_| Vec::new());
-    drop(span);
-    let empty = CommandInputs::begin();
-    let span = empty.trace_span(7);
-    drop(empty);
-    drop(span);
+    assert!(enabled());
+    input_received(7, 17, 123);
     shutdown();
 }
 
@@ -256,7 +180,6 @@ fn event(stage: Stage) -> Record {
         ns: 123,
         realtime_ns: (stage == Stage::Publish).then_some(456),
         input_sequence: None,
-        input_sequence_end: None,
         draw_seq: None,
         detail: None,
         plan: None,
@@ -321,13 +244,7 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
         (Stage::ResolveStart, "resolve_start"),
         (Stage::ResolveEnd, "resolve_end"),
         (Stage::CoverageRetry, "coverage_retry"),
-        (Stage::CommandStart, "command_start"),
-        (Stage::CommandEnd, "command_end"),
         (Stage::InputReceived, "input_received"),
-        (Stage::FlattenStart, "flatten_start"),
-        (Stage::FlattenEnd, "flatten_end"),
-        (Stage::MaterializeStart, "materialize_start"),
-        (Stage::MaterializeEnd, "materialize_end"),
         (Stage::AcquireStart, "acquire_start"),
         (Stage::AcquireEnd, "acquire_end"),
         (Stage::TessellateStart, "tessellate_start"),
@@ -337,12 +254,10 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
         (Stage::NonRootStart, "non_root_start"),
         (Stage::NonRootEnd, "non_root_end"),
         (Stage::GpuDone, "gpu_done"),
-        (Stage::Prepared, "prepared"),
         (Stage::RenderStart, "render_start"),
         (Stage::Submit, "submit"),
         (Stage::Present, "present"),
         (Stage::Presented, "presented"),
-        (Stage::Superseded, "superseded"),
         (Stage::Discarded, "discarded"),
     ] {
         let mut bytes = Vec::new();
@@ -357,7 +272,7 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
 fn full_channel_drops_without_replacing_queued_evidence() {
     let (recorder, incoming) = queue(1);
     recorder.send(event(Stage::Publish));
-    recorder.send(event(Stage::Prepared));
+    recorder.send(event(Stage::RenderStart));
     recorder.send(event(Stage::Present));
     assert_eq!(recorder.dropped.load(Ordering::Relaxed), 2);
     assert_eq!(incoming.try_recv().unwrap().stage, Stage::Publish);
@@ -415,7 +330,7 @@ fn writer_drains_and_flushes_at_normal_shutdown() {
     let (events, incoming) = bounded(2);
     let (stop, stopped) = bounded(1);
     events.try_send(event(Stage::Publish)).unwrap();
-    events.try_send(event(Stage::Prepared)).unwrap();
+    events.try_send(event(Stage::RenderStart)).unwrap();
     stop.try_send(()).unwrap();
     let dropped = AtomicU64::new(3);
     let mut bytes = Vec::new();
@@ -429,7 +344,7 @@ fn writer_drains_and_flushes_at_normal_shutdown() {
         .iter()
         .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap()["stage"].clone())
         .collect();
-    assert_eq!(stages, ["publish", "prepared", "dropped"]);
+    assert_eq!(stages, ["publish", "render_start", "dropped"]);
 }
 
 #[test]
@@ -487,14 +402,12 @@ fn environment_trace_writes_and_drains_jsonl() {
         assert_eq!(enabled(), expected == "enabled");
         for stage in [
             Stage::Publish,
-            Stage::Prepared,
             Stage::RenderStart,
             Stage::Submit,
             Stage::Present,
-            Stage::Superseded,
             Stage::Discarded,
         ] {
-            if stage == Stage::Superseded {
+            if stage == Stage::Discarded {
                 // The deferred form queues exactly what it sampled.
                 if let Some(stamp) = stamp(stage, 7, PresentationId::new(42)) {
                     stamp.emit();
@@ -547,23 +460,23 @@ fn environment_trace_writes_and_drains_jsonl() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(records.len(), 8);
+    assert_eq!(records.len(), 6);
     for record in &records {
         assert_eq!(record["frame"], 7);
         assert_eq!(record["presentation"], 42);
     }
     assert_eq!(records[0]["stage"], "publish");
     assert!(records[0]["realtime_ns"].is_u64());
-    assert_eq!(records[7]["stage"], "presented");
-    assert_eq!(records[7]["clock_id"], 17);
-    assert_eq!(records[7]["ns"], 999);
+    assert_eq!(records[5]["stage"], "presented");
+    assert_eq!(records[5]["clock_id"], 17);
+    assert_eq!(records[5]["ns"], 999);
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn local_stages_share_monotonic_clock_and_publish_pairs_realtime() {
     let (clock, ns, realtime) = sample(Stage::Publish).unwrap();
-    let (next_clock, next_ns, next_realtime) = sample(Stage::Prepared).unwrap();
+    let (next_clock, next_ns, next_realtime) = sample(Stage::RenderStart).unwrap();
     assert_eq!(clock, libc::CLOCK_MONOTONIC as u32);
     assert_eq!(next_clock, clock);
     assert!(next_ns >= ns);

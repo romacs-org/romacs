@@ -61,5 +61,5 @@ From the repository root:
 
 ```sh
 cargo build --release --locked -p romacs-vm-gui
-scripts/romacs
+tools/romacs
 ```

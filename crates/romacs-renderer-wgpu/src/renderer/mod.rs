@@ -63,7 +63,6 @@ mod snapshot_pool;
 pub(crate) use snapshot_pool::{SnapshotPool, SnapshotResources};
 pub use snapshot_pool::{SnapshotLease, SnapshotSize, texture_bytes};
 mod stats;
-mod tooltip;
 mod transitions;
 mod ui_overlays;
 mod window_effects;

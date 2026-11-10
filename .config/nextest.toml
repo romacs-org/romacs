@@ -10,3 +10,19 @@ test-threads = 24
 
 # Bound surviving tests without the retired legacy oracle's package overrides.
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
+
+# The trybuild boundary test builds its fixtures' dependency tree, romacs-vm's
+# included, in a target directory of its own. Warm it takes about a minute; a
+# cold one, as a freshly seeded check target has, compiles every dependency
+# from nothing and passed 600 s under load. A wrong verdict is its failure,
+# not time.
+[[profile.default.overrides]]
+filter = 'test(=the_compiler_enforces_the_boundaries)'
+slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
+
+# The batch scaling probes bound each session by its CPU (scaling_live.py);
+# load stretches their wall time, not their work. The test ends on those
+# bounds, and on a hung session's own wall-clock backstop.
+[[profile.default.overrides]]
+filter = 'test(=batch_probes_scale_within_their_budgets)'
+slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }

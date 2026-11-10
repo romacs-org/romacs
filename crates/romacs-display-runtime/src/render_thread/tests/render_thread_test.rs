@@ -5,10 +5,8 @@ use romacs_display_protocol::types::DisplayWindowId;
 use crate::host_types::GuiFrameGeometryHints;
 use crate::thread_comm::{ThreadComms, WindowCommand};
 use crate::thread_comm::FrameRef;
-use romacs_display_protocol::glyph_matrix::FrameDisplayState;
 use romacs_display_protocol::{
     Color, CursorStyle, DisplaySlotId, EffectsConfig, FrameRate, PhysCursor,
-    SealedFramePresentation,
 };
 use std::sync::{Arc, Mutex};
 use winit::keyboard::{Key, NamedKey};
@@ -224,7 +222,6 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
             ])
             .env(CHILD, "1")
             .env_remove("ROMACS_PRESENT_TRACE")
-            .env_remove("ROMACS_INPUT_LATENCY_FILE")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -239,7 +236,7 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
     render.set_dirty(false);
     let before = super::frame_stats::snapshot();
     for iteration in 0..2400 {
-        app.poll_frame();
+        app.refresh_frame_state();
         let render = &app.frame_windows.primary_window().unwrap().render;
         assert!(render.compositor.current_frame.is_some());
         assert!(render.cursor.target_cloned().is_none());
@@ -261,12 +258,12 @@ fn s1b_visible_cursor_poll_preserves_preedit_and_default_color_cycle() {
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
     render.set_current_frame(Some(frame), None, Default::default(), Default::default());
-    app.poll_frame();
+    app.refresh_frame_state();
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
     render.set_ime_preedit("composition".into(), Some((0, 3)));
     render.set_dirty(false);
     for _ in 0..8 {
-        app.poll_frame();
+        app.refresh_frame_state();
         let render = &app.frame_windows.primary_window().unwrap().render;
         assert!(render.cursor.target_cloned().is_some());
         assert!(render.has_ime_preedit());
@@ -515,28 +512,7 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
     assert_eq!(coordinator.next_wake_deadline_unserviced(), None);
 }
 
-fn seal_state(mut state: FrameDisplayState) -> SealedFramePresentation {
-    if state.presentation_id == romacs_display_protocol::PresentationId::default() {
-        state.presentation_id = romacs_display_protocol::PresentationId::new(1);
-        let placement = state.frame_placement;
-        state.frame_placement = romacs_display_protocol::PresentedFramePlacement::new(
-            placement.frame(),
-            state.presentation_id,
-            placement.parent(),
-            placement.outer_in_parent(),
-            placement.z_order(),
-        );
-    }
-    state.presented_hit_index = romacs_display_protocol::PresentedHitIndex::from_parts(
-        state.presentation_id,
-        vec![],
-        vec![],
-    )
-    .unwrap();
-    SealedFramePresentation::seal(state).unwrap()
-}
-
-fn presentation_state(frame_id: u64, parent_id: u64, presentation: u64) -> SealedFramePresentation {
+fn presentation_frame(frame_id: u64, parent_id: u64, presentation: u64) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(800.0, 600.0);
     frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);
     frame.set_frame_identity(
@@ -551,7 +527,7 @@ fn presentation_state(frame_id: u64, parent_id: u64, presentation: u64) -> Seale
         false,
         1.0,
     );
-    seal_state(FrameDisplayState::from_frame_glyph_buffer(&frame))
+    frame
 }
 
 fn make_test_device() -> Option<wgpu::Device> {
@@ -819,8 +795,8 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
     let window = app.frame_windows.primary_window_mut().unwrap();
     let owner = window.render.emacs_frame_id;
     window.render.compositor.current_frame = Some(frame);
-    app.menus.select_heading(
-        crate::menus::MenuHeading {
+    app.menu_bar.select(
+        crate::menu_bar::MenuHeading {
             frame: owner,
             parent: winit::window::WindowId::from_raw(1),
             key: "help-menu".into(),
@@ -830,13 +806,13 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
         false,
     );
     assert!(app.switch_native_menu_heading(-1));
-    assert_eq!(app.menus.heading().unwrap().key, "lisp-interaction");
+    assert_eq!(app.menu_bar.heading().unwrap().key, "lisp-interaction");
     assert!(app.switch_native_menu_heading(1));
-    assert_eq!(app.menus.heading().unwrap().key, "help-menu");
-    let heading = app.menus.heading().unwrap().clone();
+    assert_eq!(app.menu_bar.heading().unwrap().key, "help-menu");
+    let heading = app.menu_bar.heading().unwrap().clone();
     assert_eq!(
-        app.menus.select_heading(heading, false),
-        crate::menus::HeadingAction::Keep
+        app.menu_bar.select(heading, false),
+        crate::menu_bar::HeadingAction::Keep
     );
 }
 
@@ -875,149 +851,7 @@ fn adopted_primary_pointer_target_uses_real_frame_id() {
 }
 
 #[test]
-fn unknown_secondary_frame_snapshot_does_not_fall_back_to_primary() {
-    let comms = ThreadComms::new();
-    let (emacs, render) = comms.split();
-    let mut app = RenderApp::new(
-        render,
-        800,
-        600,
-        "test".to_string(),
-        Arc::new(crate::render_thread::ImageRenderState::default()),
-        Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
-        true,
-    );
-    let Some(device) = make_test_device() else {
-        return;
-    };
-    let __render = super::frame_windows::GuiFrameRenderState::new(
-        0,
-        &device,
-        app.frame_windows
-            .primary_window()
-            .map_or(1.0, |ws| ws.scale_factor()),
-        app.frame_windows.fps_enabled,
-        romacs_display_protocol::frame_time::observe_platform_now(),
-    );
-    if let Some(window_state) = app.frame_windows.primary_window_mut() {
-        window_state.render = __render;
-    }
-    if let Some(ws) = app.frame_windows.primary_window_mut() {
-        ws.render.set_current_frame(
-            Some(FrameGlyphBuffer::with_size(800.0, 600.0)),
-            None,
-            Default::default(),
-            Default::default(),
-        );
-    };
-    if let Some(ws) = app.frame_windows.primary_window_mut() {
-        ws.render.compositor.dirty = false
-    };
-
-    let mut secondary = FrameGlyphBuffer::with_size(320.0, 240.0);
-    secondary.set_frame_identity(
-        romacs_display_protocol::types::DisplayFrameId::new(0x2000),
-        romacs_display_protocol::types::DisplayFrameId::new(0),
-        0.0,
-        0.0,
-        0,
-        false,
-        0.0,
-        romacs_display_protocol::types::Color::BLACK,
-        false,
-        1.0,
-    );
-    emacs
-        .frame_tx
-        .submit(seal_state(FrameDisplayState::from_frame_glyph_buffer(
-            &secondary,
-        )))
-        .expect("queue secondary snapshot");
-
-    app.poll_frame();
-
-    assert_eq!(
-        app.frame_windows
-            .primary_window()
-            .and_then(|ws| ws.render.compositor.current_frame.as_ref())
-            .map(|frame| frame.width),
-        Some(800.0)
-    );
-}
-
-#[test]
 fn installing_frame_emits_activation_before_replaced_presentation_retirement() {
-    for asynchronous in [false, true] {
-        let comms = ThreadComms::new();
-        let (emacs, render) = comms.split();
-        let mut app = RenderApp::new(
-            render,
-            800,
-            600,
-            "test".to_string(),
-            Arc::new(crate::render_thread::ImageRenderState::default()),
-            Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
-            true,
-        );
-        app.frame_windows.adopt_primary_frame_id(0x42);
-        let (wake, wakes) = crossbeam_channel::unbounded();
-        if asynchronous {
-            app.frame_preparation = Some(
-                super::frame_preparation::FramePreparation::spawn(
-                    app.comms.frame_rx.clone(),
-                    move || {
-                        let _ = wake.send(());
-                    },
-                )
-                .unwrap(),
-            );
-        }
-
-        emacs
-            .frame_tx
-            .submit(presentation_state(0x42, 0, 41))
-            .expect("queue initial presentation");
-        if asynchronous {
-            wakes
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .unwrap();
-        }
-        app.poll_frame();
-        let events = emacs.input_rx.try_iter().collect::<Vec<_>>();
-        assert!(matches!(
-            events.as_slice(),
-            [crate::thread_comm::InputEvent::PresentationActivated {
-                presentation: 41,
-                emacs_frame_id: 0x42,
-            }]
-        ));
-
-        emacs
-            .frame_tx
-            .submit(presentation_state(0x42, 0, 42))
-            .expect("queue replacement presentation");
-        if asynchronous {
-            wakes
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .unwrap();
-        }
-        app.poll_frame();
-        let events = emacs.input_rx.try_iter().collect::<Vec<_>>();
-        assert!(matches!(
-            events.as_slice(),
-            [
-                crate::thread_comm::InputEvent::PresentationActivated {
-                    presentation: 42,
-                    emacs_frame_id: 0x42,
-                },
-                crate::thread_comm::InputEvent::PresentationRetired { presentation: 41 },
-            ]
-        ));
-    }
-}
-
-#[test]
-fn superseded_pending_frame_is_discarded_before_activation() {
     let comms = ThreadComms::new();
     let (emacs, render) = comms.split();
     let mut app = RenderApp::new(
@@ -1029,106 +863,33 @@ fn superseded_pending_frame_is_discarded_before_activation() {
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
         true,
     );
+    let primary = crate::paint_host::PRIMARY_FRAME;
+    app.frame_windows.adopt_primary_frame_id(primary);
 
-    emacs
-        .frame_tx
-        .submit(presentation_state(0x51, 0x50, 51))
-        .expect("queue first deferred child");
-    app.poll_frame();
-    emacs
-        .frame_tx
-        .submit(presentation_state(0x51, 0x50, 52))
-        .expect("queue replacement deferred child");
-    app.poll_frame();
-
-    assert_eq!(app.pending_child_frames.len(), 1);
+    app.ingest_paint(presentation_frame(primary, 0, 41).into());
+    app.refresh_frame_state();
     let events = emacs.input_rx.try_iter().collect::<Vec<_>>();
     assert!(matches!(
         events.as_slice(),
-        [crate::thread_comm::InputEvent::PresentationDiscarded {
-            presentation: 51,
-            emacs_frame_id: 0x51,
-        }]
+        [crate::thread_comm::InputEvent::PresentationActivated {
+            presentation: 41,
+            emacs_frame_id,
+        }] if *emacs_frame_id == primary
     ));
-}
 
-#[test]
-fn asynchronous_preparation_coalesces_bursts_and_preserves_frame_identity() {
-    use super::frame_preparation::FramePreparation;
-    let (emacs, render) = ThreadComms::new().split();
-    let (incoming, receive) = (emacs.frame_tx, render.frame_rx);
-    let (wake, wakes) = crossbeam_channel::unbounded();
-    incoming.submit(presentation_state(1, 0, 10)).unwrap();
-    incoming.submit(presentation_state(2, 1, 11)).unwrap();
-    let mut latest = presentation_state(1, 0, 12).into_state();
-    let mut matrix = romacs_display_protocol::GlyphMatrix::new(1, 1);
-    matrix.set_row_damage(0, romacs_display_protocol::glyph_matrix::RowDamage::Reused);
-    let bounds = romacs_display_protocol::Rect::new(0.0, 0.0, 800.0, 600.0);
-    latest
-        .window_matrices
-        .push(romacs_display_protocol::glyph_matrix::WindowMatrixEntry {
-            window_id: DisplayWindowId::new(1),
-            matrix,
-            pixel_bounds: bounds,
-            text_pixel_bounds: bounds,
-            text_clip_bounds: None,
-            selected: true,
-        });
-    let superseded = incoming.submit(seal_state(latest)).unwrap().unwrap();
-    assert_eq!(superseded.presentation().get(), 10);
-    let worker = FramePreparation::spawn(receive, move || {
-        let _ = wake.send(());
-    })
-    .unwrap();
-    let timeout = std::time::Duration::from_secs(10);
-    wakes.recv_timeout(timeout).unwrap();
-    wakes.recv_timeout(timeout).unwrap();
-    let prepared: Vec<_> = worker.ready().collect();
-    assert_eq!(prepared.len(), 2);
-    assert_eq!(prepared[0].frame.presentation_id.get(), 11);
-    assert_eq!(prepared[0].frame.frame_placement.parent().unwrap().get(), 1);
-    assert_eq!(prepared[1].frame.presentation_id.get(), 12);
-    assert!(
-        matches!(
-            prepared[1].damage.windows[&1].rows[0].damage,
-            romacs_display_protocol::glyph_matrix::RowDamage::New
-        ),
-        "coalescing must invalidate damage relative to the skipped predecessor"
-    );
-    for item in &prepared {
-        assert_eq!(item.frame.presentation_id, item.state.presentation());
-        assert_eq!(item.frame.frame_placement, item.state.frame_placement);
-        assert_eq!(
-            item.frame.glyphs.len(),
-            item.state.materialize().glyphs.len()
-        );
-    }
-}
-
-#[test]
-fn asynchronous_preparation_stops_with_a_full_result_queue() {
-    use super::frame_preparation::FramePreparation;
-    let (emacs, render) = ThreadComms::new().split();
-    let (incoming, receive) = (emacs.frame_tx, render.frame_rx);
-    let (wake, wakes) = crossbeam_channel::unbounded();
-    for id in 1..=4 {
-        incoming.submit(presentation_state(id, 0, id)).unwrap();
-    }
-    let worker = FramePreparation::spawn(receive, move || {
-        let _ = wake.send(());
-    })
-    .unwrap();
-    let timeout = std::time::Duration::from_secs(10);
-    wakes.recv_timeout(timeout).unwrap();
-    wakes.recv_timeout(timeout).unwrap();
-    // Leave the two-slot result queue full and the evaluator sender alive.
-    // Dropping the worker must release its wake callback without any drain.
-    drop(worker);
+    app.ingest_paint(presentation_frame(primary, 0, 42).into());
+    app.refresh_frame_state();
+    let events = emacs.input_rx.try_iter().collect::<Vec<_>>();
     assert!(matches!(
-        wakes.recv_timeout(timeout),
-        Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        events.as_slice(),
+        [
+            crate::thread_comm::InputEvent::PresentationActivated {
+                presentation: 42,
+                emacs_frame_id,
+            },
+            crate::thread_comm::InputEvent::PresentationRetired { presentation: 41 },
+        ] if *emacs_frame_id == primary
     ));
-    drop(incoming);
 }
 
 #[test]
@@ -1261,11 +1022,11 @@ fn clipboard_command_before_display_initialization_returns_an_explicit_error() {
 #[test]
 fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
     let comms = ThreadComms::new();
-    let (emacs, render) = comms.split();
+    let (_emacs, render) = comms.split();
     let mut app = RenderApp::new(render, 800, 600, "test".to_string(),
         Arc::new(crate::render_thread::ImageRenderState::default()),
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())), true);
-    let id = app.frame_windows.primary_window().unwrap().render.emacs_frame_id;
+    let id = crate::paint_host::PRIMARY_FRAME;
     let frame = |presentation: u64, blinked_off: bool| {
         let mut frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
         frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);
@@ -1275,7 +1036,7 @@ fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
             frame.window_cursors.clear();
             frame.cursor_blinked_off = true;
         }
-        seal_state(FrameDisplayState::from_frame_glyph_buffer(&frame))
+        frame
     };
     let drawn = |app: &RenderApp| {
         let render = &app.frame_windows.primary_window().unwrap().render;
@@ -1284,13 +1045,13 @@ fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
     };
     // Composing: the cursor's frame places the IME and its panel.
     app.frame_windows.primary_window_mut().unwrap().render.set_ime_preedit("composition".into(), Some((0, 3)));
-    emacs.frame_tx.submit(frame(1, false)).expect("queue the cursor's frame");
-    app.poll_frame();
+    app.ingest_paint(frame(1, false).into());
+    app.refresh_frame_state();
     let shown = drawn(&app);
     let area = app.frame_windows.primary_window().unwrap().lifecycle.last_ime_cursor_area();
     assert!(shown.is_some() && area.is_some(), "the cursor placed the IME and its panel");
-    emacs.frame_tx.submit(frame(2, true)).expect("queue the blink-off frame");
-    app.poll_frame();
+    app.ingest_paint(frame(2, true).into());
+    app.refresh_frame_state();
     let window = app.frame_windows.primary_window().unwrap();
     assert!(RenderApp::cursor_blinked_off(&window.render), "the blink-off frame is current");
     assert!(window.render.compositor.current_frame.as_ref().unwrap().active_cursor().is_none(), "no cursor is painted");

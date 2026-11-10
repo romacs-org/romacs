@@ -237,7 +237,6 @@ impl RenderApp {
                 frame.presentation_id,
                 logical_size,
                 window_state.scale_factor(),
-                window_state.render.compositor.input_scroll.staged_tokens(),
             );
             window.pre_present_notify();
         }

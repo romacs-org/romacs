@@ -15,7 +15,7 @@ fn main() {
         std::io::stdout().flush().unwrap();
         if !ok { std::process::exit(1); }
     }
-    let result = vm.eval_source(include_str!("../../../scripts/ert-closure-run.el"))
+    let result = vm.eval_source(include_str!("../../../tools/lib/ert-closure-run.el"))
         .and_then(|v| v.display());
     let ok = result.is_ok();
     println!("{}", serde_json::json!({"ert": result}));

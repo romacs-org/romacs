@@ -9,13 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 mod command_channel;
-mod frame_mailbox;
 pub(crate) use command_channel::{CommandReceiver, CommandSender, command_channel};
 mod frame_opacity;
 use crate::host_types::GuiFrameGeometryHints;
-pub(crate) use frame_mailbox::{
-    FrameReceiver, FrameSender, QueuedPresentation,
-};
 pub(crate) use frame_opacity::FrameOpacityState;
 use romacs_display_protocol::{
     ImageId, ImageLoadToken,
@@ -133,11 +129,6 @@ pub struct PositionedPointerInput {
 pub enum InputEvent {
     Tracked {
         receipt: romacs_display_protocol::input_progress::InputDelivery,
-        event: Box<InputEvent>,
-    },
-    /// Diagnostic token paired with one actual command event.
-    Observed {
-        token: romacs_display_protocol::input_latency::InputToken,
         event: Box<InputEvent>,
     },
     /// Bytes read directly from a Unix TTY.
@@ -448,10 +439,6 @@ pub(crate) enum RenderCommand {
 }
 
 /// Channel capacities
-// Frame channel: unbounded so try_send never drops frames.
-// The render thread drains all queued frames and keeps only the latest
-// (see poll_frame()), so memory stays bounded in practice.
-//
 // GNU Emacs' `kbd_buffer` holds 4096 input events and `tty_read_avail_input`
 // stops reading terminal bytes when the buffer is under pressure rather than
 // silently dropping command input.  Keep Romacs' render-to-evaluator input
@@ -463,10 +450,6 @@ const COMMAND_CHANNEL_CAPACITY: usize = 64;
 pub(crate) struct ThreadComms {
     /// The pointer over the primary window: Render → Emacs.
     pub pointer: Arc<PointerCell>,
-
-    /// Frame display state: Emacs → Render
-    pub frame_tx: FrameSender,
-    pub frame_rx: FrameReceiver,
 
     /// Commands: Emacs → Render
     pub cmd_tx: CommandSender,
@@ -492,13 +475,10 @@ pub(crate) struct LostImages {
 impl ThreadComms {
     /// Create new thread communication channels
     pub fn new() -> Self {
-        let (frame_tx, frame_rx) = frame_mailbox::channel();
         let (cmd_tx, cmd_rx) = command_channel(COMMAND_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         Self {
             pointer: Arc::default(),
-            frame_tx,
-            frame_rx,
             cmd_tx,
             cmd_rx,
             input_tx,
@@ -514,7 +494,6 @@ impl ThreadComms {
             pointer: self.pointer.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
-            frame_tx: self.frame_tx,
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
         };
@@ -528,7 +507,6 @@ impl ThreadComms {
             input_stream: Default::default(),
             frame_opacity: self.frame_opacity,
             lost_images: self.lost_images,
-            frame_rx: self.frame_rx,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
         };
@@ -546,9 +524,6 @@ impl Default for ThreadComms {
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
     pub pointer: Arc<PointerCell>,
-    /// Frames for the render thread; only tests submit through it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "production frames arrive through the paint host; the held sender keeps the frame mailbox connected and lets tests submit"))]
-    pub frame_tx: FrameSender,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
@@ -578,7 +553,6 @@ pub(crate) struct RenderComms {
     pub keep_alive_without_frames: bool,
     pub native_window_waits: Option<Arc<crate::native_window_wait::NativeWindowWaits>>,
     input_stream: romacs_display_protocol::input_progress::InputStream,
-    pub frame_rx: FrameReceiver,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
@@ -602,60 +576,38 @@ impl RenderComms {
             None => create(),
         }
     }
-    fn observe_scroll_input(event: InputEvent) -> InputEvent {
+    /// Record a pressed key's or a scroll's platform receive time in the
+    /// presentation trace, when one is open.
+    fn trace_input_received(event: &InputEvent) {
         #[cfg(target_os = "linux")]
-        if romacs_display_protocol::input_latency::enabled() {
-            let target = match &event {
-                InputEvent::Key {
-                    key: crate::host_types::FrontendKey::Keysym(0xff55 | 0xff56),
-                    pressed: true,
-                    emacs_frame_id,
-                    ..
-                } => Some((*emacs_frame_id, "page")),
+        if romacs_display_protocol::present_trace::enabled() {
+            let frame = match event {
                 InputEvent::Key {
                     pressed: true,
                     emacs_frame_id,
                     ..
-                } if romacs_display_protocol::present_trace::enabled() => {
-                    Some((*emacs_frame_id, "key"))
-                }
+                } => *emacs_frame_id,
                 InputEvent::PositionedPointer(PositionedPointerInput {
                     position,
-                    action: PointerAction::Scroll { delta, .. },
+                    action: PointerAction::Scroll { .. },
                     ..
-                }) => Some((
-                    position.target_frame_id,
-                    match delta {
-                        ScrollDelta::Lines { .. } => "wheel",
-                        ScrollDelta::Pixels { .. } => "precise",
-                    },
-                )),
-                _ => None,
+                }) => position.target_frame_id,
+                _ => return,
             };
-            if let Some((frame, kind)) = target {
-                let mut time = libc::timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                };
-                // SAFETY: valid out-pointer, POSIX monotonic clock. The
-                // compositor's clock ID must match before subtraction.
-                if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
-                    let time = romacs_display_protocol::input_latency::PlatformTimestamp {
-                        clock_id: libc::CLOCK_MONOTONIC as u32,
-                        nanoseconds: time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
-                    };
-                    if let Some(token) =
-                        romacs_display_protocol::input_latency::received(frame, kind, time)
-                    {
-                        return InputEvent::Observed {
-                            token,
-                            event: Box::new(event),
-                        };
-                    }
-                }
+            let mut time = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            // SAFETY: valid out-pointer, POSIX monotonic clock. The
+            // compositor's clock ID must match before subtraction.
+            if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
+                romacs_display_protocol::present_trace::input_received(
+                    frame,
+                    libc::CLOCK_MONOTONIC as u32,
+                    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
+                );
             }
         }
-        event
     }
 
     fn is_lossy_input_event(event: &InputEvent) -> bool {
@@ -681,9 +633,7 @@ impl RenderComms {
 
     fn event_name(event: &InputEvent) -> &'static str {
         match event {
-            InputEvent::Observed { event, .. } | InputEvent::Tracked { event, .. } => {
-                Self::event_name(event)
-            }
+            InputEvent::Tracked { event, .. } => Self::event_name(event),
             InputEvent::RawTtyBytes { .. } => "raw-tty-bytes",
             InputEvent::Key { .. } => "key",
             InputEvent::PositionedPointer(PositionedPointerInput { action, .. }) => match action {
@@ -720,17 +670,14 @@ impl RenderComms {
     ///
     /// After converting the display event, the bridge owns notifying the
     /// evaluator's wait backend.
-    pub fn send_input(&self, event: InputEvent) {
+    pub(crate) fn send_input(&self, event: InputEvent) {
         let _ = self.send_input_with_receipt(event);
     }
 
     pub(crate) fn send_input_with_receipt(
         &self,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         self.send_input_with_tracking(event, None)
     }
 
@@ -739,29 +686,22 @@ impl RenderComms {
     pub(super) fn send_key_input_with_receipt(
         &self,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         if self.input_interrupt.as_ref().is_some_and(|hook| hook.interrupt(&event)) {
-            return (None, None, None);
+            return None;
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
             .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
         let read = delivery.as_ref().map(|delivery| delivery.receipt());
-        let (completion, token) = self.send_input_with_tracking(event, delivery);
-        (read, completion, token)
+        self.send_input_with_tracking(event, delivery);
+        read
     }
 
     fn send_input_with_tracking(
         &self,
         event: InputEvent,
         read: Option<romacs_display_protocol::input_progress::InputDelivery>,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         crate::paint_host::trace_key_enqueue(&event, read.as_ref());
         let receipt = if matches!(
             &event,
@@ -779,11 +719,7 @@ impl RenderComms {
             None
         };
         let observer = receipt.as_ref().map(|delivery| delivery.receipt());
-        let event = Self::observe_scroll_input(event);
-        let token = match &event {
-            InputEvent::Observed { token, .. } => Some(*token),
-            _ => None,
-        };
+        Self::trace_input_received(&event);
         let event = if let Some(receipt) = receipt {
             InputEvent::Tracked {
                 receipt,
@@ -822,7 +758,7 @@ impl RenderComms {
                     );
                 }
             }
-            return (observer, token);
+            return observer;
         }
 
         match self.input_tx.send(event) {
@@ -838,12 +774,11 @@ impl RenderComms {
                 );
             }
         }
-        (observer, token)
+        observer
     }
 }
 
 #[cfg(test)]
-#[path = "thread_comm/tests/thread_comm_test.rs"]
 mod tests;
 
 #[cfg(test)]

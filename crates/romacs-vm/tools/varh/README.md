@@ -42,7 +42,7 @@ calls without rewriting recording provenance.
 ## Recording and review
 
 Build the reference described by `parity-reference.toml` with
-`scripts/build-gnu-oracle.sh`. An intentional new recording uses
+`tools/build-gnu-oracle.sh`. An intentional new recording uses
 `python3 "$V/varh.py" record --gnu "$ROMACS_GNU_ORACLE" --jobs 8`.
 Inspect every changed answer and its oracle identity. Do not refresh hashes or
 accept pins just to make a test pass. `varh.py pin --vm2 BIN` changes the fixed

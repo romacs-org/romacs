@@ -1,5 +1,7 @@
-//! `cargo run -p romacs-parity-reference --bin pin-reference` --- deliberate
-//! re-baselining of the GNU Emacs every parity number is measured against.
+//! `cargo run -p romacs-parity-reference --bin pin-reference` --- deliberate re-baselining of the
+//! GNU Emacs every parity number is measured against.
+//!
+//! It lives beside the manifest it rewrites.
 //!
 //! # Why re-pinning is a command and not an edit (ledger 214)
 //!

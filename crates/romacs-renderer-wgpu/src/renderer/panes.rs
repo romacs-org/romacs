@@ -11,7 +11,6 @@ use crate::vertex::{RectVertex, RoundedRectVertex};
 use romacs_display_protocol::{Color, FrameGlyphBuffer, Pane, Rect};
 
 #[cfg(test)]
-#[path = "panes/tests/panes_test.rs"]
 mod tests;
 
 /// The rounded-rect shader's style for the outside of its box.

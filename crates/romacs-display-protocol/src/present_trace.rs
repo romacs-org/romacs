@@ -7,9 +7,7 @@
 //! domains. X11/non-Wayland captures contain local stages only.
 //! Repeated draws of one sealed revision intentionally repeat its identity.
 //! Input receive records preserve the platform timestamp/domain and carry an
-//! `input_sequence`. Command scopes carry the first and last consumed sequences
-//! as `input_sequence` and `input_sequence_end`; these are endpoints, not proof
-//! that every intervening input was consumed. Unknown presentation IDs are zero.
+//! `input_sequence`. Unknown presentation IDs are zero.
 //! `submit` marks the root glyph pass's queue submission, or the retained
 //! static composition's submission, not the frame's final GPU submission; a
 //! rebuilt retained static scene records it twice.
@@ -23,9 +21,8 @@
 //! waits on the queue, so a send never wakes another thread. One writer owns
 //! the file and drains the queue every 10 ms into buffered JSONL (no fsync).
 //! The queue is bounded; dropped records are reported separately. Abrupt
-//! process exit can lose a tail, and so can a normal exit in two cases:
-//! a daemon is not drained at teardown, and the detached preparation worker
-//! may still record Prepared/Discarded after the final drain. Call [`init`]
+//! process exit can lose a tail, and so can a daemon's normal exit, which
+//! is not drained at teardown. Call [`init`]
 //! early so the writer thread is not started under a hot-path lock, and
 //! [`shutdown`] after GUI/evaluator teardown for a normal drain.
 
@@ -61,13 +58,7 @@ pub enum Stage {
     ResolveStart,
     ResolveEnd,
     CoverageRetry,
-    CommandStart,
-    CommandEnd,
     InputReceived,
-    FlattenStart,
-    FlattenEnd,
-    MaterializeStart,
-    MaterializeEnd,
     AcquireStart,
     AcquireEnd,
     TessellateStart,
@@ -94,11 +85,9 @@ pub enum Stage {
     LayoutQueryEnd,
 
     Publish,
-    Prepared,
     RenderStart,
     Submit,
     Present,
-    Superseded,
     Discarded,
     Presented,
 }
@@ -112,12 +101,9 @@ struct Record {
     ns: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     realtime_ns: Option<u64>,
-    /// First consumed input sequence (or this received input's sequence).
+    /// This received input's sequence.
     #[serde(skip_serializing_if = "Option::is_none")]
     input_sequence: Option<u64>,
-    /// Last consumed input sequence; omitted for a single received input.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    input_sequence_end: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     draw_seq: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -271,7 +257,6 @@ fn stamp_with(
         ns,
         realtime_ns,
         input_sequence: None,
-        input_sequence_end: None,
         draw_seq: current_draw(),
         detail: None,
         plan: (stage == Stage::RenderStart)
@@ -368,39 +353,16 @@ pub struct Span {
     end: Option<Stage>,
     frame: u64,
     presentation: PresentationId,
-    inputs: (Option<u64>, Option<u64>),
     detail: Option<String>,
 }
 
 impl Span {
     #[inline]
     pub fn new(start: Stage, end: Stage, frame: u64, presentation: Option<PresentationId>) -> Self {
-        Self::with_inputs(start, end, frame, presentation, (None, None))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn command(frame: u64, first: Option<u64>, last: Option<u64>) -> Self {
-        Self::with_inputs(
-            Stage::CommandStart,
-            Stage::CommandEnd,
-            frame,
-            None,
-            (first, last),
-        )
-    }
-
-    fn with_inputs(
-        start: Stage,
-        end: Stage,
-        frame: u64,
-        presentation: Option<PresentationId>,
-        inputs: (Option<u64>, Option<u64>),
-    ) -> Self {
         let span = Self {
             end: enabled().then_some(end),
             frame,
             presentation: presentation.unwrap_or_else(|| PresentationId::new(0)),
-            inputs,
             detail: None,
         };
         if span.end.is_some() {
@@ -415,8 +377,6 @@ impl Span {
                 stamp_with(recorder, stage, self.frame, self.presentation, sample)
         {
             record.detail = self.detail.clone();
-            record.input_sequence = self.inputs.0;
-            record.input_sequence_end = self.inputs.1;
             recorder.send(record);
         }
     }
@@ -431,10 +391,13 @@ impl Drop for Span {
     }
 }
 
-/// Preserve the platform receive timestamp and its clock domain. This is not
-/// sampled command time, and does not imply a presentation has been sealed.
-pub(crate) fn input_received(frame: u64, sequence: u64, clock_id: u32, ns: u64) {
+/// Record one input's platform receive timestamp and its clock domain, with
+/// the next input sequence. This is not sampled command time, and does not
+/// imply a presentation has been sealed.
+pub fn input_received(frame: u64, clock_id: u32, ns: u64) {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     if let Some(recorder) = recorder() {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
         recorder.send(Record {
             stage: Stage::InputReceived,
             frame,
@@ -443,7 +406,6 @@ pub(crate) fn input_received(frame: u64, sequence: u64, clock_id: u32, ns: u64) 
             ns,
             realtime_ns: None,
             input_sequence: Some(sequence),
-            input_sequence_end: None,
             draw_seq: current_draw(),
             detail: None,
             plan: None,
@@ -493,7 +455,6 @@ pub fn presented_draw(
         ns,
         realtime_ns: None,
         input_sequence: None,
-        input_sequence_end: None,
         draw_seq,
         detail: None,
         plan: None,

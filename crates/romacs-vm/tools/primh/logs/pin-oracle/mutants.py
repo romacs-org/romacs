@@ -13,7 +13,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[6]
 PRIMH = REPO / "crates/romacs-vm/tools/primh"
-ORACLE = REPO / "scripts/gnu_oracle.py"
+ORACLE = REPO / "tools/lib/gnu_oracle.py"
 PIN = "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea"
 OLD = "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b"
 

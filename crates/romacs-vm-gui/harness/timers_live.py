@@ -16,7 +16,9 @@ long the keys take to come, but never while a command runs.  That session
 runs with --trace-scene, whose scene dump on every repaint the checks read;
 idle CPU is measured in a second session with the same init and keys but no
 dumps, once the evaluator is quiet after startup and again after the
-dashboard.
+dashboard.  A third session's init cancels every timer and leaves one that
+messages: the paint that shows it, submitted with no input and no timer
+after it, must retire at once, woken by its render, not at the render stall.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set.  labwc, wlr-randr, wtype and grim come
@@ -104,15 +106,24 @@ def idle_cpu(pid, seconds):
     return {'seconds': round(elapsed, 2), 'percent_of_core': pct(total1 - total0), 'threads': busy}
 
 
-def session_env(root, args):
-    """A private HOME/XDG tree under ROOT, with init.el installed: (env, state, config)."""
+RETIRE_INIT = '''(blink-cursor-mode -1)
+(run-with-timer 4 nil (lambda ()
+  (mapc (function cancel-timer) (append timer-list timer-idle-list nil))
+  (run-with-timer 1 nil (lambda () (message "retire probe")))))
+'''
+RETIRE_STALL = 30
+
+
+def session_env(root, args, init=None):
+    """A private HOME/XDG tree under ROOT, with init.el (INIT, or the
+    timers' probes) installed: (env, state, config)."""
     home, work, config = [root / name for name in ('home', 'work', 'config')]
     for directory in (home, work, config, work / 'gnosis'):
         directory.mkdir()
     state = work / 'timers-state.el'
     (home / 'config/romacs').mkdir(parents=True)
     (home / 'config/romacs/init.el').write_text(
-        INIT.format(state=json.dumps(str(state)), gnosis=json.dumps(str(work / 'gnosis') + '/')))
+        init or INIT.format(state=json.dumps(str(state)), gnosis=json.dumps(str(work / 'gnosis') + '/')))
     (config / 'rc.xml').write_text(live.RC_XML)
     path = os.environ.get('PATH', '/usr/bin:/bin')
     env = {'PATH': f'{args.tools}:{path}' if args.tools else path,
@@ -132,15 +143,17 @@ def session_env(root, args):
 
 
 @contextlib.contextmanager
-def session(binary, args, output, name, report, trace):
+def session(binary, args, output, name, report, trace, init=None, extra_env=None):
     """A private compositor and `BINARY --loadup' (with --trace-scene when
-    TRACE), logging to OUTPUT/NAME.stderr: yields (env, state, process, log)."""
+    TRACE) on INIT and EXTRA_ENV, logging to OUTPUT/NAME.stderr: yields
+    (env, state, process, log)."""
     compositor = keyboard = process = None
     try:
         with tempfile.TemporaryDirectory(prefix='timers-live-') as temporary:
             root = Path(temporary)
             root.chmod(0o700)
-            env, state, work, config = session_env(root, args)
+            env, state, work, config = session_env(root, args, init)
+            env.update(extra_env or {})
             log_path = output / f'{name}.stderr'
             with (output / f'{name}-compositor.log').open('w') as compositor_log, log_path.open('w') as log:
                 compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
@@ -330,6 +343,52 @@ def measured(binary, args, output, report):
         report['idle_cpu_dashboard'] = idle_cpu(process.pid, args.cpu_window)
 
 
+def paint_lines(text):
+    """[(kind, presentation)] of the log's `paint-submitted' and `paint' lines."""
+    found = []
+    for line in text.splitlines():
+        if line.startswith('{') and '"diagnostic":"paint' in line:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if record.get('diagnostic') in ('paint-submitted', 'paint'):
+                found.append((record['diagnostic'], record['presentation']))
+    return found
+
+
+def retired(binary, args, output, report):
+    """A paint no input and no timer follows retires when it renders: the
+    render wakes the evaluator's wait.  Polling for it, or waiting out the
+    render stall (RETIRE_STALL seconds here), would leave it in flight."""
+    def check(name, ok, detail):
+        report['checks'].append({'check': name, 'ok': bool(ok)})
+        if not ok:
+            report['failures'].append({'check': name, 'detail': detail})
+    with session(binary, args, output, 'retire', report, False, RETIRE_INIT,
+                 {'ROMACS_RENDER_STALL_MS': str(RETIRE_STALL * 1000)}) as (_, _, process, log_path):
+        text = lambda: log_path.read_text(errors='replace')
+        fio.wait(lambda: 'retire probe' in text(), args.timeout, 'the retire probe message', process)
+        # Every paint from the message on (showing it may take more than
+        # one): once they stop coming, the last submitted must have rendered.
+        def paints():
+            return paint_lines(text().split('retire probe', 1)[1])
+        def last(kind):
+            return max((p for k, p in paints() if k == kind), default=0)
+        fio.wait(lambda: last('paint-submitted'), 15, "the probe message's paint submitted", process)
+        settled, count = time.monotonic(), len(paints())
+        while time.monotonic() - settled < 2:
+            time.sleep(.1)
+            if len(paints()) != count:
+                settled, count = time.monotonic(), len(paints())
+        try:
+            fio.wait(lambda: last('paint') >= last('paint-submitted'), RETIRE_STALL / 3, 'the last paint retired', process)
+        except Exception:  # noqa: BLE001
+            pass
+        check('a paint with no input or timer after it retires when it renders, not at the stall',
+              last('paint') >= last('paint-submitted'), {'tail': paints()[-6:]})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
@@ -347,6 +406,7 @@ def main():
     try:
         checked(binary, args, output, report)
         measured(binary, args, output, report)
+        retired(binary, args, output, report)
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     except Exception as error:  # noqa: BLE001
         report['error'] = repr(error)

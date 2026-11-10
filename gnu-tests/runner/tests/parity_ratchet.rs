@@ -1,5 +1,5 @@
 //! The parity ratchet, GNU-suite half: every GNU test file's passing deftests
-//! are floors recorded in parity-ratchet.json (tools/parity_ratchet.py). Each
+//! are floors recorded in parity-ratchet.json (tools/lib/parity_ratchet.py). Each
 //! shard fits in one batch of eight files under the gate's per-test timeout.
 //! The adapter is the one Cargo just built.
 //!
@@ -26,7 +26,7 @@ fn field(line: &str, name: &str) -> Option<usize> {
 fn ratchet(unit: &str, flag: &str, binary: &str) {
     let root = root();
     let output = Command::new("python3")
-        .arg(root.join("tools/parity_ratchet.py"))
+        .arg(root.join("tools/lib/parity_ratchet.py"))
         .args(["check", "--accept-gains", "--unit", unit, flag, binary, "--jobs", "8"])
         .current_dir(&root)
         .output()
@@ -55,7 +55,7 @@ fn ratchet(unit: &str, flag: &str, binary: &str) {
 
 /// A PASS must stay auditable. nextest keeps nothing a passing test prints, so
 /// the checker writes every verdict into the gate's run directory
-/// (`ROMACS_GATE_EVIDENCE`, set by scripts/gate); refuse to pass if this
+/// (`ROMACS_GATE_EVIDENCE`, set by tools/gate); refuse to pass if this
 /// unit's verdict line is not there. Outside the gate, print the verdict.
 fn require_evidence(unit: &str, line: &str, stdout: &str) {
     for l in stdout.lines().filter(|l| l.starts_with("parity-ratchet:")) {
@@ -434,7 +434,7 @@ fn parity_ratchet_gnu_suite_shard_71_of_71() {
 fn parity_ratchet_checker_contract() {
     let root = root();
     let output = Command::new("python3")
-        .arg(root.join("tools/parity_ratchet_test.py"))
+        .arg(root.join("tools/tests/parity_ratchet_test.py"))
         .arg("-v")
         .env("ROMACS_GNU_ERT", GNU_ERT)
         .current_dir(&root)
@@ -443,7 +443,7 @@ fn parity_ratchet_checker_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "tools/parity_ratchet_test.py failed (exit {:?}):\n{}\n{stderr}",
+        "tools/tests/parity_ratchet_test.py failed (exit {:?}):\n{}\n{stderr}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout)
     );

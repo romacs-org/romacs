@@ -34,7 +34,7 @@ const SITES: &[(&str, usize, &str)] = &[
 const VM_FREE: &str = "catch_unwind(|| validate_declaration(";
 
 /// Packages a session's code lives in.
-const SESSION: &[&str] = &["crates/romacs-vm-gui", "crates/romacs-layout2"];
+const SESSION: &[&str] = &["crates/romacs-vm-gui", "crates/romacs-layout"];
 
 /// Compiles only while `Vm` is not `Send`: were it, both impls would apply and
 /// the call would be ambiguous.

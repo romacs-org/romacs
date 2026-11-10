@@ -109,7 +109,7 @@ impl MediaBudget {
     }
 
     /// Unregister a media item
-    pub fn unregister(&mut self, media_type: MediaType, id: u32) {
+    pub(crate) fn unregister(&mut self, media_type: MediaType, id: u32) {
         let key = self
             .entries
             .iter()
@@ -202,5 +202,4 @@ impl Default for MediaBudget {
 }
 
 #[cfg(test)]
-#[path = "media_budget/tests/media_budget_test.rs"]
 mod tests;

@@ -7,7 +7,7 @@ and the CI under `infra/`). **Never edit it.** Its content hashes to the git
 tree `test_tree` in `PIN.json`; `run.py verify-pin` recomputes that hash from
 the working files (no repository needed) and every run refuses to start, and
 re-checks at the end, if it differs. `run.py verify-pin --gnu GNU` (run by
-`scripts/check-derived`) also derives `test_tree` from GNU's own
+`tools/check-derived`) also derives `test_tree` from GNU's own
 `45b0f7699df:test` less the excluded paths, so the record stays GNU's. Tests execute in a scratch copy, because
 GNU's tests write beside themselves (`bytecomp-resources/*.elc`).
 
@@ -89,14 +89,14 @@ targeted test to fail.
 ## The parity ratchet
 
 The suite's passes are floors (`parity-ratchet.json` at the repo root,
-`tools/parity_ratchet.py`): per file, the exact deftests that pass. The gate
+`tools/lib/parity_ratchet.py`): per file, the exact deftests that pass. The gate
 runs the whole suite in four shards (`runner/tests/parity_ratchet.rs`), and
 the WARM and COLD Lisp census beside it (`crates/romacs-vm/tests/
 parity_ratchet.rs`). A lost pass fails and names the test; a new pass fails
-until recorded with `python3 tools/parity_ratchet.py record` in the same
-commit; a run that measured nothing is red. `scripts/check-derived` refuses a
+until recorded with `python3 tools/lib/parity_ratchet.py record` in the same
+commit; a run that measured nothing is red. `tools/check-derived` refuses a
 ratchet file that lowers a floor without a `--lower UNIT --because` record.
-Quick local check: `python3 tools/parity_ratchet.py check --tier fast`.
+Quick local check: `python3 tools/lib/parity_ratchet.py check --tier fast`.
 
 ## The honest ratchet (schema 2)
 
@@ -104,7 +104,7 @@ A reduced-harness pass is not evidence until something shows it can fail.
 `record` therefore stores, per passing member, a CLASS derived from
 the run-local `MEMBER-EVIDENCE.json` and from what the measurement saw.
 `tools/import-vacuity-evidence.py` generates it beside `VACUITY-VERDICT.json`
-outside the source tree; `scripts/gate` provides both paths to tests. Standalone
+outside the source tree; `tools/gate` provides both paths to tests. Standalone
 measurements set `ROMACS_VACUITY_RECEIPT` to the receipt, with the member file as
 its sibling. Neither output is tracked. `member-evidence-policy.json` retains
 the historical member names, classes and methods only; it contains no run
@@ -139,7 +139,7 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
   `reduced_harness` says so) and `gnu_suite.real_ert` (GNU `ert.el`,
   unmodified). `gnu_suite.honest.counted` is the headline candidate for the
   reduced harness.
-- Proof: `tools/honest_ratchet_test.py` and `tests/test_run.py` (`Honesty`,
+- Proof: `tools/tests/honest_ratchet_test.py` and `tests/test_run.py` (`Honesty`,
   end to end).
 
 ## Public baseline diagnostics

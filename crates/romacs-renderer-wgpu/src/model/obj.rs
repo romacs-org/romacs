@@ -773,5 +773,4 @@ pub(crate) fn read_obj_file_within(
 }
 
 #[cfg(test)]
-#[path = "obj/tests.rs"]
 mod tests;

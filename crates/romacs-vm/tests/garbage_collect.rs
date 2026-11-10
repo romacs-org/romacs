@@ -74,12 +74,13 @@ fn garbage_collect_obeys_existing_inhibition() {
     eval(&mut vm, "(add-variable-watcher 'gi-v (lambda (&rest _) (setq gi-r (garbage-collect))))");
     eval(&mut vm, "(defmacro gi-m () (list 'quote (garbage-collect)))");
     let before = vm.heap_stats().collections;
-    assert_eq!(eval(&mut vm, "(progn (set 'gi-v 1) gi-r)"), "nil", "GC_INHIBITED_RESULT");
     eval(&mut vm, "(defun gi-f () (gi-m))");
     assert_eq!(eval(&mut vm, "(gi-f)"), "nil", "GC_INHIBITED_RESULT");
     assert_eq!(vm.heap_stats().collections, before, "GC_INHIBITED_COUNT");
-    // The same watcher collects from a compiled `setq', whose engine suspends.
+    // The same watcher collects from a compiled `setq', whose engine suspends,
+    // and from `set', whose write waits for its engine's drain (VM2-WATCH1).
     assert_ne!(eval(&mut vm, "(progn (setq gi-v 2) gi-r)"), "nil", "GC_WATCHED_SETQ");
+    assert_ne!(eval(&mut vm, "(progn (setq gi-r nil) (set 'gi-v 3) gi-r)"), "nil", "GC_WATCHED_SET");
 }
 
 fn churn(vm: &mut Vm, conses: u32) -> u64 {

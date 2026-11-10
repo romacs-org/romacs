@@ -54,7 +54,13 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
-    ("mode_line_forms", Cache), ("lambda_lists", Cache),
+    // An entry goes when the value it was converted from dies (gc.rs), and
+    // a moving collection rewrites that value.
+    ("mode_line_forms", Cache),
+    // An ephemeron table: unlike `mode_line_forms`, whose entries keep
+    // nothing alive, an entry here is traced while its list, the key, lives
+    // (gc.rs `weak_round`), so what it holds survives through it.
+    ("lambda_lists", Root),
     ("images", Free),
     // A `Band`: its object constants are `Rooted` handles, and its `rule` keeps
     // a `CharTableView` no root list reads. Inert: those Values reach only
@@ -446,6 +452,9 @@ const CELLS: &[(&str, Behind)] = &[
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
     ("compiled_lisp/mod.rs:Configured.identity", Plain),
     ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
+    // The scanner's test text: syntax codes and positions, no Value.
+    ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
+    ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
