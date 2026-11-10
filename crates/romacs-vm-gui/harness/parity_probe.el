@@ -78,22 +78,28 @@ is written, so a request never ends with neither file."
       (rename-file request claimed t)
       (save-match-data
         (save-current-buffer
-          (let* ((deactivate-mark deactivate-mark)
-                 (inhibit-message t)
-                 (message-log-max nil)
-                 (pair (with-temp-buffer
-                         (let ((coding-system-for-read 'utf-8-unix))
-                           (insert-file-contents claimed))
-                         (read (current-buffer))))
-                 (answer nil))
+          (let ((deactivate-mark deactivate-mark)
+                (inhibit-message t)
+                (message-log-max nil)
+                (id nil)
+                (answer nil))
             (unwind-protect
                 (setq answer (condition-case condition
-                                 (list 'ok (eval (cdr pair) t))
+                                 (let ((pair (with-temp-buffer
+                                               (let ((coding-system-for-read 'utf-8-unix))
+                                                 (insert-file-contents claimed))
+                                               (read (current-buffer)))))
+                                   ;; A request that cannot be read is answered
+                                   ;; too, with no id: the harness sees at once.
+                                   (setq id (car pair))
+                                   (list 'ok (eval (cdr pair) t)))
                                (t (list 'error (parity-probe--plain condition)))))
               (unless answer
                 (setq answer (list 'error '(non-local-exit)))
                 (run-with-timer 0 nil #'parity-probe--start))
-              (parity-probe--answer (car pair) answer)
+              ;; Should no answer be writable, the claim stays as the
+              ;; evidence and timer.el reports the error in *Messages*.
+              (parity-probe--answer id answer)
               (delete-file claimed))))))))
 
 (defvar parity-probe-event-ids nil
