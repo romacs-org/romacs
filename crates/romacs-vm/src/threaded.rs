@@ -4305,11 +4305,14 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
-        // Only `provide' and `featurep' come here (the rest route through
-        // `primitive', a lend); `provide''s after-load hooks run deferred.
-        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |vm, p, start, n| {
+        // The other loader primitives never come here: the engine lends them
+        // (`loader_body`). These two run no Lisp.
+        Provide | Featurep => |vm, p, start, n| {
             let args = vm.stack[start..start + n].to_vec();
-            vm.defer(|vm| vm.loader_primitive(p, &args))
+            vm.feature_primitive(p, &args)
+        },
+        Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |_, _, _, _| {
+            Err("a loader primitive is lent from its engine (`loader_body`), never called here".into())
         },
         Get | Put | RawPropertiesAt | GetCharProperty | BufferSubstring
         | InsertInherit | KillNew | CurrentKill | YankPart | YankFinalize | YankPropertyRun

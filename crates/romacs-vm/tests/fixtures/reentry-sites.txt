@@ -50,7 +50,6 @@ lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
 lib.rs expr_evaluated expand_macro 1 held  # an open compiler builder holds collection
 lib.rs expr_now expand_macro 1 held  # an open compiler builder holds collection
 lib.rs force_lazy compile_lazy_request 1 held  # an open compiler builder holds collection
-lib.rs primitive loader_primitive 1 held  # a legacy primitive call: its engine is not suspended
 lib.rs restore_binding notify_watchers 1 rooted  # the popped VALUE is a frame, read back for the restore
 lib.rs restore_binding notify_watchers_at 2 rooted  # the popped VALUE and OWNER are a frame, read back for the restore
 lib.rs restore_binding unbind_forwarded 1 rooted  # it roots OLD and OWNER itself
@@ -121,7 +120,6 @@ threaded.rs bind_special_now bind_variable 1 clean  # only a variable no watcher
 threaded.rs execute execute_args 1 clean  # a tail call
 threaded.rs execute_args_inner force_lazy 1 held  # an open compiler builder holds collection; ARGS are kept across it and copied to the registers after
 threaded.rs execute_args_inner unwind 1 clean  # taken only with nothing to pop or no watchers at all, so it runs no Lisp; the other branch roots VALUE
-threaded.rs primitive_target loader_primitive 1 held  # `Vm::defer''s hold: a legacy primitive's engine runs unsuspended
 threaded.rs reader_call execute_args 1 suspended  # the caller set its engine aside; ARGS become the callee's registers before it can collect
 threaded.rs resolve_entry force_lazy 1 held  # `lend::deferred''s hold, a safe call of the facade
 threaded.rs run_aftermath execute_args 1 clean  # the runner is an interned symbol and nothing else is held
