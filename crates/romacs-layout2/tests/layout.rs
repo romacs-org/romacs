@@ -493,9 +493,9 @@ fn images_take_their_slots_on_the_rows_baseline() {
     use romacs_layout_input::InlineImage;
     let mut snapshot = scene();
     snapshot.text = TextSlice { extends: vec![], utf8: "a b\nc d\nz".into(), face_runs: vec![], raw: vec![] };
-    let image = InlineImage { byte: 1, image: 7, width: 48, ascent: 40, descent: 10, body_x: 4, body_y: 5,
+    let image = InlineImage { byte: 1, image: 7, surface: 0, width: 48, ascent: 40, descent: 10, body_x: 4, body_y: 5,
         source: (10, 0, 40, 40), full: (80, 40), relief: 2, relief_background: None };
-    snapshot.images = vec![image, InlineImage { byte: 5, image: 0, width: 30, ascent: 15, descent: 15, body_x: 0, body_y: 0,
+    snapshot.images = vec![image, InlineImage { byte: 5, image: 0, surface: 0, width: 30, ascent: 15, descent: 15, body_x: 0, body_y: 0,
         source: (0, 0, 30, 30), full: (30, 30), relief: 0, relief_background: None }];
     let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
     let images: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
@@ -530,6 +530,33 @@ fn images_take_their_slots_on_the_rows_baseline() {
     let outline = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { bg, width, height, .. }
         if *bg == Color::from_pixel(0xffffff) && (*width == 1.0 || *height == 1.0))).count();
     assert_eq!(outline, 4);
+}
+
+/// A native surface (a model) takes an image's slot and draws as a surface
+/// glyph on the row's baseline, with no failed-image outline.
+#[test]
+fn a_surface_takes_its_slot_on_the_rows_baseline() {
+    use romacs_layout_input::InlineImage;
+    let mut snapshot = scene();
+    snapshot.text = TextSlice { extends: vec![], utf8: "a b".into(), face_runs: vec![], raw: vec![] };
+    snapshot.images = vec![InlineImage { byte: 1, image: 0, surface: 9, width: 64, ascent: 48, descent: 0, body_x: 0,
+        body_y: 0, source: (0, 0, 64, 48), full: (64, 48), relief: 0, relief_background: None }];
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let surfaces: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Surface { surface_id, x, y, width, height, .. } => Some((surface_id.get(), *x, *y, *width, *height)),
+        _ => None,
+    }).collect();
+    let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, baseline, .. } => Some((*char, *x, *baseline)),
+        _ => None,
+    }).collect();
+    let a = chars[0];
+    assert_eq!(surfaces, [(9, a.1 + frame.char_width, a.2 - 48.0, 64.0, 48.0)]);
+    assert_eq!((chars[1].0, chars[1].1, chars[1].2), ('b', a.1 + frame.char_width + 64.0, a.2));
+    assert!(!frame.glyphs.iter().any(|g| matches!(g, FrameGlyph::Image { .. })));
+    let outline = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { width, height, .. }
+        if *width == 1.0 || *height == 1.0)).count();
+    assert_eq!(outline, 0);
 }
 
 /// A character of another font that wraps to a new row sets that row on

@@ -52,7 +52,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, ModelCreate, NO_MODELS, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;

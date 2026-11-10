@@ -7,7 +7,9 @@
 //! evicted, or lost with its GPU, goes again the next time a frame draws it.
 //! The channel is the frame's too: a publication sends at most
 //! `ASSETS_PER_PUBLICATION` loads and retirements, none while the channel
-//! is full, and the frame goes again with the rest.
+//! is full, and the frame goes again with the rest.  Native surfaces (a
+//! model) that Lisp freed retire the same way, so a full channel never
+//! loses one.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_runtime::paint_host::PaintSender;
 use romacs_imaging::decode::SemanticImageDecoded;
@@ -23,6 +25,8 @@ const ASSETS_PER_PUBLICATION: usize = 16;
 pub trait Sink {
     fn load(&self, id: u32, attempt: u64, decoded: Arc<SemanticImageDecoded>) -> Result<bool, String>;
     fn retire(&self, id: u32) -> Result<bool, String>;
+    /// Free native surface ID once no presented frame draws it.
+    fn free_surface(&self, id: u32) -> Result<bool, String>;
     /// The images it lost since the last call, and whether it lost them all.
     fn lost(&self) -> (Vec<u32>, bool);
     /// Whether it lost them all since the last call, without taking that.
@@ -34,6 +38,7 @@ impl Sink for PaintSender {
         self.load_image(id, attempt, decoded)
     }
     fn retire(&self, id: u32) -> Result<bool, String> { self.retire_image(id) }
+    fn free_surface(&self, id: u32) -> Result<bool, String> { PaintSender::free_surface(self, id) }
     fn lost(&self) -> (Vec<u32>, bool) { self.take_lost_images() }
     fn reset_pending(&self) -> bool { self.images_reset_pending() }
 }
@@ -46,6 +51,8 @@ pub struct Images {
     /// The last attempt sent for each image the VM still holds.
     attempts: HashMap<u32, u64>,
     released: Vec<u32>,
+    /// Native surfaces Lisp freed, still to retire in the renderer.
+    surfaces: Vec<u32>,
     /// Pixels decoded off the VM landed since the last publication, or a
     /// publication left loads or retirements unsent: the frame goes again.
     landed: bool,
@@ -70,6 +77,13 @@ impl Images {
         self.decoded.remove(&id);
         self.attempts.remove(&id);
         if self.resident.remove(&id).is_some() { self.released.push(id); }
+    }
+
+    /// Retire native surface ID at the next publication: the loop paints
+    /// again to send it.
+    pub fn free_surface(&mut self, id: u32) {
+        self.surfaces.push(id);
+        self.landed = true;
     }
 
     /// Whether pixels wait to go to the renderer: the loop paints again.
@@ -123,6 +137,15 @@ impl Images {
             }
             sent += 1;
         }
+        let surfaces = std::mem::take(&mut self.surfaces);
+        for (i, &id) in surfaces.iter().enumerate() {
+            if sent == ASSETS_PER_PUBLICATION || !sink.free_surface(id)? {
+                self.surfaces.extend_from_slice(&surfaces[i..]);
+                self.landed = true;
+                break;
+            }
+            sent += 1;
+        }
         Ok(())
     }
 }
@@ -156,6 +179,11 @@ mod tests {
         fn retire(&self, id: u32) -> Result<bool, String> {
             if !self.take() { return Ok(false) }
             self.sent.borrow_mut().push(format!("retire {id}"));
+            Ok(true)
+        }
+        fn free_surface(&self, id: u32) -> Result<bool, String> {
+            if !self.take() { return Ok(false) }
+            self.sent.borrow_mut().push(format!("free {id}"));
             Ok(true)
         }
         fn lost(&self) -> (Vec<u32>, bool) { std::mem::take(&mut *self.lost.borrow_mut()) }
@@ -255,4 +283,23 @@ mod tests {
         assert_eq!((publications, renderer.sent.borrow().len()), (3, 43 + 39));
     }
 
+
+    /// A freed surface the full channel refused stays to retire: the frame
+    /// goes again, and the next publication with room frees it once.
+    #[test]
+    fn a_freed_surface_survives_a_full_channel() {
+        let renderer = Renderer::default();
+        let mut images = Images::default();
+        images.free_surface(5);
+        assert!(images.behind());
+        renderer.room.set(Some(0));
+        images.publish(&renderer, std::iter::empty()).unwrap();
+        assert!(images.behind(), "refused: it goes again");
+        assert!(renderer.sent.borrow().is_empty());
+        renderer.room.set(None);
+        images.publish(&renderer, std::iter::empty()).unwrap();
+        images.publish(&renderer, std::iter::empty()).unwrap();
+        assert_eq!(*renderer.sent.borrow(), ["free 5"]);
+        assert!(!images.behind());
+    }
 }

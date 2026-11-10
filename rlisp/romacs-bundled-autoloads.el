@@ -53,6 +53,11 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent-codex" '("romacs-agent--codex-"))
 
 
+;;; Generated autoloads from romacs-agent-diff.el
+
+(register-definition-prefixes "romacs-agent-diff" '("romacs-agent-"))
+
+
 ;;; Generated autoloads from romacs-agent-gnosis.el
 
 (register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
@@ -919,6 +924,11 @@ abstention, cancellation and retry never accept a scheduled or practice grade.
 (register-definition-prefixes "gnosis-agent-eval" '("gnosis-agent-eval-"))
 
 
+;;; Generated autoloads from gnosis-agent-model.el
+
+(register-definition-prefixes "gnosis-agent-model" '("gnosis-agent-model-"))
+
+
 ;;; Generated autoloads from gnosis-agent-review.el
 
 (autoload 'gnosis-agent-review-bind-provider "gnosis-agent-review"
@@ -1353,9 +1363,24 @@ model themata, or import a new one; q finishes.
 (register-definition-prefixes "gnosis-model-backend-canvas" '("gnosis-model-backend-canvas"))
 
 
+;;; Generated autoloads from gnosis-model-backend-romacs.el
+
+(register-definition-prefixes "gnosis-model-backend-romacs" '("gnosis-model-backend-romacs"))
+
+
 ;;; Generated autoloads from gnosis-model-camera.el
 
 (register-definition-prefixes "gnosis-model-camera" '("gnosis-model-camera-"))
+
+
+;;; Generated autoloads from gnosis-model-explore.el
+
+(autoload 'gnosis-model-explore "gnosis-model-explore"
+"Study model scene RESOURCE: orbit, zoom and click its structures.
+Interactively, choose a managed scene.
+
+(fn RESOURCE)" t)
+(register-definition-prefixes "gnosis-model-explore" '("gnosis-model-explore-"))
 
 
 ;;; Generated autoloads from gnosis-monkeytype.el

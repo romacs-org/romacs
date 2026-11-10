@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "09c4e1308c9df60d83c797bbedea4aea4f1748e06738867aa44281515f8f2086",
+  "source_fingerprint": "83e8c1960c8c1213150e8002f9bc1a18e30427acf6f38d82a612056b0d5908b6",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1440,
-  "parsed_vm2_only": 1440
+  "parsed_total": 1448,
+  "parsed_vm2_only": 1448
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -5454,6 +5454,41 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:20"
   },
+  "romacs-model--available-p": {
+   "name": "romacs-model--available-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:8"
+  },
+  "romacs-model--create": {
+   "name": "romacs-model--create",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:14"
+  },
+  "romacs-model--freeze": {
+   "name": "romacs-model--freeze",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:45"
+  },
+  "romacs-model--resize": {
+   "name": "romacs-model--resize",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:39"
+  },
+  "romacs-model--set-highlight": {
+   "name": "romacs-model--set-highlight",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:27"
+  },
+  "romacs-model--set-highlight-layers": {
+   "name": "romacs-model--set-highlight-layers",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:33"
+  },
+  "romacs-model--set-view": {
+   "name": "romacs-model--set-view",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:20"
+  },
   "romacs-native-stack-room": {
    "name": "romacs-native-stack-room",
    "implementation": "vm2",
@@ -5473,6 +5508,11 @@
    "name": "romacs-status-bar-window",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:492"
+  },
+  "romacs-surface-destroy": {
+   "name": "romacs-surface-destroy",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/model.rs:49"
   },
   "romacs-treesit-bundled-grammars": {
    "name": "romacs-treesit-bundled-grammars",
