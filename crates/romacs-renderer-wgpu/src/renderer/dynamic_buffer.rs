@@ -1,7 +1,7 @@
 use bytemuck::Pod;
 use std::marker::PhantomData;
 
-pub struct FrameVertexArena<T: Pod> {
+pub(crate) struct FrameVertexArena<T: Pod> {
     buffer: Option<wgpu::Buffer>,
     capacity_bytes: wgpu::BufferAddress,
     cursor_bytes: wgpu::BufferAddress,
@@ -13,7 +13,7 @@ pub struct FrameVertexArena<T: Pod> {
     _marker: PhantomData<T>,
 }
 
-pub struct VertexUpload {
+pub(crate) struct VertexUpload {
     buffer: wgpu::Buffer,
     offset_bytes: wgpu::BufferAddress,
     len_bytes: wgpu::BufferAddress,
@@ -26,7 +26,7 @@ impl VertexUpload {
 
     /// Slice of the arena buffer holding this upload. The upload owns a
     /// handle to the buffer, so the slice needs no borrow of the arena.
-    pub fn buffer_slice(&self) -> wgpu::BufferSlice<'_> {
+    pub(crate) fn buffer_slice(&self) -> wgpu::BufferSlice<'_> {
         self.buffer.slice(self.byte_range())
     }
 }
@@ -84,7 +84,7 @@ impl<T: Pod> FrameVertexArena<T> {
 
     /// Total GPU buffer allocations over the arena's lifetime (monotonic;
     /// steady-state frames add zero).
-    pub fn buffers_created(&self) -> u64 {
+    pub(crate) fn buffers_created(&self) -> u64 {
         self.buffers_created
     }
 

@@ -92,9 +92,6 @@ fn main() {
         event_loop
     };
 
-    #[cfg(not(target_os = "linux"))]
-    let event_loop = EventLoop::new().expect("failed to build event loop");
-
     tracing::info!("probe: entering run_app");
     let app = ProbeApp {
         started: Instant::now(),

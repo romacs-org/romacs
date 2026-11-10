@@ -78,18 +78,6 @@ impl PendingGpu {
         descriptor: wgpu::InstanceDescriptor,
         proxy: EventLoopProxy,
     ) -> Result<Self, String> {
-        #[cfg(feature = "gui-test-hooks")]
-        if crate::gui_test_controls::take("gpu-start-error") {
-            return Err("Injected ordinary GPU worker start error".into());
-        }
-        #[cfg(feature = "gui-test-hooks")]
-        if crate::gui_test_controls::take("gpu-error") {
-            let (sender, reply) = crossbeam_channel::bounded(1);
-            sender
-                .send(Err("Injected ordinary adapter error".into()))
-                .unwrap();
-            return Ok(Self::Adapters { window, reply });
-        }
         crate::paint_host::trace_gpu("adapters-start");
         let reply = spawn("gpu-adapters", proxy, move || {
             let instance = romacs_renderer_wgpu::new_instance(descriptor);

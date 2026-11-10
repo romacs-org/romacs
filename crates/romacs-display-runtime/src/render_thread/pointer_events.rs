@@ -5,13 +5,13 @@ use super::frame_windows::{ChromePress, GuiFrameWindowState};
 use super::input::{MenuBarHit, frame_chrome_hit, frame_chrome_owns_pointer};
 use super::state::PointerCursorIntent;
 use super::state::PresentedInteractionKey;
-use crate::backend::wgpu::ROMACS_SUPER_MASK;
-use crate::core::frame_glyphs::FrameGlyph;
 use crate::thread_comm::{
     InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput, ScrollDelta,
 };
 use romacs_display_protocol::PresentationFramePoint;
+use romacs_display_protocol::TransportModifierBit;
 use romacs_display_protocol::frame_chrome::{ChromeAction, FrameChromeKind};
+use romacs_display_protocol::frame_glyphs::FrameGlyph;
 
 use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
@@ -942,7 +942,7 @@ impl RenderApp {
 
                     if !handled_chrome
                         && !window_state.chrome().decorations_enabled
-                        && (self.modifiers & ROMACS_SUPER_MASK) != 0
+                        && (self.modifiers & TransportModifierBit::Super.mask()) != 0
                     {
                         window_state.drag_window();
                         handled_chrome = true;

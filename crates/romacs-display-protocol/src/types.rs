@@ -253,8 +253,8 @@ impl std::fmt::Display for ImageLoadToken {
 pub struct LayoutUnit(i64);
 
 impl LayoutUnit {
-    pub const FRACTION_BITS: u32 = 6;
-    pub const UNITS_PER_PIXEL: i64 = 1_i64 << Self::FRACTION_BITS;
+    pub(crate) const FRACTION_BITS: u32 = 6;
+    pub(crate) const UNITS_PER_PIXEL: i64 = 1_i64 << Self::FRACTION_BITS;
     pub const ZERO: Self = Self(0);
 
     #[must_use]
@@ -276,7 +276,7 @@ impl LayoutUnit {
     }
 
     #[must_use]
-    pub fn to_px(self) -> f32 {
+    pub(crate) fn to_px(self) -> f32 {
         self.0 as f32 / Self::UNITS_PER_PIXEL as f32
     }
 
@@ -354,7 +354,7 @@ impl Px {
     /// rounding contract of [`crate::frame_glyphs::DisplaySlotId::from_pixels`].
     /// A non-positive cell size yields cell 0 (degenerate geometry guard).
     #[must_use]
-    pub fn cells_rounded(self, cell: Px) -> Cell {
+    pub(crate) fn cells_rounded(self, cell: Px) -> Cell {
         if cell.0 > 0.0 {
             Cell((self.0 / cell.0).round().max(0.0) as u32)
         } else {
@@ -473,7 +473,7 @@ impl Color {
         Self::new(r, g, b, 1.0)
     }
 
-    pub fn from_u8(r: u8, g: u8, b: u8, a: u8) -> Self {
+    pub(crate) fn from_u8(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
             r: r as f32 / 255.0,
             g: g as f32 / 255.0,
@@ -656,8 +656,9 @@ impl Rect {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn from_point_size(point: Point, size: Size) -> Self {
+    pub(crate) fn from_point_size(point: Point, size: Size) -> Self {
         Self::new(point.x, point.y, size.width, size.height)
     }
 
@@ -762,8 +763,9 @@ pub enum CursorAnimStyle {
 }
 
 impl CursorAnimStyle {
+    #[cfg(test)]
     /// Decode a numeric style, using exponential decay for unknown values.
-    pub fn from_u8(v: u8) -> Self {
+    pub(crate) fn from_u8(v: u8) -> Self {
         Self::from(v)
     }
 }

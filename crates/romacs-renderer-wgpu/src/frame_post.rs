@@ -16,25 +16,21 @@
 //! composes the accessor functions into the module, this side only keeps the
 //! name -> slot table so [`FramePost::set_uniform`] can update values live.
 
-use std::collections::HashMap;
-
 use romacs_display_protocol::frame_time::{EventTime, FrameSample, observe_platform_now};
 
 use bytemuck::Zeroable;
 
 use crate::shader_surface::{
     SURFACE_UNIFORM_BYTES, SURFACE_USER_UNIFORM_SLOTS, SurfaceShaderLanguage, SurfaceUniformInit,
-    SurfaceUniforms, uniform_accessor_name,
+    SurfaceUniforms,
 };
 use crate::shader_surface_cache::build_surface_pipeline;
 
-pub struct FramePost {
+pub(crate) struct FramePost {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// name -> (slot, components) for `set_uniform` by Lisp name.
-    uniform_slots: HashMap<String, (usize, u8)>,
     custom: [[f32; 4]; SURFACE_USER_UNIFORM_SLOTS],
     /// `iTime` epoch. Dated to the frame sample, not the wall clock: the
     /// shader's animation is a visual phase, so it must be correct when the
@@ -117,10 +113,8 @@ impl FramePost {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let mut uniform_slots = HashMap::new();
         let mut custom = [[0.0f32; 4]; SURFACE_USER_UNIFORM_SLOTS];
         for (slot, init) in uniforms.iter().enumerate().take(SURFACE_USER_UNIFORM_SLOTS) {
-            uniform_slots.insert(init.name.clone(), (slot, init.components));
             custom[slot] = init.value;
         }
         Ok(Self {
@@ -128,7 +122,6 @@ impl FramePost {
             uniform_buffer,
             bind_group_layout,
             sampler,
-            uniform_slots,
             custom,
             // Adapter read: the epoch is minted at install time, outside any
             // frame. Every later read of it goes through the frame sample.
@@ -136,20 +129,6 @@ impl FramePost {
             last: None,
             frame_index: 0,
         })
-    }
-
-    /// Update one named uniform; unknown names are ignored with a warning
-    /// (the accessor set is fixed at install time). No dirty flag needed:
-    /// the post pass runs every frame while installed, so the next frame
-    /// picks the value up — no recompile.
-    pub fn set_uniform(&mut self, name: &str, value: [f32; 4]) {
-        match self.uniform_slots.get(name) {
-            Some((slot, _)) => self.custom[*slot] = value,
-            None => tracing::warn!(
-                "frame shader has no uniform {name:?} (accessor {})",
-                uniform_accessor_name(name)
-            ),
-        }
     }
 
     /// Record the post pass: sample `src_view` (the rendered frame), write the

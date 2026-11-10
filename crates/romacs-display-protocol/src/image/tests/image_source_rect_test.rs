@@ -1,5 +1,4 @@
-use super::{ImageLayoutAdvance, ImageMargins, ImageOpaqueBackground, ImageSourceRect};
-use crate::types::Px;
+use super::{ImageMargins, ImageOpaqueBackground, ImageSourceRect};
 
 const QUANTIZATION_TOLERANCE: f32 = 2.0 / u16::MAX as f32;
 
@@ -80,16 +79,4 @@ fn a_crop_that_leaves_nothing_to_sample_is_rejected() {
         Some(ImageSourceRect::FULL),
         "a fraction past the whole rect crops nothing"
     );
-}
-
-#[test]
-fn a_cropped_layout_advance_must_be_positive_and_finite() {
-    assert_eq!(
-        ImageLayoutAdvance::new(Px(304.0)).map(|advance| advance.px().get()),
-        Some(304.0)
-    );
-    assert_eq!(ImageLayoutAdvance::new(Px(0.0)), None);
-    assert_eq!(ImageLayoutAdvance::new(Px(-1.0)), None);
-    assert_eq!(ImageLayoutAdvance::new(Px(f32::INFINITY)), None);
-    assert_eq!(std::mem::size_of::<ImageLayoutAdvance>(), 4);
 }

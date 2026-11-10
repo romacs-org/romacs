@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use super::child_frames::ChildFrameManager;
 use super::cursor::CursorState;
 use super::transitions::TransitionState;
-use crate::core::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 #[cfg(feature = "video")]
 use romacs_display_protocol::types::VideoId;
 use romacs_renderer_wgpu::{FullFrameTexture, RendererFrameEffects, WgpuGlyphAtlas};
@@ -270,7 +270,7 @@ pub(crate) struct RetainedStatic {
 /// A retained single-glyph mini-frame for one filled-box cursor cell, plus the
 /// physical-pixel scissor rect it is drawn within.
 pub(crate) struct RetainedCursorCell {
-    pub(super) mini: crate::core::frame_glyphs::FrameGlyphBuffer,
+    pub(super) mini: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     pub(super) scissor: (u32, u32, u32, u32),
 }
 

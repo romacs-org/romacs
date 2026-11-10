@@ -100,7 +100,7 @@ impl PopupPlacement {
     /// This is useful only for coarse pre-layout estimates; final drawing must
     /// use [`Self::resolve`] with the measured popup extent.
     #[must_use]
-    pub fn preferred_origin(self, popup: Size) -> Point {
+    pub(crate) fn preferred_origin(self, popup: Size) -> Point {
         self.origin_for(self.preferred_side, popup)
     }
 

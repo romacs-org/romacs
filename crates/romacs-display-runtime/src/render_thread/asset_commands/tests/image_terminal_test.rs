@@ -70,10 +70,11 @@ fn bands_do_not_answer_a_terminal_query() {
         Some(0),
         "the band is published where the display side can read it"
     );
-    assert!(matches!(
-        shared.wait_for_terminal(load, std::time::Duration::from_millis(1)),
-        None
-    ));
+    assert!(
+        shared
+            .wait_for_terminal(load, std::time::Duration::from_millis(1))
+            .is_none()
+    );
 
     shared.publish_band(load, band(4));
     assert_eq!(

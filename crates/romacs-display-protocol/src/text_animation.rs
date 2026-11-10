@@ -33,7 +33,11 @@ pub enum TextAnimationKind {
     /// The Romacs mark and wordmark (romacs-logo) in cells CELL_ASPECT as
     /// wide as high, a sweep of light crossing them.  A new EPOCH starts
     /// the motion over.
-    Logo { cell_aspect: f64, epoch: u64, colours: LogoColours },
+    Logo {
+        cell_aspect: f64,
+        epoch: u64,
+        colours: LogoColours,
+    },
 }
 
 /// The colours the logo takes from the theme: the mark's light (the
@@ -49,7 +53,10 @@ impl Default for LogoColours {
     /// The stock theme's: its accent and the logo's own wordmark grey.
     fn default() -> Self {
         let word = romacs_logo::WORDMARK_COLOUR;
-        Self { mark: [0xd4, 0x8a, 0x20], word: [(word >> 16) as u8, (word >> 8) as u8, word as u8] }
+        Self {
+            mark: [0xd4, 0x8a, 0x20],
+            word: [(word >> 16) as u8, (word >> 8) as u8, word as u8],
+        }
     }
 }
 
@@ -57,7 +64,10 @@ impl TextAnimation {
     /// Whether NEXT continues this one's motion rather than restarting it.
     pub fn continues(&self, next: &Self) -> bool {
         match (&self.kind, &next.kind) {
-            (TextAnimationKind::Logo { epoch: a, .. }, TextAnimationKind::Logo { epoch: b, .. }) => a == b,
+            (
+                TextAnimationKind::Logo { epoch: a, .. },
+                TextAnimationKind::Logo { epoch: b, .. },
+            ) => a == b,
         }
     }
 
@@ -66,8 +76,16 @@ impl TextAnimation {
     pub fn cells(&self, moved: f64) -> Vec<romacs_logo::Cell> {
         match self.kind {
             TextAnimationKind::Logo { cell_aspect, .. } => {
-                let view = romacs_logo::View { cols: self.cols as usize, rows: self.rows as usize, cell_aspect };
-                if view.valid() { romacs_logo::frame(view, moved) } else { vec![] }
+                let view = romacs_logo::View {
+                    cols: self.cols as usize,
+                    rows: self.rows as usize,
+                    cell_aspect,
+                };
+                if view.valid() {
+                    romacs_logo::frame(view, moved)
+                } else {
+                    vec![]
+                }
             }
         }
     }
@@ -86,15 +104,31 @@ impl TextAnimation {
 /// glyphs, which the evaluator lays out for every cell of the block.
 pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[romacs_logo::Cell]) {
     let (cols, rows) = (animation.cols as usize, animation.rows as usize);
-    if cols == 0 || cells.len() != cols * rows { return; }
+    if cols == 0 || cells.len() != cols * rows {
+        return;
+    }
     let in_window = |glyph: &FrameGlyph| match glyph {
-        FrameGlyph::Char { slot_id, row_role: GlyphRowRole::Text, composed: None, .. }
-            if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
+        FrameGlyph::Char {
+            slot_id,
+            row_role: GlyphRowRole::Text,
+            composed: None,
+            ..
+        } if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
         _ => None,
     };
-    let Some((first_row, first_col)) = frame.glyphs.iter().filter_map(in_window)
-        .fold(None, |origin: Option<(u32, u16)>, slot| Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col)))))
-    else { return };
+    let Some((first_row, first_col)) =
+        frame
+            .glyphs
+            .iter()
+            .filter_map(in_window)
+            .fold(None, |origin: Option<(u32, u16)>, slot| {
+                Some(origin.map_or((slot.row, slot.col), |(r, c)| {
+                    (r.min(slot.row), c.min(slot.col))
+                }))
+            })
+    else {
+        return;
+    };
     let block = |slot: &DisplaySlotId| -> Option<usize> {
         let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
         let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
@@ -105,26 +139,48 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
     let mut model: Vec<Option<usize>> = vec![None; rows];
     for (i, glyph) in frame.glyphs.iter().enumerate() {
         if let Some(slot_id) = in_window(glyph)
-            && let Some(cell) = block(&slot_id) {
+            && let Some(cell) = block(&slot_id)
+        {
             at[cell] = Some(i);
             model[cell / cols].get_or_insert(i);
         }
     }
-    let Some(base) = model.iter().flatten().next().and_then(|&i| face_of(&frame.glyphs[i])) else { return };
-    let Some(face) = frame.faces.get(&base).cloned() else { return };
-    let mut next = frame.faces.keys().map(|id| id.get()).max().unwrap_or(0).max(crate::face::BasicFaceId::SENTINEL) + 1;
+    let Some(base) = model
+        .iter()
+        .flatten()
+        .next()
+        .and_then(|&i| face_of(&frame.glyphs[i]))
+    else {
+        return;
+    };
+    let Some(face) = frame.faces.get(&base).cloned() else {
+        return;
+    };
+    let mut next = frame
+        .faces
+        .keys()
+        .map(|id| id.get())
+        .max()
+        .unwrap_or(0)
+        .max(crate::face::BasicFaceId::SENTINEL)
+        + 1;
     let mut coloured: Vec<(u32, FaceId)> = vec![];
     // Every character's font and glyph as the evaluator's frame resolved it.
-    let mut resolved: std::collections::HashMap<char, crate::font::ResolvedCharGlyph> = std::collections::HashMap::new();
+    let mut resolved: std::collections::HashMap<char, crate::font::ResolvedCharGlyph> =
+        std::collections::HashMap::new();
     for glyphs in frame.char_fonts.values() {
-        for (&c, &glyph) in glyphs { resolved.entry(c).or_insert(glyph); }
+        for (&c, &glyph) in glyphs {
+            resolved.entry(c).or_insert(glyph);
+        }
     }
     let char_width = frame.char_width;
     for (cell, &(ch, colour)) in cells.iter().enumerate() {
         let index = match at[cell] {
             Some(index) => index,
             None => {
-                let Some(model) = model[cell / cols] else { continue };
+                let Some(model) = model[cell / cols] else {
+                    continue;
+                };
                 let mut glyph = frame.glyphs[model].clone();
                 if let FrameGlyph::Char { x, slot_id, .. } = &mut glyph {
                     let col = first_col + (cell % cols) as u16;
@@ -142,22 +198,43 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
                 None => {
                     let id = FaceId::new(next);
                     next += 1;
-                    frame.faces.insert(id, Face { id, foreground: Color::from_pixel(rgb), ..face.clone() });
+                    frame.faces.insert(
+                        id,
+                        Face {
+                            id,
+                            foreground: Color::from_pixel(rgb),
+                            ..face.clone()
+                        },
+                    );
                     coloured.push((rgb, id));
                     id
                 }
             },
         };
-        if let FrameGlyph::Char { char, face_id: glyph_face, .. } = &mut frame.glyphs[index] {
+        if let FrameGlyph::Char {
+            char,
+            face_id: glyph_face,
+            ..
+        } = &mut frame.glyphs[index]
+        {
             *char = ch;
             *glyph_face = face_id;
         }
-        if face_id != base && let Some(&glyph) = resolved.get(&ch) {
-            frame.char_fonts.entry(face_id).or_default().insert(ch, glyph);
+        if face_id != base
+            && let Some(&glyph) = resolved.get(&ch)
+        {
+            frame
+                .char_fonts
+                .entry(face_id)
+                .or_default()
+                .insert(ch, glyph);
         }
     }
 }
 
 fn face_of(glyph: &FrameGlyph) -> Option<FaceId> {
-    match glyph { FrameGlyph::Char { face_id, .. } => Some(*face_id), _ => None }
+    match glyph {
+        FrameGlyph::Char { face_id, .. } => Some(*face_id),
+        _ => None,
+    }
 }

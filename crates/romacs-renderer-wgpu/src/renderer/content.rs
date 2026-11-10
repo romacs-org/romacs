@@ -262,7 +262,6 @@ impl WgpuRenderer {
         let mut stipple_vertices: Vec<RectVertex> = Vec::new();
         let mut cursor_bg_vertices: Vec<RectVertex> = Vec::new();
         let mut cursor_vertices: Vec<RectVertex> = Vec::new();
-        let mut cursor_inverse_video = None;
         let mut fringe_vertices: Vec<RectVertex> = Vec::new();
         let mut scroll_bar_thumbs: Vec<(f32, f32, f32, f32, f32, Color)> = Vec::new();
 
@@ -545,7 +544,7 @@ impl WgpuRenderer {
                 &mut cursor_vertices,
             );
         }
-        cursor_inverse_video = self.active_cursor_inverse_video(frame, cursor_visible, animated_cursor.as_ref());
+        let cursor_inverse_video = self.active_cursor_inverse_video(frame, cursor_visible, animated_cursor.as_ref());
 
         // --- Step 2: Collect text glyphs (with overstrike and composed) ---
         let mut mask_data: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])> = Vec::new();

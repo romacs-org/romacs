@@ -80,7 +80,7 @@ impl Node {
     }
 
     /// Create a container with transform
-    pub fn container_with_transform(children: Vec<Node>, transform: Transform) -> Self {
+    pub(crate) fn container_with_transform(children: Vec<Node>, transform: Transform) -> Self {
         Self {
             kind: NodeKind::Container { children },
             bounds: Rect::ZERO,
@@ -91,7 +91,7 @@ impl Node {
     }
 
     /// Create a color rectangle node
-    pub fn color_rect(bounds: Rect, color: Color) -> Self {
+    pub(crate) fn color_rect(bounds: Rect, color: Color) -> Self {
         Self {
             kind: NodeKind::ColorRect { color },
             bounds,
@@ -154,20 +154,22 @@ impl Node {
         }
     }
 
+    #[cfg(test)]
     /// Set opacity
-    pub fn with_opacity(mut self, opacity: f32) -> Self {
+    pub(crate) fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity;
         self
     }
 
+    #[cfg(test)]
     /// Set transform
-    pub fn with_transform(mut self, transform: Transform) -> Self {
+    pub(crate) fn with_transform(mut self, transform: Transform) -> Self {
         self.transform = Some(transform);
         self
     }
 
     /// Set clip
-    pub fn with_clip(mut self, clip: Rect) -> Self {
+    pub(crate) fn with_clip(mut self, clip: Rect) -> Self {
         self.clip = Some(clip);
         self
     }
@@ -300,8 +302,9 @@ impl Scene {
         self.dirty = Some(Rect::new(0.0, 0.0, self.width, self.height));
     }
 
+    #[cfg(test)]
     /// Mark a region as dirty
-    pub fn mark_region_dirty(&mut self, region: Rect) {
+    pub(crate) fn mark_region_dirty(&mut self, region: Rect) {
         self.dirty = Some(match self.dirty {
             Some(existing) => {
                 // Union of existing and new dirty region
@@ -315,8 +318,9 @@ impl Scene {
         });
     }
 
+    #[cfg(test)]
     /// Clear dirty region
-    pub fn clear_dirty(&mut self) {
+    pub(crate) fn clear_dirty(&mut self) {
         self.dirty = None;
     }
 
@@ -332,71 +336,10 @@ impl Scene {
         self.faces.insert(face.id, face);
     }
 
+    #[cfg(test)]
     /// Get a face by ID
-    pub fn get_face(&self, id: FaceId) -> Option<&Face> {
+    pub(crate) fn get_face(&self, id: FaceId) -> Option<&Face> {
         self.faces.get(&id)
-    }
-
-    /// Add a floating video at screen position
-    pub fn add_floating_video(
-        &mut self,
-        video_id: VideoId,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) {
-        self.floating_videos.push(FloatingVideo {
-            video_id,
-            x,
-            y,
-            width,
-            height,
-        });
-        self.mark_dirty();
-    }
-
-    /// Remove floating video by video ID
-    pub fn remove_floating_video(&mut self, video_id: VideoId) {
-        self.floating_videos.retain(|v| v.video_id != video_id);
-        self.mark_dirty();
-    }
-
-    /// Clear all floating videos
-    pub fn clear_floating_videos(&mut self) {
-        self.floating_videos.clear();
-        self.mark_dirty();
-    }
-
-    /// Add a floating image at screen position
-    pub fn add_floating_image(
-        &mut self,
-        image_id: ImageId,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) {
-        self.floating_images.push(FloatingImage {
-            image_id,
-            x,
-            y,
-            width,
-            height,
-        });
-        self.mark_dirty();
-    }
-
-    /// Remove floating image by image ID
-    pub fn remove_floating_image(&mut self, image_id: ImageId) {
-        self.floating_images.retain(|i| i.image_id != image_id);
-        self.mark_dirty();
-    }
-
-    /// Clear all floating images
-    pub fn clear_floating_images(&mut self) {
-        self.floating_images.clear();
-        self.mark_dirty();
     }
 
     /// Add a border rectangle
@@ -411,8 +354,9 @@ impl Scene {
         self.mark_dirty();
     }
 
+    #[cfg(test)]
     /// Clear all borders
-    pub fn clear_borders(&mut self) {
+    pub(crate) fn clear_borders(&mut self) {
         self.borders.clear();
     }
 

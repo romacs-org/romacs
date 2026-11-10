@@ -981,7 +981,7 @@ fn hit_test_respects_updated_z_order() {
 
 use romacs_display_protocol::motion_spec::{MotionDuration, TweenSpec};
 use romacs_display_protocol::scroll_animation::TransitionEasing;
-use crate::core::frame_glyphs::FrameGlyph;
+use romacs_display_protocol::frame_glyphs::FrameGlyph;
 
 fn tween_100ms() -> MotionSpec {
     MotionSpec::Tween(TweenSpec {
@@ -1314,7 +1314,7 @@ fn finished_drifts_clear_so_the_retained_path_returns() {
     assert!(mgr.has_animation_activity());
 
     // Mid-drift the drift pins full renders.
-    assert!(mgr.clear_finished_drifts(sample_at(origin, 10)) == false);
+    assert!(!mgr.clear_finished_drifts(sample_at(origin, 10)));
     assert!(mgr.has_animation_activity());
 
     // Past the tween the drift clears, releasing the retained path.

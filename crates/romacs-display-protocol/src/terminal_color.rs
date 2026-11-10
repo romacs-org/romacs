@@ -52,7 +52,7 @@ impl TerminalColor {
     /// palette subscript a terminfo `setaf` can take -- so a malformed Lisp
     /// answer cannot become a colour.
     #[must_use]
-    pub fn from_tty_color_desc(index: i64, color_cells: i64) -> Option<Self> {
+    pub(crate) fn from_tty_color_desc(index: i64, color_cells: i64) -> Option<Self> {
         if index < 0 {
             return None;
         }
@@ -65,30 +65,6 @@ impl TerminalColor {
             });
         }
         u16::try_from(index).ok().map(Self::Indexed)
-    }
-
-    /// The single number GNU's realized face carries for this colour.
-    ///
-    /// `setaf`/`setab` take it apart with `TF_rgb_separate` (src/term.c:2098),
-    /// but `Setulc` does not: GNU installs one fixed string for the underline
-    /// colour and passes the realized slot to it whole (src/term.c:4708),
-    ///
-    /// ```text
-    ///   \e[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%dm
-    /// ```
-    ///
-    /// which divides that one parameter into three channels regardless of what
-    /// the terminal's colour depth made it mean.  Recovering the number is
-    /// therefore how the underline colour is written, and the conflation it
-    /// produces below 24-bit colour is GNU's, measured: on TERM=tmux-256color
-    /// with no COLORTERM, `(:underline (:color "red"))` realizes to palette
-    /// subscript 1 and GNU emits `ESC[58:2::0:0:1m`.
-    #[must_use]
-    pub fn realized_pixel(self) -> u32 {
-        match self {
-            Self::Indexed(index) => u32::from(index),
-            Self::Direct { r, g, b } => (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b),
-        }
     }
 }
 

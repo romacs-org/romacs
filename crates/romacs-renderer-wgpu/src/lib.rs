@@ -7,14 +7,15 @@
 
 pub mod gpu_policy;
 pub mod diagnostics;
-pub mod external_buffer;
-pub mod frame_post;
+pub(crate) mod frame_post;
 pub mod glyph_atlas;
 #[cfg(feature = "video")]
 mod gpu_frame_timing;
 pub mod image_cache;
-pub use romacs_imaging::{image_bands, image_probe, image_scale, image_sequence, svg, svg_animation, xbm, xpm};
-pub mod media_budget;
+pub use romacs_imaging::{
+    image_bands, image_probe, image_scale, image_sequence, svg, svg_animation, xbm, xpm,
+};
+pub(crate) mod media_budget;
 pub mod model;
 #[cfg(target_os = "linux")]
 pub mod native_presentation;
@@ -26,47 +27,32 @@ pub mod shader_surface_cache;
 #[cfg(test)]
 #[path = "tests/texture_discipline_test.rs"]
 mod texture_discipline_test;
-pub mod tooltip_layout;
+pub(crate) mod tooltip_layout;
 pub use image_bands::{BandPlacement, DecodedBand, RasterBand, RowRange, TextureRows};
 pub use svg::SvgResourceContext;
 pub mod vertex;
 
 #[cfg(feature = "video")]
-pub mod video_cache;
+pub(crate) mod video_cache;
 
-#[cfg(all(
-    feature = "video-dmabuf",
-    target_os = "linux"
-))]
-pub mod vulkan_dmabuf;
-
-pub use gpu_policy::{choose_adapter, new_instance, power_preference, request_renderer_device};
-#[cfg(target_os = "linux")]
-pub use external_buffer::DmaBufBuffer;
-pub use external_buffer::{BufferFormat, ExternalBuffer, PlatformBuffer, SharedMemoryBuffer};
-pub use glyph_atlas::{
-    ComposedGlyphKey, GlyphAtlasHandle, GlyphKey, GlyphPixelKind, RasterizeResult, WgpuGlyphAtlas,
-    allocator, pages, types,
-};
-pub use image_cache::{
-    CachedImage, FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState,
-};
+pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
+pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
-    BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudget, GpuBudgetOwner,
-    PaneBlit, PaneSource, RendererFrameEffects, RowDamageInfo, RowReuseStats, SnapshotId,
-    SnapshotLease, SnapshotPool, SnapshotResources, SnapshotSize, UnpooledTexture, WgpuRenderer,
-    WindowRowDamage, texture_bytes,
+    BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudgetOwner, PaneBlit,
+    PaneSource, RendererFrameEffects, SnapshotLease, SnapshotSize, UnpooledTexture, WgpuRenderer,
+    texture_bytes,
 };
 pub use shader_surface::{
-    SURFACE_USER_UNIFORM_SLOTS, ShaderValidationError, SurfaceContract, SurfaceUniformInit,
-    compose_surface_wgsl, validate_surface_wgsl,
+    ShaderValidationError, SurfaceContract, SurfaceUniformInit, compose_surface_wgsl,
+    validate_surface_wgsl,
 };
-pub use shader_surface_cache::{MAX_SURFACE_SIZE, ShaderSurfaceCache};
 pub use tooltip_layout::TooltipLayout;
-pub use vertex::{GlyphVertex, RectVertex, RoundedRectVertex, TextureVertex, Uniforms};
+pub use vertex::{Uniforms};
 #[cfg(feature = "video")]
-pub use video_cache::{CachedVideo, VideoCache, VideoRecoveryManifest, VideoState};
+pub use video_cache::VideoRecoveryManifest;
+pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
+pub use shader_surface_cache::ShaderSurfaceCache;
 
 /// Whether the WGPU backend has a concrete rendering path for a graphical
 /// face feature.

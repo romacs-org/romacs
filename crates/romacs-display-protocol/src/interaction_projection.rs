@@ -43,7 +43,7 @@ use crate::types::LiveDisplayWindowId;
 pub enum PresentationFrameSpace {}
 
 /// The translation from root-surface coordinates into a presentation's frame.
-pub type SurfaceToPresentation =
+pub(crate) type SurfaceToPresentation =
     SpaceTranslation<RootSurfaceSpace, PresentationFrameSpace, LogicalPixels>;
 
 /// A point known to be in the frame space of `presentation`.
