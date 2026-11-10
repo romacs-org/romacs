@@ -220,7 +220,7 @@ impl Vm {
     }
     pub(crate) fn overlay_store_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
-        match self.objects.get_mut(i) {
+        match self.objects.get_entry_mut(i) {
             Some(Object::Buffer(b)) => Ok(b),
             Some(Object::ByteBuffer(b)) => b.shown_mut().ok_or_else(|| "unibyte buffer not mirrored".into()),
             _ => Err("text buffer required".into()),
@@ -272,7 +272,7 @@ impl Vm {
     }
     pub(super) fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
-        match self.objects.get_mut(i) {
+        match self.objects.get_entry_mut(i) {
             Some(Object::Buffer(b)) => Ok(b),
             _ => Err("text buffer required".into()),
         }
@@ -288,7 +288,7 @@ impl Vm {
     }
     pub(crate) fn marker_anchors_mut(&mut self, buffer: Value) -> Result<&mut crate::anchors::AnchorTree> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
-        match self.objects.get_mut(i) {
+        match self.objects.get_entry_mut(i) {
             Some(Object::Buffer(b)) => Ok(&mut b.anchors),
             Some(Object::ByteBuffer(b)) => Ok(&mut b.anchors),
             _ => Err("buffer required".into()),
@@ -964,7 +964,7 @@ impl Vm {
                 let index = self.buffer_index()?;
                 if matches!(self.objects[index], Object::ByteBuffer(_)) {
                     let (bytes, properties) = self.unibyte_insertion(args)?;
-                    let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+                    let Object::ByteBuffer(b) = self.objects.entry_mut(index) else { unreachable!("unibyte buffer") };
                     let at = b.point;
                     b.insert_before_markers(&bytes)?;
                     b.graft_properties(at, properties);

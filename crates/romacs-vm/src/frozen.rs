@@ -9,7 +9,7 @@
 //! region's bytes are attached (`attach`), so every accessor that is total
 //! over private objects is total over frozen ones through `Vm::object`,
 //! `Vm::object_if` and `Vm::cons_pair`; mutation goes through `Vm::object_mut`
-//! and `Vm::cons_mut`, which refuse with GNU's read-only error.
+//! and `Vm::writable_cons`, which refuse with GNU's read-only error.
 //!
 //! One encoding (`VM2FRZ01`) serves both directions: `freeze` walks a graph
 //! (private or frozen) into bytes and attaches them as a new region; `thaw`
@@ -724,7 +724,7 @@ impl Vm {
             let filled = table.storage_bytes(false).saturating_sub(empty);
             self.allocation.allocated += filled as u64;
             self.allocation.consed.vector_cells += (filled / size_of::<Value>()) as u64;
-            self.objects[base + i] = Object::HashTable(Box::new(table));
+            *self.objects.entry_mut(base + i) = Object::HashTable(Box::new(table));
         }
         Ok(place.value(decoded.root, &symbols))
     }

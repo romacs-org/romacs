@@ -18,7 +18,7 @@ impl Leaf<'_> {
         let marker = self.vm.allocate_object(Object::Marker(Box::new(Marker {
             buffer: Value::NIL, anchor: None, bias: Bias::Left, last_position: 0
         })));
-        match &mut self.vm.objects[buffer.index(0).map_err(Fault::Error)? - 1] {
+        match self.vm.objects.entry_mut(buffer.index(0).map_err(Fault::Error)? - 1) {
             Object::Buffer(b) => b.per_buffer.set_editor_mark(marker),
             Object::ByteBuffer(b) => b.per_buffer.set_editor_mark(marker),
             _ => unreachable!(),

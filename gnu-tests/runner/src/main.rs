@@ -190,13 +190,11 @@ fn lisp_string(text: &str) -> String {
     s
 }
 
-/// Evaluate SOURCE, converting a panic into an error tagged `panic`.
+/// Evaluate SOURCE, converting a panic into an error tagged `panic`. The VM is
+/// put back as it was (`Vm::catching`), as some callers go on using it.
 fn eval<'vm>(vm: &'vm mut Vm, source: &str) -> Result<romacs_vm::Local<'vm>, (bool, String)> {
-    match catch_unwind(AssertUnwindSafe(move || {
-        let vm = vm;
-        vm.eval_source(source)
-    })) {
-        Ok(Ok(v)) => Ok(v),
+    match vm.catching(|vm| vm.eval_source(source).map(romacs_vm::Local::root)) {
+        Ok(Ok(rooted)) => rooted.get(vm).map_err(|e| (false, e)),
         Ok(Err(e)) => Err((false, e)),
         Err(p) => Err((
             true,

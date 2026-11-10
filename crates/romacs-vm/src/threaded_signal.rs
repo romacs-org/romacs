@@ -84,7 +84,7 @@ pub(super) fn prepare_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b
         let Some(&Escape::Signal(condition, data)) = e.escape.as_ref() else { return false };
         let object = e.vm.list_value(&[condition]);
         let index = object.index(3).unwrap();
-        e.vm.conses[index].1 = data;
+        e.vm.conses.set_cdr(index, data);
         let conditions = e.vm.signal_conditions(condition);
         e.escape = Some(Escape::Error { condition, object, conditions, target: None });
         true

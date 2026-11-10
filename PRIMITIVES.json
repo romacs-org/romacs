@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "98a220daf5f71dbbb802dbfc881ffd89b0de0f6cf162276bcf4b53edb68e733b",
+  "source_fingerprint": "834ff6fda025ab742084a55d3ee588f2c17e1207b063c4702d373712f08842e9",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1442,
-  "parsed_vm2_only": 1442
+  "parsed_total": 1443,
+  "parsed_vm2_only": 1443
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3127,7 +3127,7 @@
   "make-finalizer": {
    "name": "make-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:87"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -3372,12 +3372,12 @@
   "memory-info": {
    "name": "memory-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:125"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:135"
   },
   "memory-use-counts": {
    "name": "memory-use-counts",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:139"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:149"
   },
   "memq": {
    "name": "memq",
@@ -4351,7 +4351,7 @@
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:104"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:114"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
@@ -5254,6 +5254,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:504"
   },
+  "romacs--suspended-activations": {
+   "name": "romacs--suspended-activations",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:82"
+  },
   "romacs--t2-assoc": {
    "name": "romacs--t2-assoc",
    "implementation": "vm2",
@@ -5267,12 +5272,12 @@
   "romacs--take-doomed-finalizer": {
    "name": "romacs--take-doomed-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:85"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:95"
   },
   "romacs--take-post-gc": {
    "name": "romacs--take-post-gc",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:93"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:103"
   },
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",

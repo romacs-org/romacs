@@ -18,26 +18,18 @@ romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaime
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
 /// so only the forwarded copy is used. Frames nest; release each in reverse
-/// order on every exit, the failing ones included. A panic unwinding the
-/// owning frame drops the span.
+/// order on every exit, the failing ones included. A panic leaves them to
+/// whatever catches it (`Vm::catching`).
 #[must_use = "a root frame is released on every exit"]
 pub(crate) struct RootFrame {
     base: usize,
     len: usize,
-    vm: *mut Vm,
+    /// Only compared, to refuse a frame of another VM.
+    vm: *const Vm,
 }
 // SAFETY: a frame holds indices into its VM's traced `external_roots`, never a
 // Value; every read, write and release checks the VM is the frame's.
 unsafe impl crate::brand::Plain for RootFrame {}
-
-impl Drop for RootFrame {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            // SAFETY: as for `UnwindMark`.
-            unsafe { (*self.vm).external_roots.truncate(self.base) };
-        }
-    }
-}
 
 /// Test mode: every Nth Lisp entry (`threaded::execute_args`) collects and
 /// moves every live object, so a heap Value a native frame kept in a Rust
@@ -112,8 +104,15 @@ pub(crate) struct CollectionRecord {
     /// In a prompt's redisplay, the host taken for the read: no key can be
     /// seen, and one pressed waits.
     pub(crate) redisplay: bool,
+    /// When it ended, in seconds as `float-time` reads, if a clock timed it
+    /// (`host::collection_clock`).
+    pub(crate) at: Option<f64>,
+    /// What it left live in the private heap: `private_objects`, and
+    /// `Vm::live_bytes_estimate`.
+    pub(crate) objects: usize,
+    pub(crate) bytes: usize,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -240,69 +239,17 @@ romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_
 /// index no table has, which no operation accepts.
 pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
-/// The state nested Lisp runs push and pop on the VM: suspended engines and
-/// their register stacks, root frames, collection holds, the running-engine
-/// count, the hold on aftermath and its runs (`Vm::aftermath_held'), dynamic bindings,
-/// handler and backtrace marks. A panic unwinding a frame that took this mark
-/// restores it, so no entry outlives the engine or frame it describes (a
-/// suspended engine's code pointers would dangle) and the VM stays usable
-/// once the panic is caught: the bindings and handlers made since are popped,
-/// without their watchers, and no cleanup runs; what they owned
-/// (`romacs--post-gc-owned', `inhibit-quit', a job's claim) ends with them,
-/// and a variable whose watchers were running is trapped again (`Vm::retrap').
-/// An unbind that panics again during recovery aborts the process: a second
-/// panic in a drop.
-#[must_use = "the mark restores on unwinding only while it lives"]
-pub(crate) struct UnwindMark {
-    vm: *mut Vm,
-    code: usize,
-    stacks: usize,
+/// What can stand at a `Vm::catching` outside any engine, for a panic to put
+/// back: an embedder's root frames and holds, the bindings, handlers and
+/// backtrace entries below it, watchers already running, and the Lisp depth.
+struct NestingMark {
     roots: usize,
-    engines: usize,
     holds: usize,
-    aftermath_held: usize,
-    aftermath_runs: usize,
     dynamic: usize,
     retrap: usize,
-    rooted_write: bool,
-    stack_empty: bool,
     handlers: usize,
     backtrace: usize,
     eval_depth: usize,
-    site_leaf: (usize, usize),
-}
-
-impl Drop for UnwindMark {
-    fn drop(&mut self) {
-        if !std::thread::panicking() {
-            return;
-        }
-        // SAFETY: the mark lives in a frame of the borrow it was taken from,
-        // and an unwinding frame no longer uses that borrow.
-        let vm = unsafe { &mut *self.vm };
-        // The bindings made since end as an error's teardown ends them
-        // (`Vm::unwind'), but no watcher runs: no Lisp runs while a panic
-        // unwinds. First, while the backtrace still names them.
-        let trapped = std::mem::take(&mut vm.trapped);
-        vm.unwind(vm.dynamic.len().saturating_sub(self.dynamic));
-        vm.trapped = trapped;
-        for base in vm.retrap.drain(self.retrap.min(vm.retrap.len())..) { vm.trapped.insert(base); }
-        vm.suspended_code.truncate(self.code);
-        vm.suspended_stacks.truncate(self.stacks);
-        vm.external_roots.truncate(self.roots);
-        vm.running_engines = self.engines;
-        vm.gc_holds = self.holds;
-        vm.aftermath_held = self.aftermath_held;
-        vm.aftermath_runs = self.aftermath_runs;
-        vm.rooted_write = self.rooted_write;
-        vm.site_leaf = self.site_leaf;
-        if self.stack_empty {
-            vm.stack = Vec::new();
-        }
-        vm.signal_handlers.truncate(self.handlers);
-        vm.backtrace.leave(self.backtrace);
-        vm.eval_depth = self.eval_depth;
-    }
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -456,32 +403,67 @@ pub fn assert_no_retention_growth(
 }
 
 impl Vm {
-    /// Mark the nested-run state for restoration should a panic unwind the
-    /// caller's frame ([`UnwindMark`]).
-    pub(crate) fn unwind_mark(&mut self) -> UnwindMark {
-        UnwindMark {
-            code: self.suspended_code.len(),
-            stacks: self.suspended_stacks.len(),
+    /// Run BODY outside any engine and, if it panics, put the VM back as it
+    /// was, for a caller that goes on using it: a tool scoring a file, a test.
+    ///
+    /// The invariant: **a session never uses its VM after a panic.** A panic or
+    /// `kill-emacs` ends it, and its VM with it, so nothing on the way in pays
+    /// to be recoverable, and no frame restores anything as a panic crosses it.
+    /// `tests/panic_boundary.rs` lists every `catch_unwind` that could reach a
+    /// VM, and fails on a new one. What a panic left is
+    /// dropped: suspended engines' state, root frames, holds; the bindings and
+    /// handlers made since are popped, without their watchers, and no cleanup
+    /// runs; what they owned (`romacs--post-gc-owned`, `inhibit-quit`, a job's
+    /// claim) ends with them, and a variable whose watchers were running is
+    /// trapped again (`Vm::retrap`).
+    ///
+    /// # Errors
+    /// The panic's payload, if BODY panicked.
+    ///
+    /// # Panics
+    /// If an engine is running: a panic is caught outside any.
+    pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
+        assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
+        let mark = NestingMark {
             roots: self.external_roots.len(),
-            engines: self.running_engines,
             holds: self.gc_holds,
-            aftermath_held: self.aftermath_held,
-            aftermath_runs: self.aftermath_runs,
             dynamic: self.dynamic.len(),
             retrap: self.retrap.len(),
-            rooted_write: self.rooted_write,
-            stack_empty: self.stack.is_empty(),
             handlers: self.signal_handlers.len(),
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
-            site_leaf: self.site_leaf,
-            vm: self,
+        };
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
+        if caught.is_err() {
+            self.restore_nesting(&mark);
         }
+        caught
+    }
+    fn restore_nesting(&mut self, mark: &NestingMark) {
+        // First, while the backtrace still names them.
+        let trapped = std::mem::take(&mut self.trapped);
+        self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
+        self.trapped = trapped;
+        for base in self.retrap.drain(mark.retrap.min(self.retrap.len())..) { self.trapped.insert(base); }
+        self.external_roots.truncate(mark.roots);
+        self.gc_holds = mark.holds;
+        self.signal_handlers.truncate(mark.handlers);
+        self.backtrace.leave(mark.backtrace);
+        self.eval_depth = mark.eval_depth;
+        // Outside any engine, these are all at rest.
+        self.suspended.clear();
+        self.suspended_stacks.clear();
+        self.stack = Vec::new();
+        self.running_engines = 0;
+        self.unwinding = 0;
+        self.aftermath_runs = 0;
+        self.rooted_write = false;
+        self.site_leaf = (0, 0);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
         self.external_roots.extend_from_slice(values);
-        RootFrame { base, len: values.len(), vm: self }
+        RootFrame { base, len: values.len(), vm: std::ptr::from_ref(self) }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
@@ -523,13 +505,13 @@ impl Vm {
     /// GNU's `garbage_collection_inhibited`, derived from its owners: a
     /// collection may run only when no frame keeps heap Values in untraced
     /// Rust storage. Those are OWN unsuspended engines (the caller's own),
-    /// no other running engine outside `suspended_code`, no open compiler
+    /// no other running engine outside `suspended`, no open compiler
     /// builder and no watcher notification from an unrooted native writer.
     /// Every other native frame on the stack holds its Values in traced
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
+        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
     /// Set the suspended engine's register stack aside for a nested run,
     /// still traced, its allocation unmoved for the frames' raw pointers.
@@ -757,8 +739,15 @@ impl Vm {
     /// heap may be collected (VM2-GC-FINALIZER). An explicit `garbage-collect'
     /// asks `finalizer_runner' itself.
     pub(crate) fn safe_runner(&mut self, own: usize) -> Option<Value> {
-        if self.aftermath_held != 0 || !self.may_collect(own) { return None; }
+        if !self.may_collect(own) || self.aftermath_held() { return None; }
         self.finalizer_runner()
+    }
+    /// Whether anything in progress holds aftermath back: an escape being
+    /// unwound, a run of aftermath, or a suspended engine's cleanup. A running
+    /// engine answers for its own cleanups (`Engine::safe_runner`), and an
+    /// engine that is neither fails `may_collect`.
+    pub(crate) fn aftermath_held(&self) -> bool {
+        self.unwinding != 0 || self.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,
@@ -819,9 +808,7 @@ impl Vm {
         let mut s = self.gc_stats;
         s.allocations += (self.heap_objects() - self.gc_retained) as u64;
         s.live_objects = self.heap_objects();
-        s.live_bytes = self.conses.live() * std::mem::size_of::<(Value, Value)>()
-            + self.cells.live() * std::mem::size_of::<Value>()
-            + self.closures.live() * std::mem::size_of::<Closure>()
+        s.live_bytes = self.table_bytes()
             + self
                 .closures
                 .iter()
@@ -830,48 +817,47 @@ impl Vm {
         // Native nodes may be retained by both tables and suspended cursors.
         // Keep this accounting separate from the moving arena object counts.
         let mut native_nodes = HashSet::default();
-        s.live_bytes += self.objects.live() * std::mem::size_of::<data::Object>()
-            + self
-                .objects
-                .iter()
-                .map(|o| match o {
-                    data::Object::Float(_) => 0,
-                    data::Object::Bignum(n) => size_of::<num_bigint::BigInt>()
-                        + n.bits().div_ceil(64) as usize * size_of::<u64>(),
-                    data::Object::Window(w) => w.storage_bytes(),
-                    data::Object::Frame(f) => f.storage_bytes(),
-                    data::Object::Terminal(t) => t.storage_bytes(),
-                    data::Object::WindowConfiguration(c) => c.storage_bytes(),
-                    data::Object::Sqlite(h) => h.storage_bytes(),
-                    data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
-                    data::Object::Process(p) => p.storage_bytes(),
-                    data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
-                    data::Object::Bytes(v) => v.len(),
-                    data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
-                    data::Object::ByteBuffer(b) => {
-                        size_of::<bytes::ByteBuffer>() + b.storage_bytes(false)
-                    }
-                    data::Object::Marker(_) => size_of::<annotations::Marker>(),
-                    data::Object::Overlay(o) => {
-                        size_of::<annotations::Overlay>()
-                            + o.properties.len() * size_of::<(Value, Value)>()
-                    }
-                    data::Object::Vector(v) | data::Object::Record(v) => v.len() * std::mem::size_of::<Value>(),
-                    data::Object::CharTable(t) => t.storage_bytes_seen(false, &mut native_nodes),
-                    data::Object::SubCharTable(node) => char_table::CharTableNode::storage_bytes(node, false, &mut native_nodes),
-                    data::Object::MapKeymapCursor(c) => c.storage_bytes(false, &mut native_nodes),
-                    data::Object::Buffer(t) => {
-                        size_of::<annotations::AnnotatedBuffer>() + t.storage_bytes(false)
-                    }
-                    data::Object::SyntaxTable(t) => {
-                        size_of_val(t)
-                            + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
-                    }
-                    data::Object::HashTable(t) => t.storage_bytes(false),
-                    data::Object::Obarray(t) => t.storage_bytes(false),
-                })
-                .sum::<usize>();
+        s.live_bytes += self
+            .objects
+            .iter()
+            .map(|o| match o {
+                data::Object::Float(_) => 0,
+                data::Object::Bignum(n) => size_of::<num_bigint::BigInt>()
+                    + n.bits().div_ceil(64) as usize * size_of::<u64>(),
+                data::Object::Window(w) => w.storage_bytes(),
+                data::Object::Frame(f) => f.storage_bytes(),
+                data::Object::Terminal(t) => t.storage_bytes(),
+                data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                data::Object::Sqlite(h) => h.storage_bytes(),
+                data::Object::Treesit(t) => t.storage_bytes(),
+                data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
+                data::Object::Process(p) => p.storage_bytes(),
+                data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
+                data::Object::Bytes(v) => v.len(),
+                data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
+                data::Object::ByteBuffer(b) => {
+                    size_of::<bytes::ByteBuffer>() + b.storage_bytes(false)
+                }
+                data::Object::Marker(_) => size_of::<annotations::Marker>(),
+                data::Object::Overlay(o) => {
+                    size_of::<annotations::Overlay>()
+                        + o.properties.len() * size_of::<(Value, Value)>()
+                }
+                data::Object::Vector(v) | data::Object::Record(v) => v.len() * std::mem::size_of::<Value>(),
+                data::Object::CharTable(t) => t.storage_bytes_seen(false, &mut native_nodes),
+                data::Object::SubCharTable(node) => char_table::CharTableNode::storage_bytes(node, false, &mut native_nodes),
+                data::Object::MapKeymapCursor(c) => c.storage_bytes(false, &mut native_nodes),
+                data::Object::Buffer(t) => {
+                    size_of::<annotations::AnnotatedBuffer>() + t.storage_bytes(false)
+                }
+                data::Object::SyntaxTable(t) => {
+                    size_of_val(t)
+                        + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                }
+                data::Object::HashTable(t) => t.storage_bytes(false),
+                data::Object::Obarray(t) => t.storage_bytes(false),
+            })
+            .sum::<usize>();
         s.capacity_bytes = self.conses.capacity_bytes()
             + self.cells.capacity_bytes()
             + self.closures.capacity_bytes()
@@ -966,10 +952,10 @@ impl Vm {
         self.cells.shrink(1024, budget);
         self.closures.shrink(1024, budget);
     }
-    /// Keep a finished collection's record, ELAPSED_NS long, IDLE as in
-    /// `collect_until_key'. One look at the host and one at the command
-    /// variable, per collection: a key pays nothing.
-    pub(super) fn note_collection(&mut self, elapsed_ns: u64, idle: bool) {
+    /// Keep a finished collection's record, `elapsed_ns` long if a clock timed
+    /// it, IDLE as in `collect_until_key`. One look at the host and one at the
+    /// command variable, per collection: a key pays nothing.
+    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool) {
         let explicit = std::mem::take(&mut self.collection_log.explicit);
         if self.collection_log.records.len() >= COLLECTION_RECORDS {
             self.collection_log.dropped += 1;
@@ -978,8 +964,26 @@ impl Vm {
         let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
         let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
         let key = command.is_none() && self.host_key_pending();
-        let us = (elapsed_ns / 1_000).min(u32::MAX as u64) as u32;
-        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay });
+        let us = (elapsed_ns.unwrap_or(0) / 1_000).min(u32::MAX as u64) as u32;
+        let at = elapsed_ns
+            .and_then(|_| crate::host::clock().duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs_f64());
+        let (objects, bytes) = (self.private_objects(), self.live_bytes_estimate());
+        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
+    }
+    /// What the tables hold at their entries' own sizes.
+    fn table_bytes(&self) -> usize {
+        self.conses.live() * std::mem::size_of::<(Value, Value)>()
+            + self.cells.live() * std::mem::size_of::<Value>()
+            + self.closures.live() * std::mem::size_of::<Closure>()
+            + self.objects.live() * std::mem::size_of::<data::Object>()
+    }
+    /// The live heap's size just after a collection, without a walk: the
+    /// tables, and the strings and vectors the mark counted. It leaves out what
+    /// only `heap_stats`, which walks, sees: buffers' text, hash tables, windows
+    /// and the rest; and frozen regions.
+    fn live_bytes_estimate(&self) -> usize {
+        self.table_bytes() + self.gc_census.string_bytes + self.gc_census.vector_slots * std::mem::size_of::<Value>()
     }
     /// The running command's name, or the last one's in the command loop's
     /// tail (`romacs--command-loop-top' has cleared the running one).
@@ -993,9 +997,11 @@ impl Vm {
         Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
-    /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
-    /// MS a float, the pause in milliseconds to the microsecond,
-    /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
+    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES), KIND `idle`, `explicit` or
+    /// `automatic`, MS a float, the pause in milliseconds to the microsecond,
+    /// MET `command`, `key`, `redisplay` or nil, COMMAND a string or nil,
+    /// T when it ended as `float-time` reads, or nil if nothing timed it,
+    /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk).
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
         let mut result = Value::NIL;
@@ -1010,7 +1016,12 @@ impl Vm {
             let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
             let kind = self.intern(kind);
             let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
-            let mut row = self.keymap_cons(command, Value::NIL);
+            let at = record.at.map_or(Value::NIL, |at| self.allocate_object(data::Object::Float(at)));
+            let size = |n: usize| Value::integer(i64::try_from(n).expect("a heap's size fits i64")).expect("a heap's size fits fixnum");
+            let mut row = self.keymap_cons(size(record.bytes), Value::NIL);
+            row = self.keymap_cons(size(record.objects), row);
+            row = self.keymap_cons(at, row);
+            row = self.keymap_cons(command, row);
             row = self.keymap_cons(met, row);
             row = self.keymap_cons(ms, row);
             row = self.keymap_cons(kind, row);
@@ -1032,7 +1043,7 @@ impl Vm {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
-        debug_assert!(self.suspended_code.len() <= self.running_engines, "suspended engines outnumber running ones");
+        debug_assert!(self.suspended.len() <= self.running_engines, "suspended engines outnumber running ones");
         if !self.may_collect(0) {
             return false;
         }
@@ -1071,7 +1082,7 @@ impl Vm {
         // A lexical pair's cell takes its value, which marking only read.
         let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(&i, _)| self.cells.marked(i))
             .map(|(&i, &pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
-        for (i, value) in pairs { self.cells[i] = value; }
+        for (i, value) in pairs { self.cells.collector_entries_mut()[i] = value; }
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         if !doomed.is_empty() {
             let gone: HashSet<u64> = doomed.iter().map(|f| f.0).collect();
@@ -1101,7 +1112,7 @@ impl Vm {
                     .collect(),
                 _ => unreachable!("weak table index"),
             };
-            if let data::Object::HashTable(table) = &mut self.objects[t] {
+            if let data::Object::HashTable(table) = &mut self.objects.collector_entries_mut()[t] {
                 for slot in dead {
                     table.sweep(slot);
                 }
@@ -1122,7 +1133,7 @@ impl Vm {
             if let data::Object::Marker(m) = &self.objects[i as usize] && let Some(anchor) = m.anchor {
                 let buffer = m.buffer;
                 let Ok(index) = buffer.index(0) else { continue };
-                match self.objects.get_mut(index.saturating_sub(1)) {
+                match self.objects.collector_entries_mut().get_mut(index.saturating_sub(1)) {
                     Some(data::Object::Buffer(b)) => { b.anchors.remove(anchor); }
                     Some(data::Object::ByteBuffer(b)) => { b.anchors.remove(anchor); }
                     _ => {}
@@ -1147,8 +1158,7 @@ impl Vm {
         // The code this collection traced, for the next one's pacing.
         self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
             + self.execution.code_len()
-            // SAFETY: as in the mark phase.
-            + self.suspended_code.iter().map(|code| unsafe { code.code_len() }).sum::<usize>();
+            + self.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if self.stack.is_empty() && self.suspended_stacks.is_empty() {
@@ -1158,7 +1168,7 @@ impl Vm {
         // entry into one is left (swept above), so their ids can be reused.
         self.sweep_regions(&region_marks);
         for &i in &live_obarrays {
-            if let data::Object::Obarray(t) = &mut self.objects[i] {
+            if let data::Object::Obarray(t) = &mut self.objects.collector_entries_mut()[i] {
                 t.reclaim_removed(&obarray_symbols_live);
             }
         }
@@ -1170,7 +1180,7 @@ impl Vm {
             let cells = &self.cells;
             self.cell_pairs.retain(|&i, _| cells.marked(i));
             for &i in &dead {
-                self.objects[i as usize] = data::Object::Free;
+                self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
             }
             let verify = self.gc_stress.verify;
             #[cfg(test)]
@@ -1230,11 +1240,11 @@ impl Vm {
             assert_ne!(i, usize::MAX, "rewriting an unmarked root");
             *v = Value::reference(i + offset, tag);
         };
-        self.conses.compact(|p| {
+        self.conses.collector_compact(|p| {
             rewrite(&mut p.0);
             rewrite(&mut p.1);
         });
-        self.closures.compact(|c| {
+        self.closures.collector_compact(|c| {
             for v in c.captures.iter_mut().chain(c.metadata.iter_mut()) {
                 rewrite(v);
             }
@@ -1247,7 +1257,7 @@ impl Vm {
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
         }).collect();
-        self.cells.compact(|v| rewrite(v));
+        self.cells.collector_compact(|v| rewrite(v));
         for v in roots
             .iter_mut()
             .chain(self.stack.iter_mut())
@@ -1294,7 +1304,7 @@ impl Vm {
         // Forward each physical native slot once, even when several live
         // cursors retain the same subtree (possibly detached from its table).
         native_nodes.clear();
-        self.objects.compact(|object| {
+        self.objects.collector_compact(|object| {
                 match object {
                     data::Object::Vector(values) | data::Object::Record(values) => {
                         for v in values {
@@ -1348,16 +1358,15 @@ impl Vm {
         for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
         }
-        for code in &self.suspended_code {
-            // SAFETY: as in the mark phase.
-            unsafe { code.visit_values(&mut |v| rewrite(v)) };
+        for engine in &mut self.suspended {
+            engine.visit_values(&mut |v| rewrite(v));
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
         // Stress fillers: unreachable, so the next collection drops them.
-        self.conses.prepend(fill[0], || (Value::NIL, Value::NIL));
-        self.closures.prepend(fill[1], || Closure { function: 0, captures: vec![], metadata: vec![], document: Value::NIL });
-        self.cells.prepend(fill[2], || Value::NIL);
-        self.objects.prepend(fill[3], || data::Object::String(Box::new(data::LispString::from_bytes(vec![], true))));
+        self.conses.collector_prepend(fill[0], || (Value::NIL, Value::NIL));
+        self.closures.collector_prepend(fill[1], || Closure { function: 0, captures: vec![], metadata: vec![], document: Value::NIL });
+        self.cells.collector_prepend(fill[2], || Value::NIL);
+        self.objects.collector_prepend(fill[3], || data::Object::String(Box::new(data::LispString::from_bytes(vec![], true))));
         lap.lap(&mut self.gc_times, Phase::Rewrite);
         self.shrink_tables();
         lap.lap(&mut self.gc_times, Phase::Shrink);
@@ -1384,6 +1393,9 @@ impl Vm {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.external_roots);
+        for engine in &mut self.suspended {
+            engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
+        }
         pending.extend(self.doomed_finalizers.iter().copied());
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
@@ -1449,15 +1461,14 @@ impl Vm {
         let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
-            // lowered code, through the visitor a compaction rewrites it with.
-            for code in &this.suspended_code {
-                // SAFETY: each entry's engine is suspended in a nested call.
-                unsafe { code.visit_values(&mut |v| if keep(v) { pending.push(*v) }) };
+            // lowered code.
+            for engine in &this.suspended {
+                engine.code_values(&mut |v| if keep(&v) { pending.push(v) });
             }
             marking.add(&mut own, &mut pending);
             loop {
                 let drained = marking.round(&view, &mut own, KEY_POLL,
-                    &mut |v, pending| this.mark_serial(&marking, v, in_obarray, pending, &mut state),
+                    &mut |handed, pending| this.mark_serial(handed, in_obarray, pending, &mut state),
                     &mut || host.as_mut().is_some_and(|host| host.key_pending()));
                 if !drained { return false; }
                 if !std::mem::replace(&mut finalizers_doomed, true) && this.doom_finalizers(&mut pending, &mut doomed) {
@@ -1513,9 +1524,10 @@ impl Vm {
     }
     /// What the workers hand back, claimed: the kinds with `&mut' visitors,
     /// symbols of an obarray of their own, and frozen values. Only the entry
-    /// is written, through MARKING, beside the workers' reads of others.
-    fn mark_serial(&self, marking: &gc_mark::Marking, v: Value, in_obarray: &[bool], pending: &mut Vec<Value>, state: &mut MarkState) {
+    /// is written, through HANDED, beside the workers' reads of others.
+    fn mark_serial(&self, handed: gc_mark::Handed<'_>, in_obarray: &[bool], pending: &mut Vec<Value>, state: &mut MarkState) {
         let keep = |v: &Value| traced(*v, in_obarray);
+        let v = handed.value();
         if v.tag() == 7 {
             let slot = v.payload() as usize - 1;
             if let Some(&name) = self.obarray_symbol_names.get(&slot) && state.obarray_symbols_live.insert(slot) {
@@ -1541,8 +1553,7 @@ impl Vm {
         }
         let i = v.payload() as usize - 1;
         let native_nodes = &mut state.native_nodes;
-        // SAFETY: claimed by the worker that handed it over, which reads it no more.
-        match unsafe { marking.objects.get_mut(i) } {
+        match handed.object() {
             data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Obarray(t) => {
                 state.live_obarrays.push(i);

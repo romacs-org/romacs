@@ -40,11 +40,14 @@
 ;;       counts in buckets that double: N0 gaps under 1 ms, N1 under 2 ms,
 ;;       and the last 32 s or more; written with the counts, when any.
 ;;       The idle windows a background task (a checkpoint, a fork) has.
-;;   {"kind":"collection","collection":K,"pause_ms":MS,"met":M,"command":C}
+;;   {"kind":"collection","collection":K,"pause_ms":MS,"t":T,"live_objects":O,"live_bytes_est":B,"met":M,"command":C}
 ;;       a garbage collection MS long, a float read to the microsecond, K
 ;;       `idle' (the idle pass's or a
 ;;       prompt's), `explicit' (`garbage-collect') or `automatic', written
-;;       with the counts.  M, when there is one, says who waited at most
+;;       with the counts.  T is when it ended, as `float-time' reads; O and B
+;;       what it left live in the private heap, B an estimate that does not
+;;       walk and leaves out buffers' text and hash tables.  M, when there is
+;;       one, says who waited at most
 ;;       MS: "command", C being the command it ran in or at the end of;
 ;;       "key", a key press queued as it ended; or "redisplay", in a
 ;;       prompt's redisplay, where no key can be seen and any pressed waits.
@@ -304,7 +307,8 @@ The first of its kind carries the backtrace its signal left, if one was taken."
       (nconc
        (mapcar (lambda (record)
                  (let ((met (nth 2 record)) (command (nth 3 record)))
-                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record))
+                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record)
+                                                 :t (nth 4 record) :live_objects (nth 5 record) :live_bytes_est (nth 6 record))
                                            (and met (list :met (symbol-name met)))
                                            (and command (list :command command))))))
                (cdr taken))
