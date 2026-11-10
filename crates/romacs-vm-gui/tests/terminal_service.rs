@@ -567,6 +567,9 @@ fn a_helper_runs_its_shell_on_the_pty_its_spawner_made() {
     assert_eq!(unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&kept), libc::TIOCGPTN, &raw mut number) }, 0);
     assert!(text.lines().any(|line| line == format!("/dev/pts/{number}")), "the shell is on another pty:\n{text}");
     service.close(id).unwrap();
-    // SAFETY: reaping this test's own child; a null status is allowed.
-    unsafe { libc::waitpid(child.pid, std::ptr::null_mut(), 0) };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) {
+        assert!(Instant::now() < deadline, "the helper did not end at its close");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
