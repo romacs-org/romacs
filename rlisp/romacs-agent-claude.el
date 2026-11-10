@@ -137,6 +137,27 @@ runs is that subagent's: no event."
                                       ("completed" 'completed) ("failed" 'failed) (_ 'stopped))
                              :summary (romacs-agent--value (gethash "summary" line)))))))))))
 
+(defun romacs-agent--claude-mode-refused (session id response)
+  "The events of Claude Code refusing mode switch ID, RESPONSE: said; a
+switch into plan mode leaves the session out of it, and one out of plan
+mode is tried again to the default."
+  (let ((asked (plist-get (romacs-agent-driver-state session) :mode-asked)))
+    (cons (list :type 'error :text (format "Claude Code would not switch to %s mode: %s"
+                                           (or asked "that") (or (romacs-agent--value (gethash "error" response)) "")))
+          (if (equal asked "plan") (list (list :type 'plan-refused))
+            (unless (member asked '(nil "default"))
+            (list (list :type 'handshake
+                        :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
+                                                   (list (list :line (format "romacs-mode-default-%s" id) "default")))))))))))
+
+(defun romacs-agent--claude-plan (session on from)
+  "The line putting SESSION's Claude Code in plan mode when ON, else back
+in mode FROM (the default when it had none)."
+  (romacs-mcp--object "type" "control_request"
+                      "request_id" (format "romacs-mode-%d" (romacs-agent-request-id session))
+                      "request" (romacs-mcp--object "subtype" "set_permission_mode"
+                                                    "mode" (if on "plan" (or from "default")))))
+
 (defun romacs-agent--claude-cache-ttl (usage)
   "Seconds the prompt cache a request with USAGE wrote lives: an hour or
 five minutes, as it says; nil when it wrote none (served wholly from the
@@ -162,7 +183,9 @@ cache, it reports none) or does not say."
                              :harness-session (gethash "session_id" line)
                              :permission-mode (gethash "permissionMode" line)
                              :mcp (gethash "mcp_servers" line))))
-         ("status" (romacs-agent--claude-status line))
+         ("status" (append (and (stringp (gethash "permissionMode" line))
+                                (list (list :type 'mode :permission-mode (gethash "permissionMode" line))))
+                           (romacs-agent--claude-status line)))
          ("compact_boundary" (setf (romacs-agent-compacting session) t) nil)
          ((or "task_started" "task_progress" "task_notification" "task_updated") (romacs-agent--claude-task line))
          (_ nil)))
@@ -250,13 +273,19 @@ cache, it reports none) or does not say."
                                                     (list (list :hook (gethash "request_id" line) request))))))))
          (when (equal (gethash "subtype" request) "can_use_tool")
            (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
-           (list (list :type 'approval :request-id (gethash "request_id" line)
+           (append
+            ;; A plan presented: shown, and its call stopped (`romacs-agent--plan-captured').
+            (let ((plan (and (equal (gethash "tool_name" request) "ExitPlanMode") (hash-table-p (gethash "input" request))
+                             (romacs-agent--value (gethash "plan" (gethash "input" request))))))
+              (and (stringp plan) (not (string-empty-p (string-trim plan))) (list (list :type 'plan :text plan))))
+            (list (list :type 'approval :request-id (gethash "request_id" line)
+                       :plan (equal (gethash "tool_name" request) "ExitPlanMode")
                        :tool (gethash "tool_name" request) :input (gethash "input" request)
                        ;; A question, or a plan to approve, is the user's alone.
                        :user (and (member (gethash "tool_name" request) '("AskUserQuestion" "ExitPlanMode")) t)
                        :questions (and (equal (gethash "tool_name" request) "AskUserQuestion")
                                        (romacs-agent--claude-questions (gethash "input" request)))
-                       :description (gethash "description" request))))))
+                       :description (gethash "description" request)))))))
       ("control_response"
        (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
          (cond ((and id (romacs-agent--select-answered session id (equal (gethash "subtype" response) "success"))))
@@ -268,7 +297,11 @@ cache, it reports none) or does not say."
                 (cl-return-from romacs-agent--claude-events
                   (list (list :type 'handshake :state (list :initialized t)))))
                ((and id (gethash id (romacs-agent-approvals session)))
-                (remhash id (romacs-agent-approvals session))))
+                (remhash id (romacs-agent-approvals session)))
+               ;; A mode it would not take: out of plan mode, back to the
+               ;; default rather than stay (T3 Code's fallback).
+               ((and id (string-prefix-p "romacs-mode-" id) (equal (gethash "subtype" response) "error"))
+                (cl-return-from romacs-agent--claude-events (romacs-agent--claude-mode-refused session id response))))
          nil))
       ("rate_limit_event" nil)
       (_ (list (list :type 'unknown :raw line))))))
@@ -315,8 +348,13 @@ an approval answered."
                   ;; Spoken to before any initialize: a run of before, ready as it is.
                   (list :type 'handshake :state (list :spoken t))))
     ("control_request"
-     (when (equal (gethash "subtype" (gethash "request" line)) "initialize")
-       (list (list :type 'handshake :state (list :initialize (gethash "request_id" line))))))
+     (let ((owed (plist-get (romacs-agent-driver-state session) :owed)))
+       (pcase (gethash "subtype" (gethash "request" line))
+         ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))
+         ("set_permission_mode"
+          (list (list :type 'handshake
+                      :state (list :mode-asked (gethash "mode" (gethash "request" line))
+                                   :owed (cl-remove (gethash "request_id" line) owed :key #'cadr :test #'equal))))))))
     ("control_response"
      (let* ((id (gethash "request_id" (gethash "response" line)))
             (owed (plist-get (romacs-agent-driver-state session) :owed))
@@ -345,6 +383,12 @@ edit before writing it (`romacs-agent-gate-check').")
 run's initialize, with Romacs's hooks; ready once that is answered."
   (let ((state (romacs-agent-driver-state session)))
     (cond ((plist-get state :owed) (romacs-agent--claude-reply session (car (plist-get state :owed))))
+          ;; In plan mode, the harness not: put it there, once, whatever
+          ;; started it (a launch, a resume, a detached session attached).
+          ((and (plist-get state :initialized) (plist-get (romacs-agent-options session) :plan)
+                (not (equal (romacs-agent-permission-mode session) "plan"))
+                (not (equal (plist-get state :mode-asked) "plan")))
+           (romacs-agent--claude-plan session t nil))
           ((or (plist-get state :initialized) (plist-get state :spoken)) :ready)
           ((plist-get state :initialize) nil)
           (t (romacs-mcp--object
@@ -365,10 +409,14 @@ to say.  Judged as it is written, on the file as it is then."
       (romacs-mcp--object))))
 
 (defun romacs-agent--claude-reply (_session owed)
-  "The line answering OWED, (:hook ID REQUEST): written live only."
-  (romacs-mcp--object "type" "control_response"
-                      "response" (romacs-mcp--object "subtype" "success" "request_id" (cadr owed)
-                                                     "response" (romacs-agent--claude-hook (nth 2 owed)))))
+  "The line OWED asks for, written live only: (:hook ID REQUEST), the
+answer to a hook; (:line ID MODE), a switch to permission mode MODE."
+  (pcase (car owed)
+    (:line (romacs-mcp--object "type" "control_request" "request_id" (cadr owed)
+                               "request" (romacs-mcp--object "subtype" "set_permission_mode" "mode" (nth 2 owed))))
+    (_ (romacs-mcp--object "type" "control_response"
+                           "response" (romacs-mcp--object "subtype" "success" "request_id" (cadr owed)
+                                                          "response" (romacs-agent--claude-hook (nth 2 owed)))))))
 
 (defun romacs-agent--claude-interrupt (session)
   (romacs-mcp--object "type" "control_request"
@@ -435,6 +483,7 @@ answers in its input, and for the session when asked."
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
   :next #'romacs-agent--claude-next
+  :plan #'romacs-agent--claude-plan
   :select #'romacs-agent--claude-select
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user

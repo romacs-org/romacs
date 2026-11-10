@@ -88,7 +88,9 @@ collects what it answers; timers run at once."
                                    "request" (romacs-mcp--object "subtype" "can_use_tool" "tool_name" tool
                                                                  "input" (romacs-mcp--object))))))
     (should-not (plist-get (car (romacs-agent--claude-events session (funcall ask "Bash"))) :user))
-    (should (plist-get (car (romacs-agent--claude-events session (funcall ask "ExitPlanMode"))) :user))
+    (should (plist-get (cl-find 'approval (romacs-agent--claude-events session (funcall ask "ExitPlanMode"))
+                                :key (lambda (e) (plist-get e :type)))
+                       :user))
     (should (plist-get (car (romacs-agent--claude-events session (funcall ask "AskUserQuestion"))) :user))))
 
 (provide 'romacs-agent-policy-tests)

@@ -92,6 +92,15 @@ summarized in detail."
         (options (romacs-agent-options session)))
     (when-let* ((model (plist-get options :model))) (puthash "model" model params))
     (when-let* ((effort (plist-get options :effort))) (puthash "effort" effort params))
+    ;; Every turn says its mode, as T3 Code does: leaving plan mode clears it.
+    (when-let* ((model (or (plist-get options :model) (romacs-agent-model session))))
+      (puthash "collaborationMode"
+               (romacs-mcp--object "mode" (if (plist-get options :plan) "plan" "default")
+                                   "settings" (let ((settings (romacs-mcp--object "model" model)))
+                                                (when-let* ((effort (plist-get options :effort)))
+                                                  (puthash "reasoning_effort" effort settings))
+                                                settings))
+               params))
     (romacs-agent--codex-request "turn/start" number params)))
 
 (defun romacs-agent--codex-input (session text id)
@@ -198,7 +207,7 @@ startup's next step."
             "initialize" (romacs-agent-request-id session)
             (romacs-mcp--object "clientInfo" (romacs-mcp--object "name" "romacs" "title" "Romacs"
                                                                  "version" emacs-version)
-                                "capabilities" (romacs-mcp--object "experimentalApi" :false "requestAttestation" :false
+                                "capabilities" (romacs-mcp--object "experimentalApi" t "requestAttestation" :false
                                                                    "optOutNotificationMethods" ["turn/diff/updated"]))))
           ((and (equal sent "initialize") (plist-get state :initialized))
            (romacs-mcp--object "method" "initialized"))
@@ -385,7 +394,10 @@ an approval or questions for the user, anything else refused."
                                 "\n\n")))
            (unless (string-empty-p text) (list (list :type 'thinking :text text))))))
       ("contextCompaction" (when completed (list (list :type 'status :text "Context compacted"))))
-      ((or "userMessage" "hookPrompt" "plan" "todo_list" "error") nil)
+      ;; A plan proposed (plan mode): the completed item is the plan.
+      ("plan" (when (and completed (stringp (gethash "text" item)))
+                (list (list :type 'plan :text (gethash "text" item)))))
+      ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
       (_ (romacs-agent--codex-tool-events session id item completed)))))
 
 (defun romacs-agent--codex-plan (params)

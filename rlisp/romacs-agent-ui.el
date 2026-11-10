@@ -610,8 +610,16 @@ or a repeat."
                                         (propertize "Session compacted" 'face 'romacs-agent-link 'mouse-face 'highlight))
                                 'keymap romacs-agent-ui--compaction-map 'help-echo "Show what the session kept"
                                 'romacs-agent-compaction (plist-get event :text)))
-        ;; A tool call the policy answers asks no one: its card shows it.
-        ((and 'approval (guard (romacs-agent--auto-p event))) nil)
+        ;; A tool call the policy answers asks no one: its card shows it; a
+        ;; plan presented shows as its plan.
+        ((and 'approval (guard (or (plist-get event :plan) (romacs-agent--auto-p event)))) nil)
+        ('plan
+         (romacs-agent-ui--line session event "── Proposed plan ──" 'face 'romacs-agent-section)
+         (romacs-agent-ui--insert (concat (string-trim (or (plist-get event :text) "")) "\n"))
+         (romacs-agent-ui--line session event
+                                (substitute-command-keys
+                                 "  \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-implement] implement it, or write what to change")
+                                'face 'romacs-agent-dim))
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
@@ -880,7 +888,8 @@ and its state."
                       ;; The icon names the harness: only another instance of it is named.
                       (and (not (equal (romacs-agent-provider session) (symbol-name harness)))
                            (propertize (romacs-agent-provider session) 'face 'romacs-agent-dim))
-                      (and mode (not (equal mode "bypassPermissions")) (propertize mode 'face 'romacs-agent-mode))
+                      (cond ((plist-get (romacs-agent-options session) :plan) (propertize "plan" 'face 'warning))
+                            ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
                       (concat (propertize (or (romacs-agent-ui--instance nil harness (romacs-agent-model session) nil) "...")
                                           'face 'romacs-agent-model)
                               (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
@@ -1702,6 +1711,29 @@ starts on a brief of the thread, and its chat opens."
                (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
                                                         provider model next))))))
 
+(defun romacs-agent-chat-plan ()
+  "Put this session in plan mode, or take it out: in plan mode it plans
+and changes nothing; its plan comes as a card to implement."
+  (interactive nil romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (romacs-agent-set-plan session (not (plist-get (romacs-agent-options session) :plan)))))
+
+(defun romacs-agent-chat-implement ()
+  "Leave plan mode and implement the plan, once the turn has ended."
+  (interactive nil romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (unless (plist-get (romacs-agent-options session) :plan)
+      (user-error "Not in plan mode: there is no plan to implement"))
+    (when (memq (romacs-agent-state session) '(starting running waiting-approval))
+      (user-error "The plan's turn is still going: implement it when it ends"))
+    (romacs-agent-set-plan session nil)
+    (romacs-agent-send session "Implement the plan.")))
+
+(defun romacs-agent-ui--plan-label ()
+  (if (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))
+      (concat "Plan mode: " (propertize "on" 'face 'warning))
+    "Plan mode: off"))
+
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-chat-mode)
@@ -1996,6 +2028,9 @@ view."
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "H" ("Hand off to another…" romacs-agent-chat-handoff)
+  "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
+  "I" ("Implement the plan" romacs-agent-chat-implement
+       :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))
   :group "Session"
   "b" ("Switch chat" romacs-agent-switch-chat)
   "t" ("Switch thread" romacs-agent-switch)

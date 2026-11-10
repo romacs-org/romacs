@@ -201,6 +201,74 @@ the id as :request.")
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
 
+(defconst romacs-agent--plan-captured
+  "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn."
+  "What a harness asking to leave plan mode is told, as T3 Code tells it:
+the plan is the user's to take up.")
+
+(defun romacs-agent--set-options (session options)
+  "Make OPTIONS SESSION's, in its manifest too."
+  (setf (romacs-agent-options session) options)
+  (romacs-agent--manifest-put session "options" (romacs-agent--options-object options)))
+
+(defun romacs-agent--without (options keys)
+  "OPTIONS, a plist, without KEYS."
+  (cl-loop for (key value) on options by #'cddr unless (memq key keys) append (list key value)))
+
+(defun romacs-agent--mode-seen (session mode)
+  "SESSION's harness says it is in permission MODE.  Live only (on a
+replay the options are already the last word): gone into plan mode of
+its own, the session is in plan mode; in plan mode, the mode to go back
+to is first known."
+  (let ((before (romacs-agent-permission-mode session)) (options (romacs-agent-options session)))
+    (setf (romacs-agent-permission-mode session) mode)
+    (when (romacs-agent--live-p session)
+      (cond ((and (equal mode "plan") (not (plist-get options :plan)))
+             (romacs-agent--set-options
+              session (append (list :plan t) (and before (not (equal before "plan")) (list :plan-from before)) options)))
+            ((and (plist-get options :plan) (not (plist-get options :plan-from)) mode (not (equal mode "plan")))
+             (romacs-agent--set-options session (append (list :plan-from mode) options)))))))
+
+(defun romacs-agent-set-plan (session on)
+  "Put SESSION in plan mode when ON, else back in the mode it had: it plans
+and changes nothing until told to implement.  A harness running takes it
+now (its driver's :plan), else at its next launch."
+  (let* ((options (romacs-agent-options session))
+         (now (romacs-agent-permission-mode session))
+         ;; The mode to go back to: never plan itself, unknown till the
+         ;; harness says (`mode' events fill it in).
+         (from (or (plist-get options :plan-from) (and now (not (equal now "plan")) now))))
+    (unless (eq (and (plist-get options :plan) t) (and on t))
+      (romacs-agent--set-options
+       session (append (and on (list :plan t)) (and on from (list :plan-from from))
+                       (romacs-agent--without options '(:plan :plan-from))))
+      (when-let* ((line (romacs-agent--harness-get session :plan))
+                  ((process-live-p (romacs-agent-connection session)))
+                  (object (funcall line session on from)))
+        (romacs-agent--line session object))
+      (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" (if on t :false))))))
+
+(defconst romacs-agent--plan-tool-refused
+  "This tool requires approval in Plan mode, but approvals are disabled for this thread."
+  "What a tool call is told in plan mode under the `allow' policy, as T3
+Code tells it: a plan changes nothing.")
+
+(defun romacs-agent--answer-unasked (session id)
+  "Answer SESSION's request ID that no user is asked: a plan presented is
+captured and its call stopped; in plan mode a tool call is refused; else,
+under the `allow' policy, it is allowed.  Only while it still waits, and
+never one of the user's own (questions)."
+  (when (and (romacs-agent--live-p session) (gethash id (romacs-agent-approvals session))
+             (not (member id (romacs-agent-asks session))))
+    (let ((plan (member id (plist-get (romacs-agent-driver-state session) :plans))))
+      (condition-case err
+          (cond (plan (romacs-agent-respond session id nil romacs-agent--plan-captured))
+                ((not (eq romacs-agent-approval-policy 'allow)))
+                ((plist-get (romacs-agent-options session) :plan)
+                 (romacs-agent-respond session id nil romacs-agent--plan-tool-refused))
+                (t (romacs-agent-respond session id t)))
+        (error (message "Romacs could not answer %s: %s" id (error-message-string err)))))))
+
 (defun romacs-agent-asks (session)
   "The approvals SESSION's run waits on that only the user can answer
 \(questions, a plan), by request id: the rest the `allow' policy answers.
@@ -220,22 +288,14 @@ Its run's, kept in the driver's state."
 its replay over.  A copy drawn again, or a replay, answers nothing."
   (and (eq (romacs-agent-get (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
 
-(defun romacs-agent--allow (session id)
-  "Allow SESSION's tool call ID, if it still waits, is no question of the
-user's, and the `allow' policy holds."
-  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session)
-             (gethash id (romacs-agent-approvals session)) (not (member id (romacs-agent-asks session))))
-    (condition-case err (romacs-agent-respond session id t)
-      (error (message "Romacs could not allow %s: %s" id (error-message-string err))))))
-
 (defun romacs-agent--allow-tool-calls (session)
-  "Allow every tool call SESSION's harness waits on, under the `allow'
-policy, when its records are the live ones: what came while no editor was
-attached, or an answer lost with its connection, is answered on catching
-up."
-  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session))
+  "Answer every request SESSION's harness waits on that no user is asked
+\(`romacs-agent--answer-unasked'), when its records are the live ones:
+what came while no editor was attached, or an answer lost with its
+connection, is answered on catching up."
+  (when (romacs-agent--live-p session)
     (dolist (id (hash-table-keys (romacs-agent-approvals session)))
-      (romacs-agent--allow session id))))
+      (romacs-agent--answer-unasked session id))))
 
 ;;; Places
 
@@ -1038,7 +1098,7 @@ itself, so the turn goes on whatever becomes of this server."
                     (romacs-agent-harness-session session) (plist-get event :harness-session)
                     (romacs-agent-state session) 'running)
               (when (plist-get event :permission-mode)
-                (setf (romacs-agent-permission-mode session) (plist-get event :permission-mode))))
+                (romacs-agent--mode-seen session (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
     ;; A request: when the prompt cache it wrote expires, or unknown.
     ('cache (setf (romacs-agent-driver-state session)
@@ -1060,6 +1120,8 @@ itself, so the turn goes on whatever becomes of this server."
     ;; to the next run, never to the one going on.
     ('run (setf (romacs-agent-driver session) nil
                 (romacs-agent-driver-state session) (list :run (plist-get event :seq))
+                ;; The mode is the run's: unknown till its harness says.
+                (romacs-agent-permission-mode session) nil
                 (romacs-agent-startup-pending session) nil))
     ('handshake (let ((state (romacs-agent-driver-state session)))
                   (cl-loop for (key value) on (plist-get event :state) by #'cddr
@@ -1079,13 +1141,25 @@ itself, so the turn goes on whatever becomes of this server."
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
-    ;; A tool call the policy answers waits on no one: its answer goes now,
-    ;; or on catching up.
-    ('approval (if (romacs-agent--auto-p event)
-                   (when (romacs-agent--live-p session)
-                     (run-at-time 0 nil #'romacs-agent--allow session (plist-get event :request-id)))
-                 (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
-                 (setf (romacs-agent-state session) 'waiting-approval)))
+    ;; A plan presented: captured, its call told to stop (T3 Code's way);
+    ;; the plan is the user's to take up.  A tool call the policy answers
+    ;; waits on no one: its answer goes now, or on catching up.
+    ('approval (cond
+                ((or (plist-get event :plan) (romacs-agent--auto-p event))
+                 ;; A plan is known as one on catching up too.
+                 (when (plist-get event :plan)
+                   (setf (romacs-agent-driver-state session)
+                         (plist-put (romacs-agent-driver-state session) :plans
+                                    (cons (plist-get event :request-id)
+                                          (plist-get (romacs-agent-driver-state session) :plans)))))
+                 (when (romacs-agent--live-p session)
+                   (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
+                (t (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
+                   (setf (romacs-agent-state session) 'waiting-approval))))
+    ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
+    ;; Its harness would not go into plan mode: the session is not in it.
+    ('plan-refused (when (romacs-agent--live-p session)
+                     (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
     ('answered (romacs-agent--set-asks session (remove (plist-get event :request-id) (romacs-agent-asks session)))
                ;; Still waiting on the user while one of theirs waits.
                (setf (romacs-agent-state session) (if (romacs-agent-asks session) 'waiting-approval 'running)))
@@ -1216,6 +1290,7 @@ other; empty for none."
                             ((hash-table-p note)
                              (pcase (gethash "type" note)
                                ("run" (list (list :type 'run)))
+                               ("plan" (list (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
@@ -1697,7 +1772,7 @@ waiting."
 
 (defconst romacs-agent--option-keys
   '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
-    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:fork . "forkedFrom"))
+    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
