@@ -61,8 +61,11 @@ impl Vm {
                 let hook = self.symbol_property(a[0], property)?;
                 if hook != Value::NIL {
                     self.autoload_note_defalias(slot);
-                    self.call_lisp_at_write(hook, &[a[0], a[1]])?;
-                    self.defalias_documentation(&a)?;
+                    let documentation = a.get(2).copied().unwrap_or(Value::NIL);
+                    let tail = self.alloc_cons(a[1], documentation);
+                    let value = self.alloc_cons(hook, tail);
+                    let write = crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Defalias, slot, value };
+                    self.write_from_native(write).map_err(crate::watchers::fault_text)?;
                     return Ok(a[0]);
                 }
                 let mut definition = a[1];

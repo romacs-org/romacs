@@ -67,6 +67,11 @@ const CASES: &str = r###"
 (progn (setq log nil) (defvar wv-sb2 0) (with-temp-buffer (rename-buffer "wv-p") (add-variable-watcher 'wv-sb2 (lambda (s n o w) (setq log (cons (list n (buffer-name)) log)))) (let ((v (with-temp-buffer (rename-buffer "wv-q") (set-default 'wv-sb2 1) (buffer-name)))) (list v (buffer-name) log))))
 (progn (defvar wv-ka 0) (defvar wv-kb2 0) (let ((orig (get-buffer-create "wv-orig")) (other (get-buffer-create "wv-other"))) (with-current-buffer other (set (make-local-variable 'wv-kb2) 22)) (with-current-buffer orig (set (make-local-variable 'wv-ka) 1) (set (make-local-variable 'wv-kb2) 2) (fset 'wv-killer (lambda (s n o w) (if (buffer-live-p orig) (progn (set-buffer other) (kill-buffer orig))))) (add-variable-watcher 'wv-ka 'wv-killer) (add-variable-watcher 'wv-kb2 'wv-killer) (kill-all-local-variables)) (list (buffer-live-p orig) (local-variable-p 'wv-kb2 other) (with-current-buffer other wv-kb2) (default-value 'wv-kb2))))
 (progn (defvar wv-la 0) (defvar wv-lb 0) (let ((orig (get-buffer-create "wv-orig")) (other (get-buffer-create "wv-other"))) (with-current-buffer other (set (make-local-variable 'wv-lb) 22)) (with-current-buffer orig (set (make-local-variable 'wv-la) 1) (set (make-local-variable 'wv-lb) 2) (fset 'wv-mover (lambda (s n o w) (set-buffer other))) (add-variable-watcher 'wv-la 'wv-mover) (add-variable-watcher 'wv-lb 'wv-mover) (kill-all-local-variables)) (list (local-variable-p 'wv-lb orig) (local-variable-p 'wv-la orig) (local-variable-p 'wv-lb other) (with-current-buffer other wv-lb))))
+(progn (setq log nil) (put 'wv-fa 'defalias-fset-function (lambda (s d) (garbage-collect) (setq log (cons (list s (functionp d)) log)) (fset s d))) (list (defalias 'wv-fa (lambda () 7) "Doc fa.") log (funcall 'wv-fa) (get 'wv-fa 'function-documentation)))
+(progn (put 'wv-fb 'defalias-fset-function (lambda (_s _d) (error "No fb"))) (list (condition-case e (defalias 'wv-fb 'car "Doc fb.") (error (car (cdr e)))) (get 'wv-fb 'function-documentation) (fboundp 'wv-fb)))
+(progn (put 'wv-fc 'defalias-fset-function (lambda (_s _d) (throw 'out 'thrown))) (list (catch 'out (defalias 'wv-fc 'car "Doc fc.")) (get 'wv-fc 'function-documentation)))
+(progn (defvar wv-gc nil) (setq log nil) (add-variable-watcher 'wv-gc (lambda (s n o w) (garbage-collect) (setq log (cons (list s n o) log)))) (list (set 'wv-gc (list 1 2 3)) (makunbound 'wv-gc) (nreverse log) (boundp 'wv-gc)))
+(progn (add-variable-watcher 'gc-cons-threshold (lambda (&rest _) nil)) (list (condition-case e (set 'gc-cons-threshold "x") (error e)) (integerp gc-cons-threshold)))
 "###;
 
 /// Writes GNU's C makes by assignment (`Vname = value`), which no watcher
@@ -155,6 +160,21 @@ fn lisp_watchers_match_pinned_gnu() {
     let failures: Vec<_> = CASES.lines().filter(|line| !line.is_empty())
         .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG), prelude())).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The legacy primitives' Lisp (a watcher of `set` or `makunbound`, a
+/// `defalias-fset-function`) runs at its engine's drain, where it may collect,
+/// not inside the primitive with collection held.
+#[test]
+fn a_legacy_primitives_watchers_and_hook_may_collect() {
+    let mut vm = prelude();
+    vm.eval_source("(progn (defvar wv-lc nil) (add-variable-watcher 'wv-lc (lambda (&rest _) (garbage-collect))) \
+        (put 'wv-lh 'defalias-fset-function (lambda (s d) (garbage-collect) (fset s d))))").unwrap();
+    for form in ["(set 'wv-lc 1)", "(makunbound 'wv-lc)", "(defalias 'wv-lh 'car)"] {
+        let before = vm.heap_stats().collections;
+        vm.eval_source(form).unwrap();
+        assert!(vm.heap_stats().collections > before, "{form} collected nothing: its Lisp ran with collection held");
+    }
 }
 
 /// A primitive's queued write (`watchers.rs`) differs from GNU's in place in
