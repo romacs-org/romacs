@@ -190,12 +190,6 @@ pub(crate) fn compile_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Fo
 pub(crate) fn expand_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form) -> Result<Option<Form>> {
     m.request(&EngineKey, gc, |vm| vm.expand_macro(form), (), |_, (), expanded| expanded)
 }
-/// The next form of SOURCE, its value, offset and end; reading can call Lisp
-/// (a `\N{NAME}` character). THEN consumes the value at once.
-pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &[u8], b: B,
-    then: impl FnOnce(&mut Vm, B, Result<Option<(Value, usize, usize)>>) -> R + Copy + 'static) -> R {
-    m.request(&EngineKey, gc, |vm| vm.read_internal_span(source), b, then)
-}
 /// The function rooted first in FRAME, called on the rest, THEN consuming its
 /// value at once.
 pub(crate) fn call_frame<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, frame: &RootFrame, b: B,
@@ -406,13 +400,30 @@ pub(super) fn unwind<'b>(m: &mut Orch<'_, 'b, '_>, _gc: Gc<'_, 'b>, n: usize) {
     m.raw(&EngineKey).code_suspended(|vm| rooted_writer(vm, |vm| vm.unwind(n)));
 }
 
-/// A generated primitive whose body reads (`read`, `read-from-string`), and
-/// so runs Lisp: TARGET on the ARGC arguments at register offset START, its
-/// step handed to THEN.
-pub(super) fn read<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>, (target, start, argc): (Imm, usize, usize), b: B,
+/// A reading primitive (`read`, `read-from-string`: `prim::Body::Reader`),
+/// which may run Lisp: TARGET on the ARGC arguments at register offset START,
+/// in place, its body orchestration over the VM under this permission; its
+/// step handed to THEN. An escape from its Lisp stays in `propagated_escape`.
+pub(super) fn read<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, (target, start, argc): (Imm, usize, usize), b: B,
     then: impl FnOnce(&mut Engine<'a>, B, std::result::Result<prim::Step, Option<(Value, Value)>>) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
-    let step = e.code_suspended(|vm| vm.call_generated(target.get(), start, argc));
+    let step = e.code_suspended(|vm| {
+        let index = vm.reading_primitive(target.get(), argc)?;
+        let out = vm.root_frame(&[Value::NIL; 3]);
+        let signalled = over_vm(vm, gc, (index, start, argc, &out), |mut m, gc, (index, start, argc, out)| {
+            prim::reader_body(index)(prim::ReadCall { m: &mut m, gc, start, argc, out })
+        });
+        let [value, condition, data] = vm.release_frame(out);
+        if !signalled {
+            Ok(prim::Step::Done(value))
+        } else if condition == Value::NIL {
+            // The body's fault was an escape, which waits in
+            // `propagated_escape` for `read_body` to take first (`prim::land`).
+            Err(None)
+        } else {
+            Err(Some((condition, data)))
+        }
+    });
     then(e, b, step)
 }
 
@@ -426,4 +437,13 @@ pub(super) fn callback<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc
         vm.reader_call(function, &[object])
     });
     then(e, b, result)
+}
+
+#[cfg(test)]
+pub(crate) mod test_requests {
+    use super::*;
+    /// A collection now, for a test standing in for Lisp that collects.
+    pub(crate) fn collect_now<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>) {
+        m.request(&EngineKey, gc, |vm| { vm.collect(&mut []); }, (), |_, (), ()| ());
+    }
 }

@@ -931,22 +931,22 @@ fn reader_chartable_minimum() {
 
 #[test]
 fn reader_chartable_uniform() {
-    reader_table_fixture(include_str!("reader_fixtures/uniform.el"));
+    reader_table_fixture(include_str!("fixtures/uniform.el"));
 }
 
 #[test]
 fn reader_chartable_subdivision() {
-    reader_table_fixture(include_str!("reader_fixtures/subdivision.el"));
+    reader_table_fixture(include_str!("fixtures/subdivision.el"));
 }
 
 #[test]
 fn reader_chartable_case() {
-    reader_table_fixture(include_str!("reader_fixtures/case.el"));
+    reader_table_fixture(include_str!("fixtures/case.el"));
 }
 
 #[test]
 fn reader_chartable_syntax() {
-    reader_table_fixture(include_str!("reader_fixtures/syntax.el"));
+    reader_table_fixture(include_str!("fixtures/syntax.el"));
 }
 
 fn reader_table_fixture(literal: &str) {
@@ -1005,21 +1005,21 @@ fn reader_callback_partials_and_source_survive_compaction() {
     let function=vm.eval_source_raw(r#"(let ((s "(\"first\" [\"second\"] (\"third\"))") (i 0)) (lambda (&optional c) (if c (setq i (1- i)) (if (< i (length s)) (prog1 (aref s i) (setq i (1+ i))) nil))))"#).unwrap();
     let root = vm.external_roots.len();
     vm.external_roots.push(function);
-    let mut reader = Reader {
-        input: Input::Function { root },
-        at: 0,
-        lookahead: None,
-        error: None,
-        eof: false,
-        labels: BTreeMap::new(),
-        vm: &mut vm,
-        signal: None,
-        collect_subforms: true,
-    };
-    let value = reader.form(0).unwrap();
-    reader.finish().unwrap();
-    assert_eq!(
-        reader.vm.display(value).unwrap(),
-        r#"("first" ["second"] ("third"))"#
-    );
+    let shown = crate::threaded::toplevel(&mut vm, root, |mut m, gc, root| {
+        let mut reader = Reader {
+            m: &mut m,
+            gc: Some(gc),
+            input: Input::Function { root },
+            at: 0,
+            lookahead: None,
+            error: None,
+            eof: false,
+            labels: BTreeMap::new(),
+            signal: None,
+            collect_subforms: true,
+        };
+        let value = reader.form(0).and_then(|value| reader.finish().map(|()| value));
+        m.leaf(value, |vm, value| value.and_then(|root| vm.display(vm.external_roots[root])))
+    });
+    assert_eq!(shown, Ok(r#"("first" ["second"] ("third"))"#.to_owned()));
 }
