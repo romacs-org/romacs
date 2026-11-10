@@ -15,20 +15,16 @@ impl RenderApp {
         window: WindowId,
         key: PhysicalKey,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
         let pressed = matches!(&event, InputEvent::Key { pressed: true, .. });
-        let result = self.comms.send_key_input_with_receipt(event);
+        let read = self.comms.send_key_input_with_receipt(event);
         if pressed {
-            self.key_repeats.queued(window, key, result.0.clone());
+            self.key_repeats.queued(window, key, read);
             // The key may start a long command: look at the evaluator later.
             if self.comms.input_interrupt.is_some() {
                 self.busy_toast.arm(romacs_display_protocol::frame_time::observe_platform_now());
             }
         }
-        (result.1, result.2)
     }
 
     /// Record the physical modifier keys' own press and release.
@@ -301,7 +297,7 @@ impl RenderApp {
         ) {
             return;
         }
-        // Retirement precedes menus, tooltips and IME interception: a
+        // Retirement precedes menu-bar and IME interception: a
         // release/focus loss cannot leave repeat authority behind there.
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
@@ -312,53 +308,15 @@ impl RenderApp {
             }
             _ => {}
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .tooltips
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
-        {
-            return;
-        }
-        let live_owner = self.frame_windows.get_by_winit(window_id).is_some();
-        let dismiss = match &event {
-            WindowEvent::PointerButton {
-                state: ElementState::Pressed,
-                ..
-            }
-            | WindowEvent::MouseWheel { .. } => live_owner,
-            WindowEvent::KeyboardInput { event, .. } => {
-                live_owner && event.state == ElementState::Pressed
-            }
-            WindowEvent::PointerLeft { .. } => {
-                self.tooltips.owns_parent(window_id)
-                    || (live_owner && self.tooltips.owner().is_none())
-            }
-            WindowEvent::CloseRequested | WindowEvent::Destroyed => {
-                self.tooltips.owns_parent(window_id)
-            }
-            _ => false,
-        };
-        if dismiss {
-            self.tooltips.hide();
-        }
         if self.handle_native_menu_bar_event(window_id, &event)
             || self.handle_native_menu_bar_key(window_id, &event)
         {
             return;
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .menus
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
+        if self.gpu.is_some()
+            && self.renderer.is_some()
+            && self.menu_bar.event(window_id, &event)
         {
-            // Reconcile native hierarchy changes after this event batch,
-            // never while winit is dispatching a borrowed update batch.
-            while let Some(index) = self.menus.take_result() {
-                self.comms.send_input(InputEvent::MenuSelection {
-                    index: index.index(),
-                    token: Some(index.token),
-                });
-            }
             self.sync_menu_heading();
             return;
         }
@@ -451,7 +409,7 @@ impl RenderApp {
                 let retirements = if focused {
                     Vec::new()
                 } else {
-                    let menu_owns_focus = self.menus.owns_parent(window_id);
+                    let menu_owns_focus = self.menu_bar.owns_parent(window_id);
                     self.frame_windows
                         .get_by_winit_mut(window_id)
                         .map(|window| {
@@ -642,7 +600,7 @@ impl RenderApp {
                             if self.effects.idle_dim.enabled {
                                 self.record_idle_dim_activity(window_id);
                             }
-                            let (receipt, token) = self.send_native_key(
+                            self.send_native_key(
                                 window_id,
                                 physical_key,
                                 InputEvent::Key {
@@ -652,17 +610,6 @@ impl RenderApp {
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },
                             );
-                            if state == ElementState::Pressed
-                                && matches!(key, FrontendKey::Keysym(0xff55 | 0xff56))
-                                && let Some(receipt) = receipt
-                                && let Some(window) = self.frame_windows.get_by_winit_mut(window_id)
-                            {
-                                window
-                                    .render
-                                    .compositor
-                                    .input_scroll
-                                    .observe_input(receipt, token);
-                            }
                         } else if state == ElementState::Pressed {
                             tracing::debug!(
                                 "KeyboardInput dropped after translation: logical_key={:?} physical_key={:?} text={:?} mods=0x{:x}",

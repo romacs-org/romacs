@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-EMPTYSTR1 | Empty strings are not one shared object | GNU has exactly two empty strings, `empty_unibyte_string` and `empty_multibyte_string` (`src/alloc.c:1557-1562`), and every length-0 string allocation returns one of them (`src/alloc.c:2330,2359`), including `copy-sequence` of `""` and a string emptied by `delete` (`src/fns.c:2137`): `(eq (copy-sequence "") (copy-sequence ""))` is t | VM2 allocates a fresh empty string each time, so that witness is nil (true before `delete` existed). `delete` itself follows GNU exactly: it returns SEQ when nothing matched and a new string of SEQ's kind otherwise; only the identity of an emptied result differs. The one pinned `delete` harness row, `delete/0680` (`(eq r a0)` for two `(copy-sequence "")`), is exactly this | **Package-observable** only through `eq` (or `memq`/`assq`) between separately produced empty strings; `equal`, `string=`, length and multibyteness agree. A canonical empty string belongs in the allocator, not in each primitive | <!-- symbols: copy-sequence, delete, substring, concat, make-string -->

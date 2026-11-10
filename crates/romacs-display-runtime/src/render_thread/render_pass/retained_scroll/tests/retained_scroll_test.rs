@@ -221,8 +221,7 @@ fn retained_scroll_pixels_match_full_render_and_reuse_coverage_during_reversal()
                 11.0,
                 11.0,
                 delta,
-                delivery.receipt(),
-                None
+                delivery.receipt()
             ));
             deliveries.push(delivery);
             let mut frame = original.clone();
@@ -505,14 +504,12 @@ fn changed_coverage_pixels_and_font_catalog_rebuild_the_raster() {
         }
         render.compositor.input_scroll = Default::default();
         let delivery = stream.issue().unwrap();
-        assert!(render.compositor.input_scroll.push(
-            &frame,
-            11.0,
-            11.0,
-            4.0,
-            delivery.receipt(),
-            None
-        ));
+        assert!(
+            render
+                .compositor
+                .input_scroll
+                .push(&frame, 11.0, 11.0, 4.0, delivery.receipt())
+        );
         deliveries.push(delivery);
         render.compositor.input_scroll.paint(&mut frame);
         if previous.is_some() {
@@ -572,14 +569,12 @@ fn changing_coverage_defers_raster_work_until_paint_is_stable() {
         });
         render.compositor.input_scroll = Default::default();
         let delivery = stream.issue().unwrap();
-        assert!(render.compositor.input_scroll.push(
-            &frame,
-            11.0,
-            11.0,
-            4.0,
-            delivery.receipt(),
-            None,
-        ));
+        assert!(
+            render
+                .compositor
+                .input_scroll
+                .push(&frame, 11.0, 11.0, 4.0, delivery.receipt())
+        );
         deliveries.push(delivery);
         render.compositor.input_scroll.paint(&mut frame);
         let raster = prepare(
@@ -689,14 +684,12 @@ fn scrolling_hover_resolves_projected_slots_and_draws_live_pixels() {
     render.mouse_pos = (11.0, 11.0);
     let stream = InputStream::default();
     let delivery = stream.issue().unwrap();
-    assert!(render.compositor.input_scroll.push(
-        &frame,
-        11.0,
-        11.0,
-        10.5,
-        delivery.receipt(),
-        None
-    ));
+    assert!(
+        render
+            .compositor
+            .input_scroll
+            .push(&frame, 11.0, 11.0, 10.5, delivery.receipt())
+    );
     render.compositor.input_scroll.paint(&mut frame);
     let selection = render
         .pointer_selection_for(&frame)

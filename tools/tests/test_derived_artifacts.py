@@ -29,8 +29,12 @@ inputs = sorted(p.stem for p in Path('.').glob('autoload-input-*.txt'))
 output.write_text(f';;; {output.name} --- fixture\\n' + ''.join(f';; {i}\\n' for i in inputs)
                   + f';;; {output.name} ends here\\n')
 '''
-# check-derived's other checks are not under test here.
+# check-derived's other checks are not under test here: each passes.
 STUB = 'GNU_SOURCE = "."\nif __name__ == "__main__":\n    raise SystemExit(0)\n'
+CHECKERS = ('tools/lib/python_tests.py', 'tools/lib/lisp_oracle.py', 'gnu-tests/run.py', 'tools/lib/parity_ratchet.py',
+            'tools/lib/gnu_arity.py', 'tools/lib/gnu_defvars.py', 'tools/lib/icon_font.py', 'tools/lib/bundled_fonts.py',
+            'tools/lib/treesit_grammars.py', 'tools/lib/unsafe_census.py', 'tools/lib/smells.py',
+            'tools/lib/divergence_index.py')
 
 
 def run(root, *args, check=True, env=None):
@@ -51,7 +55,8 @@ def fixture(root):
     for name in OWNED:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, root / name)
-    for name in ('tools/lib/lisp_oracle.py', 'tools/lib/parity_ratchet.py'):
+    for name in CHECKERS:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(STUB)
     (root / 'tools/lib/bundled_autoloads.py').write_text(AUTOLOADS_FIXTURE)
     (root / 'autoload-input-base.txt').write_text('base\n')
@@ -81,12 +86,20 @@ class DerivedTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_a_fresh_tree_passes(self):
+        result = check_derived(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('check-derived: ok', result.stdout)
+
     def test_corruption_is_refused_before_healing(self):
         good = self.path.read_bytes()
-        for corrupt in (good[:-5], b'<<<<<<< ours\n' + good):
-            with self.subTest(corrupt=corrupt[:20]):
+        for corrupt, why in ((good[:-5], 'not a complete generated Lisp file'),
+                             (b'<<<<<<< ours\n' + good, 'unresolved conflict marker')):
+            with self.subTest(why=why):
                 self.path.write_bytes(corrupt)
-                self.assertNotEqual(check_derived(self.root).returncode, 0)
+                result = check_derived(self.root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(why, result.stdout)
                 self.assertEqual(self.path.read_bytes(), corrupt, 'validation must not heal corruption')
         self.path.write_bytes(good)
 
@@ -107,12 +120,14 @@ class DerivedTests(unittest.TestCase):
         (self.root / 'tools/lib/bundled_autoloads.py').write_text('raise SystemExit(37)\n')
         result = check_derived(self.root)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('37', result.stdout)
+        self.assertIn('returned non-zero exit status 37', result.stdout)
 
     def test_generator_output_with_a_marker_is_refused(self):
         (self.root / 'tools/lib/bundled_autoloads.py').write_text(
             AUTOLOADS_FIXTURE.replace("+ f';;; {output.name} ends here", "+ '=======\\n' + f';;; {output.name} ends here"))
-        self.assertNotEqual(check_derived(self.root).returncode, 0)
+        result = check_derived(self.root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unresolved conflict marker', result.stdout)
 
     def test_sources_first_merge(self):
         prepare_branches(self.root)

@@ -619,7 +619,7 @@ pub(crate) const STATUS_BAR_ZONE_GAP: f32 = 24.0;
 
 impl StatusBarSnapshot {
     /// Where each character goes (`BandMarks::places'), inside the bar's
-    /// padding. The painter (layout2) and `romacs-status-bar-string' (the
+    /// padding. The painter (romacs-layout) and `romacs-status-bar-string' (the
     /// VM) both place by this.
     pub fn places(&self, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
         self.marks.places(&self.text, self.width as f32, STATUS_BAR_PAD, advances)

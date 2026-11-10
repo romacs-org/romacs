@@ -176,5 +176,4 @@ impl FrameSample {
 }
 
 #[cfg(test)]
-#[path = "frame_time/tests/frame_time_test.rs"]
 mod tests;

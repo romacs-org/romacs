@@ -22,5 +22,4 @@ pub(in crate::render_thread) fn blends_older_pictures(
 }
 
 #[cfg(test)]
-#[path = "model_provenance/tests.rs"]
 mod tests;

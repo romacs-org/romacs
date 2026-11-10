@@ -787,5 +787,4 @@ impl FaceCache {
 }
 
 #[cfg(test)]
-#[path = "face/tests/face_test.rs"]
 mod tests;

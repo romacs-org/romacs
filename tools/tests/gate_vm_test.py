@@ -21,12 +21,12 @@ loader.exec_module(gate)
 
 class WorkspaceInventory(unittest.TestCase):
     def test_all_members_are_partitioned_without_duplicates(self):
-        names = ['romacs-vm', 'romacs-layout2', 'new-support-crate']
+        names = ['romacs-vm', 'romacs-layout', 'new-support-crate']
         metadata = {'workspace_members': names, 'packages': [dict(id=n, name=n) for n in names]
                     + [dict(id='external', name='external')]}
         suites = gate.workspace_suites(metadata)
         self.assertEqual(suites, {'vm2': ['new-support-crate', 'romacs-vm'],
-                                 'display': ['romacs-layout2']})
+                                 'display': ['romacs-layout']})
         self.assertEqual(sorted(sum(suites.values(), [])), sorted(names))
 
     def test_oracle_suites_are_not_excluded(self):

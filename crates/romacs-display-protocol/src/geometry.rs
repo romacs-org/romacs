@@ -483,7 +483,7 @@ impl<From, To> SpaceTranslation<From, To, LayoutUnit> {
     }
 
     #[must_use]
-    pub fn map_rect(self, rect: LayoutRect<From>) -> LayoutRect<To> {
+    pub(crate) fn map_rect(self, rect: LayoutRect<From>) -> LayoutRect<To> {
         LayoutRect::from_origin_and_size(
             self.map_point(LayoutPoint::new(rect.x(), rect.y())),
             GeometrySize::new(rect.width(), rect.height())
@@ -516,7 +516,7 @@ impl<From, To> SpaceTranslation<From, To, LogicalPixels> {
         )
     }
 
-    pub fn map_rect(
+    pub(crate) fn map_rect(
         self,
         rect: GeometryRect<From, LogicalPixels>,
     ) -> Result<GeometryRect<To, LogicalPixels>, GeometryError> {
@@ -562,5 +562,4 @@ impl DeviceScale {
 }
 
 #[cfg(test)]
-#[path = "geometry/tests/geometry_test.rs"]
 mod tests;

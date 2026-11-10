@@ -192,7 +192,6 @@ impl VertexArenas {
 }
 
 #[cfg(test)]
-#[path = "resources/tests/resources_test.rs"]
 mod tests;
 
 #[cfg(test)]

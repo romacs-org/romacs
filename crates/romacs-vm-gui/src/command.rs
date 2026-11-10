@@ -9,7 +9,7 @@ use romacs_display_runtime::thread_comm::InputEvent;
 
 pub fn unwrap_event(event: InputEvent) -> InputEvent {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => unwrap_event(*event),
+        InputEvent::Tracked { event, .. } => unwrap_event(*event),
         event => event,
     }
 }

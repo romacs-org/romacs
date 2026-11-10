@@ -27,7 +27,6 @@ pub mod shader_surface_cache;
 #[cfg(test)]
 #[path = "tests/texture_discipline_test.rs"]
 mod texture_discipline_test;
-pub(crate) mod tooltip_layout;
 pub use image_bands::{BandPlacement, DecodedBand, RasterBand, RowRange, TextureRows};
 pub use svg::SvgResourceContext;
 pub mod vertex;
@@ -47,7 +46,6 @@ pub use shader_surface::{
     ShaderValidationError, SurfaceContract, SurfaceUniformInit, compose_surface_wgsl,
     validate_surface_wgsl,
 };
-pub use tooltip_layout::TooltipLayout;
 pub use vertex::{Uniforms};
 #[cfg(feature = "video")]
 pub use video_cache::VideoRecoveryManifest;

@@ -123,6 +123,15 @@ fn mapcan_string_survives_moving_collections_inside_every_callback() {
          "(ok ((955 955 120 38634 38634) \"λλx雪雪\"))", 5, 0);
 }
 
+
+/// The divergence ledger, one file per divergence, read as one text.
+fn divergences() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ledger/divergences");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+    paths.sort();
+    paths.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect::<Vec<_>>().join("\n")
+}
+
 #[test]
 fn mapcan_pins_are_exactly_the_ledger() {
     let ledger: serde_json::Value = serde_json::from_str(include_str!("../tools/primh/mapcan-ledger.json")).unwrap();
@@ -136,6 +145,6 @@ fn mapcan_pins_are_exactly_the_ledger() {
     assert_eq!(pinned, ledgered, "pins and ledger differ");
     for (id, v) in ledger {
         let row = v["row"].as_str().unwrap();
-        assert!(include_str!("../../../DIVERGENCES.md").contains(&format!("\n| {row} |")), "{id}: missing {row}");
+        assert!(divergences().contains(&format!("\n| {row} |")), "{id}: missing {row}");
     }
 }

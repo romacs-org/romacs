@@ -442,5 +442,4 @@ impl GlyphAtlasPages {
 }
 
 #[cfg(test)]
-#[path = "pages/tests/pages_test.rs"]
 mod tests;

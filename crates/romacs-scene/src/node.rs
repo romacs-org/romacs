@@ -25,7 +25,7 @@ impl NodeId {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SceneId(pub u32);
 
-/// A buffer-text anchor published by `layout2` per window.
+/// A buffer-text anchor published by `romacs-layout` per window.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AnchorId(pub u32);
 

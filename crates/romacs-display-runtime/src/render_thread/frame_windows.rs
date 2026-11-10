@@ -2334,48 +2334,6 @@ impl GuiFrameWindowManager {
         }
     }
 
-    /// Resolve the native top-level window that owns a presented frame.
-    /// `frame_id` may name the top-level frame itself or any installed child
-    /// in its immutable ancestry scene.
-    pub(super) fn get_mut_by_presented_frame(
-        &mut self,
-        frame_id: u64,
-    ) -> Option<&mut GuiFrameWindowState> {
-        let owner = if self.is_primary_frame_id(frame_id) {
-            Some(self.primary_frame_key())
-        } else if self.windows.contains_key(&FrameKey::Adopted(frame_id)) {
-            Some(FrameKey::Adopted(frame_id))
-        } else {
-            self.windows.iter().find_map(|(key, window)| {
-                window
-                    .render
-                    .compositor
-                    .child_frames
-                    .frames
-                    .contains_key(&frame_id)
-                    .then_some(*key)
-            })
-        }?;
-        self.windows.get_mut(&owner)
-    }
-
-    pub(super) fn has_presented_frame(&self, frame_id: u64) -> bool {
-        self.windows.values().any(|window| {
-            window
-                .render
-                .compositor
-                .current_frame
-                .as_ref()
-                .is_some_and(|frame| frame.frame_placement.frame().get() == frame_id)
-                || window
-                    .render
-                    .compositor
-                    .child_frames
-                    .frames
-                    .contains_key(&frame_id)
-        })
-    }
-
     /// Get a window state by winit WindowId.
     pub(crate) fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
         if self.primary_winit_id == Some(winit_id) {
@@ -2516,7 +2474,7 @@ impl GuiFrameWindowManager {
 
     pub(super) fn apply_top_level_transition_policy(
         &mut self,
-        policy: romacs_display_protocol::TransitionPolicy,
+        policy: super::transitions::TransitionPolicy,
     ) {
         self.for_each_top_level_window_mut(|window_state| {
             window_state
@@ -2719,5 +2677,4 @@ impl GuiFrameWindowManager {
 }
 
 #[cfg(test)]
-#[path = "frame_windows/tests/frame_windows_test.rs"]
 mod tests;

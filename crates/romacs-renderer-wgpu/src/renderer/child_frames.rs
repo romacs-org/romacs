@@ -839,5 +839,4 @@ impl WgpuRenderer {
 }
 
 #[cfg(test)]
-#[path = "child_frames/tests/child_frames_test.rs"]
 mod tests;
