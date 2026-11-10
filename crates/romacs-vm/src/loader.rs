@@ -336,7 +336,6 @@ impl Vm {
             }
             Primitive::Eval => self.eval_primitive(args),
             Primitive::Macroexpand => self.macroexpand_primitive(args),
-            Primitive::ReadHostEvent => self.read_host_event(args),
             Primitive::FormatModeLine => self.format_mode_line(args),
             _ => unreachable!(),
         }

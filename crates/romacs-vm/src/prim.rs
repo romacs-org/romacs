@@ -153,7 +153,7 @@ pub(crate) struct PrimDesc {
 /// the `vm` field is private even to `prims::*` (a child of `prim` would
 /// otherwise see `prim`'s private fields): a leaf body cannot name `Vm`, so it
 /// cannot call `collect`, `execute` or `load`. Proven by compile-fail probe.
-pub(crate) use leaf::graphics::ImageEnv;
+pub(crate) use leaf::graphics::{IMAGE_ERROR_LOG, ImageEnv};
 mod leaf {
     use super::super::*;
     use super::Fault;
