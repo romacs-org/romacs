@@ -1591,13 +1591,13 @@ mod leaf {
             }
             let mut values = [Value::NIL; 4];
             for (i, table) in tables.into_iter().enumerate() {
-                self.vm.native_case_roots[i] = std::sync::Arc::downgrade(&table.root);
+                self.vm.native_case_roots[i] = std::sync::Arc::downgrade(table.root());
                 values[i] = self.vm.allocate_object(data::Object::CharTable(Box::new(table)));
             }
             let data::Object::CharTable(down) = self.vm.objects.entry_mut(values[0].index(0).unwrap() - 1) else { unreachable!() };
-            down.extras.copy_from_slice(&values[1..]);
+            down.set_extras(&values[1..]);
             let data::Object::CharTable(canon) = self.vm.objects.entry_mut(values[2].index(0).unwrap() - 1) else { unreachable!() };
-            canon.extras[2] = values[3];
+            canon.set_extra(2, values[3]);
             self.vm.standard_case_tables = values;
             Ok(values[0])
         }
@@ -1699,8 +1699,7 @@ mod leaf {
             let mut table = char_table::CharTable::new(purpose);
             table.initialize(n, init).map_err(Fault::Error)?;
             let slot = self.vm.literal_table_slot(init);
-            table.root.lock().unwrap().slots.fill(slot.clone());
-            table.ascii = crate::char_table::CharTable::ascii_from_root(&table.root);
+            table.fill(&slot);
             Ok(self.vm.allocate_object(data::Object::CharTable(Box::new(table))))
         }
         pub fn char_table_extra(&mut self, table: Value, n: Value, set: Option<Value>) -> super::Out {
@@ -1708,17 +1707,17 @@ mod leaf {
                 return Err(Fault::Wrong("char-table-p", table));
             };
             let i = n.as_integer().map_err(|_| Fault::Wrong("fixnump", n))?;
-            if i < 0 || i as usize >= t.extras.len() { return Err(Fault::Range(table, n)); }
-            let old = t.extras[i as usize];
+            if i < 0 || i as usize >= t.extras().len() { return Err(Fault::Range(table, n)); }
+            let old = t.extras()[i as usize];
             if let Some(value) = set {
                 let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
-                t.extras[i as usize] = value;
+                t.set_extra(i as usize, value);
                 Ok(value)
             } else { Ok(old) }
         }
         pub fn char_table_subtype(&self, table: Value) -> std::result::Result<Value, Fault> {
             match self.vm.object_if(table) {
-                Some(data::Object::CharTable(t)) => Ok(t.purpose),
+                Some(data::Object::CharTable(t)) => Ok(t.purpose()),
                 _ => Err(Fault::Wrong("char-table-p", table)),
             }
         }
@@ -1726,7 +1725,7 @@ mod leaf {
             let Some(data::Object::CharTable(t)) = self.vm.object_if(table) else {
                 return Err(Fault::Wrong("char-table-p", table));
             };
-            let old = t.parent;
+            let old = t.parent();
             if let Some(parent) = parent {
                 if parent != Value::NIL && !matches!(self.vm.object_if(parent), Some(data::Object::CharTable(_))) {
                     return Err(Fault::Wrong("char-table-p", parent));
@@ -1735,10 +1734,10 @@ mod leaf {
                 let mut seen = HashSet::default();
                 while let Some(data::Object::CharTable(t)) = self.vm.object_if(next) {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
-                    next = t.parent;
+                    next = t.parent();
                 }
                 let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
-                t.parent = parent;
+                t.set_parent(parent);
                 Ok(parent)
             } else { Ok(old) }
         }
@@ -1758,7 +1757,7 @@ mod leaf {
             let slot = self.vm.literal_table_slot(value);
             let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
             if let Some((from, to)) = bounds { t.set_range_slot(from, to, slot).map_err(Fault::Error)?; }
-            else { t.default = value; }
+            else { t.set_default(value); }
             Ok(value)
         }
         pub fn list_limit(&self) -> usize {
