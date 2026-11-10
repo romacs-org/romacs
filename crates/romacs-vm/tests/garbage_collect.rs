@@ -796,3 +796,34 @@ fn a_collections_record_reads_its_pause_to_the_microsecond() {
         .unwrap().display().unwrap();
     assert_eq!(out, "(explicit t t t)");
 }
+
+/// A record says when its collection ended and what it left live, the second
+/// without a walk: what is held shows in it, and it stays in step with the walk's
+/// count of objects and below its bytes.
+#[test]
+fn a_collections_record_reads_its_time_and_what_it_left_live() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let collected = |vm: &mut Vm, form: &str| -> (f64, usize, usize) {
+        let out = vm.eval_source(&format!("(progn {form} (romacs--take-collections) (garbage-collect)
+                                             (let ((r (car (cdr (romacs--take-collections)))))
+                                               (format \"%f %d %d\" (nth 4 r) (nth 5 r) (nth 6 r))))"))
+            .unwrap().display().unwrap();
+        let out: String = serde_json::from_str(&out).unwrap();
+        let words: Vec<&str> = out.split(' ').collect();
+        (words[0].parse().unwrap(), words[1].parse().unwrap(), words[2].parse().unwrap())
+    };
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let (at, objects, bytes) = collected(&mut vm, "");
+    assert!((at - now()).abs() < 60.0, "{at}");
+    // The walk comes a little after the record, past what the form allocated.
+    let stats = vm.heap_stats();
+    assert!(objects.abs_diff(stats.live_objects) < 1000, "{objects} {}", stats.live_objects);
+    assert!(bytes <= stats.live_bytes, "{bytes} {}", stats.live_bytes);
+    let (_, _, with_string) = collected(&mut vm, "(setq held (make-string 8000000 ?x))");
+    assert!(with_string - bytes >= 7_900_000, "{bytes} {with_string}");
+    let (_, _, with_vector) = collected(&mut vm, "(setq held (make-vector 2000000 nil))");
+    assert!(with_vector + 8_000_000 - with_string >= 15_900_000, "{with_string} {with_vector}");
+    let (_, with_list, _) = collected(&mut vm, "(setq held (make-list 1000000 nil))");
+    assert!(with_list - objects >= 1_000_000, "{objects} {with_list}");
+}

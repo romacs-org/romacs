@@ -329,7 +329,7 @@ impl Vm {
         }
     }
     pub(crate) fn buffer_state_mut(&mut self, value: Value) -> Result<&mut bytes::BufferState> {
-        match self.objects.get_mut(value.index(0)?.checked_sub(1).ok_or("buffer required")?).ok_or("buffer required")? {
+        match self.objects.get_entry_mut(value.index(0)?.checked_sub(1).ok_or("buffer required")?).ok_or("buffer required")? {
             Object::Buffer(b) => Ok(&mut b.state),
             Object::ByteBuffer(b) => Ok(&mut b.state),
             _ => Err("buffer required".into()),
@@ -585,7 +585,7 @@ impl Vm {
         }
         if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
         for i in self.buffer_referrers(index) {
-            match &mut self.objects[i] {
+            match self.objects.entry_mut(i) {
                 Object::Marker(m) if m.buffer == value => {
                     m.buffer = Value::NIL;
                     m.anchor = None;
@@ -614,7 +614,7 @@ impl Vm {
         retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
         state.kill();
-        self.objects[index] = match &self.objects[index] {
+        *self.objects.entry_mut(index) = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             Object::Buffer(b) => {
                 let mut empty: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
@@ -834,7 +834,7 @@ impl Vm {
             None
         };
         let marks = if matches!(p, Insert | DeleteRegion) { self.family_record(index) } else { None };
-        let Object::Buffer(t) = &mut self.objects[index] else {
+        let Object::Buffer(t) = self.objects.entry_mut(index) else {
             unreachable!()
         };
         let accessible = t.accessible();
@@ -1049,7 +1049,7 @@ impl Vm {
                 _ => None,
             };
             if let Some(o) = replacement {
-                self.objects[index] = o;
+                *self.objects.entry_mut(index) = o;
             }
             if n != 1 {
                 return Err("wrong primitive arity".into());
@@ -1113,7 +1113,7 @@ impl Vm {
             _ => None,
         };
         if let Some(o) = replacement {
-            self.objects[index] = o;
+            *self.objects.entry_mut(index) = o;
             self.adopt_overlays(buffer, overlays)?;
         }
         Ok(if text { Value::TRUE } else { Value::NIL })
@@ -1260,7 +1260,7 @@ impl Vm {
         } else {
             None
         };
-        let Object::ByteBuffer(b) = &mut self.objects[index] else {
+        let Object::ByteBuffer(b) = self.objects.entry_mut(index) else {
             unreachable!()
         };
         let r = b.restriction.clone();
@@ -1420,7 +1420,7 @@ mod tests {
             table.set(65, Value::integer((i + 100) as i64).unwrap()).unwrap();
             *root = vm.allocate_object(Object::CharTable(Box::new(table)));
         }
-        let Object::Buffer(buffer) = &mut vm.objects[index] else { panic!() };
+        let Object::Buffer(buffer) = vm.objects.entry_mut(index) else { panic!() };
         buffer.case_tables = roots;
         vm.collect(&mut []);
         let index = vm.buffer_index().unwrap();
@@ -1486,7 +1486,7 @@ mod tests {
         assert_eq!(b.point, ByteOffset(1));
         let leaf = b.properties[&ByteOffset(1)]["x"];
         assert_eq!(vm.display(leaf).unwrap(), "\"retained\"");
-        let Object::ByteBuffer(b) = &mut vm.objects[roots[0].index(0).unwrap() - 1] else {
+        let Object::ByteBuffer(b) = vm.objects.entry_mut(roots[0].index(0).unwrap() - 1) else {
             panic!()
         };
         b.point = ByteOffset(0);
@@ -1676,7 +1676,7 @@ mod tests {
         text.properties
             .put(ByteOffset(1)..ByteOffset(3), "probe", vector);
         let buffer = vm.allocate_object(Object::Buffer(Box::new(text.into())));
-        if let Object::Vector(v) = &mut vm.objects[2] {
+        if let Object::Vector(v) = vm.objects.entry_mut(2) {
             v.push(buffer);
         }
         let mut roots = [buffer];
@@ -1746,7 +1746,7 @@ mod tests {
         text.replace(ByteOffset(0)..ByteOffset(0), "λ🙂".as_bytes())
             .unwrap();
         let buffer = vm.allocate_object(Object::Buffer(Box::new(text.into())));
-        if let Object::Vector(v) = &mut vm.objects[2] {
+        if let Object::Vector(v) = vm.objects.entry_mut(2) {
             v.push(buffer);
         }
         let mut roots = [buffer];
@@ -1966,7 +1966,7 @@ impl Vm {
                 self.record_first_change().map_err(Fault::Error)?;
             }
             let index = buffer.index(0).map_err(Fault::Error)? - 1;
-            match &mut self.objects[index] {
+            match self.objects.entry_mut(index) {
                 Object::Buffer(b) => b.state.record_change(false),
                 Object::ByteBuffer(b) => b.state.record_change(false),
                 _ => {}
@@ -1998,7 +1998,7 @@ impl Vm {
             PlanApply::Reset => properties.reset(),
             PlanApply::Ops(ops) => apply_plan_ops(properties, ops),
         };
-        match &mut self.objects[index] {
+        match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => {
                 install(&mut buffer.properties);
                 self.display_state.version += 1;
@@ -2007,7 +2007,7 @@ impl Vm {
             Object::Bytes(bytes) => {
                 let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
                 install(&mut string.properties);
-                self.objects[index] = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
+                *self.objects.entry_mut(index) = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
             }
             Object::ByteBuffer(buffer) => {
                 let mut properties = properties::Properties::from_map(&buffer.properties);

@@ -851,14 +851,9 @@ mod leaf {
             if !matches!(self.vm.object_if(v), Some(data::Object::Vector(_))) {
                 return Err(Fault::Wrong("vectorp", v));
             }
-            let data::Object::Vector(a) = self.object_mut(v)? else {
-                unreachable!()
-            };
-            let item = usize::try_from(n)
-                .ok()
-                .and_then(|i| a.get_mut(i))
-                .ok_or(Fault::Range(v, index))?;
-            *item = value;
+            let object = self.writable_object(v)?;
+            let slot = usize::try_from(n).map_err(|_| Fault::Range(v, index))?;
+            self.vm.objects.update_element(object, slot, value).map_err(|_| Fault::Range(v, index))?;
             Ok(value)
         }
         pub fn setcar(&mut self, v: Value, value: Value) -> std::result::Result<Value, Fault> {
@@ -877,14 +872,14 @@ mod leaf {
             if Vm::image_value(v) && v.tag() == 3 {
                 return Err(self.read_only(v));
             }
-            let pair = v
+            let i = v
                 .index_if(3)
-                .and_then(|i| self.vm.conses.get_mut(i))
+                .filter(|&i| i < self.vm.conses.len())
                 .ok_or(Fault::Wrong("consp", v))?;
             if car {
-                pair.0 = value;
+                self.vm.conses.set_car(i, value);
             } else {
-                pair.1 = value;
+                self.vm.conses.set_cdr(i, value);
             }
             Ok(value)
         }
@@ -1444,8 +1439,13 @@ mod leaf {
         /// The private object V names, for writing; a frozen or image value
         /// is refused with `read_only`.
         pub(crate) fn object_mut(&mut self, v: Value) -> std::result::Result<&mut data::Object, Fault> {
+            let i = self.writable_object(v)?;
+            Ok(self.vm.objects.entry_mut(i))
+        }
+        /// As `object_mut`, the object's index, for a store that names its slot.
+        pub(crate) fn writable_object(&mut self, v: Value) -> std::result::Result<usize, Fault> {
             if Vm::image_value(v) { return Err(self.read_only(v)); }
-            self.vm.object_mut(v).map_err(Fault::Error)
+            self.vm.writable_object(v).map_err(Fault::Error)
         }
         /// GNU's `CHECK_IMPURE` signal for a write to the frozen or image
         /// object V (`frozen.rs`).
@@ -1588,9 +1588,9 @@ mod leaf {
                 self.vm.native_case_roots[i] = std::sync::Arc::downgrade(&table.root);
                 values[i] = self.vm.allocate_object(data::Object::CharTable(Box::new(table)));
             }
-            let data::Object::CharTable(down) = &mut self.vm.objects[values[0].index(0).unwrap() - 1] else { unreachable!() };
+            let data::Object::CharTable(down) = self.vm.objects.entry_mut(values[0].index(0).unwrap() - 1) else { unreachable!() };
             down.extras.copy_from_slice(&values[1..]);
-            let data::Object::CharTable(canon) = &mut self.vm.objects[values[2].index(0).unwrap() - 1] else { unreachable!() };
+            let data::Object::CharTable(canon) = self.vm.objects.entry_mut(values[2].index(0).unwrap() - 1) else { unreachable!() };
             canon.extras[2] = values[3];
             self.vm.standard_case_tables = values;
             Ok(values[0])
@@ -1834,6 +1834,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod flight;
     mod compiled_lisp;
     mod casetab;
     mod casing;

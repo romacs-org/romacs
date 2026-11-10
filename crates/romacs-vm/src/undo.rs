@@ -91,7 +91,7 @@ impl Vm {
             && start.integer_value().is_some()
             && end.integer_value() == Some(beg)
         {
-            self.conses[elt.index(3)?].1 = Value::integer(beg + length)?;
+            self.conses.set_cdr(elt.index(3)?, Value::integer(beg + length)?);
             return Ok(());
         }
         let entry = self.alloc_cons(Value::integer(beg)?, Value::integer(beg + length)?);

@@ -1363,7 +1363,7 @@ impl Vm {
         }
     }
     fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
-        match self.objects.get_mut(buffer)? {
+        match self.objects.get_entry_mut(buffer)? {
             data::Object::Buffer(b) => Some(&mut b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&mut b.per_buffer),
             _ => None,

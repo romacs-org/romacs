@@ -370,8 +370,8 @@ impl Vm {
             if until_key {
                 crate::gc_mark::trim_after_graves(self.gc_stress.threads);
             }
-            let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
-            self.count_collection(elapsed);
+            let elapsed = start.map(|start| start.elapsed().as_nanos() as u64);
+            self.count_collection(elapsed.unwrap_or(0));
             self.note_collection(elapsed, until_key);
         }
         self.profile_collection_end();
@@ -544,32 +544,36 @@ mod tests {
             vm.display(taken).unwrap().split_whitespace().map(str::to_owned).collect::<Vec<_>>().join(" ")
         };
         take(&mut vm);
-        // Durations vary: only the record's shape is compared.
-        let shape = |text: String| text.split(' ').enumerate().map(|(i, w)| if i % 4 == 2 { "MS".to_owned() } else { w.to_owned() }).collect::<Vec<_>>().join(" ");
+        // Durations, times and sizes vary: only the record's shape is compared.
+        let shape = |text: String| {
+            let words: Vec<&str> = text.split(' ').collect();
+            let [dropped, kind, _ms, met, command, _at, _objects, _bytes] = words[..] else { panic!("{text}") };
+            format!("{dropped} {kind} MS {met} {command} T OBJECTS BYTES))")
+        };
         vm.collect_garbage();
-        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil T OBJECTS BYTES))");
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil T OBJECTS BYTES))");
         // The key arrives after the last point the collection gives way.
         vm.set_host_input(Some(Box::new(KeyAfter(2))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil T OBJECTS BYTES))");
         vm.set_host_input(None);
         vm.eval_source_raw("(setq real-this-command 'forward-char)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char"))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char" T OBJECTS BYTES))"#);
         // The loop's tail has cleared the running command.
         vm.eval_source_raw("(setq real-this-command nil real-last-command 'next-line)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line"))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line" T OBJECTS BYTES))"#);
         // Idle again: the command has ended, whatever the variable holds.
         vm.idle_since = Some(crate::host::monotonic());
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil T OBJECTS BYTES))");
         vm.set_host_input(None);
         for _ in 0..crate::gc::COLLECTION_RECORDS + 44 {
             vm.collect(&mut []);

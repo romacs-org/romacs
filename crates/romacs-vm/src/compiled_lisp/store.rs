@@ -225,8 +225,8 @@ pub(super) fn open(path: &Path) -> crate::Result<Artifact> {
 pub(super) fn room(store: &Path) -> bool {
     let Ok(path) = std::ffi::CString::new(store.as_os_str().as_encoded_bytes()) else { return false };
     let Ok(stat) = host::statvfs(&path) else { return false };
-    let free = stat.f_bavail as u64 * stat.f_frsize as u64;
-    let size = stat.f_blocks as u64 * stat.f_frsize as u64;
+    let free = stat.available * stat.fragment;
+    let size = stat.blocks * stat.fragment;
     free >= (size / 20).min(2 << 30)
 }
 

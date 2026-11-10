@@ -37,9 +37,9 @@ impl Vm {
         // A watcher may collect only for a writer that rooted its own frame
         // (an engine write, `threaded::watched_write'); any other native
         // writer may keep Values in locals, so it holds collection.
-        let _unwind = self.unwind_mark();
         // GNU untraps the variable while its watchers run (no recursion),
-        // and traps it again as they end; a panic out of them, at the mark.
+        // and traps it again as they end; a panic out of them, by whatever
+        // catches it (`Vm::catching`).
         self.trapped.remove(&base);
         self.retrap.push(base);
         let held = usize::from(!self.rooted_write);

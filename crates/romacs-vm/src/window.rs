@@ -232,7 +232,7 @@ impl Vm {
         }
     }
     pub(super) fn window_mut(&mut self, v: Value) -> Result<&mut Window> {
-        match self.objects.get_mut(v.index(0)?.saturating_sub(1)) {
+        match self.objects.get_entry_mut(v.index(0)?.saturating_sub(1)) {
             Some(Object::Window(w)) => Ok(w),
             _ => Err("window required".into()),
         }
@@ -421,7 +421,8 @@ impl Vm {
                 match previous {
                     None => head = rest,
                     Some(cell) => {
-                        self.cons_mut(cell)?.1 = rest;
+                        let at = self.writable_cons(cell)?;
+                        self.conses.set_cdr(at, rest);
                     }
                 }
             } else {
@@ -1428,7 +1429,7 @@ impl Vm {
         self.display_state.hosted = true;
         for (end, &byte) in ends.iter().zip(&bytes) { self.display_state.painted_rows(end, byte); }
         for (index, distance) in changes {
-            let Object::Window(w) = &mut self.objects[index] else {
+            let Object::Window(w) = self.objects.entry_mut(index) else {
                 unreachable!()
             };
             w.end_distance = distance;
@@ -2433,12 +2434,12 @@ impl<'a> Windows<'a> {
     }
     pub(crate) fn set_terminal_params(&mut self, terminal: Value, params: Value) -> std::result::Result<(), Fault> {
         let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) { t.params = params; }
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) { t.params = params; }
         Ok(())
     }
     pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
         let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) {
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) {
             if keyboard { t.keyboard_coding = coding; } else { t.terminal_coding = coding; }
         }
         Ok(())

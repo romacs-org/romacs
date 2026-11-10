@@ -336,14 +336,15 @@ fn file_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) 
     Ok(Step::Done(if host::probe(host::Probe::IsDir, &path) { Value::TRUE } else { Value::NIL }))
 }
 
-/// gnulib gen_tempname's six random filename characters.
-fn temp_name_letters() -> String {
-    use std::hash::{BuildHasher, Hasher};
+/// gnulib gen_tempname's six random filename characters, from the
+/// kernel's entropy as gnulib draws them (getrandom): read through the host
+/// boundary, so a flight replay names the same files (`crate::flight`).
+fn temp_name_letters() -> std::io::Result<String> {
     const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u128(host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-    let mut bits = hasher.finish();
-    (0..6).map(|_| { let c = LETTERS[(bits % 62) as usize]; bits /= 62; c as char }).collect()
+    let mut bytes = [0u8; 8];
+    host::random_source()?.read_exact(&mut bytes)?;
+    let mut bits = u64::from_le_bytes(bytes);
+    Ok((0..6).map(|_| { let c = LETTERS[(bits % 62) as usize]; bits /= 62; c as char }).collect())
 }
 
 // Fmake_temp_file_internal: PREFIX, six random characters, SUFFIX, created
@@ -358,7 +359,9 @@ fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, te
     let kind = if dir_flag == Value::NIL { 0 } else if dir_flag.integer_value() == Some(0) { 2 } else { 1 };
     let mut attempt = 0;
     let path = loop {
-        let path = format!("{head}{}{tail}", temp_name_letters());
+        let operation = ["Creating file with prefix", "Creating directory with prefix", "Creating file name with prefix"][kind];
+        let letters = temp_name_letters().map_err(|e| errno(cx, operation, &[prefix], e))?;
+        let path = format!("{head}{letters}{tail}");
         let made = match kind {
             0 => host::open_output(&path, host::OpenOptions::new().write(true).create_new(true).mode(0o600)).map(drop),
             1 => host::create_dir(&path, 0o700),
@@ -372,10 +375,7 @@ fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, te
         match made {
             Ok(()) => break path,
             Err(e) if e.raw_os_error() == Some(libc::EEXIST) && attempt < 238328 => continue,
-            Err(e) => {
-                let operation = ["Creating file with prefix", "Creating directory with prefix", "Creating file name with prefix"][kind];
-                return Err(errno(cx, operation, &[prefix], e));
-            }
+            Err(e) => return Err(errno(cx, operation, &[prefix], e)),
         }
     };
     let multibyte = cx.string_view(prefix)?.is_multibyte() || cx.string_view(suffix)?.is_multibyte();
@@ -489,10 +489,7 @@ fn create_name(
 
 /// The process umask, which GNU reads once at startup (fileio.c realmask).
 fn umask() -> std::result::Result<u32, Fault> {
-    let status = host::read_to_string("/proc/self/status").map_err(|e| Fault::Error(format!("VM2 umask: {e}")))?;
-    status.lines().find_map(|line| line.strip_prefix("Umask:"))
-        .and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
-        .ok_or_else(|| Fault::Error("VM2 umask: no Umask in /proc/self/status".into()))
+    host::umask().map_err(|e| Fault::Error(format!("VM2 umask: {e}")))
 }
 
 // Fcopy_file: a regular FILE's bytes into NEWNAME, created exclusively with

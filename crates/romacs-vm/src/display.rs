@@ -1039,7 +1039,7 @@ impl Vm {
         self.referrers();
         let (windows, objects) = (self.referrers.as_ref().map_or(&[][..], |r| &r.windows), &mut self.objects);
         for &i in windows {
-            if let Object::Window(w) = &mut objects[i]
+            if let Object::Window(w) = objects.entry_mut(i)
                 && let Some(next) = w.pending_vscroll.take()
                 && next != w.vscroll_px
             {
@@ -2775,7 +2775,8 @@ impl Vm {
         for (_, form, _) in runs.iter().rev() {
             let value = self.ml_prop_value(form)?;
             let cell = self.list_value(&[value]);
-            self.cons_mut(cell)?.1 = self.slots[slot].value;
+            let cell_at = self.writable_cons(cell)?;
+            self.conses.set_cdr(cell_at, self.slots[slot].value);
             self.slots[slot].value = cell;
         }
         let (window, specs) = (self.slots[root].value, self.slots[slot].value);

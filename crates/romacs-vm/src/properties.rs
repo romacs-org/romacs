@@ -660,6 +660,10 @@ impl SyntaxChanges {
 
 impl Properties {
     /// The `syntax-table' changes since the last take.
+    /// Whether `syntax-table' changed since the last take.
+    pub(crate) fn has_syntax_changes(&self) -> bool {
+        self.syntax_changes.is_some()
+    }
     pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
         self.syntax_changes.take().map(|changes| *changes).unwrap_or_default()
     }
