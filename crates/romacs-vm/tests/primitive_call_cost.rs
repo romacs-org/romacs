@@ -62,13 +62,35 @@ fn a_cached_pattern_costs_no_copy_and_no_translation_table() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 400)";
-    // 4,525 and 5,004 now; 5,299 and 6,066 before.
-    for (body, bound) in [("(looking-at \"[ \\t]*(def\")", 4950.0), ("(string-match \"b+\" \"aabbcc\")", 5550.0)] {
+    // 4,056 and 4,545 with the syntax memo; 4,525 and 5,004 before it;
+    // 5,299 and 6,066 before either.
+    for (body, bound) in [("(looking-at \"[ \\t]*(def\")", 4350.0), ("(string-match \"b+\" \"aabbcc\")", 4850.0)] {
         let cost = per_call_in(&mut vm, buffer, body);
         assert!(cost < bound, "{body} costs {cost:.0} instructions a call");
     }
     assert_eq!(
         eval(&mut vm, "(with-temp-buffer (insert \"  (Defun x)\") (goto-char 1) (list (looking-at \"[ \\t]*(def\") (let ((case-fold-search nil)) (looking-at \"[ \\t]*(def\")) (string-match \"B+\" \"aabbcc\") (let ((case-fold-search nil)) (string-match \"B+\" \"aabbcc\")) (condition-case e (string-match 1 \"a\") (error e)) (search-forward \"(D\" nil t)))"),
         "(t nil 2 nil (wrong-type-argument stringp 1) 5)"
+    );
+}
+
+/// What a search learns of its syntax table lasts between searches: that
+/// the table is one whose parents do not loop, and its entries for ASCII.
+/// Every way the table can change must still be seen by the next search:
+/// `modify-syntax-entry`, a plain `aset`, a change to the entry cons
+/// itself, a parent's entry, another parent, a collection, and another
+/// table for the buffer.
+#[test]
+fn the_syntax_memo_follows_every_change_to_a_table() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
+    // 2,898 with the memo; 3,720 before.
+    let cost = per_call_in(&mut vm, buffer, "(progn (goto-char 5) (skip-syntax-forward \"^w\"))");
+    assert!(cost < 3200.0, "skip-syntax-forward costs {cost:.0} instructions a call");
+    // Pinned GNU's answers to the same form.
+    assert_eq!(
+        eval(&mut vm, "(with-temp-buffer (insert \"a-b c\") (let* ((r nil) (note (lambda () (setq r (cons (list (progn (goto-char 1) (skip-syntax-forward \"w\") (point)) (progn (goto-char 1) (and (looking-at \"\\\\sw+\") (match-end 0)))) r)))) (table (lambda (parent) (let ((tb (make-char-table 'syntax-table nil))) (set-char-table-parent tb parent) tb))) (parent (funcall table (standard-syntax-table))) (child (funcall table parent)) (other (funcall table (standard-syntax-table))) (old (syntax-table))) (set-syntax-table child) (funcall note) (modify-syntax-entry ?- \"w\" child) (funcall note) (aset child ?- (cons 2 nil)) (funcall note) (setcar (aref child ?-) 1) (funcall note) (aset child ?- nil) (modify-syntax-entry ?- \"w\" parent) (funcall note) (set-char-table-parent child other) (funcall note) (garbage-collect) (funcall note) (set-syntax-table parent) (funcall note) (set-syntax-table old) (funcall note) (nreverse r)))"),
+        "((2 2) (4 4) (4 4) (2 2) (4 4) (2 2) (2 2) (4 4) (2 2))"
     );
 }

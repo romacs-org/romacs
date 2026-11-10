@@ -187,12 +187,18 @@ pub(crate) struct PatternCache {
     /// The slots of the variables every search reads, found by name once:
     /// a slot keeps its index for the life of the VM.
     slots: Option<SearchSlots>,
+    /// What the last search learned of its syntax table.
+    syntax: syntax::SyntaxMemo,
 }
 #[derive(Clone, Copy)]
 struct SearchSlots {
     case_fold: usize,
     preserve_match_data: usize,
     match_buffer: usize,
+    standard_syntax: usize,
+    lookup_properties: usize,
+    /// The symbol a syntax table's purpose names, once it is interned.
+    syntax_purpose: Option<usize>,
 }
 impl PatternCache {
     pub(crate) fn is_empty(&self) -> bool {
@@ -345,6 +351,7 @@ impl Vm {
     /// syntax.c's clear_regexp_cache after `modify-syntax-entry'. A
     /// collection, which moves the tables, drops the patterns kept for one.
     pub(crate) fn clear_regexp_cache(&mut self, only_tables: bool) {
+        self.regexp_cache.syntax.forget();
         self.regexp_cache.retain(|e| only_tables && e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
     }
 
@@ -640,8 +647,12 @@ impl Vm {
             case_fold: self.names["case-fold-search"],
             preserve_match_data: self.names["inhibit-changing-match-data"],
             match_buffer: self.names["#:vm2-match-buffer"],
+            standard_syntax: self.names["#:vm2-standard-syntax"],
+            lookup_properties: self.names["parse-sexp-lookup-properties"],
+            syntax_purpose: self.names.get("syntax-table").copied(),
         };
-        self.regexp_cache.slots = Some(slots);
+        // Kept only once the purpose symbol exists: it is interned late.
+        if slots.syntax_purpose.is_some() { self.regexp_cache.slots = Some(slots); }
         slots
     }
     fn regexp_preserve(&mut self) -> bool {
@@ -683,16 +694,17 @@ impl Vm {
     ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let key = if folded { Translation::Standard } else { Translation::None };
         let table = source.table();
-        let mut cache = std::mem::take(&mut self.regexp_cache);
-        cache.clock += 1;
-        let clock = cache.clock;
+        self.regexp_cache.clock += 1;
+        let clock = self.regexp_cache.clock;
+        // The map alone leaves the VM while the pattern's bytes are borrowed.
+        let mut patterns = std::mem::take(&mut self.regexp_cache.patterns);
         let hit = self.str_view(pattern).and_then(|view| {
-            let entry = cache.patterns.get_mut(view.bytes())?.iter_mut().find(|e| e.multibyte == view.is_multibyte()
+            let entry = patterns.get_mut(view.bytes())?.iter_mut().find(|e| e.multibyte == view.is_multibyte()
                 && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))?;
             entry.used = clock;
             Some(entry.compiled.clone())
         });
-        self.regexp_cache = cache;
+        self.regexp_cache.patterns = patterns;
         let compiled = match hit {
             Some(compiled) => compiled,
             None => {
