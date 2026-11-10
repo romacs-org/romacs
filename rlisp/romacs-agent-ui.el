@@ -344,13 +344,16 @@ to its thread, which fold its result as the rest of the row does."
         (romacs-agent-ui--insert-at start (propertize (romacs-agent-ui--chip state) 'romacs-agent-tool tool))
         (set-marker mark start)))))
 
-(defun romacs-agent-ui--wake (session text)
-  "TEXT, a message to SESSION, as the wake of a task it delegated, or nil:
+(defun romacs-agent-ui--wakes (session text)
+  "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
 what the user wrote stays theirs, whatever it looks like."
-  (when-let* ((wake (romacs-agent-tools--wake-parse text))
-              (child (romacs-agent-get (plist-get wake :id)))
-              ((equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
-    wake))
+  (let ((wakes (romacs-agent-tools--wakes-parse text)))
+    (and wakes
+         (cl-every (lambda (wake)
+                     (when-let* ((child (romacs-agent-get (plist-get wake :id))))
+                       (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+                   wakes)
+         wakes)))
 
 (defun romacs-agent-ui--arrival (session event wake)
   "Show WAKE, a task's result reaching SESSION at EVENT: a row of its own,
@@ -546,8 +549,8 @@ or a repeat."
   "Draw SESSION's EVENT in its chat BUFFER, the current buffer."
       (pcase (plist-get event :type)
         ('input
-         (let ((wake (romacs-agent-ui--wake session (plist-get event :text))))
-           (if wake (romacs-agent-ui--arrival session event wake)
+         (let ((wakes (romacs-agent-ui--wakes session (plist-get event :text))))
+           (if wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake))
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              ;; A prompt carries its request id: what names its turn.

@@ -1553,7 +1553,8 @@ waiting."
                        "hostSocket" (romacs-agent-host-socket session))))
 
 (defconst romacs-agent--option-keys
-  '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId"))
+  '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
+    (:wake . "wake"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
