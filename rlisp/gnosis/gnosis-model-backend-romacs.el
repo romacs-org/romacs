@@ -238,28 +238,38 @@ Return non-nil on retirement; a stale claim never touches a successor."
                   :color gnosis-model-cue-color))
           gnosis-model-backend-romacs--cues))
 
-;; The renderer paints at most `romacs-model-max-highlight-layers'; cues
-;; give way to what is drawn above them, so a pick or an answer always shows.
-(defun gnosis-model-backend-romacs--fit-layers (beneath above)
-  "Return layers BENEATH, then ABOVE, within the renderer's layer limit.
-ABOVE (picks, answers) are kept first, its last ones when it alone is
-too many; BENEATH (cues) fill the room left."
-  (let* ((limit romacs-model-max-highlight-layers)
-         (above (last above limit)))
-    (append (seq-take beneath (- limit (length above))) above)))
+;; The renderer paints at most `romacs-model-max-highlight-layers'.  A cue
+;; set is painted whole or not at all (`gnosis-model-show-cues'): one
+;; layer stays free for the pick, and a reveal that cannot hold every cue
+;; beside its answers shows the answers alone.
+(defun gnosis-model-backend-romacs--cue-room ()
+  "How many cues the backend paints: every layer but the pick's."
+  (1- romacs-model-max-highlight-layers))
+
+(defun gnosis-model-backend-romacs--fit-layers (cues above)
+  "Return layers CUES, then ABOVE, when all fit the renderer's limit;
+else ABOVE alone, its last ones when it alone is too many.  Cues are
+never cut: a partial set could highlight a contrast card's answer alone."
+  (let ((limit romacs-model-max-highlight-layers))
+    (if (<= (+ (length cues) (length above)) limit)
+        (append cues above)
+      (last above limit))))
 
 (defun gnosis-model-backend-romacs-cue (targets)
   "Paint cue TARGETS beneath picks; nil TARGETS removes them.
-Return non-nil if painted; without colored layers decline."
+Return non-nil if painted.  Decline, and paint no cue, without colored
+layers or with more TARGETS than `gnosis-model-backend-romacs--cue-room':
+the caller names them in text instead."
   (let ((model (gnosis-model-backend-romacs--owned)))
     (when (gnosis-model-backend-romacs--layers-p)
-      (setq gnosis-model-backend-romacs--cues (copy-tree targets)
-            gnosis-model-backend-romacs--pending-pick nil)
-      (apply #'romacs-model-set-highlight model
-             (gnosis-model-backend-romacs--pick-highlight
-              model (or gnosis-model-backend-romacs--selection
-                        (list :mesh gnosis-model-backend-romacs--selected-id))))
-      t)))
+      (let ((fits (<= (length targets) (gnosis-model-backend-romacs--cue-room))))
+        (setq gnosis-model-backend-romacs--cues (and fits (copy-tree targets))
+              gnosis-model-backend-romacs--pending-pick nil)
+        (apply #'romacs-model-set-highlight model
+               (gnosis-model-backend-romacs--pick-highlight
+                model (or gnosis-model-backend-romacs--selection
+                          (list :mesh gnosis-model-backend-romacs--selected-id))))
+        fits))))
 
 (defun gnosis-model-backend-romacs-set-view (view)
   "Request VIEW, a (YAW PITCH ZOOM) list, on the current attachment."
