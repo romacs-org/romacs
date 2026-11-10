@@ -1,7 +1,6 @@
 {
   lib,
   pkgs,
-  wpeWebkit,
 }:
 let
   baseBuildInputs =
@@ -88,35 +87,22 @@ let
       ]
     );
 
-  webviewBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux (
-    assert lib.assertMsg (wpeWebkit != null) "Linux webview dependencies require a WPE package";
-    [
-      wpeWebkit
-      pkgs.libwpe
-      pkgs.libwpe-fdo
-      pkgs.weston
-      pkgs.xdg-dbus-proxy
-      # Runtime library for the `udev` crate, which enumerates DRM render
-      # nodes for the webview reactor's device selection.
-      pkgs.udev
-    ]
-  );
 in
 {
   inherit
     baseBuildInputs
     videoBuildInputs
     videoPluginInputs
-    webviewBuildInputs
     ;
 
   # Development exposes every optional native capability. Distribution
   # packages select capabilities using the typed production policy.
-  developmentBuildInputs = baseBuildInputs ++ videoBuildInputs ++ webviewBuildInputs;
+  # Weston hosts the display tests' headless sessions.
+  developmentBuildInputs =
+    baseBuildInputs ++ videoBuildInputs ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.weston ];
 
   productionBuildInputs =
     capabilities:
     baseBuildInputs
-    ++ lib.optionals (builtins.elem "video" capabilities.cargoFeatures) videoBuildInputs
-    ++ lib.optionals (builtins.elem "webview" capabilities.cargoFeatures) webviewBuildInputs;
+    ++ lib.optionals (builtins.elem "video" capabilities.cargoFeatures) videoBuildInputs;
 }

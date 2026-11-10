@@ -3027,5 +3027,29 @@ step, before the next step or the count's end."
                              (kill-emacs 0)))))
             (funcall step))))))))
 
+;; A flight recorder's step fingerprint (src/flight.rs) over N buffers, one
+;; edited before each step: a step looks at each buffer's tick and hashes
+;; only the text that changed, not every buffer's.
+(scaling-probe flight-fingerprint :n 200
+  :setup (let ((buffers (mapcar (lambda (name) (with-current-buffer (get-buffer-create name)
+                                                 (insert (make-string 4000 ?x))
+                                                 (current-buffer)))
+                                (scaling--names "scaling-flight" n))))
+           (romacs--flight-fingerprint)
+           (vconcat buffers))
+  :body (dotimes (i 50)
+          (with-current-buffer (aref it (% i (length it))) (insert "y"))
+          (romacs--flight-fingerprint)))
+
+;; A session that makes a buffer at each step: the steps' fingerprints
+;; look at every buffer's tick, a scan of the buffer list per step, as
+;; making a buffer already rebuilds that list (ticket buffers).
+(scaling-probe flight-buffer-steps :n 200
+  :known "ticket flight-steps: a flight step looks at each buffer's tick, as making a buffer rebuilds the buffer order (ticket buffers)"
+  :setup (scaling--names "scaling-flight-steps" n)
+  :body (dolist (name it)
+          (with-current-buffer (get-buffer-create name) (insert "x"))
+          (romacs--flight-fingerprint)))
+
 (provide 'scaling-probes)
 ;;; probes.el ends here

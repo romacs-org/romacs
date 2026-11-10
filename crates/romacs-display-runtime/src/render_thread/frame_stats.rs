@@ -14,14 +14,11 @@
 //! All counters are relaxed atomics: every writer runs on the render thread,
 //! and readers only need eventually-consistent totals.
 
-use enum_map::EnumMap;
-use std::collections::BTreeMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use romacs_display_protocol::frame_time::EventTime;
 
-use super::frame_sched::{DemandReason, DemandReasonSet, FramePlan, NativeWindowId, RenderWork};
+use super::frame_sched::{FramePlan, RenderWork};
 
 /// One event-loop iteration (about_to_wait or user-event wake).
 pub(super) static EVENT_LOOP_WAKEUPS: AtomicU64 = AtomicU64::new(0);
@@ -104,7 +101,7 @@ static FRAME_TIME_BUCKETS: [AtomicU64; 8] = [
 
 /// Inclusive upper bound (microseconds) of each `FRAME_TIME_BUCKETS` slot; the
 /// last is unbounded (`u64::MAX`), i.e. frames slower than 66 ms.
-pub const FRAME_TIME_BUCKET_UPPER_US: [u64; 8] =
+pub(crate) const FRAME_TIME_BUCKET_UPPER_US: [u64; 8] =
     [1_000, 2_000, 4_000, 8_000, 16_000, 33_000, 66_000, u64::MAX];
 
 fn record_frame_time(latency_us: u64) {
@@ -142,48 +139,9 @@ pub(super) fn add(counter: &AtomicU64, n: u64) {
     counter.fetch_add(n, Ordering::Relaxed);
 }
 
-/// Per-native-window demand attribution (frame scheduling plan,
-/// Observability: "counters per native window and process-wide totals ...
-/// active demand reasons"). Written only from the render thread at points
-/// that are already awake (demand reconciliation and frame planning), so a
-/// fully idle loop never touches it; read by the diagnostics snapshot.
-struct WindowDemandStats {
-    /// Demand reasons active as of the last reconciliation.
-    active: DemandReasonSet,
-    /// Planned frames for each demand reason, keyed by the reason itself.
-    plans: EnumMap<DemandReason, u64>,
-}
-
-static WINDOW_DEMAND: Mutex<BTreeMap<u64, WindowDemandStats>> = Mutex::new(BTreeMap::new());
-
-/// The scheduler's loop-global pseudo-window (`LOOP_WINDOW`): not a native
-/// window, so it is excluded from per-window attribution. Its demand still
-/// counts in the process-wide totals.
-const LOOP_PSEUDO_WINDOW: u64 = u64::MAX;
-
-/// Replace the per-window active-reason sets with the coordinator's current
-/// view. Windows absent from `demand` (destroyed/pruned) drop their stats:
-/// per-window attribution does not outlive the window.
-pub(super) fn publish_window_demand(
-    demand: impl Iterator<Item = (NativeWindowId, DemandReasonSet)>,
-) {
-    let mut map = WINDOW_DEMAND.lock().unwrap();
-    let mut old = std::mem::take(&mut *map);
-    for (id, set) in demand {
-        if id.0 == LOOP_PSEUDO_WINDOW {
-            continue;
-        }
-        let plans = old
-            .remove(&id.0)
-            .map(|stats| stats.plans)
-            .unwrap_or_default();
-        map.insert(id.0, WindowDemandStats { active: set, plans });
-    }
-}
-
-/// Record a frame plan: its render work class and the demands it satisfies,
-/// both process-wide and attributed to the window the plan is for.
-pub(super) fn count_plan(window: NativeWindowId, plan: &FramePlan) {
+/// Record a frame plan process-wide: its render work class and the demands
+/// it satisfies.
+pub(super) fn count_plan(plan: &FramePlan) {
     let counter = match plan.work {
         RenderWork::None => &PLAN_NONE,
         RenderWork::CompositeOnly { .. } => &PLAN_COMPOSITE_ONLY,
@@ -193,17 +151,6 @@ pub(super) fn count_plan(window: NativeWindowId, plan: &FramePlan) {
     count(counter);
     for reason in plan.reasons.iter() {
         count(&PLAN_DEMAND_REASONS[reason.index()]);
-    }
-    if plan.reasons.is_empty() || window.0 == LOOP_PSEUDO_WINDOW {
-        return;
-    }
-    let mut map = WINDOW_DEMAND.lock().unwrap();
-    let stats = map.entry(window.0).or_insert_with(|| WindowDemandStats {
-        active: DemandReasonSet::empty(),
-        plans: EnumMap::default(),
-    });
-    for reason in plan.reasons.iter() {
-        stats.plans[reason] += 1;
     }
 }
 
@@ -265,7 +212,7 @@ pub struct FrameSchedSnapshot {
 }
 
 /// Names of the [`FrameSchedSnapshot::demand_reasons`] slots, in index order.
-pub const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] = {
+pub(crate) const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] = {
     let mut names = [""; super::frame_sched::DemandReason::COUNT];
     let all = super::frame_sched::DemandReason::ALL;
     let mut i = 0;
@@ -275,35 +222,6 @@ pub const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] =
     }
     names
 };
-
-/// Point-in-time per-native-window demand attribution: the reasons currently
-/// keeping the window rendering plus its cumulative planned-frame counts per
-/// reason (frame scheduling plan, Observability).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WindowFrameSnapshot {
-    /// Scheduler window id: the Emacs frame id once adopted, 0 for the
-    /// primary window before adoption.
-    pub window: u64,
-    /// Currently-active demand reasons, in [`DEMAND_REASON_NAMES`] order.
-    pub active_reasons: Vec<&'static str>,
-    /// Planned frames per demand reason, indexed as [`DEMAND_REASON_NAMES`].
-    pub demand_reasons: [u64; super::frame_sched::DemandReason::COUNT],
-}
-
-/// Copy of the per-window demand attribution, sorted by window id. Safe from
-/// any thread; the render thread holds the lock only for map-sized updates.
-pub fn window_snapshots() -> Vec<WindowFrameSnapshot> {
-    WINDOW_DEMAND
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(id, stats)| WindowFrameSnapshot {
-            window: *id,
-            active_reasons: stats.active.iter().map(DemandReason::name).collect(),
-            demand_reasons: stats.plans.into_array(),
-        })
-        .collect()
-}
 
 pub fn snapshot() -> FrameSchedSnapshot {
     FrameSchedSnapshot {

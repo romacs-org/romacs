@@ -59,7 +59,7 @@ use super::frame_windows::{
     FrameLifecycle, GuiFrameNativeWindowState, GuiFrameRenderState, GuiFrameWindowState,
 };
 use super::state::{ChildFrameStyle, ToolbarResources};
-use crate::core::types::DisplayFrameId;
+use romacs_display_protocol::types::DisplayFrameId;
 use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
 
 /// A frame drawn and ready to present.
@@ -73,7 +73,7 @@ use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
 /// against pixels nobody saw.
 struct RenderedFrameSurface {
     output: wgpu::SurfaceTexture,
-    frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     projection: Option<romacs_display_protocol::InteractionProjection>,
     /// What the composed picture holds of the native models (design §6.2).
     models: super::models::ModelPicture,
@@ -95,8 +95,8 @@ struct RenderedFrameSurface {
 /// context.
 struct FrameDrawInputs<'a> {
     present_mapping: romacs_display_protocol::PresentMapping,
-    root_animated_cursor: Option<crate::core::types::AnimatedCursor>,
-    animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    root_animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
+    animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
     bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
     child_frame_style: &'a ChildFrameStyle,
     scroll_indicators_enabled: bool,
@@ -112,7 +112,7 @@ fn render_frame_window_contents(
     native: &GuiFrameNativeWindowState,
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     inputs: &FrameDrawInputs<'_>,
     cursor_visible: bool,
     include_overlays: bool,

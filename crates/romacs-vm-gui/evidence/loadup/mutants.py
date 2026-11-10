@@ -109,7 +109,7 @@ for name, file, old, new, test, target in MUTANTS:
     path.write_text(original.replace(old, new))
     try:
         assert path.read_text() != original
-        p = subprocess.run(['cargo', 'test', '--locked', '-p', 'romacs-vm-gui', '--bin', 'romacs-vm-gui', test, '--', '--exact'],
+        p = subprocess.run(['cargo', 'test', '--locked', '-p', 'romacs-vm-gui', '--lib', test, '--', '--exact'],
                            cwd=root, capture_output=True, text=True, env=env)
         out = p.stdout + p.stderr
         compiled = 'test result' in out or 'panicked' in out

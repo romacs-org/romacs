@@ -3,19 +3,8 @@
 //! uniquify names two notes.org by their directories and each file joins
 //! `file-name-history', as pinned GNU does for `emacs a/notes.org
 //! b/notes.org'.
-#[path = "../src/loadup.rs"] mod loadup;
-#[path = "../src/eval_last_sexp.rs"] mod eval_last_sexp;
-#[path = "../src/startup.rs"] mod startup;
-#[path = "../src/command.rs"] mod command;
-#[path = "../src/presentation.rs"] mod presentation;
-#[path = "../src/native.rs"] mod native;
-#[path = "../src/echo.rs"] mod echo;
+use romacs_vm_gui::startup;
 use romacs_vm::Vm;
-
-#[allow(dead_code)]
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 #[test]
 fn loadup_file_arguments_visit_through_gnus_find_file() {

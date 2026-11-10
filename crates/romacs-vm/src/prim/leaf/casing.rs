@@ -242,7 +242,7 @@ impl Leaf<'_> {
         let (mut first, mut last, mut added) = (None, 0, 0);
         for (i, (&code, out)) in codes.iter().zip(&cased).enumerate() {
             let at = start - 1 + i as i64 + added;
-            match &mut self.vm.objects[index] {
+            match self.vm.objects.entry_mut(index) {
                 data::Object::Buffer(b) => {
                     if out.as_slice() == [code] { continue; }
                     last = at + 1 + out.len() as i64;
@@ -255,11 +255,11 @@ impl Leaf<'_> {
                         // replace_range_2: one character for others,
                         // keeping its text properties.
                         let marks = self.vm.family_record(index);
-                        let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
+                        let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!("text buffer") };
                         let edited = b.rewrite_character(from..to, &text);
                         self.vm.family_fetch(marks);
                         edited.map_err(Fault::Error)?;
-                        let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
+                        let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!("text buffer") };
                         b.state.record_text_change(out.len() + 1);
                         added += out.len() as i64 - 1;
                     }

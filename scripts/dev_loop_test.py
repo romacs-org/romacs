@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -48,17 +49,23 @@ class SelectionTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.cache = tempfile.TemporaryDirectory(prefix="dev-loop-test-")
+        self.addCleanup(self.cache.cleanup)
+
     def invoke(self, arguments=(), fail=False, extra_env=None):
         calls = []
         metadata = {"packages": [package()], "workspace_members": ["small"]}
 
         def run(command, **kwargs):
+            tmpdir = Path(kwargs["env"]["TMPDIR"])
+            self.assertTrue(tmpdir.is_dir() and not any(tmpdir.iterdir()), "a fresh private TMPDIR")
             calls.append((command, kwargs["env"]))
             if fail:
                 raise subprocess.CalledProcessError(100, command)
 
-        environment = {"PATH": "/bin", "HOME": "/owner", "CARGO_TARGET_DIR": "/chosen-target",
-                       "GNUPGHOME": "/signing", "XDG_CACHE_HOME": "/cache", **(extra_env or {})}
+        environment = {"PATH": "/bin", "HOME": "/owner", "CARGO_TARGET_DIR": "/chosen-target", "TMPDIR": "/shared-tmp",
+                       "GNUPGHOME": "/signing", "XDG_CACHE_HOME": self.cache.name, **(extra_env or {})}
         environment = {key: value for key, value in environment.items() if value is not None}
         stream = io.StringIO()
         with patch.object(loop.sys, "argv", ["dev-loop", "small", *arguments]), \
@@ -76,7 +83,11 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         command, child_env = calls[0]
         self.assertEqual(command[:4], ["cargo", "nextest", "run", "--config"])
-        self.assertEqual(child_env, environment)
+        # The caller's environment, but a TMPDIR of the run's own, gone after it.
+        tmpdir = Path(child_env["TMPDIR"])
+        self.assertEqual(tmpdir.parent, Path(self.cache.name))
+        self.assertFalse(tmpdir.exists())
+        self.assertEqual({**child_env, "TMPDIR": environment["TMPDIR"]}, environment)
         self.assertIn("--no-tests=fail", command)
         self.assertEqual(command[command.index("--retries") + 1], "0")
         self.assertIn("PASS (focused tests only)", text)

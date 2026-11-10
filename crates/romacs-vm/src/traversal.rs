@@ -42,11 +42,11 @@ impl Vm {
                 Ok(if p == Car { pair.0 } else { pair.1 })
             }
             Setcar | Setcdr => {
-                let pair = self.cons_mut(x)?;
+                let i = self.writable_cons(x)?;
                 if p == Setcar {
-                    pair.0 = y;
+                    self.conses.set_car(i, y);
                 } else {
-                    pair.1 = y;
+                    self.conses.set_cdr(i, y);
                 }
                 Ok(y)
             }
@@ -213,11 +213,14 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
             if x.tag() != 3 || Vm::image_value(x) {
                 return None;
             }
-            let pair = vm.conses.get_mut(x.payload() as usize)?;
+            let i = x.payload() as usize;
+            if i >= vm.conses.len() {
+                return None;
+            }
             if p == Setcar {
-                pair.0 = y;
+                vm.conses.set_car(i, y);
             } else {
-                pair.1 = y;
+                vm.conses.set_cdr(i, y);
             }
             Some(y)
         }
@@ -267,14 +270,19 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
 /// else arrives leaves by tail call.
 macro_rules! half {
     ($name:ident, $general:ident, $field:tt) => {
-        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+        /// # Safety
+        /// R is the running engine's current frame (`Engine::regs`) and PC an
+        /// instruction of the function running in it: the registers and constants
+        /// its operands name lie in that frame and code, as lowering checked.
+        pub(super) unsafe fn $name(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+            // SAFETY: R and PC as the function's contract (`# Safety`).
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
                 if x.0 & 7 == 3 {
                     let index = (x.0 >> 3) as usize;
-                    if index < e.vm.conses.len() {
-                        *r.add(i.a) = e.vm.conses.get_unchecked(index).$field;
+                    if let Some(pair) = e.vm.conses.get(index) {
+                        *r.add(i.a) = pair.$field;
                         return advance(e, r, pc);
                     }
                 } else if x == Value::NIL {
@@ -289,7 +297,12 @@ macro_rules! half {
 macro_rules! handler {
     ($(#[$attribute:meta])* $name:ident, $p:ident) => {
         $(#[$attribute])*
-        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+        /// # Safety
+        /// R is the running engine's current frame (`Engine::regs`) and PC an
+        /// instruction of the function running in it: the registers and constants
+        /// its operands name lie in that frame and code, as lowering checked.
+        pub(super) unsafe fn $name(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+            // SAFETY: R and PC as the function's contract (`# Safety`).
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
@@ -313,7 +326,12 @@ handler!(eq, Eq);
 handler!(memq, Memq);
 handler!(assq, Assq);
 // GNU plist_get, the eq walk of a two-argument `plist-get'.
-pub(super) unsafe fn plist_get(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+/// # Safety
+/// R is the running engine's current frame (`Engine::regs`) and PC an
+/// instruction of the function running in it: the registers and constants
+/// its operands name lie in that frame and code, as lowering checked.
+pub(super) unsafe fn plist_get(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+    // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let i = &*pc;
         let Some(value) = plist_get_eq(e.vm, *r.add(i.d), *r.add(i.d + 1)) else {

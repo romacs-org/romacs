@@ -1,5 +1,5 @@
-use crate::core::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
 use image::{Rgba, RgbaImage};
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
 use romacs_renderer_wgpu::WgpuRenderer;
 use std::path::Path;
 
@@ -516,7 +516,7 @@ fn colorful_glyph_box_logs(
     logs
 }
 
-fn color_is_grayscale(color: crate::core::types::Color) -> bool {
+fn color_is_grayscale(color: romacs_display_protocol::types::Color) -> bool {
     (color.r - color.g).abs() < 0.001 && (color.g - color.b).abs() < 0.001
 }
 

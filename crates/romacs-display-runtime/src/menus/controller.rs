@@ -14,7 +14,9 @@ use winit::{
 
 pub(crate) struct MenuRequest {
     pub tooltips: Option<romacs_display_protocol::tooltip::MenuTooltips>,
+    #[cfg(test)]
     pub request_id: Option<romacs_display_protocol::menu::MenuBarRequestId>,
+    #[cfg(test)]
     pub token: romacs_display_protocol::menu::MenuToken,
     pub frame_id: u64,
     pub parent: Arc<dyn Window>,
@@ -46,7 +48,7 @@ struct PanelState {
 }
 
 impl MenuPresentation {
-    pub fn tooltip_deadline(&self) -> Option<std::time::Instant> {
+    pub(crate) fn tooltip_deadline(&self) -> Option<std::time::Instant> {
         self.help
             .deadline()
             .into_iter()
@@ -129,7 +131,6 @@ impl MenuPresentation {
                             fonts,
                         },
                         appearance,
-                        crate::tooltips::TooltipSource::NativeMenu,
                         now,
                     );
                 }
@@ -145,7 +146,7 @@ impl MenuPresentation {
 
     /// Horizontal navigation moves between headings only when the current
     /// submenu cannot consume it. Pending menus support the same navigation.
-    pub fn heading_step(&self, id: WindowId, key: &winit::keyboard::Key) -> Option<i32> {
+    pub(crate) fn heading_step(&self, id: WindowId, key: &winit::keyboard::Key) -> Option<i32> {
         self.heading()?;
         if !self.owns_parent(id) && self.host.depth(id).is_none() {
             return None;
@@ -175,7 +176,7 @@ impl MenuPresentation {
         }
     }
 
-    pub fn select_heading(
+    pub(crate) fn select_heading(
         &mut self,
         heading: super::MenuHeading,
         pressed: bool,
@@ -194,6 +195,7 @@ impl MenuPresentation {
         action
     }
 
+    #[cfg(test)]
     pub fn open(&mut self, request: MenuRequest) -> bool {
         if let Some(id) = request.request_id
             && !self.menu_bar.accepts(id)
@@ -230,7 +232,7 @@ impl MenuPresentation {
         self.panels.truncate(len);
     }
 
-    pub fn commit_retirements(&mut self, commit: &PopupCommit<'_>) {
+    pub(crate) fn commit_retirements(&mut self, commit: &PopupCommit<'_>) {
         // Passive children must release their retained menu parents first.
         self.tooltip.commit_retirements(commit);
         self.host.commit_retirements(commit);
@@ -248,25 +250,13 @@ impl MenuPresentation {
             .or_else(|| self.request.as_ref().map(|r| r.frame_id))
     }
 
-    pub fn owns_parent(&self, id: WindowId) -> bool {
+    pub(crate) fn owns_parent(&self, id: WindowId) -> bool {
         self.heading().is_some_and(|h| h.parent == id)
             || self.request.as_ref().is_some_and(|r| r.parent.id() == id)
     }
 
     pub fn take_result(&mut self) -> Option<romacs_display_protocol::menu::MenuResult> {
         self.lifetime.take_result()
-    }
-
-    pub fn hide(&mut self, token: romacs_display_protocol::menu::MenuToken) -> bool {
-        if self.heading().is_some() && !self.menu_bar.owns_popup(token) {
-            // Old evaluator teardown may arrive before the new ShowPopupMenu.
-            return false;
-        }
-        if self.lifetime.hide(token) {
-            self.close();
-            return true;
-        }
-        false
     }
 
     pub fn cancel(&mut self) {

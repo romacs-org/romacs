@@ -1,8 +1,6 @@
 //! Vulkan import of packed and native bi-planar DRM DMA-BUF surfaces.
 
-#![allow(clippy::field_reassign_with_default)]
-
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd};
 use std::sync::Arc;
 
 use ash::vk;
@@ -30,6 +28,10 @@ struct ImportedResources {
 
 impl Drop for ImportedResources {
     fn drop(&mut self) {
+        // SAFETY: this owner created the image and its memories on `device`
+        // and is their last user: wgpu's texture holds it through its drop
+        // callback and each release through an Arc, so no queued work still
+        // reads them when the last reference goes.
         unsafe {
             self.device.destroy_image(self.image, None);
             for memory in self.memories.drain(..) {
@@ -44,6 +46,9 @@ struct ForeignRelease(Arc<ImportedResources>);
 impl GpuFrameRelease for ForeignRelease {
     fn record(&self, encoder: &mut wgpu::CommandEncoder) {
         let resources = &self.0;
+        // SAFETY: the closure records one barrier into the encoder's own
+        // Vulkan command buffer, on the image `resources` keeps alive until
+        // the recorded work is retired; it neither ends nor submits the buffer.
         unsafe {
             encoder.as_hal_mut::<wgpu::hal::api::Vulkan, _, _>(|hal| {
                 let hal = hal.expect("DMA-BUF release requires a Vulkan command encoder");
@@ -81,6 +86,8 @@ pub(super) struct ImportedDmaBufSurface {
 
 impl ImportedDmaBufSurface {
     pub(super) fn acquire(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), String> {
+        // SAFETY: the image and its device are this surface's, alive while
+        // `self` is, and `device` is the wgpu device they were imported into.
         unsafe {
             submit_foreign_acquire(
                 device,
@@ -145,6 +152,12 @@ pub(super) fn import_dmabuf(
         .ok_or_else(|| format!("DRM format {:#010x} is not sampleable", params.fourcc))?;
 
     use wgpu::hal::api::Vulkan;
+    // SAFETY: every raw handle comes from wgpu's Vulkan device and outlives
+    // this block. The create-info chains point at locals that live to the
+    // calls reading them. The image is destroyed on every error path before
+    // anything else owns it, and its memories by `bind_*` on theirs. Once
+    // bound, the image passes to wgpu with a drop callback that keeps the
+    // owning `ImportedResources` alive as long as the texture.
     unsafe {
         let hal = device
             .as_hal::<Vulkan>()
@@ -316,6 +329,11 @@ fn sampled_format(fourcc: u32) -> Option<(vk::Format, wgpu::TextureFormat)> {
 #[path = "dmabuf/tests/dmabuf_test.rs"]
 mod tests;
 
+/// The memory-plane count the device reports for FORMAT with MODIFIER, or
+/// None when it cannot sample that combination.
+///
+/// # Safety
+/// PHYSICAL_DEVICE belongs to INSTANCE.
 unsafe fn modifier_plane_count(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
@@ -327,6 +345,8 @@ unsafe fn modifier_plane_count(
         p_next: (&mut list as *mut _) as *mut std::ffi::c_void,
         ..Default::default()
     };
+    // SAFETY: the chain points at the live local `list`, whose array pointer
+    // is null, so Vulkan only writes the count.
     unsafe {
         instance.get_physical_device_format_properties2(physical_device, format, &mut properties)
     };
@@ -339,6 +359,8 @@ unsafe fn modifier_plane_count(
         p_next: (&mut list as *mut _) as *mut std::ffi::c_void,
         ..Default::default()
     };
+    // SAFETY: as above; `list` now points at `entries`, which holds the
+    // count Vulkan reported.
     unsafe {
         instance.get_physical_device_format_properties2(physical_device, format, &mut properties)
     };
@@ -368,14 +390,20 @@ fn plane_layouts(
         .collect())
 }
 
-unsafe fn fds_are_disjoint(fds: &[BorrowedFd<'_>]) -> bool {
+/// Whether FDS name more than one DMA-BUF (by inode); true when one
+/// cannot be told.
+fn fds_are_disjoint(fds: &[BorrowedFd<'_>]) -> bool {
     let mut first_inode = None;
     for fd in fds {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        if unsafe { libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
-            return true;
-        }
-        let inode = unsafe { stat.assume_init() }.st_ino;
+        // SAFETY: FD is open for the borrow; fstat fills `stat` when it
+        // returns 0, and only then is it read.
+        let inode = unsafe {
+            if libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) != 0 {
+                return true;
+            }
+            stat.assume_init().st_ino
+        };
         match first_inode {
             None => first_inode = Some(inode),
             Some(first) if first != inode => return true,
@@ -385,13 +413,21 @@ unsafe fn fds_are_disjoint(fds: &[BorrowedFd<'_>]) -> bool {
     false
 }
 
+/// Import the single DMA-BUF behind IMAGE's planes and bind it; the image
+/// stays the caller's, and the memory is freed again on failure.
+///
+/// # Safety
+/// DEVICE created IMAGE, which has no memory bound yet, and
+/// EXTERNAL_MEMORY_FD was loaded for DEVICE.
 unsafe fn bind_shared(
     device: &ash::Device,
     external_memory_fd: &ash::khr::external_memory_fd::Device,
     image: vk::Image,
     params: &ImportParams<'_>,
 ) -> Result<Vec<vk::DeviceMemory>, String> {
+    // SAFETY: the caller's contract.
     let requirements = unsafe { device.get_image_memory_requirements(image) };
+    // SAFETY: the caller's contract; the size and types are IMAGE's.
     let memory = unsafe {
         import_memory(
             device,
@@ -402,13 +438,20 @@ unsafe fn bind_shared(
             external_memory_fd,
         )?
     };
+    // SAFETY: MEMORY was allocated on DEVICE for IMAGE, which has none bound.
     if let Err(error) = unsafe { device.bind_image_memory(image, memory, 0) } {
+        // SAFETY: the binding failed, so nothing uses MEMORY.
         unsafe { device.free_memory(memory, None) };
         return Err(format!("binding DMA-BUF memory failed: {error:?}"));
     }
     Ok(vec![memory])
 }
 
+/// Import each plane's DMA-BUF and bind them to IMAGE's memory planes; the
+/// image stays the caller's, and the memories are freed again on failure.
+///
+/// # Safety
+/// As [`bind_shared`], for an image created DISJOINT.
 unsafe fn bind_disjoint(
     device: &ash::Device,
     external_memory_fd: &ash::khr::external_memory_fd::Device,
@@ -432,11 +475,14 @@ unsafe fn bind_disjoint(
             ..Default::default()
         };
         let mut requirements = vk::MemoryRequirements2::default();
+        // SAFETY: the caller's contract; the chain points at the live local
+        // `plane_info`.
         unsafe { device.get_image_memory_requirements2(&requirements_info, &mut requirements) };
         let object_index = params.plane_object_indices[plane as usize];
         let fd = *params.fds.get(object_index).ok_or_else(|| {
             format!("DMA-BUF plane {plane} refers to missing object {object_index}")
         })?;
+        // SAFETY: the caller's contract; the size and types are this plane's.
         let memory = match unsafe {
             import_memory(
                 device,
@@ -450,6 +496,7 @@ unsafe fn bind_disjoint(
             Ok(memory) => memory,
             Err(error) => {
                 for memory in memories.drain(..) {
+                    // SAFETY: not yet bound, so nothing uses it.
                     unsafe { device.free_memory(memory, None) };
                 }
                 return Err(error);
@@ -471,8 +518,11 @@ unsafe fn bind_disjoint(
             ..Default::default()
         })
         .collect();
+    // SAFETY: each binding's chain points at `plane_infos`, alive across the
+    // call, and names a memory allocated on DEVICE for IMAGE.
     if let Err(error) = unsafe { device.bind_image_memory2(&bindings) } {
         for memory in memories.drain(..) {
+            // SAFETY: the binding failed, so nothing uses it.
             unsafe { device.free_memory(memory, None) };
         }
         return Err(format!("binding disjoint DMA-BUF planes failed: {error:?}"));
@@ -480,6 +530,10 @@ unsafe fn bind_disjoint(
     Ok(memories)
 }
 
+/// Allocate dedicated memory for IMAGE that imports a duplicate of FD.
+///
+/// # Safety
+/// DEVICE created IMAGE, and EXTERNAL_MEMORY_FD was loaded for DEVICE.
 unsafe fn import_memory(
     device: &ash::Device,
     image: vk::Image,
@@ -489,6 +543,7 @@ unsafe fn import_memory(
     external_memory_fd: &ash::khr::external_memory_fd::Device,
 ) -> Result<vk::DeviceMemory, String> {
     let mut fd_properties = vk::MemoryFdPropertiesKHR::default();
+    // SAFETY: FD is open for the borrow and only inspected.
     unsafe {
         external_memory_fd.get_memory_fd_properties(
             vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT,
@@ -498,11 +553,9 @@ unsafe fn import_memory(
     }
     .map_err(|error| format!("querying DMA-BUF Vulkan memory types failed: {error:?}"))?;
     let memory_type_index = first_memory_type(image_memory_types & fd_properties.memory_type_bits)?;
-    let duplicated = unsafe { libc::dup(fd.as_raw_fd()) };
-    if duplicated < 0 {
-        return Err("failed to duplicate DMA-BUF for Vulkan import".into());
-    }
-    let owned = unsafe { OwnedFd::from_raw_fd(duplicated) };
+    let owned = fd
+        .try_clone_to_owned()
+        .map_err(|error| format!("failed to duplicate DMA-BUF for Vulkan import: {error}"))?;
     let mut import = vk::ImportMemoryFdInfoKHR {
         handle_type: vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT,
         fd: owned.as_raw_fd(),
@@ -519,6 +572,9 @@ unsafe fn import_memory(
         memory_type_index,
         ..Default::default()
     };
+    // SAFETY: the caller's contract; the chain points at locals alive across
+    // the call. On success Vulkan owns the duplicate, so it is not closed
+    // here; on failure `owned` closes it.
     match unsafe { device.allocate_memory(&allocate, None) } {
         Ok(memory) => {
             let _ = owned.into_raw_fd();
@@ -528,6 +584,11 @@ unsafe fn import_memory(
     }
 }
 
+/// Submit a barrier that takes IMAGE from the foreign queue family into
+/// QUEUE_FAMILY for sampling.
+///
+/// # Safety
+/// IMAGE is a live image of DEVICE, which is WGPU_DEVICE's Vulkan device.
 unsafe fn submit_foreign_acquire(
     wgpu_device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -538,6 +599,8 @@ unsafe fn submit_foreign_acquire(
     let mut encoder = wgpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Romacs DMA-BUF foreign ownership acquire"),
     });
+    // SAFETY: the caller's contract; the closure only records a barrier into
+    // the encoder's own command buffer, which wgpu finishes and submits.
     unsafe {
         encoder.as_hal_mut::<wgpu::hal::api::Vulkan, _, _>(|hal| {
             if let Some(hal) = hal {

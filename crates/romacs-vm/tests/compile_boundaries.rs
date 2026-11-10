@@ -3,7 +3,9 @@
 //! rejects it, so an unrelated failure (a typo, a missing import) cannot pass
 //! for the property; `pass/` is the positive control. A `heap_boundary/fail/`
 //! program holds a `Local` across a call that can collect, or reaches for the
-//! raw moving index.
+//! raw moving index. A `rooting_brand/fail/` program breaks a rule of
+//! `brand` (a heap value out of a leaf, the engine after its dispatch, a
+//! permission into a leaf or across VMs) on a stand-in engine.
 //!
 //! One test for the whole crate: trybuild keeps one project per crate and
 //! rewrites its manifest. A second test binary, run in parallel by nextest,
@@ -18,4 +20,6 @@ fn the_compiler_enforces_the_boundaries() {
     t.compile_fail("tests/heap_boundary/fail/*.rs");
     t.pass("tests/snapshot_safe/pass/*.rs");
     t.compile_fail("tests/snapshot_safe/fail/*.rs");
+    t.pass("tests/rooting_brand/pass/*.rs");
+    t.compile_fail("tests/rooting_brand/fail/*.rs");
 }

@@ -4,7 +4,7 @@
     python3 scripts/gate --lane nocore full
     scripts/gate focused 'EXPR'
     scripts/gate --repeat 60 focused 'EXPR'
-    scripts/gate changed
+    scripts/gate changed [BASE]
     scripts/gate build
     scripts/gate reuse RUN_DIR [full|focused|changed [EXPR]]
 
@@ -69,7 +69,7 @@ DISPLAY_PACKAGES = {
     'romacs-display-runtime', 'romacs-renderer-wgpu',
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
     'romacs-font-materializer', 'romacs-test-fonts', 'romacs-video',
-    'romacs-video-model', 'romacs-webview', 'romacs-layout-input',
+    'romacs-video-model', 'romacs-layout-input',
     'romacs-layout2', 'romacs-vm-gui',
 }
 GATE_PROFILE = ['--config', 'profile.gate.inherits="release"', '--config', 'profile.gate.lto="off"',
@@ -485,9 +485,9 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         print(f'gate: {reason}', flush=True)
         return None
     try:
-        # The workspace config still describes retired editor targets and setup
-        # scripts. Use one explicit config for build, inventory and execution;
-        # slot admission supplies the memory limit, and this bounds test hangs.
+        # One explicit config for build, inventory and execution, apart from
+        # the workspace's; slot admission supplies the memory limit, and this
+        # bounds test hangs.
         config = run_dir / 'nextest.toml'
         # The warm census loads GNU's loadup chain through abbrev.el into a
         # fresh VM per file: about 275s per pass alone in the gate, and over
@@ -627,17 +627,29 @@ def mirror_files(root):
             for p in root.rglob('*')}
 
 
-def changed_filter(wt):
-    """Nextest filter naming tests after the Rust modules changed since master.
+# The rules a change can break anywhere, which no module's name would select:
+# what may run Lisp, what may hold a value across it, what each primitive
+# declares, which derived files match.  Together a few minutes at worst, of which
+# compile_boundaries, the compile-fail fixtures of the rooting rules, is most.
+STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules', 'romacs-vm::no_remote_references', 'romacs-vm::heap_boundary',
+              'romacs-vm::oclosure_boundary', 'romacs-vm::gc_threads_forbidden', 'romacs-vm::primitive_registry',
+              'romacs-vm::production_registry', 'romacs-vm::host_boundary_lint', 'romacs-vm::primitive_gc_boundary',
+              'romacs-introspect::boundary', 'romacs-introspect::derived_artifacts', 'romacs-introspect::derive',
+              'romacs-gui-tests::harness_contract')
+
+
+def changed_filter(wt, base='master'):
+    """Nextest filter for the small gate: tests named after the Rust modules
+    changed since BASE, and the structural rules whatever changed.
 
     None (run everything) when a change cannot be mapped to test names.
     """
-    base = out('git', 'merge-base', 'HEAD', 'master', cwd=wt).decode().strip()
+    base = out('git', 'merge-base', 'HEAD', base, cwd=wt).decode().strip()
     names = set(out('git', 'diff', '--name-only', base, cwd=wt).decode().split())
     names |= set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
     terms = set()
     for name in names:
-        if name.startswith('doc/') or name.endswith('.md') or name == 'scripts/gate':
+        if name.startswith(('doc/', 'scripts/tests/')) or name.endswith('.md') or name in ('scripts/gate', 'Makefile'):
             continue
         m = re.match(r'crates/([^/]+)/tests/([^/]+)\.rs$', name)
         if m:                                   # a test binary, or a module of compat_all
@@ -651,7 +663,7 @@ def changed_filter(wt):
             return None                           # crate root changed
         leaf = re.sub(r'_test$', '', parts[-1])
         terms.add(f'test(/(^|::){re.escape(leaf)}(_test)?(::|$)/)')
-    return ' | '.join(sorted(terms)) if terms else None
+    return ' | '.join(sorted(terms) + [f'binary_id({binary})' for binary in STRUCTURAL])
 
 
 def reuse(wt, args, group):
@@ -702,6 +714,18 @@ def reuse(wt, args, group):
     return 0 if reason is None else 1
 
 
+def provision_fixtures(src):
+    """Fill the pinned test-fixture cache before any test runs: tests read
+    it and never download (crates/romacs-test-fonts/fixtures.json)."""
+    script = src / 'scripts/fetch-test-fixtures'
+    if not script.is_file():
+        return
+    fixtures_env = dict(os.environ, ROMACS_TEST_FONTS_DIR=os.environ.get(
+        'ROMACS_TEST_FONTS_DIR', str(HOME / '.cache/romacs-test-fonts')))
+    if subprocess.call([sys.executable, '-I', str(script)], env=fixtures_env) != 0:
+        raise MissingTool('pinned test fixtures (scripts/fetch-test-fixtures failed)')
+
+
 def inner(args):
     global ORACLE
     wt, run_dir = pathlib.Path(args.worktree), pathlib.Path(args.run_dir)
@@ -728,6 +752,8 @@ def inner(args):
             ORACLE = _override_oracle(args.oracle) if args.oracle else _pinned_oracle(root)
             fingerprint, env_hashes, tool_hashes = environment_identity(src, root)
             sync(root, src)
+        if not build_only:
+            provision_fixtures(src)
         threads = {'vm2': args.threads, 'display': args.display_threads}
         failed = build_and_run(src, run_dir, args.expr, threads, not build_only, t0, suites, args.repeat)
         if failed is None:
@@ -815,7 +841,9 @@ def gate_main():
         return inner(args)
     if args.mode == 'focused' and len(args.rest) != 1:
         ap.error('focused requires one nextest expression')
-    if args.mode not in ('focused', 'reuse') and args.rest:
+    if args.mode == 'changed' and len(args.rest) > 1:
+        ap.error('changed takes at most one base revision')
+    if args.mode not in ('focused', 'reuse', 'changed') and args.rest:
         ap.error('unexpected mode arguments')
     wt = pathlib.Path(out('git', 'rev-parse', '--show-toplevel').decode().strip())
     lane = args.lane or re.sub(r'[^A-Za-z0-9_.-]', '-', out(
@@ -825,7 +853,7 @@ def gate_main():
         ORACLE = _override_oracle(args.oracle) if args.oracle else _pinned_oracle(wt)
         return reuse(wt, args, group)
     tree = freeze(wt, staged=args.staged)
-    expr = args.rest[0] if args.mode == 'focused' else changed_filter(wt) or 'all()' if args.mode == 'changed' else 'all()'
+    expr = args.rest[0] if args.mode == 'focused' else changed_filter(wt, *args.rest[:1]) or 'all()' if args.mode == 'changed' else 'all()'
     (CACHE / 'runs').mkdir(parents=True, exist_ok=True)
     run_dir = pathlib.Path(tempfile.mkdtemp(prefix=f'{lane}-{time.strftime("%Y%m%d-%H%M%S")}-', dir=CACHE / 'runs'))
     (run_dir / 'gate').write_bytes(out('git', 'show', f'{tree}:scripts/gate', cwd=wt))

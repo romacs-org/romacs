@@ -48,9 +48,10 @@ impl FrameDisplayState {
         self.render_snapshot_text(false)
     }
 
+    #[cfg(test)]
     /// Like [`render_text`](Self::render_text), plus one `: run ...` line per
     /// face run under each row, carrying the face name and resolved colors.
-    pub fn render_text_faces(&self) -> String {
+    pub(crate) fn render_text_faces(&self) -> String {
         self.render_snapshot_text(true)
     }
 

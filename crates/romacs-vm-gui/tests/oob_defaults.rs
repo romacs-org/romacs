@@ -7,30 +7,9 @@
 //! off); `romacs-defaults-mode' off
 //! gives every option GNU's standard value back but one the init set
 //! itself; -Q never turns them on.
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/fonts.rs"]
-mod fonts;
-#[path = "../src/grammars.rs"]
-mod grammars;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{command, fonts, grammars, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::collections::VecDeque;
-
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))

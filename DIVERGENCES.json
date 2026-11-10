@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "cd3ecb9387d043390926829a081cf2866f00d6eda306689ea9bfa582645e1320",
+  "input_hash": "182eabafb552d92c3d4a12e26fa2735e777ca9c761bbab3b1f1a1d9b0f46777f",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5898,7 +5898,7 @@
    "planned": false,
    "mechanism": "`object-intervals` layout",
    "gnu": "`fns.c:6663` copies the interval tree as it stands: adjacent intervals whose plists are equal stay separate when separate edits made them (`(concat (propertize \"a\" 'x 1) (propertize \"b\" 'x 1))` gives `((0 1 (x 1)) (1 2 (x 1)))`), and each interval's plist is the live plist object.",
-   "romacs": "Text keeps no hidden interval boundaries (`crates/romacs-props`), so the layout is the printer's: maximal runs whose property values are `eq`, as `(BEG END PLIST)` over the whole text with 0-based character positions, including runs without properties (nil), and nil for text that never had properties. Each PLIST is a fresh list in `text-properties-at`'s order.",
+   "romacs": "Text keeps no hidden interval boundaries (`crates/romacs-vm/src/properties.rs`), so the layout is the printer's: maximal runs whose property values are `eq`, as `(BEG END PLIST)` over the whole text with 0-based character positions, including runs without properties (nil), and nil for text that never had properties. Each PLIST is a fresh list in `text-properties-at`'s order.",
    "why": "**Package-observable** where code counts intervals or relies on GNU's edit-history splits (the second case above gives `((0 2 (x 1)))`); a string printed and read back, and the text it came from, report the same layout, as ERC's snapshot tests compare. Oracle test: `crates/romacs-vm/tests/substrate_oracle.rs` `object_intervals_match_pinned_gnu`",
    "symbols": [
     "object-intervals"

@@ -158,10 +158,9 @@ impl LayoutDriver {
         if self
             .planned_sample(frame, grid)
             .is_none_or(|sample| sample.motion.finished())
+            && let Self::Animating { outgoing, .. } = self
         {
-            if let Self::Animating { outgoing, .. } = self {
-                *outgoing = OutgoingPicture::Pinned(None);
-            }
+            *outgoing = OutgoingPicture::Pinned(None);
         }
     }
 

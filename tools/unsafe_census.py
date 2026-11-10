@@ -213,20 +213,25 @@ def owner(path, dirs):
     return None
 
 
-def census(root):
-    """{crate: Counter of kinds plus 'sites', 'undocumented', and 'allows'
-    (source attributes that relax unsafe_op_in_unsafe_fn)}."""
+def rust_sources(root):
+    """(crate, path relative to ROOT, source text) for each .rs file in scope."""
     dirs = packages(root)
     listed = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.rs'],
                             cwd=root, check=True, stdout=subprocess.PIPE).stdout.decode()
-    counts = {}
     for name in sorted(set(filter(None, listed.split('\0')))):
         path = Path(root) / name
         package = owner(name, dirs)
-        if package is None or not path.is_file():
-            continue
-        tally = counts.setdefault(dirs[package], Counter())
-        sites, allows = file_census(path.read_text(errors='surrogateescape'))
+        if package is not None and path.is_file():
+            yield dirs[package], name, path.read_text(errors='surrogateescape')
+
+
+def census(root):
+    """{crate: Counter of kinds plus 'sites', 'undocumented', and 'allows'
+    (source attributes that relax unsafe_op_in_unsafe_fn)}."""
+    counts = {}
+    for crate, _, src in rust_sources(root):
+        tally = counts.setdefault(crate, Counter())
+        sites, allows = file_census(src)
         tally['allows'] += allows
         for kind, ok, _ in sites:
             tally[kind] += 1

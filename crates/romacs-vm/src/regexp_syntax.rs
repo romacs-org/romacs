@@ -388,7 +388,7 @@ impl Vm {
                 if values[code as usize] != Value::NIL { return values[code as usize]; }
             }
             let entry = self.list_value(&[Value::integer(code).unwrap()]);
-            if let Object::Vector(values) = &mut self.objects[index] { values[code as usize] = entry; }
+            if let Object::Vector(values) = self.objects.entry_mut(index) { values[code as usize] = entry; }
             return entry;
         }
         let value = self.alloc_cons(Value::integer(code).unwrap(), matching);
@@ -554,7 +554,7 @@ impl Vm {
             SetSyntaxTable => {
                 self.regexp_syntax_table(args[0])?;
                 let i = self.buffer_index()?;
-                match &mut self.objects[i] {
+                match self.objects.entry_mut(i) {
                     Object::Buffer(t) => t.syntax_table = args[0],
                     Object::ByteBuffer(t) => t.syntax_table = args[0],
                     _ => unreachable!("buffer_index validates"),

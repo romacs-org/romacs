@@ -75,7 +75,7 @@ impl HoverHelp {
         };
     }
 
-    pub fn take_due(&mut self, now: Instant) -> Option<HelpTarget> {
+    pub(crate) fn take_due(&mut self, now: Instant) -> Option<HelpTarget> {
         match self.state {
             HoverState::Waiting { target, deadline } if deadline <= now => {
                 self.state = HoverState::Offered(target);

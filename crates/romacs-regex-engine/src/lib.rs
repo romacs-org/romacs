@@ -36,15 +36,13 @@
 //! [`MatchRegisters`] (per-group byte spans).  Nothing here exposes the
 //! backtracker's opcode buffer, failure stack, fastmap, or pattern layout, so
 //! a different matcher can replace `engine` behind these signatures without
-//! changing a caller.  The test and fuzzing seams that DO reach those
-//! internals live in [`internals`], which exists only with the `test-hooks`
-//! or `fuzzing` feature (never in a shipping build).
+//! changing a caller.  The crate's own tests reach the internals from
+//! inside it.
 
-// The API seal, checked by doctests in builds without the seams (with them,
-// these items are reachable on purpose).
-#![cfg_attr(
-    not(any(feature = "test-hooks", feature = "fuzzing")),
-    doc = r#"
+// Every unsafe block says why it holds (the unsafe census keeps the count).
+#![deny(clippy::undocumented_unsafe_blocks)]
+// The API seal, checked by doctests.
+#![doc = r#"
 ## The seal
 
 The compiled-pattern layout is not reachable:
@@ -53,28 +51,7 @@ The compiled-pattern layout is not reachable:
 let pattern = romacs_regex_engine::regex_compile("a", false, false).unwrap();
 let _ = pattern.fastmap_accurate;
 ```
-
-and neither are the engine's internals:
-
-```compile_fail,E0433
-let _ = romacs_regex_engine::internals::dfa::DfaMode::On;
-```
-"#
-)]
-
-/// Make an associated function crate-private, or public to the test/fuzz
-/// seams (`test-hooks` / `fuzzing`, and this crate's own tests).  Used for
-/// methods of public types that expose engine internals.
-macro_rules! seam {
-    ($(#[$meta:meta])* fn $($rest:tt)*) => {
-        #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
-        $(#[$meta])*
-        pub fn $($rest)*
-        #[cfg(not(any(test, feature = "test-hooks", feature = "fuzzing")))]
-        $(#[$meta])*
-        pub(crate) fn $($rest)*
-    };
-}
+"#]
 
 pub mod case_table;
 pub mod emacs_char;
@@ -82,11 +59,8 @@ mod engine;
 pub mod host;
 pub mod syntax_class;
 #[cfg(test)]
-mod test_paths;
+mod test_utils;
 mod tls_scope;
-
-#[cfg(test)]
-use test_paths::{emacs_core, test_utils};
 
 pub use case_table::{CaseTable, EmacsStr, EmacsText, emacs_downcase_compat};
 pub use syntax_class::{
@@ -94,27 +68,18 @@ pub use syntax_class::{
 };
 
 // Compile.
-pub use engine::{
-    CompiledPattern, RegexCompileError, regex_compile, regex_compile_lisp,
-    regex_compile_lisp_with_translation,
+pub use engine::compile::{
+    RegexCompileError, regex_compile, regex_compile_lisp, regex_compile_lisp_with_translation,
 };
+pub use engine::pattern::{CompiledPattern, MatchRegisters};
 // Match.
-pub use engine::{
-    MATCHER_OVERFLOW_MESSAGE, MatchRegisters, pattern_max_match_chars, re_match, re_search,
-    take_matcher_overflow,
-};
+pub use engine::matcher::fail::{MATCHER_OVERFLOW_MESSAGE, take_matcher_overflow};
+pub use engine::matcher::re_match;
+pub use engine::optimize::pattern_max_match_chars;
+pub use engine::search::re_search;
 // Host boundary: syntax and case.
-pub use engine::{
-    AsciiPreimage, CaseTranslation, DefaultSyntaxLookup, LookupClassKey, SyntaxCacheKey,
-    SyntaxLookup, char_class_bit, char_in_classes, default_char_has_category,
+pub use engine::class::{char_class_bit, char_in_classes};
+pub use engine::syntax::{
+    DefaultSyntaxLookup, LookupClassKey, SyntaxCacheKey, SyntaxLookup, default_char_has_category,
 };
-
-/// The engine's internals, for a host's white-box tests and the differential
-/// fuzzer only: engine routing overrides, matcher counters, the fail-stack
-/// probe, the existence DFA, and the compiled-pattern layout.  These are the
-/// backtracker's, and go away with it.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
-#[doc(hidden)]
-pub mod internals {
-    pub use crate::engine::*;
-}
+pub use engine::translate::{AsciiPreimage, CaseTranslation};

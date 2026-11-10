@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_windows::GuiFrameRenderState;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use romacs_display_protocol::{
     DisplayWindowId, GeometryPoint, GeometryRect, InteractionProjection, LiveDisplayWindowId,
     LogicalPixels, PaneProjection, PresentationFrameSpace, PresentationId, RootSurfaceSpace,

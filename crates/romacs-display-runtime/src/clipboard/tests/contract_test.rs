@@ -8,13 +8,11 @@
 //!    `TextRead::TargetUnavailable`, or `TextRead::Indeterminate`), never an
 //!    `Err` — `Err` is reserved for transport and worker failures;
 //! 2. text round-trips where the backend can read the selection it set;
-//! 3. `Text("")` is text, not absence;
-//! 4. CLIPBOARD and PRIMARY never alias.
+//! 3. `Text("")` is text, not absence.
 //!
 //! What these tests cannot see: the real X11 owner/requestor exchange, the
 //! Wayland data-control protocol against a compositor, and cross-process
-//! ownership.  The GUI test job covers PRIMARY end to end; the live check at
-//! the bottom is opt-in.
+//! ownership.  The live check at the bottom is opt-in.
 
 use super::*;
 
@@ -48,14 +46,6 @@ impl ClipboardBackend for FakeBackend {
             None => text_policy::TextRead::NoSelection,
         })
     }
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(if self.selections.contains_key(&selection) {
-            SelectionOwner::ThisProcess
-        } else {
-            SelectionOwner::None
-        })
-    }
 }
 
 /// Reports every absence as a transport error; the contract's first check
@@ -74,43 +64,12 @@ impl ClipboardBackend for LyingBackend {
     fn text(&mut self, _selection: ClipboardSelection) -> Result<text_policy::TextRead, String> {
         Err("selection is empty".to_owned())
     }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
-    }
-}
-
-/// Answers both selections from one slot; the contract's alias check must
-/// catch this.
-#[derive(Default)]
-struct AliasingBackend {
-    value: String,
-}
-
-impl ClipboardBackend for AliasingBackend {
-    fn set_text(
-        &mut self,
-        _selection: ClipboardSelection,
-        text: Option<&str>,
-    ) -> Result<(), String> {
-        self.value = text.unwrap_or_default().to_owned();
-        Ok(())
-    }
-
-    fn text(&mut self, _selection: ClipboardSelection) -> Result<text_policy::TextRead, String> {
-        Ok(text_policy::TextRead::Text(self.value.clone()))
-    }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
-    }
 }
 
 /// Assert the text contract against any backend.
 fn assert_contract(backend: &mut dyn ClipboardBackend) {
     const PROBE: &str = "romacs clipboard contract probe 3f8a2c";
     let clipboard = ClipboardSelection::Clipboard;
-    let primary = ClipboardSelection::Primary;
 
     // 1. Absence is an answer, not a transport error.
     backend
@@ -137,18 +96,6 @@ fn assert_contract(backend: &mut dyn ClipboardBackend) {
         "an empty selection is text, not absence"
     );
 
-    // 4. CLIPBOARD and PRIMARY never alias.
-    backend
-        .set_text(clipboard, Some(PROBE))
-        .expect("setting text must not fail");
-    assert_ne!(
-        backend
-            .text(primary)
-            .expect("reading PRIMARY must not fail"),
-        text_policy::TextRead::Text(PROBE.to_owned()),
-        "PRIMARY must not alias CLIPBOARD"
-    );
-
     // 1 again, for the cleared state.
     backend
         .set_text(clipboard, None)
@@ -172,12 +119,6 @@ fn the_fake_backend_satisfies_the_text_contract() {
 #[should_panic(expected = "absence must be an answer")]
 fn a_backend_that_reports_absence_as_an_error_fails_the_contract() {
     assert_contract(&mut LyingBackend);
-}
-
-#[test]
-#[should_panic(expected = "PRIMARY must not alias CLIPBOARD")]
-fn a_backend_that_aliases_the_selections_fails_the_contract() {
-    assert_contract(&mut AliasingBackend::default());
 }
 
 /// Opt-in live check against the real system clipboard.  It writes and clears

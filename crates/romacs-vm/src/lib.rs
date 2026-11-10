@@ -43,6 +43,7 @@ mod html_entities;
 mod xml_read;
 pub mod host;
 pub mod world;
+pub mod flight;
 pub mod compiled_lisp;
 mod environment;
 mod watchers;
@@ -103,6 +104,10 @@ mod tzfile;
 mod undo;
 mod insdel;
 mod indirect;
+// Rooting as a type; public, hidden, so tests/rooting_brand.rs compiles
+// against it.
+#[doc(hidden)]
+pub mod brand;
 mod gc;
 mod gc_check;
 mod gc_mark;
@@ -208,6 +213,8 @@ pub enum Form {
     #[doc(hidden)]
     Object(handle::FormObject),
 }
+// SAFETY: a form's objects are rooted handles (`FormObject`), never raw Values.
+unsafe impl crate::brand::Plain for Form {}
 romacs_snapshot::snapshot_enum!(Form {
     Form::Int(f0) => (f0),
     Form::Float(f0) => (f0),
@@ -283,6 +290,27 @@ impl Form {
 /// Two-bit fixnums and three-bit reference tags; private indices move at collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Value(u64);
+/// A Value no collection frees or moves: nil, t, unbound, a fixnum, a
+/// primitive, or a symbol that is not an obarray's (`reclaim_obarray_symbols`
+/// frees those and reuses their slots). Plain data, so orchestration may carry
+/// one across a collection point (`brand`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Imm(Value);
+// SAFETY: `Imm::new` admits only values no collection frees or moves.
+unsafe impl brand::Plain for Imm {}
+impl Imm {
+    pub(crate) fn new(vm: &Vm, value: Value) -> Option<Self> {
+        let fixed = match value.tag() {
+            1 | 6 => true,
+            7 => value.payload() == 0 || !vm.obarray_symbol_names.contains_key(&(value.payload() as usize - 1)),
+            _ => value == Value::NIL || value == Value::TRUE,
+        };
+        fixed.then_some(Imm(value))
+    }
+    pub(crate) fn get(self) -> Value {
+        self.0
+    }
+}
 romacs_snapshot::snapshot_tuple!(Value(f0));
 impl Value {
     pub const NIL: Self = Self(0);
@@ -1384,8 +1412,7 @@ pub struct Vm {
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
     /// Variables whose watchers run now, each trapped again as its call ends
-    /// (`Vm::notify_watchers_at'), or as a panic unwinds past it
-    /// (`UnwindMark').
+    /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
@@ -1513,7 +1540,7 @@ pub struct Vm {
     /// from native writers (`gc.rs`, `Vm::may_collect`).
     gc_holds: usize,
     /// Engines between entry and exit, suspended or not; those not in
-    /// `suspended_code` hold untraced registers and code.
+    /// `suspended` hold untraced registers and code.
     running_engines: usize,
     /// The writer notifying watchers is an engine write suspended for it,
     /// whose own Values the write roots (`threaded::watched_write`).
@@ -1609,12 +1636,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
-    /// What holds a collection's automatic aftermath back, over every engine:
-    /// each escape `threaded::route_escape' is unwinding, each live resume
-    /// record (a cleanup running) and each run of aftermath in progress
-    /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
-    /// zero whenever no engine runs.
-    aftermath_held: usize,
+    /// Escapes being unwound, in any engine: routing takes it, the driver gives
+    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
+    unwinding: usize,
     /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
     /// interrupt naming the job waits (`threaded::isolate_quit'), so
     /// finalizers and `post-gc-hook' never take it.
@@ -1622,8 +1646,9 @@ pub struct Vm {
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
-    /// Suspended engines' code and entry caches, traced and forwarded in place.
-    suspended_code: Vec<threaded::SuspendedCode>,
+    /// Suspended engines' own state, owned here until they resume: traced and
+    /// forwarded in place, and dropped with the engine by a caught panic.
+    suspended: Vec<threaded::Suspended>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
     /// (menu item, result); set and cleared around one walk, which never
     /// collects.
@@ -1768,7 +1793,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
-    aftermath_held,
+    unwinding,
     aftermath_runs,
     keymap_filters,
     keymap_pending_filter,
@@ -1793,7 +1818,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     images,
     lambda_lists,
     status_bar_line,
-    suspended_code,
+    suspended,
     host_input,
     layout_host,
     display,
@@ -2005,10 +2030,10 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
-            aftermath_held: 0,
+            unwinding: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],
-            suspended_code: vec![],
+            suspended: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
             dynamic: vec![],
@@ -2274,7 +2299,6 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        let _unwind = self.unwind_mark();
         self.gc_holds += 1;
         let result = self.build_function(args, body, outer, local_specials);
         self.gc_holds -= 1;

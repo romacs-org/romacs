@@ -1,7 +1,7 @@
-//! Cross-platform GPU-resident video playback.
+//! GPU-resident video playback: GStreamer decodes, and frames reach the
+//! compositor's Vulkan device as DMA-BUF imports or uploads.
 //!
-//! The public interface deliberately contains no GStreamer, CoreVideo,
-//! Media Foundation, DMA-BUF, Metal, or Direct3D types. Platform-native frame
+//! The public interface contains no GStreamer or DMA-BUF types. Native frame
 //! ownership and import stay behind the private platform seam.
 
 mod backend;
@@ -32,7 +32,6 @@ pub use model::{
     VideoSurfacePoolRole, VideoTextureCoordinates, VideoTransferCharacteristic,
 };
 pub(crate) use sampling::GpuVideoFrame;
-#[cfg(target_os = "linux")]
 pub use sampling::linux_render_device_numbers;
 pub use sampling::{GpuGeneration, PreparedVideoDraw, PreparedVideoDraws, VideoSamplingResources};
 pub use system::{VideoSystem, VideoWake};

@@ -22,6 +22,7 @@ import argparse
 import json
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -168,6 +169,12 @@ def main():
         engine.ask('(progn (romacs-usage-log-flush) t)')
     finally:
         engine.stop()
+        # What a run leaves is its evidence in OUTPUT, and no home in TMPDIR.
+        for name in ('engine.log', 'compositor.log', 'stacks.txt', usage.name):
+            if (root / name).exists():
+                shutil.copy(root / name, args.output / name)
+        shutil.rmtree(root, ignore_errors=True)
+    usage = args.output / usage.name
     commands = 0
     for line in usage.read_text().splitlines() if usage.exists() else []:
         record = json.loads(line)

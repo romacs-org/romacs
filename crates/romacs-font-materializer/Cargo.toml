@@ -7,10 +7,6 @@ license.workspace = true
 repository.workspace = true
 description = "Exact font opening, replay, metrics, and rasterization for Romacs"
 
-[features]
-default = []
-freetype-bundled = ["freetype-rs/bundled"]
-
 [dependencies]
 allsorts.workspace = true
 cosmic-text.workspace = true
@@ -22,12 +18,7 @@ thiserror.workspace = true
 tiny-skia.workspace = true
 tracing.workspace = true
 ttf-parser.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
 freetype-rs = { version = "0.38.0" }
-
-[target.'cfg(windows)'.dependencies]
-freetype-rs = { version = "0.38.0", features = ["bundled"] }
 
 [dev-dependencies]
 romacs-test-fonts.workspace = true

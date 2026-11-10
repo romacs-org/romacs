@@ -1,16 +1,11 @@
 use romacs_display_protocol::types::VideoId;
-#[cfg(target_os = "linux")]
 use std::collections::HashMap;
-#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[cfg(target_os = "linux")]
 use crossbeam_channel::{Receiver, Sender};
 
-#[cfg(target_os = "linux")]
 use crate::mailbox::PresentationFrameQueue;
 use crate::sampling::GpuVideoContext;
 use crate::system::VideoWake;
@@ -32,10 +27,6 @@ pub(crate) struct DecodedFrame<F> {
     /// seeks change media position, while output generations change the
     /// native surface contract used by the GPU importer.
     pub(crate) output_generation: DecoderOutputGeneration,
-    /// Compositor import work already completed before this frame entered the
-    /// common bounded presentation queue. Keeping this state on the affine frame
-    /// prevents replacement or late-drop paths from hiding real GPU work.
-    pub(crate) decoder_import: DecodedFrameImport,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -60,29 +51,6 @@ pub(crate) struct DecoderOutputRejection {
     pub(crate) reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DecodedFrameImport {
-    Deferred,
-    #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-    Completed(CompletedFrameImport),
-}
-
-impl DecodedFrameImport {
-    pub(crate) const fn completed(self) -> Option<CompletedFrameImport> {
-        match self {
-            Self::Deferred => None,
-            Self::Completed(completed_import) => Some(completed_import),
-        }
-    }
-
-    pub(crate) const fn path(self) -> Option<VideoCompositorImport> {
-        match self.completed() {
-            Some(completed_import) => Some(completed_import.path()),
-            None => None,
-        }
-    }
-}
-
 /// Event emitted by a platform decoder adapter.
 pub(crate) enum BackendEvent<F> {
     Opened {
@@ -105,13 +73,11 @@ pub(crate) enum BackendEvent<F> {
     /// Frames coalesced from the native bounded presentation queue before the compositor
     /// serviced it. This aggregates instead of turning diagnostic accounting
     /// into an unbounded per-frame control queue.
-    #[cfg(any(target_os = "linux", test))]
     FramesReplaced {
         id: VideoId,
         count: u64,
     },
     /// Decoder output caps moved once to a lower, explicitly constrained tier.
-    #[cfg(any(target_os = "linux", test))]
     OutputReconfigured {
         id: VideoId,
         generation: DecoderOutputGeneration,
@@ -134,27 +100,6 @@ pub(crate) enum BackendEvent<F> {
     },
 }
 
-/// Whether a queued backend event crosses a diagnostic measurement boundary.
-///
-/// Lifecycle and capability events must remain observable after counters are
-/// reset. Frame evidence produced before the acknowledged boundary must not be
-/// counted in the new epoch. Keeping this as a closed enum, and classifying
-/// events with an exhaustive match, makes every newly added event choose its
-/// behavior explicitly.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MeasurementEpochDisposition {
-    Retain,
-    Discard,
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-impl MeasurementEpochDisposition {
-    pub(crate) const fn retains_event(self) -> bool {
-        matches!(self, Self::Retain)
-    }
-}
-
 impl<F> BackendEvent<F> {
     pub(crate) const fn id(&self) -> VideoId {
         match self {
@@ -165,25 +110,7 @@ impl<F> BackendEvent<F> {
             | Self::Looped { id, .. }
             | Self::Ended { id }
             | Self::Failed { id, .. } => *id,
-            #[cfg(any(target_os = "linux", test))]
             Self::FramesReplaced { id, .. } | Self::OutputReconfigured { id, .. } => *id,
-        }
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub(crate) const fn measurement_epoch_disposition(&self) -> MeasurementEpochDisposition {
-        match self {
-            Self::Frame { .. } => MeasurementEpochDisposition::Discard,
-            #[cfg(any(target_os = "linux", test))]
-            Self::FramesReplaced { .. } => MeasurementEpochDisposition::Discard,
-            Self::Opened { .. }
-            | Self::DecoderSelected { .. }
-            | Self::StateChanged { .. }
-            | Self::Looped { .. }
-            | Self::Ended { .. }
-            | Self::Failed { .. } => MeasurementEpochDisposition::Retain,
-            #[cfg(any(target_os = "linux", test))]
-            Self::OutputReconfigured { .. } => MeasurementEpochDisposition::Retain,
         }
     }
 }
@@ -232,7 +159,6 @@ pub(crate) trait DecoderBackend {
     fn begin_measurement_epoch(&mut self) {}
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) struct BackendPublisher<F> {
     events: Sender<BackendEvent<F>>,
     latest_frames: Arc<Mutex<HashMap<VideoId, PublishedFrameQueue<F>>>>,
@@ -240,7 +166,6 @@ pub(crate) struct BackendPublisher<F> {
     wake: VideoWake,
 }
 
-#[cfg(target_os = "linux")]
 impl<F> Clone for BackendPublisher<F> {
     fn clone(&self) -> Self {
         Self {
@@ -252,7 +177,6 @@ impl<F> Clone for BackendPublisher<F> {
     }
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) struct BackendInbox<F> {
     events: Receiver<BackendEvent<F>>,
     latest_frames: Arc<Mutex<HashMap<VideoId, PublishedFrameQueue<F>>>>,
@@ -264,17 +188,14 @@ pub(crate) struct BackendInbox<F> {
 /// Unlike playback epochs, this has no media meaning. It makes an acknowledged
 /// benchmark boundary reject work that began before the boundary but reached
 /// the cross-thread publisher afterward.
-#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BackendMeasurementEpoch(u64);
 
-#[cfg(target_os = "linux")]
 struct PublishedFrameQueue<F> {
     frames: PresentationFrameQueue<DecodedFrame<F>>,
     replaced: u64,
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn backend_bridge<F>(wake: VideoWake) -> (BackendPublisher<F>, BackendInbox<F>) {
     let (events, incoming) = crossbeam_channel::unbounded();
     let latest_frames = Arc::new(Mutex::new(HashMap::new()));
@@ -294,7 +215,6 @@ pub(crate) fn backend_bridge<F>(wake: VideoWake) -> (BackendPublisher<F>, Backen
     )
 }
 
-#[cfg(target_os = "linux")]
 impl<F> BackendPublisher<F> {
     pub(crate) fn event(&self, event: BackendEvent<F>) {
         if self.events.send(event).is_ok() {
@@ -328,7 +248,6 @@ impl<F> BackendPublisher<F> {
     }
 }
 
-#[cfg(target_os = "linux")]
 impl<F> BackendInbox<F> {
     pub(crate) fn drain(&self) -> Vec<BackendEvent<F>> {
         let mut events: Vec<_> = self.events.try_iter().collect();
@@ -362,7 +281,6 @@ impl<F> BackendInbox<F> {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
@@ -370,13 +288,12 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 #[path = "tests/backend_bridge_test.rs"]
 mod bridge_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DecoderReconfiguration {
-    #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
     Applied {
         generation: DecoderOutputGeneration,
     },
@@ -397,14 +314,7 @@ pub(crate) struct ImportedFrame<S> {
 /// as reporting CPU-upload bytes for a direct external surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompletedFrameImport {
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "macos", test)),
-        allow(dead_code)
-    )]
     BorrowedNativeSurface,
-    #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-    GpuBlit { reported_bytes: Option<u64> },
-    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
     CpuUpload { bytes: u64 },
 }
 
@@ -412,33 +322,8 @@ impl CompletedFrameImport {
     pub(crate) const fn path(self) -> VideoCompositorImport {
         match self {
             Self::BorrowedNativeSurface => VideoCompositorImport::BorrowedNativeSurface,
-            Self::GpuBlit { .. } => VideoCompositorImport::GpuBlit,
             Self::CpuUpload { .. } => VideoCompositorImport::CpuUpload,
         }
-    }
-}
-
-/// Validate a platform whose native API has one unavoidable compositor import.
-///
-/// This check belongs before decoder construction because some native
-/// decoders materialize their output before the common importer is called.
-#[cfg_attr(
-    not(any(target_os = "macos", target_os = "windows", test)),
-    allow(dead_code)
-)]
-pub(crate) fn require_fixed_compositor_import(
-    backend: crate::VideoDecodeBackend,
-    policy: crate::FrameImportPolicy,
-    path: VideoCompositorImport,
-) -> Result<(), VideoInitError> {
-    if policy.permits(path) {
-        Ok(())
-    } else {
-        Err(VideoInitError::ImportForbidden {
-            backend,
-            policy,
-            path,
-        })
     }
 }
 
@@ -448,12 +333,10 @@ pub(crate) fn require_fixed_compositor_import(
 /// instead of poisoning the playback session.
 pub(crate) enum FrameImportOutcome<S> {
     Ready(ImportedFrame<S>),
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Backpressured,
     /// The representation is valid decoder output but unusable by the active
     /// GPU interop stack.  The common system keeps playback alive only when
     /// the decoder confirms that it installed a lower-tier representation.
-    #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
     ReconfigureDecoder {
         rejection: DecoderOutputRejection,
     },

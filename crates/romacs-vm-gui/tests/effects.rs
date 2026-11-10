@@ -2,31 +2,10 @@
 //! chain with a window system: every way of setting one reaches the
 //! display as a visual configuration, a refused value warns and leaves the
 //! display as it was, and each option starts at the renderer's default.
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/fonts.rs"]
-mod fonts;
-#[path = "../src/grammars.rs"]
-mod grammars;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{fonts, startup};
 use romacs_display_protocol::VisualConfig;
 use romacs_vm::Vm;
 use std::{cell::RefCell, rc::Rc, time::Duration};
-
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))
