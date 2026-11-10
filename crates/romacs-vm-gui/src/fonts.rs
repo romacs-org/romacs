@@ -426,7 +426,7 @@ impl romacs_vm::DisplayHost for Display {
         sent(sender.update_model(id, req, change))
     }
     fn free_surface(&mut self, id: u32) {
-        // Sent with the next frame, which no longer draws it (residency.rs).
+        // Sent after the next frame, which no longer draws it (residency.rs).
         self.decoded.borrow_mut().free_surface(id);
     }
     fn release_image(&mut self, id: u64) {

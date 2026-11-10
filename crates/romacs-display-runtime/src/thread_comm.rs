@@ -464,6 +464,11 @@ pub(crate) enum RenderCommand {
 // queue at the same scale and use backpressure for durable user input below.
 const INPUT_CHANNEL_CAPACITY: usize = 4096;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
+/// The commands Lisp's model requests may keep waiting.  The rest of the
+/// channel is a publication's (at most 16 asset loads and retirements, its
+/// paint, the surface frees after it) and the other producers': a burst of
+/// requests is refused as busy, never a frame.
+pub(crate) const MODEL_REQUEST_ROOM: usize = COMMAND_CHANNEL_CAPACITY / 4;
 
 /// Communication channels between threads
 pub(crate) struct ThreadComms {

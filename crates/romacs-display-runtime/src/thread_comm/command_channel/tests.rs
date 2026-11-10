@@ -350,3 +350,23 @@ fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
         Err(TryRecvError::Disconnected)
     ));
 }
+
+/// A producer held within a limit is refused at it while the channel still
+/// takes everyone else's commands, up to its capacity.
+#[test]
+fn a_limited_producer_leaves_the_rest_of_the_channel() {
+    let capacity = crate::thread_comm::COMMAND_CHANNEL_CAPACITY;
+    let room = crate::thread_comm::MODEL_REQUEST_ROOM;
+    assert!(room < capacity / 2, "a publication's commands fit beside the requests");
+    let (sender, receiver) = command_channel(capacity);
+    let retire = |id| RenderCommand::Asset(AssetCommand::ImageRetire { image: ImageId::new(id) });
+    for id in 0..room as u32 {
+        sender.try_send_within(retire(id), room).unwrap();
+    }
+    assert!(matches!(sender.try_send_within(retire(999), room), Err(TrySendError::Full(_))));
+    for id in room as u32..capacity as u32 {
+        sender.try_send(retire(id)).unwrap();
+    }
+    assert!(matches!(sender.try_send(retire(999)), Err(TrySendError::Full(_))));
+    assert_eq!(receiver.len(), capacity);
+}

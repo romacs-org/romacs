@@ -1010,6 +1010,7 @@ fn paint(
     let submit_start = Instant::now();
     images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
     sender.submit_scene(frame, children, shown.animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
     if wait != Wait::No { activate(sender, presentation, pending)?; }
@@ -1146,6 +1147,7 @@ fn paint_prompt(
     });
     images.borrow_mut().publish(sender, std::iter::once(&glyphs).chain(&children))?;
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }

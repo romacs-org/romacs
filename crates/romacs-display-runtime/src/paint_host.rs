@@ -483,7 +483,7 @@ impl PaintSender {
         logical: (u32, u32),
     ) -> Result<bool, String> {
         let (width, height) = logical;
-        self.send_asset(crate::thread_comm::AssetCommand::ModelCreate { id, meshes, view, background, width, height })
+        self.send_model_request(crate::thread_comm::AssetCommand::ModelCreate { id, meshes, view, background, width, height })
     }
 
     /// Lisp request REQ for native model ID.  False while the channel is full.
@@ -493,7 +493,7 @@ impl PaintSender {
         req: u64,
         change: romacs_display_protocol::model::ModelChange,
     ) -> Result<bool, String> {
-        self.send_asset(crate::thread_comm::AssetCommand::ModelUpdate { id, req, change })
+        self.send_model_request(crate::thread_comm::AssetCommand::ModelUpdate { id, req, change })
     }
 
     /// Free surface ID once no presented frame draws it: native models
@@ -503,10 +503,22 @@ impl PaintSender {
         self.send_asset(crate::thread_comm::AssetCommand::ModelFree { id })
     }
 
+    /// Send Lisp's model request COMMAND within `MODEL_REQUEST_ROOM`: false
+    /// once that many commands wait, so requests never fill the channel a
+    /// frame needs.
+    fn send_model_request(&self, command: crate::thread_comm::AssetCommand) -> Result<bool, String> {
+        self.send_asset_within(command, crate::thread_comm::MODEL_REQUEST_ROOM)
+    }
+
     /// Send an asset COMMAND: whether it went, false while the channel is
     /// full (its sender sends it again later).
     fn send_asset(&self, command: crate::thread_comm::AssetCommand) -> Result<bool, String> {
-        let result = match self.comms.cmd_tx.try_send(RenderCommand::Asset(command)) {
+        self.send_asset_within(command, usize::MAX)
+    }
+
+    /// Send asset COMMAND unless LIMIT commands already wait.
+    fn send_asset_within(&self, command: crate::thread_comm::AssetCommand, limit: usize) -> Result<bool, String> {
+        let result = match self.comms.cmd_tx.try_send_within(RenderCommand::Asset(command), limit) {
             Ok(()) => Ok(true),
             Err(crossbeam_channel::TrySendError::Full(_)) => Ok(false),
             Err(error) => Err(error.to_string()),
