@@ -39,15 +39,16 @@ possible; say so where you do.
   each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
   deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
   lowered floors with the change. Raising a floor is a deliberate commit.
-- `tools/lib/smells.py` (also run by `tools/check-derived`) holds the other smells
-  to `SMELL-FLOORS.json`: `allow(dead_code|unused*)`, TODO/FIXME, files over
-  1,500 lines, every rustc and Clippy pedantic warning by lint, the tree's
-  top-level entries, and primitives declared outside `src/prims/` or through
-  lib.rs's own enum. Like the unsafe census, a rise fails and a dropped crate
-  smell or layout count is recorded with `lower` in the same change. Lint
-  counts are ceilings instead: a drop passes, and `lower` records it at
-  checkpoints. A new top-level entry or a raised floor is a deliberate commit
-  with its reason.
+- `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
+  smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines, every
+  rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
+  primitives declared outside `src/prims/` or through lib.rs's own enum. It
+  holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
+  `master`): a count above the merge-base's own fails, and a drop needs no
+  record. Adding a smell takes raising its floor in `SMELL-FLOORS.json` by as
+  much, and a new top-level entry takes listing it there: a deliberate commit
+  with its reason. `smells.py check --absolute` holds the trunk to that file at
+  a checkpoint, where `lower` records the drops.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

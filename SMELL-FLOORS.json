@@ -1,5 +1,5 @@
 {
-  "rule": "See tools/lib/smells.py: what each smell counts. check fails when a count rises above its floor and when a layout list misses or keeps an entry; a slack crate-smell or layout floor fails too, until lower records it in the same change. Lint floors are ceilings: a drop passes, and lower records drops at checkpoints. Raising a floor or adding an entry is a deliberate hand edit in its own commit, with its reason.",
+  "rule": "See tools/lib/smells.py: what each smell counts. check holds a tree to its merge-base with the trunk: a count above the merge-base's own fails, and a drop needs no record. Adding a smell takes raising its floor here by as much, and a new layout entry takes listing it: a deliberate hand edit in its own commit, with its reason. check --absolute holds the trunk to this file at a checkpoint, where lower records the drops.",
   "long_file_lines": 1500,
   "crates": {
     "romacs-display-protocol": {"allows": 0, "todos": 1, "long_files": 9},
