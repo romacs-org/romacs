@@ -40,6 +40,7 @@ handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local 
 handle.rs execute finish_request 1 collector  # the outcome is its root, rewritten in place
 handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+handle.rs read_source read_source_raw 1 boundary  # the embedder's read: its caller holds no Value
 host_input.rs host_wait_state call_prepared_source_propagating 1 clean  # no arguments; its value is printed before anything else allocates
 host_input.rs read_host_event_with call_prepared_source_propagating 1 clean  # no arguments; its value is discarded, and the wait holds no Value across it
 host_input.rs run_pre_redisplay call_prepared_source_propagating 1 clean  # WINDOWS is only the call's argument; its value is discarded, and frame_snapshot holds no Value across it
@@ -79,13 +80,12 @@ protocol.rs submit prepare_source 2 clean  # no caller Values
 reader/mod.rs compile_source compile 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
+reader/mod.rs eval_source_forms read_source_raw 1 rooted  # the last value is a frame; the source is plain text
 reader/mod.rs eval_source_inner execute_raw 1 clean  # a cached submission, nothing held
 reader/mod.rs eval_source_raw finish_request 1 collector  # the request's result is its root
 reader/mod.rs request_source_ir compile_request 1 held  # an open compiler builder holds collection
 reader/mod.rs request_source_ir finish_request 1 collector  # no Values outstanding
-reader/parse.rs character_name reader_call 1 rooted  # the reader's partial forms live in external_roots
-reader/parse.rs get reader_call 1 rooted  # the stream and partial forms live in external_roots
-reader/parse.rs unget reader_call 1 rooted  # the stream and partial forms live in external_roots
+reader/mod.rs source_progn read_source_raw 1 clean  # only the source text, which is plain
 request_code.rs compile_request compile 1 held  # an open compiler builder holds collection
 request_code.rs eval_datum_raw cached_datum 1 held  # an open compiler builder holds collection
 request_code.rs eval_datum_raw eval_form_raw 1 clean  # FORM's objects are rooted
@@ -114,6 +114,7 @@ source_cache/prepared.rs invoke_prepared_with prepared_function 1 rooted  # ARGS
 source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
 source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
+source_cache/prepared.rs prepared_function read_source_raw 2 clean  # the source text only; the form is made before the second read
 tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; only the returned row is read after it, by reads that do not allocate
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
 threaded.rs bind_special_now bind_variable 1 clean  # only a variable no watcher hears gets here: it runs no Lisp

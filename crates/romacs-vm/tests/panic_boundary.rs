@@ -20,7 +20,6 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/src/gc_mark.rs", 4, "tests of a panic inside the collector, which nests no engine"),
     ("crates/romacs-vm/src/handle.rs", 1, "a test of a host panicking in an idle mark, which nests no engine"),
     ("crates/romacs-vm/src/prim.rs", 2, "tests of the declaration parser, with no VM"),
-    ("crates/romacs-vm/src/reader/parse.rs", 1, "a test that asserts no panic came"),
     ("crates/romacs-vm/src/twin.rs", 1,
      "a mark twin's forked child: its VM is a copy no other process uses, and it sends the panic as its report and ends (`exit_at_once`)"),
     ("crates/romacs-vm/tests/buffer_lifecycle.rs", 1, "a VM made in the closure, which the unwinding drops"),

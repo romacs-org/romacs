@@ -1,96 +1,102 @@
 //! One integer-character grammar for host sources and live Lisp streams.
+//! A read is orchestration (`crate::brand`): what it may call Lisp for (a
+//! function stream, `\N{NAME}` by name) runs under the permission, and a read
+//! without one refuses it. Its entries:
+//! - with the permission: `read_next` (the loader), `read_string` and
+//!   `read_stream` (`read-from-string' and `read', `prims/read.rs`);
+//! - without one, calling no Lisp: `Vm::read_string_unlent`, for leaves
+//!   reading Romacs's own constant Lisp;
+//! - for callers not yet converted: `Vm::read_source_raw`, a census entry.
+use crate::brand::{Gc, Mx, Plain};
 use crate::{Form, Result, Value, Vm, data::Object};
 mod build;
 mod parse;
 use parse::Input;
 
+/// What a read hands its THEN at once: the datum, with the offsets it began
+/// and ended at (None when only whitespace and comments were left); or the
+/// error's text, with GNU's `(CONDITION . DATA)` when known.
+pub(crate) type Read = std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)>;
+
+/// The loader's read: the next form of SOURCE, GNU internal text, under the
+/// permission (a `\N{NAME}` calls Lisp). THEN consumes it at once.
+pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &[u8], b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Option<(Value, usize, usize)>>) -> R + Copy + 'static) -> R {
+    parse::read_input(m, Some(gc), Input::Host { text: source, byte: 0 }, b, move |vm, b, read: Read| then(vm, b, read.map_err(|(text, _)| text)))
+}
+
+/// Characters START to END of the string rooted at ROOT, read; without the
+/// permission, calling no Lisp. THEN consumes it at once.
+pub(crate) fn read_string<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Option<Gc<'_, 'b>>, (root, start, end): (usize, usize, usize), b: B,
+    then: impl FnOnce(&mut Vm, B, Read) -> R + Copy + 'static) -> R {
+    let byte = m.leaf((root, start), |vm, (root, start)| {
+        let view = vm.str_view(vm.external_roots[root]).expect("a string stream");
+        if view.is_multibyte() { view.chars().take(start).map(|c| crate::lstring::char_string(c, &mut [0; 5])).sum() } else { start }
+    });
+    parse::read_input(m, gc, Input::String { root, byte, character: start, end }, b, then)
+}
+
+/// The stream rooted at ROOT read under the permission: a string, a buffer
+/// from its point, a marker from its position, or a function called for each
+/// character. THEN consumes it at once.
+pub(crate) fn read_stream<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, root: usize, b: B,
+    then: impl FnOnce(&mut Vm, B, Read) -> R + Copy + 'static) -> R {
+    let (length, buffer) = m.leaf(root, |vm, root| {
+        let stream = vm.external_roots[root];
+        let buffer = matches!(vm.object_if(stream), Some(Object::Buffer(_) | Object::ByteBuffer(_) | Object::Marker(_)));
+        (vm.str_view(stream).map(|view| view.len()), buffer)
+    });
+    let input = match (length, buffer) {
+        (Some(end), _) => Input::String { root, byte: 0, character: 0, end },
+        (None, true) => Input::Buffer { root },
+        (None, false) => Input::Function { root },
+    };
+    parse::read_input(m, Some(gc), input, b, then)
+}
+
+/// A read's datum and condition, rooted for a caller with no permission,
+/// which takes them back with `taken` once it holds the VM again.
+type Kept = std::result::Result<Option<(usize, usize, usize)>, (String, Option<(usize, usize)>)>;
+fn keep(vm: &mut Vm, (): (), read: Read) -> Kept {
+    let mut root = |value: Value| { vm.external_roots.push(value); vm.external_roots.len() - 1 };
+    match read {
+        Ok(found) => Ok(found.map(|(value, begin, end)| (root(value), begin, end))),
+        Err((text, signal)) => Err((text, signal.map(|(condition, data)| (root(condition), root(data))))),
+    }
+}
+fn taken(vm: &Vm, kept: Kept) -> Read {
+    let at = |root: usize| vm.external_roots[root];
+    match kept {
+        Ok(found) => Ok(found.map(|(root, begin, end)| (at(root), begin, end))),
+        Err((text, signal)) => Err((text, signal.map(|(condition, data)| (at(condition), at(data))))),
+    }
+}
+
 impl Vm {
-    /// Read one datum, returning its UTF-8 byte end offset. Comments/whitespace
-    /// alone return None. Root the value explicitly if retaining across execution.
+    /// One datum of SOURCE, with the UTF-8 byte offset it ended at; None for
+    /// only whitespace and comments. For callers not yet converted, each a
+    /// census row: it may call Lisp (`\N{NAME}`), which may collect, under the
+    /// permission minted here. The value is unrooted: root it to keep it.
     pub(crate) fn read_source_raw(&mut self, source: &str) -> Result<Option<(Value, usize)>> {
-        self.read_source_span(source)
-            .map(|v| v.map(|(value, _, end)| (value, end)))
+        let mark = self.external_roots.len();
+        let kept = crate::threaded::toplevel(self, source, |mut m, gc, source| read_next(&mut m, gc, source.as_bytes(), (), |vm, (), read| {
+            read.map(|found| found.map(|(value, _, end)| { vm.external_roots.push(value); (vm.external_roots.len() - 1, end) }))
+        }));
+        let read = kept.map(|found| found.map(|(root, end)| (self.external_roots[root], end)));
+        self.external_roots.truncate(mark);
+        read
     }
-    pub(super) fn read_source_span(
-        &mut self,
-        source: &str,
-    ) -> Result<Option<(Value, usize, usize)>> {
-        self.read_internal_span(source.as_bytes())
-    }
-    pub(super) fn read_internal_span(
-        &mut self,
-        source: &[u8],
-    ) -> Result<Option<(Value, usize, usize)>> {
-        self.read_internal_signal(source).map_err(|(text, _)| text)
-    }
-    /// `read_source_span`, also returning GNU's exact `(CONDITION . DATA)`
-    /// when the reader knows it. Both values are unrooted: use them before
-    /// anything can collect (a leaf primitive signalling them does).
-    pub(super) fn read_source_signal(
-        &mut self,
-        source: &str,
-    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        self.read_internal_signal(source.as_bytes())
-    }
-    /// `read_source_signal` over GNU internal multibyte text.
-    pub(super) fn read_internal_signal(
-        &mut self,
-        source: &[u8],
-    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        self.read_input(Input::Host { text: source, byte: 0 })
-    }
-    pub(super) fn read_lisp_string(
-        &mut self,
-        string: Value,
-        start: usize,
-        end: usize,
-    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let root = self.external_roots.len();
+    /// Characters START to END of STRING read without the permission, so
+    /// calling no Lisp: no function stream and no `\N{NAME}` by name, which
+    /// it refuses. For leaves reading Romacs's own constant Lisp. The values
+    /// are unrooted: use them before anything can collect.
+    pub(crate) fn read_string_unlent(&mut self, string: Value, start: usize, end: usize) -> Read {
+        let mark = self.external_roots.len();
         self.external_roots.push(string);
-        let view = self.str_view(string).unwrap();
-        let byte = if view.is_multibyte() {
-            view.chars()
-                .take(start)
-                .map(|c| {
-                    let mut b = [0; 5];
-                    crate::lstring::char_string(c, &mut b)
-                })
-                .sum()
-        } else {
-            start
-        };
-        let result = self.read_input(Input::String {
-            root,
-            byte,
-            character: start,
-            end,
-        });
-        self.external_roots.truncate(root);
-        result
-    }
-    pub(super) fn read_lisp_stream(
-        &mut self,
-        stream: Value,
-    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let root = self.external_roots.len();
-        self.external_roots.push(stream);
-        let input = if let Some(view) = self.str_view(stream) {
-            Input::String {
-                root,
-                byte: 0,
-                character: 0,
-                end: view.len(),
-            }
-        } else {
-            match self.object_if(stream) {
-                Some(Object::Buffer(_) | Object::ByteBuffer(_)) => Input::Buffer { root },
-                Some(Object::Marker(_)) => Input::Marker { root },
-                _ => Input::Function { root },
-            }
-        };
-        let result = self.read_input(input);
-        self.external_roots.truncate(root);
-        result
+        let kept = crate::brand::without_gc(self, (mark, start, end), |mut m, spec| read_string(&mut m, None, spec, (), keep));
+        let read = taken(self, kept);
+        self.external_roots.truncate(mark);
+        read
     }
 
     pub(super) fn source_form(&self, value: Value, depth: usize) -> Result<Form> {

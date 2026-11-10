@@ -1,6 +1,12 @@
 //! The reader's grammar: characters from its input kinds, tokens and forms.
-use crate::coordinates::ByteOffset;
-use crate::{Result, Value, Vm, data::Object};
+//! It is orchestration (`crate::brand`): it holds plain data only (positions,
+//! tokens, the indices of what it has read so far in `external_roots`), and
+//! its raw work runs in leaves (`build`). So nothing it holds goes stale when
+//! a stream's Lisp or `char-from-name` collects, and the compiler says so.
+use super::build;
+use crate::brand::{Gc, Mx, Plain};
+use crate::gc::RootFrame;
+use crate::{Result, Vm};
 use std::collections::BTreeMap;
 
 trait CharacterCode {
@@ -37,10 +43,8 @@ pub(super) enum Input<'a> {
         character: usize,
         end: usize,
     },
+    /// A buffer, read from its point, or a marker, from its position.
     Buffer {
-        root: usize,
-    },
-    Marker {
         root: usize,
     },
     Function {
@@ -52,21 +56,25 @@ fn host_width(code: u32) -> usize {
     crate::lstring::char_string(code, &mut [0; 5])
 }
 
-struct Reader<'a, 'v> {
+/// One read: orchestration over the VM. Lisp (a function stream, `\N{NAME}`
+/// by name) runs only under GC, the permission; a read without one refuses it.
+struct Reader<'a, 'r, 'm, 'b, 'g> {
+    m: &'r mut Mx<'m, 'b, Vm>,
+    gc: Option<Gc<'g, 'b>>,
     input: Input<'a>,
     at: usize,
     lookahead: Option<u32>,
     error: Option<String>,
     eof: bool,
     labels: BTreeMap<u64, usize>,
-    vm: &'v mut Vm,
-    signal: Option<(Value, Value)>,
+    /// The root of a `(CONDITION . DATA)` the read failed with, when known.
+    signal: Option<usize>,
     #[cfg(test)]
     collect_subforms: bool,
 }
 /// The character at the start of BYTES of a Lisp string read as a stream,
 /// and its width: a unibyte string's bytes above 127 are raw bytes.
-fn string_input_char(bytes: &[u8], multibyte: bool) -> Result<(u32, usize)> {
+pub(super) fn string_input_char(bytes: &[u8], multibyte: bool) -> Result<(u32, usize)> {
     if !multibyte {
         let c = bytes[0] as u32;
         return Ok((if c >= 128 { c + 0x3fff00 } else { c }, 1));
@@ -83,25 +91,29 @@ fn string_input_char(bytes: &[u8], multibyte: bool) -> Result<(u32, usize)> {
     Ok(crate::lstring::string_char(bytes))
 }
 
-impl Reader<'_, '_> {
+impl Reader<'_, '_, '_, '_, '_> {
+    /// FRAME's function called on the rest of it (a stream's function, or
+    /// `char-from-name`), and the frame dropped: its value, when an integer.
+    /// A read without the permission refuses: it reads Romacs's own text.
+    fn call(&mut self, frame: RootFrame) -> Result<Option<i64>> {
+        let called = match self.gc.as_mut() {
+            Some(gc) => crate::threaded::call_frame(self.m, gc.by_ref(), &frame, (), |_, (), value| value.map(crate::Value::integer_value)),
+            None => Err("this read calls no Lisp: no function stream, and no `\\N{NAME}' by name".into()),
+        };
+        self.m.leaf(frame, Vm::drop_frame);
+        called
+    }
     /// Inside a string literal read from a Lisp string, the characters up
     /// to the next quote or backslash, taken in one pass over the string's bytes
     /// instead of one stream read each: pushed onto S.  Whether any is a
     /// non-ASCII character.  Stops early, leaving the rest to `next', at
     /// anything unusual (a lookahead, an error, a malformed character).
     fn string_literal_run(&mut self, s: &mut Vec<u32>) -> bool {
-        let Self { input, at, lookahead: None, error: None, vm, .. } = self else { return false };
-        let Input::String { root, byte, character, end } = input else { return false };
-        let Some(view) = vm.str_view(vm.external_roots[*root]) else { return false };
-        let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
-        let mut unicode = false;
-        while *character < *end {
-            let Some(rest) = bytes.get(*byte..).filter(|rest| !matches!(rest.first(), None | Some(b'"' | b'\\'))) else { break };
-            let Ok((c, width)) = string_input_char(rest, multibyte) else { break };
-            unicode |= (128..0x3fff80).contains(&c);
-            s.push(c);
-            (*character, *byte, *at) = (*character + 1, *byte + width, *at + 1);
-        }
+        let (None, None, &Input::String { root, byte, character, end }) = (self.lookahead, &self.error, &self.input) else { return false };
+        let (run, unicode, byte, after) = self.m.leaf((std::mem::take(s), (root, byte, character, end)), build::string_run);
+        *s = run;
+        self.at += after - character;
+        self.input = Input::String { root, byte, character: after, end };
         unicode
     }
     fn get(&mut self) -> Result<Option<u32>> {
@@ -123,32 +135,16 @@ impl Reader<'_, '_> {
                 if *character >= *end {
                     return Ok(None);
                 }
-                let view = self
-                    .vm
-                    .str_view(self.vm.external_roots[*root])
-                    .ok_or("string stream no longer exists")?;
-                let bytes = view
-                    .bytes()
-                    .get(*byte..)
-                    .filter(|b| !b.is_empty())
-                    .ok_or("string stream changed length")?;
-                let (c, width) = string_input_char(bytes, view.is_multibyte())?;
+                let (c, width) = self.m.leaf((*root, *byte), build::string_char)?;
                 *character += 1;
                 *byte += width;
                 Ok(Some(c))
             }
             Input::Function { root } => {
-                let function = self.vm.external_roots[*root];
-                let result = self.vm.reader_call(function, &[])?;
-                Ok(result
-                    .integer_value()
-                    .filter(|n| (0..=0x3fffff).contains(n))
-                    .map(|n| n as u32))
+                let frame = self.m.leaf((*root, None), build::stream_call)?;
+                Ok(self.call(frame)?.filter(|n| (0..=0x3fffff).contains(n)).map(|n| n as u32))
             }
-            Input::Buffer { root } | Input::Marker { root } => {
-                let source = self.vm.external_roots[*root];
-                self.vm.reader_buffer_get(source)
-            }
+            Input::Buffer { root } => self.m.leaf(*root, build::buffer_get),
         }
     }
     fn unget(&mut self, c: u32) -> Result<()> {
@@ -160,28 +156,15 @@ impl Reader<'_, '_> {
                 byte,
                 ..
             } => {
-                let view = self
-                    .vm
-                    .str_view(self.vm.external_roots[*root])
-                    .ok_or("string stream no longer exists")?;
-                let width = if view.is_multibyte() {
-                    let mut bytes = [0; 5];
-                    crate::lstring::char_string(c, &mut bytes)
-                } else {
-                    1
-                };
+                let width = self.m.leaf((*root, c), build::string_width)?;
                 *character -= 1;
                 *byte -= width;
             }
             Input::Function { root } => {
-                let function = self.vm.external_roots[*root];
-                self.vm
-                    .reader_call(function, &[Value::integer(c as i64)?])?;
+                let frame = self.m.leaf((*root, Some(c)), build::stream_call)?;
+                self.call(frame)?;
             }
-            Input::Buffer { root } | Input::Marker { root } => {
-                let source = self.vm.external_roots[*root];
-                self.vm.reader_buffer_unget(source, c)?;
-            }
+            Input::Buffer { root } => self.m.leaf((*root, c), build::buffer_unget)?,
         }
         Ok(())
     }
@@ -193,7 +176,7 @@ impl Reader<'_, '_> {
                     self.lookahead = c;
                 }
                 Err(e) => {
-                    self.signal = self.vm.pending_eval_escape();
+                    self.signal = self.m.leaf((), build::pending_signal);
                     self.error = Some(e);
                 }
             }
@@ -306,26 +289,25 @@ impl Reader<'_, '_> {
             }
         }
     }
-    /// Record a terminal GNU condition; no subsequent parse or callback runs.
-    /// Partial values and the live source use external-root indices throughout
-    /// parsing, so callback reentry cannot invalidate an aggregate in progress.
-    fn signal(&mut self, condition: &str, data: &[Value], text: String) -> String {
-        let condition = self.vm.intern(condition);
-        let data = self.vm.list_value(data);
-        self.signal = Some((condition, data));
+    /// A failure's text, its GNU condition (rooted, when known) recorded as
+    /// terminal: no subsequent parse or callback runs.
+    fn fail(&mut self, (text, signal): (String, Option<usize>)) -> String {
+        if signal.is_some() {
+            self.signal = signal;
+        }
         text
     }
     fn syntax(&mut self, datum: &str) -> String {
-        let text = self.vm.make_lisp_string(datum.as_bytes().to_vec(), true);
-        self.signal(
-            "invalid-read-syntax",
-            &[text],
-            format!("invalid-read-syntax {datum}"),
-        )
+        let failure = self.m.leaf(datum, build::syntax);
+        self.fail(failure)
+    }
+    /// What a leaf built: its root, or its failure recorded.
+    fn built(&mut self, built: build::Built) -> Result<usize> {
+        built.map_err(|failure| self.fail(failure))
     }
     /// GNU lread.c read_bool_vector: `#&LENGTH"BYTES"`, a unibyte string of
     /// exactly ceil(LENGTH/8) bytes (or one more, as Emacs 19 printed it).
-    fn bool_vector(&mut self, depth: usize) -> Result<Value> {
+    fn bool_vector(&mut self, depth: usize) -> Result<usize> {
         let mut length: usize = 0;
         loop {
             match self.peek() {
@@ -339,17 +321,8 @@ impl Reader<'_, '_> {
             }
         }
         let string = self.form_inner(depth + 1)?;
-        let view = self.vm.str_view(string).ok_or("bool-vector literal string")?;
-        // Host-source literals keep ASCII text multibyte; its bytes are the same.
-        let (multibyte, bytes) = (view.is_multibyte() && !view.bytes().is_ascii(), view.bytes().to_vec());
-        let size = length.div_ceil(8);
-        if multibyte || !(bytes.len() == size || length == bytes.len().saturating_sub(1) * 8) {
-            return Err(self.syntax("#&..."));
-        }
-        let mut vector = crate::bool_vector::BoolVector::new(length, false)?;
-        vector.bytes.copy_from_slice(&bytes[..size]);
-        vector.mask_padding();
-        Ok(self.vm.allocate_object(Object::BoolVector(Box::new(vector))))
+        let built = self.m.leaf((length, string), build::bool_vector);
+        self.built(built)
     }
     /// GNU lread.c:3852 `#s(...)`: a record, or, when the first element is
     /// the symbol `hash-table`, a table built by `hash_table_from_plist`
@@ -363,11 +336,10 @@ impl Reader<'_, '_> {
                 self.next()?;
                 return Ok(roots);
             }
-            self.form(depth + 1)?;
-            roots.push(self.vm.external_roots.len() - 1);
+            roots.push(self.form(depth + 1)?);
         }
     }
-    fn table(&mut self, depth: usize) -> Result<Value> {
+    fn table(&mut self, depth: usize) -> Result<usize> {
         let sub = self.peek() == Some(94);
         if sub {
             self.next()?;
@@ -382,135 +354,15 @@ impl Reader<'_, '_> {
             }
         }
         let roots = self.aggregate(93, depth)?;
-        let values = roots
-            .iter()
-            .map(|&i| self.vm.external_roots[i])
-            .collect::<Vec<_>>();
-        let result = if sub {
-            self.vm.sub_char_table_from_literal(&values)
-        } else {
-            self.vm.char_table_from_literal(&values)
-        };
-        result.map_err(|e| {
-            if !sub && e == "Invalid size char-table" {
-                return self.syntax(&e);
-            }
-            let text = self.vm.byte_string(e.as_bytes());
-            self.signal("error", &[text], e)
-        })
+        let built = self.m.leaf((sub, roots), build::char_table);
+        self.built(built)
     }
-    fn property_string(&mut self, depth: usize) -> Result<Value> {
+    fn property_string(&mut self, depth: usize) -> Result<usize> {
         let roots = self.aggregate(41, depth)?;
-        let Some(&root) = roots.first() else {
-            return Err(self.syntax("#"));
-        };
-        let value = self.vm.external_roots[root];
-        if self.vm.str_view(value).is_none() {
-            return Err(self.syntax("#"));
-        }
-        if (roots.len() - 1) % 3 != 0 {
-            return Err(self.syntax("Invalid string property list"));
-        }
-        for triple in roots[1..].chunks_exact(3) {
-            let start = self.vm.external_roots[triple[0]];
-            let end = self.vm.external_roots[triple[1]];
-            let plist = self.vm.external_roots[triple[2]];
-            let integerp = self.vm.intern("integer-or-marker-p");
-            let a = start.integer_value().ok_or_else(|| {
-                self.signal(
-                    "wrong-type-argument",
-                    &[integerp, start],
-                    "invalid property start".into(),
-                )
-            })?;
-            let b = end.integer_value().ok_or_else(|| {
-                self.signal(
-                    "wrong-type-argument",
-                    &[integerp, end],
-                    "invalid property end".into(),
-                )
-            })?;
-            let view = self.vm.str_view(value).unwrap();
-            if a < 0 || b < 0 || a as usize > view.len() || b as usize > view.len() {
-                return Err(self.signal(
-                    "args-out-of-range",
-                    &[start, end],
-                    "property range".into(),
-                ));
-            }
-            let (a, b) = if a <= b {
-                (a as usize, b as usize)
-            } else {
-                (b as usize, a as usize)
-            };
-            let width = |code| {
-                let mut encoded = [0; 5];
-                crate::lstring::char_string(code, &mut encoded)
-            };
-            let offset = |n| {
-                if view.is_multibyte() {
-                    view.chars().take(n).map(width).sum()
-                } else {
-                    n
-                }
-            };
-            let range = ByteOffset(offset(a))..ByteOffset(offset(b));
-            let mut pairs = Vec::new();
-            let mut cursor = plist;
-            while cursor != Value::NIL {
-                let (key, tail) = self.vm.cons_pair(cursor)?;
-                if tail == Value::NIL {
-                    let text = self.vm.byte_string(b"Odd length text property list");
-                    return Err(self.signal(
-                        "error",
-                        &[text],
-                        "Odd length text property list".into(),
-                    ));
-                }
-                let (val, tail) = self.vm.cons_pair(tail)?;
-                let name = if key == Value::NIL {
-                    "nil".to_owned()
-                } else if key == Value::TRUE {
-                    "t".to_owned()
-                } else if key.tag() == 7 {
-                    self.vm.symbol_names[key.index(7)? - 1].clone()
-                } else {
-                    return Err("reader properties require interned symbol keys".into());
-                };
-                if pairs.iter().any(|(previous, _)| previous == &name) {
-                    let message = "Reader cannot retain duplicate text property keys";
-                    let text = self.vm.byte_string(message.as_bytes());
-                    return Err(self.signal("error", &[text], message.into()));
-                }
-                pairs.push((name, val));
-                cursor = tail;
-                if pairs.len() > self.vm.list_limit() {
-                    return Err("circular property list".into());
-                }
-            }
-            // The new literal may be an unibyte Bytes object: promote while preserving representation.
-            let view = self.vm.str_view(value).unwrap();
-            let mut string =
-                crate::data::LispString::from_bytes(view.bytes().to_vec(), view.is_multibyte());
-            if let Object::String(s) | Object::RawString(s) = self.vm.object(value)? {
-                string.properties = s.properties.clone();
-            }
-            for key in string.properties.properties_keys() {
-                string.properties.remove(range.clone(), &key);
-            }
-            // Reverse insertion preserves the plist's printed key order.
-            for (key, val) in pairs.into_iter().rev() {
-                string.properties.put(range.clone(), &key, val);
-            }
-            *self.vm.objects.entry_mut(value.index(0)? - 1) = if string.is_utf8() {
-                Object::String(Box::new(string))
-            } else {
-                Object::RawString(Box::new(string))
-            };
-        }
-        Ok(value)
+        let built = self.m.leaf(roots.as_slice(), build::property_string);
+        self.built(built)
     }
-    fn record(&mut self, depth: usize) -> Result<Value> {
+    fn record(&mut self, depth: usize) -> Result<usize> {
         match self.peek() {
             Some(40) => {
                 self.next()?;
@@ -537,36 +389,15 @@ impl Reader<'_, '_> {
                 break;
             }
             // A dot token here reaches `form_inner`'s dot arm and is refused.
-            self.form(depth + 1)?;
-            items.push(self.vm.external_roots.len() - 1);
+            items.push(self.form(depth + 1)?);
         }
-        // Every element is rooted in `external_roots` until the caller
-        // truncates them; nothing below collects.
-        let values: Vec<Value> = items.iter().map(|&i| self.vm.external_roots[i]).collect();
-        let Some(&head) = values.first() else {
-            return Err(self.syntax("#s"));
-        };
-        if head == self.vm.intern("hash-table") {
-            return match self.vm.hash_table_from_plist(&values[1..]) {
-                Ok(table) => Ok(table),
-                Err(fault) => match self.vm.hash_fault_signal(fault) {
-                    Ok((_, condition, data)) => {
-                        self.signal = Some((condition, data));
-                        Err("hash table read error".into())
-                    }
-                    Err(message) => Err(message),
-                },
-            };
-        }
-        self.vm.allocate_record(values).map_err(|message| {
-            let text = self.vm.make_lisp_string(message.as_bytes().to_vec(), true);
-            self.signal("error", &[text], message)
-        })
+        let built = self.m.leaf(items.as_slice(), build::record);
+        self.built(built)
     }
     /// GNU lread.c:2942 read_integer: scan all ASCII alphanumerics,
     /// poisoning the entire integer on an out-of-base digit. Punctuation is
     /// left unread, even when it is not an ordinary Lisp token delimiter.
-    fn radix_integer(&mut self, radix: u32) -> Result<Value> {
+    fn radix_integer(&mut self, radix: u32) -> Result<usize> {
         let mut token = String::new();
         if matches!(self.peek(), Some(43 | 45)) {
             token.push(char::from_u32(self.next()?).unwrap());
@@ -583,9 +414,9 @@ impl Reader<'_, '_> {
         if digits == 0 || !valid {
             return Err(self.syntax(&format!("integer, radix {radix}")));
         }
-        self.vm.integer_from_radix(&token, radix)
+        self.m.leaf((token.as_str(), radix), build::radix_integer)
     }
-    fn numbered_dispatch(&mut self, first: u32, depth: usize) -> Result<Value> {
+    fn numbered_dispatch(&mut self, first: u32, depth: usize) -> Result<usize> {
         let mut number = (first - 48) as u64;
         let mut prefix = format!("#{}", char::from_u32(first).unwrap());
         while let Some(c) = self.peek().filter(|c| c.is_ascii_digit()) {
@@ -601,79 +432,23 @@ impl Reader<'_, '_> {
             114 | 82 if (2..=36).contains(&number) => self.radix_integer(number as u32),
             114 | 82 => Err(self.syntax(&format!("integer, radix {number}"))),
             61 => {
-                // lread.c read0 `#N=': a placeholder cons stands for the
-                // object while it is read, so the object may refer to itself.
-                let placeholder = self.vm.list_value(&[Value::NIL]);
-                let slot = self.vm.external_roots.len();
-                self.vm.external_roots.push(placeholder);
+                let slot = self.m.leaf((), build::label);
                 self.labels.insert(number, slot);
                 let value = self.form(depth + 1)?;
-                let placeholder = self.vm.external_roots[slot];
-                if value == placeholder {
-                    return Err(self.syntax("nonsensical self-reference"));
-                }
-                match value.index_if(3).filter(|_| !Vm::image_value(value)) {
-                    // A cons: the placeholder becomes it, so references to
-                    // the placeholder are references to the object.
-                    Some(cons) => {
-                        let pair = self.vm.conses[cons];
-                        let at = placeholder.payload() as usize;
-                        self.vm.conses.set_car(at, pair.0);
-                        self.vm.conses.set_cdr(at, pair.1);
-                        Ok(placeholder)
-                    }
-                    None => {
-                        self.vm.external_roots[slot] = value;
-                        self.substitute(value, placeholder);
-                        Ok(value)
-                    }
-                }
+                let built = self.m.leaf((slot, value), build::labelled);
+                self.built(built)
             }
-            35 => self
-                .labels
-                .get(&number)
-                .copied()
-                .map(|r| self.vm.external_roots[r])
-                .ok_or_else(|| self.syntax("undefined numbered reference")),
+            35 => match self.labels.get(&number).copied() {
+                Some(slot) => Ok(self.m.leaf(slot, build::reference)),
+                None => Err(self.syntax("undefined numbered reference")),
+            },
             _ => Err(self.syntax("#")),
         }
     }
-    /// lread.c substitute_object_recurse: replace PLACEHOLDER by OBJECT
-    /// within OBJECT's conses, vectors and records, visiting each once.
-    fn substitute(&mut self, object: Value, placeholder: Value) {
-        let mut seen = std::collections::HashSet::new();
-        let mut pending = vec![object];
-        while let Some(v) = pending.pop() {
-            if Vm::image_value(v) || !seen.insert(v.0) {
-                continue;
-            }
-            let mut fix = |x: &mut Value| {
-                if *x == placeholder {
-                    *x = object;
-                } else {
-                    pending.push(*x);
-                }
-            };
-            if let Some(i) = v.index_if(3) {
-                let (mut car, mut cdr) = self.vm.conses[i];
-                fix(&mut car);
-                fix(&mut cdr);
-                self.vm.conses.set_car(i, car);
-                self.vm.conses.set_cdr(i, cdr);
-            } else if let Some(i) = v.index_if(0).and_then(|i| i.checked_sub(1))
-                && let Some(Object::Vector(items) | Object::Record(items)) = self.vm.objects.get_entry_mut(i)
-            {
-                items.iter_mut().for_each(fix);
-            }
-        }
-    }
-    fn prefix(&mut self, name: &str, depth: usize) -> Result<Value> {
-        let symbol = self.vm.intern(name);
-        let root = self.vm.external_roots.len();
-        self.vm.external_roots.push(symbol);
+    fn prefix(&mut self, name: &str, depth: usize) -> Result<usize> {
+        let symbol = self.m.leaf((name, true), build::symbol);
         let value = self.form(depth + 1)?;
-        let symbol = self.vm.external_roots[root];
-        Ok(self.vm.list_value(&[symbol, value]))
+        Ok(self.m.leaf((symbol, value), build::prefixed))
     }
     fn escape(&mut self) -> Result<i64> {
         // GNU lread.c:read_char_escape: modifiers accumulate, but Control
@@ -800,7 +575,7 @@ impl Reader<'_, '_> {
     /// lread.c read_char_escape's `\N{NAME}', NAME read as GNU does
     /// (whitespace runs fold to one space, no non-ASCII). `U+XXXX' is
     /// decoded here; any other NAME is GNU's Lisp `char-from-name' with
-    /// IGNORE-CASE, called as a function stream is (roots kept).
+    /// IGNORE-CASE, called as a function stream is.
     fn character_name(&mut self) -> Result<i64> {
         if self.next()? != 123 {
             return Err("Expected opening brace after \\N".into());
@@ -823,10 +598,8 @@ impl Reader<'_, '_> {
         }
         if name.is_empty() { return Err("Empty character name".into()); }
         let Some(hex) = name.strip_prefix("U+") else {
-            let function = self.vm.intern("char-from-name");
-            let string = self.vm.byte_string(name.as_bytes());
-            let code = self.vm.reader_call(function, &[string, Value::TRUE])?;
-            return code.integer_value()
+            let frame = self.m.leaf(name.as_str(), build::name_call);
+            return self.call(frame)?
                 .filter(|&code| (0..=0x10ffff).contains(&code) && !(0xd800..=0xdfff).contains(&code))
                 .ok_or_else(|| format!("\\N{{{name}}}"));
         };
@@ -835,24 +608,23 @@ impl Reader<'_, '_> {
             .map(i64::from)
             .ok_or_else(|| format!("\\N{{{name}}}"))
     }
-    fn form(&mut self, depth: usize) -> Result<Value> {
+    /// The next form, rooted: its index in `external_roots`.
+    fn form(&mut self, depth: usize) -> Result<usize> {
         #[cfg(test)]
         if self.collect_subforms {
-            self.vm.byte_string(b"unreachable reader stress allocation");
+            self.m.leaf((), |vm, ()| { vm.byte_string(b"unreachable reader stress allocation"); });
         }
-        let value = self.form_inner(depth)?;
+        let root = self.form_inner(depth)?;
         if depth > 0 {
             self.eof = false;
         }
-        let index = self.vm.external_roots.len();
-        self.vm.external_roots.push(value);
         #[cfg(test)]
-        if self.collect_subforms {
-            self.vm.collect(&mut []);
+        if self.collect_subforms && let Some(gc) = self.gc.as_mut() {
+            crate::threaded::collect_now(self.m, gc.by_ref());
         }
-        Ok(self.vm.external_roots[index])
+        Ok(root)
     }
-    fn form_inner(&mut self, depth: usize) -> Result<Value> {
+    fn form_inner(&mut self, depth: usize) -> Result<usize> {
         if depth > 256 {
             return Err("reader nesting limit exceeded".into());
         }
@@ -863,7 +635,7 @@ impl Reader<'_, '_> {
                 let vector = opening == 91;
                 let end = if vector { 93 } else { 41 };
                 let mut values = vec![];
-                let mut tail = Value::NIL;
+                let mut tail = None;
                 loop {
                     self.space();
                     if self.peek() == Some(end) {
@@ -883,31 +655,17 @@ impl Reader<'_, '_> {
                             self.next()?;
                             return Err(self.syntax(&char::from_u32(closer).unwrap().to_string()));
                         }
-                        self.form(depth + 1)?;
-                        let tail_root = self.vm.external_roots.len() - 1;
+                        let root = self.form(depth + 1)?;
                         self.space();
                         if self.next()? != end {
                             return Err("dotted list requires one tail".into());
                         }
-                        tail = self.vm.external_roots[tail_root];
+                        tail = Some(root);
                         break;
                     }
-                    self.form(depth + 1)?;
-                    values.push(self.vm.external_roots.len() - 1);
+                    values.push(self.form(depth + 1)?);
                 }
-                if vector {
-                    let values = values
-                        .into_iter()
-                        .map(|i| self.vm.external_roots[i])
-                        .collect();
-                    Ok(self.vm.allocate_object(Object::Vector(values)))
-                } else {
-                    for index in values.into_iter().rev() {
-                        let value = self.vm.external_roots[index];
-                        tail = self.vm.alloc_cons(value, tail);
-                    }
-                    Ok(tail)
-                }
+                Ok(self.m.leaf((vector, values, tail), build::sequence))
             }
             41 | 93 => Err(self.syntax(&char::from_u32(opening).unwrap().to_string())),
             // A dot token where no list can take it: top level, a tail
@@ -936,7 +694,7 @@ impl Reader<'_, '_> {
                 120 | 88 => self.radix_integer(16),
                 c @ 48..=57 => self.numbered_dispatch(c, depth),
                 // ## -- the interned symbol whose name is empty.
-                35 => Ok(self.vm.intern("")),
+                35 => Ok(self.m.leaf(("", true), build::symbol)),
                 // #:X uninterned, #_X without shorthand: a
                 // symbol whatever the token looks like; nothing after it is
                 // the empty name.
@@ -946,7 +704,7 @@ impl Reader<'_, '_> {
                         Some(c) if !Self::empty_symbol_follows(c) => { let first = self.next()?; self.symbol_token(first)?.0 }
                         _ => String::new(),
                     };
-                    Ok(if uninterned { self.vm.uninterned_symbol(&name) } else { self.vm.intern(&name) })
+                    Ok(self.m.leaf((name.as_str(), !uninterned), build::symbol))
                 }
                 // #! starts an executable file's first line: skip it.
                 33 => {
@@ -957,7 +715,8 @@ impl Reader<'_, '_> {
             },
             63 => {
                 if matches!(self.peek(), Some(9 | 32)) {
-                    return Value::integer(i64::from(self.next()?));
+                    let c = self.next()?;
+                    return self.m.leaf(i64::from(c), build::integer);
                 }
                 let n = if self.peek() == Some(92) {
                     self.next()?;
@@ -976,7 +735,7 @@ impl Reader<'_, '_> {
                 } else {
                     n
                 };
-                Value::integer(n)
+                self.m.leaf(n, build::integer)
             }
             34 => {
                 let mut s: Vec<u32> = Vec::new();
@@ -1043,140 +802,81 @@ impl Reader<'_, '_> {
                 }
                 // GNU read_string_literal: multibyte only for a character
                 // above 127 that is not a raw byte, whatever the source.
-                if !unicode {
-                    let bytes = s
-                        .into_iter()
-                        .map(|c| {
-                            if c >= 0x3fff80 {
-                                (c - 0x3fff00) as u8
-                            } else {
-                                c as u8
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    // A unibyte literal with bytes above 127 ("\351") is a
-                    // byte string; ASCII keeps its string slot.
-                    if !bytes.is_ascii() {
-                        return Ok(self.vm.make_lisp_string(bytes, false));
-                    }
-                    Ok(self.vm.allocate_object(Object::String(Box::new(
-                        crate::data::LispString::from_bytes(bytes, false),
-                    ))))
-                } else {
-                    let mut bytes = Vec::new();
-                    for c in s {
-                        let mut encoded = [0; 5];
-                        let n = crate::lstring::char_string(c, &mut encoded);
-                        bytes.extend_from_slice(&encoded[..n]);
-                    }
-                    Ok(self.vm.make_lisp_string(bytes, true))
-                }
+                Ok(self.m.leaf((s, unicode), build::string_literal))
             }
             first => {
                 let (token, escaped) = self.symbol_token(first)?;
-                if !escaped {
-                    // GNU also accepts decimal integers with a trailing dot.
-                    let integer = token.strip_suffix('.').unwrap_or(&token);
-                    let digits = integer.strip_prefix(['+', '-']).unwrap_or(integer);
-                    if !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit()) {
-                        // A fixnum when it fits, else a bignum.
-                        let n: num_bigint::BigInt = integer.parse().map_err(|_| "invalid integer")?;
-                        return Ok(self.vm.bigint(n));
-                    }
-                    // A lone `.' token here was followed by `)` or `]`,
-                    // which GNU's dot test excludes (`dot_follows`): it is
-                    // the symbol `.`, so `(a .)` is a list of `a` and `.`.
-                    // Numeric-looking floats/bignums are not interned as symbols.
-                    // Rust also parses "nan" and "inf" as floats; GNU interns
-                    // those names. Only numeric-leading tokens can be numbers.
-                    let unsigned = token.strip_prefix(['+', '-']).unwrap_or(&token);
-                    let numeric_leading = unsigned.starts_with(|c: char| c.is_ascii_digit())
-                        || unsigned
-                            .strip_prefix('.')
-                            .is_some_and(|s| s.starts_with(|c: char| c.is_ascii_digit()));
-                    if numeric_leading && (token.contains('.') || token.contains(['e', 'E'])) {
-                        let special = match token.as_str() {
-                            "1.0e+INF" | "+1.0e+INF" => Some(f64::INFINITY),
-                            "-1.0e+INF" => Some(f64::NEG_INFINITY),
-                            "0.0e+NaN" | "+0.0e+NaN" => Some(f64::NAN),
-                            "-0.0e+NaN" => Some(-f64::NAN),
-                            _ => None,
-                        };
-                        if let Some(n) = special {
-                            return Ok(self.vm.allocate_object(Object::Float(n)));
-                        }
-                        if let Ok(n) = token.parse::<f64>() {
-                            return Ok(self.vm.allocate_object(Object::Float(n)));
-                        }
-                    }
-                }
-                let longhand = self.vm.shorthand_longhand(&token)?;
-                Ok(self.vm.intern(longhand.as_deref().unwrap_or(&token)))
+                self.m.leaf((token.as_str(), escaped), build::atom)
             }
         }
     }
 }
 
-impl Vm {
-    pub(super) fn read_input(
-        &mut self,
-        input: Input<'_>,
-    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let roots = self.external_roots.len();
-        let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
-        let mut reader = Reader {
-            input,
-            at: 0,
-            lookahead: None,
-            error: None,
-            eof: false,
-            labels: BTreeMap::new(),
-            vm: self,
-            signal: None,
-            #[cfg(test)]
-            collect_subforms: false,
-        };
-        reader.space();
-        let begin = reader.at;
-        let result = if reader.peek().is_none() {
-            Ok(None)
-        } else {
-            reader.form(0).map(|_| Some((reader.vm.external_roots.len() - 1, begin, reader.at)))
-        };
-        let result = result.and_then(|r| {
-            reader.finish()?;
-            Ok(r.map(|(root, begin, end)| (reader.vm.external_roots[root], begin, end)))
-        });
-        let signal = reader
-            .signal
-            .take()
-            .or_else(|| reader.vm.pending_eval_escape());
-        reader.vm.external_roots.truncate(roots);
-        result.map_err(|message| {
+/// One read of INPUT, under GC when it may call Lisp: THEN gets what it read
+/// (`super::Read`) at once, in a leaf, the read's roots already released, as
+/// a request's value goes straight to its leaf.
+pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Option<Gc<'_, 'b>>, input: Input<'_>, b: B,
+    then: impl FnOnce(&mut Vm, B, super::Read) -> R + Copy + 'static) -> R {
+    let mark = m.leaf((), |vm, ()| vm.external_roots.len());
+    let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
+    let mut reader = Reader {
+        m,
+        gc,
+        input,
+        at: 0,
+        lookahead: None,
+        error: None,
+        eof: false,
+        labels: BTreeMap::new(),
+        signal: None,
+        #[cfg(test)]
+        collect_subforms: false,
+    };
+    reader.space();
+    let begin = reader.at;
+    let result = if reader.peek().is_none() {
+        Ok(None)
+    } else {
+        reader.form(0).map(|root| Some((root, begin, reader.at)))
+    };
+    let result = result.and_then(|r| {
+        reader.finish()?;
+        Ok(r)
+    });
+    let result = match result {
+        Ok(found) => Ok(found),
+        Err(message) => {
             let bytes = match reader.input {
                 Input::Host { .. } => Some(reader.at),
                 Input::String { byte, root, .. } => {
-                    let pending = reader.lookahead.map_or(0, |code| {
-                        if reader.vm.str_view(reader.vm.external_roots[root]).is_some_and(|view| view.is_multibyte()) {
-                            let mut encoded = [0; 5];
-                            crate::lstring::char_string(code, &mut encoded)
-                        } else { 1 }
-                    });
+                    let pending = match reader.lookahead {
+                        Some(code) => reader.m.leaf((root, code), build::string_width).unwrap_or(1),
+                        None => 0,
+                    };
                     Some(byte - initial_byte - pending)
-                },
+                }
                 _ => None,
             };
-            let message = if let Some(bytes) = bytes {
-                format!("{message} at byte {bytes}")
-            } else { message };
-            (message, signal)
-        })
-    }
+            Err(if let Some(bytes) = bytes { format!("{message} at byte {bytes}") } else { message })
+        }
+    };
+    reader.m.leaf((result, reader.signal, mark, b), move |vm, (result, signal, mark, b)| {
+        let read = match result {
+            Ok(found) => Ok(found.map(|(root, begin, end)| (vm.external_roots[root], begin, end))),
+            Err(message) => {
+                let signal = signal.and_then(|root| vm.cons_pair(vm.external_roots[root]).ok());
+                Err((message, signal.or_else(|| vm.pending_eval_escape())))
+            }
+        };
+        vm.external_roots.truncate(mark);
+        then(vm, b, read)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Value, data::Object};
     include!("oracle_tests.rs");
 
     #[test]
@@ -1191,33 +891,147 @@ mod tests {
     #[test]
     fn partial_reader_forms_survive_compaction_between_subforms() {
         let mut vm = Vm::new();
-        let source = r#"("first" ["second" ("third")] '"fourth" . "tail")"#;
-        let mut reader = Reader {
-            input: Input::Host {
-                text: source.as_bytes(),
-                byte: 0,
-            },
-            at: 0,
-            lookahead: None,
-            error: None,
-            eof: false,
-            labels: BTreeMap::new(),
-            vm: &mut vm,
-            signal: None,
-            collect_subforms: true,
-        };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            reader.form(0).and_then(|v| reader.vm.display(v))
-        }));
-        assert!(
-            result.is_ok(),
-            "partial reader forms must remain valid during compaction"
-        );
-        let result = result.unwrap();
+        let shown = crate::threaded::toplevel(&mut vm, (), |mut m, gc, ()| {
+            let source = r#"("first" ["second" ("third")] '"fourth" . "tail")"#;
+            let mark = m.leaf((), |vm, ()| vm.external_roots.len());
+            let mut reader = Reader {
+                m: &mut m,
+                gc: Some(gc),
+                input: Input::Host { text: source.as_bytes(), byte: 0 },
+                at: 0,
+                lookahead: None,
+                error: None,
+                eof: false,
+                labels: BTreeMap::new(),
+                signal: None,
+                collect_subforms: true,
+            };
+            let root = reader.form(0);
+            m.leaf((root, mark), |vm, (root, mark)| {
+                let shown = root.and_then(|root| vm.display(vm.external_roots[root]));
+                vm.external_roots.truncate(mark);
+                shown
+            })
+        });
         assert_eq!(
-            result,
+            shown,
             Ok(r#"("first" ["second" ("third")] (quote "fourth") . "tail")"#.to_owned()),
             "partial reader forms must be forwarded"
         );
+    }
+
+    /// SOURCE's value, printed, or the VM's error.
+    fn evaluated(vm: &mut Vm, source: &str) -> String {
+        match vm.eval_source_raw(source) {
+            Ok(value) => vm.display(value).unwrap(),
+            Err(e) => format!("VM-ERROR {e}"),
+        }
+    }
+
+    #[test]
+    fn a_streams_throw_crosses_read() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        assert_eq!(evaluated(&mut vm, "(catch 'out (read (lambda (&optional _) (throw 'out 'thrown))))"), "thrown");
+    }
+
+    /// A stream's signal reaches `read`'s caller as the stream raised it: a
+    /// handler runs once for it, not again for a signal the reader re-raised.
+    #[test]
+    fn a_streams_signal_reaches_its_handler_once() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        let ran = evaluated(&mut vm, r#"(let ((ran 0))
+            (list (condition-case e
+                      (handler-bind-1 (lambda () (read (lambda (&optional _) (error "stream"))))
+                                      '(error) (lambda (_) (setq ran (1+ ran))))
+                    (error e))
+                  ran))"#);
+        assert_eq!(ran, r#"((error "stream") 1)"#);
+    }
+
+    /// A function stream whose every call (each `get` and `unget`) collects
+    /// and moves every live object (GC stress 1, through the production
+    /// `read`), under a shared `#1=` list, a property string and a dotted
+    /// list: what the reader has read so far stays whole.
+    #[test]
+    fn partial_forms_survive_a_stream_that_collects() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        let before = vm.heap_stats().collections;
+        vm.set_gc_stress(1);
+        let shown = evaluated(&mut vm, r#"(let* ((s "(#1=(a \"x\") #1# #(\"pro\" 0 1 (face bold)) (b . c))") (i 0)
+                 (v (read (lambda (&optional c)
+                            (if c (setq i (1- i))
+                              (if (< i (length s)) (prog1 (aref s i) (setq i (1+ i))) nil))))))
+            (list (eq (nth 0 v) (nth 1 v)) (nth 0 v) (get-text-property 0 'face (nth 2 v)) (nth 3 v)))"#);
+        vm.set_gc_stress(0);
+        assert!(vm.heap_stats().collections > before + 40, "a collection at every stream call");
+        assert_eq!(shown, r#"(t (a "x") bold (b . c))"#);
+    }
+
+    /// `char-from-name`, called for a `\N{NAME}` by name, may collect, signal
+    /// or throw, as a stream may.
+    #[test]
+    fn char_from_name_may_collect_signal_or_throw() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        evaluated(&mut vm, r#"(defun char-from-name (name &optional _) (and (equal name "BULLET") 8226))"#);
+        vm.set_gc_stress(1);
+        let read = evaluated(&mut vm, r#"(read "(\"keep\" ?\\N{BULLET} [x])")"#);
+        vm.set_gc_stress(0);
+        assert_eq!(read, r#"("keep" 8226 [x])"#);
+        evaluated(&mut vm, r#"(defun char-from-name (&rest _) (error "named"))"#);
+        assert_eq!(evaluated(&mut vm, r#"(condition-case e (read "?\\N{BULLET}") (error (car (cdr e))))"#), r#""named""#);
+        evaluated(&mut vm, r"(defun char-from-name (&rest _) (throw 'name 'thrown))");
+        assert_eq!(evaluated(&mut vm, r#"(catch 'name (read "?\\N{BULLET}"))"#), "thrown");
+    }
+
+    /// A read without the permission (`Vm::read_string_unlent`) calls no
+    /// Lisp: it refuses a `\N{NAME}` by name, and still reads `\N{U+XXXX}`.
+    #[test]
+    fn a_read_without_the_permission_calls_no_lisp() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        evaluated(&mut vm, r#"(defun char-from-name (&rest _) (error "called"))"#);
+        for (text, read) in [(r"?\N{BULLET}", "refused"), (r"?\N{U+2022}", "8226")] {
+            let string = vm.make_lisp_string(text.as_bytes().to_vec(), true);
+            let end = vm.str_view(string).unwrap().len();
+            let got = match vm.read_string_unlent(string, 0, end) {
+                Ok(Some((value, ..))) => vm.display(value).unwrap(),
+                Ok(None) => "nothing".into(),
+                Err((message, _)) if message.contains("calls no Lisp") => "refused".into(),
+                Err((message, _)) => message,
+            };
+            assert_eq!(got, read, "{text}");
+        }
+    }
+
+    /// Every Lisp half a leaf primitive installs (`rlisp/vm/`) reads without
+    /// the permission, as its primitive reads it at its first call: no
+    /// `\N{NAME}` by name in them.
+    #[test]
+    fn the_leaves_lisp_halves_read_without_lisp() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/vm");
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "el")).collect();
+        files.sort();
+        assert!(files.len() >= 10, "the halves under {}", dir.display());
+        let mut vm = Vm::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            let string = vm.make_lisp_string(text.into_bytes(), true);
+            let end = vm.str_view(string).unwrap().len();
+            let mut at = 0;
+            let mut forms = 0;
+            loop {
+                match vm.read_string_unlent(string, at, end) {
+                    Ok(Some((_, _, read))) => { at += read; forms += 1; }
+                    Ok(None) => break,
+                    Err((message, _)) => panic!("{}: form {forms}: {message}", file.display()),
+                }
+            }
+            assert!(forms > 0, "{}", file.display());
+        }
     }
 }
