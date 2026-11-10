@@ -502,7 +502,7 @@ impl Reader<'_, '_> {
             for (key, val) in pairs.into_iter().rev() {
                 string.properties.put(range.clone(), &key, val);
             }
-            self.vm.objects[value.index(0)? - 1] = if string.is_utf8() {
+            *self.vm.objects.entry_mut(value.index(0)? - 1) = if string.is_utf8() {
                 Object::String(Box::new(string))
             } else {
                 Object::RawString(Box::new(string))
@@ -617,7 +617,9 @@ impl Reader<'_, '_> {
                     // the placeholder are references to the object.
                     Some(cons) => {
                         let pair = self.vm.conses[cons];
-                        self.vm.conses[placeholder.payload() as usize] = pair;
+                        let at = placeholder.payload() as usize;
+                        self.vm.conses.set_car(at, pair.0);
+                        self.vm.conses.set_cdr(at, pair.1);
                         Ok(placeholder)
                     }
                     None => {
@@ -656,9 +658,10 @@ impl Reader<'_, '_> {
                 let (mut car, mut cdr) = self.vm.conses[i];
                 fix(&mut car);
                 fix(&mut cdr);
-                self.vm.conses[i] = (car, cdr);
+                self.vm.conses.set_car(i, car);
+                self.vm.conses.set_cdr(i, cdr);
             } else if let Some(i) = v.index_if(0).and_then(|i| i.checked_sub(1))
-                && let Some(Object::Vector(items) | Object::Record(items)) = self.vm.objects.get_mut(i)
+                && let Some(Object::Vector(items) | Object::Record(items)) = self.vm.objects.get_entry_mut(i)
             {
                 items.iter_mut().for_each(fix);
             }
@@ -1196,7 +1199,6 @@ impl Vm {
         &mut self,
         input: Input<'_>,
     ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let _unwind = self.unwind_mark();
         let roots = self.external_roots.len();
         let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
         let mut reader = Reader {

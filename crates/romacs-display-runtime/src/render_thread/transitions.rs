@@ -1,6 +1,8 @@
 //! Renderer-owned state for snapshot-based window transitions.
 
-use crate::core::frame_glyphs::{BufferTransitionTarget, ContentTransitionHint, FrameGlyphBuffer};
+use romacs_display_protocol::frame_glyphs::{
+    BufferTransitionTarget, ContentTransitionHint, FrameGlyphBuffer,
+};
 use romacs_display_protocol::{
     DirectionlessTransitionEffect, DisplayWindowId, Rect, ResolvedTransitionEffect,
     TransitionEasing, TransitionPlan, TransitionPolicy,

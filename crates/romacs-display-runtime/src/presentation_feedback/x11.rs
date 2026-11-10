@@ -61,10 +61,10 @@ impl Observer {
         {
             return;
         }
-        // SAFETY: render-thread ownership keeps this surface configured on the
-        // supplied renderer device; generations change on every configure.
         let session = self.sessions.entry(frame).or_insert_with(|| Session {
             generation,
+            // SAFETY: render-thread ownership keeps this surface configured on
+            // the supplied renderer device; generations change on every configure.
             timing: unsafe { SwapchainTiming::new(device, surface, generation) },
             pending: VecDeque::new(),
         });
@@ -76,6 +76,8 @@ impl Observer {
         {
             *session = Session {
                 generation,
+                // SAFETY: as above; the surface was reconfigured, so the new
+                // generation names its current configuration.
                 timing: unsafe { SwapchainTiming::new(device, surface, generation) },
                 pending: VecDeque::new(),
             };
@@ -86,6 +88,8 @@ impl Observer {
         let Some(serial) = self.next_serial.checked_add(1) else {
             return;
         };
+        // SAFETY: TIMING matches this surface and generation (checked above), and
+        // the render thread holds the surface configured while it requests.
         if session.pending.len() >= 256 || !unsafe { timing.request(surface, generation, serial) } {
             return;
         }
@@ -120,11 +124,11 @@ impl Observer {
         let Some(path) = &self.path else {
             return;
         };
-        // SAFETY: the caller borrows each current surface from the renderer
-        // owning device; reconfiguration cannot run during this dispatch.
         self.sessions.retain(|&frame, session| {
             let Some((surface, generation)) = surface(frame) else { return false; };
             let Some(timing) = &mut session.timing else { return true; };
+            // SAFETY: the caller borrows each current surface from the renderer
+            // owning DEVICE; reconfiguration cannot run during this dispatch.
             let Some(observations) = (unsafe { timing.poll(device, surface, generation) }) else {
                 session.timing = None;
                 session.pending.clear();

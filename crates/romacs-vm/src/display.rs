@@ -1039,7 +1039,7 @@ impl Vm {
         self.referrers();
         let (windows, objects) = (self.referrers.as_ref().map_or(&[][..], |r| &r.windows), &mut self.objects);
         for &i in windows {
-            if let Object::Window(w) = &mut objects[i]
+            if let Object::Window(w) = objects.entry_mut(i)
                 && let Some(next) = w.pending_vscroll.take()
                 && next != w.vscroll_px
             {
@@ -1067,7 +1067,7 @@ impl Vm {
         use romacs_layout_input::NoFont;
         let slot = self.slot("glyphless-char-display");
         let table = self.variable_value(slot).unwrap_or(Value::NIL);
-        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras.first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
+        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras().first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
         let method = self.cons_pair(method).map_or(method, |(graphical, _)| graphical);
         if method == self.display_symbol("hex-code") { NoFont::HexCode }
         else if method == self.display_symbol("thin-space") { NoFont::ThinSpace }
@@ -2775,7 +2775,8 @@ impl Vm {
         for (_, form, _) in runs.iter().rev() {
             let value = self.ml_prop_value(form)?;
             let cell = self.list_value(&[value]);
-            self.cons_mut(cell)?.1 = self.slots[slot].value;
+            let cell_at = self.writable_cons(cell)?;
+            self.conses.set_cdr(cell_at, self.slots[slot].value);
             self.slots[slot].value = cell;
         }
         let (window, specs) = (self.slots[root].value, self.slots[slot].value);

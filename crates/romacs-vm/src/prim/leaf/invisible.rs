@@ -44,7 +44,7 @@ impl Leaf<'_> {
     }
     pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(byte),
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(byte),
             _ => unreachable!(),
@@ -54,7 +54,7 @@ impl Leaf<'_> {
     /// Point to character position POSITION (1-based), already in range.
     pub fn goto_char_position(&mut self, position: i64) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = b.byte_of_char(crate::coordinates::CharOffset(position as usize - 1)).map_err(Fault::Error)?,
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(position as usize - 1),
             _ => unreachable!(),
@@ -94,7 +94,7 @@ impl Leaf<'_> {
             at += width(c);
         }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
             _ => unreachable!(),
@@ -109,16 +109,11 @@ impl Leaf<'_> {
     }
 
     fn character_property(&mut self, pos: Value, key: Value) -> super::super::Out {
-        // Threaded activations exclude the final 4096 stack slots. This
-        // non-evaluating property query uses two of them without reallocating
-        // the Vec and invalidating the engine's live register pointers.
-        let start = self.vm.stack.len().checked_sub(2)
-            .ok_or_else(|| Fault::Error("native property scratch unavailable".into()))?;
-        let saved = [self.vm.stack[start], self.vm.stack[start + 1]];
-        self.vm.stack[start..].copy_from_slice(&[pos, key]);
-        let value = self.vm.annotation_primitive(Primitive::GetCharProperty, start, 2);
-        self.vm.stack[start..].copy_from_slice(&saved);
-        value.map_err(Fault::Error)
+        // A non-evaluating query, on the kernel file: a running engine's
+        // registers stay where they are.
+        self.vm
+            .with_kernel_stack(&[pos, key], |vm, n| vm.annotation_primitive(Primitive::GetCharProperty, 0, n))
+            .map_err(Fault::Error)
     }
 
     /// TEXT_PROP_MEANS_INVISIBLE (xdisp.c invisible_prop) over the current

@@ -163,6 +163,23 @@ thousandth a stack mark."
 
 ;;;; Tree-sitter
 
+;;;; Syntax summaries (crates/romacs-vm/src/syntax_index.rs)
+
+(defun scaling--syntax-buffer (name n &optional lines)
+  "A buffer NAME of N copies of LINES (C-like code by default), in a C
+comment and string syntax, its summaries made by one parse to the end."
+  (with-current-buffer (get-buffer-create name)
+    (erase-buffer)
+    (let ((table (make-char-table 'syntax-table)))
+      (set-char-table-parent table (standard-syntax-table))
+      (dolist (entry '((?/ . ". 124b") (?* . ". 23") (?\n . "> b") (?\" . "\"") (?\\ . "\\") (?# . "' 14") (?| . "\" 23bn")))
+        (modify-syntax-entry (car entry) (cdr entry) table))
+      (set-syntax-table table))
+    (dotimes (i n)
+      (insert (or lines (format "int f%d(int a) { /* (c */ return a + \"s(\" + %d; } // d {\n" i i))))
+    (parse-partial-sexp (point-min) (point-max))
+    (current-buffer)))
+
 ;;;; Windows
 
 ;;;; Symbols, hash tables, features

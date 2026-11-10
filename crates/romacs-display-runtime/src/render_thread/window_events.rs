@@ -221,7 +221,7 @@ impl RenderApp {
             // OS-delivered RedrawRequested for a surface the
             // compositor is not showing.
             if !self.frame_coordinator.is_eligible(sched_id) {
-                super::frame_stats::count_plan(sched_id, &plan);
+                super::frame_stats::count_plan(&plan);
                 return;
             }
             if !plan.should_present {
@@ -234,7 +234,7 @@ impl RenderApp {
                 // than rendered unattributed.
                 plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
             }
-            super::frame_stats::count_plan(sched_id, &plan);
+            super::frame_stats::count_plan(&plan);
             if plan.reasons.is_empty() {
                 super::frame_stats::count(
                     &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
@@ -339,7 +339,6 @@ impl RenderApp {
             _ => false,
         };
         if dismiss {
-            self.comms.tooltip_context.invalidate();
             self.tooltips.hide();
         }
         if self.handle_native_menu_bar_event(window_id, &event)
@@ -512,35 +511,6 @@ impl RenderApp {
                 if state == ElementState::Pressed {
                     self.frame_windows.finish_top_level_child_frame_animations();
                 }
-                #[cfg(feature = "webview")]
-                if let Some(target) = self.focused_webview {
-                    use winit::platform::scancode::PhysicalKeyExtScancode;
-
-                    // The external WebView API has its own numeric key-value
-                    // contract. Keep this conversion at that boundary; the
-                    // editor transport retains the typed identity below.
-                    let key_value = match Self::translate_key_input(&logical_key) {
-                        Some(FrontendKey::Character(character)) => character as u32,
-                        Some(FrontendKey::Keysym(keysym)) => keysym,
-                        None => 0,
-                    };
-                    if key_value != 0
-                        && let Some(system) = self.webview_system.as_mut()
-                    {
-                        let input = romacs_webview::WebViewInput::Keyboard {
-                            key_value,
-                            hardware_key_code: physical_key.to_scancode().unwrap_or(0),
-                            state: match state {
-                                ElementState::Pressed => romacs_webview::ButtonState::Pressed,
-                                ElementState::Released => romacs_webview::ButtonState::Released,
-                            },
-                            modifiers: Self::webview_modifiers(self.modifiers),
-                        };
-                        if let Err(error) = system.input(target, input) {
-                            tracing::warn!(view = %target.view(), %error, "dropping WebView keyboard input");
-                        }
-                    }
-                }
                 if state == ElementState::Pressed
                     && !self.key_repeats.admit(window_id, physical_key, repeat)
                 {
@@ -642,11 +612,8 @@ impl RenderApp {
                     if !handled_via_text {
                         // `logical_key` is the layout's key with Shift applied
                         // and no command modifier folded in, which is what GNU
-                        // reads for a command chord. macOS is the one window
-                        // system that would compose an Option chord into
-                        // another character first, and the frame window asks
-                        // it not to (`apply_option_key_policy`), so no
-                        // per-event substitution is needed here.
+                        // reads for a command chord, so no per-event
+                        // substitution is needed here.
                         let key = Self::translate_key_input(&logical_key);
                         if let Some(key) = key {
                             let key_modifiers = match key {

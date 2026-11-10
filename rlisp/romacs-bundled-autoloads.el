@@ -612,6 +612,11 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-surface" '("romacs-"))
 
 
+;;; Generated autoloads from romacs-syntax.el
+
+(register-definition-prefixes "romacs-syntax" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-term.el
 
 (register-definition-prefixes "romacs-term" '("kill-ring" "romacs-term"))
@@ -697,15 +702,6 @@ is available that early and never adds a duplicate, so this stays idempotent
 however many times `romacs-video' is loaded.")
 (add-hook 'find-file-hook #'romacs-video--select-visited-video)
 (register-definition-prefixes "romacs-video" '("romacs-video-"))
-
-
-;;; Generated autoloads from romacs-webkit.el
-
-(autoload 'romacs-webkit-open-url "romacs-webkit"
-"Open URL in a new WebKit browser buffer.
-
-(fn URL)" t)
-(register-definition-prefixes "romacs-webkit" '("romacs-webkit-"))
 
 
 ;;; Generated autoloads from romacs-workspace-completion.el

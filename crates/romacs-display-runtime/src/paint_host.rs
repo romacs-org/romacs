@@ -471,7 +471,6 @@ impl PaintSender {
                 height,
                 title,
                 geometry_hints: none,
-                fullscreen: None,
                 visual: None,
                 adopt_primary: true,
                 reply: Some(reply),

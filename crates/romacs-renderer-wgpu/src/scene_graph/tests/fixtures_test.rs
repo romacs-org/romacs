@@ -908,6 +908,13 @@ fn group_fixture(badge_color: Color) -> DrawList {
 
 /// A Bayer-dithered warm gradient, as an image cache would hold a decoded
 /// picture: muted ink on near black.
+/// RGB24 pixels as opaque ARGB32 (A,R,G,B byte order).
+fn rgb_to_argb32(rgb: &[u8]) -> Vec<u8> {
+    rgb.chunks_exact(3)
+        .flat_map(|px| [0xff, px[0], px[1], px[2]])
+        .collect()
+}
+
 fn dither_image(width: u32, height: u32) -> Vec<u8> {
     const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
     let mut rgb = Vec::with_capacity((width * height * 3) as usize);
@@ -990,15 +997,15 @@ fn media_fixture() -> DrawList {
 fn media_sources(gpu: &Gpu) -> (ImageCache, ShaderSurfaceCache) {
     let mut images = ImageCache::new(&gpu.device);
     let id = romacs_display_protocol::ImageId::new(IMAGE_ID);
-    images.load_raw_rgb24_with_id(
+    images.load_raw_argb32_with_id(
         romacs_display_protocol::ImageLoadToken::new(
             id,
             romacs_display_protocol::ImageLoadAttempt::new(1).expect("attempt"),
         ),
-        &dither_image(200, 180),
+        &rgb_to_argb32(&dither_image(200, 180)),
         200,
         180,
-        600,
+        800,
     );
     for _ in 0..500 {
         images.process_pending(&gpu.device, &gpu.queue);

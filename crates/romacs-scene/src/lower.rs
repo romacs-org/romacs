@@ -34,19 +34,6 @@ pub trait Resolve {
     fn surface(&mut self, scene: SceneId, node: NodeId) -> Option<u32>;
 }
 
-/// Resolves nothing: image, shader and model nodes draw nothing.
-pub struct NoResources;
-
-impl Resolve for NoResources {
-    fn image(&mut self, _: SceneId, _: NodeId, _: &ImageSource) -> Option<(Source, Size)> {
-        None
-    }
-
-    fn surface(&mut self, _: SceneId, _: NodeId) -> Option<u32> {
-        None
-    }
-}
-
 /// The draw list of `scene` laid out as `solved`, at its document time.
 pub fn lower(scene: &Scene, solved: &Solved, resolve: &mut dyn Resolve) -> DrawList {
     let mut items: BTreeMap<NodeId, Vec<Item>> = BTreeMap::new();

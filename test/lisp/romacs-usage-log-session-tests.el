@@ -34,6 +34,9 @@
                              (romacs-usage-log-test--lines file))))
        (should (equal (plist-get record :collection) "explicit"))
        (should (floatp (plist-get record :pause_ms)))
+       (should (< (abs (- (plist-get record :t) (float-time))) 60))
+       (should (> (plist-get record :live_objects) 0))
+       (should (> (plist-get record :live_bytes_est) (plist-get record :live_objects)))
        (should-not (plist-get record :met))))))
 
 (ert-deftest romacs-usage-log-server-keeps-its-own-session-record ()

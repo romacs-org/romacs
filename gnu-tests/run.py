@@ -670,7 +670,7 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
                                 stderr=subprocess.PIPE, text=True, errors='replace')
         lines: queue.Queue = queue.Queue()
 
-        def pump(stream=proc.stdout):
+        def pump(stream=proc.stdout, lines=lines):
             for line in stream:
                 lines.put(line)
             lines.put(None)

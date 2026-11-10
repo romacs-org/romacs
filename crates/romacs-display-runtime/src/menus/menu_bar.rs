@@ -1,5 +1,7 @@
 //! Heading intent survives native focus changes and asynchronous popup cleanup.
-use romacs_display_protocol::menu::{MenuBarRequestId, MenuToken};
+use romacs_display_protocol::menu::MenuBarRequestId;
+#[cfg(test)]
+use romacs_display_protocol::menu::MenuToken;
 use winit::window::WindowId;
 
 #[derive(Clone, Debug)]
@@ -20,7 +22,9 @@ pub(crate) enum HeadingAction {
 
 struct RequestedHeading {
     heading: MenuHeading,
+    #[cfg(test)]
     id: MenuBarRequestId,
+    #[cfg(test)]
     shown: Option<MenuToken>,
 }
 
@@ -45,28 +49,26 @@ impl MenuBarTracking {
         let id = MenuBarRequestId::fresh();
         self.requested = Some(RequestedHeading {
             heading,
+            #[cfg(test)]
             id,
+            #[cfg(test)]
             shown: None,
         });
         HeadingAction::Request(id)
     }
 
+    #[cfg(test)]
     pub fn accepts(&self, id: MenuBarRequestId) -> bool {
         self.requested.as_ref().is_some_and(|r| r.id == id)
     }
 
+    #[cfg(test)]
     pub fn shown(&mut self, id: MenuBarRequestId, token: MenuToken) {
         if let Some(r) = &mut self.requested
             && r.id == id
         {
             r.shown = Some(token);
         }
-    }
-
-    pub fn owns_popup(&self, token: MenuToken) -> bool {
-        self.requested
-            .as_ref()
-            .is_some_and(|r| r.shown == Some(token))
     }
 
     pub fn heading(&self) -> Option<&MenuHeading> {

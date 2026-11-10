@@ -175,7 +175,7 @@ impl Vm {
                 if next == seq {
                     return Err("circular list".into());
                 }
-                self.conses[i].1 = prev;
+                self.conses.set_cdr(i, prev);
                 prev = tail;
                 tail = next;
             }
@@ -206,11 +206,11 @@ impl Vm {
             return Err(self.refuse_read_only(seq));
         }
         let index = seq.index_if(0).and_then(|i| i.checked_sub(1));
-        if let Some(data::Object::Vector(v)) = index.and_then(|i| self.objects.get_mut(i)) {
+        if let Some(data::Object::Vector(v)) = index.and_then(|i| self.objects.get_entry_mut(i)) {
             v.reverse();
             return Ok(seq);
         }
-        if let Some(data::Object::BoolVector(bits)) = index.and_then(|i| self.objects.get_mut(i)) {
+        if let Some(data::Object::BoolVector(bits)) = index.and_then(|i| self.objects.get_entry_mut(i)) {
             for i in 0..bits.len / 2 {
                 let j = bits.len - 1 - i;
                 let left = bits.get(i).unwrap();

@@ -241,7 +241,11 @@ impl LispString {
     }
     pub fn as_str(&self) -> &str {
         assert!(self.is_utf8(), "String slot must contain UTF-8");
-        // Construction and every byte mutation update is_utf8.
+        // SAFETY: checked just above, and construction and every byte mutation
+        // keep is_utf8 true only of valid UTF-8. Kept for this representation:
+        // a checked conversion here would scan the whole string on every call
+        // of a hot accessor. Holding valid UTF-8 as a `String` would remove
+        // it, with the flag.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
     }
     pub fn bytes(&self) -> &[u8] {
@@ -480,18 +484,15 @@ impl Vm {
     #[inline(never)]
     pub(super) fn aset_kernel(&mut self, array: Value, at: Value, value: Value) -> bool {
         let Some(at) = at.integer_value().and_then(|n| usize::try_from(n).ok()) else { return false };
-        match self.object_mut_quiet(array) {
-            Some(Object::Vector(items) | Object::Record(items)) => items.get_mut(at).map(|slot| *slot = value).is_some(),
-            _ => false,
-        }
+        self.private_object_quiet(array).is_some_and(|i| self.objects.update_element(i, at, value).is_ok())
     }
-    /// The private object ARRAY names, with no refusal left pending.
-    fn object_mut_quiet(&mut self, array: Value) -> Option<&mut Object> {
+    /// The index of the private object ARRAY names, with no refusal left pending.
+    fn private_object_quiet(&self, array: Value) -> Option<usize> {
         let index = array.index_if(0)?;
         if index & crate::image::IMAGE != 0 {
             return None;
         }
-        self.objects.get_mut(index.checked_sub(1)?)
+        index.checked_sub(1).filter(|&i| i < self.objects.len())
     }
     /// A new cons (CAR . CDR), as `allocate_object' makes an object.
     #[inline]
@@ -537,23 +538,32 @@ impl Vm {
     /// The private object V names, for writing: a frozen or image value
     /// refuses with GNU's read-only error, left pending (`refuse_read_only`).
     pub(super) fn object_mut(&mut self, value: Value) -> Result<&mut Object> {
+        let i = self.writable_object(value)?;
+        Ok(self.objects.entry_mut(i))
+    }
+    /// As `object_mut`, the object's index, for a store that names its slot.
+    pub(super) fn writable_object(&mut self, value: Value) -> Result<usize> {
         let index = value.index(0)?;
         if index & crate::image::IMAGE != 0 {
             return Err(self.refuse_read_only(value));
         }
-        self.objects
-            .get_mut(index.checked_sub(1).ok_or("sequence required")?)
-            .filter(|object| !matches!(object, Object::Free))
-            .ok_or_else(|| "invalid object reference".into())
+        let i = index.checked_sub(1).ok_or("sequence required")?;
+        match self.objects.get(i) {
+            Some(Object::Free) | None => Err("invalid object reference".into()),
+            Some(_) => Ok(i),
+        }
     }
-    /// The private cons V names, for writing; frozen and image conses refuse
-    /// as `object_mut` does.
-    pub(super) fn cons_mut(&mut self, value: Value) -> Result<&mut (Value, Value)> {
+    /// The index of the private cons V names, for writing; frozen and image
+    /// conses refuse as `object_mut` does.
+    pub(super) fn writable_cons(&mut self, value: Value) -> Result<usize> {
         let index = value.index(3)?;
         if index & crate::image::IMAGE != 0 {
             return Err(self.refuse_read_only(value));
         }
-        self.conses.get_mut(index).ok_or_else(|| "invalid cons reference".into())
+        if index >= self.conses.len() {
+            return Err("invalid cons reference".into());
+        }
+        Ok(index)
     }
     pub(super) fn literal(&mut self, f: &Form) -> Result<Value> {
         match f {
@@ -617,12 +627,14 @@ impl Vm {
         Ok(values)
     }
     #[inline(never)]
-    /// `apply`'s spread window: (FUNCTION, OFFSET, COUNT), or Err(COUNT)
-    /// when COUNT arguments do not fit the stack's reserved tail.
+    /// `apply`'s spread, written at AT, the caller's end: (FUNCTION, AT,
+    /// COUNT), or Err(NEED) when the file needs NEED slots to hold it with
+    /// the slack every window keeps.
     pub(super) fn prepare_apply(
         &mut self,
         start: usize,
         argc: usize,
+        at: usize,
     ) -> Result<std::result::Result<(Value, usize, usize), usize>> {
         if argc < 1 {
             return Err("wrong primitive arity".into());
@@ -634,12 +646,12 @@ impl Vm {
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
-        if values.len() > self.spread_reserve {
-            return Ok(Err(values.len()));
+        let need = at + values.len() + crate::threaded::WINDOW;
+        if need > self.stack.len() {
+            return Ok(Err(need));
         }
-        let offset = self.stack.len() - self.spread_reserve;
-        self.stack[offset..offset + values.len()].copy_from_slice(values);
-        Ok(Ok((target, offset, values.len())))
+        self.stack[at..at + values.len()].copy_from_slice(values);
+        Ok(Ok((target, at, values.len())))
     }
     #[inline(never)]
     pub(super) fn primitive_call(
@@ -957,7 +969,13 @@ impl Vm {
                 self.object(x)?;
                 let value = self.stack[start + 2];
                 let table_slot = self.literal_table_slot(value);
-                match self.object_mut(x)? {
+                let object = self.writable_object(x)?;
+                match self.objects.update_element(object, index, value) {
+                    Ok(()) => return Ok(value),
+                    Err(crate::table::SlotFault::OutOfRange) => return Err("index out of range".into()),
+                    Err(crate::table::SlotFault::NotSlots) => {}
+                }
+                match self.objects.entry_mut(object) {
                     Object::String(s) | Object::RawString(s) => {
                         if index >= s.len() { return Err("index out of range".into()); }
                         let code = value
@@ -972,7 +990,7 @@ impl Vm {
                         v.set(index, value != Value::NIL);
                     }
                     Object::CharTable(t) => t.set_range_slot(index, index, table_slot)?,
-                    Object::Vector(v) | Object::Record(v) => *v.get_mut(index).ok_or("index out of range")? = value,
+                    Object::Vector(_) | Object::Record(_) => unreachable!("stored above"),
                     Object::Bytes(v) => {
                         if index >= v.len() { return Err("index out of range".into()); }
                         let code = value

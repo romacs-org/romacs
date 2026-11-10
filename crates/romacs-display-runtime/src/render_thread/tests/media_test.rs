@@ -1,3 +1,4 @@
+#[cfg(feature = "video")]
 use super::*;
 
 #[cfg(feature = "video")]

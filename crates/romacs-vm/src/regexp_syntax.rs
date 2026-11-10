@@ -388,7 +388,7 @@ impl Vm {
                 if values[code as usize] != Value::NIL { return values[code as usize]; }
             }
             let entry = self.list_value(&[Value::integer(code).unwrap()]);
-            if let Object::Vector(values) = &mut self.objects[index] { values[code as usize] = entry; }
+            if let Object::Vector(values) = self.objects.entry_mut(index) { values[code as usize] = entry; }
             return entry;
         }
         let value = self.alloc_cons(Value::integer(code).unwrap(), matching);
@@ -400,7 +400,7 @@ impl Vm {
                 if self
                     .names
                     .get("syntax-table")
-                    .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7)) =>
+                    .is_some_and(|&slot| t.purpose() == Value::reference(slot + 1, 7)) =>
             {
                 Ok(t)
             }
@@ -421,7 +421,7 @@ impl Vm {
     /// which allocates nothing on the path every search takes.
     fn char_table_parents_cycle(&self, table: Value) -> bool {
         let parent = |t: Value| match self.object_if(t) {
-            Some(Object::CharTable(c)) => Some(c.parent),
+            Some(Object::CharTable(c)) => Some(c.parent()),
             _ => None,
         };
         let (mut slow, mut fast) = (table, table);
@@ -545,16 +545,16 @@ impl Vm {
                 };
                 let standard = self.regexp_standard_syntax();
                 let mut copy = self.regexp_syntax_table(source)?.clone();
-                copy.default = Value::NIL;
+                copy.set_default(Value::NIL);
                 if source == standard {
-                    copy.parent = standard;
+                    copy.set_parent(standard);
                 }
                 Ok(self.allocate_object(Object::CharTable(Box::new(copy))))
             }
             SetSyntaxTable => {
                 self.regexp_syntax_table(args[0])?;
                 let i = self.buffer_index()?;
-                match &mut self.objects[i] {
+                match self.objects.entry_mut(i) {
                     Object::Buffer(t) => t.syntax_table = args[0],
                     Object::ByteBuffer(t) => t.syntax_table = args[0],
                     _ => unreachable!("buffer_index validates"),

@@ -52,6 +52,37 @@ class GraphicalOracleEnvironment(unittest.TestCase):
         self.assertEqual(environment.get('ROMACS_TEST_LABWC'), gate.LABWC)
 
 
+class FixtureProvisioning(unittest.TestCase):
+    """The gate fills the pinned test-fixture cache before tests, which only read it."""
+
+    def tree_with_fetcher(self, root, status):
+        script = root / 'scripts/fetch-test-fixtures'
+        script.parent.mkdir(parents=True)
+        script.write_text(f'import os, pathlib, sys\n'
+                          f'pathlib.Path(sys.argv[0]).with_name("seen").write_text(os.environ["ROMACS_TEST_FONTS_DIR"])\n'
+                          f'sys.exit({status})\n')
+        return script
+
+    def test_runs_the_tree_fetcher_against_the_shared_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            script = self.tree_with_fetcher(root, 0)
+            with mock.patch.dict(os.environ, {'ROMACS_TEST_FONTS_DIR': str(root / 'cache')}):
+                gate.provision_fixtures(root)
+            self.assertEqual(script.with_name('seen').read_text(), str(root / 'cache'))
+
+    def test_a_failed_fetch_refuses_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self.tree_with_fetcher(root, 1)
+            with self.assertRaises(gate.MissingTool):
+                gate.provision_fixtures(root)
+
+    def test_a_tree_without_the_fetcher_needs_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gate.provision_fixtures(pathlib.Path(tmp))
+
+
 class PortableToolTrust(unittest.TestCase):
     def test_slot_defaults_are_adjacent_even_with_legacy_tools_on_path(self):
         environment = {k: v for k, v in os.environ.items()

@@ -312,6 +312,8 @@ sections without an ID) is a `U-` file.
 
 ## World snapshots
 
+## Observable by a package: syntax summaries
+
 ## romacs-face
 
 Reference: GNU Emacs 32.0.50 built at the pin 45b0f7699df (`$ROMACS_GNU_ORACLE -Q --batch`,

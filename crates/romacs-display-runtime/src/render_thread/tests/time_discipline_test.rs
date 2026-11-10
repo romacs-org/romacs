@@ -30,11 +30,6 @@ const GUARDED_DIRS: [&str; 2] = ["src/render_thread", "src/core"];
 fn allowlist() -> BTreeMap<&'static str, &'static str> {
     BTreeMap::from([
         (
-            "src/render_thread/startup/tests/first_frame.rs",
-            "Seeds the real native-constructor transaction expiry; an injected \
-             visual frame sample cannot bound its monotonic constructor lease.",
-        ),
-        (
             "src/render_thread/state.rs",
             "ImageRenderState::wait_for_terminal is a Condvar::wait_timeout run on the \
              Lisp thread, not the render loop; FpsCounter::cpu_span_start seeds the \

@@ -54,6 +54,9 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
     start(cx, Op::ParsePartialSexp, &[from, to, targetdepth, stopbefore, oldstate, commentstop])
 }}
 
+defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
+fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
+
 /// Registers: the operation, its six arguments, the `syntax-ppss' answers,
 /// the scan's memory.
 const ARGS: usize = 9;

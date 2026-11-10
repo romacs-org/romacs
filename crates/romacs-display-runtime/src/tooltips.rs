@@ -23,21 +23,6 @@ struct ReadyTooltip {
     owner: TooltipOwner,
     request: TooltipRequest,
     expires: Instant,
-    source: TooltipSource,
-}
-
-pub(crate) enum TooltipSource {
-    Lisp(romacs_display_protocol::tooltip::TooltipTicket),
-    NativeMenu,
-}
-
-impl TooltipSource {
-    fn is_current(&self) -> bool {
-        match self {
-            Self::Lisp(ticket) => ticket.is_current(),
-            Self::NativeMenu => true,
-        }
-    }
 }
 
 fn placement(owner: &TooltipOwner, request: &TooltipRequest) -> PopupPlacement {
@@ -47,14 +32,6 @@ fn placement(owner: &TooltipOwner, request: &TooltipRequest) -> PopupPlacement {
         Point::new(request.offset.0 as f32, request.offset.1 as f32),
         PopupConstraintPolicy::FlipAndShift { padding: 0.0 },
     )
-}
-
-impl Drop for ReadyTooltip {
-    fn drop(&mut self) {
-        if let TooltipSource::Lisp(ticket) = &self.source {
-            ticket.cancel();
-        }
-    }
 }
 
 // A mapped tooltip owns all native/GPU resources together. Drop its child
@@ -82,16 +59,7 @@ pub(crate) struct Tooltips {
 }
 
 impl Tooltips {
-    pub fn show(
-        &mut self,
-        owner: TooltipOwner,
-        request: TooltipRequest,
-        source: TooltipSource,
-        now: Instant,
-    ) {
-        if !source.is_current() {
-            return;
-        }
+    pub fn show(&mut self, owner: TooltipOwner, request: TooltipRequest, now: Instant) {
         let expires = now.checked_add(request.timeout).unwrap_or(now);
         if let Presentation::Mapped(mapped) = &mut self.state
             && mapped.ready.owner.parent.id() == owner.parent.id()
@@ -105,15 +73,6 @@ impl Tooltips {
             }
             mapped.ready.owner = owner;
             mapped.ready.request = request;
-            if let TooltipSource::Lisp(ticket) = &mapped.ready.source {
-                ticket.cancel();
-            }
-            if let TooltipSource::Lisp(ticket) = &source
-                && mapped.host.submitted_window(0).is_some()
-            {
-                ticket.mark_visible();
-            }
-            mapped.ready.source = source;
             return;
         }
         self.hide();
@@ -121,22 +80,18 @@ impl Tooltips {
             owner,
             request,
             expires,
-            source,
         }));
     }
 
     pub fn hide(&mut self) -> bool {
         let visible = matches!(self.state, Presentation::Mapped(_));
         if let Presentation::Mapped(mapped) = std::mem::take(&mut self.state) {
-            if let TooltipSource::Lisp(ticket) = &mapped.ready.source {
-                ticket.cancel();
-            }
             self.retired.push(mapped);
         }
         visible
     }
 
-    pub fn commit_retirements(&mut self, _commit: &PopupCommit<'_>) {
+    pub(crate) fn commit_retirements(&mut self, _commit: &PopupCommit<'_>) {
         self.retired.commit();
     }
 
@@ -157,15 +112,8 @@ impl Tooltips {
     pub fn owner(&self) -> Option<u64> {
         self.ready().map(|r| r.owner.frame)
     }
-    pub fn owns_parent(&self, id: WindowId) -> bool {
+    pub(crate) fn owns_parent(&self, id: WindowId) -> bool {
         self.ready().is_some_and(|r| r.owner.parent.id() == id)
-    }
-    pub fn dismiss(&mut self, ticket: &romacs_display_protocol::tooltip::TooltipTicket) {
-        if self.ready().is_some_and(
-            |r| matches!(&r.source, TooltipSource::Lisp(current) if current.same_request(ticket)),
-        ) {
-            self.hide();
-        }
     }
     pub fn deadline(&self) -> Option<Instant> {
         self.ready().map(|r| r.expires)
@@ -182,9 +130,6 @@ impl Tooltips {
         format: wgpu::TextureFormat,
     ) -> Result<(), String> {
         if self.deadline().is_some_and(|d| d <= now) {
-            self.hide();
-        }
-        if self.ready().is_some_and(|r| !r.source.is_current()) {
             self.hide();
         }
         self.commit_retirements(commit);
@@ -238,11 +183,6 @@ impl Tooltips {
                 mapped.host.draw(depth, device, queue, |target| {
                     renderer.render_native_tooltip(target, &mapped.paint, &mut mapped.atlas)
                 });
-                if mapped.host.submitted_window(depth).is_some()
-                    && let TooltipSource::Lisp(ticket) = &mapped.ready.source
-                {
-                    ticket.mark_visible();
-                }
             }
             _ => {}
         }

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use romacs_display_protocol::frame_time::{EventTime, FrameSample};
 use romacs_display_protocol::motion_spec::MotionSpec;
 
-use crate::core::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_compositor::motion::{Motion, ProgressRate};
 use romacs_display_protocol::{
     PlaceChildQuery, PresentedClip, PresentedFramePlacement, PresentedFrameScene,
@@ -96,7 +96,7 @@ pub(crate) struct ChildFrameEntry {
 impl ChildFrameEntry {
     /// Where SAMPLE draws the frame's rect, `[x, y, width, height]`: its
     /// placed rect, or the reshape's interpolation toward it.
-    pub fn drawn_rect(&self, sample: FrameSample) -> [f32; 4] {
+    pub(crate) fn drawn_rect(&self, sample: FrameSample) -> [f32; 4] {
         let to = [self.abs_x, self.abs_y, self.frame.width, self.frame.height];
         let Some(reshape) = self.reshape.as_ref() else { return to };
         let progress = reshape.motion.sample(sample);
@@ -107,7 +107,7 @@ impl ChildFrameEntry {
     }
 
     /// Where SAMPLE draws the selection band's row, if the frame shows one.
-    pub fn drawn_selection_y(&self, sample: FrameSample) -> Option<f32> {
+    pub(crate) fn drawn_selection_y(&self, sample: FrameSample) -> Option<f32> {
         let to = self.frame.layer.selection?.y;
         Some(self.glide.as_ref().map_or(to, |glide| {
             let progress = glide.motion.sample(sample);
@@ -192,7 +192,7 @@ impl ChildFrameManager {
         }
     }
 
-    pub fn set_root_frame(&mut self, root: Option<&FrameGlyphBuffer>) {
+    pub(crate) fn set_root_frame(&mut self, root: Option<&FrameGlyphBuffer>) {
         self.root = root.map(|root| root.frame_placement);
         self.rebuild_presented_scene();
     }
@@ -206,7 +206,7 @@ impl ChildFrameManager {
     ///
     /// The caller decides "fresh" (it sees the map before the install);
     /// re-delivering an existing frame must not retrigger an appearance.
-    pub fn begin_open_animation(
+    pub(crate) fn begin_open_animation(
         &mut self,
         frame_id: u64,
         spec: MotionSpec,
@@ -230,7 +230,7 @@ impl ChildFrameManager {
     /// did. A dying entry keeps its placement, clip and z-path snapshots; it
     /// is unconsultable for interaction, which is the whole point of keeping
     /// it out of `frames`.
-    pub fn retire_frame(
+    pub(crate) fn retire_frame(
         &mut self,
         frame_id: u64,
         spec: MotionSpec,
@@ -272,7 +272,7 @@ impl ChildFrameManager {
     /// Returns whether anything was removed: the caller must repaint once
     /// more, because the corpse's last drawn pixels are on screen and
     /// nothing else will ask for the frame that clears them.
-    pub fn prune_dying(&mut self, sample: FrameSample) -> bool {
+    pub(crate) fn prune_dying(&mut self, sample: FrameSample) -> bool {
         let before = self.dying.len();
         self.dying
             .retain(|dying| !dying.animation.motion.sample(sample).finished);
@@ -286,18 +286,18 @@ impl ChildFrameManager {
         pruned
     }
 
-    pub fn dying_entry(&self, frame_id: u64) -> Option<&DyingChildFrame> {
+    pub(crate) fn dying_entry(&self, frame_id: u64) -> Option<&DyingChildFrame> {
         self.dying
             .iter()
             .find(|dying| dying.entry.frame_id == frame_id)
     }
 
-    pub fn has_dying(&self) -> bool {
+    pub(crate) fn has_dying(&self) -> bool {
         !self.dying.is_empty()
     }
 
     /// Start a rect tween for `frame_id` from `from`, toward its placed rect.
-    pub fn begin_reshape(&mut self, frame_id: u64, from: [f32; 4], spec: MotionSpec, origin: EventTime) {
+    pub(crate) fn begin_reshape(&mut self, frame_id: u64, from: [f32; 4], spec: MotionSpec, origin: EventTime) {
         if let Some(entry) = self.frames.get_mut(&frame_id)
             && let Some(motion) = Motion::start(spec, origin)
         {
@@ -308,7 +308,7 @@ impl ChildFrameManager {
     }
 
     /// Start a selection glide for `frame_id` from band row `from_y`.
-    pub fn begin_glide(&mut self, frame_id: u64, from_y: f32, spec: MotionSpec, origin: EventTime) {
+    pub(crate) fn begin_glide(&mut self, frame_id: u64, from_y: f32, spec: MotionSpec, origin: EventTime) {
         let Some(entry) = self.frames.get_mut(&frame_id) else { return };
         let Some(frame) = glide_frame(&entry.frame, from_y) else { return };
         let Some(motion) = Motion::start(spec, origin) else { return };
@@ -319,7 +319,7 @@ impl ChildFrameManager {
     /// keeping its origin, trajectory and deadline: for an update that
     /// changed how the layer looks (its colours, a theme switch) and not
     /// where it is, how big, or which row it selects.
-    pub fn restyle_motion(&mut self, frame_id: u64) {
+    pub(crate) fn restyle_motion(&mut self, frame_id: u64) {
         let Some(entry) = self.frames.get_mut(&frame_id) else { return };
         if let Some(reshape) = entry.reshape.as_mut() {
             reshape.frame_box = frame_box(&entry.frame, reshape.frame_box.width, reshape.frame_box.height);
@@ -358,7 +358,7 @@ impl ChildFrameManager {
     /// slot is enabled. An in-flight drift is replaced; the fresh start
     /// departs from the last drawn position when the caller supplies one
     /// (see `retarget_drift`).
-    pub fn begin_drift(
+    pub(crate) fn begin_drift(
         &mut self,
         frame_id: u64,
         from_x: f32,
@@ -394,7 +394,7 @@ impl ChildFrameManager {
     /// A re-anchor arriving mid-drift must carry the popup on from where
     /// the user saw it, not restart it from a standstill at a place it
     /// never reached -- the same step-11 rule the pane morphs follow.
-    pub fn retarget_drift(&mut self, frame_id: u64, spec: MotionSpec, origin: EventTime) -> bool {
+    pub(crate) fn retarget_drift(&mut self, frame_id: u64, spec: MotionSpec, origin: EventTime) -> bool {
         let Some(last) = self
             .frames
             .get(&frame_id)
@@ -421,7 +421,7 @@ impl ChildFrameManager {
 
     /// Clear finished drifts, sampled at `sample`. Returns whether anything
     /// was cleared, so the caller repaints once more.
-    pub fn clear_finished_drifts(&mut self, sample: FrameSample) -> bool {
+    pub(crate) fn clear_finished_drifts(&mut self, sample: FrameSample) -> bool {
         let before = self
             .frames
             .values()
@@ -447,7 +447,7 @@ impl ChildFrameManager {
     /// Reclaim time-expired composition ownership before mandatory admission.
     /// Sampling expiry is pure: do not advance drift, placement or the submitted
     /// interaction projection when a frame might still be refused.
-    pub fn reclaim_finished_composition(&mut self, sample: FrameSample) -> bool {
+    pub(crate) fn reclaim_finished_composition(&mut self, sample: FrameSample) -> bool {
         let mut changed = self.prune_dying(sample);
         for entry in self.frames.values_mut() {
             let finished = |motion: Option<&Motion>| motion.is_some_and(|motion| motion.sample(sample).finished);
@@ -469,7 +469,7 @@ impl ChildFrameManager {
 
     /// End every animation at once, as a key does: each frame settles where
     /// Lisp put it, and fading corpses go. Returns whether any ran.
-    pub fn finish_animations(&mut self) -> bool {
+    pub(crate) fn finish_animations(&mut self) -> bool {
         let mut changed = !self.dying.is_empty();
         self.dying.clear();
         for entry in self.frames.values_mut() {
@@ -481,7 +481,7 @@ impl ChildFrameManager {
 
     /// Record where a drifting frame was painted this pass, for the next
     /// re-anchor's retarget.
-    pub fn record_drift_drawn(&mut self, frame_id: u64, x: f32, y: f32, rate: f32) {
+    pub(crate) fn record_drift_drawn(&mut self, frame_id: u64, x: f32, y: f32, rate: f32) {
         if let Some(entry) = self.frames.get_mut(&frame_id)
             && let Some(drift) = entry.drift.as_mut()
         {
@@ -491,7 +491,7 @@ impl ChildFrameManager {
 
     /// Clear a finished lifecycle animation so `has_animation_activity`
     /// stops reporting it.
-    pub fn clear_finished_animation(&mut self, frame_id: u64) {
+    pub(crate) fn clear_finished_animation(&mut self, frame_id: u64) {
         if let Some(entry) = self.frames.get_mut(&frame_id) {
             entry.animation = None;
         }
@@ -505,14 +505,14 @@ impl ChildFrameManager {
     /// its texture is rebuilt only on a scene-generation change, so blitting
     /// it while a lifecycle animation runs would show the corpse at whatever
     /// alpha it had when the texture was last built.
-    pub fn has_animation_activity(&self) -> bool {
+    pub(crate) fn has_animation_activity(&self) -> bool {
         self.frames.values().any(|entry| {
             entry.animation.is_some() || entry.reshape.is_some() || entry.glide.is_some() || entry.drift.is_some()
         }) || self.has_dying()
     }
 
     /// Whether any child frame is mid-animation and needs another frame.
-    pub fn has_active_animation(&self, sample: FrameSample) -> bool {
+    pub(crate) fn has_active_animation(&self, sample: FrameSample) -> bool {
         self.frames.values().any(|entry| {
             entry
                 .animation
@@ -541,7 +541,7 @@ impl ChildFrameManager {
     /// Returns true only when the rendered payload changed. Repeated delivery of
     /// an identical child-frame snapshot still refreshes liveness, but it must
     /// not look like a new frame install to face-cache and dirty-redraw logic.
-    pub fn update_frame(&mut self, buf: FrameGlyphBuffer) -> bool {
+    pub(crate) fn update_frame(&mut self, buf: FrameGlyphBuffer) -> bool {
         let frame_id = buf.frame_placement.frame();
         let outer = buf.frame_placement.outer_in_parent();
         let abs_x = outer.x();
@@ -681,7 +681,7 @@ impl ChildFrameManager {
         }
     }
 
-    pub fn subtree_frame_ids(&self, frame_id: u64) -> std::collections::HashSet<u64> {
+    pub(crate) fn subtree_frame_ids(&self, frame_id: u64) -> std::collections::HashSet<u64> {
         let mut subtree = std::collections::HashSet::from([frame_id]);
         loop {
             let before = subtree.len();
@@ -701,7 +701,7 @@ impl ChildFrameManager {
         }
     }
 
-    pub fn subtree_presentations(&self, frame_id: u64) -> Vec<u64> {
+    pub(crate) fn subtree_presentations(&self, frame_id: u64) -> Vec<u64> {
         let mut presentations = self
             .subtree_frame_ids(frame_id)
             .into_iter()
@@ -716,7 +716,7 @@ impl ChildFrameManager {
 
     /// Remove child frames not updated in the last `max_age` poll cycles.
     #[allow(dead_code)] // child-frame staleness API, exercised by the child_frames tests
-    pub fn prune_stale(&mut self, max_age: u64) {
+    pub(crate) fn prune_stale(&mut self, max_age: u64) {
         let threshold = self.frame_counter.saturating_sub(max_age);
         let before = self.frames.len();
         self.frames
@@ -727,7 +727,7 @@ impl ChildFrameManager {
     }
 
     /// Get the z_order-sorted list of frame IDs for rendering.
-    pub fn sorted_for_rendering(&self) -> &[u64] {
+    pub(crate) fn sorted_for_rendering(&self) -> &[u64] {
         &self.render_order
     }
 
@@ -740,7 +740,7 @@ impl ChildFrameManager {
     /// new one arriving. Interleaving matters for the rest: a dying child
     /// deep in the stack must not jump above an unrelated living sibling
     /// that happens to sit higher.
-    pub fn merged_render_order(&self) -> Vec<(u64, bool)> {
+    pub(crate) fn merged_render_order(&self) -> Vec<(u64, bool)> {
         let mut order: Vec<(&[i32], u64, bool)> =
             Vec::with_capacity(self.frames.len() + self.dying.len());
         for (&id, entry) in &self.frames {

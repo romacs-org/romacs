@@ -5,8 +5,6 @@ use super::super::image_cache::ImageCache;
 use super::super::shader_surface_cache::ShaderSurfaceCache;
 #[cfg(feature = "video")]
 use super::super::video_cache::VideoCache;
-#[cfg(all(feature = "webview", target_os = "linux"))]
-use super::super::webview_cache::WgpuWebViewCache;
 use super::deferred_resource::DeferredResource;
 use super::dynamic_buffer::FrameVertexArena;
 use super::full_frame_texture::FullFrameTexture;
@@ -130,8 +128,6 @@ pub(crate) struct RenderCaches {
     pub(crate) image: ImageCache,
     #[cfg(feature = "video")]
     pub(crate) video: VideoCache,
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub(crate) webview: WgpuWebViewCache,
     pub(crate) surface: ShaderSurfaceCache,
 }
 

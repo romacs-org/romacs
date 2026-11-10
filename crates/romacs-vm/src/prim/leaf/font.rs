@@ -15,9 +15,8 @@ impl Leaf<'_> {
         if !matches!(self.vm.object_if(record), Some(data::Object::Record(_))) {
             return Err(Fault::Wrong("recordp", record));
         }
-        let data::Object::Record(slots) = self.object_mut(record)? else { unreachable!() };
-        *slots.get_mut(index).ok_or(Fault::Range(record, Value::integer(index as i64).unwrap()))? = value;
-        Ok(())
+        let object = self.writable_object(record)?;
+        self.vm.objects.update_element(object, index, value).map_err(|_| Fault::Range(record, Value::integer(index as i64).unwrap()))
     }
     /// The open display's host; None while the frame is on the initial terminal.
     pub(crate) fn font_host(&mut self) -> Option<&mut (dyn crate::DisplayHost + 'static)> {

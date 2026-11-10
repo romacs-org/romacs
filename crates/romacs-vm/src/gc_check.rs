@@ -61,8 +61,7 @@ impl Vm {
             symbols: HashSet::default(),
         };
         let (mut values, mut code) = (roots.to_vec(), Vec::new());
-        values.extend_from_slice(&self.stack);
-        values.extend(self.suspended_stacks.iter().flatten().copied());
+        values.extend(self.register_roots().into_iter().flatten().copied());
         values.extend_from_slice(&self.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());
@@ -100,9 +99,8 @@ impl Vm {
         let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
         code.extend((0..self.request_code.live.len()).filter(|&id| self.request_code.live[id] && (active || self.request_code.permanent[id])));
         self.source_code_roots(&mut code);
-        for engine in &self.suspended_code {
-            // SAFETY: each entry's engine is suspended in a nested call.
-            unsafe { engine.visit_values(&mut |v| values.push(*v)) };
+        for engine in &mut self.suspended {
+            engine.visit_values(&mut |v| values.push(*v));
         }
         let mut native = HashSet::default();
         loop {
@@ -163,15 +161,15 @@ impl Vm {
                 if !first(&mut r.tables[3], i) { return; }
                 let mut push = |v: &mut Value| values.push(*v);
                 use data::Object::*;
-                match &mut self.objects[i] {
+                match &mut self.objects.collector_entries_mut()[i] {
                     Vector(slots) | Record(slots) => slots.iter_mut().for_each(&mut push),
                     Finalizer(function) => push(function),
                     String(s) | RawString(s) => s.properties.visit_values(&mut push),
                     HashTable(t) if t.weakness == hash::Weakness::None => t.visit_values(&mut push),
                     HashTable(_) => {}
-                    CharTable(t) => t.visit_values_seen(native, &mut push),
-                    SubCharTable(node) => char_table::visit_char_table_node_values(node, native, &mut push),
-                    MapKeymapCursor(c) => c.visit_values(native, &mut push),
+                    CharTable(t) => t.collector_visit_values(native, &mut push),
+                    SubCharTable(node) => char_table::collector_visit_node(node, native, &mut push),
+                    MapKeymapCursor(c) => c.collector_visit_values(native, &mut push),
                     Window(w) => w.visit_values(&mut push),
                     Frame(f) => f.visit_values(&mut push),
                     Terminal(t) => t.visit_values(&mut push),

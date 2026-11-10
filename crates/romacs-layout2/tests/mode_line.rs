@@ -127,8 +127,10 @@ fn malformed_band_runs_and_handle_are_errors_not_panics() {
             bytes: 0..99,
             face: FaceHandle(0),
         }],
+        // A reversed range, spelled as a struct so the lint against
+        // writing one by accident stays on.
         vec![FaceRun {
-            bytes: 5..3,
+            bytes: std::ops::Range { start: 5, end: 3 },
             face: FaceHandle(0),
         }],
         vec![

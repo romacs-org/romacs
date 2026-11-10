@@ -38,8 +38,8 @@ pub(crate) const ST_STRING_STYLE: i32 = 256 + 2;
 /// syntax.c syntax_code_spec: the designator character of each class.
 pub(crate) const SYNTAX_CODE_SPEC: [u8; 16] = *b" .w_()'\"$\\/<>@!|";
 
-fn comstart_first(s: i32) -> bool { (s >> 16) & 1 != 0 }
-fn comstart_second(s: i32) -> bool { (s >> 17) & 1 != 0 }
+pub(crate) fn comstart_first(s: i32) -> bool { (s >> 16) & 1 != 0 }
+pub(crate) fn comstart_second(s: i32) -> bool { (s >> 17) & 1 != 0 }
 fn comend_first(s: i32) -> bool { (s >> 18) & 1 != 0 }
 fn comend_second(s: i32) -> bool { (s >> 19) & 1 != 0 }
 fn comstartend_first(s: i32) -> bool { s & 0x50000 != 0 }
@@ -125,6 +125,11 @@ pub(crate) struct ParseState {
     /// every element is Some.
     pub levelstarts: Vec<Option<i64>>,
     pub prev_syntax: i32,
+    /// The deepest depth the scan reached, as `mindepth` is the shallowest.
+    pub maxdepth: i64,
+    /// What the list form drops at END. A scan always records it; a scan
+    /// started from a state that carries it continues exactly.
+    pub continuation: Option<Continuation>,
 }
 impl Default for ParseState {
     /// internalize_parse_state (Qnil, ...).
@@ -132,9 +137,37 @@ impl Default for ParseState {
         Self {
             depth: 0, instring: -1, incomment: 0, comstyle: 0, quoted: false, mindepth: 0,
             thislevelstart: -1, prevlevelstart: -1, location: 0, comstr_start: -1,
-            levelstarts: Vec::new(), prev_syntax: SMAX,
+            levelstarts: Vec::new(), prev_syntax: SMAX, maxdepth: 0, continuation: None,
         }
     }
+}
+
+/// What a scan stopped at END knows beyond `parse-partial-sexp''s value.
+/// A scan resumed from a state with a continuation reaches what one scan
+/// that never stopped would, unless the character before END can start a
+/// two-character comment: the scan read it by its own class, not knowing
+/// whether the next one completes the comment, and no state undoes that.
+/// One resumed from Lisp's list resumes as GNU's does, which differs in
+/// three more places:
+/// - inside a symbol, GNU starts a new symbol at END, and the list form
+///   counts the symbol complete there, which the continuation does not:
+///   a symbol a comment start ends is never complete;
+/// - GNU resets the current level's `last' and `prev', so element 2 and
+///   the innermost start of the levels opened later forget the symbol,
+///   string or list that began before END;
+/// - after an escape in a comment, with `comment-end-can-be-escaped', GNU
+///   reads the escaped character instead of skipping it.
+///
+/// One state no continuation resumes: a nested comment whose nesting an
+/// escaped end used up (forw_comment decrements before it tests the
+/// escape, and from 0 never ends the comment). The list reads it as
+/// outside any comment; `spent' marks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Continuation {
+    pub in_symbol: bool,
+    pub top_last: i64,
+    pub top_prev: i64,
+    pub spent: bool,
 }
 
 pub(crate) struct Scanner<'a, T: Text> {
@@ -813,9 +846,15 @@ impl<T: Text> Scanner<'_, T> {
             levels[level] = Level { last: -1, prev: -1 };
         }
         let level = levels.len() - 1;
-        levels[level] = Level { last: -1, prev: -1 };
+        let exact = state.continuation;
+        levels[level] = exact.map_or(Level { last: -1, prev: -1 }, |c| Level { last: c.top_last, prev: c.top_prev });
         state.quoted = false;
         let mut mindepth = depth;
+        let mut maxdepth = depth;
+        let mut in_symbol = false;
+        // The current level's `prev' before END completed the symbol it is in.
+        let mut symbol_prev = -1;
+        let mut spent = false;
         self.setup(from.char, 1)?;
 
         // INC_FROM.
@@ -833,11 +872,24 @@ impl<T: Text> Scanner<'_, T> {
         }
 
         let mut at = if state.incomment != 0 {
-            At::InComment
+            if start_quoted && exact.is_some() && self.options.comment_end_can_be_escaped {
+                // forw_comment skips the character an escape quotes.
+                if from.char < end {
+                    inc_from!();
+                    prev_from_syntax = SMAX;
+                    At::InComment
+                } else {
+                    At::EndQuoted
+                }
+            } else {
+                At::InComment
+            }
         } else if state.instring >= 0 {
             if start_quoted { At::QuotedInString } else { At::InString }
         } else if start_quoted {
             At::Quoted
+        } else if exact.is_some_and(|c| c.in_symbol) {
+            At::Symbol
         } else if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
             inc_from!();
             prev_from_syntax = SMAX;
@@ -877,6 +929,7 @@ impl<T: Text> Scanner<'_, T> {
                                 SOPEN => {
                                     if stopbefore { At::Stop } else {
                                         depth += 1;
+                                        maxdepth = maxdepth.max(depth);
                                         cur!().last = prev_from.char;
                                         if levels.len() < LEVELS {
                                             levels.push(Level { last: -1, prev: -1 });
@@ -916,6 +969,7 @@ impl<T: Text> Scanner<'_, T> {
                 }
                 At::Symbol => {
                     let mut next = None;
+                    let mut ended = false;
                     while from.char < end {
                         if self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
                             inc_from!();
@@ -929,10 +983,15 @@ impl<T: Text> Scanner<'_, T> {
                                 if from.char == end { next = Some(At::EndQuoted); break; }
                             }
                             SWORD | SSYMBOL | SQUOTE => {}
-                            _ => break,
+                            _ => {
+                                ended = true;
+                                break;
+                            }
                         }
                         inc_from!();
                     }
+                    in_symbol = next.is_none() && !ended;
+                    symbol_prev = cur!().prev;
                     next.unwrap_or_else(|| {
                         let level = cur!();
                         level.prev = level.last;
@@ -949,6 +1008,7 @@ impl<T: Text> Scanner<'_, T> {
                     from = out;
                     prev_from_syntax = last;
                     if !found {
+                        spent = incomment == 0;
                         state.incomment = incomment;
                         let code = prev_from_syntax & 0xff;
                         if code == SESCAPE || code == SCHARQUOTE { At::EndQuoted } else { At::Done }
@@ -1013,17 +1073,21 @@ impl<T: Text> Scanner<'_, T> {
         state.location = from.char;
         state.levelstarts = levels[..levels.len() - 1].iter().map(|l| Some(l.last)).collect();
         state.prev_syntax = if comstartend_first(prev_from_syntax) || state.quoted { prev_from_syntax } else { SMAX };
+        state.maxdepth = maxdepth;
+        let top = levels.last().expect("a current level");
+        let top_prev = if in_symbol { symbol_prev } else { top.prev };
+        state.continuation = Some(Continuation { in_symbol, top_last: top.last, top_prev, spent });
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// ASCII text with a per-character syntax.
-    struct Plain { text: Vec<u8>, table: fn(u8) -> i32 }
-    impl Text for Plain {
+    pub(crate) struct Plain<F: Fn(u8) -> i32> { pub text: Vec<u8>, pub table: F }
+    impl<F: Fn(u8) -> i32> Text for Plain<F> {
         fn char_at(&self, at: Pos) -> u32 { self.text.get(at.byte).copied().map_or(0, u32::from) }
         fn inc(&self, at: Pos) -> Pos { Pos { char: at.char + 1, byte: at.byte + 1 } }
         fn dec(&self, at: Pos) -> Pos { Pos { char: at.char - 1, byte: at.byte - 1 } }
@@ -1037,8 +1101,8 @@ mod tests {
             b'\n' => SENDCOMMENT, b' ' => SWHITESPACE, b'\'' => SQUOTE | 1 << 20, _ => SWORD,
         }
     }
-    fn scan<T>(text: &str, f: impl FnOnce(&mut Scanner<'_, Plain>) -> T) -> T {
-        let plain = Plain { text: text.as_bytes().to_vec(), table: lisp };
+    fn scan<T>(text: &str, f: impl FnOnce(&mut Scanner<'_, Plain<fn(u8) -> i32>>) -> T) -> T {
+        let plain = Plain { text: text.as_bytes().to_vec(), table: lisp as fn(u8) -> i32 };
         let ppss = BTreeMap::new();
         let options = Options { ignore_comments: true, open_paren_in_column_0_is_defun_start: true, ..Options::default() };
         let mut scanner = Scanner { begv: plain.pos(1), zv: plain.pos(i64::MAX), text: &plain, options, ppss: &ppss, defun_start: None, modiff: 1 };
@@ -1071,5 +1135,81 @@ mod tests {
         }).unwrap();
         assert_eq!((state.depth, state.instring, state.comstr_start, state.levelstarts.clone(), state.location),
                    (2, '"' as i32, 7, vec![Some(1), Some(4)], 9));
+    }
+
+    /// xorshift64*: the seeded randomness of the property tests.
+    pub(crate) struct Rng(pub u64);
+    impl Rng {
+        pub fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+        pub fn below(&mut self, n: usize) -> usize { (self.next() % n as u64) as usize }
+        pub fn chance(&mut self, percent: u64) -> bool { self.next() % 100 < percent }
+    }
+
+    /// A random syntax table over a small alphabet: every class a scan
+    /// knows, with random comment flags, styles, nesting and prefix.
+    pub(crate) fn random_table(rng: &mut Rng) -> [i32; 128] {
+        const CLASSES: [i32; 14] = [SWHITESPACE, 1, SWORD, SSYMBOL, SOPEN, SCLOSE, SQUOTE, SSTRING, SMATH, SESCAPE,
+                                    SCHARQUOTE, SCOMMENT, SENDCOMMENT, SCOMMENT_FENCE];
+        let mut table = [SWORD; 128];
+        for c in ALPHABET.iter().copied() {
+            let class = if rng.chance(8) { SSTRING_FENCE } else { CLASSES[rng.below(CLASSES.len())] };
+            let mut flags = 0;
+            for bit in 16..24 {
+                if rng.chance(if bit == 20 { 10 } else { 18 }) { flags |= 1 << bit; }
+            }
+            table[usize::from(c)] = class | flags;
+        }
+        table
+    }
+    pub(crate) const ALPHABET: &[u8] = b"abcdefghij \n";
+    /// The character position of offset AT.
+    pub(crate) fn position(at: usize) -> i64 {
+        i64::try_from(at).expect("a test text") + 1
+    }
+    pub(crate) fn random_text(rng: &mut Rng, len: usize) -> Vec<u8> {
+        (0..len).map(|_| ALPHABET[rng.below(ALPHABET.len())]).collect()
+    }
+
+    /// A scan stopped anywhere and resumed from its own state, with its
+    /// continuation, ends where one scan from the start does.
+    #[test]
+    fn a_scan_resumed_from_its_continuation_is_one_scan() {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        for case in 0..4000 {
+            let table = random_table(&mut rng);
+            let len = if case % 50 == 0 { 300 } else { rng.below(60) };
+            let mut text = random_text(&mut rng, len);
+            if case % 50 == 0 {
+                // Deep enough for the 100-level cap.
+                let open = ALPHABET.iter().copied().find(|&c| table[usize::from(c)] & 0xff == SOPEN);
+                if let Some(open) = open { for byte in text.iter_mut().take(150) { *byte = open; } }
+            }
+            let plain = Plain { text, table: |c: u8| table[usize::from(c)] };
+            let ppss = BTreeMap::new();
+            let options = Options { comment_end_can_be_escaped: rng.chance(50), ..Options::default() };
+            let mut scanner = Scanner { begv: plain.pos(1), zv: plain.pos(i64::MAX), text: &plain, options, ppss: &ppss, defun_start: None, modiff: 1 };
+            let end = position(len);
+            let from_at = rng.below(len + 1);
+            let from = position(from_at);
+            let mut mid = position(from_at + rng.below(len - from_at + 1));
+            // Not inside a two-character comment start (Continuation).
+            while mid > from && mid < end && comstart_first(plain.syntax(plain.pos(mid - 1))) && comstart_second(plain.syntax(plain.pos(mid))) { mid -= 1; }
+            let mut whole = ParseState::default();
+            scanner.scan_sexps_forward(&mut whole, plain.pos(from), end, i64::MIN, false, 0).unwrap();
+            let mut first = ParseState::default();
+            scanner.scan_sexps_forward(&mut first, plain.pos(from), mid, i64::MIN, false, 0).unwrap();
+            if first.continuation.is_some_and(|c| c.spent) { continue; }
+            let mut second = first.clone();
+            scanner.scan_sexps_forward(&mut second, plain.pos(mid), end, i64::MIN, false, 0).unwrap();
+            second.mindepth = second.mindepth.min(first.mindepth);
+            second.maxdepth = second.maxdepth.max(first.maxdepth);
+            assert_eq!(second, whole, "case {case}: {:?} split at {mid} of {from}..{end}, escaped ends {}",
+                       String::from_utf8_lossy(&plain.text), options.comment_end_can_be_escaped);
+        }
     }
 }

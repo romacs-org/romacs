@@ -163,7 +163,6 @@ pub(crate) enum DemandReason {
     /// still being redrawn after its parent's layout has settled.
     ChildFrameMotion,
     Video,
-    Webkit,
     /// Animated shader surfaces visible in a composited frame
     /// (docs/display-engine/SHADER_SURFACES.md).
     ShaderSurface,
@@ -1066,21 +1065,10 @@ impl FrameCoordinator {
         }
     }
 
-    /// Active demand reasons for diagnostics ("why is this window still
-    /// rendering?").
     #[cfg(test)]
-    pub(crate) fn active_reasons(&self, id: NativeWindowId) -> Vec<DemandReason> {
-        self.window_demand()
-            .find(|(wid, _)| *wid == id)
-            .map(|(_, set)| set.iter().collect())
-            .unwrap_or_default()
-    }
-
     /// Every tracked window with its currently-active demand reasons: due
-    /// one-shots plus standing scheduled deadlines (plan: Observability,
-    /// "active demand reasons" per native window). The render loop publishes
-    /// this into the per-window diagnostics counters after each demand
-    /// reconciliation; it is a read of existing state and schedules nothing.
+    /// one-shots plus standing scheduled deadlines; a read of existing state
+    /// that schedules nothing.
     pub(crate) fn window_demand(
         &self,
     ) -> impl Iterator<Item = (NativeWindowId, DemandReasonSet)> + '_ {
@@ -1091,6 +1079,16 @@ impl FrameCoordinator {
             }
             (*id, reasons)
         })
+    }
+
+    /// Active demand reasons for diagnostics ("why is this window still
+    /// rendering?").
+    #[cfg(test)]
+    pub(crate) fn active_reasons(&self, id: NativeWindowId) -> Vec<DemandReason> {
+        self.window_demand()
+            .find(|(wid, _)| *wid == id)
+            .map(|(_, set)| set.iter().collect())
+            .unwrap_or_default()
     }
 
     /// Whether a redraw request is outstanding for this window.

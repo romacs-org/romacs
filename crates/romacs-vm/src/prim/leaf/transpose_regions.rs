@@ -70,7 +70,7 @@ impl Leaf<'_> {
         }
         let places = self.transpose_places(index, span)?;
         let moved = |at: i64| if leave_markers { at } else { transposed(at, span) };
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => {
                 let byte = |b: &crate::annotations::AnnotatedBuffer, c: i64| b.byte_of_char(CharOffset((c - 1) as usize));
                 let mut offsets = [ByteOffset(0); 4];
@@ -205,7 +205,7 @@ impl Leaf<'_> {
             match place {
                 Place::Marker(anchor, bias, at) => {
                     let to = byte(self.vm, moved(at)).map_err(Fault::Error)?;
-                    match &mut self.vm.objects[index] {
+                    match self.vm.objects.entry_mut(index) {
                         data::Object::Buffer(b) => { b.anchors.set(anchor, to, bias); }
                         data::Object::ByteBuffer(b) => { b.anchors.set(anchor, to, bias); }
                         _ => {}
@@ -229,7 +229,7 @@ impl Leaf<'_> {
                     // narrowing.  GNU fetches the three markers as they are,
                     // which can leave BEGV after ZV; Romacs keeps a view.
                     let (begv, zv) = (begv.min(zv), begv.max(zv));
-                    if let data::Object::Buffer(b) = &mut self.vm.objects[other] { b.set_view(begv..zv, pt.clamp(begv, zv)); }
+                    if let data::Object::Buffer(b) = self.vm.objects.entry_mut(other) { b.set_view(begv..zv, pt.clamp(begv, zv)); }
                 }
             }
         }

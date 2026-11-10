@@ -68,7 +68,7 @@ pub enum PropertyKind {
 /// A trait rather than a match inside the macro, so adding a property type
 /// fails to compile until its kind is stated rather than silently degrading to
 /// something vague.
-pub trait EffectProperty {
+pub(crate) trait EffectProperty {
     const KIND: PropertyKind;
 }
 

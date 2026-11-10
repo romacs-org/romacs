@@ -592,7 +592,7 @@ pub(super) fn slot_effects(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, inde
         if !stored {
             let entry = cx.cons(key, value);
             let alist = cx.cons(entry, alist);
-            cx.variable_set(alist_name, alist)?;
+            cx.store_variable(alist_name, alist)?;
         }
     } else {
         cx.windows().store_frame_parameter(frame, key, value)?;

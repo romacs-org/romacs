@@ -41,7 +41,6 @@ fn fallback_to_face() -> Fontset {
     frame
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn ascii_is_the_face_font_whatever_the_rules_say() {
     let mut resolver = fixtures();
@@ -51,7 +50,6 @@ fn ascii_is_the_face_font_whatever_the_rules_say() {
     assert_eq!(resolver.resolve_char(&request(), 'a').unwrap().font.family, FAMILY);
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_nil_alternative_stops_its_fontset_and_its_fallback() {
     let mut resolver = fixtures();
@@ -70,7 +68,6 @@ fn a_nil_alternative_stops_its_fontset_and_its_fallback() {
     assert!(matches!(resolver.resolve_char(&request(), 'Ж'), Err(FontResolveError::NoCoveringFont { .. })));
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn unavailable_rules_find_nothing_though_a_font_has_the_character() {
     let mut resolver = fixtures();
@@ -81,7 +78,6 @@ fn unavailable_rules_find_nothing_though_a_font_has_the_character() {
     assert!(matches!(resolver.resolve_char(&request(), 'Ж'), Err(FontResolveError::NoCoveringFont { .. })));
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_rule_without_a_family_prefers_the_face_family() {
     let mut resolver = fixtures();
@@ -92,7 +88,6 @@ fn a_rule_without_a_family_prefers_the_face_family() {
     assert_eq!(resolver.resolve_char(&FontRequest::new("Noto Sans Mono", 16.0), 'Ж').unwrap().font.family, "Noto Sans Mono");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_new_revision_retires_every_answer() {
     let mut resolver = fixtures();
@@ -106,7 +101,6 @@ fn a_new_revision_retires_every_answer() {
     assert_eq!(resolver.realized.len(), 1);
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn an_icon_answer_belongs_to_its_family_and_a_stop_reaches_it() {
     let mut resolver = fixtures();
@@ -124,7 +118,6 @@ fn an_icon_answer_belongs_to_its_family_and_a_stop_reaches_it() {
     assert!(resolver.resolve_sole(&request(), icon).is_err());
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_group_follows_the_charset_order() {
     let mut resolver = fixtures();
@@ -141,7 +134,6 @@ fn a_group_follows_the_charset_order() {
     assert_eq!(resolver.resolve_char(&request, 'Ж').unwrap().font.family, FAMILY);
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_size_in_the_spec_beats_the_faces() {
     let mut resolver = fixtures();
@@ -152,7 +144,6 @@ fn a_size_in_the_spec_beats_the_faces() {
     assert_eq!(resolver.resolve_char(&request(), '☀').unwrap().font.pixel_size, 40.0);
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn a_size_of_its_own_gets_no_ascii_preference() {
     let mut resolver = fixtures();

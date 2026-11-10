@@ -22,21 +22,6 @@
 
 include!(concat!(env!("OUT_DIR"), "/x11_colors.rs"));
 
-/// The `#`-hex form alone, reduced to 8-bit channels.
-///
-/// GNU's `parse_color_spec` (`src/xfaces.c:976`) accepts 1..=4 hex digits per
-/// channel; each channel is scaled rather than zero-extended (`#f00` is
-/// `#ff0000`, not `#f00000`, `src/xterm.c:9276-9280`) and then reduced to the
-/// most significant 8 bits, which is what GNU does to the same 16-bit value
-/// when it makes the pixel (`lookup_rgb_color`, `src/image.c:6884-6892`).
-#[must_use]
-pub fn x11_hex_color(spec: &str) -> Option<(u8, u8, u8)> {
-    if !spec.starts_with('#') {
-        return None;
-    }
-    x11_color_spec_16bit(spec.as_bytes()).map(reduce_to_8_bits)
-}
-
 /// Resolve one color *value* the way GNU hands it to its color hook: a numeric
 /// spec (`#`-hex, `rgb:`, `rgbi:`) or a name in the X11 database.
 ///

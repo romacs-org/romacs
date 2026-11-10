@@ -42,11 +42,11 @@ impl Vm {
                 Ok(if p == Car { pair.0 } else { pair.1 })
             }
             Setcar | Setcdr => {
-                let pair = self.cons_mut(x)?;
+                let i = self.writable_cons(x)?;
                 if p == Setcar {
-                    pair.0 = y;
+                    self.conses.set_car(i, y);
                 } else {
-                    pair.1 = y;
+                    self.conses.set_cdr(i, y);
                 }
                 Ok(y)
             }
@@ -213,11 +213,14 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
             if x.tag() != 3 || Vm::image_value(x) {
                 return None;
             }
-            let pair = vm.conses.get_mut(x.payload() as usize)?;
+            let i = x.payload() as usize;
+            if i >= vm.conses.len() {
+                return None;
+            }
             if p == Setcar {
-                pair.0 = y;
+                vm.conses.set_car(i, y);
             } else {
-                pair.1 = y;
+                vm.conses.set_cdr(i, y);
             }
             Some(y)
         }
@@ -278,8 +281,8 @@ macro_rules! half {
                 let x = *r.add(i.d);
                 if x.0 & 7 == 3 {
                     let index = (x.0 >> 3) as usize;
-                    if index < e.vm.conses.len() {
-                        *r.add(i.a) = e.vm.conses.get_unchecked(index).$field;
+                    if let Some(pair) = e.vm.conses.get(index) {
+                        *r.add(i.a) = pair.$field;
                         return advance(e, r, pc);
                     }
                 } else if x == Value::NIL {
