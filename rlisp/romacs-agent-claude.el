@@ -19,6 +19,48 @@ fork's transcript with its first message, so until one was sent every
 run forks its source again."
   (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-input-seq session))))
 
+(defun romacs-agent--claude-cursor (records &optional request)
+  "The uuid of the last message of Claude Code's own in RECORDS (a
+subagent's are not the conversation's), before prompt REQUEST's when given."
+  (let ((last nil))
+    (catch 'found
+      (dolist (record records last)
+        (when (and request (equal (romacs-agent--record-request record) request)) (throw 'found last))
+        (let ((out (gethash "out" record)))
+          (when (and (hash-table-p out) (equal (gethash "type" out) "assistant")
+                     (not (romacs-agent--value (gethash "parent_tool_use_id" out)))
+                     (stringp (gethash "uuid" out)))
+            (setq last (gethash "uuid" out))))))))
+
+(defun romacs-agent--claude-head (session)
+  "Where SESSION's conversation was rolled back to, while nothing was said
+since: the uuid its harness resumes at, `fresh' when it went back to its
+start; else nil."
+  (let* ((records (romacs-agent--journal-records session))
+         (said (cl-position-if #'romacs-agent--record-request records :from-end t))
+         (rolled (cl-position-if #'romacs-agent--rollback-note-p records :from-end t)))
+    (when (and rolled (or (not said) (> rolled said)))
+      (or (romacs-agent--claude-cursor (romacs-agent--live-records records)) 'fresh))))
+
+(cl-defun romacs-agent--claude-rollback (session records request)
+  "SESSION goes back to before prompt REQUEST by its next run: resumed at
+the message before it (`romacs-agent--claude-head'), or, with none, as a
+conversation anew under a new id."
+  (unless (cl-find request records :key #'romacs-agent--record-request :test #'equal)
+    (user-error "No such prompt in this session's conversation"))
+  (unless (romacs-agent--claude-cursor records request)
+    ;; What came before is in its source's transcript, not this journal.
+    (when (or (plist-get (romacs-agent-options session) :fork) (romacs-agent-imported session))
+      (user-error "This conversation began before its first prompt here: roll back to a later one"))
+    ;; Back to its start: a conversation anew under a new id, taken once
+    ;; the rollback is journaled.
+    (cl-return-from romacs-agent--claude-rollback
+      (list 'relaunch (lambda ()
+                        (let ((native (romacs-agent--uuid)))
+                          (setf (romacs-agent-harness-session session) native)
+                          (romacs-agent--manifest-put session "harnessSession" native))))))
+  '(relaunch))
+
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
 RESUME is non-nil."
@@ -46,11 +88,15 @@ RESUME is non-nil."
                   "--permission-prompt-tool" "stdio"
                   "--mcp-config" (expand-file-name "mcp.json" dir)
                   "--append-system-prompt" (romacs-agent--instructions session))
-            (cond ((romacs-agent--claude-forking session)
-                   (list "--resume" (plist-get (romacs-agent-options session) :fork) "--fork-session"
-                         "--session-id" (romacs-agent-id session)))
-                  (resume (list "--resume" (romacs-agent--native-id session)))
-                  (t (list "--session-id" (romacs-agent-id session))))
+            (let ((head (and resume (romacs-agent--claude-head session))))
+              (cond ((romacs-agent--claude-forking session)
+                     (list "--resume" (plist-get (romacs-agent-options session) :fork) "--fork-session"
+                           "--session-id" (romacs-agent-id session)))
+                    ;; Rolled back to its start: a conversation anew.
+                    ((eq head 'fresh) (list "--session-id" (romacs-agent--native-id session)))
+                    (head (list "--resume" (romacs-agent--native-id session) "--resume-session-at" head))
+                    (resume (list "--resume" (romacs-agent--native-id session)))
+                    (t (list "--session-id" (romacs-agent-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
             (plist-get instance :arguments))))
 
@@ -482,6 +528,7 @@ answers in its input, and for the session when asked."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
+  :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
   :select #'romacs-agent--claude-select

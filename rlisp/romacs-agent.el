@@ -574,6 +574,12 @@ instances) is derived again when it changes.")
       conversation as it stands, by the harness's own fork (its options'
       :fork, the source's native id): whether SESSION's next run forks its
       source again, having no conversation of its own yet;
+  :rollback (SESSION RECORDS REQUEST)   how SESSION's conversation goes
+      back to before prompt REQUEST, RECORDS its journal's live records
+      (`romacs-agent--live-records'): a line to write its live harness, or
+      (relaunch [BEFORE]), its next run starting there, BEFORE (when
+      given) called once the rollback is journaled and before that run;
+      a `user-error' when it cannot;
   :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
       :keep, :describe and :events (`romacs-agent-history').
 
@@ -1295,7 +1301,9 @@ other; empty for none."
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
-                                                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note)))))))))
+                                                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
+                               ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
+                                                       :prompt (gethash "prompt" note) :files (eq (gethash "files" note) t)))))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
           (while events
@@ -1396,6 +1404,33 @@ at a time between the editor's other work: a long journal never holds it."
                          (when (hash-table-p record) (romacs-agent--record scratch record))))))
                  (if lines (run-at-time 0 nil step) (funcall then (nreverse events)))))
     (funcall step)))
+
+(defun romacs-agent--record-request (record)
+  "The request id of RECORD, a user's message written, or nil."
+  (let ((in (gethash "in" record)))
+    (and (hash-table-p in) (gethash "romacsRequest" in))))
+
+(defun romacs-agent--rollback-note-p (record)
+  (let ((note (gethash "note" record)))
+    (and (hash-table-p note) (equal (gethash "type" note) "rollback"))))
+
+(defun romacs-agent--journal-records (session)
+  "SESSION's journal records, oldest first."
+  (let ((records nil))
+    (romacs-agent--read-journal session (lambda (record) (push record records)))
+    (nreverse records)))
+
+(defun romacs-agent--live-records (records)
+  "RECORDS, a journal's, without the turns rolled back: each rollback note
+drops its prompt's record and every one after it, up to the note, which
+stays.  The journal itself keeps them all."
+  (let ((kept nil))
+    (dolist (record records (nreverse kept))
+      (when (romacs-agent--rollback-note-p record)
+        (when-let* ((cell (cl-member (gethash "to" (gethash "note" record)) kept
+                                     :key #'romacs-agent--record-request :test #'equal)))
+          (setq kept (cdr cell))))
+      (push record kept))))
 
 (defun romacs-agent--read-journal (session function &optional from)
   "Call FUNCTION with each record of SESSION's journal, in order, from
@@ -1676,19 +1711,21 @@ when one runs; with none, the journal is the server's to add to."
   (romacs-agent--cancel-select session)
   (setf (romacs-agent-pending-selection session)
         (plist-put (plist-put (romacs-agent-pending-selection session) :state 'restarting) :waiting nil))
+  (romacs-agent--stop-then session
+                           (lambda ()
+                             (setf (romacs-agent-pending-selection session)
+                                   (plist-put (romacs-agent-pending-selection session) :stopped t))
+                             (romacs-agent--restarted session))))
+
+(defun romacs-agent--stop-then (session then)
+  "Stop SESSION's harness, then call THEN: once its unit is gone, as the
+next run takes the unit's name; at once when it ran detached."
   (if-let* ((unit (romacs-agent-unit session)))
-      ;; The next run takes the unit's name: this one must be gone.
       (make-process :name "romacs-agent-restart" :noquery t :connection-type 'pipe
                     :command (list "systemctl" "--user" "stop" unit)
-                    :sentinel (lambda (process _event)
-                                (unless (process-live-p process)
-                                  (setf (romacs-agent-pending-selection session)
-                                        (plist-put (romacs-agent-pending-selection session) :stopped t))
-                                  (romacs-agent--restarted session))))
-    (setf (romacs-agent-pending-selection session) (plist-put (romacs-agent-pending-selection session) :stopped t))
+                    :sentinel (lambda (process _event) (unless (process-live-p process) (funcall then))))
     (romacs-agent-stop session)
-    ;; Gone already, no sentinel is to come.
-    (romacs-agent--restarted session)))
+    (funcall then)))
 
 (defun romacs-agent--restarted (session)
   "Resume SESSION on its selection, once its harness and its unit are gone."
