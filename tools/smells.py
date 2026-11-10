@@ -23,9 +23,13 @@ Layout (`layout`):
   root                    the tree's top-level entries
   members_outside_crates  workspace members not under crates/
   legacy_primitives       primitives lib.rs registers through its own enum,
-                          the second route beside `defsubr!` (PRIMITIVES.json)
+                          the second route beside `defsubr!`
+                          (tools/primitive_index.py reads both from source)
   primitives_outside_prims  `defsubr! { name = ... }` declarations outside
                           PRIMS (the harness's own tests and probes)
+  generated               files git tracks that a tool writes
+                          (tools/derived_artifacts.py's ARTIFACTS): each
+                          one leaves git, and none comes back
 
 check fails when a count rises above its floor, and when an entry is missing
 from or extra to a layout list. Crate smells and layout counts move rarely, so
@@ -50,13 +54,14 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import derived_artifacts  # noqa: E402
+import primitive_index  # noqa: E402
 import unsafe_census  # noqa: E402
 
 FLOORS = Path('SMELL-FLOORS.json')
 CRATE_SMELLS = ('allows', 'todos', 'long_files')
-COUNTED = ('legacy_primitives', 'primitives_outside_prims')
+COUNTED = ('legacy_primitives', 'primitives_outside_prims', 'generated')
 PRIMS = 'crates/romacs-vm/src/prims/'
-LEGACY_REGISTRY = 'crates/romacs-vm/src/lib.rs'
 ALLOW = re.compile(r'\b(?:allow|expect)\s*\(([^)]*)\)')
 ALLOWED_LINT = re.compile(r'(?<![:\w])(?:dead_code|unused(?:_\w+)?)\b')
 TODO = re.compile(r'\b(?:TODO|FIXME|XXX|HACK)\b')
@@ -152,16 +157,17 @@ def run_clippy(root):
 
 def layout(root, strays):
     """{'root': [top-level entries], 'members_outside_crates': [...],
-    'legacy_primitives': N, 'primitives_outside_prims': N}."""
+    'legacy_primitives': N, 'primitives_outside_prims': N, 'generated': N}."""
     listed = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
                             cwd=root, check=True, stdout=subprocess.PIPE).stdout.decode()
     top = sorted({name.split('/', 1)[0] for name in listed.split('\0') if name and (Path(root) / name).exists()})
     members = tomllib.loads((Path(root) / 'Cargo.toml').read_text())['workspace']['members']
-    primitives = json.loads((Path(root) / 'PRIMITIVES.json').read_text())['primitives'].values()
+    primitives = primitive_index.vm2_primitives(Path(root).resolve() / 'crates/romacs-vm/src').values()
     return {'root': top,
             'members_outside_crates': sorted(m for m in members if not m.startswith('crates/')),
-            'legacy_primitives': sum(p['registered_at'].startswith(LEGACY_REGISTRY + ':') for p in primitives),
-            'primitives_outside_prims': sum(strays.values())}
+            'legacy_primitives': sum('variant' in p for p in primitives),
+            'primitives_outside_prims': sum(strays.values()),
+            'generated': len(derived_artifacts.ARTIFACTS)}
 
 
 def measure(root, floors, clippy_json=None):
@@ -267,7 +273,8 @@ def report(root, floors, now, top=12):
                       'warnings by crate:', *per_crate, '',
                       f'layout: {len(lay["root"])} top-level entries, {len(lay["members_outside_crates"])} '
                       f'members outside crates/, {lay["legacy_primitives"]} primitives registered in lib.rs, '
-                      f'{lay["primitives_outside_prims"]} declared outside {PRIMS}',
+                      f'{lay["primitives_outside_prims"]} declared outside {PRIMS}, '
+                      f'{lay["generated"]} generated files tracked',
                       *(f'{n:>7} {path}' for path, n in sorted(now['strays'].items()))])
 
 
