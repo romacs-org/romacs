@@ -9,6 +9,10 @@ use romacs_display_protocol::model::{
     ModelTarget, ModelView,
 };
 
+/// The most elements a target plist has: :mesh :kind :face :barycentric
+/// :tolerance, each with its value.
+const MODEL_TARGET_FIELDS: usize = 10;
+
 fn error(message: impl Into<String>) -> Fault {
     Fault::Error(message.into())
 }
@@ -31,8 +35,20 @@ impl Leaf<'_> {
             .ok_or_else(|| error(format!("Model {what} must be a natural number")))
     }
 
-    fn model_items(&self, value: Value, what: &str) -> std::result::Result<Vec<Value>, Fault> {
-        self.vm.list_values(value).map_err(|_| error(format!("Model {what} must be a list")))
+    /// VALUE's elements, a proper list of at most MAX: a longer, dotted or
+    /// circular one is refused before any element is converted, having
+    /// walked no more than MAX links.
+    fn model_items(&self, value: Value, what: &str, max: usize) -> std::result::Result<Vec<Value>, Fault> {
+        let refuse = || error(format!("Model {what} must be a list of at most {max}"));
+        let mut items = Vec::new();
+        let mut rest = value;
+        while rest != Value::NIL {
+            if items.len() == max { return Err(refuse()); }
+            let (item, next) = self.vm.cons_pair(rest).map_err(|_| refuse())?;
+            items.push(item);
+            rest = next;
+        }
+        Ok(items)
     }
 
     fn model_view(&self, yaw: Value, pitch: Value, zoom: Value) -> std::result::Result<ModelView, Fault> {
@@ -49,7 +65,7 @@ impl Leaf<'_> {
     /// One mesh, (PATH SHA256-OR-NIL): an absolute local path, and
     /// optionally the lowercase hex digest the loader checks.
     fn model_mesh(&self, value: Value) -> std::result::Result<ModelMeshSpec, Fault> {
-        let parts = self.model_items(value, "mesh")?;
+        let parts = self.model_items(value, "mesh", 2)?;
         let path = parts.first().and_then(|&p| self.string_text(p).ok())
             .ok_or_else(|| error("Model mesh needs a file name"))?;
         let path = std::path::PathBuf::from(path);
@@ -68,7 +84,7 @@ impl Leaf<'_> {
     }
 
     fn model_background(&self, value: Value) -> std::result::Result<[f32; 4], Fault> {
-        let parts = self.model_items(value, "background")?;
+        let parts = self.model_items(value, "background", 3)?;
         let rgb = parts.iter().map(|&c| self.model_number(c, "background")).collect::<std::result::Result<Vec<_>, _>>()?;
         match rgb[..] {
             [r, g, b] if rgb.iter().all(|c| (0.0..=1.0).contains(c)) => Ok([r as f32, g as f32, b as f32, 1.0]),
@@ -80,11 +96,11 @@ impl Leaf<'_> {
     /// model's surface id. It loads asynchronously; failures come back as
     /// its `failed' event.
     pub(crate) fn model_create(&mut self, meshes: Value, view: Value, background: Value, width: Value, height: Value) -> Out {
-        let meshes = self.model_items(meshes, "meshes")?.into_iter().map(|m| self.model_mesh(m)).collect::<std::result::Result<Vec<_>, _>>()?;
-        if meshes.is_empty() || meshes.len() > MODEL_MAX_MESHES {
+        let meshes = self.model_items(meshes, "meshes", MODEL_MAX_MESHES)?.into_iter().map(|m| self.model_mesh(m)).collect::<std::result::Result<Vec<_>, _>>()?;
+        if meshes.is_empty() {
             return Err(error(format!("A model needs 1..{MODEL_MAX_MESHES} meshes")));
         }
-        let view = match self.model_items(view, "view")?[..] {
+        let view = match self.model_items(view, "view", 3)?[..] {
             [yaw, pitch, zoom] => self.model_view(yaw, pitch, zoom)?,
             _ => return Err(error("Model view must be (YAW PITCH ZOOM)")),
         };
@@ -129,7 +145,7 @@ impl Leaf<'_> {
     /// point :face N :barycentric [A B C] :tolerance R) or (:mesh INDEX
     /// :kind region :faces (N ...)).
     fn model_target(&self, value: Value, meshes: usize) -> std::result::Result<ModelTarget, Fault> {
-        let plist = self.model_items(value, "target")?;
+        let plist = self.model_items(value, "target", MODEL_TARGET_FIELDS)?;
         let field = |key: &str| self.model_plist_get(&plist, key).ok_or_else(|| error(format!("Model target needs {key}")));
         let mesh = self.model_mesh_index(field(":mesh")?, meshes)?;
         let face = |cx: &Self, value| cx.model_natural(value, "face").ok().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| error("Model face out of range"));
@@ -138,14 +154,14 @@ impl Leaf<'_> {
             "point" => {
                 let weights = match self.vm.object_if(field(":barycentric")?) {
                     Some(data::Object::Vector(items)) => items.clone(),
-                    _ => self.model_items(field(":barycentric")?, "barycentric")?,
+                    _ => self.model_items(field(":barycentric")?, "barycentric", 3)?,
                 };
                 let weights = weights.iter().map(|&w| self.model_number(w, "barycentric weight")).collect::<std::result::Result<Vec<_>, _>>()?;
                 let barycentric = <[f64; 3]>::try_from(weights).map_err(|_| error("Model barycentric needs three weights"))?;
                 ModelTarget::Point { mesh, face: face(self, field(":face")?)?, barycentric, tolerance: self.model_number(field(":tolerance")?, "tolerance")? }
             }
             "region" => {
-                let faces = self.model_items(field(":faces")?, "faces")?.into_iter().map(|f| face(self, f)).collect::<std::result::Result<Vec<_>, _>>()?;
+                let faces = self.model_items(field(":faces")?, "faces", self.vm.list_limit())?.into_iter().map(|f| face(self, f)).collect::<std::result::Result<Vec<_>, _>>()?;
                 ModelTarget::Region { mesh, faces }
             }
             other => return Err(error(format!("Unknown model target kind {other}"))),
@@ -165,12 +181,9 @@ impl Leaf<'_> {
     /// `romacs-model--set-highlight-layers' ID REQ LAYERS, each (TARGET R G B).
     pub(crate) fn model_set_highlight_layers(&mut self, id: Value, req: Value, layers: Value) -> Out {
         self.model_update(id, req, |cx, meshes| {
-            let layers = cx.model_items(layers, "layers")?;
-            if layers.len() > MODEL_MAX_HIGHLIGHT_LAYERS {
-                return Err(error(format!("At most {MODEL_MAX_HIGHLIGHT_LAYERS} model highlight layers")));
-            }
+            let layers = cx.model_items(layers, "layers", MODEL_MAX_HIGHLIGHT_LAYERS)?;
             let layers = layers.into_iter().map(|layer| {
-                let parts = cx.model_items(layer, "layer")?;
+                let parts = cx.model_items(layer, "layer", 4)?;
                 let (&target, rgb) = parts.split_first().ok_or_else(|| error("Model layer needs a target"))?;
                 let rgb = rgb.iter().map(|&c| cx.model_number(c, "colour").map(|c| c as f32)).collect::<std::result::Result<Vec<_>, _>>()?;
                 let color = <[f32; 3]>::try_from(rgb).map_err(|_| error("Model layer colour needs three components"))?;
