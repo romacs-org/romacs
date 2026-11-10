@@ -440,6 +440,7 @@ interaction, renderer loss, loading, frozen and destroyed models."
   "Free MODEL's renderer resources now.  Idempotent."
   (let ((entry (romacs-model--entry model)))
     (unless (eq (car (romacs-model--entry-status entry)) 'destroyed)
+      (romacs-model--unattach model (romacs-model--entry-buffer entry))
       (setf (romacs-model--entry-status entry) (list 'destroyed)
             (romacs-model--entry-buffer entry) nil)
       (remhash (romacs-model--id model) romacs-model--by-id)
@@ -447,17 +448,30 @@ interaction, renderer loss, loading, frozen and destroyed models."
   nil)
 
 (defvar-local romacs-model--attached nil
-  "The models attached to this buffer, so killing it finds them without a
-scan of every model.  A model that moved on is dropped when it moves.")
+  "The models attached to this buffer, a table of model to t, so killing
+it finds them without a scan of every model.  A model leaves it when it
+moves to another buffer or is destroyed.")
 (put 'romacs-model--attached 'permanent-local t)
+
+(defun romacs-model--attach (model)
+  "Note MODEL as attached to the current buffer."
+  (puthash model t (or romacs-model--attached
+                       (setq romacs-model--attached (make-hash-table :test #'eq)))))
+
+(defun romacs-model--unattach (model buffer)
+  "MODEL is no longer attached to BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when romacs-model--attached (remhash model romacs-model--attached)))))
 
 (defun romacs-model--kill-buffer ()
   "Destroy the models attached to the current buffer."
-  (let ((buffer (current-buffer)) (doomed romacs-model--attached))
-    (setq romacs-model--attached nil)
-    (dolist (model doomed)
-      (when (eq (romacs-model--entry-buffer (romacs-model--entry model)) buffer)
-        (romacs-model-destroy model)))))
+  (when romacs-model--attached
+    (let ((buffer (current-buffer)) (doomed (hash-table-keys romacs-model--attached)))
+      (clrhash romacs-model--attached)
+      (dolist (model doomed)
+        (when (eq (romacs-model--entry-buffer (romacs-model--entry model)) buffer)
+          (romacs-model-destroy model))))))
 
 ;;;; Events
 
@@ -789,7 +803,7 @@ glyph, and the camera keys no longer find MODEL in that buffer."
                                  '(display nil keymap nil romacs-model nil)))))
     (when (buffer-live-p old)
       (with-current-buffer old
-        (setq romacs-model--attached (delq model romacs-model--attached))
+        (when romacs-model--attached (remhash model romacs-model--attached))
         (when (eq romacs-model--buffer-model model)
           (setq romacs-model--buffer-model nil))))
     (setf (romacs-model--entry-buffer entry) nil)))
@@ -821,7 +835,7 @@ and killing that buffer destroys MODEL.  PLIST keys:
                         'rear-nonsticky t))
     (unless (eq (romacs-model--entry-buffer entry) (current-buffer))
       (romacs-model--detach model entry)
-      (push model romacs-model--attached))
+      (romacs-model--attach model))
     (setf (romacs-model--entry-buffer entry) (current-buffer))
     (add-hook 'kill-buffer-hook #'romacs-model--kill-buffer nil t)
     nil))

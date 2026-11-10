@@ -93,5 +93,26 @@
       (should (integerp (romacs-model--id model)))
       (should (eq (type-of (romacs-model--handle-finalizer model)) 'finalizer)))))
 
+(ert-deftest romacs-model-buffers-forget-destroyed-and-moved-models ()
+  ;; A buffer holds only the models still attached to it: one destroyed,
+  ;; or moved to another buffer, leaves it, and killing it destroys the rest.
+  (romacs-model-tests--with-renderer
+    (let ((a (generate-new-buffer " model-a")) (b (generate-new-buffer " model-b"))
+          (gone (romacs-model-create :meshes '(("m" "/m/a.obj"))))
+          (moved (romacs-model-create :meshes '(("m" "/m/a.obj"))))
+          (kept (romacs-model-create :meshes '(("m" "/m/a.obj")))))
+      (unwind-protect
+          (progn
+            (with-current-buffer a (dolist (model (list gone moved kept)) (romacs-model-insert model)))
+            (romacs-model-destroy gone)
+            (with-current-buffer b (romacs-model-insert moved))
+            (with-current-buffer a
+              (should (equal (hash-table-keys romacs-model--attached) (list kept))))
+            (kill-buffer a)
+            (should (eq (car (romacs-model-status kept)) 'destroyed))
+            (should-not (eq (car (romacs-model-status moved)) 'destroyed)))
+        (kill-buffer b)
+        (when (buffer-live-p a) (kill-buffer a))))))
+
 (provide 'romacs-model-tests)
 ;;; romacs-model-tests.el ends here
