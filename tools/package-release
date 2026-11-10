@@ -3,10 +3,10 @@
 #
 #   tools/package-release NAME BIN_DIR OUT_DIR
 #
-# BIN_DIR holds builds of romacs-vm-gui, romacs-mcp and romacs-agent-host. Writes
+# BIN_DIR holds builds of romacs-vm-gui, romacs-keeper, romacs-mcp and romacs-agent-host. Writes
 # OUT_DIR/NAME.tar.gz, which unpacks to NAME/:
 #
-#   bin/romacs-vm-gui  bin/romacs-mcp  bin/romacs-agent-host
+#   bin/romacs-vm-gui  bin/romacs-keeper  bin/romacs-mcp  bin/romacs-agent-host
 #   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
 #   share/romacs/{gnu-lisp,rlisp,etc,assets/fonts}  share/applications  share/icons
 #
@@ -32,6 +32,8 @@ if [ -e "$stage" ] || [ -e "$stage.tar.gz" ]; then
 fi
 
 install -D -m 0755 "$bin_dir/romacs-vm-gui" "$stage/bin/romacs-vm-gui"
+# Beside romacs-vm-gui, where a session looks for its keeper (romacs-keeper.el).
+install -D -m 0755 "$bin_dir/romacs-keeper" "$stage/bin/romacs-keeper"
 install -D -m 0755 "$bin_dir/romacs-mcp" "$stage/bin/romacs-mcp"
 install -D -m 0755 "$bin_dir/romacs-agent-host" "$stage/bin/romacs-agent-host"
 # A later mode argument overrides this one.
