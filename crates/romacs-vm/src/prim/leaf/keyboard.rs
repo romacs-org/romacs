@@ -20,6 +20,25 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
+    /// `romacs--take-deferred-escape`: raise the escape deferred under ID
+    /// if it still waits (`Vm::take_deferred_escape`), else nil. With ID
+    /// nil, drop every one that waits: a worker's job has ended.
+    pub(crate) fn take_deferred_escape(&mut self, id: Value) -> crate::prim::Out {
+        if id == Value::NIL {
+            self.vm.drop_deferred_escapes();
+            return Ok(Value::NIL);
+        }
+        let id = id.integer_value().ok_or(crate::prim::Fault::Wrong("integerp", id))?;
+        match self.vm.take_deferred_escape(id) {
+            None => Ok(Value::NIL),
+            Some((false, condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
+            Some((true, tag, value)) => {
+                self.vm.propagated_escape = Some(crate::threaded::Escape::Throw(tag, value));
+                Err(crate::prim::Fault::Escape)
+            }
+        }
+    }
+
     /// `romacs--call-deadline': arm GENERATION's deadline MILLISECONDS from
     /// now, or with GENERATION nil disarm the current one (quit.rs
     /// `deadline').

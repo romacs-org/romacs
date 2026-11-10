@@ -44,12 +44,14 @@ possible; say so where you do.
   rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
   primitives declared outside `src/prims/` or through lib.rs's own enum. It
   holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
-  `master`): a count above the merge-base's own fails, and a drop needs no
-  record. Adding a smell takes raising its floor in `SMELL-FLOORS.json` by as
-  much, and a new top-level entry takes listing it there: a deliberate commit
-  with its reason. `smells.py check --absolute` holds the trunk to that file at
-  a checkpoint, where `lower` records the drops. A merge conflict in the file:
-  `python3 tools/lib/smells.py resolve`.
+  `master`): a count above the merge-base's own fails. A drop needs no
+  record, and a branch never lowers a floor. Adding a smell takes raising its
+  floor in `SMELL-FLOORS.json` by as much, and a new top-level entry takes
+  listing it there: a deliberate commit with its reason. `smells.py check
+  --absolute` holds the trunk to that file at a checkpoint, where `lower`
+  records the drops. The file merges by its meaning, each side's raise added:
+  `tools/derived setup` installs the merge driver once per repository, and
+  `python3 tools/lib/smells.py resolve` does the same by hand.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

@@ -1,5 +1,4 @@
 //! The flight recorder's step marks (`crate::flight`). Not in GNU.
-use crate::prim::{Fault, Leaf};
 use crate::Value;
 
 // (romacs--flight-step LABEL): the command LABEL has run. A recording
