@@ -618,12 +618,20 @@ impl Vm {
         Ok(())
     }
     pub(crate) fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
+        self.buffer_string(buffer, from, to, true)
+    }
+    /// FROM..TO of BUFFER as a string without its text properties.
+    pub(crate) fn buffer_plain_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
+        self.buffer_string(buffer, from, to, false)
+    }
+    fn buffer_string(&mut self, buffer: Value, from: i64, to: i64, properties: bool) -> Faulty<Value> {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
-            Some(Object::Buffer(t)) => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
+            Some(Object::Buffer(t)) if properties => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
+            Some(Object::Buffer(t)) => data::string_object(data::LispString::from_bytes(t.internal(a..b).map_err(Fault::Error)?.into_owned(), true)),
             Some(Object::ByteBuffer(t)) => {
                 if t.bytes.get(a.0..b.0).is_none() { return Err(Fault::Error("position out of range".into())); }
-                t.text_object(a..b)
+                if properties { t.text_object(a..b) } else { data::unibyte_object(t.bytes[a.0..b.0].to_vec()) }
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
