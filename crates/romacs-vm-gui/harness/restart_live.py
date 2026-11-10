@@ -104,6 +104,12 @@ def ready(engine, predicate, what, timeout=None):
          timeout or engine.timeout, f'{engine.name} {what}', engine.process, .05)
 
 
+def holds(engine, predicate, what):
+    """Wait until PREDICATE holds, asked plainly: `ready' also waits out every
+    one-shot timer, and the restore's toast arms one for two seconds."""
+    wait(lambda: engine.ask(f'(if {predicate} 1 0)') == 1, engine.timeout, f'{engine.name} {what}', engine.process, .02)
+
+
 def capture(engine, path):
     done = subprocess.run([f'{engine.tools}/grim', str(path)], env=engine.env, capture_output=True, timeout=30)
     return path.name if done.returncode == 0 else None
@@ -169,7 +175,10 @@ def restart(engine):
     (engine.probe_dir / 'alive').unlink()
     engine.keys(M('x'))
     ready(engine, '(minibufferp)', 'M-x prompt')
-    engine.keys(T('romacs-restart'), K('Return'))
+    engine.keys(T('romacs-restart'))
+    # Return before the name is all there would run what was typed so far.
+    ready(engine, '(and (minibufferp) (equal (minibuffer-contents-no-properties) "romacs-restart"))', 'the command typed')
+    engine.keys(K('Return'))
     if asking:
         ready(engine, '(string-match-p "Restart anyway" (or (minibuffer-prompt) ""))', 'the restart question')
         engine.keys(T('yes'), K('Return'))
@@ -184,9 +193,12 @@ def successor(engine, pressed):
     pid = int((engine.probe_dir / 'pid').read_text())
     engine.process = Pid(pid)
     engine.processes.append(engine.process)
-    ready(engine, '(and warm-restart-last-report t)', 'the restore')
-    ready(engine, '(eq (frame-focus-state) t)', 'focus in the new process')
-    return pid, round(time.time() - pressed, 3)
+    holds(engine, 'warm-restart-last-report', 'the restore')
+    holds(engine, '(eq (frame-focus-state) t)', 'focus in the new process')
+    seconds = round(time.time() - pressed, 3)
+    # What follows observes a settled session.
+    ready(engine, 't', 'the restored session at rest')
+    return pid, seconds
 
 
 def run(args, base, name, output):
