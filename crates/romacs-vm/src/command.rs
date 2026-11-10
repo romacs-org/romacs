@@ -503,13 +503,9 @@ impl Vm {
         Ok(Value::NIL)
     }
     fn command_buffer_call(&mut self, p: Primitive, args: &[Value]) -> Result<Value> {
-        // These buffer kernels cannot collect or run Lisp. Preserve the original
-        // register allocation: extending it could invalidate the threaded engine
-        // raw register pointer even if no GC ran.
-        let saved = std::mem::replace(&mut self.stack, args.to_vec());
-        let result = self.buffer_primitive(p, 0, args.len());
-        self.stack = saved;
-        result
+        // A buffer kernel, on the kernel file: a running engine's registers
+        // stay where they are.
+        self.with_kernel_stack(args, |vm, n| vm.buffer_primitive(p, 0, n))
     }
 }
 

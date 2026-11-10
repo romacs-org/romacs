@@ -524,6 +524,22 @@ impl Vm {
         debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
         self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
     }
+    /// RUN on ARGS in the reused kernel file, the current one set aside beneath
+    /// it, still traced, its allocation unmoved: the one way a native borrows
+    /// register slots (a storage kernel, a property query) without touching a
+    /// running engine's. RUN gets the arguments' count; they start at 0.
+    pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
+        self.suspend_stack();
+        self.stack = std::mem::take(&mut self.kernel_stack);
+        self.stack.clear();
+        self.stack.extend_from_slice(args);
+        let out = run(self, args.len());
+        // Untraced between calls: nothing it held may stay in it.
+        self.stack.clear();
+        self.kernel_stack = std::mem::take(&mut self.stack);
+        self.resume_stack();
+        out
+    }
     /// SLOTS as a dense membership table over every symbol slot.
     fn slot_set<'a>(&self, slots: impl Iterator<Item = &'a usize>) -> Vec<bool> {
         let mut set = vec![false; self.slots.len()];

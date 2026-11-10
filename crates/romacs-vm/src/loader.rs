@@ -348,11 +348,7 @@ impl Vm {
                 Ok(feature)
             }
             Primitive::MakeInterpretedClosure => {
-                let start = self.stack.len();
-                self.stack.extend_from_slice(args);
-                let result = self.interpreted_closure_primitive(Primitive::MakeInterpretedClosure, start, args.len());
-                self.stack.truncate(start);
-                result
+                self.interpreted_closure_values(Primitive::MakeInterpretedClosure, args.to_vec())
             }
             Primitive::Eval => self.eval_primitive(args),
             Primitive::Macroexpand => self.macroexpand_primitive(args),

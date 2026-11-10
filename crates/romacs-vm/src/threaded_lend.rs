@@ -133,10 +133,10 @@ impl Engine<'_> {
         self.resume_code();
         out
     }
-    /// RUN as a nested engine run: this engine suspended, its register stack
-    /// set aside (traced, its allocation unmoved), then the frame pointers
-    /// rebased, since the run can widen the registers. Whether they still fit.
-    fn suspended<T>(&mut self, run: impl FnOnce(&mut Vm) -> T) -> (T, bool) {
+    /// RUN as a nested engine run: this engine suspended, its register file
+    /// set aside (traced, its allocation unmoved). The run has a file of its
+    /// own, so this one comes back as it was.
+    fn suspended<T>(&mut self, run: impl FnOnce(&mut Vm) -> T) -> T {
         self.suspend_code();
         self.vm.suspend_stack();
         let out = run(self.vm);
@@ -144,13 +144,7 @@ impl Engine<'_> {
         self.resume_code();
         self.vm.end_nested_execution();
         self.code.resize_with(self.vm.functions.len(), Vec::new);
-        // The stack is back in place; grow it only if the call widened the
-        // registers past what the current frames fit, as `frame_room` does.
-        let fits = (self.frames.len() + 3).max(MIN_FRAMES).checked_mul(self.vm.register_width)
-            .and_then(|n| n.checked_add(self.vm.spread_reserve)).is_some_and(|n| n <= self.vm.stack.len());
-        let (r, width) = (self.regs, self.vm.register_width);
-        // SAFETY: R is this engine's current frame, in the register stack.
-        (out, fits || unsafe { widen_registers(self, r, width) }.is_some())
+        out
     }
 }
 
@@ -198,20 +192,19 @@ impl Nested<'_> {
     }
 }
 
-/// Run CALL nested, then THEN on its result and whether the registers still
-/// fit (they were rebased, `e.regs` with them).
+/// Run CALL nested, then THEN on its result.
 pub(super) fn nested<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>, call: Nested<'_>, b: B,
-    then: impl FnOnce(&mut Engine<'a>, B, Result<Value>, bool) -> R + Copy + 'static) -> R {
+    then: impl FnOnce(&mut Engine<'a>, B, Result<Value>) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
-    let (result, fits) = e.suspended(|vm| call.run(vm));
-    then(e, b, result, fits)
+    let result = e.suspended(|vm| call.run(vm));
+    then(e, b, result)
 }
 
 /// Lisp that cannot collect, run nested from raw mode: the hold makes the
 /// funnel refuse whatever it reaches, so the caller may keep Values in Rust
 /// locals across it (a lazy body's expansion, under its builder's hold too).
 /// Named and counted: a deferred collection is latency debt.
-pub(super) fn deferred(e: &mut Engine<'_>, call: Nested<'_>) -> (Result<Value>, bool) {
+pub(super) fn deferred(e: &mut Engine<'_>, call: Nested<'_>) -> Result<Value> {
     e.vm.gc_holds += 1;
     let out = e.suspended(|vm| call.run(vm));
     e.vm.gc_holds -= 1;

@@ -374,17 +374,16 @@ fn escapes_through_nested_engines_leave_no_unwinding() {
     }
 }
 
-/// Finishing a collection at a safepoint can widen the registers under the
-/// frame that polled: a hook compiling a function wider than any before moves
-/// them, and that frame must come back to its own Values.
+/// A hook at a safepoint can compile and call a function wider than any
+/// before: its nested run gets a file of its own, sized for it, and the frame
+/// that polled comes back to its own Values.
 #[test]
-fn a_hook_at_a_safepoint_can_widen_the_registers_under_it() {
+fn a_hook_at_a_safepoint_can_run_a_function_wider_than_any_before() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     let wide: String = (0..600).map(|i| format!("(v{i} {i})")).collect::<Vec<_>>().join(" ");
     let sum: String = (0..600).map(|i| format!("v{i}")).collect::<Vec<_>>().join(" ");
-    let width = vm.register_width;
     let source = format!("(progn
       (defvar fw-sum nil)
       (fset 'fw-hook (lambda () (unless fw-sum (setq fw-sum (funcall (eval '(lambda () (let* ({wide}) (+ {sum}))) t))))))
@@ -395,7 +394,6 @@ fn a_hook_at_a_safepoint_can_widen_the_registers_under_it() {
         (list fw-sum (car kept) (car (cdr kept)) (car (cdr (cdr kept))) (> i 0))))");
     let value = vm.eval_source(&source).unwrap().display().unwrap();
     assert_eq!(value, "(179700 1 2 3 t)");
-    assert!(vm.register_width > width, "the hook widened them: {} from {width}", vm.register_width);
 }
 
 /// A reader function that collects, moving everything, at each character: the

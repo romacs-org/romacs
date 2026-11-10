@@ -459,16 +459,13 @@ impl Vm {
     /// the engine's stay traced beneath it, whatever the kernel comes to do.
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
-        self.suspend_stack();
-        self.stack = std::mem::take(&mut self.kernel_stack);
-        self.stack.clear();
-        self.stack.extend_from_slice(args);
-        self.change_prepared = true;
-        let result = run(self, args.len());
-        self.change_prepared = false;
-        self.kernel_stack = std::mem::take(&mut self.stack);
-        self.resume_stack();
-        result.map_err(Fault::Error)
+        self.with_kernel_stack(args, |vm, n| {
+            vm.change_prepared = true;
+            let result = run(vm, n);
+            vm.change_prepared = false;
+            result
+        })
+        .map_err(Fault::Error)
     }
 
     /// insert_from_string_1 / insert_1_both for one `insert' argument (a

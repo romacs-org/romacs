@@ -155,7 +155,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
-            apply_scratch: Vec::new(),
+            limit: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -274,7 +274,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
-            apply_scratch: Vec::new(),
+            limit: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -1016,14 +1016,10 @@ fn run_in_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, form: &Form, 
         e.vm.propagated_escape_hooked = false;
         (saved_depth, token)
     });
-    // Compiling the call can widen the registers; the rebase follows them.
-    lend::nested(m, gc, Nested::Form(form), around, |e, (saved_depth, token), result, fits| {
+    lend::nested(m, gc, Nested::Form(form), around, |e, (saved_depth, token), result| {
         let replacement = e.vm.propagated_escape.take();
         if let Some(old) = token { e.vm.restore_stack_limits(old); }
         e.vm.eval_depth = saved_depth;
-        if !fits {
-            e.error = Some("register storage exhausted".into());
-        }
         match (result, replacement) {
             (_, Some(escape)) => {
                 e.escape = Some(escape);
@@ -1340,10 +1336,12 @@ pub(super) struct Engine<'a> {
     pub(super) vm: &'a mut Vm,
     code: Vec<Vec<Inst>>,
     rest: RestStack,
+    /// The highest slot of the file written since the engine began: frame
+    /// entry, a continuation's layout and `apply`'s spread raise it.
     stack_used: usize,
-    /// The (OFFSET, COUNT) windows `apply` wrote at the end of the
-    /// registers, cleared on exit with the used prefix.
-    apply_scratch: Vec<(usize, usize)>,
+    /// The address just past the engine's register file, kept with the file
+    /// (`frame_room`, `grow_registers`).
+    limit: usize,
     frames: Vec<Frame>,
     native_mark: Option<usize>,
     apply_function: Option<Value>,
@@ -1426,7 +1424,7 @@ pub(super) fn assert_opaque_rest_compaction() {
             activations: vec![RestActivation { depth: 0, base: 0, pending: Some(desc) }],
         },
         stack_used: 0,
-        apply_scratch: Vec::new(),
+        limit: 0,
         frames: vec![],
         native_mark: None,
         apply_function: None,
@@ -1637,7 +1635,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         vm.execution_fatal = true;
         return Err(error);
     }
-    debug_assert!(vm.stack.is_empty(), "a nested run's caller set its registers aside");
+    // Taking a file over the current one would free a running engine's.
+    assert!(vm.stack.is_empty(), "a nested run's caller set its registers aside");
     let mut program = std::mem::take(&mut vm.execution);
     if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
         program = spare;
@@ -1655,26 +1654,24 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         vm.execution = program;
         return Err(error);
     }
-    let size = vm
-        .register_width
-        .checked_mul(MIN_FRAMES)
-        .and_then(|n| n.checked_add(vm.spread_reserve))
-        .ok_or("register storage overflow")?;
+    let width = vm.functions[function].regs;
+    debug_assert!(args.len() <= width.max(1), "an entry passes at most its function's registers");
+    let size = width.max(args.len()).checked_add(WINDOW).ok_or("register storage overflow")?.next_power_of_two();
     vm.stack = std::mem::take(&mut program.registers);
-    // They come back all NIL, however far the last run widened them: cut to
-    // SIZE, every run past MIN_FRAMES would fill them again.
-    if vm.stack.len() < size {
-        vm.stack.resize(size, Value::NIL);
+    // A spare file comes back all NIL, as long as its last run grew it.
+    if vm.stack.len() < size.max(FILE_START) {
+        vm.stack.resize(size.max(FILE_START), Value::NIL);
     }
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
+    let limit = file_limit(&vm.stack);
     let mark = vm.dynamic.len();
     let handler_mark = vm.signal_handlers.len();
     let backtrace_mark = vm.backtrace.frames.len();
     let vm_propagate = std::mem::take(&mut vm.propagate_next);
     let mut engine = Engine {
-        stack_used: vm.functions[function].regs.max(args.len()),
-        apply_scratch: Vec::new(),
+        stack_used: width.max(args.len()),
+        limit,
         depth_base: vm.eval_depth,
         vm,
         code: program.code,
@@ -1761,8 +1758,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // Only entered frames can have written values. Clear that prefix, not all
     // reserved frames; retaining zeroed storage avoids reinitializing it.
     engine.vm.stack[..engine.stack_used].fill(Value::NIL);
-    for &(offset, count) in &engine.apply_scratch {
-        engine.vm.stack[offset..offset + count].fill(Value::NIL);
+    // A file a deep run grew is kept for the next, up to a cap; past it, cut
+    // back, not dropped: an empty file means "no program" to the spares.
+    if engine.vm.stack.len() > SPARE_CAP {
+        engine.vm.stack.truncate(FILE_START);
+        engine.vm.stack.shrink_to_fit();
     }
     engine.rest.values.clear();
     engine.rest.activations.clear();
@@ -2651,21 +2651,28 @@ fn depth_room_cold(e: &mut Engine<'_>, attempted: usize) -> bool {
     }
     fits
 }
-/// Activations the register storage holds before it first widens. Each is
-/// reserved at the widest function compiled so far, so a single wide
-/// function multiplies this; deeper calls widen on demand (`frame_room`).
-const MIN_FRAMES: usize = 17;
-/// Grow only on a cold storage boundary, rebasing all activation pointers.
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`), holding the
-/// registers the caller names.
-unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
-    let needed = (e.frames.len() + 3).checked_mul(e.vm.register_width)?;
-    if needed <= e.vm.stack.len().checked_sub(e.vm.spread_reserve)? {
+/// Slots kept free above every window: a callee's arguments, a spread or a
+/// continuation's layout is written in the file before anything covers it,
+/// and a 256-register view of a window never leaves it.
+pub(crate) const WINDOW: usize = 256;
+/// A new register file's slots.
+const FILE_START: usize = 4096;
+/// A file longer than this is cut back to `FILE_START` when its engine ends.
+const SPARE_CAP: usize = 131_072;
+/// The address just past FILE.
+fn file_limit(file: &[Value]) -> usize {
+    file.as_ptr() as usize + std::mem::size_of_val(file)
+}
+/// Make room for a window ending END slots past R, the running engine's
+/// current frame, and `WINDOW` more: grow the file on a cold boundary,
+/// rebasing every activation pointer. Returns R, rebased if the file moved.
+fn frame_room(e: &mut Engine<'_>, r: *mut Value, end: usize) -> Option<*mut Value> {
+    let slot = std::mem::size_of::<Value>();
+    if (r as usize).saturating_add(end.saturating_add(WINDOW).saturating_mul(slot)) <= e.limit {
         Some(r)
     } else {
-        // SAFETY: R as the function's contract (`# Safety`).
-        unsafe { widen_registers(e, r, e.vm.register_width) }
+        let at = (r as usize).wrapping_sub(e.vm.stack.as_ptr() as usize) / slot;
+        grow_registers(e, r, at.checked_add(end)?.checked_add(WINDOW)?)
     }
 }
 // Keep metadata allocation and cleanup out of threaded callers so optimized
@@ -2711,8 +2718,8 @@ unsafe fn trace_call<const LISP: bool>(e: &mut Engine<'_>, r: *mut Value, pc: *c
         let function = spread.unwrap_or(function);
         let resolved = if target == Value::UNBOUND { e.vm.backtrace_resolve(function).unwrap_or(target) } else { target };
         // GNU records a pointer to the caller's pushed arguments; so does this,
-        // as an offset into the register stack. `apply`'s spread window is
-        // the exception: a nested apply reuses it, so those are copied.
+        // as an offset into the register stack. `apply`'s spread is the
+        // exception: the callee's frame overwrites it, so those are copied.
         let args = if spread.is_some() {
             e.vm.backtrace.copied(std::slice::from_raw_parts(r.add(start), argc))
         } else {
@@ -2899,7 +2906,9 @@ unsafe fn direct(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
                 e.vm.speculative_hits += 1;
             }
             if !depth_room(&mut e) { return Value::UNBOUND; }
-            let Some(r) = frame_room(&mut e, r) else { return fail(&mut e, "register storage overflow"); };
+            let width = e.vm.functions.get_unchecked(e.function).regs.max(1);
+            let end = width + e.vm.functions.get_unchecked(entry.function).regs;
+            let Some(r) = frame_room(&mut e, r, end) else { return fail(&mut e, "register storage overflow"); };
             if let Some(body) = e.inline_bodies.get_unchecked(i.site)
                 && let Some(value) = body.evaluate(r.add(i.d))
             {
@@ -2916,7 +2925,7 @@ unsafe fn direct(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
                 *r.add(i.a) = value;
                 return advance(e, r, pc);
             }
-            let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
+            let new = r.add(width);
             std::ptr::copy(r.add(i.d), new, i.e);
             return enter_frame(e, r, pc, new, entry.function, None, entry.target, i.d, i.e);
         }
@@ -3009,9 +3018,11 @@ unsafe fn invoke(
             return resolve_entry(e, r, pc, target, start, argc);
         }
         if !depth_room(en) { return Value::UNBOUND; }
-        let Some(r) = frame_room(en, r) else { return fail(en, "register storage overflow"); };
+        let width = en.vm.functions.get_unchecked(en.function).regs.max(1);
+        let end = width + en.vm.functions.get_unchecked(function).regs;
+        let Some(r) = frame_room(en, r, end) else { return fail(en, "register storage overflow"); };
         if entry.simple_arity == argc {
-            let new = r.add(en.vm.functions.get_unchecked(en.function).regs.max(1));
+            let new = r.add(width);
             let mark = call_mark(en, r, pc, target, start, argc);
             match argc {
                 0 => {}
@@ -3029,11 +3040,11 @@ unsafe fn invoke(
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
-        let new = r.add(en.vm.functions.get_unchecked(en.function).regs.max(1));
+        let new = r.add(width);
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
-        // The arguments may lie where the new frame goes (`apply`'s spread
-        // window once storage has widened): read them all before writing
+        // The arguments may lie where the new frame goes (`apply`'s spread,
+        // written at this caller's end): read them all before writing
         // the frame (the backtrace entry, then rest values, then the
         // positional ones by memmove) and only then write the captures.
         let mark = call_mark(en, r, pc, target, start, argc);
@@ -3087,18 +3098,16 @@ unsafe fn resolve_entry(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let en: &mut Engine<'_> = &mut e;
-        let mut r = r;
         if target.tag() == 4 {
             let Some(closure) = en.vm.closures.get(target.payload() as usize) else {
                 return fail(en, "invalid closure reference");
             };
             let function = closure.function;
             if en.vm.functions[function].lazy.is_some() {
-                // No collection runs in it (`force_lazy`), so `target` and the
-                // argument registers keep their indices; only `r` is rebased.
-                match force_lazy(en, r, function) {
-                    Some(rebased) => r = rebased,
-                    None => return Value::UNBOUND,
+                // No collection runs in it (`force_lazy`), and it runs on a
+                // file of its own, so `target`, the arguments and `r` stand.
+                if !force_lazy(en, function) {
+                    return Value::UNBOUND;
                 }
             }
             let closure = &en.vm.closures[target.payload() as usize];
@@ -3308,9 +3317,9 @@ unsafe fn invoke_full(
         invoke(e, r, pc, target, start, argc)
     }
 }
-/// Cold apply adapter. Its bounded scratch window is disjoint from all frames.
-/// Arguments are copied into the callee before the next handler executes; nested
-/// calls therefore never retain a pointer into the shared scratch window.
+/// Cold apply adapter. The spread goes at this caller's end, where the callee's
+/// window starts, so the callee takes it as its arguments; nothing keeps a
+/// pointer into it past the call.
 #[cold]
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
@@ -3327,8 +3336,9 @@ unsafe fn apply(
     unsafe {
         enter_apply(&mut e, r, pc, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
+        let at = base + e.vm.functions.get_unchecked(e.function).regs.max(1);
         // Out of line: the Result's error drop would stop the tail dispatch.
-        let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc) else {
+        let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc, at) else {
             return Value::UNBOUND;
         };
         e.apply_function = Some(target);
@@ -3399,6 +3409,7 @@ unsafe fn enter_frame_marked(
         let en: &mut Engine<'_> = &mut e;
         // Captures/arguments have already been copied, including on lower failure.
         let end = new.offset_from(en.vm.stack.as_ptr()) as usize + en.vm.functions[function].regs;
+        debug_assert!(end + WINDOW <= en.vm.stack.len(), "a window entered without room (`frame_room`)");
         en.stack_used = en.stack_used.max(end);
         // The function-id entry cache guarantees lowering before frame entry.
         en.frames.push(Frame {
@@ -3646,14 +3657,11 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let (r, width) = (e.regs, e.vm.register_width);
+        // The nested run had a file of its own, so this one did not move.
+        let r = e.regs;
         // SAFETY: R is this engine's current frame, in the register stack, and
         // PC the reading call's instruction, in this engine's code.
         unsafe {
-            let Some(r) = widen_registers(e, r, width) else {
-                fail(e, "register storage overflow");
-                return Continue::Stop;
-            };
             if let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
@@ -3727,8 +3735,8 @@ unsafe fn take_step(
             }
         };
         let resuming = std::ptr::eq(pc, &K_CODE[1]);
-        let (k, depth) = if resuming {
-            (r, e.frames.len())
+        let k = if resuming {
+            r
         } else {
             if !depth_room(e) { return Continue::Stop; }
             let width = if std::ptr::eq(pc, &K_CODE[0]) {
@@ -3737,44 +3745,25 @@ unsafe fn take_step(
             } else {
                 e.vm.functions.get_unchecked(e.function).regs.max(1)
             };
-            (r.add(width), e.frames.len() + 1)
+            r.add(width)
         };
-        // Frames assume an activation at depth d starts within (d + 1) register
-        // widths; a callee of this one starts at k + width at depth + 1. This
-        // is conservative; widen/grow the storage below before writing any
-        // activation wider than the compiled register width.
+        // The layout goes at K, with `WINDOW` slots above it, as any window.
         let width = K_SAVED + saved.len() + args.len();
         let offset = k.offset_from(e.vm.stack.as_ptr()) as usize;
-        let fits = |e: &Engine<'_>| {
-            (depth + 2)
-                .checked_mul(e.vm.register_width)
-                .zip(offset.checked_add(width))
-                .is_some_and(|(limit, end)| end <= limit && end <= e.vm.stack.len() - e.vm.spread_reserve)
+        let Some(need) = offset.checked_add(width).and_then(|end| end.checked_add(WINDOW)) else {
+            fail(e, "register storage exhausted");
+            return Continue::Stop;
         };
-        // The register width is the widest compiled function so far, so a
-        // request wider than every function compiled yet (the first T2 call
-        // of a fresh VM whose only form is a tiny top-level one) fails the
-        // bound at a shallow depth. That is not depth: widen the registers
-        // until the activation fits, rebasing every frame exactly as
-        // `force_lazy` does when compiling widens them. Lisp depth is checked
-        // separately against the dynamically bound variable above.
-        let r = if fits(e) {
+        let r = if need <= e.vm.stack.len() {
             r
         } else {
-            let Some(rebased) = offset
-                .checked_add(width)
-                .and_then(|end| widen_registers(e, r, end.div_ceil(depth + 2)))
-            else {
+            let Some(rebased) = grow_registers(e, r, need) else {
                 fail(e, "register storage exhausted");
                 return Continue::Stop;
             };
             rebased
         };
         let k = e.vm.stack.as_mut_ptr().add(offset);
-        if !fits(e) {
-            fail(e, "register storage exhausted");
-            return Continue::Stop;
-        }
         if !resuming {
             e.frames.push(Frame {
                 pc: pc.add(1),
@@ -3933,7 +3922,9 @@ unsafe fn t2_dispatch(
         match p {
             Primitive::Apply => {
                 enter_apply(&mut e, r, pc, start, argc);
-                let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc) else {
+                // A continuation's callee starts after its own layout.
+                let at = base + k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N));
+                let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc, at) else {
                     return Value::UNBOUND;
                 };
                 e.apply_function = Some(target);
@@ -4003,9 +3994,10 @@ unsafe fn t2_invoke_full(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe { invoke_full(e, r, pc, target, start, argc) }
 }
-/// Spread `apply`'s arguments; `None` after recording the error.  A spread
-/// wider than the stack's reserved tail widens the reserve first, rebasing
-/// every activation (offsets are unchanged), so the caller's registers move.
+/// Spread `apply`'s arguments at AT, the caller's end, where the callee's
+/// window will start; `None` after recording the error. A spread the file
+/// cannot hold grows it first, rebasing every activation (offsets are
+/// unchanged), so the caller's registers move.
 #[cold]
 #[inline(never)]
 /// # Safety
@@ -4016,27 +4008,21 @@ unsafe fn t2_prepare_apply(
     r: *mut Value,
     start: usize,
     argc: usize,
+    at: usize,
 ) -> Option<(*mut Value, Value, usize, usize)> {
     let mut r = r;
     loop {
-        // prepare_apply writes a disjoint scratch window at the end.
-        match e.vm.prepare_apply(start, argc) {
+        match e.vm.prepare_apply(start, argc, at) {
             Ok(Ok(window)) => {
-                match e.apply_scratch.iter_mut().find(|(offset, _)| *offset == window.1) {
-                    Some((_, count)) => *count = (*count).max(window.2),
-                    None => e.apply_scratch.push((window.1, window.2)),
-                }
+                e.stack_used = e.stack_used.max(window.1 + window.2);
                 return Some((r, window.0, window.1, window.2));
             }
-            Ok(Err(count)) => {
-                let Some(reserve) = count.checked_next_power_of_two() else {
+            Ok(Err(need)) => {
+                let Some(rebased) = grow_registers(e, r, need) else {
                     fail(e, "register storage overflow");
                     return None;
                 };
-                e.vm.spread_reserve = reserve;
-                let width = e.vm.register_width;
-                // SAFETY: R as the function's contract (`# Safety`).
-                r = unsafe { widen_registers(e, r, width) }?;
+                r = rebased;
             }
             Err(error) => {
                 e.error = Some(error);
@@ -4069,13 +4055,10 @@ unsafe fn t2_enter_closure(
         };
         let function = closure.function;
         if !depth_room(en) { return Value::UNBOUND; }
-        let Some(r) = frame_room(en, r) else { return fail(en, "register storage overflow"); };
-        let mut r = r;
-        if en.vm.functions[function].lazy.is_some() {
-            match force_lazy(en, r, function) {
-                Some(rebased) => r = rebased,
-                None => return Value::UNBOUND,
-            }
+        // A lazy function's width is a placeholder until it is forced, so the
+        // room is made below, once forcing and lowering have fixed it.
+        if en.vm.functions[function].lazy.is_some() && !force_lazy(en, function) {
+            return Value::UNBOUND;
         }
         if let Err(error) = lower_function(
             en.vm,
@@ -4089,17 +4072,20 @@ unsafe fn t2_enter_closure(
             en.error = Some(error);
             return Value::UNBOUND;
         }
+        let width = k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N));
+        let end = width + en.vm.functions[function].regs;
+        let Some(r) = frame_room(en, r, end) else { return fail(en, "register storage overflow"); };
         let f = &en.vm.functions[function];
         if argc < f.required || (!f.rest && argc > f.arity) {
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
-        let new = r.add(k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N)));
+        let new = r.add(width);
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
         // As in the cached entry: read every argument, the backtrace's
-        // included, before writing the frame, which may overlap `apply`'s
-        // spread window after widening.
+        // included, before writing the frame, which overlaps `apply`'s
+        // spread when there is one.
         let mark = call_mark(en, r, pc, target, start, argc);
         let f = &en.vm.functions[function];
         let closure = &en.vm.closures[target.payload() as usize];
@@ -4427,67 +4413,50 @@ unsafe fn primitive(
         }
     }
 }
-/// Raise the register width to at least `width` and grow the shared register
-/// stack to match, rebasing every frame pointer and `e.regs` the way
-/// `force_lazy` does after compiling widens the registers. Nothing runs Lisp
-/// or allocates Lisp objects here, so no collection can observe the move.
-/// Returns `r` rebased, or None when the storage size overflows.
+/// Grow the engine's register file to at least NEED slots, doubling, and
+/// rebase every frame pointer and `e.regs`, by their offsets in the file.
+/// Nothing runs Lisp or allocates Lisp objects here, so no collection can
+/// observe the move. Returns R rebased, or None when the size overflows. R
+/// and every frame pointer are offsets into the file, so the rebase needs no
+/// dereference.
 #[cold]
 #[inline(never)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`), holding the
-/// registers the caller names.
-unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Option<*mut Value> {
-    // SAFETY: R as the function's contract (`# Safety`).
-    unsafe {
-        let width = width.max(e.vm.register_width);
-        let frames = (e.frames.len() + 3).max(MIN_FRAMES).checked_next_power_of_two()?;
-        let size = width.checked_mul(frames)?.checked_add(e.vm.spread_reserve)?;
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let regs = e.regs.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
-        e.vm.register_width = width;
-        if e.vm.stack.len() < size {
-            e.vm.stack.resize(size, Value::NIL);
-        }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        e.regs = base.add(regs);
-        Some(base.add(current))
+fn grow_registers(e: &mut Engine<'_>, r: *mut Value, need: usize) -> Option<*mut Value> {
+    let size = need.max(e.vm.stack.len().checked_mul(2)?).checked_next_power_of_two()?;
+    let old_base = e.vm.stack.as_ptr() as usize;
+    let offset = |p: *mut Value| (p as usize).wrapping_sub(old_base) / std::mem::size_of::<Value>();
+    let current = offset(r);
+    let regs = offset(e.regs);
+    let frames: Vec<usize> = e.frames.iter().map(|frame| offset(frame.regs)).collect();
+    e.vm.stack.resize(size, Value::NIL);
+    e.limit = file_limit(&e.vm.stack);
+    let base = e.vm.stack.as_mut_ptr();
+    for (frame, offset) in e.frames.iter_mut().zip(frames) {
+        frame.regs = base.wrapping_add(offset);
     }
+    e.regs = base.wrapping_add(regs);
+    Some(base.wrapping_add(current))
 }
 /// R215: expand and compile a lazily held body before its first frame entry.
 /// Macro expansion runs Lisp, so this engine is suspended, its collections
 /// deferred (`lend::deferred`): callers may keep the callee and argument
-/// indices across this. Returns
-/// the rebased caller registers, or None with the expansion's own condition
-/// pending (GNU signals it when the call reaches the body).
+/// indices across this. It runs on a file of its own, so the caller's
+/// registers stay where they are. Returns false with the expansion's own
+/// condition pending (GNU signals it when the call reaches the body).
 #[cold]
 #[inline(never)]
-fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut Value> {
+fn force_lazy(e: &mut Engine<'_>, function: usize) -> bool {
     {
         e.vm.execution_fatal = false;
         e.vm.propagated_escape = None;
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
-        debug_assert_eq!(r, e.regs, "a call runs in the current frame");
-        let (result, fits) = lend::deferred(e, Nested::Lazy(function));
+        let result = lend::deferred(e, Nested::Lazy(function));
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        if !fits {
-            fail(e, "register storage overflow");
-            return None;
-        }
         match result {
-            Ok(_) => Some(e.regs),
+            Ok(_) => true,
             Err(error) => {
                 if let Some(escape) = e.vm.propagated_escape.take() {
                     e.escape = Some(escape);
@@ -4502,7 +4471,7 @@ fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut
                         Err(error) => e.error = Some(error),
                     }
                 }
-                None
+                false
             }
         }
     }
@@ -4765,14 +4734,10 @@ fn nested_then<'a, 'b, B: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call:
         e.vm.loader.propagate += 1;
         std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
     });
-    lend::nested(m, gc, call, (b, saved_depth), move |e, (b, saved_depth), result, fits| {
+    lend::nested(m, gc, call, (b, saved_depth), move |e, (b, saved_depth), result| {
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        if !fits {
-            fail(e, "register storage overflow");
-            return false;
-        }
         match result {
             Ok(value) => {
                 then(e, b, value);
@@ -4887,14 +4852,10 @@ fn loader_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, cal
         (frame, std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len()))
     });
     let ok = lend::nested(&mut m, gc.by_ref(), Nested::Loader(p, &frame), (pc.a(), p, (start, argc), saved_depth),
-        |e, (dest, p, (start, argc), saved_depth), result, fits| {
+        |e, (dest, p, (start, argc), saved_depth), result| {
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        if !fits {
-            fail(e, "register storage overflow");
-            return false;
-        }
         match result {
             Ok(value) => {
                 leave_native(e);
@@ -5880,26 +5841,30 @@ mod register_tests {
         );
     }
 
+    /// A continuation's callee whose width is known only once forced: `sort`
+    /// calls a lazy predicate wider than a new file through `t2_enter_closure`,
+    /// which must make its room after forcing, not before.
     #[test]
-    fn width_is_known_before_first_execution() {
+    fn a_continuation_grows_the_file_for_a_lazy_callee() {
         let mut vm = Vm::new();
-        vm.compile_source("(lambda (a b c d e) (+ a b c d e))")
-            .unwrap();
-        let expected = vm.functions.iter().map(|f| f.regs).max().unwrap().max(1);
-        assert_eq!(
-            vm.register_width, expected,
-            "definition must update register width, not the next call"
-        );
+        let bindings: String = (0..5000).map(|i| format!("(v{i} {i})")).collect::<Vec<_>>().join(" ");
+        let source = format!("(sort (list 3 1 2) (eval '(lambda (a b) (let* ({bindings}) (< a b)))))");
+        let value = vm.eval_source(&source).unwrap().display().unwrap();
+        assert_eq!(value, "(1 2 3)");
+        let grown = vm.execution.registers.len();
+        assert!(grown > FILE_START, "the predicate's frame grew the file: {grown}");
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     #[test]
-    fn registers_stay_widened_and_nil_across_runs() {
+    fn registers_stay_grown_and_nil_across_runs() {
         let mut vm = Vm::new();
-        vm.eval_source_raw("(defun register-probe (n) (if (> n 0) (1+ (register-probe (1- n))) 0))")
+        vm.eval_source_raw("(defun register-probe (n) (let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6))
+                              (if (> n 0) (1+ (register-probe (1- n))) (+ a b c d e f))))")
             .unwrap();
-        vm.eval_source_raw("(register-probe 100)").unwrap();
+        vm.eval_source_raw("(register-probe 800)").unwrap();
         let widened = vm.execution.registers.len();
-        assert!(widened > vm.register_width * MIN_FRAMES, "the recursion went past MIN_FRAMES");
+        assert!(widened > FILE_START, "the recursion grew the file: {widened}");
         assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
         vm.eval_source_raw("(register-probe 1)").unwrap();
         assert_eq!(vm.execution.registers.len(), widened);

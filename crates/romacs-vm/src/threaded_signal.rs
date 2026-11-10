@@ -220,14 +220,6 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
         let depth = e.vm.propagated_eval_depth.take();
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let (r, width) = (e.regs, e.vm.register_width);
-        // SAFETY: `r' is `e.regs': it and every frame's registers point into
-        // `e.vm.stack', whose allocation the nested call set aside unmoved and
-        // gave back (`Vm::suspend_stack'), as `widen_registers' rebases from.
-        if unsafe { widen_registers(e, r, width) }.is_none() {
-            e.error = Some("register storage exhausted".into());
-            e.fatal_image_failure = true;
-        }
         let escaped = match (result, replacement) {
             (_, Some(escape)) => { e.escape = Some(escape); true }
             (Err(error), None) => {
