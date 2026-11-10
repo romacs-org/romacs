@@ -45,7 +45,7 @@ struct XwidgetContentExtentWire {
 
 /// A serialized extent that [`XwidgetContentExtent::new`] refuses.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct InvalidXwidgetContentExtent {
+pub(crate) struct InvalidXwidgetContentExtent {
     /// The rejected width.
     pub width_px: f32,
     /// The rejected height.
@@ -194,7 +194,7 @@ impl<Space: Copy> XwidgetPresentationGeometry<Space> {
     }
 
     #[must_use]
-    pub fn layout_slot_rect(self) -> GeometryRect<Space, LogicalPixels> {
+    pub(crate) fn layout_slot_rect(self) -> GeometryRect<Space, LogicalPixels> {
         GeometryRect::from_origin_and_size(
             self.origin,
             GeometrySize::<LogicalPixels>::from_px(

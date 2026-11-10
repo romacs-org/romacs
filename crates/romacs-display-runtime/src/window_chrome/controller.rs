@@ -21,15 +21,13 @@ impl WindowChromeController {
 
     fn policy(decorated: bool) -> WindowChromePolicy {
         if decorated {
-            WindowChromePolicy::Native(std::cfg_select! {
-                target_os = "macos" => { NativeTitlebarStyle::Overlay }
-                _ => { NativeTitlebarStyle::System }
-            })
+            WindowChromePolicy::Native(NativeTitlebarStyle::System)
         } else {
             WindowChromePolicy::ClientDecorated
         }
     }
 
+    #[cfg(test)]
     /// An external native-style operation may invalidate the cached appearance.
     pub fn invalidate(&mut self) {
         self.applied = None;
@@ -74,7 +72,7 @@ impl WindowChromeController {
     /// Native safe areas become available only after window creation. Reserve
     /// them before GPU setup so they do not consume the requested editor area.
     /// A pending native configure remains authoritative when it arrives.
-    pub fn request_initial_content_size(
+    pub(crate) fn request_initial_content_size(
         window: &dyn Window,
         decorated: bool,
         content: PhysicalSize<u32>,

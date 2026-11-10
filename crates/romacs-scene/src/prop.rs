@@ -321,7 +321,7 @@ fn path_el_points(el: kurbo::PathEl) -> Vec<kurbo::Point> {
 
 /// A grid's shape agrees with its contents.
 #[must_use]
-pub fn cells_valid(g: &Cells) -> bool {
+pub(crate) fn cells_valid(g: &Cells) -> bool {
     let n = usize::from(g.cols) * usize::from(g.rows);
     g.glyphs.len() == n
         && (g.shades.is_empty() || g.shades.len() == n)
@@ -333,7 +333,7 @@ pub fn cells_valid(g: &Cells) -> bool {
 
 /// Every property a kind carries, for validating a whole inserted node.
 #[must_use]
-pub fn props_of(kind: &Kind) -> Vec<Prop> {
+pub(crate) fn props_of(kind: &Kind) -> Vec<Prop> {
     let common = [
         Prop::X,
         Prop::Y,
@@ -386,7 +386,7 @@ pub fn props_of(kind: &Kind) -> Vec<Prop> {
 }
 
 /// Check every property of a freshly built node, as an insert must.
-pub fn check_node(node: &Node) -> Result<(), (Prop, PropError)> {
+pub(crate) fn check_node(node: &Node) -> Result<(), (Prop, PropError)> {
     props_of(&node.kind)
         .into_iter()
         .filter_map(|prop| get(node, prop).map(|value| (prop, value)))

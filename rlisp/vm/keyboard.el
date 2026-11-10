@@ -906,6 +906,8 @@ Return the keys read, nil at the end of an executing keyboard macro."
         (setq last-repeatable-command real-this-command))
       (setq romacs--command-keys [] romacs--single-command-key-start 0)
       (romacs--after-command-mark previous-buffer previous-tick)
+      ;; A step of a session's flight recording (crate::flight).
+      (romacs--flight-step this-command)
       ;; The keys of a command that ran, unless it set a prefix argument
       ;; for the next one, belong to the macro being defined.
       (when (and defining-kbd-macro (null prefix-arg))

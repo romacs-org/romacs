@@ -654,6 +654,11 @@ impl Vm {
                         self.set_rooted(&last, 0, v);
                         self.loader.completed_forms += 1;
                         self.loader.steps[step].status = StepStatus::Ok;
+                        // A session's own file's forms are its steps; a
+                        // library's are inside the step that loaded it.
+                        if self.loader.active_depth() == 1 {
+                            crate::flight::step(|| format!("form {}:{line}", path.display()), || self.flight_step_fingerprint());
+                        }
                     }
                     Err(e) => {
                         let failed = &mut self.loader.steps[step];
@@ -763,6 +768,11 @@ impl Vm {
                         self.set_rooted(&last, 0, v);
                         self.loader.completed_forms += 1;
                         self.loader.steps[step].status = StepStatus::Ok;
+                        // A session's own file's forms are its steps; a
+                        // library's are inside the step that loaded it.
+                        if self.loader.active_depth() == 1 {
+                            crate::flight::step(|| format!("form {}:{line}", path.display()), || self.flight_step_fingerprint());
+                        }
                     }
                     Err(e) => {
                         // The form's text, for the report, from the source.

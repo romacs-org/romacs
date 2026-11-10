@@ -221,7 +221,7 @@ impl RenderApp {
             // OS-delivered RedrawRequested for a surface the
             // compositor is not showing.
             if !self.frame_coordinator.is_eligible(sched_id) {
-                super::frame_stats::count_plan(sched_id, &plan);
+                super::frame_stats::count_plan(&plan);
                 return;
             }
             if !plan.should_present {
@@ -234,7 +234,7 @@ impl RenderApp {
                 // than rendered unattributed.
                 plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
             }
-            super::frame_stats::count_plan(sched_id, &plan);
+            super::frame_stats::count_plan(&plan);
             if plan.reasons.is_empty() {
                 super::frame_stats::count(
                     &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
@@ -339,7 +339,6 @@ impl RenderApp {
             _ => false,
         };
         if dismiss {
-            self.comms.tooltip_context.invalidate();
             self.tooltips.hide();
         }
         if self.handle_native_menu_bar_event(window_id, &event)
@@ -613,11 +612,8 @@ impl RenderApp {
                     if !handled_via_text {
                         // `logical_key` is the layout's key with Shift applied
                         // and no command modifier folded in, which is what GNU
-                        // reads for a command chord. macOS is the one window
-                        // system that would compose an Option chord into
-                        // another character first, and the frame window asks
-                        // it not to (`apply_option_key_policy`), so no
-                        // per-event substitution is needed here.
+                        // reads for a command chord, so no per-event
+                        // substitution is needed here.
                         let key = Self::translate_key_input(&logical_key);
                         if let Some(key) = key {
                             let key_modifiers = match key {

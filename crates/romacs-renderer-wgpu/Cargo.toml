@@ -10,7 +10,6 @@ description = "WGPU text renderer primitives for Romacs"
 [features]
 default = []
 video = ["dep:romacs-video"]
-video-dmabuf = ["video"]
 # The shared test GPU (gpu_policy::test_gpu), for other crates' tests.
 test-gpu = []
 

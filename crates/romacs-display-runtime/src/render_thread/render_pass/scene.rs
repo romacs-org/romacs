@@ -15,7 +15,7 @@
 //! drawn: its glyph indices name fonts the current atlas no longer has, and
 //! drawing it would resolve them against the wrong table.
 
-use crate::core::types::DisplayFrameId;
+use romacs_display_protocol::types::DisplayFrameId;
 use crate::render_thread::frame_stats;
 use crate::render_thread::frame_windows::GuiFrameRenderState;
 
@@ -30,10 +30,10 @@ pub(super) fn render_frame_root_glyphs(
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     present_mapping: romacs_display_protocol::PresentMapping,
     cursor_visible: bool,
-    root_animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    root_animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
     bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
     retain_scroll_body: bool,
 ) {
@@ -126,9 +126,9 @@ pub(super) fn render_frame_content_overlays(
     content_size: (u32, u32),
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     cursor_visible: bool,
-    animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
     child_frame_style: &ChildFrameStyle,
     scroll_indicators_enabled: bool,
 ) -> Result<(), super::surface::FrameRenderFailure> {
@@ -505,7 +505,7 @@ pub(super) fn render_frame_content_overlays(
 fn render_frame_common_overlays(
     renderer: &mut WgpuRenderer,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     glyph_atlas: &mut WgpuGlyphAtlas,
     width: u32,
     height: u32,

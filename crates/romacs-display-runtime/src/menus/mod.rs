@@ -7,7 +7,10 @@ mod layout;
 mod menu_bar;
 pub(crate) use menu_bar::{HeadingAction, MenuHeading};
 mod session;
-pub(crate) use controller::{MenuPresentation, MenuRequest};
+pub(crate) use controller::MenuPresentation;
+#[cfg(test)]
+pub(crate) use controller::MenuRequest;
+#[cfg(test)]
 pub(crate) use session::MenuSession;
 
 #[cfg(all(test, target_os = "linux"))]

@@ -150,7 +150,7 @@ impl PhysicalModifierKey {
 /// Construction is struct-literal only, so adding a family is a compile
 /// error at every construction site rather than a silently-dropped slot.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct ModifierPolicyParts {
+pub(crate) struct ModifierPolicyParts {
     pub command_left: ModifierAssignment,
     pub command_right: SideAssignment,
     pub option_left: ModifierAssignment,
@@ -187,24 +187,11 @@ impl From<ModifierPolicyParts> for ModifierPolicy {
 /// being resolved away: [`ModifierPolicy::assignment`] resolves it at read
 /// time against the live left value.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub enum SideAssignment {
+pub(crate) enum SideAssignment {
     /// GNU's `left' marker: use the family's left assignment.
     #[default]
     InheritLeft,
     Explicit(ModifierAssignment),
-}
-
-/// How winit should rewrite Option-key chords, mirror of
-/// `winit::platform::macos::OptionAsAlt`.
-///
-/// Defined here so the protocol crate stays winit-free; the macOS display
-/// runtime maps this 1:1 onto winit's shape.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum OptionAsAltShape {
-    None,
-    LeftOnly,
-    RightOnly,
-    Both,
 }
 
 /// A modifier bit in the frontend transport.
@@ -282,7 +269,7 @@ struct ModifierFamily {
 }
 
 impl ModifierFamily {
-    const fn effective_right(&self) -> ModifierAssignment {
+    const fn effective_right(self) -> ModifierAssignment {
         match self.right {
             SideAssignment::InheritLeft => self.left,
             SideAssignment::Explicit(assignment) => assignment,
@@ -341,6 +328,7 @@ impl ModifierPolicy {
         }
     }
 
+    #[cfg(test)]
     /// Whether Option acts as a command (control-like) modifier for KIND,
     /// considering both sides.
     ///
@@ -348,45 +336,12 @@ impl ModifierPolicy {
     /// values when re-deriving a character with `UCKeyTranslate'; the
     /// function-kind slot matters for function-key chords because the same
     /// resolution is consulted with the event's kind.
-    pub fn option_is_command_like(&self, kind: ModifierEventKind) -> bool {
+    pub(crate) fn option_is_command_like(&self, kind: ModifierEventKind) -> bool {
         self.family_bits_for_option(Some(ModifierSideState::LeftOnly), kind) != 0
             || self.family_bits_for_option(Some(ModifierSideState::RightOnly), kind) != 0
     }
 
-    /// Per-side Option mapping, the shape winit's `set_option_as_alt`
-    /// needs.
-    ///
-    /// A side is command-like when EITHER of its ordinary or function slots
-    /// maps to a real modifier: GNU re-derives characters with
-    /// `UCKeyTranslate' only when a control-like modifier is also down, and
-    /// a chord on a function key consults the :function slot
-    /// (`nsterm.m:2722-2725`).  Sides mapped to `none' must keep composing
-    /// characters, which is exactly what winit's non-rewriting shapes do.
-    pub fn option_as_alt_shape(&self) -> OptionAsAltShape {
-        let left = self.family_bits_for_option(
-            Some(ModifierSideState::LeftOnly),
-            ModifierEventKind::Ordinary,
-        ) != 0
-            || self.family_bits_for_option(
-                Some(ModifierSideState::LeftOnly),
-                ModifierEventKind::Function,
-            ) != 0;
-        let right = self.family_bits_for_option(
-            Some(ModifierSideState::RightOnly),
-            ModifierEventKind::Ordinary,
-        ) != 0
-            || self.family_bits_for_option(
-                Some(ModifierSideState::RightOnly),
-                ModifierEventKind::Function,
-            ) != 0;
-        match (left, right) {
-            (true, true) => OptionAsAltShape::Both,
-            (true, false) => OptionAsAltShape::LeftOnly,
-            (false, true) => OptionAsAltShape::RightOnly,
-            (false, false) => OptionAsAltShape::None,
-        }
-    }
-
+    #[cfg(test)]
     fn family_bits_for_option(
         &self,
         side: Option<ModifierSideState>,
@@ -435,11 +390,7 @@ impl ModifierPolicy {
         self.with_command_assignment(Some(value))
     }
 
-    pub fn with_command_none(self) -> Self {
-        self.with_command_assignment(None)
-    }
-
-    pub fn with_command_assignment(self, value: Option<EmacsModifierKey>) -> Self {
+    pub(crate) fn with_command_assignment(self, value: Option<EmacsModifierKey>) -> Self {
         Self {
             command: ModifierFamily {
                 left: ModifierAssignment::uniform(value),
@@ -461,16 +412,19 @@ impl ModifierPolicy {
         }
     }
 
-    pub fn with_option(self, value: EmacsModifierKey) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_option(self, value: EmacsModifierKey) -> Self {
         self.with_option_assignment(Some(value), Some(value), Some(value))
     }
 
-    pub fn with_option_none(self) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_option_none(self) -> Self {
         self.with_option_assignment(None, None, None)
     }
 
+    #[cfg(test)]
     /// Replace BOTH sides of the Option family with per-kind assignments.
-    pub fn with_option_assignment(
+    pub(crate) fn with_option_assignment(
         self,
         ordinary: Option<EmacsModifierKey>,
         function: Option<EmacsModifierKey>,
@@ -484,16 +438,6 @@ impl ModifierPolicy {
                     mouse,
                 },
                 right: self.option.right,
-            },
-            ..self
-        }
-    }
-
-    pub fn with_right_option(self, value: EmacsModifierKey) -> Self {
-        Self {
-            option: ModifierFamily {
-                right: SideAssignment::Explicit(ModifierAssignment::uniform(Some(value))),
-                ..self.option
             },
             ..self
         }

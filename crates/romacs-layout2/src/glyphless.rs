@@ -92,6 +92,9 @@ pub(crate) fn layout(method: &NoFont, ch: char, base: Base, extents: &mut dyn Fn
     Glyph { width, boxed: true, halves }
 }
 
+/// Digit-face copies on other backgrounds: (background, copy) by face index.
+type DigitCopies = HashMap<usize, Vec<([u32; 4], FaceId)>>;
+
 /// The glyphless glyphs one face table's layout made: each character's
 /// by face index, and each such face's digit face (with its nominal
 /// advance) and box-line face; END, the first face id above every face
@@ -101,7 +104,7 @@ pub(crate) struct Glyphless {
     glyphs: HashMap<(usize, char), Glyph>,
     faces: HashMap<usize, Faces>,
     /// The digit faces' copies made on other backgrounds, by face index.
-    copies: std::cell::RefCell<HashMap<usize, Vec<([u32; 4], FaceId)>>>,
+    copies: std::cell::RefCell<DigitCopies>,
     pub end: u32,
 }
 

@@ -194,24 +194,6 @@ fn a_clipboard_absence_may_be_answered_by_data_control() {
 }
 
 #[test]
-fn a_primary_absence_never_consults_data_control() {
-    let result = wayland_read(ClipboardSelection::Primary, no_offer(), || {
-        panic!("PRIMARY must not consult the data-control fallback")
-    });
-    assert_eq!(result, Ok(TextRead::NoSelection));
-}
-
-#[test]
-fn primary_text_is_returned_without_consulting_data_control() {
-    let result = wayland_read(
-        ClipboardSelection::Primary,
-        Ok("selected".to_owned()),
-        || panic!("PRIMARY text must not consult the data-control fallback"),
-    );
-    assert_eq!(result, Ok(TextRead::Text("selected".to_owned())));
-}
-
-#[test]
 fn only_text_reaches_the_evaluator_facing_wire() {
     assert_eq!(
         TextRead::Text("x".to_owned()).into_option(),

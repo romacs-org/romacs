@@ -233,7 +233,7 @@ impl VideoSubmissionTracker {
 
 /// Compatibility presentation of the typed native session lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VideoState {
+pub(crate) enum VideoState {
     Loading,
     Playing,
     Paused,
@@ -257,7 +257,7 @@ impl From<VideoSessionState> for VideoState {
 
 /// Renderer-facing metadata. The authoritative frame, GPU handles, and native
 /// lease remain together in [`VideoSystem`].
-pub struct CachedVideo {
+pub(crate) struct CachedVideo {
     pub id: VideoId,
     pub width: u32,
     pub height: u32,
@@ -511,7 +511,7 @@ impl VideoSystemState {
 
 /// Cross-platform video cache. Decode and native-surface import belong to
 /// `romacs-video`; this facade maintains renderer metadata and budget events.
-pub struct VideoCache {
+pub(crate) struct VideoCache {
     system: VideoSystemState,
     sampling: Option<VideoSamplingResources>,
     channel_targets: Option<VideoChannelTargets>,
@@ -581,11 +581,11 @@ impl VideoCache {
         id
     }
 
-    pub fn load_file_with_id(&mut self, id: u32, path: &str, loop_count: i32, autoplay: bool) {
+    pub(crate) fn load_file_with_id(&mut self, id: u32, path: &str, loop_count: i32, autoplay: bool) {
         self.load_legacy_source_with_id(id, VideoSource::File(path.into()), loop_count, autoplay);
     }
 
-    pub fn load_uri_with_id(&mut self, id: u32, uri: &str, loop_count: i32, autoplay: bool) {
+    pub(crate) fn load_uri_with_id(&mut self, id: u32, uri: &str, loop_count: i32, autoplay: bool) {
         self.load_legacy_source_with_id(id, VideoSource::Uri(uri.to_owned()), loop_count, autoplay);
     }
 
@@ -718,7 +718,7 @@ impl VideoCache {
         self.videos.get(&VideoId::new(id)).map(|video| video.state)
     }
 
-    pub fn get_dimensions(&self, id: u32) -> Option<(u32, u32)> {
+    pub(crate) fn get_dimensions(&self, id: u32) -> Option<(u32, u32)> {
         self.videos
             .get(&VideoId::new(id))
             .map(|video| (video.width, video.height))
@@ -835,7 +835,7 @@ impl VideoCache {
         }
     }
 
-    pub fn set_loop(&mut self, id: u32, count: i32) {
+    pub(crate) fn set_loop(&mut self, id: u32, count: i32) {
         match LoopMode::from_legacy(count) {
             Ok(mode) => self.set_loop_mode(VideoId::new(id), mode),
             Err(error) => self.handle_operation_error(VideoId::new(id), error.to_string().into()),
@@ -996,7 +996,7 @@ impl VideoCache {
         Ok(())
     }
 
-    pub fn process_pending(
+    pub(crate) fn process_pending(
         &mut self,
         request: romacs_video::VideoServiceRequest,
     ) -> &VideoServiceResult {
@@ -1173,7 +1173,7 @@ impl VideoCache {
         visibility_result.and(close_result)
     }
 
-    pub fn last_service(&self) -> &VideoServiceResult {
+    pub(crate) fn last_service(&self) -> &VideoServiceResult {
         &self.last_service
     }
 
@@ -1213,11 +1213,11 @@ impl VideoCache {
         Ok(diagnostics)
     }
 
-    pub fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
+    pub(crate) fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
         std::mem::take(&mut self.accounting)
     }
 
-    pub fn recovery_manifests(&self) -> Vec<VideoRecoveryManifest> {
+    pub(crate) fn recovery_manifests(&self) -> Vec<VideoRecoveryManifest> {
         let mut manifests: Vec<_> = self
             .system
             .ready()
@@ -1245,7 +1245,7 @@ impl VideoCache {
         manifests
     }
 
-    pub fn restore_after_device_loss(&mut self, manifests: Vec<VideoRecoveryManifest>) {
+    pub(crate) fn restore_after_device_loss(&mut self, manifests: Vec<VideoRecoveryManifest>) {
         if manifests.is_empty() {
             return;
         }

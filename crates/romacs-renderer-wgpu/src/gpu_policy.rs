@@ -21,7 +21,7 @@ pub fn new_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
 
 /// The power preference `ROMACS_GPU` asks for: `low` or `integrated` prefer
 /// an integrated GPU, anything else (or nothing) a discrete one.
-pub fn power_preference() -> wgpu::PowerPreference {
+pub(crate) fn power_preference() -> wgpu::PowerPreference {
     match std::env::var("ROMACS_GPU").as_deref() {
         Ok("low" | "integrated") => wgpu::PowerPreference::LowPower,
         Ok("high" | "discrete") | Err(_) => wgpu::PowerPreference::HighPerformance,
