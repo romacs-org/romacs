@@ -127,8 +127,4 @@ lib-src/rcs2log diff=shell
 # whitespace.
 java/INSTALL -whitespace
 
-DIVERGENCES.json merge=romacs-derived
-PRIMITIVES.json merge=romacs-derived
-crates/romacs-introspect-live/data/registry.json merge=romacs-derived
-crates/romacs-introspect/data/registry.json merge=romacs-derived
 rlisp/romacs-bundled-autoloads.el merge=romacs-derived

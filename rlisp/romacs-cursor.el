@@ -5,11 +5,11 @@
 
 ;;; Commentary:
 
-;; A bar where text goes in, a block where it does not.  While
-;; `romacs-cursor-shape-mode' is on, an editable buffer's cursor is
-;; `romacs-cursor-edit-type' and a read-only or special buffer's is
-;; `romacs-cursor-view-type'.  The mode sets the buffer's `cursor-type'
-;; when its major mode or read-only state changes, never per key, and
+;; One cursor in every buffer: `romacs-cursor-edit-type', a bar.  Setting
+;; `romacs-cursor-view-type' (to `box', say) opts read-only and special
+;; buffers into a cursor of their own.  `romacs-cursor-shape-mode' sets a
+;; buffer's `cursor-type' when its major mode or read-only state changes,
+;; never per key, and
 ;; leaves alone a buffer whose `cursor-type' something else set, and every
 ;; buffer when the user's own default `cursor-type' is not t.  How the
 ;; shapes are drawn, and the morph between them, is `romacs-cursor-look-style'
@@ -26,16 +26,21 @@
   "The cursor in a buffer that takes text, a `cursor-type' value."
   :type 'sexp)
 
-(defcustom romacs-cursor-view-type 'box
-  "The cursor in a read-only or special buffer, a `cursor-type' value."
-  :type 'sexp)
+(defcustom romacs-cursor-view-type nil
+  "The cursor in a read-only or special buffer, a `cursor-type' value.
+nil, the default, gives those buffers `romacs-cursor-edit-type' too, so
+every buffer has the same cursor.  `box' brings back GNU's block where
+text does not go in."
+  :type '(choice (const :tag "The same cursor as editable buffers" nil)
+                 (sexp :tag "A cursor-type value")))
 
 (defvar-local romacs-cursor--shaped nil
   "The `cursor-type' `romacs-cursor-shape-mode' last gave this buffer.")
 
 (defun romacs-cursor--type ()
   "The cursor the current buffer should have."
-  (if (or buffer-read-only (derived-mode-p 'special-mode))
+  (if (and romacs-cursor-view-type
+           (or buffer-read-only (derived-mode-p 'special-mode)))
       romacs-cursor-view-type
     romacs-cursor-edit-type))
 
@@ -55,9 +60,9 @@
   (kill-local-variable 'romacs-cursor--shaped))
 
 (define-minor-mode romacs-cursor-shape-mode
-  "Show a bar where text goes in and a block where it does not.
-An editable buffer's cursor is `romacs-cursor-edit-type', a read-only or
-special buffer's `romacs-cursor-view-type'."
+  "Give every buffer `romacs-cursor-edit-type', a bar.
+A read-only or special buffer gets `romacs-cursor-view-type' instead when
+that is set."
   :global t
   :group 'romacs-cursor-shape
   (dolist (hook '(after-change-major-mode-hook read-only-mode-hook view-mode-hook))
