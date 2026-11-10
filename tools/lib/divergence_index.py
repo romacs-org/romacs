@@ -9,8 +9,7 @@ Stage 1 of R98/R99. The point is stated in R99:
 
 So this does NOT introduce a second hand-maintained list. `DIVERGENCES.md` and
 the per-crate `GNU-DIVERGENCES.md` files stay canonical and human-written; this
-reads them and emits `DIVERGENCES.json` for agents. They cannot drift, because
-the JSON has no independent content.
+reads them when asked. Nothing derived is committed, so nothing can drift.
 
 Why an index at all: R90 and R93 license breaking Lisp-visible behaviour on one
 condition -- it may never be silent. Today "not silent" means written in a file
@@ -24,11 +23,12 @@ Where derivation is wrong or incomplete a row may carry an explicit override:
     | H1 | ... | ... | ... | ... |   <!-- symbols: maphash, apply, funcall -->
 
 Usage:
-    python3 tools/lib/divergence_index.py            # write DIVERGENCES.json
+    python3 tools/lib/divergence_index.py SYMBOL...  # the rows naming SYMBOL, as JSON
+    python3 tools/lib/divergence_index.py            # counts
     python3 tools/lib/divergence_index.py --check    # exit 1 if any row has no symbol
 """
 from __future__ import annotations
-import argparse, hashlib, json, pathlib, re, sys
+import argparse, json, pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -48,22 +48,6 @@ NOT_A_SYMBOL = re.compile(
         | [-%].*                                     # suffixes/format specs: -values, %S
         | .*[A-Z].*                                  # anything capitalised: Foo-Bar
         )$''', re.X)
-
-def source_fingerprint(paths: list[str]) -> str:
-    """SHA256 of sorted relative paths and exact bytes, including this generator.
-
-    Frame each UTF-8 path with NUL and its ASCII byte length with NUL before
-    the content. The length makes boundaries unambiguous even for NUL bytes.
-    History, HEAD, timestamps and the generated output are not inputs: committing
-    a dirty ledger and its index together must not invalidate that index.
-    """
-    digest = hashlib.sha256()
-    for path in sorted(paths):
-        content = (ROOT / path).read_bytes()
-        digest.update(path.encode('utf-8') + b'\0')
-        digest.update(str(len(content)).encode('ascii') + b'\0')
-        digest.update(content)
-    return digest.hexdigest()
 
 def symbols_in(cells: list[str], override: str | None) -> list[str]:
     if override:
@@ -119,61 +103,30 @@ def parse(path: pathlib.Path, source: str) -> list[dict]:
         })
     return rows
 
-def write_if_changed(out: pathlib.Path, index: dict) -> str:
-    """Compare complete deterministic bytes, repairing stale provenance too."""
-    content = (json.dumps(index, indent=1, ensure_ascii=False) + '\n').encode('utf-8')
-    if out.exists() and out.read_bytes() == content:
-        return 'unchanged'
-    out.write_bytes(content)
-    return 'written'
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument('symbols', nargs='*', help='print the rows that name these symbols, as JSON')
     ap.add_argument('--check', action='store_true',
                     help='exit 1 if a row yields no symbol (R99: unattached rows are invisible)')
     args = ap.parse_args()
 
     ledgers = ['DIVERGENCES.md'] + [p.relative_to(ROOT).as_posix()
                                      for p in sorted(ROOT.glob('crates/*/GNU-DIVERGENCES.md'))]
-    inputs = sorted([*ledgers, 'tools/lib/divergence_index.py'])
-    rows = []
-    for source in ledgers:
-        rows += parse(ROOT / source, source)
-
-    by_symbol: dict[str, list[int]] = {}
-    for i, r in enumerate(rows):
-        for s in r['symbols']:
-            by_symbol.setdefault(s, []).append(i)
-
-    index = {
-        'provenance': {
-            'generated_by': 'tools/lib/divergence_index.py',
-            'input_hash': source_fingerprint(inputs),
-            'inputs': inputs,
-            'note': 'Derived from the prose ledgers. Do not edit; edit those and regenerate.',
-        },
-        'counts': {'rows': len(rows), 'symbols': len(by_symbol),
-                   'rows_without_symbols': sum(1 for r in rows if not r['symbols'])},
-        'by_symbol': {k: sorted(v) for k, v in sorted(by_symbol.items())},
-        'rows': rows,
-    }
-
-    unattached = [r for r in rows if not r['symbols']]
-    if args.check:
-        print(f"  {len(rows)} rows, {len(by_symbol)} symbols, {len(unattached)} unattached")
-        if unattached:
-            print("  FAIL: a divergence with no symbol attached is invisible to an agent;")
-            print("  add a `<!-- symbols: a, b -->` comment to each row below (R98/R99).")
-            for r in unattached:
-                print(f"    [{r['source']}] {r['mechanism'][:72]}")
-            return 1
+    rows = [row for source in ledgers for row in parse(ROOT / source, source)]
+    for symbol in args.symbols:
+        print(json.dumps([r for r in rows if symbol in r['symbols']], ensure_ascii=False))
+    if args.symbols:
         return 0
 
-    out = ROOT / 'DIVERGENCES.json'
-    status = write_if_changed(out, index)
-    print(f"  {status} {out.relative_to(ROOT)}: {len(rows)} rows, {len(by_symbol)} symbols, "
-          f"{len(unattached)} unattached")
+    symbols = {s for r in rows for s in r['symbols']}
+    unattached = [r for r in rows if not r['symbols']]
+    print(f"  {len(rows)} rows, {len(symbols)} symbols, {len(unattached)} unattached")
+    if args.check and unattached:
+        print("  FAIL: a divergence with no symbol attached is invisible to an agent;")
+        print("  add a `<!-- symbols: a, b -->` comment to each row below (R98/R99).")
+        for r in unattached:
+            print(f"    [{r['source']}] {r['mechanism'][:72]}")
+        return 1
     return 0
 
 if __name__ == '__main__':

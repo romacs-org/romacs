@@ -6,7 +6,8 @@
 ;; init.  A
 ;; repeating timer answers requests the harness writes to
 ;; $PARITY_PROBE_DIR/request.eld, a `(ID . FORM)' pair, by writing
-;; `(ID ok VALUE)' or `(ID error CONDITION)' to response.eld.  Timers run
+;; `(ID ok VALUE)' or `(ID error CONDITION)' to response.eld: every exit
+;; of the form is answered, a `quit' and a `throw' too.  Timers run
 ;; when the engine waits for input, so an answer also means the engine has
 ;; consumed the input before it.  The observer reads state; it does not
 ;; touch the match data, the current buffer, the echo area or *Messages*.
@@ -48,27 +49,58 @@ Every string the probe reports that contains one becomes \"<secret>\".")
     (with-temp-file temporary (insert (prin1-to-string value)))
     (rename-file temporary (parity-probe--file "response.eld") t)))
 
+;; The repeating timer that polls, kept so a `throw' out of a request's
+;; form can replace it: timer.el leaves a timer whose function exits
+;; non-locally marked as running, and it never fires again.
+(defvar parity-probe--timer nil)
+
+(defun parity-probe--start ()
+  (when (timerp parity-probe--timer) (cancel-timer parity-probe--timer))
+  (setq parity-probe--timer (run-with-timer 0 0.025 #'parity-probe--poll)))
+
+(defun parity-probe--answer (id answer)
+  "Write ANSWER to request ID; one the printer refuses still gets a reply."
+  (condition-case condition
+      (parity-probe--write (cons id answer))
+    (error (parity-probe--write
+            (list id 'error (list 'unprintable (parity-probe--plain condition)))))))
+
 (defun parity-probe--poll ()
-  (let ((request (parity-probe--file "request.eld")))
+  "Answer the request waiting, however its form exits: its value, the
+condition it signals (`quit' and any other, not only an `error'), or
+`non-local-exit' for a `throw' past it.  The request is first claimed, by
+renaming it to request.busy, so it is evaluated once whatever follows and
+a later request is never taken for it; the claim goes only once the answer
+is written, so a request never ends with neither file."
+  (let ((request (parity-probe--file "request.eld"))
+        (claimed (parity-probe--file "request.busy")))
     (when (file-exists-p request)
+      (rename-file request claimed t)
       (save-match-data
         (save-current-buffer
-          (let* ((deactivate-mark deactivate-mark)
-                 (inhibit-message t)
-                 (message-log-max nil)
-                 (pair (with-temp-buffer
-                         (let ((coding-system-for-read 'utf-8-unix))
-                           (insert-file-contents request))
-                         (read (current-buffer)))))
-            (delete-file request)
-            (let ((answer (condition-case condition
-                              (list 'ok (eval (cdr pair) t))
-                            (error (list 'error (parity-probe--plain condition))))))
-              ;; An answer the printer refuses still gets a reply.
-              (condition-case condition
-                  (parity-probe--write (cons (car pair) answer))
-                (error (parity-probe--write
-                        (list (car pair) 'error (list 'unprintable (parity-probe--plain condition)))))))))))))
+          (let ((deactivate-mark deactivate-mark)
+                (inhibit-message t)
+                (message-log-max nil)
+                (id nil)
+                (answer nil))
+            (unwind-protect
+                (setq answer (condition-case condition
+                                 (let ((pair (with-temp-buffer
+                                               (let ((coding-system-for-read 'utf-8-unix))
+                                                 (insert-file-contents claimed))
+                                               (read (current-buffer)))))
+                                   ;; A request that cannot be read is answered
+                                   ;; too, with no id: the harness sees at once.
+                                   (setq id (car pair))
+                                   (list 'ok (eval (cdr pair) t)))
+                               (t (list 'error (parity-probe--plain condition)))))
+              (unless answer
+                (setq answer (list 'error '(non-local-exit)))
+                (run-with-timer 0 nil #'parity-probe--start))
+              ;; Should no answer be writable, the claim stays as the
+              ;; evidence and timer.el reports the error in *Messages*.
+              (parity-probe--answer id answer)
+              (delete-file claimed))))))))
 
 (defvar parity-probe-event-ids nil
   "Ids gnosis-scheduler-event-id made, newest first.")
@@ -288,7 +320,7 @@ and no one-shot timer is about to run."
         :buffer (buffer-name (window-buffer (selected-window)))
         :echo (let ((message (current-message))) (and message (parity-probe--scrub (substring-no-properties message))))))
 
-(run-with-timer 0 0.025 #'parity-probe--poll)
+(parity-probe--start)
 
 (provide 'parity-probe)
 ;;; parity_probe.el ends here

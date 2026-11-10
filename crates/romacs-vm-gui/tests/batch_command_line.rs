@@ -87,7 +87,7 @@ fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, 
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
 
-/// An init file named with `--init-file' that does not exist is an error
+/// An init file named with `--init-file` that does not exist is an error
 /// naming it, never a session that silently runs without it.
 #[test]
 fn a_missing_explicit_init_file_is_an_error() {

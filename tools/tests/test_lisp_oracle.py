@@ -81,7 +81,8 @@ class RealPinControls(unittest.TestCase):
         for root in (ROOT, self.root):
             code, output = self.check(root)
             self.assertEqual(code, 0, output)
-            self.assertIn('1627 identical, 0 modified', output)
+            self.assertIn('1596 identical, 0 modified', output)
+            self.assertIn('31 excluded', output)
             self.assertIn('81 declared generated support, 0 extra', output)
             print(output.strip())
 
@@ -106,6 +107,16 @@ class RealPinControls(unittest.TestCase):
     def test_06_missing_support_input_refused(self):
         with self.changed(self.support, None):
             self.refused('ABSENT SUPPORT ' + self.support)
+
+    def test_15_an_excluded_path_must_stay_deleted(self):
+        with self.changed('gnu-lisp/README', b'GNU README\n'):
+            self.refused('EXCLUDED gnu-lisp/README')
+
+    def test_16_an_exclusion_that_drops_nothing_is_refused(self):
+        record = json.loads((self.root / ORACLE.PIN_FILE).read_text())
+        record['excluded'] = record['excluded'] + ['lisp/no-such-file']
+        with self.changed(ORACLE.PIN_FILE, json.dumps(record).encode()):
+            self.refused("excluded pattern 'lisp/no-such-file' matches no GNU path")
 
     def test_07_missing_support_manifest_refused(self):
         with self.changed(ORACLE.GENERATED_FILE, None):

@@ -22,6 +22,8 @@ def main():
         return 1
     tests = subprocess.run([sys.executable, '-B', 'tools/lib/python_tests.py', '--root', str(root)], cwd=root)
     oracle = subprocess.run([sys.executable, 'tools/lib/lisp_oracle.py', 'check', '--root', str(root)], cwd=root)
+    import lisp_oracle
+    gnu_pin = subprocess.run([sys.executable, '-B', 'gnu-tests/run.py', 'verify-pin', '--gnu', lisp_oracle.GNU_SOURCE], cwd=root)
     ratchet = subprocess.run([sys.executable, 'tools/lib/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     arity = subprocess.run([sys.executable, 'tools/lib/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
     defvars = subprocess.run([sys.executable, '-B', 'tools/lib/gnu_defvars.py', 'check', '--root', str(root)], cwd=root)
@@ -30,10 +32,10 @@ def main():
     grammars = subprocess.run([sys.executable, '-B', 'tools/lib/treesit_grammars.py', 'check', '--root', str(root)], cwd=root)
     unsafe = subprocess.run([sys.executable, '-B', 'tools/lib/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
     smells = subprocess.run([sys.executable, '-B', 'tools/lib/smells.py', 'check', '--root', str(root)], cwd=root)
-    if tests.returncode or oracle.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode:
+    if tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode:
         return 1
     print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
-          'the Python unit tests pass; lisp/ is the GNU pin; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors and the smell floors verified')
+          'the Python unit tests pass; lisp/ and gnu-tests/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors and the smell floors verified')
     return 0
 
 

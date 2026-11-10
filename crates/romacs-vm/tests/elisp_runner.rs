@@ -1,7 +1,7 @@
-//! The source-loaded Elisp test runner (tools/test-elisp) against the
-//! romacs-vm host Cargo just built: tools/tests/test_elisp_runner.py needs a
+//! The source-loaded Elisp test runner (`tools/test-elisp`) against the
+//! romacs-vm host Cargo just built: `tools/tests/test_elisp_runner.py` needs a
 //! built host, which check-derived's runner cannot assume, so this test owns
-//! it (tools/lib/python_tests.py's ELSEWHERE).
+//! it (`ELSEWHERE` in `tools/lib/python_tests.py`).
 use std::path::Path;
 use std::process::Command;
 

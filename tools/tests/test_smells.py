@@ -110,7 +110,7 @@ def floors(**layout):
             'crates': {'a': {'allows': 2, 'todos': 1, 'long_files': 1}},
             'lints': {'clippy::doc_markdown': 3},
             'layout': {'root': ['crates', 'tools'], 'members_outside_crates': ['tests/x'],
-                       'legacy_primitives': 5, 'primitives_outside_prims': 2, **layout}}
+                       'legacy_primitives': 5, 'primitives_outside_prims': 2, 'generated': 3, **layout}}
 
 
 def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outside=('tests/x',), legacy=5,
@@ -118,7 +118,7 @@ def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outsi
     return {'crates': {'a': Counter(allows=allows, todos=todos, long_files=long_files)},
             'lints': Counter({'clippy::doc_markdown': lint}) if lint else Counter(),
             'layout': {'root': list(root), 'members_outside_crates': list(outside), 'legacy_primitives': legacy,
-                       'primitives_outside_prims': strays},
+                       'primitives_outside_prims': strays, 'generated': 3},
             'strays': {}, 'long': [], 'lints_by_crate': {}}
 
 
@@ -152,7 +152,7 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(low['crates'], {'a': {'allows': 1, 'todos': 1, 'long_files': 1}})
         self.assertEqual(low['lints'], {})
         self.assertEqual(low['layout'], {'root': ['crates'], 'members_outside_crates': [], 'legacy_primitives': 4,
-                                         'primitives_outside_prims': 2})
+                                         'primitives_outside_prims': 2, 'generated': 3})
 
     def test_lower_never_raises_or_adds(self):
         state = now(allows=9, lint=9, legacy=9, root=('crates', 'tools', 'new'), outside=('tests/x', 'tests/y'))
