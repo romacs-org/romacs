@@ -497,6 +497,9 @@ impl Vm {
         self.rooted_write = false;
         self.deferred_writes.clear();
         self.site_leaf = (0, 0);
+        // A panic in a host wait drops its host, as it did when the wait
+        // kept it on the native stack.
+        self.host_wait = None;
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
@@ -925,7 +928,7 @@ impl Vm {
                 }
                 data::Object::SyntaxTable(t) => {
                     size_of_val(t)
-                        + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                        + t.len() * size_of::<(u32, romacs_regex::SyntaxClass)>()
                 }
                 data::Object::HashTable(t) => t.storage_bytes(false),
                 data::Object::Obarray(t) => t.storage_bytes(false),
@@ -976,7 +979,7 @@ impl Vm {
                     }
                     data::Object::SyntaxTable(t) => {
                         size_of_val(t)
-                            + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                            + t.len() * size_of::<(u32, romacs_regex::SyntaxClass)>()
                     }
                     data::Object::HashTable(t) => t.storage_bytes(true),
                     data::Object::Obarray(t) => t.storage_bytes(true),

@@ -643,14 +643,21 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
 
 
 def changed_filter(wt, base='master'):
-    """Nextest filter for the small gate: tests named after the Rust modules
-    changed since BASE, and the structural rules whatever changed.
-
-    None (run everything) when a change cannot be mapped to test names.
-    """
+    """Nextest filter for the small gate: `filter_for` what changed since BASE."""
     base = out('git', 'merge-base', 'HEAD', base, cwd=wt).decode().strip()
     names = set(out('git', 'diff', '--name-only', base, cwd=wt).decode().split())
     names |= set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
+    return filter_for(names)
+
+
+def filter_for(names):
+    """Nextest filter for a change to the paths NAMES: tests named after the
+    Rust modules changed, and the structural rules whatever changed.
+
+    None (run everything) when a change cannot be mapped to test names. It
+    reads no repository, so a caller that knows the paths, a merge it is about
+    to make, selects exactly as the small gate would.
+    """
     terms = set()
     for name in names:
         if name.startswith(('doc/', 'tools/tests/')) or name.endswith('.md') or name in ('tools/gate', 'Makefile'):

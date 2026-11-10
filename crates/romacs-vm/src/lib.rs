@@ -1376,6 +1376,8 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    /// A host wait in progress, its host moved out of `host_input`.
+    host_wait: Option<host_input::HostWait>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1831,6 +1833,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     status_bar_line,
     suspended,
     host_input,
+    host_wait,
     layout_host,
     display,
     visual,
@@ -1923,6 +1926,7 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            host_wait: None,
             layout_host: None,
             display: None,
             visual: Box::default(),

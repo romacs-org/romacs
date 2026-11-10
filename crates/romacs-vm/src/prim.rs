@@ -192,7 +192,7 @@ pub(crate) struct PrimDesc {
 /// the `vm` field is private even to `prims::*` (a child of `prim` would
 /// otherwise see `prim`'s private fields): a leaf body cannot name `Vm`, so it
 /// cannot call `collect`, `execute` or `load`. Proven by compile-fail probe.
-pub(crate) use leaf::graphics::ImageEnv;
+pub(crate) use leaf::graphics::{IMAGE_ERROR_LOG, ImageEnv};
 mod leaf {
     use super::super::*;
     use super::Fault;
@@ -611,7 +611,7 @@ mod leaf {
         /// Owned word flags from the current syntax table, ignoring text
         /// syntax properties as GNU's string case conversion does.
         pub(crate) fn casing_word_flags(&mut self, codes: &[u32], defaults: &[u8]) -> std::result::Result<Vec<bool>, Fault> {
-            use romacs_regex_engine::SyntaxClass;
+            use romacs_regex::SyntaxClass;
             let symbols = if let Some(&slot) = self.vm.names.get("case-symbols-as-words") {
                 let value = self.vm.variable_value(slot).map_err(Fault::Error)?;
                 value != Value::NIL && value != Value::UNBOUND

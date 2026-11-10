@@ -48,7 +48,7 @@
 The compiled-pattern layout is not reachable:
 
 ```compile_fail,E0616
-let pattern = romacs_regex_engine::regex_compile("a", false, false).unwrap();
+let pattern = romacs_regex::regex_compile("a", false, false).unwrap();
 let _ = pattern.fastmap_accurate;
 ```
 "#]

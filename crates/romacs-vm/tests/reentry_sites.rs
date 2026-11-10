@@ -19,7 +19,7 @@ const ENTRIES: &[&str] = &[
     "call_macro_expander", "expand_macro", "notify_watchers", "notify_watchers_at",
     "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one",
     "unwind", "unbind", "unbind_forwarded", "checked_unbind", "loader_primitive",
-    "eval_primitive", "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy",
+    "eval_primitive", "macroexpand_primitive", "macroexpand_value", "force_lazy",
     "lambda_list_closure", "reentrant_load", "reentrant_step", 
     "compile", "compile_request", "compile_lazy_request",
     "cached_source_form", "finish_request", "collect_garbage", "collect_garbage_until_key",
@@ -28,7 +28,7 @@ const ENTRIES: &[&str] = &[
     "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
     "compile_walk", "compile_unit", "run_aftermath",
     "call_prepared_source", "call_prepared_source_propagating", "invoke_prepared_with",
-    "read_source_raw",
+    "frame_snapshot", "resize_root_window", "read_source_raw",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];

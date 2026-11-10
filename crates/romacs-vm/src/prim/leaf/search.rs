@@ -66,9 +66,9 @@ impl Leaf<'_> {
     /// 1 to upcase it, 2 to upcase its initials.
     fn replace_case_action(&mut self, matched: &[u32], multibyte: bool) -> std::result::Result<u8, Fault> {
         let defaults: Vec<u8> = matched.iter().map(|&c| {
-            match romacs_regex_engine::standard_syntax_class_for_code(c) {
-                romacs_regex_engine::SyntaxClass::Word => 1,
-                romacs_regex_engine::SyntaxClass::Symbol => 2,
+            match romacs_regex::standard_syntax_class_for_code(c) {
+                romacs_regex::SyntaxClass::Word => 1,
+                romacs_regex::SyntaxClass::Symbol => 2,
                 _ => 0,
             }
         }).collect();

@@ -1,7 +1,0 @@
-local-bind-other-buffer	localized
-killed-local-binding	localized
-default-versus-local	localized
-buffer-forwarded-local	buffer
-buffer-forwarded-default	buffer
-kboard-saved-destination	kboard
-unsupported-forwarded	unsupported

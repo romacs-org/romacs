@@ -57,7 +57,7 @@ impl super::gc::Consed {
 
 #[derive(Clone)]
 pub(super) enum Object {
-    SyntaxTable(std::collections::BTreeMap<u32, romacs_regex_engine::SyntaxClass>),
+    SyntaxTable(std::collections::BTreeMap<u32, romacs_regex::SyntaxClass>),
     Float(f64),
     Bignum(Box<num_bigint::BigInt>),
     Window(Box<window::Window>),

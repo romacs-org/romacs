@@ -19,7 +19,7 @@ use std::path::Path;
 
 /// Modules converted to rooting as a type (`romacs_brand`): these checks cover
 /// what the types leave.
-const CONVERTED: &[&str] = &["autoload.rs", "command.rs", "prims/read.rs", "reader/mod.rs", "reader/parse.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
+const CONVERTED: &[&str] = &["autoload.rs", "command.rs", "host_input.rs", "prims/read.rs", "reader/mod.rs", "reader/parse.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
 
 fn source(name: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)).unwrap()
