@@ -1029,7 +1029,7 @@ impl Leaf<'_> {
     fn special_glyph(&mut self, slot: usize) -> std::result::Result<Value, Fault> {
         Ok(match self.display_table()? {
             Some(table) => match self.vm.object_if(table) {
-                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
+                Some(Object::CharTable(t)) => t.extras().get(slot).copied().unwrap_or(Value::NIL),
                 _ => Value::NIL,
             },
             None => Value::NIL,

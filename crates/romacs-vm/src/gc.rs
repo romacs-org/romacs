@@ -1328,9 +1328,9 @@ impl Vm {
                     }
                     data::Object::HashTable(t) => t.forward(&mut |v| rewrite(v)),
                     data::Object::Obarray(t) => t.visit_values(&mut |v| rewrite(v)),
-                    data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| rewrite(v)),
-                    data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, &mut native_nodes, &mut |v| rewrite(v)),
-                    data::Object::MapKeymapCursor(c) => c.visit_values(&mut native_nodes, &mut |v| rewrite(v)),
+                    data::Object::CharTable(t) => t.collector_visit_values(&mut native_nodes, &mut |v| rewrite(v)),
+                    data::Object::SubCharTable(node) => char_table::collector_visit_node(node, &mut native_nodes, &mut |v| rewrite(v)),
+                    data::Object::MapKeymapCursor(c) => c.collector_visit_values(&mut native_nodes, &mut |v| rewrite(v)),
                     data::Object::Float(_)
                     | data::Object::Bignum(_)
                     | data::Object::BoolVector(_)
@@ -1564,9 +1564,9 @@ impl Vm {
             data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::CharTable(t) => t.visit_values_seen(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::MapKeymapCursor(c) => c.visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Buffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::ByteBuffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
@@ -1629,11 +1629,9 @@ mod tests {
         vm.conses.push((Value::TRUE, Value::NIL));
         let mut first = char_table::CharTable::new(Value::NIL);
         first.set(65, payload).unwrap();
-        let mut second = char_table::CharTable::new(Value::NIL);
-        second.root = Arc::clone(&first.root);
-        second.ascii = first.ascii.clone();
+        let second = char_table::CharTable::sharing_nodes_of(&first);
         let native_bytes = char_table::CharTableNode::storage_bytes(
-            &first.root, false, &mut HashSet::default(),
+            first.root(), false, &mut HashSet::default(),
         );
         vm.objects.push(data::Object::CharTable(Box::new(first)));
         vm.objects.push(data::Object::CharTable(Box::new(second)));

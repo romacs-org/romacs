@@ -400,7 +400,7 @@ impl Vm {
                 if self
                     .names
                     .get("syntax-table")
-                    .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7)) =>
+                    .is_some_and(|&slot| t.purpose() == Value::reference(slot + 1, 7)) =>
             {
                 Ok(t)
             }
@@ -421,7 +421,7 @@ impl Vm {
     /// which allocates nothing on the path every search takes.
     fn char_table_parents_cycle(&self, table: Value) -> bool {
         let parent = |t: Value| match self.object_if(t) {
-            Some(Object::CharTable(c)) => Some(c.parent),
+            Some(Object::CharTable(c)) => Some(c.parent()),
             _ => None,
         };
         let (mut slow, mut fast) = (table, table);
@@ -545,9 +545,9 @@ impl Vm {
                 };
                 let standard = self.regexp_standard_syntax();
                 let mut copy = self.regexp_syntax_table(source)?.clone();
-                copy.default = Value::NIL;
+                copy.set_default(Value::NIL);
                 if source == standard {
-                    copy.parent = standard;
+                    copy.set_parent(standard);
                 }
                 Ok(self.allocate_object(Object::CharTable(Box::new(copy))))
             }
