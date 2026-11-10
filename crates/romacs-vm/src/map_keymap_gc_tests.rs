@@ -6,7 +6,7 @@ mod tests {
     fn map_char_table_cursor_roots_its_shared_range() {
         let mut vm = Vm::new();
         let table = char_table::CharTable::new(Value::NIL);
-        let root = table.root.clone();
+        let root = table.root().clone();
         let table = vm.allocate_object(data::Object::CharTable(Box::new(table)));
         let range = vm.eval_source_raw("'(0 . 4194303)").unwrap();
         let cursor = Cursor {
@@ -51,8 +51,8 @@ mod tests {
             )));
             let mut table = char_table::CharTable::new(Value::NIL);
             table.set(65537, payload).unwrap();
-            let root = table.root.clone();
-            let CharTableSlot::Node(child) = root.lock().unwrap().slots[1].clone() else {
+            let root = table.root().clone();
+            let CharTableSlot::Node(child) = root.lock().unwrap().slots()[1].clone() else {
                 panic!()
             };
             if detached {

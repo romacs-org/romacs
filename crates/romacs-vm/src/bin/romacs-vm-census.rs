@@ -71,7 +71,7 @@ fn main() {
     if warm {
         // The prelude is VM2's Lisp implementation of GNU C primitives
         // (mapcar). GNU has those before loadup.el runs, so it is runtime.
-        let prelude = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.install_lisp_prelude().map(|_| ())));
+        let prelude = vm.catching(|vm| vm.install_lisp_prelude().map(|_| ()));
         if !matches!(prelude, Ok(Ok(_))) {
             chain_panicked = prelude.is_err();
             chain.push(serde_json::json!({"file": "<vm2 lisp prelude>", "loaded": false, "forms_completed": 0}));
@@ -80,10 +80,10 @@ fn main() {
                 let path = std::path::PathBuf::from(input);
                 let link = if *is_form { path } else { std::fs::canonicalize(&path).unwrap_or(path) };
                 let from = vm.load_report()["steps"].as_array().map_or(0, Vec::len);
-                let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let result = match vm.catching(|vm| {
                     if *is_form { vm.eval_source(input).map(|_| ()) }
                     else { vm.load_file(&link).map(|_| ()) }
-                })) {
+                }) {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(error)) => Err(error),
                     Err(_) => {
@@ -137,7 +137,7 @@ fn main() {
     let result = if chain_panicked {
         Err(Box::new("bootstrap chain panicked") as Box<dyn std::any::Any + Send>)
     } else {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.load_file(&file).map(|_| ())))
+        vm.catching(|vm| vm.load_file(&file).map(|_| ()))
     };
     let mut report = vm.load_report();
     if warm {
@@ -178,7 +178,7 @@ fn main() {
     if report["ok"] == false {
         if let Some(source) = cause {
             let replay = format!("(condition-case census--replay {source} (error census--replay))");
-            let replayed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source(&replay).and_then(|v| v.display())));
+            let replayed = vm.catching(|vm| vm.eval_source(&replay).and_then(|v| v.display()));
             if let Ok(replay_result) = replayed {
                 let text = match replay_result { Ok(text) => text, Err(error) => error };
                 report["diagnostic_condition"] = text.clone().into();
@@ -204,7 +204,7 @@ fn main() {
                         let stub = format!("(let ((s (intern {name}))) (unless (fboundp s) (fset s (lambda (&rest census--args) (error {marker})))))");
                         let _ = vm.eval_source(&stub);
                     }
-                    if let Ok(result) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source(&replay).and_then(|v| v.display()))) {
+                    if let Ok(result) = vm.catching(|vm| vm.eval_source(&replay).and_then(|v| v.display())) {
                         report["candidate_replay"] = result.unwrap_or_else(|e| e).into();
                     }
                 }

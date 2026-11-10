@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "12ca5c13dfed9f602c5159bf5ffad0c65cf7623d047117d8ddab3024d47d83b3",
+  "source_fingerprint": "609524f5f8fecd7ae4257556aa2f1304c6b747a231d4800f749542eaacb5a3a9",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1440,
-  "parsed_vm2_only": 1440
+  "parsed_total": 1444,
+  "parsed_vm2_only": 1444
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -245,7 +245,7 @@
   "access-file": {
    "name": "access-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:684"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:681"
   },
   "acos": {
    "name": "acos",
@@ -265,7 +265,7 @@
   "add-name-to-file": {
    "name": "add-name-to-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:603"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:600"
   },
   "add-text-properties": {
    "name": "add-text-properties",
@@ -1065,7 +1065,7 @@
   "copy-file": {
    "name": "copy-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:502"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:499"
   },
   "copy-hash-table": {
    "name": "copy-hash-table",
@@ -1688,7 +1688,7 @@
   "file-acl": {
    "name": "file-acl",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:849"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:846"
   },
   "file-attributes": {
    "name": "file-attributes",
@@ -1763,7 +1763,7 @@
   "file-newer-than-file-p": {
    "name": "file-newer-than-file-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:702"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:699"
   },
   "file-readable-p": {
    "name": "file-readable-p",
@@ -1778,7 +1778,7 @@
   "file-selinux-context": {
    "name": "file-selinux-context",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:903"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:900"
   },
   "file-symlink-p": {
    "name": "file-symlink-p",
@@ -3127,7 +3127,7 @@
   "make-finalizer": {
    "name": "make-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:88"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -3220,12 +3220,12 @@
   "make-symbolic-link": {
    "name": "make-symbolic-link",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:626"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:623"
   },
   "make-temp-file-internal": {
    "name": "make-temp-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:353"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:354"
   },
   "make-temp-name": {
    "name": "make-temp-name",
@@ -3372,12 +3372,12 @@
   "memory-info": {
    "name": "memory-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:125"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:136"
   },
   "memory-use-counts": {
    "name": "memory-use-counts",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:139"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:150"
   },
   "memq": {
    "name": "memq",
@@ -4351,7 +4351,7 @@
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:104"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:115"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
@@ -4532,6 +4532,16 @@
    "name": "romacs--faces-modified-on",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:754"
+  },
+  "romacs--flight-fingerprint": {
+   "name": "romacs--flight-fingerprint",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/flight.rs:16"
+  },
+  "romacs--flight-step": {
+   "name": "romacs--flight-step",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/flight.rs:7"
   },
   "romacs--font-encoding": {
    "name": "romacs--font-encoding",
@@ -5244,6 +5254,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:504"
   },
+  "romacs--suspended-activations": {
+   "name": "romacs--suspended-activations",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:83"
+  },
   "romacs--t2-assoc": {
    "name": "romacs--t2-assoc",
    "implementation": "vm2",
@@ -5257,12 +5272,12 @@
   "romacs--take-doomed-finalizer": {
    "name": "romacs--take-doomed-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:85"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:96"
   },
   "romacs--take-post-gc": {
    "name": "romacs--take-post-gc",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:93"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:104"
   },
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",
@@ -5473,6 +5488,11 @@
    "name": "romacs-status-bar-window",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:492"
+  },
+  "romacs-syntax-summaries-stats": {
+   "name": "romacs-syntax-summaries-stats",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:57"
   },
   "romacs-treesit-bundled-grammars": {
    "name": "romacs-treesit-bundled-grammars",
@@ -5725,7 +5745,7 @@
   "set-file-acl": {
    "name": "set-file-acl",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:880"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:877"
   },
   "set-file-modes": {
    "name": "set-file-modes",
@@ -5735,12 +5755,12 @@
   "set-file-selinux-context": {
    "name": "set-file-selinux-context",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:915"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:912"
   },
   "set-file-times": {
    "name": "set-file-times",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:666"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:663"
   },
   "set-frame-height": {
    "name": "set-frame-height",

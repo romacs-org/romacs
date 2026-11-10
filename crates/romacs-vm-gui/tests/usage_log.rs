@@ -25,6 +25,6 @@ fn usage_log_tests_pass_in_romacs_and_pinned_gnu() {
     let expected = run(&gnu, &dir);
     let actual = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(expected, (Some(0), "Ran 9 tests, 9 results as expected, 0 unexpected".to_owned()));
+    assert_eq!(expected, (Some(0), "Ran 11 tests, 11 results as expected, 0 unexpected".to_owned()));
     assert_eq!(actual, expected);
 }

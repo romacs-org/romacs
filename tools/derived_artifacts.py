@@ -16,7 +16,7 @@ ARTIFACTS = (
 GENERATORS = (
     (sys.executable, 'tools/divergence_index.py'),
     (sys.executable, 'tools/primitive_index.py'),
-    ('cargo', 'run', '-q', '-p', 'romacs-introspect-live', '--', '--write'),
+    ('cargo', 'run', '-q', '--profile', 'gate', '-p', 'romacs-introspect-live', '--', '--write'),
     (sys.executable, 'tools/bundled_autoloads.py'),
 )
 MARKER = re.compile(rb'(?m)^[ \t]*(?:<{7}|={7}|>{7}|\|{7})')

@@ -15,6 +15,8 @@
          (romacs-usage-log--counts (make-hash-table :test 'eq))
          (romacs-usage-log--pending nil)
          (romacs-usage-log--open nil)
+         (romacs-usage-log--gaps (make-vector 17 0))
+         (romacs-usage-log--idle-since nil)
          (command-error-function command-error-function)
          (pre-command-hook nil) (post-command-hook nil) (kill-emacs-hook nil) (after-init-hook nil))
      (unwind-protect
@@ -51,6 +53,31 @@ with MS `open', COMMAND only starts."
     (should (member '(:kind "command" :command "next-line" :mode "org-mode" :n 1) counts))
     (should (member '(:kind "command" :command "anonymous" :mode "org-mode" :n 1) counts))
     (should (= (length counts) 3))))
+
+(ert-deftest usage-log-counts-gaps-between-commands-in-doubling-buckets ()
+  (let* ((gap (lambda (ms)
+                (usage-log-test--command 'next-line 'text-mode)
+                (romacs-usage-log--settled)
+                (setq romacs-usage-log--idle-since (- romacs-usage-log--idle-since (/ ms 1000.0)))))
+         (lines (usage-log-test--logging file
+                  (funcall gap 300) (funcall gap 300) (funcall gap 40000)
+                  (usage-log-test--command 'next-line 'text-mode)))
+         (gaps (usage-log-test--kind "gaps" lines)))
+    (should (= (length gaps) 1))
+    (let ((counts (plist-get (car gaps) :counts)))
+      (should (= (aref counts 9) 2))
+      (should (= (aref counts 16) 1))
+      (should (= (seq-reduce #'+ counts 0) 3)))))
+
+(ert-deftest usage-log-a-restarted-log-counts-no-gap-from-before-it ()
+  (let ((lines (usage-log-test--logging file
+                 (usage-log-test--command 'next-line 'text-mode)
+                 (romacs-usage-log--settled)
+                 (setq romacs-usage-log--idle-since (- romacs-usage-log--idle-since 0.3))
+                 (romacs-usage-log-stop)
+                 (romacs-usage-log--enable file)
+                 (usage-log-test--command 'next-line 'text-mode))))
+    (should-not (usage-log-test--kind "gaps" lines))))
 
 (ert-deftest usage-log-writes-counts-since-the-last-write ()
   (let ((lines (usage-log-test--logging file

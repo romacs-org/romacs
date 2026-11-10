@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "91b874e0a101bc8076f4c82600c4a5df7ddf524b9a5d951b44bbb006c25c1abc",
+    "input_hash": "f6c366cef36e0d19594659d192772f0387ea66970687cf9b6731fdcc65e9bd4d",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8671
+    "vm2_universe": 8737
   },
   "schema": 2,
   "vm2": {
-    "count": 1448,
+    "count": 1452,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -891,6 +891,8 @@
       "romacs--face-spec-recalc",
       "romacs--face-spec-set-match-display",
       "romacs--faces-modified-on",
+      "romacs--flight-fingerprint",
+      "romacs--flight-step",
       "romacs--font-encoding",
       "romacs--font-style-p",
       "romacs--fontset-info",
@@ -1033,6 +1035,7 @@
       "romacs--startup-phase",
       "romacs--status-bar-target",
       "romacs--status-bar-text",
+      "romacs--suspended-activations",
       "romacs--take-collections",
       "romacs--take-doomed-finalizer",
       "romacs--take-post-gc",
@@ -1078,6 +1081,7 @@
       "romacs-pbkdf2-hmac",
       "romacs-status-bar-height",
       "romacs-status-bar-window",
+      "romacs-syntax-summaries-stats",
       "romacs-treesit-bundled-grammars",
       "round",
       "run-hook-with-args",

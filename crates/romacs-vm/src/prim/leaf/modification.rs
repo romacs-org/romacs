@@ -18,7 +18,7 @@ impl Leaf<'_> {
     /// Change the current buffer's modification state with F.
     pub fn update_modification<R>(&mut self, f: impl FnOnce(&mut crate::modification::Modification) -> R) -> std::result::Result<R, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        Ok(f(match &mut self.vm.objects[index] {
+        Ok(f(match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => &mut b.state.modification,
             data::Object::ByteBuffer(b) => &mut b.state.modification,
             _ => unreachable!(),
@@ -28,7 +28,7 @@ impl Leaf<'_> {
         // Intern before borrowing buffer storage; no raw Value is retained.
         let autosaved = self.intern("autosaved");
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let state = match &mut self.vm.objects[index] {
+        let state = match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => &mut b.state.modification,
             data::Object::ByteBuffer(b) => &mut b.state.modification,
             _ => unreachable!(),
