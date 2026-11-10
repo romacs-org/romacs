@@ -52,13 +52,21 @@ impl Leaf<'_> {
     }
 
     /// A terminal over the helper process behind keeper handle HANDLE,
-    /// whose first descriptor is the helper's control socket.
+    /// whose first descriptor is the helper's control socket and whose
+    /// second, when it has one, the master of its pty.
     pub(crate) fn terminal_adopt(&mut self, handle: i64, columns: Value, rows: Value) -> Out {
         let handle = u64::try_from(handle).map_err(|_| Fault::Error("Invalid keeper handle".into()))?;
         self.terminal_bind(columns, rows, |host, keeper, columns, rows| {
-            let control = keeper.ok_or("This session has no keeper attached")?.duplicate(handle, 0)?;
-            host.adopt(control, columns, rows)
+            let keeper = keeper.ok_or("This session has no keeper attached")?;
+            host.adopt(keeper.duplicate(handle, 0)?, keeper.duplicate(handle, 1).ok(), columns, rows)
         })
+    }
+
+    /// The record version SESSION's helper process speaks, or nil.
+    pub(crate) fn terminal_helper_version(&mut self, session: i64) -> Out {
+        let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
+        let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
+        Ok(host.helper_version(id).map_or(Value::NIL, |version| Value::integer(i64::from(version)).expect("fits a fixnum")))
     }
 
     /// `(FULLS . DELTAS)`: how many of SESSION's updates carried the whole

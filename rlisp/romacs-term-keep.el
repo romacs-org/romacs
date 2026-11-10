@@ -63,8 +63,9 @@ outlives this session; `romacs-term-handle' names it."
            (row (romacs-keeper-spawn "terminal" 1 (list host "--terminal-helper" shell)
                                      :environment process-environment
                                      :directory (directory-file-name (expand-file-name directory))
-                                     :session t
-                                     :descriptors '((0 . null) (1 . null) (2 . null) (3 . socket))
+                                     ;; The keeper makes the pty and keeps its
+                                     ;; master: the pty outlives the helper.
+                                     :descriptors '((0 . null) (1 . null) (2 . null) (3 . socket) (4 . pty))
                                      :metadata (encode-coding-string (buffer-name) 'utf-8)))
            (handle (plist-get row :handle))
            (bound nil))
@@ -123,6 +124,60 @@ terminal is left as it is."
       (setq romacs-term-handle handle)
       (setq-local desktop-save-buffer #'romacs-term--desktop-save)
       (romacs-term--bound)))))
+
+(defvar romacs-restart-command)
+(defvar warm-restart-blocker-functions)
+(declare-function romacs--term-helper-version "terminal.rs")
+
+(defvar romacs-term--successor-versions nil
+  "(PROGRAM MODIFIED LOW . HIGH): the helper versions PROGRAM's sessions read.")
+
+(declare-function romacs-restart--command "warm-restart")
+
+(defun romacs-term--successor-versions ()
+  "The helper versions the build a restart starts reads, as (LOW . HIGH).
+Nil when that build does not say within two seconds, as one older than
+this rule does not.  The program is the one `romacs-restart' would start
+from the selected window's buffer, where the command runs."
+  (let* ((program (with-current-buffer (window-buffer (selected-window))
+                    (car (car (romacs-restart--command)))))
+         (modified (file-attribute-modification-time (file-attributes program))))
+    (unless (and (equal (car romacs-term--successor-versions) program)
+                 (equal (cadr romacs-term--successor-versions) modified))
+      (setq romacs-term--successor-versions
+            (cons program
+                  (cons modified
+                        (with-temp-buffer
+                          ;; Bounded: a program that ignores the option
+                          ;; must not hold the session.
+                          (and (file-executable-p program)
+                               (executable-find "timeout")
+                               (eql 0 (ignore-errors
+                                        (call-process "timeout" nil t nil "--kill-after=1" "2"
+                                                      program "--terminal-versions")))
+                               (progn (goto-char (point-min))
+                                      (looking-at "\\([0-9]+\\) \\([0-9]+\\)$"))
+                               (cons (string-to-number (match-string 1))
+                                     (string-to-number (match-string 2)))))))))
+    (cddr romacs-term--successor-versions)))
+
+;;;###autoload
+(defun romacs-term--restart-blocker ()
+  "Why the current terminal buffer cannot be handed to the next build, or nil.
+A terminal's helper process speaks the version it was started with for
+as long as the terminal lives.  A restart into a build that cannot read
+it would leave the terminal running and out of reach, so it is refused
+here, while this session still serves it."
+  (when (and romacs-term-handle romacs-term-session)
+    (let ((speaks (romacs--term-helper-version romacs-term-session))
+          (reads (romacs-term--successor-versions)))
+      (when (and speaks reads (not (<= (car reads) speaks (cdr reads))))
+        (format "terminal %s speaks helper version %d, and the build being started reads %d-%d; close it first"
+                (buffer-name) speaks (car reads) (cdr reads))))))
+
+;;;###autoload
+(with-eval-after-load 'warm-restart
+  (add-hook 'warm-restart-blocker-functions #'romacs-term--restart-blocker))
 
 ;;;###autoload
 (defun romacs-term-desktop-restore (_file name misc)

@@ -12,6 +12,13 @@ fn terminal_adopt(cx, handle: Integer; optional columns: Value, rows: Value) {
     cx.terminal_adopt(handle.0, columns, rows)
 }}
 
+// (romacs--term-helper-version SESSION): the record version its helper
+// process speaks, or nil.
+defsubr! { name = "romacs--term-helper-version", gnu = "romacs:terminal", effect = Reads,
+fn terminal_helper_version(cx, session: Integer) {
+    cx.terminal_helper_version(session.0)
+}}
+
 // (romacs--term-transport-counts SESSION): (FULLS . DELTAS), or nil.
 defsubr! { name = "romacs--term-transport-counts", gnu = "romacs:terminal", effect = Reads,
 fn terminal_transport_counts(cx, session: Integer) {

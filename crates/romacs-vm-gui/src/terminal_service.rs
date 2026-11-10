@@ -199,6 +199,8 @@ struct Shared {
     /// Pushes received that carried every line, and that carried a delta.
     fulls: u64,
     deltas: u64,
+    /// The version the helper speaks.
+    version: u16,
 }
 
 struct Session {
@@ -325,7 +327,7 @@ impl Service {
     }
 
     /// Start a conversation with the helper behind CONTROL at this size.
-    fn attach(&mut self, control: UnixStream, columns: u16, rows: u16, child: Option<Owned>) -> Result<u64, String> {
+    fn attach(&mut self, control: UnixStream, pty: Option<OwnedFd>, columns: u16, rows: u16, child: Option<Owned>) -> Result<u64, String> {
         if columns < 2 || rows == 0 { return Err("Terminal dimensions require at least two columns and one row".into()); }
         let gone = |_| "The terminal's helper process is gone".to_string();
         let (ours, theirs) = UnixStream::pair().map_err(|e| e.to_string())?;
@@ -345,14 +347,20 @@ impl Service {
             }
         };
         let helper = Hello::read(&hello).map_err(|e| format!("The terminal's helper process: {e}"))?;
-        romacs_record::hello::agree(&proto::session_class(), &helper.classes).version()
+        let version = romacs_record::hello::agree(&proto::session_class(), &helper.classes).version()
             .map_err(|why| format!("This session cannot read the terminal's helper (pid {}): {why}", helper.pid))?;
         ours.set_read_timeout(None).map_err(|e| e.to_string())?;
-        send(&ours, kind::OPEN, &Writer::default().u16(columns).u16(rows).finish())?;
+        // The pty's master rides with the OPEN: a helper not yet started
+        // takes it, one that runs lets it go.
+        let mut open = Vec::new();
+        record::encode(0, proto::CLASS, kind::OPEN, &Writer::default().u16(columns).u16(rows).finish(), &mut open);
+        let master: Vec<_> = pty.iter().map(AsFd::as_fd).collect();
+        channel::send_all(&ours, &open, &master).map_err(gone)?;
+        drop(pty);
         let id = self.next_id.checked_add(1).ok_or("Terminal session identifiers exhausted")?;
         let state = Push { columns, rows, running: true, ..Push::default() };
         let mirror = Mirror { lines: VecDeque::from(vec![(Row::new(), None); usize::from(rows)]), state, colors: Box::new([None; proto::COLORS]) };
-        let shared = Arc::new(Mutex::new(Shared { mirror, unacked: None, dirty: true, gone: false, fulls: 0, deltas: 0 }));
+        let shared = Arc::new(Mutex::new(Shared { mirror, unacked: None, dirty: true, gone: false, fulls: 0, deltas: 0, version }));
         listen(id, ours.try_clone().map_err(|e| e.to_string())?, decoder, shared.clone(), self.mailbox.clone()).map_err(|e| e.to_string())?;
         self.sessions.insert(id, Session { stream: ours, _control: control, shared, _child: child, last: None });
         self.next_id = id;
@@ -387,11 +395,11 @@ impl TerminalHost for Service {
                           fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket)], ..Spec::default() };
         let mut child = spawn::spawn(&spec).map_err(|e| format!("Cannot start the terminal's helper {}: {e}", self.program.display()))?;
         let control = UnixStream::from(child.fds.remove(0));
-        self.attach(control, columns, rows, Some(Owned(Some(child))))
+        self.attach(control, None, columns, rows, Some(Owned(Some(child))))
     }
 
-    fn adopt(&mut self, control: OwnedFd, columns: u16, rows: u16) -> Result<u64, String> {
-        self.attach(UnixStream::from(control), columns, rows, None)
+    fn adopt(&mut self, control: OwnedFd, pty: Option<OwnedFd>, columns: u16, rows: u16) -> Result<u64, String> {
+        self.attach(UnixStream::from(control), pty, columns, rows, None)
     }
 
     fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String> {
@@ -438,6 +446,10 @@ impl TerminalHost for Service {
     fn transport_counts(&mut self, session: u64) -> Option<(u64, u64)> {
         let shared = self.sessions.get(&session)?.shared.lock().unwrap();
         Some((shared.fulls, shared.deltas))
+    }
+
+    fn helper_version(&mut self, session: u64) -> Option<u16> {
+        Some(self.sessions.get(&session)?.shared.lock().unwrap().version)
     }
 
     fn close(&mut self, session: u64) -> Result<(), String> {

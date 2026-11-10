@@ -635,6 +635,13 @@ With a keeper the terminal's helper process is the keeper's child and
 outlives this session; `romacs-term-handle' names it.
 
 (fn SHELL DIRECTORY)")
+(autoload 'romacs-term--restart-blocker "romacs-term-keep"
+"Why the current terminal buffer cannot be handed to the next build, or nil.
+A terminal's helper process speaks the version it was started with for
+as long as the terminal lives.  A restart into a build that cannot read
+it would leave the terminal running and out of reach, so it is refused
+here, while this session still serves it.")
+(with-eval-after-load 'warm-restart (add-hook 'warm-restart-blocker-functions #'romacs-term--restart-blocker))
 (autoload 'romacs-term-desktop-restore "romacs-term-keep"
 "The terminal buffer NAME of MISC, attached again to its running terminal.
 

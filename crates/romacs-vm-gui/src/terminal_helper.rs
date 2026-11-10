@@ -39,6 +39,11 @@ use crate::terminal_proto::{self as proto, Cell, Push, Row, kind};
 /// The control socket's descriptor in a helper.
 pub const CONTROL: i32 = 3;
 
+/// The pty's slave end in a helper whose spawner made the pty, so that the
+/// keeper holds the master too and the terminal's pty outlives a helper.
+/// The first session to open the terminal passes the master.
+pub const SLAVE: i32 = 4;
+
 /// A flag bit Alacritty does not define, set on the first cell of the
 /// newest history line at each push. Lines enter history only below it and
 /// history is never rewritten, so its distance from the bottom at the next
@@ -50,7 +55,7 @@ enum Wake {
     /// The emulator has news.
     Terminal,
     Conversation(UnixStream),
-    Record(u64, record::Record),
+    Record(u64, record::Record, Vec<OwnedFd>),
     Gone(u64),
     ControlClosed,
 }
@@ -138,7 +143,7 @@ fn row_of(row: &alacritty_terminal::grid::Row<alacritty_terminal::term::cell::Ce
 }
 
 impl Terminal {
-    fn start(shell: &str, size: Size, wake: crossbeam_channel::Sender<Wake>) -> Result<Self, String> {
+    fn start(shell: &str, size: Size, wake: crossbeam_channel::Sender<Wake>, kept: Option<(OwnedFd, OwnedFd)>) -> Result<Self, String> {
         let (events_tx, events) = mpsc::channel();
         let listener = Listener(events_tx, wake.clone());
         let term = Arc::new(FairMutex::new(Term::new(Config { scrolling_history: 10_000, ..Config::default() }, &size, listener.clone())));
@@ -150,7 +155,17 @@ impl Terminal {
         } else { shell.into() };
         let options = tty::Options { shell: Some(tty::Shell::new(shell, vec!["-i".into()])), working_directory: std::env::current_dir().ok(),
                                      drain_on_exit: true, env };
-        let pty = tty::new(&options, size.window(), 0).map_err(|e| e.to_string())?;
+        let pty = match kept {
+            Some((master, slave)) => {
+                use std::os::fd::AsRawFd;
+                let window = libc::winsize { ws_col: size.0, ws_row: size.1, ws_xpixel: 0, ws_ypixel: 0 };
+                // SAFETY: TIOCSWINSZ reads a winsize that outlives the call,
+                // on a pty master this process was handed.
+                unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &raw const window) };
+                tty::from_fd(&options, 0, master, slave)
+            }
+            None => tty::new(&options, size.window(), 0),
+        }.map_err(|e| e.to_string())?;
         let shell_pid = pty.child().id().cast_signed();
         let foreground = pty.file().try_clone().ok().map(|master| (master, shell_pid));
         // SAFETY: pidfd_open takes a scalar child PID and zero flags, with no pointers.
@@ -271,6 +286,10 @@ struct Conversation {
     acked: bool,
     /// Whether the next push must carry every line.
     full: bool,
+    /// Descriptors the session sent and no record has taken yet. They can
+    /// arrive in the same read as an earlier record than the one they
+    /// are for, so they wait here for the OPEN.
+    fds: Vec<OwnedFd>,
 }
 
 fn send(stream: &mut UnixStream, kind: u16, payload: &[u8]) -> bool {
@@ -283,11 +302,13 @@ fn send(stream: &mut UnixStream, kind: u16, payload: &[u8]) -> bool {
 fn listen(id: u64, stream: UnixStream, wake: crossbeam_channel::Sender<Wake>) {
     std::thread::spawn(move || {
         let (mut decoder, mut buffer) = (Decoder::default(), vec![0u8; 1 << 16]);
-        'read: while let Ok(count @ 1..) = channel::receive(&stream, &mut buffer, &mut Vec::new()) {
+        let mut fds = Vec::new();
+        'read: while let Ok(count @ 1..) = channel::receive(&stream, &mut buffer, &mut fds) {
             decoder.push(&buffer[..count]);
             loop {
                 match decoder.pop() {
-                    Ok(Some(record)) => if wake.send(Wake::Record(id, record)).is_err() { break 'read },
+                    // Descriptors ride with the record they arrived beside.
+                    Ok(Some(record)) => if wake.send(Wake::Record(id, record, std::mem::take(&mut fds))).is_err() { break 'read },
                     Ok(None) => break,
                     Err(_) => break 'read,
                 }
@@ -306,6 +327,11 @@ pub fn run(shell: &str) -> Result<(), String> {
     // SAFETY: a helper is started with its control socket at descriptor 3
     // (`CONTROL`), which nothing else in this process owns.
     let control = UnixStream::from(unsafe { OwnedFd::from_raw_fd(CONTROL) });
+    // Before any thread runs or any descriptor is made, so that 4 can only
+    // be what the spawner put there.
+    // SAFETY: F_GETFD only asks whether descriptor 4 is open; when it is,
+    // the spawner put the pty's slave there for this process alone.
+    let mut slave = unsafe { (libc::fcntl(SLAVE, libc::F_GETFD) >= 0).then(|| OwnedFd::from_raw_fd(SLAVE)) };
     control.as_fd().try_clone_to_owned().map_err(|_| "a terminal helper needs its control socket at descriptor 3")?;
     let (wake, woken) = crossbeam_channel::unbounded();
     // The newest conversation's stream, so a replaced one can be cut even
@@ -348,11 +374,12 @@ pub fn run(shell: &str) -> Result<(), String> {
                 Hello { epoch: 0, pid: std::process::id(), classes: vec![proto::helper_class()] }.record().encode_into(&mut wire);
                 if stream.write_all(&wire).is_ok() && let Ok(reader) = stream.try_clone() {
                     listen(conversations, reader, wake.clone());
-                    conversation = Some(Conversation { id: conversations, stream, greeted: false, acked: true, full: true });
+                    conversation = Some(Conversation { id: conversations, stream, greeted: false, acked: true, full: true, fds: Vec::new() });
                 }
             }
-            Ok(Wake::Record(id, record)) => if let Some(talk) = conversation.as_mut().filter(|c| c.id == id) {
+            Ok(Wake::Record(id, record, fds)) => if let Some(talk) = conversation.as_mut().filter(|c| c.id == id) {
                 let mut r = Reader(&record.payload);
+                talk.fds.extend(fds);
                 match record.kind {
                     _ if !talk.greeted => {
                         // A session of another framing, or one that does not
@@ -363,13 +390,17 @@ pub fn run(shell: &str) -> Result<(), String> {
                     kind::OPEN => if let (Ok(columns), Ok(rows)) = (r.u16(), r.u16()) && let Ok(size) = Size::checked(columns, rows) {
                         match &mut terminal {
                             Some(terminal) => terminal.resize(size),
-                            None => match Terminal::start(shell, size, wake.clone()) {
+                            // A pty the spawner made: its master comes with
+                            // the first OPEN, its slave was inherited.
+                            None => match Terminal::start(shell, size, wake.clone(), talk.fds.drain(..).next().zip(slave.take())) {
                                 Ok(started) => terminal = Some(started),
                                 // No terminal to speak of: the helper's end
                                 // is what tells the session, and the keeper.
                                 Err(error) => return Err(format!("Cannot start {shell}: {error}")),
                             },
                         }
+                        // A master sent to a terminal that already runs is let go.
+                        talk.fds.clear();
                         (talk.full, dirty) = (true, true);
                     },
                     kind::INPUT => if let Some(terminal) = &terminal { terminal.input(record.payload.clone()); dirty = true; },

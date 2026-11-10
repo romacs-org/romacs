@@ -109,11 +109,13 @@ pub trait TerminalHost {
     fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String>;
     /// A terminal that already runs, behind the control socket of its
     /// helper process: one a keeper spawned for this session, or kept for
-    /// it across a restart. A host with no helper processes has none.
+    /// it across a restart. PTY is the master of the pty the spawner made
+    /// for it, when it made one: the helper takes it if its shell is not
+    /// started yet. A host with no helper processes has none.
     ///
     /// # Errors
     /// The helper does not answer, or speaks a version this session cannot read.
-    fn adopt(&mut self, _control: std::os::fd::OwnedFd, _columns: u16, _rows: u16) -> Result<u64, String> {
+    fn adopt(&mut self, _control: std::os::fd::OwnedFd, _pty: Option<std::os::fd::OwnedFd>, _columns: u16, _rows: u16) -> Result<u64, String> {
         Err("This terminal host adopts no helper process".into())
     }
     fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String>;
@@ -126,6 +128,9 @@ pub trait TerminalHost {
     /// How many of SESSION's updates arrived as the whole grid, and how
     /// many as a change to it; `None` for a host that has no such transport.
     fn transport_counts(&mut self, _session: u64) -> Option<(u64, u64)> { None }
+    /// The record version SESSION's helper process speaks, for as long as
+    /// it lives; `None` for a host with no helper processes.
+    fn helper_version(&mut self, _session: u64) -> Option<u16> { None }
 }
 
 pub(crate) struct TerminalBinding {

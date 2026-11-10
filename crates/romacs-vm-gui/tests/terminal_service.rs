@@ -505,7 +505,7 @@ fn transport_share_on_cat_and_on_a_shell_session() {
     let line = "the quick brown fox jumps over the lazy dog 0123456789 abcdefghijklmnopqrstuvwxyz\n";
     std::fs::write(&file, line.repeat(100 * 1024 * 1024 / line.len())).unwrap();
     let wait = |service: &mut Service, id: u64, marker: &str| {
-        let deadline = Instant::now() + Duration::from_secs(300);
+        let deadline = Instant::now() + Duration::from_mins(5);
         loop {
             let _ = service.ready().recv_timeout(Duration::from_millis(20));
             service.changed_sessions();
@@ -534,4 +534,39 @@ fn transport_share_on_cat_and_on_a_shell_session() {
     println!("shell session: updates in full {}, as deltas {}", after.0 - before.0, after.1 - before.1);
     service.close(id).unwrap();
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A helper given a pty by its spawner runs its shell on that pty, not on
+/// one of its own: the master rides with the session's OPEN, which can
+/// arrive in the same read as its hello.
+#[test]
+fn a_helper_runs_its_shell_on_the_pty_its_spawner_made() {
+    use romacs_keeper::spawn::{self, End, Spec};
+    use std::os::fd::OwnedFd;
+    let host = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("romacs-vm-gui");
+    let spec = Spec { argv: vec![host.to_str().unwrap().as_bytes().to_vec(), b"--terminal-helper".to_vec(), b"/bin/sh".to_vec()],
+                      env: vec![b"PATH=/usr/bin:/bin".to_vec()], cwd: b"/".to_vec(), umask: 0o022,
+                      fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket), (4, End::Pty)], ..Spec::default() };
+    let mut child = spawn::spawn(&spec).unwrap();
+    let (control, master): (OwnedFd, OwnedFd) = (child.fds.remove(0), child.fds.remove(0));
+    let kept = master.try_clone().unwrap();
+    let mut service = Service::new();
+    let id = service.adopt(control, Some(master), 60, 6).unwrap();
+    service.send(id, b"tty; echo TTY-DONE\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let text = loop {
+        let _ = service.ready().recv_timeout(Duration::from_millis(50));
+        service.changed_sessions();
+        let snapshot = service.snapshot(id).unwrap();
+        if snapshot.text.lines().any(|line| line == "TTY-DONE") { break snapshot.text.to_string(); }
+        assert!(Instant::now() < deadline, "the shell never answered");
+    };
+    // The slave's name, from the master the spawner kept.
+    let mut number: libc::c_uint = 0;
+    // SAFETY: TIOCGPTN writes the pty's number into the int it is given.
+    assert_eq!(unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&kept), libc::TIOCGPTN, &raw mut number) }, 0);
+    assert!(text.lines().any(|line| line == format!("/dev/pts/{number}")), "the shell is on another pty:\n{text}");
+    service.close(id).unwrap();
+    // SAFETY: reaping this test's own child; a null status is allowed.
+    unsafe { libc::waitpid(child.pid, std::ptr::null_mut(), 0) };
 }
