@@ -646,7 +646,7 @@ keeper with their programs running.  Each comes back in a buffer of the
 name it had.  Return those buffers.  Does nothing when no keeper runs
 for this session." t)
 (defun romacs-term--adopt-at-startup nil
-"Once started and idle, bring back terminals a gone session left." (unless noninteractive (run-with-idle-timer 1 nil (lambda nil (ignore-errors (romacs-term-adopt-orphans))))))
+"Once started, bring back terminals a gone session left." (unless noninteractive (run-at-time 0 nil (lambda nil (ignore-errors (romacs-term-adopt-orphans))))))
 (add-hook 'after-init-hook #'romacs-term--adopt-at-startup)
 (with-eval-after-load 'desktop (add-to-list 'desktop-buffer-mode-handlers '(romacs-term-mode . romacs-term-desktop-restore)))
 (setq romacs-term-open-function #'romacs-term-keep-open)

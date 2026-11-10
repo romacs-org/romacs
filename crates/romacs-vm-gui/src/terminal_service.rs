@@ -227,8 +227,8 @@ fn send(mut stream: &UnixStream, kind: u16, payload: &[u8]) -> Result<(), String
 }
 
 /// Apply the helper's pushes to the mirror until the conversation ends.
-fn listen(id: u64, stream: UnixStream, mut decoder: Decoder, shared: Arc<Mutex<Shared>>, mailbox: crate::terminal_wait::Mailbox) {
-    std::thread::spawn(move || {
+fn listen(id: u64, stream: UnixStream, mut decoder: Decoder, shared: Arc<Mutex<Shared>>, mailbox: crate::terminal_wait::Mailbox) -> std::io::Result<()> {
+    std::thread::Builder::new().name("term-mirror".into()).spawn(move || {
         let (mut buffer, mut parts) = (vec![0u8; 1 << 16], Vec::new());
         'read: loop {
             loop {
@@ -266,7 +266,7 @@ fn listen(id: u64, stream: UnixStream, mut decoder: Decoder, shared: Arc<Mutex<S
         shared.mirror.state.running = false;
         drop(shared);
         mailbox.mark(id);
-    });
+    }).map(drop)
 }
 
 /// This process's umask, which a helper it spawns itself keeps.
@@ -353,7 +353,7 @@ impl Service {
         let state = Push { columns, rows, running: true, ..Push::default() };
         let mirror = Mirror { lines: VecDeque::from(vec![(Row::new(), None); usize::from(rows)]), state, colors: Box::new([None; proto::COLORS]) };
         let shared = Arc::new(Mutex::new(Shared { mirror, unacked: None, dirty: true, gone: false, fulls: 0, deltas: 0 }));
-        listen(id, ours.try_clone().map_err(|e| e.to_string())?, decoder, shared.clone(), self.mailbox.clone());
+        listen(id, ours.try_clone().map_err(|e| e.to_string())?, decoder, shared.clone(), self.mailbox.clone()).map_err(|e| e.to_string())?;
         self.sessions.insert(id, Session { stream: ours, _control: control, shared, _child: child, last: None });
         self.next_id = id;
         self.mailbox.mark(id);

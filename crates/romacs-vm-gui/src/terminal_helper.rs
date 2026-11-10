@@ -410,3 +410,17 @@ pub fn run(shell: &str) -> Result<(), String> {
     if let Some(terminal) = &mut terminal { terminal.shutdown(); }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The mark is sound only while Alacritty leaves its bit undefined. A
+    /// pin that defines it fails here; until someone looks, `collect`
+    /// sends every line, since it checks the same thing.
+    #[test]
+    fn the_mark_is_a_bit_alacritty_does_not_define() {
+        assert_eq!(Flags::all().bits() & MARK, 0);
+        assert_ne!(MARK, 0);
+    }
+}

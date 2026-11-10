@@ -170,14 +170,15 @@ for this session."
         (message "Terminals brought back: %s" (mapconcat #'buffer-name buffers ", "))))
     (nreverse buffers)))
 
-;; A session that starts where a keeper already runs looks, once idle, for
-;; terminals nobody owns.  A restored image has claimed its own by then.
+;; A session that starts where a keeper already runs looks, at the end of
+;; its startup, for terminals nobody owns.  An image restored after that
+;; finds its terminal buffers already attached and leaves them so.
 ;;;###autoload
 (progn
   (defun romacs-term--adopt-at-startup ()
-    "Once started and idle, bring back terminals a gone session left."
+    "Once started, bring back terminals a gone session left."
     (unless noninteractive
-      (run-with-idle-timer 1 nil (lambda () (ignore-errors (romacs-term-adopt-orphans))))))
+      (run-at-time 0 nil (lambda () (ignore-errors (romacs-term-adopt-orphans))))))
   (add-hook 'after-init-hook #'romacs-term--adopt-at-startup))
 
 ;; In every session from its start: a restored one must find the handler

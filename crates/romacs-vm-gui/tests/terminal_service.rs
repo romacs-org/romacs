@@ -428,3 +428,110 @@ fn a_shell_that_cannot_start_ends_the_terminal() {
         }
     }
 }
+
+/// Run SCRIPT in a terminal and return what the session shows once the
+/// output has settled, then what it shows after the helper has sent every
+/// line again. The first is built from deltas; they must agree.
+fn delta_and_full(script: &str, columns: u16, narrower: Option<u16>) -> (String, String, (u64, u64)) {
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", columns, 6).unwrap();
+    let settle = |service: &mut Service, marker: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let _ = service.ready().recv_timeout(Duration::from_millis(50));
+            service.changed_sessions();
+            let snapshot = service.snapshot(id).unwrap();
+            if snapshot.text.lines().any(|line| line == marker) { return snapshot.text.to_string(); }
+            assert!(Instant::now() < deadline, "{marker} never arrived");
+        }
+    };
+    service.send(id, format!("{script}; echo SETTLED-1\n").as_bytes()).unwrap();
+    settle(&mut service, "SETTLED-1");
+    if let Some(narrower) = narrower {
+        service.resize(id, narrower, 6).unwrap();
+        service.send(id, b"echo AFTER-RESIZE; echo SETTLED-2\n").unwrap();
+        settle(&mut service, "SETTLED-2");
+    }
+    service.send(id, b"echo more; echo SETTLED-3\n").unwrap();
+    let by_deltas = settle(&mut service, "SETTLED-3");
+    std::thread::sleep(Duration::from_millis(150));
+    service.changed_sessions();
+    let by_deltas = if service.snapshot(id).unwrap().text.len() >= by_deltas.len() { service.snapshot(id).unwrap().text.to_string() } else { by_deltas };
+    let counts = service.transport_counts(id).unwrap();
+    // The same size again: the helper answers an OPEN with every line.
+    service.resize(id, narrower.unwrap_or(columns), 6).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while service.transport_counts(id).unwrap().0 == counts.0 {
+        assert!(Instant::now() < deadline, "no full push came");
+        let _ = service.ready().recv_timeout(Duration::from_millis(20));
+    }
+    service.changed_sessions();
+    let in_full = service.snapshot(id).unwrap().text.to_string();
+    service.close(id).unwrap();
+    (by_deltas, in_full, counts)
+}
+
+/// Where the mark could be copied or lost without notice, the session must
+/// still show exactly the terminal: each case is checked against every
+/// line sent anew.
+#[test]
+fn deltas_agree_with_the_grid_where_the_mark_could_mislead() {
+    let fill = "i=0; while [ $i -lt 10300 ]; do echo line $i; i=$((i+1)); done";
+    let cases: [(&str, String, Option<u16>); 5] = [
+        ("a history at its limit", format!("{fill}; echo tail-a; echo tail-b"), None),
+        ("a scroll region not starting at line 0, history at its limit",
+         format!("{fill}; printf '\\033[2;4r\\033[4;1H'; for n in 1 2 3 4 5 6 7; do echo region $n; done; printf '\\033[r\\033[6;1H'; echo after-region"), None),
+        ("history cleared", "i=0; while [ $i -lt 40 ]; do echo early $i; i=$((i+1)); done; printf '\\033[3J'; echo after-clear; echo again".into(), None),
+        ("the alternate screen", "i=0; while [ $i -lt 30 ]; do echo before $i; i=$((i+1)); done; printf '\\033[?1049h'; echo on-alternate; printf '\\033[?1049l'; echo back".into(), None),
+        ("a resize that reflows history", "i=0; while [ $i -lt 60 ]; do echo a-long-line-that-will-wrap-when-narrower $i; i=$((i+1)); done".into(), Some(20)),
+    ];
+    for (name, script, narrower) in cases {
+        let (by_deltas, in_full, (fulls, deltas)) = delta_and_full(&script, 60, narrower);
+        assert!(by_deltas == in_full, "{name}: the session's copy differs from the terminal ({fulls} full, {deltas} deltas):\n--- by deltas, last lines ---\n{}\n--- in full ---\n{}",
+                by_deltas.lines().rev().take(12).collect::<Vec<_>>().join("\n"), in_full.lines().rev().take(12).collect::<Vec<_>>().join("\n"));
+        assert!(deltas > 0, "{name}: no delta was used, so nothing was checked");
+    }
+}
+
+/// A measurement, not a check: `cat` of a 100 MB text file and an ordinary
+/// shell session, with how many updates carried every line. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement; prints its numbers"]
+fn transport_share_on_cat_and_on_a_shell_session() {
+    let dir = std::env::temp_dir().join(format!("romacs-term-cat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hundred.txt");
+    let line = "the quick brown fox jumps over the lazy dog 0123456789 abcdefghijklmnopqrstuvwxyz\n";
+    std::fs::write(&file, line.repeat(100 * 1024 * 1024 / line.len())).unwrap();
+    let wait = |service: &mut Service, id: u64, marker: &str| {
+        let deadline = Instant::now() + Duration::from_secs(300);
+        loop {
+            let _ = service.ready().recv_timeout(Duration::from_millis(20));
+            service.changed_sessions();
+            if service.snapshot(id).unwrap().text.lines().any(|l| l == marker) { return; }
+            assert!(Instant::now() < deadline, "{marker} never arrived");
+        }
+    };
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", 100, 30).unwrap();
+    service.send(id, b"echo READY\n").unwrap();
+    wait(&mut service, id, "READY");
+    let before = service.transport_counts(id).unwrap();
+    let started = Instant::now();
+    service.send(id, format!("cat {}; echo CAT-DONE\n", file.display()).as_bytes()).unwrap();
+    wait(&mut service, id, "CAT-DONE");
+    let (seconds, after) = (started.elapsed().as_secs_f64(), service.transport_counts(id).unwrap());
+    println!("cat 100 MB: {seconds:.2} s; updates in full {}, as deltas {}", after.0 - before.0, after.1 - before.1);
+    let before = after;
+    for command in ["ls /usr/bin | head -50", "echo hello", "printf 'a\\tb\\n'", "ls -la /etc | tail -30", "date", "seq 1 200", "clear", "echo done"] {
+        service.send(id, format!("{command}; echo STEP\n").as_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        service.changed_sessions();
+        let _ = service.snapshot(id).unwrap();
+    }
+    let after = service.transport_counts(id).unwrap();
+    println!("shell session: updates in full {}, as deltas {}", after.0 - before.0, after.1 - before.1);
+    service.close(id).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
