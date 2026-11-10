@@ -1407,8 +1407,8 @@ pub(super) struct Engine<'a> {
     /// `apply`'s spread raise it, and a collection lowers it to the engine's
     /// top after clearing above (`Vm::clear_dead_tails`).
     stack_used: usize,
-    /// The address just past the engine's register file, kept with the file
-    /// (`frame_room`, `grow_registers`).
+    /// The address `WINDOW` slots before the end of the engine's register
+    /// file, kept with the file (`file_limit`, `frame_room`, `grow_registers`).
     limit: usize,
     /// The end of `apply`'s spread while it is pending, else 0: the top a
     /// collection traces covers it (`Suspended::top`).
@@ -2734,16 +2734,17 @@ pub(crate) const WINDOW: usize = 256;
 const FILE_START: usize = 4096;
 /// A file longer than this is cut back to `FILE_START` when its engine ends.
 const SPARE_CAP: usize = 131_072;
-/// The address just past FILE.
+/// The address `WINDOW` slots before FILE's end: the furthest a window may end.
 fn file_limit(file: &[Value]) -> usize {
-    file.as_ptr() as usize + std::mem::size_of_val(file)
+    (file.as_ptr() as usize + std::mem::size_of_val(file)).saturating_sub(WINDOW * std::mem::size_of::<Value>())
 }
 /// Make room for a window ending END slots past R, the running engine's
 /// current frame, and `WINDOW` more: grow the file on a cold boundary,
 /// rebasing every activation pointer. Returns R, rebased if the file moved.
 fn frame_room(e: &mut Engine<'_>, r: *mut Value, end: usize) -> Option<*mut Value> {
     let slot = std::mem::size_of::<Value>();
-    if (r as usize).saturating_add(end.saturating_add(WINDOW).saturating_mul(slot)) <= e.limit {
+    // A window's width fits in 32 bits, so this cannot wrap.
+    if (r as usize).wrapping_add(end * slot) <= e.limit {
         Some(r)
     } else {
         let at = (r as usize).wrapping_sub(e.vm.stack.as_ptr() as usize) / slot;
