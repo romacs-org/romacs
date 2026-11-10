@@ -497,6 +497,9 @@ impl Vm {
         self.rooted_write = false;
         self.deferred_writes.clear();
         self.site_leaf = (0, 0);
+        // A panic in a host wait drops its host, as it did when the wait
+        // kept it on the native stack.
+        self.host_wait = None;
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();

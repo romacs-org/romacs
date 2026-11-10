@@ -5,16 +5,20 @@
 //! `read_char' redisplays and blocks for a key while every outer C frame stays
 //! suspended on the native stack. VM2 has the same shape. The Lisp half of
 //! `read-from-minibuffer' (prims/minibuf.el) calls `romacs--read-host-event'
-//! for each key; that primitive is engine control like `eval' and `load'
-//! (threaded.rs `reentrant_load'): the waiting engines are suspended, their
+//! for each key; that primitive is lent from its engine as `load' is
+//! (threaded.rs `loader_body'): the waiting engines are suspended, their
 //! registers and code traced, so a redisplay that runs Lisp (a mode-line
-//! `:eval') executes in its own engine and may collect. Nothing here holds a
-//! `Value' across the wait: the host sees only plain frame data and answers
+//! `:eval') executes in its own engine and may collect. The wait is
+//! orchestration (`crate::brand`, `wait_for_event'): it holds no `Value', its
+//! Lisp runs in requests, and the host sees only plain frame data and answers
 //! with plain events.
 //!
 //! A VM with no host attached keeps batch GNU's behaviour: the primitive
 //! returns nil (end of input) and `read-from-minibuffer' still signals
 //! `(end-of-file "Error reading from stdin")' outside a keyboard macro.
+use crate::brand::{Gc, Mx};
+use crate::gc::RootFrame;
+use crate::loader::Out;
 use crate::{CommandEvent, Result, Value, Vm, quit, threaded};
 
 /// keyboard.c quit_char: C-g. `set-quit-char' changes it only for a text
@@ -138,77 +142,6 @@ impl Vm {
         let attached = if host.is_some() { Value::TRUE } else { Value::NIL };
         self.host_input = host;
         self.declare_special_raw(HOST_INPUT_VARIABLE, attached);
-    }
-
-    /// `romacs--read-host-event' &optional SECONDS NODISPLAY: redisplay
-    /// unless NODISPLAY or input is pending, then wait for one event, or nil
-    /// once SECONDS pass. Lisp runs timers between reads
-    /// (rlisp/vm/keyboard.el). Runs only under `reentrant_load''s discipline.
-    pub(crate) fn read_host_event(&mut self, args: &[Value]) -> Result<Value> {
-        if args.len() > 2 {
-            return Err("wrong primitive arity".into());
-        }
-        let display = args.get(1).is_none_or(|&v| v == Value::NIL);
-        let deadline = match args.first() {
-            None => None,
-            Some(&v) if v == Value::NIL => None,
-            Some(&v) => {
-                let seconds = match (v.integer_value(), self.object_if(v)) {
-                    (Some(n), _) => n as f64,
-                    (None, Some(crate::data::Object::Float(n))) => *n,
-                    _ => return Err("romacs--read-host-event: SECONDS is not a number".into()),
-                };
-                let wait = std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).unwrap_or_default();
-                Some(crate::host::monotonic() + wait)
-            }
-        };
-        // Taken, not borrowed: the redisplay below needs `&mut self`, and a
-        // read cannot re-enter itself because no Lisp runs inside the wait
-        // except the redisplay's own, which cannot reach this primitive with
-        // the host absent (it would see end of input, nil).
-        let Some(mut host) = self.host_input.take() else {
-            return Ok(Value::NIL);
-        };
-        // A C-g that came before the read is the quit character at once, as
-        // read_char returns it.
-        let outcome = match self.read_quit_event() {
-            Some(event) => Ok(event),
-            None => self.read_host_event_with(host.as_mut(), deadline, display),
-        };
-        self.host_input = Some(host);
-        // kbd_buffer_store_event: input inside `while-no-input' sets
-        // `quit-flag' to `throw-on-input', for the next safepoint to throw.
-        if let Ok(HostEvent::Key(_)) = outcome {
-            self.note_input_for_throw();
-        }
-        match outcome? {
-            HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
-            HostEvent::Key(CommandEvent::Named(name)) => Ok(self.intern(&name)),
-            HostEvent::Timeout => Ok(Value::NIL),
-            // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME).
-            HostEvent::Focus(focused) => {
-                let kind = self.intern(if focused { "focus-in" } else { "focus-out" });
-                let frame = self.frame_value_peek();
-                Ok(self.list_value(&[kind, frame]))
-            }
-            HostEvent::Model { id, event } => Ok(self.model_event_value(id, &event)),
-            HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
-            HostEvent::Closed => {
-                // Its data tells it from a C-g's (`romacs--host-event').
-                let (quit, closed) = (self.intern("quit"), self.intern("frame-closed"));
-                self.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
-                Err("quit: frame closed while reading input".into())
-            }
-        }
-    }
-
-    /// What a host wait's deadline depends on besides the clock, as
-    /// rlisp/vm/keyboard.el's `romacs--wait-state' prints it: empty before
-    /// the Lisp half is installed.
-    fn host_wait_state(&mut self) -> Result<String> {
-        let probe = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
-        let state = self.call_prepared_source_propagating(probe, &[])?;
-        self.display(state)
     }
 
     /// redisplay_internal's run_window_change_functions, which every
@@ -349,88 +282,240 @@ impl Vm {
         }
     }
 
-    fn read_host_event_with(&mut self, host: &mut dyn HostInput, deadline: Option<std::time::Instant>, display: bool) -> Result<HostEvent> {
-        let mut redraw = display;
-        loop {
-            redraw |= self.poll_terminal_output()?;
-            // An image decoded off the VM landed: the frame shows it.
-            redraw |= self.land_images()?;
-            // So did the parse a redisplay left a window plain for.
-            redraw |= self.land_treesit();
-            // GNU redisplay_internal does nothing while `inhibit-redisplay'
-            // is non-nil, as it is around Lisp that redisplay itself calls,
-            // and waits for pending input; but GNU's `message' displays the
-            // echo area at once, input pending or not (xdisp.c
-            // message3_nolog, echo_area_display): a message left during
-            // this wait (a timer's) is shown, and painted, before the input
-            // that may clear it is read.
-            if redraw && !self.redisplay_inhibited()? {
-                // DEADLINE was computed from the timers and the unread
-                // queues; the echo area's functions (a toast's expiry) or
-                // a redisplay's Lisp (a mode-line :eval) may change them,
-                // and then the wait ends for Lisp to compute it again.
-                let before = self.host_wait_state()?;
-                let echoed = self.call_prepared_source_propagating("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])? != Value::NIL;
-                if echoed || !host.input_pending() {
-                    let (width, height) = (self.window_state.width, self.window_state.height);
-                    let started = crate::host::monotonic();
-                    let frame = self.frame_snapshot(width, height)?;
-                    let snapshot = crate::host::monotonic().saturating_duration_since(started);
-                    let selected = self.selected_window_value()?;
-                    let selected = self.window(selected)?.id;
-                    let minibuffer = self.window(self.mini_window())?.id;
-                    let text_animations = self.text_animations()?;
-                    let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
-                    self.display_apply_layout(&ends)?;
-                    self.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
-                    redraw = false;
-                }
-                if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
-            }
-            // The paint sent a bounded share of new images: paint the rest
-            // before waiting, while no input waits and redisplay may run.
-            if host.images_behind() && !host.input_pending() && !self.redisplay_inhibited()? {
-                redraw = true;
-                continue;
-            }
-            // A user signal `debug-on-event' names, which woke this wait:
-            // the command reading quits into the debugger now, as GNU's
-            // enters it at once, not at the read's next key.
-            if self.take_debug_event() {
-                self.poll_quit()?;
-            }
-            let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            host.watch_processes(&self.process_wait_fds());
-            // Blocked for input, the evaluator is not busy: a C-g typed now
-            // is this read's key, not a quit (quit.rs). The Lisp around the
-            // wait (the redisplay's hooks) stays quittable, as GNU's is.
-            let busy = self.quit.busy();
-            for _ in 0..self.quit.set_busy(false) {
-                self.handle_interrupt();
-            }
-            let event = match self.read_quit_event() {
-                Some(event) => Ok(event),
-                None => host.next_event(timeout),
+}
+
+/// A host wait in progress (`wait_for_event`): the host, moved out of
+/// `host_input` so a nested read and the collector see none, as before; the
+/// read's time limit; and, once it came, the event that ends the wait.
+pub(crate) struct HostWait {
+    host: Box<dyn HostInput>,
+    deadline: Option<std::time::Instant>,
+    event: Option<HostEvent>,
+}
+
+/// The waiting host (`HostWait`).
+fn host(vm: &mut Vm) -> &mut dyn HostInput {
+    vm.host_wait.as_mut().expect("a host wait in progress").host.as_mut()
+}
+
+/// What a host wait's deadline depends on besides the clock, as
+/// `romacs--wait-state` (`rlisp/vm/keyboard.el`) prints it: empty before the
+/// Lisp half is installed.
+const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
+/// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
+const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))";
+
+/// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
+/// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
+/// input is pending, then wait for one event, or nil once SECONDS pass; its
+/// value goes to OUT. Lisp runs timers between reads (`rlisp/vm/keyboard.el`).
+/// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
+/// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
+pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
+    let Some(display) = m.leaf(args, take_host)? else { return Ok(()) };
+    let waited = wait(m, gc.by_ref(), display);
+    m.leaf((waited, out), finish)
+}
+
+/// The read's arguments; with a host attached, the host moved to the wait
+/// (`HostWait`) and whether to redisplay, else None and the read is nil.
+/// Moved, not borrowed: a read cannot re-enter itself, because no Lisp runs
+/// inside the wait but its own (a redisplay's), which sees no host and so
+/// end of input, nil.
+fn take_host(vm: &mut Vm, args: &RootFrame) -> Result<Option<bool>> {
+    let args = vm.rooted_values(args).to_vec();
+    if args.len() > 2 {
+        return Err("wrong primitive arity".into());
+    }
+    let display = args.get(1).is_none_or(|&v| v == Value::NIL);
+    let deadline = match args.first() {
+        None => None,
+        Some(&v) if v == Value::NIL => None,
+        Some(&v) => {
+            let seconds = match (v.integer_value(), vm.object_if(v)) {
+                (Some(n), _) => n as f64,
+                (None, Some(crate::data::Object::Float(n))) => *n,
+                _ => return Err("romacs--read-host-event: SECONDS is not a number".into()),
             };
-            self.quit.set_busy(busy);
-            match event? {
-                HostEvent::Resize { width, height } => {
-                    let (line, column) = (self.window_state.line, self.window_state.column);
-                    self.resize_root_window(width, height)?;
-                    self.set_frame_geometry(width, height, line, column)?;
-                    redraw = true;
-                }
-                // A completed background command ends the wait as a
-                // timeout does: Lisp may run its callback between commands
-                // (rlisp/vm/keyboard.el `romacs--read-host-char').
-                HostEvent::Background if self.background_processes_ready() => return Ok(HostEvent::Timeout),
-                HostEvent::Background => {}
-                // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
-                HostEvent::Process => return Ok(HostEvent::Timeout),
-                event => return Ok(event),
+            let wait = std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).unwrap_or_default();
+            Some(crate::host::monotonic() + wait)
+        }
+    };
+    let Some(host) = vm.host_input.take() else { return Ok(None) };
+    vm.host_wait = Some(HostWait { host, deadline, event: None });
+    Ok(Some(display))
+}
+
+/// The wait (GNU `read_char`'s redisplay, then `wait_reading_process_output`),
+/// done once `HostWait::event` holds what ends it.
+fn wait<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, display: bool) -> Result<()> {
+    // A C-g that came before the read is the quit character at once, as
+    // read_char returns it.
+    if m.leaf((), |vm, ()| vm.read_quit_event().is_some_and(|event| ended(vm, event))) {
+        return Ok(());
+    }
+    let mut redraw = display;
+    loop {
+        redraw |= m.leaf((), |vm, ()| vm.poll_terminal_output())?;
+        // An image decoded off the VM landed: the frame shows it.
+        redraw |= land_images(m, gc.by_ref())?;
+        // So did the parse a redisplay left a window plain for.
+        redraw |= m.leaf((), |vm, ()| vm.land_treesit());
+        // GNU redisplay_internal does nothing while `inhibit-redisplay'
+        // is non-nil, as it is around Lisp that redisplay itself calls,
+        // and waits for pending input; but GNU's `message' displays the
+        // echo area at once, input pending or not (xdisp.c
+        // message3_nolog, echo_area_display): a message left during
+        // this wait (a timer's) is shown, and painted, before the input
+        // that may clear it is read.
+        if redraw && !m.leaf((), |vm, ()| vm.redisplay_inhibited())? {
+            // The deadline was computed from the timers and the unread
+            // queues; the echo area's functions (a toast's expiry) or
+            // a redisplay's Lisp (a mode-line :eval) may change them,
+            // and then the wait ends for Lisp to compute it again.
+            let before = wait_state(m, gc.by_ref())?;
+            let echoed = threaded::call_source(m, gc.by_ref(), ECHO_SYNC, None, (), |_, (), echoed| echoed.map(|v| v != Value::NIL))?;
+            if echoed || !m.leaf((), |vm, ()| host(vm).input_pending()) {
+                threaded::redisplay(m, gc.by_ref(), (), |vm, (), (started, frame)| paint(vm, started, frame))?;
+                redraw = false;
+            }
+            if wait_state(m, gc.by_ref())? != before {
+                m.leaf((), |vm, ()| ended(vm, HostEvent::Timeout));
+                return Ok(());
             }
         }
+        // The paint sent a bounded share of new images: paint the rest
+        // before waiting, while no input waits and redisplay may run.
+        if m.leaf((), |vm, ()| {
+            let behind = { let host = host(vm); host.images_behind() && !host.input_pending() };
+            Ok::<_, String>(behind && !vm.redisplay_inhibited()?)
+        })? {
+            redraw = true;
+            continue;
+        }
+        // A user signal `debug-on-event' names, which woke this wait:
+        // the command reading quits into the debugger now, as GNU's
+        // enters it at once, not at the read's next key.
+        m.leaf((), |vm, ()| if vm.take_debug_event() { vm.poll_quit() } else { Ok(()) })?;
+        let (resize, done) = m.leaf((), next_event)?;
+        if let Some(size) = resize {
+            threaded::resize(m, gc.by_ref(), size)?;
+            redraw = true;
+        }
+        if done {
+            return Ok(());
+        }
     }
+}
+
+/// The wait-state probe's printed value (`WAIT_STATE`).
+fn wait_state<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>) -> Result<String> {
+    threaded::call_source(m, gc, WAIT_STATE, None, (), |vm, (), state| state.and_then(|v| vm.display(v)))
+}
+
+/// `Vm::land_images` within the wait: the decodes that finished landed, and
+/// each loader's error logged to *Messages* unshown, its Lisp a request.
+/// Whether any decode finished.
+fn land_images<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>) -> Result<bool> {
+    let (messages, landed) = m.leaf((), |vm, ()| vm.image_completions());
+    for message in messages {
+        let frame = m.leaf(message.as_str(), |vm, message| {
+            let text = vm.allocate_object(crate::data::Object::String(Box::new(crate::data::LispString::new(message))));
+            vm.root_frame(&[text])
+        });
+        let logged = threaded::call_source(m, gc.by_ref(), crate::prim::IMAGE_ERROR_LOG, Some(&frame), (), |_, (), logged| logged.map(|_| ()));
+        m.leaf(frame, Vm::drop_frame);
+        logged?;
+    }
+    Ok(landed)
+}
+
+/// The frame frozen at START (`threaded::redisplay`), handed to the host to
+/// paint, and the layout it reports applied.
+fn paint(vm: &mut Vm, started: std::time::Instant, frame: Result<romacs_layout_input::FrameSnapshot>) -> Result<()> {
+    let frame = frame?;
+    let snapshot = crate::host::monotonic().saturating_duration_since(started);
+    let selected = vm.selected_window_value()?;
+    let selected = vm.window(selected)?.id;
+    let minibuffer = vm.window(vm.mini_window())?.id;
+    let text_animations = vm.text_animations()?;
+    let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
+    vm.display_apply_layout(&ends)?;
+    vm.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
+    Ok(())
+}
+
+/// The host's next event, waited for with the evaluator idle: a C-g typed now
+/// is this read's key, not a quit (quit.rs), while the Lisp around the wait
+/// (the redisplay's) stays quittable, as GNU's is. A resize to apply, and
+/// whether the wait is over, its event in `HostWait::event`.
+fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
+    let deadline = vm.host_wait.as_ref().expect("a host wait in progress").deadline;
+    let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
+    let fds = vm.process_wait_fds();
+    host(vm).watch_processes(&fds);
+    let busy = vm.quit.busy();
+    for _ in 0..vm.quit.set_busy(false) {
+        vm.handle_interrupt();
+    }
+    let event = match vm.read_quit_event() {
+        Some(event) => Ok(event),
+        None => host(vm).next_event(timeout),
+    };
+    vm.quit.set_busy(busy);
+    Ok(match event? {
+        HostEvent::Resize { width, height } => (Some((width, height)), false),
+        // A completed background command ends the wait as a timeout does:
+        // Lisp may run its callback between commands
+        // (rlisp/vm/keyboard.el `romacs--read-host-char').
+        HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
+        HostEvent::Background => (None, false),
+        // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
+        HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
+        event => (None, ended(vm, event)),
+    })
+}
+
+/// EVENT ends the wait.
+fn ended(vm: &mut Vm, event: HostEvent) -> bool {
+    vm.host_wait.as_mut().expect("a host wait in progress").event = Some(event);
+    true
+}
+
+/// The wait's end, whatever ended it: the host back in `host_input`, then
+/// the event as the read's value in OUT.
+fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
+    let HostWait { host, event, .. } = vm.host_wait.take().expect("a host wait in progress");
+    vm.host_input = Some(host);
+    waited?;
+    let event = event.expect("a wait ends with its event");
+    // kbd_buffer_store_event: input inside `while-no-input' sets
+    // `quit-flag' to `throw-on-input', for the next safepoint to throw.
+    if let HostEvent::Key(_) = event {
+        vm.note_input_for_throw();
+    }
+    let value = match event {
+        HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c)?,
+        HostEvent::Key(CommandEvent::Named(name)) => vm.intern(&name),
+        HostEvent::Timeout => Value::NIL,
+        // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME).
+        HostEvent::Focus(focused) => {
+            let kind = vm.intern(if focused { "focus-in" } else { "focus-out" });
+            let frame = vm.frame_value_peek();
+            vm.list_value(&[kind, frame])
+        }
+        // A native model's event: the special event `(romacs-model ID TYPE PLIST)`.
+        HostEvent::Model { id, event } => vm.model_event_value(id, &event),
+        HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
+        HostEvent::Closed => {
+            // Its data tells it from a C-g's (`romacs--host-event').
+            let (quit, closed) = (vm.intern("quit"), vm.intern("frame-closed"));
+            vm.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
+            return Err("quit: frame closed while reading input".into());
+        }
+    };
+    vm.set_rooted(out.0, out.1, value);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -508,5 +593,69 @@ mod tests {
             .map(|v| v.display().unwrap())
             .unwrap_or_else(|e| format!("VM-ERROR {e}"));
         assert_eq!(got, "((romacs--read-host-event) (5 6))");
+    }
+
+    /// A host that answers with EVENTS in turn, no input ever pending, so
+    /// every read redisplays first.
+    struct Events(std::collections::VecDeque<HostEvent>);
+    impl HostInput for Events {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(Vec::new()) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
+            self.0.pop_front().ok_or_else(|| "host script exhausted".into())
+        }
+    }
+    fn waiting(events: Vec<HostEvent>) -> Vm {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(Events(events.into()))));
+        vm
+    }
+    fn shown(vm: &mut Vm, source: &str) -> String {
+        vm.eval_source(source).map_or_else(|e| format!("VM-ERROR {e}"), |v| v.display().unwrap())
+    }
+
+    /// The wait's own Lisp (the wait-state probe, echo-sync) and a
+    /// redisplay's run as requests and may collect: the read still answers.
+    #[test]
+    fn the_waits_lisp_may_collect() {
+        let mut vm = waiting(vec![HostEvent::Key(CommandEvent::Character(120))]);
+        shown(&mut vm, "(progn (defun romacs--wait-state () (garbage-collect) (format \"%S\" (list 1 2)))
+                               (defun romacs--echo-sync () (garbage-collect) nil)
+                               (setq mode-line-format '(:eval (progn (garbage-collect) \"m\"))))");
+        vm.set_gc_stress(0);
+        let before = vm.heap_stats().collections;
+        assert_eq!(shown(&mut vm, "(list (romacs--read-host-event) (make-string 2 ?k))"), "(120 \"kk\")");
+        assert!(vm.heap_stats().collections > before, "the wait's Lisp collected");
+        assert!(vm.host_input.is_some(), "the host is back after the read");
+    }
+
+    /// A resize while waiting resizes the root window (Lisp, a request) and
+    /// the frame, then redisplays and goes on waiting.
+    #[test]
+    fn a_resize_during_the_wait_resizes_and_waits_on() {
+        let mut vm = waiting(vec![HostEvent::Resize { width: 1000, height: 700 }, HostEvent::Key(CommandEvent::Character(120))]);
+        vm.set_gc_stress(0);
+        assert_eq!(shown(&mut vm, "(romacs--read-host-event)"), "120");
+        assert_eq!((vm.window_state.width, vm.window_state.height), (1000, 700));
+    }
+
+    /// A closed frame ends the wait with `quit`, its data telling it from a
+    /// C-g's, and the host is back afterwards.
+    #[test]
+    fn a_closed_frame_quits_the_wait() {
+        let mut vm = waiting(vec![HostEvent::Closed]);
+        assert_eq!(shown(&mut vm, "(condition-case e (romacs--read-host-event) (quit e))"), "(quit . frame-closed)");
+        assert!(vm.host_input.is_some(), "the host is back after the quit");
+    }
+
+    /// A read from a redisplay's Lisp, inside a wait, sees no host and reads
+    /// nil; the outer read still gets its key.
+    #[test]
+    fn a_nested_read_sees_no_host() {
+        let mut vm = waiting(vec![HostEvent::Key(CommandEvent::Character(120))]);
+        shown(&mut vm, "(setq nested 'unread mode-line-format '(:eval (progn (setq nested (list (romacs--read-host-event))) \"m\")))");
+        assert_eq!(shown(&mut vm, "(list (romacs--read-host-event) nested)"), "(120 (nil))");
+        assert!(vm.host_input.is_some(), "the host is back after the read");
     }
 }
