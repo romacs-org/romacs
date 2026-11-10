@@ -6,7 +6,9 @@
 ;; Codex's driver (`romacs-agent-define-harness'): one `codex app-server'
 ;; process per session, JSON-RPC lines both ways (codex-cli 0.164).  It
 ;; starts up by `initialize', `initialized', then `thread/start', or
-;; `thread/resume' going on with its thread (one `codex exec' made too).
+;; `thread/resume' going on with its thread (one `codex exec' made too),
+;; or for a fork's first run `thread/fork' of its source's (Codex writes
+;; the new thread's rollout then).
 ;; A message is a `turn/start', or a `turn/steer' into the turn running;
 ;; an interrupt is `turn/interrupt'.  Its approval requests come to the
 ;; user; any other request it makes is refused.
@@ -48,17 +50,24 @@ a thread is its startup's to say."
             (romacs-agent--codex-mcp-words session)
             (plist-get instance :arguments))))
 
+(defun romacs-agent--codex-forking (session)
+  "Whether SESSION, a fork, forks its source's thread again on its next
+run: its own is not named yet (Codex writes it when it forks)."
+  (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-harness-session session))))
+
 (defun romacs-agent--codex-thread (session number)
-  "The request starting SESSION's thread, or going on with the one it has."
+  "The request starting SESSION's thread: going on with the one it has, a
+fork of the one its options' :fork names, else a new one."
   (let ((thread (romacs-agent-harness-session session))
+        (fork (plist-get (romacs-agent-options session) :fork))
         (params (romacs-mcp--object "cwd" (romacs-agent-cwd session)
                                     "developerInstructions" (romacs-agent--instructions session))))
     (when-let* ((model (plist-get (romacs-agent-options session) :model))) (puthash "model" model params))
-    (if thread
-        (progn (puthash "threadId" thread params)
-               ;; Its turns are in the journal already.
+    (if (or thread fork)
+        (progn (puthash "threadId" (or thread fork) params)
+               ;; Its turns are in the journal already (a fork's, in its source's).
                (puthash "excludeTurns" t params)
-               (romacs-agent--codex-request "thread/resume" number params))
+               (romacs-agent--codex-request (if thread "thread/resume" "thread/fork") number params))
       (romacs-agent--codex-request "thread/start" number params))))
 
 (defun romacs-agent--codex-text (text)
@@ -222,7 +231,7 @@ what to do should it miss its turn."
   (let ((method (gethash "method" object)) (id (gethash "id" object)))
     (cond
      ((member method '("turn/start" "turn/steer")) (romacs-agent--codex-message session object))
-     ((member method '("initialize" "initialized" "thread/start" "thread/resume"))
+     ((member method '("initialize" "initialized" "thread/start" "thread/resume" "thread/fork"))
       (list (list :type 'handshake :state (list :sent (if (string-prefix-p "thread/" method) "thread" method)))))
      (method nil)
      ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
@@ -251,10 +260,10 @@ what to do should it miss its turn."
         (error (romacs-agent--codex-error object))
         (method (romacs-agent--codex-method id)))
     (pcase method
-      ((guard (and error (member method '("initialize" "thread/start" "thread/resume"))))
+      ((guard (and error (member method '("initialize" "thread/start" "thread/resume" "thread/fork"))))
        (list (list :type 'error :text (format "Codex could not start: %s" error))))
       ("initialize" (list (list :type 'handshake :state (list :initialized t))))
-      ((or "thread/start" "thread/resume")
+      ((or "thread/start" "thread/resume" "thread/fork")
        (let ((thread (gethash "id" (gethash "thread" result))))
          (append (list (list :type 'handshake :state (list :thread thread))
                        (list :type 'session :harness-session thread
@@ -500,7 +509,7 @@ line an earlier `codex exec' run journaled)."
   ;; a child's environment).
   :scrub '("CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS" "CODEX_CI" "CODEX_SANDBOX_NETWORK_DISABLED"
            "CODEX_SESSION_ID" "CODEX_THREAD_ID" "CODEX_TOOL_CALL_ID" "CODEX_VERSION")
-  :lifetime 'persistent
+  :lifetime 'persistent :forks #'romacs-agent--codex-forking
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next
