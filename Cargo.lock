@@ -3539,10 +3539,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-gnudiff"
-version = "0.0.20"
-
-[[package]]
 name = "romacs-grammars"
 version = "0.0.20"
 dependencies = [
