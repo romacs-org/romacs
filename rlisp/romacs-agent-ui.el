@@ -98,6 +98,9 @@
   "A session whose last turn ended since its chat was shown.")
 
 (defvar-local romacs-agent-ui--session nil)
+(defvar-local romacs-agent-ui--thinkings 0 "How many thinking rows the chat has: each one's id.")
+(defvar-local romacs-agent-ui--thinking nil "The id of the thinking row open.")
+(defvar-local romacs-agent-ui--thinking-tail "" "Its spaces and newlines not yet written.")
 (defvar-local romacs-agent-ui--asks nil
   "The chat's approval events by request id: what each asked.")
 
@@ -581,11 +584,22 @@ or a repeat."
            ;; Opened by the first delta with something to show; then every
            ;; delta, spaces and newlines too.
            (when (and text (or (eq romacs-agent-ui--open 'thinking) (not (string-empty-p (string-trim text)))))
+             ;; Folded to its row, as a tool's output is: TAB shows it.
              (unless (eq romacs-agent-ui--open 'thinking)
-               (romacs-agent-ui--line session event "∴ " 'face 'romacs-agent-dim)
+               (setq romacs-agent-ui--thinking (format "thinking-%d" (cl-incf romacs-agent-ui--thinkings)))
+               (romacs-agent-ui--line session event "∴ thinking" 'face 'romacs-agent-dim
+                                      'romacs-agent-fold romacs-agent-ui--thinking)
                (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
-               (setq romacs-agent-ui--open 'thinking))
-             (romacs-agent-ui--insert text 'face 'romacs-agent-dim))))
+               (setq romacs-agent-ui--open 'thinking romacs-agent-ui--thinking-tail "\n"))
+             ;; Its last spaces and newlines wait for more: a fold never
+             ;; ends hiding the newline the next row needs.
+             (let* ((text (concat romacs-agent-ui--thinking-tail text))
+                    (cut (or (string-match-p "[ \t\n]*\\'" text) (length text))))
+               (setq romacs-agent-ui--thinking-tail (substring text cut))
+               (unless (= cut 0)
+                 (romacs-agent-ui--insert (substring text 0 cut) 'face 'romacs-agent-dim
+                                          'romacs-agent-output romacs-agent-ui--thinking
+                                          'invisible (romacs-agent-ui--fold-shown romacs-agent-ui--thinking)))))))
         ('tool (romacs-agent-ui--tool session event))
         ('compacted
          (romacs-agent-ui--line session event
@@ -844,38 +858,31 @@ WORD its help."
     (propertize "default" 'face 'romacs-agent-effort-default)))
 
 (defun romacs-agent-ui--header-line ()
-  "The chat's header: harness | permission mode | model | context used/window
-| state, fitted to the window (the instance named when not the default)."
+  "The chat's header, only what is worth a glance: harness, the instance
+when not the harness's own, a permission mode other than bypassing them, model
+and effort, a selection waiting, its workers, how full its context is,
+and its state."
   (let* ((session romacs-agent-ui--session)
-         (separator (propertize " | " 'face 'romacs-agent-dim))
-         (context (and (numberp (romacs-agent-context-used session))
-                       (concat (hermes-chat--abbrev-tokens (romacs-agent-context-used session))
-                               (if (numberp (romacs-agent-context-window session))
-                                   (concat "/" (hermes-chat--abbrev-tokens (romacs-agent-context-window session)))
-                                 ""))))
+         (harness (romacs-agent-harness session))
          (mode (romacs-agent-permission-mode session))
+         (effort (plist-get (romacs-agent-options session) :effort))
+         (share (romacs-agent-ui--context-share session))
          (segments
           (delq nil
-                (list (romacs-agent-ui--harness-icon (romacs-agent-harness session))
-                      (and (not (equal (romacs-agent-provider session) (ignore-errors (romacs-agent--default-provider))))
+                (list (romacs-agent-ui--harness-icon harness)
+                      ;; The icon names the harness: only another instance of it is named.
+                      (and (not (equal (romacs-agent-provider session) (symbol-name harness)))
                            (propertize (romacs-agent-provider session) 'face 'romacs-agent-dim))
-                      ;; Hermes's words for the risky mode: YOLO, in the warning face.
-                      (and mode (if (equal mode "bypassPermissions")
-                                    (propertize "YOLO" 'face 'warning 'help-echo mode)
-                                  (propertize mode 'face 'romacs-agent-mode)))
-                      (let ((model (propertize (or (romacs-agent-model session) "...") 'face 'romacs-agent-model))
-                            (effort (plist-get (romacs-agent-options session) :effort)))
-                        (if effort (concat model (propertize " · " 'face 'romacs-agent-model)
-                                           (romacs-agent-ui--effort effort))
-                          model))
+                      (and mode (not (equal mode "bypassPermissions")) (propertize mode 'face 'romacs-agent-mode))
+                      (concat (propertize (or (romacs-agent-ui--instance nil harness (romacs-agent-model session) nil) "...")
+                                          'face 'romacs-agent-model)
+                              (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
                       (when-let* ((switch (romacs-agent-pending-selection session)))
-                        (propertize (format "→ %s next turn" (romacs-agent-ui--selection-label switch)) 'face 'warning))
-                      (when-let* ((children (romacs-agent-children-summary session)))
-                        (concat (propertize "⇢ " 'face 'romacs-agent-delegate) children))
-                      (and context (propertize context 'face 'romacs-agent-context))
-                      (romacs-agent-ui--state-label session))))
-         (text (mapconcat #'identity segments separator)))
-    (string-replace "%" "%%" (romacs-truncate text (max 1 (window-body-width))))))
+                        (propertize (format "→ %s" (romacs-agent-ui--selection-label switch)) 'face 'warning))
+                      (romacs-agent-children-summary session)
+                      (and share (propertize share 'face 'romacs-agent-context))
+                      (romacs-agent-ui--state-label session)))))
+    (string-replace "%" "%%" (romacs-truncate (mapconcat #'identity segments "  ") (max 1 (window-body-width))))))
 
 ;;; The composer
 
@@ -890,10 +897,8 @@ WORD its help."
   (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint))))
 
 (defun romacs-agent-ui--make-hint ()
-  (let ((hint (concat "Message... · " (romacs-agent-ui--key #'romacs-agent-chat-return) " send · "
-                      (romacs-agent-ui--key #'romacs-agent-chat-interrupt) " interrupt · "
-                      (romacs-agent-ui--key #'romacs-agent-chat-history-previous) " history")))
-    (add-face-text-property 0 (length hint) 'romacs-agent-dim t hint)
+  "The hint alone: the keys are the actions menu's (?)."
+  (let ((hint (propertize "Message…" 'face 'romacs-agent-dim)))
     ;; The cursor before the hint, not after it.
     (put-text-property 0 1 'cursor t hint)
     hint))
@@ -1174,19 +1179,34 @@ transcript, scroll back, as hermes's chat does."
         ((> (point) romacs-agent-ui--end) (delete-char (- (min n (- (point) romacs-agent-ui--end)))))))
 
 (defun romacs-agent-chat-toggle ()
-  "Show or hide the output of the tool call on this row."
+  "Show or hide the output of the tool call, or the thinking, on this row."
   (interactive nil romacs-agent-chat-mode)
-  (let ((id (or (get-text-property (point) 'romacs-agent-tool)
-                (get-text-property (line-beginning-position) 'romacs-agent-tool)
-                (get-text-property (max (point-min) (1- (line-end-position))) 'romacs-agent-tool))))
-    (when id
+  (let ((id (cl-some (lambda (pos) (or (get-text-property pos 'romacs-agent-tool) (get-text-property pos 'romacs-agent-fold)))
+                     (list (point) (line-beginning-position) (max (point-min) (1- (line-end-position)))))))
+    (when-let* ((id)
+                (start (romacs-agent-ui--output-start id (line-beginning-position))))
       (save-excursion
-        (forward-line 1)
-        (let ((inhibit-read-only t) (start (point)))
+        (goto-char start)
+        (let ((inhibit-read-only t))
           (while (equal (get-text-property (point) 'romacs-agent-output) id) (forward-char 1))
-          (when (> (point) start)
-            (put-text-property start (point) 'invisible
-                               (if (get-text-property start 'invisible) nil 'romacs-agent-output))))))))
+          (put-text-property start (point) 'invisible
+                             (if (get-text-property start 'invisible) nil 'romacs-agent-output)))))))
+
+(defun romacs-agent-ui--output-start (id from)
+  "Where the output of fold ID starts, from FROM on, or nil: ids are
+strings, compared by value."
+  (let ((pos from))
+    (while (and pos (< pos (point-max)) (not (equal (get-text-property pos 'romacs-agent-output) id)))
+      (setq pos (next-single-property-change pos 'romacs-agent-output)))
+    (and pos (< pos (point-max)) pos)))
+
+(defun romacs-agent-ui--fold-shown (id)
+  "How more of fold ID's output goes, written at the transcript's end: as
+what of it is there just before, folded when none is."
+  (let ((before (max (point-min) (1- romacs-agent-ui--end))))
+    (if (equal (get-text-property before 'romacs-agent-output) id)
+        (get-text-property before 'invisible)
+      'romacs-agent-output)))
 
 (defun romacs-agent-chat-open-task ()
   "Open the thread of the delegated task on this row."
@@ -1650,79 +1670,26 @@ ALL, what every turn of the session did."
     (and (numberp used) (numberp window) (> window 0)
          (format "%d%%" (round (* 100.0 (/ used (float window))))))))
 
-(defun romacs-agent-ui--one-line (text width)
-  "TEXT on one line, shortened to WIDTH, reading no more of it than that
-can show: a reply can be long."
-  (let ((text (or text "")))
-    (romacs-truncate
-     (string-trim (replace-regexp-in-string "[\n\t ]+" " " (substring text 0 (min (length text) (* 4 (max 0 width))))))
-     width)))
-
-(defcustom romacs-agent-switch-context-share 70
-  "The context share, in percent, from which the switcher shows a
-session's: below, it is nothing to act on."
-  :type 'natnum :group 'romacs-agent)
-
-(defun romacs-agent-ui--switch-facts (session default)
-  "What is worth acting on in SESSION at a glance, each in its face: its
-project, its context when nearly full, what waits in its queue, and its
-instance when not DEFAULT."
-  (let ((queued (romacs-agent-queue-length session))
-        (used (romacs-agent-context-used session)) (window (romacs-agent-context-window session))
-        (provider (romacs-agent-provider session)))
-    (delq nil (list (and (romacs-agent-cwd session)
-                         (propertize (file-name-nondirectory (directory-file-name (romacs-agent-cwd session)))
-                                     'face 'romacs-agent-project))
-                    (and (numberp used) (numberp window) (> window 0)
-                         (>= (* 100.0 (/ used (float window))) romacs-agent-switch-context-share)
-                         (propertize (romacs-agent-ui--context-share session) 'face 'warning))
-                    (and (> queued 0) (propertize (format "%d queued" queued) 'face 'romacs-agent-running))
-                    (and provider (not (equal provider default)) (propertize provider 'face 'romacs-agent-dim))))))
-
-(defun romacs-agent-ui--plain (text)
-  "TEXT, a reply's Markdown, as plain words for one line: links as their
-text, code and emphasis marks, headings' and lists' marks gone."
-  (thread-last (or text "")
-               (replace-regexp-in-string "```[^\n]*" "")
-               (replace-regexp-in-string "\\[\\([^]]*\\)\\](\\([^)]*\\))" "\\1")
-               (replace-regexp-in-string "\\*\\*\\|__\\|`" "")
-               (replace-regexp-in-string "^[ \t]*\\(?:#+\\|[-*+]\\|[0-9]+\\.\\)[ \t]+" "")
-               (romacs-agent-ui--unemphasize)))
-
-(defun romacs-agent-ui--unemphasize (text)
-  "TEXT without single-marker emphasis, *word* or _word_, an underscore
-within a word kept.  Again until none is left: a match takes the boundary
-an adjacent span needs."
-  (let ((next (replace-regexp-in-string
-               "\\(^\\|[^[:alnum:]]\\)\\([*_]\\)\\([^*_ \n][^*_\n]*\\)\\2\\([^[:alnum:]]\\|$\\)"
-               "\\1\\3\\4" text)))
-    (if (equal next text) text (romacs-agent-ui--unemphasize next))))
-
 (defconst romacs-agent-ui--switch-words '("working" "needs you" "failed")
-  "The states the switcher names: the rest its mark says.")
+  "The states the switcher marks: the rest are unmarked.")
 
-(defun romacs-agent-ui--switch-suffix (session width default)
+(defun romacs-agent-ui--switch-suffix (session width)
   "What the switcher says of SESSION after its title, in at most WIDTH
-columns: a state that wants attention, then facts, then what room leaves
-of its reply.  DEFAULT is the provider not worth naming."
-  (pcase-let* ((`(,_mark ,face ,word) (romacs-agent-ui--status session))
-               (unread (> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)))
-               (head (concat (propertize (format "%-9s" (if (member word romacs-agent-ui--switch-words) word ""))
-                                         'face face)
-                             (propertize (format "%5s  " (or (romacs-agent-ui--ago (romacs-agent-last-time session)) ""))
-                                         'face 'romacs-agent-dim)
-                             (if unread (propertize "● " 'face 'romacs-agent-unread) "  ")))
-               (space (- width (string-width head)))
-               (facts (romacs-truncate
-                       (mapconcat #'identity (romacs-agent-ui--switch-facts session default) " · ") space))
-               (room (- space (string-width facts) 2)))
+columns: when it was last active, and its project."
+  (let ((cwd (romacs-agent-cwd session)))
     (truncate-string-to-width
-     (concat head facts
-             (if (> room 8)
-                 (propertize (concat "  " (romacs-agent-ui--one-line (romacs-agent-ui--plain (romacs-agent-reply session)) room))
-                             'face 'romacs-agent-dim)
-               ""))
+     (concat (propertize (format "%4s  " (romacs-agent-ui--ago (romacs-agent-last-time session))) 'face 'romacs-agent-dim)
+             (propertize (if cwd (file-name-nondirectory (directory-file-name cwd)) "") 'face 'romacs-agent-project))
      (max 0 width))))
+
+(defconst romacs-agent-ui--switch-suffix-width 26
+  "The columns a switcher row keeps after its title: the mark, the padding,
+the age and a project's name.")
+
+(defun romacs-agent-ui--switch-mark (session)
+  "SESSION's mark in the switcher: only a state that wants attention."
+  (pcase-let ((`(,mark ,face ,word) (romacs-agent-ui--status session)))
+    (propertize (if (member word romacs-agent-ui--switch-words) mark " ") 'face face)))
 
 (defun romacs-agent-ui--session-names (sessions)
   "A table of a unique name to each of SESSIONS, and the names in order, as
@@ -1741,24 +1708,24 @@ needs, then a count: every name stands for one session."
         (push name names)))
     (cons table (nreverse names))))
 
-(defun romacs-agent-ui--switch-row (name session column width default)
+(defun romacs-agent-ui--switch-row (name session column width)
   "NAME's row for SESSION: the affixation of a candidate, whose value stays
-NAME and whose shown form fits COLUMN.  DEFAULT is the provider not worth
-naming."
+NAME and whose shown form fits COLUMN."
   (let ((shown (romacs-truncate name column)))
     (list (if (equal shown name) name (propertize name 'display shown))
-          (concat (romacs-agent-ui--status-mark session) " ")
+          (concat (romacs-agent-ui--switch-mark session) " ")
           (concat (make-string (max 1 (- (+ column 2) (string-width shown))) ?\s)
-                  (romacs-agent-ui--switch-suffix session (- width column 4) default)))))
+                  (romacs-agent-ui--switch-suffix session (- width column 4))))))
 
 (defun romacs-agent-ui--session-table (table names width)
   "A completion table of NAMES in their order, each TABLE's session, each
 row its status within WIDTH columns."
-  (let* ((column (min 44 (apply #'max 1 (mapcar #'string-width names))))
-         (default (romacs-agent-ui--default-provider))
+  (let* ((column (min 44 (apply #'max 1 (mapcar #'string-width names))
+                      ;; What follows a title, its age and project, keeps its room.
+                      (max 12 (- width romacs-agent-ui--switch-suffix-width))))
          (rows (lambda (candidates)
                  (mapcar (lambda (name)
-                           (romacs-agent-ui--switch-row name (gethash name table) column width default))
+                           (romacs-agent-ui--switch-row name (gethash name table) column width))
                          candidates))))
     (lambda (string predicate action)
       (if (eq action 'metadata)
@@ -1766,16 +1733,10 @@ row its status within WIDTH columns."
                      (cycle-sort-function . identity) (affixation-function . ,rows))
         (complete-with-action action names string predicate)))))
 
-(defun romacs-agent-ui--status-mark (session)
-  "SESSION's status mark, in its face."
-  (pcase-let ((`(,mark ,face ,_word) (romacs-agent-ui--status session)))
-    (propertize (or mark " ") 'face face)))
-
 (defvar romacs-complete-center-width)
 
-(defcustom romacs-agent-switch-width 0.8
-  "How much of the frame's width `romacs-agent-switch' takes: a row says more
-than most completions."
+(defcustom romacs-agent-switch-width 0.5
+  "How much of the frame's width `romacs-agent-switch' takes."
   :type 'float :group 'romacs-agent)
 
 (defun romacs-agent-ui--finished-child-p (session)

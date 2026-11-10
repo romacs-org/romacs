@@ -156,3 +156,44 @@
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
     (should (string-suffix-p "{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
+
+;; Only the essentials shown.
+
+(ert-deftest romacs-agent-thinking-is-folded-to-its-row ()
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh ")
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "it all.")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Answer.")
+    (should (string-prefix-p "∴ thinking\n" (romacs-agent-cards-tests--visible)))
+    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
+    ;; TAB on its row shows it all, on lines of its own; again, folds it.
+    (goto-char (point-min))
+    (romacs-agent-chat-toggle)
+    (should (string-prefix-p "∴ thinking\nWeigh it all.\n" (romacs-agent-cards-tests--visible)))
+    (romacs-agent-chat-toggle)
+    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
+    ;; Ending in a newline, it still leaves the next row its own line.
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Consider.\n")
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id "r1" :name "Read"
+                                    :input (romacs-agent-cards-tests--table "file_path" "/a"))
+    (should (string-match-p "∴ thinking\n.*Read" (romacs-agent-cards-tests--visible)))
+    (should-not (string-match-p "∴ thinking.*Read" (romacs-agent-cards-tests--visible)))
+    ;; A second one is its own fold.
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Again.")
+    (should (= (how-many "∴ thinking" (point-min) (point-max)) 3))))
+
+(ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
+  (romacs-agent-cards-tests--with-chat session
+    (setf (romacs-agent-model session) "claude-opus-5-5" (romacs-agent-permission-mode session) "bypassPermissions"
+          (romacs-agent-options session) '(:effort "high")
+          (romacs-agent-context-used session) 440000 (romacs-agent-context-window session) 1000000
+          (romacs-agent-provider session) "claude")
+    (let ((romacs-agent-glyphs nil) (romacs-agent-default-provider "claude"))
+      (should (equal (substring-no-properties (romacs-agent-ui--header-line))
+                     (concat (romacs-agent-ui--harness-icon 'claude) "  opus-5-5 high  44%%  Running")))
+      ;; A mode other than bypassing approvals is worth a glance.
+      (setf (romacs-agent-permission-mode session) "plan")
+      (should (string-search "  plan  " (romacs-agent-ui--header-line)))
+      ;; Another instance of the harness is named.
+      (setf (romacs-agent-provider session) "claude2")
+      (should (string-search "  claude2  " (romacs-agent-ui--header-line))))))

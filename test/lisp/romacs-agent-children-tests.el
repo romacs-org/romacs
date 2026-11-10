@@ -215,7 +215,7 @@
       (let ((romacs-agent-ui--session parent))
         (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made at redisplay")))
                   ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned at redisplay"))))
-          (should (string-search "⇢ 1 running" (romacs-agent-ui--header-line))))))))
+          (should (string-search "1 running" (romacs-agent-ui--header-line))))))))
 
 (ert-deftest romacs-agent-children-menu-rows-open-children ()
   (romacs-agent-children-tests--with
