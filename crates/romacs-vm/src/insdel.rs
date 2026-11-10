@@ -420,6 +420,9 @@ impl Vm {
     /// no Lisp before or after it. Undo, when on, is then recorded by
     /// `quiet_inserted'.
     pub(crate) fn quiet_insertion(&mut self) -> Option<QuietInsertion> {
+        // Its watchers are Lisp, and this insertion is the one that runs none.
+        let deactivate = self.change_slots().deactivate;
+        if self.variable_trapped(self.indirect_variable(deactivate)) { return None; }
         let index = self.buffer_index().ok()?;
         let Object::Buffer(b) = &self.objects[index] else { return None };
         if b.properties.has_intervals() || !b.intervals.is_empty() { return None; }
@@ -439,19 +442,28 @@ impl Vm {
         if let Some((index, point, unmodified)) = quiet.undo {
             self.record_insert(index, point, length as i64, unmodified).map_err(Fault::Error)?;
         }
-        if !quiet.inhibited { self.mark_deactivated()?; }
+        if !quiet.inhibited { self.store_deactivated()?; }
         Ok(())
     }
 
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        // This buffer's own binding is t already: only a watcher could tell.
+        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.deferred_writes.is_empty() {
+            return self.write_from_native(crate::watchers::NativeWrite::set(deactivate, Value::TRUE));
+        }
+        self.store_deactivated()
+    }
+    /// `mark_deactivated` where no watcher hears it.
+    fn store_deactivated(&mut self) -> Faulty<()> {
+        let deactivate = self.change_slots().deactivate;
+        // This buffer's own binding is t already: nothing changes. An inherited
+        // t is not its own, so the write still makes the binding.
         let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
-        if local != deactivate && self.slots[local].value == Value::TRUE && !self.variable_trapped(deactivate) {
+        if local != deactivate && self.slots[local].value == Value::TRUE {
             return Ok(());
         }
-        self.set_variable_value(deactivate, Value::TRUE).map_err(Fault::Error)
+        self.assign_variable(deactivate, Value::TRUE).map_err(Fault::Error)
     }
 
     /// Run a storage kernel on ARGS outside the engine's registers, which

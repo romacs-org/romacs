@@ -22,10 +22,10 @@
 //! What the types cannot reject is a deliberate channel: a leaf writing a Value
 //! to global mutable state, or re-encoding it as an integer, for orchestration
 //! to read back. Those are named in the design note (§4.14) and kept out of
-//! ordinary code by `tests/rooting_brand_rules.rs`.
+//! ordinary code by romacs-vm's `tests/rooting_brand_rules.rs`.
 //!
-//! Generic over the engine, so `tests/compile_boundaries.rs` proves the rules
-//! on these very types with a stand-in engine.
+//! Generic over the engine and depending on nothing, so `tests/compile_fail.rs`
+//! proves the rules on these very types with a stand-in engine, in seconds.
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
@@ -87,7 +87,8 @@ macro_rules! plain {
 plain!(
     [] (), [] bool, [] char, [] u8, [] u16, [] u32, [] u64, [] u128, [] usize,
     [] i8, [] i16, [] i32, [] i64, [] i128, [] isize, [] f32, [] f64, [] String, [] str,
-    [T: Plain + ?Sized] &T, [T: Plain + ?Sized] Box<T>, [T: Plain] Option<T>,
+    [] std::path::Path, [] std::path::PathBuf,
+    [T: Plain + ?Sized] &T, [T: Plain + ?Sized] Box<T>, [T: Plain + ?Sized] std::sync::Arc<T>, [T: Plain] Option<T>,
     [T: Plain, E: Plain] Result<T, E>, [T: Plain] Vec<T>, [T: Plain] [T], [T: Plain, const N: usize] [T; N],
     [A: Plain, B: Plain] (A, B), [A: Plain, B: Plain, C: Plain] (A, B, C),
     [A: Plain, B: Plain, C: Plain, D: Plain] (A, B, C, D),
@@ -140,6 +141,15 @@ impl<'b, E> Mx<'_, 'b, E> {
     #[inline(always)]
     pub fn raw<K: Key>(&mut self, _key: &K) -> &mut E {
         self.e
+    }
+    /// A collecting request, for the key holder: RUN may collect, and what it
+    /// returns goes straight to the leaf THEN, whose result is plain. So nothing
+    /// RUN returned outlives the request in orchestration.
+    #[inline]
+    pub fn request<K: Key, T, B: Plain, R: Plain>(&mut self, _key: &K, _gc: Gc<'_, 'b>, run: impl FnOnce(&mut E) -> T, b: B,
+        then: impl FnOnce(&mut E, B, T) -> R + Copy + 'static) -> R {
+        let out = run(self.e);
+        then(self.e, b, out)
     }
 }
 

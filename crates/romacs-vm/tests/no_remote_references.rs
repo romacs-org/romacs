@@ -11,8 +11,6 @@
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
 use rust_tokens::{Token, tokens};
-// The shared lexer's own list, which this test has no use for.
-const _: &[&str] = rust_tokens::CONVERTED;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -130,6 +128,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
+    // A native call's watched writes, from the write to its engine's drain;
+    // `may_collect` refuses while any waits (`watchers.rs`).
+    ("deferred_writes", Transient),
     ("dynamic", Root),
     // Custom symbols' entries are read with their symbol, and will shade at their store.
     ("conditions", Owed),

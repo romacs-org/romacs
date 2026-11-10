@@ -1,8 +1,8 @@
 error[E0382]: borrow of moved value: `e`
-  --> tests/rooting_brand/fail/engine_after_dispatch.rs:10:5
+  --> tests/rooting/fail/engine_after_dispatch.rs:10:5
    |
  7 | fn bad(e: Eng<'_, Engine>) -> u64 {
-   |        - move occurs because `e` has type `romacs_vm::brand::Eng<'_, standin::Engine>`, which does not implement the `Copy` trait
+   |        - move occurs because `e` has type `romacs_brand::Eng<'_, standin::Engine>`, which does not implement the `Copy` trait
  8 |     let held = e.stack[0].0;
  9 |     let out = dispatch(e);
    |                        - value moved here
@@ -10,7 +10,7 @@ error[E0382]: borrow of moved value: `e`
    |     ^ value borrowed here after move
    |
 note: consider changing this parameter type in function `dispatch` to borrow instead if owning the value isn't necessary
-  --> tests/rooting_brand/fail/engine_after_dispatch.rs:6:17
+  --> tests/rooting/fail/engine_after_dispatch.rs:6:17
    |
  6 | fn dispatch(_e: Eng<'_, Engine>) -> u64 { 0 }
    |    --------     ^^^^^^^^^^^^^^^ this parameter takes ownership of the value
@@ -18,7 +18,7 @@ note: consider changing this parameter type in function `dispatch` to borrow ins
    |    in this function
    = note: borrow occurs due to deref coercion to `standin::Engine`
 note: deref defined here
-  --> src/brand.rs
+  --> src/lib.rs
    |
    |     type Target = E;
    |     ^^^^^^^^^^^

@@ -1,5 +1,5 @@
 // A heap value smuggled out of a leaf through a captured place.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

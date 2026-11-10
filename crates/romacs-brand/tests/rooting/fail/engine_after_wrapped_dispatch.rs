@@ -1,5 +1,5 @@
 // A raw handler orchestrating through a closure called in non-tail position, then using its engine.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

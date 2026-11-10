@@ -45,7 +45,7 @@ impl Leaf<'_> {
         let last = self.intern("last-coding-system-used");
         let name = if coding == Value::NIL {
             let name = self.intern("no-conversion");
-            self.variable_set(last, name)?;
+            self.store_variable(last, name)?;
             if buffer == Value::NIL {
                 return if nocopy != Value::NIL { Ok(string) } else { self.propertized_copy(string, &[]) };
             }
@@ -64,7 +64,7 @@ impl Leaf<'_> {
         let fast = ascii_fast && source.bytes().is_ascii() && self.vector_get(attrs, num(5))? != Value::NIL
             && (eol == unix || inhibit || !source.bytes().contains(&if encode { b'\n' } else { b'\r' }));
         if fast && (buffer == Value::NIL || buffer == Value::TRUE) {
-            self.variable_set(last, name)?;
+            self.store_variable(last, name)?;
             return if nocopy != Value::NIL { Ok(string) } else { Ok(self.make_string(source.bytes().to_vec(), !encode)) };
         }
         let kind = self.vector_get(attrs, num(3))?;
@@ -182,7 +182,7 @@ impl Leaf<'_> {
     fn coding_string_result(&mut self, buffer: Value, last: Value, precise: Value, bytes: Vec<u8>, multibyte: bool, runs: Vec<(usize, usize, usize)>) -> super::super::Out {
         // A BUFFER destination receives the string (prims/coding.rs).
         let _ = buffer;
-        self.variable_set(last, precise)?;
+        self.store_variable(last, precise)?;
         let result = self.make_string(bytes, multibyte);
         // produce_charset: each run of characters a non-ASCII charset decoded.
         let key = self.intern("charset");
@@ -1541,7 +1541,7 @@ impl Leaf<'_> {
         }
         let list = self.coding_list(&names);
         let variable = self.intern("coding-category-list");
-        self.variable_set(variable, list)?;
+        self.store_variable(variable, list)?;
         Ok(Value::NIL)
     }
     /// Romacs: the categories' priority order from CATEGORIES, symbols as
@@ -1571,7 +1571,7 @@ impl Leaf<'_> {
         }
         let list = self.coding_list(&names);
         let variable = self.intern("coding-category-list");
-        self.variable_set(variable, list)?;
+        self.store_variable(variable, list)?;
         Ok(Value::NIL)
     }
     /// coding.c Fcoding_system_priority_list: the base names of the systems

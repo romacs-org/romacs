@@ -1,5 +1,5 @@
 // Orchestration handing the engine back to its raw caller.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

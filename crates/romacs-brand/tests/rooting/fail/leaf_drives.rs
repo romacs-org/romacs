@@ -1,5 +1,5 @@
 // A leaf starting a run (an Eng) with orchestration's permission.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

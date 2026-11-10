@@ -242,7 +242,7 @@ fn this_single_command_raw_keys(cx) {
 defsubr! { name = "clear-this-command-keys", gnu = "keyboard.c:12329", effect = Global,
 fn clear_this_command_keys(cx; optional keep_record: Value) {
     let symbol = cx.intern(COMMAND_KEYS);
-    cx.variable_set(symbol, Value::NIL)?;
+    cx.store_variable(symbol, Value::NIL)?;
     if keep_record == Value::NIL {
         cx.clear_recent_keys();
     }
@@ -267,9 +267,9 @@ fn set_this_command_keys(cx, keys: Value) {
     }
     let vector = cx.vector_from(std::mem::take(&mut events));
     let symbol = cx.intern(COMMAND_KEYS);
-    cx.variable_set(symbol, vector)?;
+    cx.store_variable(symbol, vector)?;
     let start = cx.intern(SINGLE_KEY_START);
-    cx.variable_set(start, Value::integer(0).unwrap())?;
+    cx.store_variable(start, Value::integer(0).unwrap())?;
     Ok(Value::NIL)
 }}
 

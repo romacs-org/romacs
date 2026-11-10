@@ -1,5 +1,5 @@
 // A leaf orchestrating (so collecting) while it holds a heap value: it has &mut E, never an Eng.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

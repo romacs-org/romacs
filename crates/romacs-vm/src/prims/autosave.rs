@@ -61,7 +61,7 @@ fn remote_modes(cx: &mut Leaf<'_>, modes: Value, _: &[Value]) -> Next {
 
 fn write_auto_save(cx: &mut Leaf<'_>, bits: Value, _: &[Value]) -> Next {
     let auto_saving = cx.intern(AUTO_SAVING);
-    cx.variable_set(auto_saving, bits)?;
+    cx.store_variable(auto_saving, bits)?;
     let name = super::fileio::var(cx, "buffer-auto-save-file-name")?;
     let visit = if super::fileio::var(cx, "auto-save-visited-file-name")? == Value::NIL { cx.intern("lambda") } else { Value::TRUE };
     let args = vec![Value::NIL, Value::NIL, name, Value::NIL, visit, Value::NIL, Value::NIL];
@@ -72,7 +72,7 @@ fn write_auto_save(cx: &mut Leaf<'_>, bits: Value, _: &[Value]) -> Next {
 defsubr! { name = "romacs--auto-save-done", gnu = "fileio.c:6283", effect = Global,
 fn auto_save_done(cx) {
     let auto_saving = cx.intern(AUTO_SAVING);
-    cx.variable_set(auto_saving, Value::NIL)?;
+    cx.store_variable(auto_saving, Value::NIL)?;
     Ok(Value::NIL)
 }}
 

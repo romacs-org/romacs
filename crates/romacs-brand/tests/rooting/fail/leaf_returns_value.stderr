@@ -1,26 +1,26 @@
-error[E0277]: the trait bound `standin::Word: romacs_vm::brand::Plain` is not satisfied
- --> tests/rooting_brand/fail/leaf_returns_value.rs:7:15
+error[E0277]: the trait bound `standin::Word: romacs_brand::Plain` is not satisfied
+ --> tests/rooting/fail/leaf_returns_value.rs:7:15
   |
 7 |     let w = m.leaf((), |e, ()| Word(e.stack[0].0));
   |               ^^^^ unsatisfied trait bound
   |
-help: the trait `romacs_vm::brand::Plain` is not implemented for `standin::Word`
- --> tests/rooting_brand/fail/../standin.rs
+help: the trait `romacs_brand::Plain` is not implemented for `standin::Word`
+ --> tests/rooting/fail/../standin.rs
   |
   | pub struct Word(pub u64);
   | ^^^^^^^^^^^^^^^
-  = help: the following other types implement trait `romacs_vm::brand::Plain`:
+  = help: the following other types implement trait `romacs_brand::Plain`:
             &T
             ()
             (A, B)
             (A, B, C)
             (A, B, C, D)
+            Arc<T>
             Box<T>
-            Form
             Option<T>
           and $N others
-note: required by a bound in `romacs_vm::brand::Mx::<'_, 'b, E>::leaf`
- --> src/brand.rs
+note: required by a bound in `romacs_brand::Mx::<'_, 'b, E>::leaf`
+ --> src/lib.rs
   |
   |     pub fn leaf<A: Plain, R: Plain>(&mut self, a: A, f: impl FnOnce(&mut E, A) -> R + Copy + 'static) -> R {
   |                              ^^^^^ required by this bound in `Mx::<'_, 'b, E>::leaf`

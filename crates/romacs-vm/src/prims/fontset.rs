@@ -17,7 +17,7 @@ const INDEXED_ALIASES: &str = "#:vm2-indexed-fontset-aliases";
 /// `fontset-alias-alist' set to ALIASES, which the name index matches.
 fn set_aliases(cx: &mut Leaf<'_>, aliases: Value) -> std::result::Result<(), Fault> {
     cx.set_hidden_value(INDEXED_ALIASES, aliases);
-    cx.set_variable_named("fontset-alias-alist", aliases)
+    cx.store_variable_named("fontset-alias-alist", aliases)
 }
 
 fn window_system(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {

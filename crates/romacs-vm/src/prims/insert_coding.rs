@@ -255,7 +255,7 @@ fn encoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fa
     let last = cx.intern("last-coding-system-used");
     let recorded = cx.variable_value(last)?.unwrap_or(Value::NIL);
     let encoded = cx.coding_convert_string(name, coding, Value::TRUE, Value::NIL, true)?;
-    cx.variable_set(last, recorded)?;
+    cx.store_variable(last, recorded)?;
     Ok(encoded)
 }
 
@@ -627,7 +627,7 @@ fn decode(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(Value, 
     let lcsu = cx.intern("last-coding-system-used");
     let old = var(cx, "last-coding-system-used")?;
     let decoded = decode_bytes(cx, r);
-    cx.variable_set(lcsu, old)?;
+    cx.store_variable(lcsu, old)?;
     decoded
 }
 
@@ -791,7 +791,7 @@ fn unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let r = saved.to_vec();
     if r[HANDLER] == Value::NIL {
         let lcsu = cx.intern("last-coding-system-used");
-        cx.variable_set(lcsu, r[CODING])?;
+        cx.store_variable(lcsu, r[CODING])?;
     }
     let set_coding = cx.intern("after-insert-file-set-coding");
     if cx.fboundp(set_coding) {

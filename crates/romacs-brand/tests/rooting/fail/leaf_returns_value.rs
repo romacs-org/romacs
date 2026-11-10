@@ -1,5 +1,5 @@
 // A heap value returned from a leaf into orchestration.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

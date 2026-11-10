@@ -1,5 +1,5 @@
 // A raw handler using its engine after the dispatch that consumed it.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;

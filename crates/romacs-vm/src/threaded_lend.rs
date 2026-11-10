@@ -5,10 +5,13 @@
 //! Only this module suspends an engine, so raw code cannot make a collection
 //! look permitted to the funnel (`Vm::collect_marked`).
 //!
-//! What a nested call runs (`Nested`, the watched writes) is code not yet
+//! What a nested call runs (`Nested`, the watched writes) is mostly code not yet
 //! converted: each callee roots what it is handed, as its file's census rows
 //! say. The handoff is read from traced storage (a register, a `RootFrame`)
-//! here, at the call.
+//! here, at the call. A load is converted: it goes on under this permission.
+//!
+//! The requests over a VM below are the same thing without an engine: what
+//! orchestration over a `Vm` (`crate::loader`, `crate::command`) may ask.
 use super::*;
 use crate::brand::{Gc, Key, Mx, Plain};
 use std::marker::PhantomData;
@@ -154,12 +157,88 @@ impl Engine<'_> {
     }
 }
 
+/// An embedder's request, from no engine: BODY holds the top-level permission
+/// (`Gc::top`), and what it returns is plain. Counted in `rooting_brand_rules`.
+pub(crate) fn toplevel<A: Plain, N: Plain + 'static>(vm: &mut Vm, a: A, body: for<'m, 'b, 'g> fn(Mx<'m, 'b, Vm>, Gc<'g, 'b>, A) -> N) -> N {
+    crate::brand::orchestrate(crate::brand::Eng::lend(vm, Gc::top(&EngineKey)), a, body, |_, next| next)
+}
+/// Orchestration over the VM under a permission already held: a suspended
+/// engine's nested load.
+fn over_vm<'g, A: Plain, N: Plain + 'static>(vm: &'g mut Vm, gc: Gc<'g, '_>, a: A, body: for<'m, 'b, 'p> fn(Mx<'m, 'b, Vm>, Gc<'p, 'b>, A) -> N) -> N {
+    crate::brand::orchestrate(crate::brand::Eng::lend(vm, gc), a, body, |_, next| next)
+}
+/// Evaluate FORM as a request, THEN consuming its value at once.
+pub(crate) fn eval_form<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| vm.eval_form_raw(form), b, then)
+}
+/// Evaluate the text SOURCE as a request, THEN consuming its value at once.
+pub(crate) fn eval_text<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &str, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| vm.eval_source_raw(source), b, then)
+}
+/// Run the code of FUNCTION as a request, THEN consuming its value at once.
+pub(crate) fn run_function<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, function: usize, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| vm.execute_raw(function), b, then)
+}
+/// Compile FORM as a request: the function that runs it.
+pub(crate) fn compile_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form) -> Result<usize> {
+    m.request(&EngineKey, gc, |vm| vm.compile_request(form).map(|(function, _)| function), (), |_, (), compiled| compiled)
+}
+/// FORM's macro expansion, a macro's autoload loaded first; None when it has none.
+pub(crate) fn expand_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form) -> Result<Option<Form>> {
+    m.request(&EngineKey, gc, |vm| vm.expand_macro(form), (), |_, (), expanded| expanded)
+}
+/// The next form of SOURCE, its value, offset and end; reading can call Lisp
+/// (a `\N{NAME}` character). THEN consumes the value at once.
+pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &[u8], b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Option<(Value, usize, usize)>>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| vm.read_internal_span(source), b, then)
+}
+/// The function rooted first in FRAME, called on the rest, THEN consuming its
+/// value at once.
+pub(crate) fn call_frame<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, frame: &RootFrame, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| {
+        let values = vm.rooted_values(frame).to_vec();
+        vm.reader_call(values[0], &values[1..])
+    }, b, then)
+}
+/// A writer whose Values are rooted: its watchers are free to collect.
+fn rooted_writer<T>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> T) -> T {
+    let rooted = std::mem::replace(&mut vm.rooted_write, true);
+    let out = run(vm);
+    vm.rooted_write = rooted;
+    out
+}
+/// Bind SLOT's variable to the value rooted in FRAME at I, as `let` does.
+pub(crate) fn bind_from<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, slot: usize, frame: &RootFrame, i: usize) -> Result<()> {
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| {
+        let value = vm.rooted(frame, i);
+        vm.bind_variable(slot, value)
+    }), (), |_, (), bound| bound)
+}
+/// Set SLOT's variable to the value rooted in FRAME at I, as `set` does.
+pub(crate) fn write_from<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, slot: usize, frame: &RootFrame, i: usize) -> Result<()> {
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| {
+        let value = vm.rooted(frame, i);
+        vm.set_variable_value(slot, value)
+    }), (), |_, (), written| written)
+}
+/// GNU `unbind_to` on normal completion, down to MARK (`Vm::unbind`).
+pub(crate) fn unbind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize) -> Result<()> {
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unbind(vm.dynamic.len() - mark)), (), |_, (), unbound| unbound)
+}
+/// Unwinding under an escape, down to MARK (`Vm::unwind`).
+pub(crate) fn unwind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize) {
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unwind(vm.dynamic.len() - mark)), (), |_, (), ()| ());
+}
+
 /// Lisp a suspended engine runs nested.
 pub(super) enum Nested<'f> {
     /// Compile FORM and run it as an `eval` (the signal hook, the debugger).
     Form(&'f Form),
-    /// Expand and compile the lazy function FUNCTION (`Vm::force_lazy`).
-    Lazy(usize),
     /// `autoload-do-load' of FUNDEF and FUNCTION, rooted in the frame
     /// (FUNCTION first: the call is retried from it).
     Autoload(&'f RootFrame),
@@ -171,7 +250,7 @@ pub(super) enum Nested<'f> {
     Loader(Primitive, &'f RootFrame),
 }
 impl Nested<'_> {
-    fn run(self, vm: &mut Vm) -> Result<Value> {
+    fn run(self, vm: &mut Vm, gc: Gc<'_, '_>) -> Result<Value> {
         stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || match self {
             Nested::Form(form) => {
                 let function = vm.compile(form)?;
@@ -180,16 +259,23 @@ impl Nested<'_> {
                 vm.propagate_next = false;
                 result
             }
-            Nested::Lazy(function) => vm.force_lazy(function).map(|()| Value::NIL),
             Nested::Autoload(frame) => {
                 let (function, fundef) = (vm.rooted(frame, 0), vm.rooted(frame, 1));
-                vm.autoload_do_load(fundef, function, Value::NIL)
+                let args = vm.autoload_args(fundef, function, Value::NIL);
+                let outcome = over_vm(vm, gc, &args, |mut m, gc, args| crate::autoload::do_load(&mut m, gc, args));
+                vm.autoload_result(args, outcome)
             }
             Nested::LambdaList(frame) => {
                 let list = vm.rooted(frame, 0);
                 vm.lambda_list_closure(list)
             }
             Nested::Aftermath(runner) => vm.run_aftermath(runner.get(), true),
+            Nested::Loader(p, frame) if crate::loader::loads(p) => {
+                let out = vm.root_frame(&[Value::NIL]);
+                let outcome = over_vm(vm, gc, (p, frame, &out), |mut m, gc, (p, args, out)| crate::loader::load_primitive(&mut m, gc, p, args, (out, 0)));
+                let [value] = vm.release_frame(out);
+                outcome.map(|()| value)
+            }
             Nested::Loader(p, frame) => {
                 let args = vm.rooted_values(frame).to_vec();
                 vm.loader_primitive(p, &args)
@@ -200,20 +286,20 @@ impl Nested<'_> {
 
 /// Run CALL nested, then THEN on its result and whether the registers still
 /// fit (they were rebased, `e.regs` with them).
-pub(super) fn nested<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>, call: Nested<'_>, b: B,
+pub(super) fn nested<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call: Nested<'_>, b: B,
     then: impl FnOnce(&mut Engine<'a>, B, Result<Value>, bool) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
-    let (result, fits) = e.suspended(|vm| call.run(vm));
+    let (result, fits) = e.suspended(|vm| call.run(vm, gc));
     then(e, b, result, fits)
 }
 
-/// Lisp that cannot collect, run nested from raw mode: the hold makes the
-/// funnel refuse whatever it reaches, so the caller may keep Values in Rust
-/// locals across it (a lazy body's expansion, under its builder's hold too).
+/// Expand and compile the lazy function FUNCTION (`Vm::force_lazy`), nested from
+/// raw mode: the hold makes the funnel refuse whatever it reaches, so the caller
+/// may keep Values in Rust locals across it (under its builder's hold too).
 /// Named and counted: a deferred collection is latency debt.
-pub(super) fn deferred(e: &mut Engine<'_>, call: Nested<'_>) -> (Result<Value>, bool) {
+pub(super) fn deferred(e: &mut Engine<'_>, function: usize) -> (Result<()>, bool) {
     e.vm.gc_holds += 1;
-    let out = e.suspended(|vm| call.run(vm));
+    let out = e.suspended(|vm| stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.force_lazy(function)));
     e.vm.gc_holds -= 1;
     out
 }
@@ -241,18 +327,22 @@ pub(super) fn watched<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc:
         Write::Set(_, reg) => e.reg(reg),
         Write::Bind(..) => Value::NIL,
     };
-    let outcome = e.code_suspended(|vm| {
-        let rooted = std::mem::replace(&mut vm.rooted_write, true);
-        let outcome = match write {
-            Write::Set(slot, _) => vm.set_variable_value(slot, set),
-            Write::Bind(slot, frame, i) => {
-                let value = vm.rooted(frame, i);
-                vm.bind_variable(slot, value)
-            }
-        };
-        vm.rooted_write = rooted;
-        outcome
-    });
+    let outcome = e.code_suspended(|vm| rooted_writer(vm, |vm| match write {
+        Write::Set(slot, _) => vm.set_variable_value(slot, set),
+        Write::Bind(slot, frame, i) => {
+            let value = vm.rooted(frame, i);
+            vm.bind_variable(slot, value)
+        }
+    }));
+    then(e, b, outcome)
+}
+/// Write I of a queue's FRAME (`Vm::take_deferred`), this engine suspended, its
+/// watchers free to collect; then THEN on its outcome.
+pub(super) fn deferred_write<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>,
+    (frame, i): (&RootFrame, usize), b: B,
+    then: impl FnOnce(&mut Engine<'a>, B, std::result::Result<(), prim::Fault>) -> R + Copy + 'static) -> R {
+    let e = m.raw(&EngineKey);
+    let outcome = e.code_suspended(|vm| rooted_writer(vm, |vm| vm.perform_deferred(frame, i)));
     then(e, b, outcome)
 }
 /// Unbind N bindings, their unlet watchers free to collect; the first
@@ -261,18 +351,14 @@ pub(super) fn watched<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc:
 pub(super) fn unbind<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>, n: usize, b: B,
     then: impl FnOnce(&mut Engine<'a>, B, Option<Escape>) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
-    let escape = e.code_suspended(|vm| {
-        let rooted = std::mem::replace(&mut vm.rooted_write, true);
-        let mut escape = None;
+    let escape = e.code_suspended(|vm| rooted_writer(vm, |vm| {
         for _ in 0..n {
             if vm.unbind_one().is_err() {
-                escape = vm.propagated_escape.take();
-                break;
+                return vm.propagated_escape.take();
             }
         }
-        vm.rooted_write = rooted;
-        escape
-    });
+        None
+    }));
     then(e, b, escape)
 }
 
@@ -280,11 +366,7 @@ pub(super) fn unbind<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: 
 /// signals keeps its value and the escape in flight stays; the unlet watchers
 /// are free to collect.
 pub(super) fn unwind<'b>(m: &mut Orch<'_, 'b, '_>, _gc: Gc<'_, 'b>, n: usize) {
-    m.raw(&EngineKey).code_suspended(|vm| {
-        let rooted = std::mem::replace(&mut vm.rooted_write, true);
-        vm.unwind(n);
-        vm.rooted_write = rooted;
-    });
+    m.raw(&EngineKey).code_suspended(|vm| rooted_writer(vm, |vm| vm.unwind(n)));
 }
 
 /// A generated primitive whose body reads (`read`, `read-from-string`), and

@@ -1,5 +1,5 @@
 // A permission minted without the key or unsafe.
-use romacs_vm::brand::*;
+use romacs_brand::*;
 #[path = "../standin.rs"]
 mod standin;
 use standin::*;
