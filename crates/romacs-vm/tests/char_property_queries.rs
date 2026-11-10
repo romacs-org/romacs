@@ -26,6 +26,27 @@ fn get_char_property_and_overlay_names_the_supplying_overlay() {
                    (get-char-property-and-overlay 0 'face (propertize \"xy\" 'face 'bold)))))");
 }
 
+/// A position outside the accessible region signals as GNU's does: the
+/// position as both ends for `get-text-property` and `text-properties-at`
+/// (`validate_interval_range`), alone for `get-char-property`, a marker kept as
+/// the marker.
+#[test]
+fn positions_outside_the_restriction_signal_as_gnu() {
+    agree("(with-temp-buffer (insert (make-string 200 ?x)) (narrow-to-region 100 150) \
+           (let ((m (copy-marker 50 t)) (buffer (current-buffer))) \
+             (list (condition-case e (get-text-property 50 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-text-property m 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-text-property 160 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (text-properties-at 50) (args-out-of-range (cdr e))) \
+                   (condition-case e (text-properties-at m) (args-out-of-range (cdr e))) \
+                   (condition-case e (text-properties-at 50 buffer) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-char-property 50 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-char-property m 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-char-property 300 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (get-pos-property 50 'foo) (args-out-of-range (cdr e))) \
+                   (condition-case e (next-single-property-change 50 'foo) (args-out-of-range (cdr e))))))");
+}
+
 #[test]
 fn barf_if_buffer_read_only_honours_variables_and_text_properties() {
     agree("(with-temp-buffer (insert \"abcdef\") (put-text-property 2 3 'inhibit-read-only t) \
