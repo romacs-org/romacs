@@ -1557,7 +1557,8 @@ waiting."
                        "hostSocket" (romacs-agent-host-socket session))))
 
 (defconst romacs-agent--option-keys
-  '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId"))
+  '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
+    (:worktree . "worktree") (:branch . "branch"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
@@ -1577,17 +1578,22 @@ waiting."
 build, its usage log, its font), so no harness or command it runs
 inherits them.")
 
+(defconst romacs-agent-git-variables '("GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE")
+  "What points git at another repository than the directory it runs in:
+an editor's, inherited, would send a harness's git (and Romacs's own) to
+the editor's checkout.")
+
 (defconst romacs-agent-orchestrator-variables '("T3CODE_THREAD_ID" "T3CODE_CLI_PATH")
   "Variables an orchestrator running this editor sets for its own child:
 no harness Romacs runs is that child.")
 
 (defun romacs-agent--dropped-variables ()
   "What no harness inherits: the editor's launch variables, an
-orchestrator's, and every harness's own (its configuration variable, and
+orchestrator's, git's repository pointers, and every harness's own (its configuration variable, and
 what it sets for the commands it runs): a harness parent's would
 otherwise reach any child, a Claude Code parent's a Codex child too.  A
 session's own configuration variable is given again, by `env'."
-  (delete-dups (append romacs-agent--editor-variables romacs-agent-orchestrator-variables
+  (delete-dups (append romacs-agent--editor-variables romacs-agent-orchestrator-variables romacs-agent-git-variables
                        (cl-loop for (_ . driver) in romacs-agent--drivers
                                 append (cons (plist-get driver :config-variable) (plist-get driver :scrub))))))
 
@@ -1666,6 +1672,22 @@ A chat opens with no initial prompt."
          (selection (romacs-agent--read-selection current-prefix-arg)))
     (list cwd nil nil (car selection) (cdr selection))))
 
+(defun romacs-agent--start-instance (provider)
+  "The instance a session started under PROVIDER (nil: the default) runs
+on, or a `user-error' saying why none can start there: unknown, disabled,
+or its configuration directory missing."
+  (let* ((name (or provider (romacs-agent--default-provider)))
+         (instance (or (romacs-agent--configured name)
+                       (user-error "No agent provider %s; configured: %s" name
+                                   (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
+                                                                  when (plist-get i :enabled) collect (plist-get i :name))
+                                              ", ")))))
+    (unless (plist-get instance :enabled)
+      (user-error "Agent provider %s is disabled" (plist-get instance :name)))
+    ;; The directory as configured: the harness's default too, when named.
+    (romacs-agent--check-config-dir (plist-get instance :name) (plist-get instance :config-dir))
+    instance))
+
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
   "Start a session working in the project directory CWD under instance
@@ -1676,19 +1698,10 @@ the harness, :role, :parent (the delegating session's id) and :request
 with the session before its harness starts.  Return the session.
 Interactively, open the chat without sending an initial prompt."
   (interactive (romacs-agent--start-arguments (romacs-agent--project-default)))
-  (let* ((name (or provider (romacs-agent--default-provider)))
-         (instance (or (romacs-agent--configured name)
-                       (user-error "No agent provider %s; configured: %s" name
-                                   (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
-                                                                  when (plist-get i :enabled) collect (plist-get i :name))
-                                              ", "))))
-         (name (progn (unless (plist-get instance :enabled)
-                        (user-error "Agent provider %s is disabled" (plist-get instance :name)))
-                      ;; A T3 id names its instance.
-                      (plist-get instance :name)))
+  (let* ((instance (romacs-agent--start-instance provider))
+         ;; A T3 id names its instance.
+         (name (plist-get instance :name))
          (session (progn
-                    ;; The directory as configured: the harness's default too, when named.
-                    (romacs-agent--check-config-dir name (plist-get instance :config-dir))
                     (romacs-agent--create
                      :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
                      ;; What the start asks for, else the instance's defaults.
