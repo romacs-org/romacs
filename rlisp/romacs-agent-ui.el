@@ -914,8 +914,7 @@ and its state."
       (let* ((approval (eq (romacs-agent-state session) 'waiting-approval))
              (start (romacs-agent-turn-start session))
              (clock (and (numberp start) (hermes-chat--clock (- (float-time) start)))))
-        (concat (if (save-excursion (goto-char romacs-agent-ui--end) (bolp)) "" "\n")
-                (romacs-agent-ui--rule
+        (concat (romacs-agent-ui--rule
                  (concat (propertize (if approval "◆ Waiting for you" "● Running")
                                      'face (if approval 'romacs-agent-approval 'romacs-agent-running))
                          (if clock (propertize (concat " " clock) 'face 'romacs-agent-dim) "")
@@ -928,11 +927,19 @@ and its state."
 (defun romacs-agent-ui--composer-empty-p ()
   (= (marker-position romacs-agent-ui--end) (point-max)))
 
+(defun romacs-agent-ui--boundary ()
+  "What stands between the transcript and the composer: a newline when the
+transcript stops mid-line (a fold, or a reply, still being written), then
+the live rule while a turn runs.  The composer starts on its own line,
+whoever wrote last and whatever the session's state."
+  (concat (if (save-excursion (goto-char romacs-agent-ui--end) (bolp)) "" "\n")
+          (or (romacs-agent-ui--live-rule) "")))
+
 (defun romacs-agent-ui--composer-update ()
-  "The live rule and, in an empty composer, the hint."
+  "The boundary and, in an empty composer, the hint."
   (when (overlayp romacs-agent-ui--composer)
     (move-overlay romacs-agent-ui--composer romacs-agent-ui--end romacs-agent-ui--end)
-    (overlay-put romacs-agent-ui--composer 'before-string (romacs-agent-ui--live-rule))
+    (overlay-put romacs-agent-ui--composer 'before-string (romacs-agent-ui--boundary))
     (overlay-put romacs-agent-ui--composer 'after-string
                  (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--hint)))))
 

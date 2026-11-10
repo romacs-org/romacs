@@ -197,3 +197,19 @@
       ;; Another instance of the harness is named.
       (setf (romacs-agent-provider session) "claude2")
       (should (string-search "  claude2  " (romacs-agent-ui--header-line))))))
+
+(ert-deftest romacs-agent-composer-starts-on-its-own-line ()
+  ;; Thinking left open while no turn runs: the composer is not glued to it.
+  (romacs-agent-cards-tests--with-chat session
+    (setq romacs-agent-ui--composer (make-overlay (point-max) (point-max) nil nil nil))
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh it.")
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-ui--composer-update)
+    (should (string-prefix-p "\n" (overlay-get romacs-agent-ui--composer 'before-string)))
+    ;; At a line's start, nothing is added; a running turn adds its rule.
+    (romacs-agent-ui--insert "\n")
+    (romacs-agent-ui--composer-update)
+    (should (equal (overlay-get romacs-agent-ui--composer 'before-string) ""))
+    (setf (romacs-agent-state session) 'running)
+    (romacs-agent-ui--composer-update)
+    (should (string-match-p "Running" (overlay-get romacs-agent-ui--composer 'before-string)))))
