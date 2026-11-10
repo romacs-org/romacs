@@ -104,18 +104,52 @@ summarized in detail."
 requests from 0 every run, so an earlier run's row names no later request."
   (format "%s:%s" (or (plist-get (romacs-agent-driver-state session) :run) 0) wire))
 
+(defun romacs-agent--codex-questions (params)
+  "`item/tool/requestUserInput''s PARAMS as an `approval' event's
+:questions (`romacs-agent--claude-questions''s shape).  Each takes words
+of the user's own too: Codex marks every one isOther."
+  (cl-loop for q across (gethash "questions" params)
+           for options = (cl-loop for o across (or (romacs-agent--value (gethash "options" q)) [])
+                                  collect (cons (gethash "label" o) (romacs-agent--value (gethash "description" o))))
+           collect (list (gethash "question" q)
+                         :header (romacs-agent--value (gethash "header" q))
+                         :options (mapcar #'car options)
+                         :notes (cl-remove-if (lambda (note) (member (cdr note) '(nil ""))) options)
+                         :multi nil)))
+
+(defun romacs-agent--codex-answers (params answers)
+  "ANSWERS ((QUESTION . ANSWER) ...) as `requestUserInput''s answers, by
+question id: an option by its label, other words as Codex's own client
+gives them, a user_note."
+  (let ((object (romacs-mcp--object)))
+    (cl-loop for q across (gethash "questions" params)
+             for answer = (string-trim (or (cdr (assoc (gethash "question" q) answers)) ""))
+             for labels = (cl-loop for o across (or (romacs-agent--value (gethash "options" q)) [])
+                                   collect (gethash "label" o))
+             unless (string-empty-p answer)
+             do (puthash (gethash "id" q)
+                         (romacs-mcp--object "answers" (vector (if (member answer labels) answer
+                                                                 (concat "user_note: " answer))))
+                         object))
+    object))
+
 (defun romacs-agent--codex-respond (session request-id allow _message)
   "The answer to approval REQUEST-ID: what it asked when ALLOW, for the
-rest of the session when ALLOW is (:always t), else declined (Codex takes
-no reason)."
+rest of the session when ALLOW is (:always t), with the user's answers
+when it asked questions; else declined (Codex takes no reason), a
+question by no answers."
   (pcase-let ((`(,wire ,method ,params) (gethash request-id (romacs-agent-approvals session)))
               (always (and (consp allow) (plist-get allow :always))))
     (romacs-mcp--object
      "id" wire
-     "result" (if (equal method "item/permissions/requestApproval")
-                  (romacs-mcp--object "permissions" (if allow (gethash "permissions" params) (romacs-mcp--object))
-                                      "scope" (if always "session" "turn"))
-                (romacs-mcp--object "decision" (cond (always "acceptForSession") (allow "accept") (t "decline")))))))
+     "result" (pcase method
+                ("item/permissions/requestApproval"
+                 (romacs-mcp--object "permissions" (if allow (gethash "permissions" params) (romacs-mcp--object))
+                                     "scope" (if always "session" "turn")))
+                ("item/tool/requestUserInput"
+                 (romacs-mcp--object "answers" (romacs-agent--codex-answers
+                                                params (and (consp allow) (plist-get allow :answers)))))
+                (_ (romacs-mcp--object "decision" (cond (always "acceptForSession") (allow "accept") (t "decline"))))))))
 
 (defun romacs-agent--codex-select (session model effort)
   "Nothing to write: each turn names its model and effort.  Neither can be
@@ -196,8 +230,10 @@ what to do should it miss its turn."
       (let ((result (gethash "result" object)))
         (list (list :type 'answered :request-id (romacs-agent--codex-approval-id session id)
                     :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
-                                      (let ((granted (gethash "permissions" result)))
-                                        (and (hash-table-p granted) (> (hash-table-count granted) 0))))
+                                      (cl-some (lambda (key)
+                                                 (let ((given (gethash key result)))
+                                                   (and (hash-table-p given) (> (hash-table-count given) 0))))
+                                               '("permissions" "answers")))
                                   "allow" "deny")))))
      (t (romacs-agent--codex-paid session (lambda (owed) (and (eq (car owed) :reply) (equal (cadr owed) id))))))))
 
@@ -253,12 +289,17 @@ first), owed as a turn of its own."
 
 (defun romacs-agent--codex-asked (session id method params)
   "The events of request ID, METHOD with PARAMS, Codex asks of Romacs:
-an approval for the user, anything else refused."
-  (cl-flet ((approval (tool input)
+an approval or questions for the user, anything else refused."
+  (cl-flet ((approval (tool input &optional questions)
               (let ((approval (romacs-agent--codex-approval-id session id)))
                 (puthash approval (list id method params) (romacs-agent-approvals session))
-                (list (list :type 'approval :request-id approval :tool tool :input input
-                            :description (romacs-agent--value (gethash "reason" params)))))))
+                (list (list :type 'approval :request-id approval :tool tool :input input :questions questions
+                            :description (romacs-agent--value (gethash "reason" params))))))
+            (refused (&optional why)
+              (append (and why (list (list :type 'status :text why)))
+                      (list (list :type 'handshake
+                                  :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
+                                                             (list (list :reply id method)))))))))
     (pcase method
       ("item/commandExecution/requestApproval"
        (approval "Bash" (romacs-mcp--object "command" (romacs-agent--value (gethash "command" params))
@@ -266,9 +307,14 @@ an approval for the user, anything else refused."
       ("item/fileChange/requestApproval"
        (approval "Edit" (romacs-mcp--object "grantRoot" (or (romacs-agent--value (gethash "grantRoot" params)) :null))))
       ("item/permissions/requestApproval" (approval "Permissions" (gethash "permissions" params)))
-      (_ (list (list :type 'handshake
-                     :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
-                                                (list (list :reply id method))))))))))
+      ("item/tool/requestUserInput"
+       ;; An answer is journaled and shown: a secret is not asked here.
+       (if (cl-some (lambda (q) (eq (gethash "isSecret" q) t)) (gethash "questions" params))
+           (refused "Codex asked for a secret: answer it in Codex's own client")
+         (approval "Question" params (romacs-agent--codex-questions params))))
+      ;; An MCP server's form wants typed JSON (numbers, booleans, lists),
+      ;; and its url mode a browser: neither is a question's answer.
+      (_ (refused)))))
 
 (defun romacs-agent--codex-tool (item)
   "An item's tool name and input, for the tool block."
