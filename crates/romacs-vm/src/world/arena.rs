@@ -916,7 +916,7 @@ pub fn heap_is_shared() -> bool {
     BACKING.load(Ordering::Relaxed) >= 0
 }
 
-/// Whether a heap table may take its one large reservation (`table.rs'): not
+/// Whether a heap table may take its one large reservation (`table.rs`): not
 /// where the heap is an image, nor under an address-space limit, which the
 /// reservation would eat into.
 pub fn may_reserve() -> bool {

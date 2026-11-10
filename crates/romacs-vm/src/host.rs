@@ -1864,7 +1864,7 @@ pub fn run_time() -> io::Result<std::time::Duration> {
 /// The processor time this process has used, read live and never logged:
 /// for a process outside the session's own results (a mark twin's child,
 /// `twin.rs`, whose usage starts at its fork).
-pub fn live_run_time() -> io::Result<std::time::Duration> {
+pub(crate) fn live_run_time() -> io::Result<std::time::Duration> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage writes the whole struct it is given.
     if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
@@ -2795,7 +2795,7 @@ pub fn fork_isolate() -> io::Result<i32> {
 /// child takes no other lock and ends with `exit_at_once`. It dies with the
 /// forking thread, even one that ends without unwinding (`_exit`), and ends
 /// at once if that thread was gone before it could ask.
-pub fn fork_threaded() -> io::Result<i32> {
+pub(crate) fn fork_threaded() -> io::Result<i32> {
     let parent = std::process::id();
     let pid = crate::world::arena::across_fork(fork)?;
     if pid == 0 && (set_parent_death_signal(libc::SIGKILL).is_err() || std::os::unix::process::parent_id() != parent) {

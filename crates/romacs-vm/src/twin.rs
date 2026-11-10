@@ -3,7 +3,7 @@
 //! A mark twin is a fork that marks the heap on its own copy while the Lisp
 //! process goes on, and hands back what is dead. Before any twin frees
 //! anything, this check proves its answer against the collector's. With
-//! ROMACS_GC_TWIN=N, every Nth collection that leaves entries where they are
+//! `ROMACS_GC_TWIN=N`, every Nth collection that leaves entries where they are
 //! forks a child from the state it starts from. In the child, after the
 //! caches a collection drops are dropped (rule M1):
 //! - **the twin's mark:** the collector's own mark (`Vm::mark_only`) with
@@ -74,7 +74,7 @@ impl Drop for Pending {
     }
 }
 
-/// Every how many collections a twin is checked: ROMACS_GC_TWIN, 0 for never.
+/// Every how many collections a twin is checked: `ROMACS_GC_TWIN`, 0 for never.
 fn every() -> u64 {
     static EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
     *EVERY.get_or_init(|| crate::host::getenv("ROMACS_GC_TWIN").and_then(|v| v.to_str()?.parse().ok()).unwrap_or(0))
@@ -166,7 +166,7 @@ fn child_marks(vm: &mut Vm, roots: &[Value]) -> Result<Vec<u8>, String> {
         }
     }
     let twin = marks(vm);
-    let spent = || crate::host::live_run_time().map_or(0, |t| t.as_micros() as u64);
+    let spent = || crate::host::live_run_time().map_or(0, |t| u64::try_from(t.as_micros()).unwrap_or(u64::MAX));
     let before = spent();
     let bound_rounds = bound(vm, &rooted, &twin)?;
     let bound_us = spent() - before;
@@ -222,7 +222,7 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
 /// never freed, so it counts as reached.
 fn table_walk_extras<S: std::hash::BuildHasher>(vm: &mut Vm, symbols_live: &std::collections::HashSet<usize, S>) -> Vec<Value> {
     let reached = |vm: &Vm, buffer: Value| buffer.tag() == 0 && buffer != Value::NIL
-        && (Vm::image_value(buffer) || vm.objects.marked(buffer.payload() as usize - 1));
+        && (Vm::image_value(buffer) || buffer.index_if(0).and_then(|i| i.checked_sub(1)).is_some_and(|i| vm.objects.marked(i)));
     let mut extras = Vec::new();
     for (i, object) in vm.objects.iter().enumerate() {
         let buffer = match object {
@@ -384,12 +384,12 @@ pub(crate) fn check(vm: &mut Vm, pending: Pending) {
         Ok(Agreed { live, dead, kept_m8, kept_via, rounds, bound_rounds, bound_us, child_us }) => eprintln!("{}", serde_json::json!({
             "twin": "agreed", "collection": collection, "live": live, "dead": dead, "kept_m8": kept_m8, "kept_via": kept_via,
             "rounds": rounds, "bound_rounds": bound_rounds, "bound_us": bound_us, "child_us": child_us})),
-        Err(what) => diverged(collection, what),
+        Err(what) => diverged(collection, &what),
     }
 }
 
 /// The process ends: its twin and its collector disagreed about WHAT.
-fn diverged(collection: u64, what: String) -> ! {
+fn diverged(collection: u64, what: &str) -> ! {
     eprintln!("{}", serde_json::json!({"twin": "diverged", "collection": collection, "what": what}));
     crate::host::exit_at_once(DIVERGED)
 }
@@ -486,12 +486,13 @@ mod tests {
         let roots = [table, reached];
         let mut twin = twin_marks(&mut vm, &roots);
         assert_eq!(bound(&mut vm, &roots, &twin), Ok(2), "keeping weak entries is accounted for");
-        let entry = unrelated.payload() as usize;
+        let cons = |v: Value| v.index_if(v.tag()).expect("a cons's entry");
+        let entry = cons(unrelated);
         twin[0][entry] = true;
         assert_eq!(bound(&mut vm, &roots, &twin),
                    Err(format!("the twin marked conses entry {entry}, which the mark from its roots, extras and weak entries does not reach")));
         twin[0][entry] = false;
-        twin[0][reached.payload() as usize] = false;
+        twin[0][cons(reached)] = false;
         assert!(bound(&mut vm, &roots, &twin).is_err_and(|e| e.contains("left unmarked")));
     }
 
@@ -515,7 +516,7 @@ mod tests {
             (puthash a b b) (puthash b a a) (cons a b))").unwrap();
         let (a, b) = vm.cons_pair(pair).unwrap();
         let root = vm.alloc_cons(Value::integer(1).unwrap(), Value::NIL);
-        let index = |v: Value| v.payload() as usize - 1;
+        let index = |v: Value| v.index_if(0).and_then(|i| i.checked_sub(1)).expect("an object's entry");
         for vouched in [vec![lone], vec![a, b]] {
             let mut twin = twin_marks(&mut vm, &[root]);
             for &table in &vouched {
@@ -620,10 +621,10 @@ mod tests {
     /// tables, each the value of a dead-keyed entry of the one before, ENTRIES
     /// entries each, in a heap PAD conses larger, costs it one mark per level
     /// and one more, whatever the entries and the heap. (The twin's own mark
-    /// takes each table once: gc.rs `a_twins_mark_keeps_a_chain_of_weak_tables'.)
+    /// takes each table once: gc.rs `a_twins_mark_keeps_a_chain_of_weak_tables`.)
     #[test]
     fn weak_table_chains_cost_the_bound_one_mark_per_level() {
-        for (depth, entries, pad) in [(10, 1, 0), (40, 1, 0), (40, 20, 0), (40, 20, 20_000)] {
+        for (depth, entries, pad) in [(10_u64, 1, 0), (40, 1, 0), (40, 20, 0), (40, 20, 20_000)] {
             let mut vm = quiet_vm();
             for i in 0..pad {
                 vm.alloc_cons(Value::integer(i).unwrap(), Value::NIL);
@@ -631,7 +632,7 @@ mod tests {
             let first = vm.eval_source_raw(&format!("(let ((next nil)) (dotimes (_ {depth}) (let ((h (make-hash-table :test 'eq :weakness 'key))) \
                 (dotimes (_ {}) (puthash (list 'dead) (list 'value) h)) (when next (puthash (list 'dead-link) next h)) (setq next h))) next)", entries - 1)).unwrap();
             let twin = twin_marks(&mut vm, &[first]);
-            assert_eq!(bound(&mut vm, &[first], &twin), Ok(depth as u64 + 1), "depth {depth}, entries {entries}, pad {pad}");
+            assert_eq!(bound(&mut vm, &[first], &twin), Ok(depth + 1), "depth {depth}, entries {entries}, pad {pad}");
         }
     }
 }
