@@ -172,6 +172,9 @@ pub(crate) struct MarkedSet {
     pub(crate) code_marks: Vec<bool>,
     pub(crate) obarray_symbols_live: HashSet<usize>,
     pub(crate) region_marks: Vec<bool>,
+    /// Weak tables the weak rounds looked through, one per table per round.
+    #[cfg(test)]
+    pub(crate) weak_visits: usize,
 }
 
 /// What the coordinator gathers while marking.
@@ -194,6 +197,9 @@ struct MarkState {
     /// once, by the round that finds its list live, and those left at the
     /// fixpoint are the dead lists.
     untraced_lists: Vec<u64>,
+    /// Weak tables looked through, one per table per round (`MarkedSet`).
+    #[cfg(test)]
+    weak_visits: usize,
     /// Weak rounds run and `lambda_lists` entries traced (`Stress::last_mark`).
     #[cfg(test)]
     last_mark: (usize, usize),
@@ -820,6 +826,8 @@ impl Vm {
             let data::Object::HashTable(table) = &self.objects[t] else {
                 unreachable!("weak table index");
             };
+            #[cfg(test)]
+            { state.weak_visits += 1; }
             for (_, key, value) in table.entries() {
                 let (k, v) = (self.survives(symbols, regions, key), self.survives(symbols, regions, value));
                 // The buffer-keyed ephemeron owns a local value indirectly
@@ -1125,7 +1133,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         // From here the collection changes the heap: the last point a key
@@ -1482,7 +1490,8 @@ impl Vm {
         let local_binding = self.slot_set(self.local_binding_slots.iter());
         let marked = self.mark_heap(roots, &in_obarray, &local_binding, MarkFor::Only { keep_weak }, 1, &mut Lap(None)).expect("no key ends it");
         let Marked { code_marks, state, .. } = marked;
-        MarkedSet { code_marks, obarray_symbols_live: state.obarray_symbols_live, region_marks: state.region_marks }
+        MarkedSet { code_marks, obarray_symbols_live: state.obarray_symbols_live, region_marks: state.region_marks,
+                    #[cfg(test)] weak_visits: state.weak_visits }
     }
     /// Mark from ROOTS and everything the VM holds, on N threads, for FOR: what
     /// it reached, or None when a key press ended it, its marks left for the
@@ -1940,7 +1949,8 @@ mod tests {
     }
 
     /// A mark twin's mark keeps a chain of weak tables, each reached only
-    /// through a dead-keyed entry of the one before, taking each once.
+    /// through a dead-keyed entry of the one before, taking each once: a
+    /// rescan of every table each round would look through 1275, not 50.
     #[test]
     fn a_twins_mark_keeps_a_chain_of_weak_tables() {
         let mut vm = Vm::new();
@@ -1948,7 +1958,10 @@ mod tests {
         vm.set_gc_verify(false);
         let first = vm.eval_source_raw("(let ((next nil)) (dotimes (_ 50) (let ((h (make-hash-table :test 'eq :weakness 'key))) \
             (when next (puthash (list 'dead) next h)) (setq next h))) next)").unwrap();
-        vm.mark_only(&[first], true);
+        let empty = vm.mark_only(&[], true).weak_visits;
+        vm.clear_marks();
+        let visits = vm.mark_only(&[first], true).weak_visits - empty;
+        assert_eq!(visits, 50, "each table of the chain is looked through once");
         let (mut table, mut chain) = (Some(first), 0);
         while let Some(t) = table {
             assert!(vm.objects.marked(t.payload() as usize - 1), "table {chain} of the chain is kept");
