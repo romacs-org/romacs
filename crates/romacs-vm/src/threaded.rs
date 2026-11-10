@@ -12,7 +12,9 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
-pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_form, eval_text, expand_form, read_next, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
+pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_form, eval_text, expand_form, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
+#[cfg(test)]
+pub(crate) use lend::test_requests::collect_now;
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
 use lend::{Nested, Orch, Pc, Write};
@@ -3773,8 +3775,8 @@ unsafe fn generated_step(
     unsafe {
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
-        // The reader runs Lisp: a lend, which the dispatch makes.
-        if matches!(prim::name(target), Some("read" | "read-from-string")) {
+        // A reading primitive runs Lisp: a lend, which the dispatch makes.
+        if matches!(prim::generated(target), Some(prim::PrimDesc { body: prim::Body::Reader(_), .. })) {
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             return Continue::Read(Box::new((Pc::new(pc), Imm::new(e.vm, target).expect("a primitive"), base + start, argc)));
         }
