@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GATE = runpy.run_path(str(ROOT / 'tools/gate'), run_name='gate')
 STRUCTURAL = GATE['STRUCTURAL']
 changed_filter = GATE['changed_filter']
+filter_for = GATE['filter_for']
 
 
 class ChangedFilter(unittest.TestCase):
@@ -67,6 +68,13 @@ class ChangedFilter(unittest.TestCase):
         self.write('crates/romacs-vm/tests/quit_async.rs')
         self.assertIsNone(changed_filter(self.repo))
         self.assertIn('binary_id(romacs-vm::quit_async)', changed_filter(self.repo, 'trunk'))
+
+    def test_paths_select_as_the_same_change_in_a_repository_does(self):
+        names = ['crates/romacs-vm/src/source_cache/prepared.rs', 'crates/romacs-vm/tests/quit_async.rs', 'doc/x.org']
+        self.write(*names)
+        self.assertEqual(filter_for(names), changed_filter(self.repo))
+        self.assertIsNone(filter_for([*names, 'rlisp/x.el']))
+        self.assertEqual(filter_for([]).count('|') + 1, len(STRUCTURAL))
 
     def test_what_cannot_be_mapped_runs_everything(self):
         for name in ('rlisp/x.el', 'crates/romacs-vm/src/lib.rs'):
