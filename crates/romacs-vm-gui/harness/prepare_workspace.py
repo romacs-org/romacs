@@ -21,7 +21,7 @@ for entry in (root / 'crates').iterdir():
     target = shadow / 'crates' / entry.name
     if target.exists():
         continue
-    if args.red_layout and entry.name == 'romacs-layout2':
+    if args.red_layout and entry.name == 'romacs-layout':
         target.mkdir()
         shutil.copy2(entry / 'Cargo.toml', target / 'Cargo.toml')
         shutil.copytree(entry / 'tests', target / 'tests')
@@ -33,7 +33,7 @@ for entry in (root / 'crates').iterdir():
     else:
         target.symlink_to(entry, target_is_directory=True)
 manifest = (root / 'Cargo.toml').read_text()
-missing = [f'    "crates/{name}",' for name in ('romacs-layout2', 'romacs-vm-gui')
+missing = [f'    "crates/{name}",' for name in ('romacs-layout', 'romacs-vm-gui')
            if f'"crates/{name}"' not in manifest]
 manifest = manifest.replace('members = [', 'members = [\n' + '\n'.join(missing), 1)
 (shadow / 'Cargo.toml').write_text(manifest)

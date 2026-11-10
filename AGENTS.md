@@ -48,7 +48,8 @@ possible; say so where you do.
   record. Adding a smell takes raising its floor in `SMELL-FLOORS.json` by as
   much, and a new top-level entry takes listing it there: a deliberate commit
   with its reason. `smells.py check --absolute` holds the trunk to that file at
-  a checkpoint, where `lower` records the drops.
+  a checkpoint, where `lower` records the drops. A merge conflict in the file:
+  `python3 tools/lib/smells.py resolve`.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -57,9 +58,10 @@ possible; say so where you do.
   real packages observe; replace an implementation whose design is platform or era
   baggage (tty/termcap, per-window-system backend dispatch, charset-era MULE, byte
   code in data files, startup rituals) with an API-compatible one in `rlisp/`, and
-  record it in DIVERGENCES.md. Keeping a mechanism because GNU has it is
-  museum-keeping; deleting one because GNU has it is vandalism. Replace it when a
-  better mechanism exists and real packages still work.
+  record it as a file named by its ID in `ledger/divergences/`. Keeping a
+  mechanism because GNU has it is museum-keeping; deleting one because GNU has
+  it is vandalism. Replace it when a better mechanism exists and real packages
+  still work.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even
@@ -78,8 +80,8 @@ possible; say so where you do.
   mark state dirty; expensive derivations (face realisation, display
   mirroring, layout, chrome refresh) run once per command, redisplay, or
   theme switch. Hot primitives index rather than scan growing collections.
-  Every new collection-holding subsystem adds a scaling probe to
-  `crates/romacs-vm-gui/harness/scaling/probes.el`. A probe over its exponent
+  Every new collection-holding subsystem adds a scaling probe, one file under
+  `crates/romacs-vm-gui/harness/scaling/probes/`. A probe over its exponent
   budget is fixed, or carries `:known` with a ticket. Raising its budget is
   not a fix.
 - Attack cost in this order: complexity (never worse than GNU's; pick the

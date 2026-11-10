@@ -1793,5 +1793,4 @@ impl WgpuRenderer {
 }
 
 #[cfg(test)]
-#[path = "content/tests/content_test.rs"]
 mod tests;

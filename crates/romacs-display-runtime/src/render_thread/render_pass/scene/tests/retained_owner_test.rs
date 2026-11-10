@@ -524,7 +524,7 @@ fn scroll(dead: bool) {
         render
             .compositor
             .input_scroll
-            .push(&root, 11.0, 11.0, 4.0, delivery.receipt(), None)
+            .push(&root, 11.0, 11.0, 4.0, delivery.receipt())
     );
     render.compositor.input_scroll.paint(&mut root);
     let prepared = retained_scroll::prepare(

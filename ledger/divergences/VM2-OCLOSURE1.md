@@ -1,0 +1,5 @@
+## Explicit OClosure compatibility
+
+| # | Mechanism | GNU | Romacs | Boundary |
+|---|---|---|---|---|
+| VM2-OCLOSURE1 | Closure metadata and GNU generic dispatch | GNU OClosure inspects closure documentation and captured environment slots. | Ordinary closures retain a private traced documentation value. The explicit `oclosure--fix-type` marker emitted by GNU's macro retains named capture cells and exposes the supported interpreter metadata. `romacs-cl-generic` loads the owned `romacs-oclosure` type-query bridge before unchanged GNU `cl-generic`. | Compatibility callers must load the named entry after GNU core prerequisites; this is not an automatic GUI startup addition. Ordinary closure array access remains rejected. Explicit OClosure capture retention may include bindings GNU optimizes away. Existing code-image restrictions on mutable captured cells remain. Code images use VM2CODE8 to serialize private documentation. `tests/oclosure.rs` covers accessors, copying, inheritance, identity, GC, dispatch, replacement and method combination. | <!-- symbols: oclosure-type, romacs--oclosure-type, make-interpreted-closure, cl-type-of, purify-flag -->

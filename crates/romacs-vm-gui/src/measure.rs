@@ -5,7 +5,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 pub struct Host {
-    pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub engine: Rc<RefCell<romacs_layout::LayoutEngine>>,
 }
 
 impl romacs_vm::LayoutHost for Host {
@@ -31,18 +31,18 @@ mod tests {
     use romacs_display_protocol::{FrameGlyph, frame_glyphs::GlyphRowRole};
     use romacs_vm::Vm;
 
-    struct Hosted { vm: Vm, engine: Rc<RefCell<romacs_layout2::LayoutEngine>>, width: u32, height: u32 }
+    struct Hosted { vm: Vm, engine: Rc<RefCell<romacs_layout::LayoutEngine>>, width: u32, height: u32 }
 
     fn hosted() -> Hosted { hosted_with(None) }
 
     /// `hosted', on a frame of SIZE pixels where given, else 60 columns by
     /// 20 lines.
     fn hosted_with(size: Option<(u32, u32)>) -> Hosted {
-        let engine = Rc::new(RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine = Rc::new(RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         let mut vm = Vm::new();
         crate::startup::initialize(&mut vm).unwrap();
         // As the GUI does after startup Lisp chose the default face.
-        let (line, column) = romacs_layout2::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
+        let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
         let (width, height) = size.unwrap_or((column * 60, line * 20));
         vm.set_frame_geometry(width, height, line, column).unwrap();
         vm.set_layout_host(Some(Box::new(Host { engine: engine.clone() })));

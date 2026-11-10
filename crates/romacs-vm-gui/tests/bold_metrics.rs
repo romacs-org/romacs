@@ -26,12 +26,12 @@ fn bold_rows_measure_and_lay_out_as_gnu() {
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
-        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         // The probe's font, and the frame's cell from it, as the GUI sets it
         // once startup Lisp chose the default face.
         vm.eval_source("(set-face-attribute 'default nil :family \"Iosevka\" :height 140)").unwrap();
-        let (line, column) = romacs_layout2::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
+        let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
         vm.set_frame_geometry(1280, 800, line, column).unwrap();
         // The probe finds the tree's keymap-popup beside it, as in GNU.
         vm.eval_source(&format!("(setenv \"PROBE\" {:?})", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/bold_metrics.el"))).unwrap();

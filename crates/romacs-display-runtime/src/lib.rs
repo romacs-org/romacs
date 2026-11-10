@@ -16,13 +16,12 @@
 pub mod backend;
 pub(crate) mod clipboard;
 pub mod host_types;
-mod menus;
+mod menu_bar;
 pub(crate) mod native_window_wait;
 pub mod paint_host;
 mod presentation;
 mod presentation_feedback;
 pub mod thread_comm;
-mod tooltips;
 #[cfg(target_os = "linux")]
 mod wayland_toplevel_icon;
 mod window_chrome;
@@ -44,7 +43,7 @@ pub mod model {
     pub use romacs_renderer_wgpu::model::ModelView;
 }
 
-pub use render_thread::frame_stats::FrameSchedSnapshot;
+pub(crate) use render_thread::frame_stats::FrameSchedSnapshot;
 
 /// Read the current process-global frame-scheduling counters.
 ///

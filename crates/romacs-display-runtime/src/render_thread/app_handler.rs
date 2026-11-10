@@ -80,7 +80,7 @@ impl ApplicationHandler for RenderApp {
 
 impl Drop for RenderApp {
     fn drop(&mut self) {
-        self.menus.close();
+        self.menu_bar.close();
         self.handle_exiting();
     }
 }

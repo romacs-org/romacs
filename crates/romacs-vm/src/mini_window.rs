@@ -110,7 +110,7 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
 /// starts one, and unless WRAP truncates, a glyph that does not fit in
 /// what is left of a row of WIDTH columns starts the next, or under
 /// `word-wrap' the row's last wrap point (the first glyph after spaces or
-/// TABs) does, as GNU's word wrap and romacs-layout2 break it. A TAB goes
+/// TABs) does, as GNU's word wrap and romacs-layout break it. A TAB goes
 /// to the next stop of TAB_WIDTH columns from its line's start, counting
 /// the rows before it (continuation_lines_width; a TAB that does not fit
 /// counts its row as full); any other character its width by RULE
@@ -273,7 +273,7 @@ impl Vm {
         // The text area between its fringes, less the continuation glyph
         // on a window without a right fringe, as GNU's init_iterator makes
         // the last visible x: the host's advance for it where a host lays
-        // the frame out (romacs-layout2 reserves the same), else its columns.
+        // the frame out (romacs-layout reserves the same), else its columns.
         let column = self.window_state.column.max(1);
         let [left, right] = self.window_fringe_widths(mini)?;
         let (wrap, rule) = (self.window_line_wrap(mini, buffer)?, self.buffer_width_rule(buffer)?);
