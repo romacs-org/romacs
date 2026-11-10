@@ -860,17 +860,23 @@ impl Vm {
     /// the last collection, and its `stack_used` down to the top, so no stale
     /// register keeps an object alive and none is traced later as a root.
     pub(crate) fn clear_dead_tails(&mut self) {
+        #[cfg(test)]
+        let mut cleared = 0;
         for record in &mut self.suspended {
             let file = self.suspended_stacks.get_mut(record.file).unwrap_or(&mut self.stack);
             let top = record.top(file, &self.functions);
             let end = record.stack_used.clamp(top, file.len());
             file[top..end].fill(Value::NIL);
+            #[cfg(test)]
+            { cleared += end - top; }
             record.stack_used = top;
             // Above `stack_used` a file holds NIL already: a missed raise of it fails here.
             if self.gc_stress.verify || cfg!(debug_assertions) {
                 assert!(file[top..].iter().all(|&v| v == Value::NIL), "a register file holds a value above its engine's top");
             }
         }
+        #[cfg(test)]
+        CLEARED.with(|log| log.borrow_mut().push(cleared));
     }
     /// Every suspended engine's activations, oldest engine first, as Lisp data:
     /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function` or
@@ -5846,6 +5852,8 @@ thread_local! {
     /// The lowest native stack pointer a poll ran at on this thread: how deep
     /// handlers dispatch.
     pub(crate) static POLL_LOW: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+    /// The slots each collection on this thread cleared above its engines' tops.
+    pub(crate) static CLEARED: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 #[cfg(test)]
 #[path = "threaded_reader_gc_tests.rs"]
@@ -6057,6 +6065,21 @@ mod register_tests {
         let value = vm.eval_source(&source).map(|v| v.display().unwrap());
         std::fs::remove_file(&path).unwrap();
         assert_eq!(value.unwrap(), "((a) (b))");
+    }
+
+    /// A deep excursion's registers are cleared by the first collection after
+    /// it, and by no later one: a resumed engine does not bring back the high
+    /// slot it had before the collection.
+    #[test]
+    fn a_dead_tail_is_cleared_once() {
+        let mut vm = Vm::new();
+        CLEARED.with(|log| log.borrow_mut().clear());
+        vm.eval_source("(progn (defun dt-deep (n) (if (> n 0) (dt-deep (1- n)) 0))
+                          (dt-deep 500) (garbage-collect) (garbage-collect) (garbage-collect))")
+            .unwrap();
+        let log = CLEARED.with(|log| log.borrow().clone());
+        let last = &log[log.len().saturating_sub(3)..];
+        assert!(last.len() == 3 && last[0] >= 500 && last[1] == 0 && last[2] == 0, "slots cleared per collection: {log:?}");
     }
 
     /// A file grown past the cap is cut back when its engine ends.
