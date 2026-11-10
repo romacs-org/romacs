@@ -1189,6 +1189,10 @@ gone gets nothing."
               (quit (list 'error (list 'quit nil nil '(quit))))
               (error (list 'error (list (car err) (romacs--isolate-transportable (cdr err)) nil
                                         (get (car err) 'error-conditions)))))))))
+    ;; A quit an interrupt left deferred in this job's compile, which an
+    ;; escape then passed over, ends with the job: the next job, in this
+    ;; same request, must not take it.
+    (romacs--take-deferred-escape nil)
     ;; The preparation loads the worker's baseline features; a later job
     ;; that loads more retires the worker: the spawner reuses it no more and
     ;; the jobs queued behind go back to run elsewhere.

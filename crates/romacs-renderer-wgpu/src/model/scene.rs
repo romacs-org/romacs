@@ -8,11 +8,11 @@
 use super::obj::{ObjError, ObjLimits, ObjMesh};
 
 /// Most meshes in one model (Gnosis accepts 255 scene objects).
-pub const MAX_MODEL_MESHES: usize = 255;
+pub(crate) const MAX_MODEL_MESHES: usize = 255;
 /// Most triangles in one model, over all its meshes.
-pub const MAX_MODEL_TRIANGLES: usize = 2_000_000;
+pub(crate) const MAX_MODEL_TRIANGLES: usize = 2_000_000;
 /// Most vertices in one model, over all its meshes.
-pub const MAX_MODEL_VERTICES: usize = 2_000_000;
+pub(crate) const MAX_MODEL_VERTICES: usize = 2_000_000;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SceneError {
@@ -61,7 +61,7 @@ pub struct ModelScene {
 }
 
 /// What is left of a model's caps after `meshes`.
-pub fn remaining_limits(meshes: &[ObjMesh]) -> ObjLimits {
+pub(crate) fn remaining_limits(meshes: &[ObjMesh]) -> ObjLimits {
     let vertices: usize = meshes.iter().map(|m| m.vertices.len()).sum();
     let triangles: usize = meshes.iter().map(|m| m.triangles.len()).sum();
     ObjLimits {
@@ -74,7 +74,7 @@ pub fn remaining_limits(meshes: &[ObjMesh]) -> ObjLimits {
 ///
 /// Port of canvas-3d's `triangle_normals`: edges are scaled by a power of two
 /// before the cross product so tiny geometry does not underflow to zero.
-pub fn face_normal(t: [[f64; 3]; 3]) -> Option<[f64; 3]> {
+pub(crate) fn face_normal(t: [[f64; 3]; 3]) -> Option<[f64; 3]> {
     let e1 = sub(t[1], t[0]);
     let e2 = sub(t[2], t[0]);
     let scale = e1
@@ -116,7 +116,7 @@ impl ModelScene {
 
     /// [`ModelScene::new`], polling `cancelled` every [`CHECK_EVERY`]
     /// triangles or vertices of validation and framing.
-    pub fn new_cancellable(
+    pub(crate) fn new_cancellable(
         meshes: Vec<ObjMesh>,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Self, SceneError> {
@@ -190,7 +190,7 @@ impl ModelScene {
         })
     }
 
-    pub fn meshes(&self) -> &[ObjMesh] {
+    pub(crate) fn meshes(&self) -> &[ObjMesh] {
         &self.meshes
     }
 
@@ -203,7 +203,7 @@ impl ModelScene {
     }
 
     /// Triangle counts per mesh, in mesh order.
-    pub fn triangle_counts(&self) -> Vec<u32> {
+    pub(crate) fn triangle_counts(&self) -> Vec<u32> {
         self.meshes
             .iter()
             .map(|m| m.triangles.len() as u32)
@@ -211,7 +211,7 @@ impl ModelScene {
     }
 
     /// Global GPU face number of `mesh`'s face `face`, when both exist.
-    pub fn global_face(&self, mesh: u16, face: u32) -> Option<u32> {
+    pub(crate) fn global_face(&self, mesh: u16, face: u32) -> Option<u32> {
         let m = self.meshes.get(mesh as usize)?;
         ((face as usize) < m.triangles.len()).then(|| self.face_starts[mesh as usize] + face)
     }
@@ -226,7 +226,7 @@ impl ModelScene {
 
     /// The original-coordinate point `w0·v0 + w1·v1 + w2·v2` on `mesh`'s
     /// face `face`, in f64 (design §2 point targets, §5.4 picks).
-    pub fn point_on(&self, mesh: u16, face: u32, weights: [f64; 3]) -> Option<[f64; 3]> {
+    pub(crate) fn point_on(&self, mesh: u16, face: u32, weights: [f64; 3]) -> Option<[f64; 3]> {
         let m = self.meshes.get(mesh as usize)?;
         let tri = m.triangles.get(face as usize)?;
         let v = tri.map(|i| m.vertices[i as usize]);
@@ -236,16 +236,15 @@ impl ModelScene {
     }
 
     /// `v` in the normalised frame the GPU draws: `(v - centre) / radius`.
-    pub fn normalise(&self, v: [f64; 3]) -> [f32; 3] {
+    pub(crate) fn normalise(&self, v: [f64; 3]) -> [f32; 3] {
         let d = sub(v, self.centre);
         d.map(|c| (c / self.radius) as f32)
     }
 
-    pub fn triangle_count(&self) -> usize {
+    pub(crate) fn triangle_count(&self) -> usize {
         self.meshes.iter().map(|m| m.triangles.len()).sum()
     }
 }
 
 #[cfg(test)]
-#[path = "scene/tests.rs"]
 mod tests;

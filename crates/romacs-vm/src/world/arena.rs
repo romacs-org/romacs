@@ -204,6 +204,17 @@ fn unlock() {
     LOCK.store(false, Ordering::Release);
 }
 
+/// FORK, a fork(2), with the allocator's lock held, and the lock released
+/// after it in each process it returns in: a child has the forking thread
+/// alone, so a lock another thread held at the fork would stay held there.
+/// FORK allocates nothing.
+pub fn across_fork<T>(fork: impl FnOnce() -> T) -> T {
+    lock();
+    let forked = fork();
+    unlock();
+    forked
+}
+
 /// The class of a request of SIZE bytes aligned to ALIGN, or None for a run.
 fn class_of(size: usize, align: usize) -> Option<usize> {
     if align > PAGE {
@@ -893,13 +904,19 @@ pub fn restore_outcome() -> Restore {
 }
 
 /// Whether the heap is an arena whose used prefix will be an image: a
-/// builder's. What goes into it goes into the world, so nothing that depends
-/// on the moment belongs there.
+/// builder's, the only heap `write_image` will write. What goes into it goes
+/// into the world, so nothing that depends on the moment belongs there.
 pub fn heap_is_image() -> bool {
-    started() && !ADOPTED.load(Ordering::Acquire)
+    BACKING.load(Ordering::Relaxed) >= 0 && !ADOPTED.load(Ordering::Acquire)
 }
 
-/// Whether a heap table may take its one large reservation (`table.rs'): not
+/// Whether the arena is a shared mapping (a builder's, `backing_file`): a
+/// forked child then shares its blocks with the parent instead of copying them.
+pub fn heap_is_shared() -> bool {
+    BACKING.load(Ordering::Relaxed) >= 0
+}
+
+/// Whether a heap table may take its one large reservation (`table.rs`): not
 /// where the heap is an image, nor under an address-space limit, which the
 /// reservation would eat into.
 pub fn may_reserve() -> bool {

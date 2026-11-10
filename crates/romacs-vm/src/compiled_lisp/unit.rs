@@ -896,7 +896,9 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
         match node {
             Node::Cons(a, b) => {
                 let pair = (resolve(a)?, resolve(b)?);
-                *vm.cons_mut(v)? = pair;
+                let at = vm.writable_cons(v)?;
+                vm.conses.set_car(at, pair.0);
+                vm.conses.set_cdr(at, pair.1);
             }
             Node::Vector(items) | Node::Record(items) => {
                 let filled = all(items)?;
@@ -928,13 +930,13 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
             }
             Node::Cell(content) => {
                 let content = resolve(content)?;
-                vm.cells[v.payload() as usize] = content;
+                vm.cells.set(v.payload() as usize, content);
             }
             Node::Closure(_, captures, metadata, document) => {
                 let (captures, metadata, document) = (all(captures)?, all(metadata)?, resolve(document)?);
                 // The funnel charged the closure empty (data.rs `alloc_closure').
                 vm.allocation.allocated += ((captures.len() + metadata.len()) * size_of::<Value>()) as u64;
-                let closure = &mut vm.closures[v.index(4)?];
+                let closure = vm.closures.entry_mut(v.index(4)?);
                 closure.captures = captures;
                 closure.metadata = metadata;
                 closure.document = document;

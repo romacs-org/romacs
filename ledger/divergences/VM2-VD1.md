@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-VD1 | A local `(defvar x)` reaches `let` but not lambda parameters | GNU's `funcall_lambda` (`src/eval.c:3433`) binds arguments by consing onto `lexenv` whenever `lexenv` is non-nil and **never** consults a local-special marker, while `Flet`/`FletX` (`eval.c:1109`, `:1183`) check `declared_special` and `Fmemq (var, Vinternal_interpreter_environment)`. A one-argument `Fdefvar` enters the interpreter environment only | VM2 matches GNU: the compiler's parameter-binding path does not consult local specials, while its `let` path does. Verified on live GNU 32.0.50 interpreted with `lexical-binding: t` on line 1 — the lambda-parameter form signals `void-variable`, the `let` form answers 18 | **Not a divergence in behaviour**; recorded because VM2 briefly implemented the symmetric (wrong) rule and a reader may expect symmetry. Both directions are pinned by `local_declaration_does_not_reach_lambda_parameters_but_does_reach_let` and mutation-proven | <!-- symbols: defvar, let, lambda -->

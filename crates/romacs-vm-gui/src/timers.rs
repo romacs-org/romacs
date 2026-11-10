@@ -74,7 +74,7 @@ pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
 /// is never cloned.
 pub fn ends_idle(event: &InputEvent) -> bool {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => ends_idle(event),
+        InputEvent::Tracked { event, .. } => ends_idle(event),
         &InputEvent::Key { ref key, modifiers, pressed: true, emacs_frame_id } => crate::native::translate(
             InputEvent::Key { key: key.clone(), modifiers, pressed: true, emacs_frame_id },
         ).is_some(),
@@ -123,8 +123,10 @@ mod tests {
         std::thread::sleep(waiting.delay.unwrap());
         assert!(idle(&mut vm, true).unwrap().ran);
         assert_eq!(printed(&mut vm, "probe"), "((idle t) ordinary)", "an idle timer sees idleness");
+        // The next delay is the 60 s timer's, however slow a loaded host
+        // made the steps since; the idle timer due again would be 0.05 s.
         let after = idle(&mut vm, true).unwrap();
-        assert!(!after.ran && after.delay.is_some_and(|d| d > Duration::from_secs(59)), "runs once per idleness: {after:?}");
+        assert!(!after.ran && after.delay.is_some_and(|d| d > Duration::from_secs(10)), "runs once per idleness: {after:?}");
         // A key ends idleness; the next idle period may run the idle timer again.
         vm.timer_stop_idle();
         assert_eq!(printed(&mut vm, "(current-idle-time)"), "nil");
@@ -467,7 +469,9 @@ mod tests {
     /// wait, which reads a queued key and ends at its time limit between
     /// rounds. Pinned GNU 45b0f7699df, -nw: the key typed 0.3s in is read
     /// then; its time limit waits for the rescheduling to stop
-    /// (DIVERGENCES.md VM2-KBD1).
+    /// (DIVERGENCES.md VM2-KBD1). A starved wait ends only when the
+    /// rescheduling does, after 10 s; half that bounds a loaded host's
+    /// slowness.
     #[test]
     fn a_rescheduling_timer_never_starves_a_wait() {
         std::thread::Builder::new().stack_size(64 << 20).spawn(rescheduling_body).unwrap().join().unwrap();
@@ -478,14 +482,14 @@ mod tests {
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
-            (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 2) (run-with-timer 0 nil #'rescheduling)))
+            (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 10) (run-with-timer 0 nil #'rescheduling)))
             (run-with-timer 0 nil #'rescheduling)";
         vm.set_host_input(Some(Box::new(Paced([Step::Key('a')].into()))));
         printed(&mut vm, rescheduling);
-        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 1.5) (<= runs 2))");
+        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 5) (<= runs 2))");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, rescheduling);
-        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 1.5))");
+        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 5))");
         assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
     }
 

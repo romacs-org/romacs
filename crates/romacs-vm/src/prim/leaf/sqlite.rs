@@ -87,7 +87,7 @@ impl Leaf<'_> {
     }
     fn sqlite_handle_mut(&mut self, object: Value) -> &mut Handle {
         let index = object.index(0).expect("checked sqlite object") - 1;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Sqlite(handle) => handle,
             _ => unreachable!("checked sqlite object"),
         }

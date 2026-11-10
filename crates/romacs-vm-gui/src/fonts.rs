@@ -232,7 +232,7 @@ impl Display {
         })
     }
     fn char_font_uncached(&mut self, face: &romacs_vm::FaceFont, ch: char) -> Option<(OpenedFont, u32)> {
-        // The request painting makes (romacs-layout2 `font_request').
+        // The request painting makes (romacs-layout `font_request').
         let slant = if face.italic { romacs_display_protocol::font::FontSlantKind::Italic } else { romacs_display_protocol::font::FontSlantKind::Normal };
         let request = FontRequest { weight: face.weight, slant, width: face.width, ..FontRequest::new(&face.family, face.pixel_size) };
         let resolved = self.resolver.resolve_char(&request, ch).ok()?;

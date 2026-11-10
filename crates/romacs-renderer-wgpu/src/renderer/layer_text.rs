@@ -373,8 +373,8 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                             .collect()
                     };
 
-                    if self.atlas.cache_misses_this_frame != misses_before {
-                        if let Some(start) = atlas_start {
+                    if self.atlas.cache_misses_this_frame != misses_before
+                        && let Some(start) = atlas_start {
                             start.emit();
                             romacs_display_protocol::present_trace::record(
                                 romacs_display_protocol::present_trace::Stage::AtlasUploadEnd,
@@ -382,7 +382,6 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                                 frame_glyphs.presentation_id,
                             );
                         }
-                    }
 
                     for handle in handles {
                         let entry = handle.entry;

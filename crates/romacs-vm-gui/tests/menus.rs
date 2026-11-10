@@ -8,7 +8,7 @@ use romacs_vm::{CommandEvent, Vm};
 
 const META: i64 = 1 << 27;
 
-type Engine = std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>;
+type Engine = std::rc::Rc<std::cell::RefCell<romacs_layout::LayoutEngine>>;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))
@@ -36,7 +36,7 @@ fn menus_share_one_look_and_motion() {
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
-        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         vm.set_echo_area_host(true);
         let mut report = vec![];
@@ -396,7 +396,7 @@ fn key_hint_cards() {
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
-        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         vm.set_echo_area_host(true);
         vm.eval_source("(progn (require 'which-key)

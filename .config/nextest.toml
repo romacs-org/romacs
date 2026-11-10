@@ -1,11 +1,9 @@
 nextest-version = "0.9.137"
-experimental = ["wrapper-scripts"]
 
-# Memory-limited wrapper: each test process gets an 8GB virtual address space limit.
-# Uses prlimit (RLIMIT_AS) so allocation failures produce a Rust abort with
-# backtrace instead of a silent SIGKILL from cgroup OOM killer.
-[scripts.wrapper.memory-limit]
-command = 'prlimit --as=8589934592 --'
+# No address-space limit: a table reserves its storage only without one
+# (`world::arena::may_reserve'), as in a session, so checks run here take
+# the path sessions take, as the gate does. Memory is bounded by the cgroup
+# the run is started in.
 
 [profile.default]
 test-threads = 24
@@ -13,9 +11,18 @@ test-threads = 24
 # Bound surviving tests without the retired legacy oracle's package overrides.
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
 
-# The collector's own unit tests run without the limit: a table takes its
-# reservation only with no address-space limit, as a session has.
-[[profile.default.scripts]]
-filter = 'not (package(romacs-vm) & kind(lib) & test(/^(gc|gc_mark|table)::/))'
-platform = { host = "cfg(target_os = \"linux\")" }
-run-wrapper = 'memory-limit'
+# The trybuild boundary test builds its fixtures' dependency tree, romacs-vm's
+# included, in a target directory of its own. Warm it takes about a minute; a
+# cold one, as a freshly seeded check target has, compiles every dependency
+# from nothing and passed 600 s under load. A wrong verdict is its failure,
+# not time.
+[[profile.default.overrides]]
+filter = 'test(=the_compiler_enforces_the_boundaries)'
+slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
+
+# The batch scaling probes bound each session by its CPU (scaling_live.py);
+# load stretches their wall time, not their work. The test ends on those
+# bounds, and on a hung session's own wall-clock backstop.
+[[profile.default.overrides]]
+filter = 'test(=batch_probes_scale_within_their_budgets)'
+slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }

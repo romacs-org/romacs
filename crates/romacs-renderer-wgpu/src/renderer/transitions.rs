@@ -2545,5 +2545,4 @@ impl WgpuRenderer {
 }
 
 #[cfg(test)]
-#[path = "transitions/tests/transitions_test.rs"]
 mod tests;

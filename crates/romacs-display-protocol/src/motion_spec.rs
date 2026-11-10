@@ -166,16 +166,6 @@ pub struct AngularFrequency(f32);
 #[serde(transparent)]
 pub struct DampingRatio(f32);
 
-/// A length in physical device pixels, after scale resolution.
-///
-/// Motion thresholds live in this unit rather than in logical pixels so a
-/// "too small to be worth animating" policy means the same thing on a HiDPI
-/// display as on a 1x one.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, serde::Serialize)]
-#[serde(transparent)]
-pub struct DevicePixels(f32);
-
 const fn validate_positive_motion_parameter(value: &f32) -> Result<(), MotionSpecError> {
     if !value.is_finite() {
         Err(MotionSpecError::NotFinite)
@@ -214,28 +204,6 @@ impl DampingRatio {
     }
 }
 
-impl DevicePixels {
-    pub const ZERO: Self = Self(0.0);
-
-    /// # Errors
-    /// [`MotionSpecError::NotFinite`] if `value` is `NaN` or infinite,
-    /// [`MotionSpecError::Negative`] if it is negative.
-    pub fn new(value: f32) -> Result<Self, MotionSpecError> {
-        if !value.is_finite() {
-            Err(MotionSpecError::NotFinite)
-        } else if value < 0.0 {
-            Err(MotionSpecError::Negative)
-        } else {
-            Ok(Self(value))
-        }
-    }
-
-    #[must_use]
-    pub const fn get(self) -> f32 {
-        self.0
-    }
-}
-
 impl<'de> serde::Deserialize<'de> for MotionDuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -247,16 +215,6 @@ impl<'de> serde::Deserialize<'de> for MotionDuration {
 }
 
 impl<'de> serde::Deserialize<'de> for UnitInterval {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = <f32 as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for DevicePixels {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -413,5 +371,4 @@ impl MotionSpec {
 }
 
 #[cfg(test)]
-#[path = "motion_spec/tests/motion_spec_test.rs"]
 mod tests;

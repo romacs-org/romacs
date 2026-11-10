@@ -146,7 +146,7 @@ impl GpuBudget {
         Self::with_limit_bytes(limit)
     }
 
-    pub fn with_limit_bytes(limit_bytes: NonZeroU64) -> Self {
+    pub(crate) fn with_limit_bytes(limit_bytes: NonZeroU64) -> Self {
         Self {
             limit_bytes,
             pooled_bytes: 0,
@@ -167,7 +167,7 @@ impl GpuBudget {
         self.unpooled_bytes
     }
 
-    pub fn in_use_bytes(&self) -> u64 {
+    pub(crate) fn in_use_bytes(&self) -> u64 {
         self.pooled_bytes.saturating_add(self.unpooled_bytes)
     }
 
@@ -279,5 +279,4 @@ impl Default for GpuBudget {
 }
 
 #[cfg(test)]
-#[path = "gpu_budget/tests/gpu_budget_test.rs"]
 mod tests;

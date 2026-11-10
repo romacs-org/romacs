@@ -1,4 +1,4 @@
-{"provenance": {"generated_by": "tools/gnu_defvars.py", "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea", "source": "DEFVAR_LISP, DEFVAR_LISP_NOPRO, DEFVAR_BOOL, DEFVAR_INT, DEFVAR_PER_BUFFER and DEFVAR_KBOARD (NAME, ...) in src/*.c"},
+{"provenance": {"generated_by": "tools/lib/gnu_defvars.py", "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea", "source": "DEFVAR_LISP, DEFVAR_LISP_NOPRO, DEFVAR_BOOL, DEFVAR_INT, DEFVAR_PER_BUFFER and DEFVAR_KBOARD (NAME, ...) in src/*.c"},
 "defvars": {
  "abbrev-mode": ["buffer.c"],
  "after-change-functions": ["buffer.c"],

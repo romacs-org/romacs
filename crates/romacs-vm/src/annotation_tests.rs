@@ -111,13 +111,13 @@ fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
     )
     .unwrap();
     let string = vm.allocate_object(Object::String(Box::new(data::LispString::new("λ"))));
-    if let Object::String(s) = &mut vm.objects[string.index(0).unwrap() - 1] {
+    if let Object::String(s) = vm.objects.entry_mut(string.index(0).unwrap() - 1) {
         s.properties
             .put(ByteOffset(0)..ByteOffset(2), "overlay", overlay);
     }
     let property = vm.allocate_object(Object::Vector(vec![marker, overlay, buffer, string]));
     let slot = vm.slot("annotation-test");
-    if let Object::Overlay(o) = &mut vm.objects[overlay.index(0).unwrap() - 1] {
+    if let Object::Overlay(o) = vm.objects.entry_mut(overlay.index(0).unwrap() - 1) {
         o.properties.push((Value::reference(slot + 1, 7), property));
     }
     let mut roots = [buffer];

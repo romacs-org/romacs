@@ -23,6 +23,10 @@ const CASES: &str = r##"
 (error-message-string nil)
 (error-message-string '(quit))
 (let ((print-length 1)) (error-message-string '(wrong-type-argument (1 2 3))))
+(progn (define-error 'romacs-test-quoted "Can't `frob' it") (error-message-string '(romacs-test-quoted 1)))
+(let ((text-quoting-style 'grave)) (define-error 'romacs-test-quoted "Can't `frob' it") (error-message-string '(romacs-test-quoted 1)))
+(let ((text-quoting-style 'straight)) (define-error 'romacs-test-quoted "Can't `frob' it") (error-message-string '(romacs-test-quoted 1)))
+(error-message-string '(error "x `y' z"))
 "##;
 
 fn oracle(expression: &str) -> String {

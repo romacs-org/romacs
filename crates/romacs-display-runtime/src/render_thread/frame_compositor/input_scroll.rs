@@ -10,14 +10,9 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(in crate::render_thread) struct InputScroll {
     active: Option<PendingScroll>,
-    observed: Vec<(
-        InputReceipt,
-        romacs_display_protocol::input_latency::InputToken,
-    )>,
     /// Only submitted pixels may change pointer observations.
     submitted: Option<(Arc<ScrollSurface>, f32)>,
     staged: Option<Option<(Arc<ScrollSurface>, f32)>>,
-    staged_tokens: Vec<romacs_display_protocol::input_latency::InputToken>,
 }
 
 struct PendingScroll {
@@ -25,7 +20,6 @@ struct PendingScroll {
     surface: Arc<ScrollSurface>,
     offset: f32,
     receipts: Vec<InputReceipt>,
-    tokens: Vec<romacs_display_protocol::input_latency::InputToken>,
 }
 
 impl InputScroll {
@@ -36,7 +30,6 @@ impl InputScroll {
         y: f32,
         delta: f32,
         receipt: InputReceipt,
-        token: Option<romacs_display_protocol::input_latency::InputToken>,
     ) -> bool {
         if self.active.as_ref().is_some_and(|active| active.resolved) {
             return false;
@@ -67,7 +60,6 @@ impl InputScroll {
                 surface: surface.clone(),
                 offset: 0.0,
                 receipts: Vec::new(),
-                tokens: Vec::new(),
             });
         }
         let active = self.active.as_mut().unwrap();
@@ -85,29 +77,12 @@ impl InputScroll {
                 upper = surface.clamp_offset(f32::MAX),
                 "input-driven scroll reached prepared coverage boundary");
         }
-        if offset != active.offset
-            && let Some(token) = token
-        {
-            active.tokens.push(token);
-        }
         active.offset = offset;
         active.receipts.push(receipt);
         true
     }
 
-    pub(in crate::render_thread) fn observe_input(
-        &mut self,
-        input: InputReceipt,
-        token: Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
-        let Some(token) = token else { return };
-        self.observed.retain(|(input, _)| !input.cancelled());
-        if self.observed.len() == 128 {
-            self.observed.remove(0);
-        }
-        self.observed.push((input, token));
-    }
-
+    #[cfg(test)]
     pub(in crate::render_thread) fn resolve(
         &mut self,
         frame: &FrameGlyphBuffer,
@@ -150,21 +125,11 @@ impl InputScroll {
             return false;
         };
         let offset = surface.clamp_offset(intent.offset);
-        let tokens = if offset != 0.0 {
-            self.observed
-                .iter()
-                .filter(|(input, _)| intent.inputs.iter().any(|owner| owner.same_input(input)))
-                .map(|(_, token)| *token)
-                .collect()
-        } else {
-            Vec::new()
-        };
         self.active = Some(PendingScroll {
             resolved: true,
             surface: surface.clone(),
             offset,
             receipts: intent.inputs,
-            tokens,
         });
         true
     }
@@ -176,11 +141,6 @@ impl InputScroll {
         &mut self,
         frame: Option<&FrameGlyphBuffer>,
     ) -> Option<romacs_display_protocol::DisplayWindowId> {
-        if let Some(frame) = frame {
-            self.observed.retain(|(input, _)| {
-                !input.cancelled() && !input.acknowledged_by(&frame.input_checkpoint)
-            });
-        }
         let mut active = self.active.take()?;
         let window = active.surface.coverage().content.window_id;
         let Some(frame) = frame else {
@@ -235,7 +195,6 @@ impl InputScroll {
 
     pub(in crate::render_thread) fn paint(&mut self, frame: &mut FrameGlyphBuffer) {
         self.staged = Some(None);
-        self.staged_tokens.clear();
         if self
             .active
             .as_ref()
@@ -253,9 +212,6 @@ impl InputScroll {
             tracing::warn!(?error, "scroll pointer projection rejected");
             self.active = None;
             return;
-        }
-        if active.offset != 0.0 {
-            self.staged_tokens.extend_from_slice(&active.tokens);
         }
         // Until point has been adjusted by the command, suppress its caret
         // rather than attach an authoritative slot to a different source row.
@@ -275,14 +231,7 @@ impl InputScroll {
         self.active.is_some()
     }
 
-    pub(in crate::render_thread) fn staged_tokens(
-        &self,
-    ) -> &[romacs_display_protocol::input_latency::InputToken] {
-        &self.staged_tokens
-    }
-
     pub(in crate::render_thread) fn submit(&mut self) {
-        self.staged_tokens.clear();
         if let Some(staged) = self.staged.take() {
             if let Some((surface, offset)) = &staged {
                 tracing::debug!(target: "romacs_display_runtime::input_scroll", window = surface.coverage().content.window_id.get(), offset, "submitted input-driven scroll");
@@ -312,5 +261,4 @@ impl InputScroll {
 }
 
 #[cfg(test)]
-#[path = "input_scroll/tests/input_scroll_test.rs"]
 mod tests;

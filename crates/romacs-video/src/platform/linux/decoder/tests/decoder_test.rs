@@ -167,7 +167,7 @@ fn packed_dmabuf_fallback_retains_its_srgb_contract() {
 fn sink_caps_accept_modifier_bearing_dma_drm_then_validate_the_sample() {
     gstreamer::init().unwrap();
     let caps = preferred_sink_caps(
-        FrameImportPolicy::AllowGpuBlit,
+        FrameImportPolicy::RequireDirectSurface,
         NativeVideoFormatSupport {
             nv12: true,
             p010: false,
@@ -192,7 +192,7 @@ fn sink_caps_accept_modifier_bearing_dma_drm_then_validate_the_sample() {
     assert_eq!(caps.size(), 3);
 
     let fallback_caps = preferred_sink_caps(
-        FrameImportPolicy::AllowGpuBlit,
+        FrameImportPolicy::RequireDirectSurface,
         NativeVideoFormatSupport {
             nv12: true,
             p010: false,
@@ -207,7 +207,7 @@ fn sink_caps_accept_modifier_bearing_dma_drm_then_validate_the_sample() {
     );
 
     let all_native_formats = preferred_sink_caps(
-        FrameImportPolicy::AllowGpuBlit,
+        FrameImportPolicy::RequireDirectSurface,
         NativeVideoFormatSupport {
             nv12: true,
             p010: true,
@@ -232,7 +232,7 @@ fn sink_caps_accept_modifier_bearing_dma_drm_then_validate_the_sample() {
     assert_eq!(all_native_formats.size(), 3);
 
     let packed_only = preferred_sink_caps(
-        FrameImportPolicy::AllowGpuBlit,
+        FrameImportPolicy::RequireDirectSurface,
         NativeVideoFormatSupport {
             nv12: false,
             p010: false,

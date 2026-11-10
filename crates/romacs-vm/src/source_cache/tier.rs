@@ -57,10 +57,7 @@ impl Vm {
                     _ => self.literal(f)?,
                 });
             }
-            self.stack.extend_from_slice(&args);
-            let result = self.primitive(p, 0, args.len());
-            self.stack.clear();
-            result
+            self.with_kernel_stack(&args, |vm, n| vm.primitive(p, 0, n))
         })();
         // This tier has no escape channel. Fall back before returning a fault
         // whose symbol data must be carried by the ordinary evaluator.

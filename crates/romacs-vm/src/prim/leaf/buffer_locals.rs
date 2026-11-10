@@ -3,6 +3,8 @@ use crate::forwarded::Fwd;
 use crate::prim::Out;
 use crate::data::Object;
 
+use crate::watchers::{NativeWrite, WriteKind};
+
 impl Leaf<'_> {
     fn local_symbol(&mut self, symbol: Value) -> std::result::Result<Option<usize>, Fault> {
         if symbol == Value::NIL || symbol == Value::TRUE { return Ok(None); }
@@ -40,11 +42,14 @@ impl Leaf<'_> {
         // Fkill_local_variable reports makunbound with the current buffer, for
         // a localized variable only (a plain or forwarded one returns first).
         let localized = self.vm.forwarding(slot).is_none() && self.vm.local_table(slot).map_err(Fault::Error)?.is_some();
-        if localized { self.notify(slot, Value::NIL, "makunbound", Some(buffer))?; }
-        self.clear_local_slot(slot, buffer)?;
+        if localized {
+            self.write(NativeWrite { kind: WriteKind::ClearLocal, slot, value: Value::NIL })?;
+        } else {
+            self.clear_local_slot(slot, buffer)?;
+        }
         Ok(symbol)
     }
-    fn clear_local_slot(&mut self, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
+    pub(in crate::prim) fn clear_local_slot(&mut self, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
         if let Some(fwd) = self.vm.forwarding(slot) {
             if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.index(0).unwrap() - 1, i); }
         } else if let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? {
@@ -100,16 +105,23 @@ impl Leaf<'_> {
                 if !(file_coding && kill_permanent == Value::NIL) { self.clear_local_slot(slot, buffer)?; }
                 continue;
             }
+            // reset_buffer_local_variables (buffer.c:1190) keeping permanent
+            // locals reports every localized one, before it looks at any.
+            // `truncate-lines' is per-buffer there, though a local here.
+            let reported = kill_permanent == Value::NIL && slot != self.vm.truncate_lines_slot;
             let property = self.vm.symbol_property(symbol, permanent).map_err(Fault::Error)?;
             let builtin_permanent = slot == self.vm.truncate_lines_slot || file_coding;
             if kill_permanent == Value::NIL && (property != Value::NIL || builtin_permanent) {
+                if reported { self.write(NativeWrite { kind: WriteKind::Report, slot, value: Value::NIL })?; }
                 if property == permanent_hook {
                     let value = match self.buffer_local_read(symbol, buffer) {
                         Ok(value) => value,
                         Err(Fault::VoidVariable(_)) => return Err(Fault::Wrong("arrayp", self.vm.forwarded_unbound_symbol())),
                         Err(fault) => return Err(fault),
                     };
-                    if self.pair(value).is_some() {
+                    if value == Value::NIL {
+                        self.write(NativeWrite { kind: WriteKind::Report, slot, value })?;
+                    } else if self.pair(value).is_some() {
                         let mut values = Vec::new();
                         let mut rest = value;
                         while let Some((item, tail)) = self.pair(rest) {
@@ -118,16 +130,20 @@ impl Leaf<'_> {
                             }
                             rest = tail;
                         }
-                        let filtered = self.vm.list_value(&values);
-                        self.vm.set_variable_value(slot, filtered).map_err(Fault::Error)?;
+                        let value = self.vm.list_value(&values);
+                        self.write(NativeWrite { kind: WriteKind::StoreLocal, slot, value })?;
                     }
                 }
-            } else { self.clear_local_slot(slot, buffer)?; }
+            } else if reported {
+                self.write(NativeWrite { kind: WriteKind::ClearLocal, slot, value: Value::NIL })?;
+            } else {
+                self.clear_local_slot(slot, buffer)?;
+            }
         }
         let index = buffer.index(0).unwrap() - 1;
         if kill_permanent == reset { self.vm.reset_forwarded_visit(index); }
         let case_tables = self.standard_case_roots()?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
             Object::ByteBuffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
             _ => unreachable!(),

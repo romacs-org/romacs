@@ -345,7 +345,7 @@ impl Vm {
 }
 
 /// A closure's code, which `function-equal' compares.
-pub(super) fn code_identity(closures: &[Closure], f: Value) -> Option<Identity> {
+pub(super) fn code_identity(closures: &crate::table::Table<Closure>, f: Value) -> Option<Identity> {
     if f.tag() != 4 {
         return None;
     }

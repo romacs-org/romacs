@@ -91,27 +91,16 @@ impl RenderApp {
             .or_else(|| self.comms.cmd_rx.try_recv().ok())
         {
             match cmd {
-                #[cfg(feature = "core-free")]
                 RenderCommand::Paint(scene) => self.ingest_paint(*scene),
-                RenderCommand::Lifecycle(c) => {
-                    if let LifecycleCommand::Shutdown = c {
-                        tracing::info!("Render thread received shutdown command");
-                        self.lifecycle_flags.request_shutdown(
-                            super::state::RenderShutdownReason::EvaluatorShutdown,
-                        );
-                        should_exit = true;
-                        continue;
-                    }
+                RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
+                    tracing::info!("Render thread received shutdown command");
+                    self.lifecycle_flags
+                        .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+                    should_exit = true;
+                    continue;
                 }
-                RenderCommand::Window(c) => {
-                    if matches!(c, WindowCommand::ScrollBlit { .. }) {
-                        tracing::debug!("ScrollBlit ignored (full-frame rendering mode)");
-                        continue;
-                    }
-                    self.handle_window(c);
-                }
+                RenderCommand::Window(c) => self.handle_window(c),
                 RenderCommand::Asset(c) => self.handle_asset(c),
-                RenderCommand::Ui(c) => self.handle_ui(c),
                 RenderCommand::Config(c) => self.handle_config(c),
                 RenderCommand::Clipboard(c) => self.handle_clipboard(c),
             }

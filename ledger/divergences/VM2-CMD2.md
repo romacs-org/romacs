@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-CMD2 | VM2 edit command surrounding semantics | `cmds.c:internal_self_insert` handles overwrite, region callbacks, insertion hooks, abbrevs/autofill; motion handles fields/selection, `simple.el:delete-backward-char` handles regions and delete-active-region | Character counts, Unicode, accessible-boundary signals, line motion and atomic excessive deletion work; overwrite-mode, self-insert-uses-region-functions, region/delete-active-region, fields/selection, insertion hooks, abbrevs/autofill and undo are not honoured. Non-nil deletion killflag explicitly errors; invalid insertion event returns nil without GNU's bell | **Package-observable staged editing subset**, not GNU command completeness. G3 window tree/minibuffer/completion, timers, keyboard-quit, prefix-arg, undo and terminal route remain out of scope | <!-- symbols: self-insert-command, forward-char, backward-char, beginning-of-line, end-of-line, delete-char, delete-backward-char -->

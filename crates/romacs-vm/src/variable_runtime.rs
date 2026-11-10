@@ -172,7 +172,14 @@ impl Vm {
         // eval.c:720), including nil, t and keywords as bases.
         base == self.multibyte_slot
             || self.fixnum_slots.contains(&base)
-            || (base != slot && (matches!(self.symbol_names[base].as_str(), "nil" | "t") || self.symbol_names[base].starts_with(':')))
+            || (base != slot && (matches!(self.symbol_names[base].as_str(), "nil" | "t") || self.interned_keyword_slot(base)))
+    }
+    /// Whether SLOT is a keyword GNU makes constant: only a `:' name interned
+    /// in the obarray is SYMBOL_NOWRITE (lread.c intern_sym); an uninterned
+    /// `:x' is an ordinary variable.
+    pub(crate) fn interned_keyword_slot(&self, slot: usize) -> bool {
+        let name = &self.symbol_names[slot];
+        name.starts_with(':') && self.names.get(name) == Some(&slot)
     }
     /// Follow GNU's variable-alias chain (`indirect_variable`, data.c:1291) to
     /// the variable that actually holds the value. `defvaralias` refuses
@@ -211,10 +218,9 @@ impl Vm {
     // Lisp plist, so no plist operation can install or remove it.
     pub(super) fn initialize_variable_redirect(&mut self, name: &str, slot: usize) {
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
-        if self.variable_redirects[slot].is_none() && self.names.get(name) == Some(&slot) {
-            if let Some(fwd) = self.forwarded.lookup(name) {
-                self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(fwd));
-            }
+        if self.variable_redirects[slot].is_none() && self.names.get(name) == Some(&slot)
+            && let Some(fwd) = self.forwarded.lookup(name) {
+            self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(fwd));
         }
         if self.variable_redirects[slot].is_none() {
             let localized = self.slots[slot].local != Value::NIL;
@@ -442,7 +448,7 @@ impl Vm {
         Ok(())
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
-        if self.protected_variable_slot(slot) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
+        if self.protected_variable_slot(slot) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
         // A fenced variable's forwarding is `Fwd::Fence`, whose arm acts
         // through the fence: the kept forwarding would never localize it.
         if let Some(fwd) = self.access_forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
@@ -518,9 +524,15 @@ impl Vm {
             Set | Makunbound => {
                 // ORIGINAL, not the resolved base: an alias of nil, t or a
                 // keyword is itself constant (GNU copies trapped_write).
-                if self.protected_variable_slot(original) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
+                if self.protected_variable_slot(original) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
                 let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
-                self.set_variable_value(slot, value)?;
+                // A write nothing hears stores at once; a heard one waits for
+                // its engine's drain (`Vm::write_from_native`).
+                if self.deferred_writes.is_empty() && !self.variable_trapped(slot) {
+                    self.assign_variable(slot, value)?;
+                } else {
+                    self.write_from_native(crate::watchers::NativeWrite::set(slot, value)).map_err(crate::watchers::fault_text)?;
+                }
                 Ok(if p == Set { value } else { symbol })
             }
             MakeLocalVariable => { self.make_local_variable(slot)?; Ok(symbol) }

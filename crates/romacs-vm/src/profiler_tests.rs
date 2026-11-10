@@ -2,6 +2,7 @@
 //! the log's backtrace vectors and special entries, `function-equal' and
 //! the hash test profiler.el defines over it.
 use crate::Vm;
+use std::sync::atomic::Ordering;
 
 fn eval(vm: &mut Vm, source: &str) -> String {
     let value = vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}"));
@@ -60,18 +61,23 @@ fn cpu_log_records_the_running_backtrace() {
 }
 
 /// Samples a collection takes are GNU's [Automatic\ GC nil] entry; a full
-/// log evicts its least counted half into [Discarded\ Samples nil].
+/// log evicts its least counted half into [Discarded\ Samples nil]. A sample
+/// lands in a collection by chance, so rounds run until one has: this shows
+/// that a sampler can see a collection, not that it sees each one, and
+/// `a_collections_ticks_are_its_entry` counts what it charges.
 #[test]
 fn special_entries_for_collection_and_eviction() {
     let mut vm = Vm::new();
     let source = r#"
       (progn
         (defalias 'pt-gc (lambda () (let ((end (+ (float-time) 0.3))) (while (< (float-time) end) (make-list 20000 nil) (garbage-collect)))))
-        (profiler-cpu-start 1000000)
-        (pt-gc)
-        (profiler-cpu-stop)
-        (let ((gc nil))
-          (maphash (lambda (k v) (when (equal k (vector (intern "Automatic GC") nil)) (setq gc v))) (profiler-cpu-log))
+        (let ((gc nil) (deadline (+ (float-time) 60)))
+          (profiler-cpu-start 1000000)
+          ;; A log taken while the profiler runs restarts it.
+          (while (and (not gc) (< (float-time) deadline))
+            (pt-gc)
+            (maphash (lambda (k v) (when (equal k (vector (intern "Automatic GC") nil)) (setq gc v))) (profiler-cpu-log)))
+          (profiler-cpu-stop)
           (natnump gc)))"#;
     assert_eq!(eval(&mut vm, source), "t");
     let source = r#"
@@ -89,6 +95,36 @@ fn special_entries_for_collection_and_eviction() {
                    (profiler-memory-log))
           (list (<= n 3) (natnump discarded))))"#;
     assert_eq!(eval(&mut vm, source), "(t t)");
+}
+
+/// The ticks taken inside a collection are its entry, and those before it
+/// are charged to what ran, with the sampler's timing out of it: a sample an
+/// hour keeps it from adding any, and the ticks are set by hand.
+#[test]
+fn a_collections_ticks_are_its_entry() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    eval(&mut vm, "(profiler-cpu-start 3600000000000)");
+    // A log read while the profiler runs restarts it, with new ticks.
+    let ticks = |vm: &Vm| vm.profiler.cpu.as_ref().expect("the profiler runs").ticks.clone();
+    let log = r#"
+      (let ((gc 0) (others 0))
+        (maphash (lambda (k v)
+                   (if (equal k (vector (intern "Automatic GC") nil))
+                       (setq gc v)
+                     (setq others (+ others v))))
+                 (profiler-cpu-log))
+        (list gc others))"#;
+    ticks(&vm).store(2, Ordering::Relaxed);
+    vm.profile_collection_begin();
+    ticks(&vm).fetch_add(3, Ordering::Relaxed);
+    vm.profile_collection_end();
+    assert_eq!(eval(&mut vm, log), "(3 2)");
+    // The collector itself: what came before it is not its own.
+    ticks(&vm).store(2, Ordering::Relaxed);
+    vm.collect(&mut []);
+    assert_eq!(eval(&mut vm, log), "(0 2)");
+    eval(&mut vm, "(profiler-cpu-stop)");
 }
 
 /// Ffunction_equal: one function, or closures of one code; profiler.el's
@@ -112,9 +148,11 @@ fn function_equal_and_its_hash_test() {
 
 /// A burst of CPU followed by a wait is charged to the burst: a sample
 /// counts only while the thread runs, so a wait never takes the samples
-/// of the work before it. 400 bursts of 0.2 ms at 1 ms are about 80
-/// samples (fewer when a loaded host delays the sampler); a sampler that
-/// charged late lost about half of them to the wait.
+/// of the work before it; a sampler that charged late lost about half of
+/// them to the wait. The bursts are timed by the wall clock, so a loaded
+/// host gives them fewer samples: rounds of 100 run until 40 have been
+/// taken, which an unloaded host does in about one round. Only a sampler
+/// that sees no burst at all goes the whole minute without them.
 #[test]
 fn a_burst_before_a_wait_is_charged_to_the_burst() {
     let mut vm = Vm::new();
@@ -122,14 +160,16 @@ fn a_burst_before_a_wait_is_charged_to_the_burst() {
       (progn
         (defalias 'pt-burst (lambda () (let ((end (+ (float-time) 0.0002)) (n 0)) (while (< (float-time) end) (setq n (1+ n))) n)))
         (defalias 'pt-wait (lambda () (sleep-for 0.001)))
-        (profiler-cpu-start 1000000)
-        (dotimes (_ 400) (pt-burst) (pt-wait))
-        (profiler-cpu-stop)
-        (let ((burst 0) (wait 0))
-          (maphash (lambda (k v) (cond ((memq 'pt-burst (append k nil)) (setq burst (+ burst v)))
-                                       ((memq 'pt-wait (append k nil)) (setq wait (+ wait v)))))
-                   (profiler-cpu-log))
-          (list (>= burst 20) (< (* 3 wait) burst) burst wait)))"#;
+        (let ((burst 0) (wait 0) (deadline (+ (float-time) 60)))
+          (profiler-cpu-start 1000000)
+          ;; A log taken while the profiler runs restarts it.
+          (while (and (< (+ burst wait) 40) (< (float-time) deadline))
+            (dotimes (_ 100) (pt-burst) (pt-wait))
+            (maphash (lambda (k v) (cond ((memq 'pt-burst (append k nil)) (setq burst (+ burst v)))
+                                         ((memq 'pt-wait (append k nil)) (setq wait (+ wait v)))))
+                     (profiler-cpu-log)))
+          (profiler-cpu-stop)
+          (list (>= (+ burst wait) 40) (< (* 3 wait) burst) burst wait)))"#;
     let result = eval(&mut vm, source);
     assert!(result.starts_with("(t t "), "{result}");
 }

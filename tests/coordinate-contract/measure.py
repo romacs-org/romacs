@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exact-scheduling, image-asserted primitive workload acquisition.
 
-Existing syscall attribute owner: scripts/romacs_accept_counter.py.
+Existing syscall attribute owner: tools/lib/romacs_accept_counter.py.
 No affinity, count scaling, elapsed-time claims or guard relaxation.
 """
 import argparse, ctypes, fcntl, hashlib, json, os, platform, signal, statistics, struct, subprocess, sys, time
@@ -9,7 +9,7 @@ from pathlib import Path
 if not __debug__:
     raise RuntimeError('Assertions are part of the fail-closed acquisition guard; do not use python -O')
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(ROOT / 'tools/lib'))
 from romacs_accept_counter import attributes
 p = argparse.ArgumentParser()
 p.add_argument('--binary', required=True)

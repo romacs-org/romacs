@@ -8,7 +8,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROMACS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-EMACS_BIN="$ROMACS_ROOT/target/release/romacs"
+EMACS_BIN="$ROMACS_ROOT/target/release/romacs-vm-gui"
 TEST_EL="$SCRIPT_DIR/org-image-test.el"
 LOG_FILE="/tmp/romacs-org-image-test.log"
 SCREENSHOT_FILE="/tmp/romacs-org-image-test.png"
@@ -23,7 +23,7 @@ echo ""
 
 if [[ ! -x "$EMACS_BIN" ]]; then
     echo -e "${RED}ERROR: Romacs binary not found at $EMACS_BIN${NC}"
-    echo "Run: cargo xtask fresh-build --release"
+    echo "Run: cargo build --release -p romacs-vm-gui"
     exit 1
 fi
 

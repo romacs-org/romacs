@@ -17,7 +17,7 @@ use std::io::Read;
 use std::path::Path;
 
 /// Largest OBJ file the model view reads (Gnosis's limit).
-pub const MAX_OBJ_FILE_BYTES: u64 = 100_000_000;
+pub(crate) const MAX_OBJ_FILE_BYTES: u64 = 100_000_000;
 
 /// Largest absolute coordinate accepted (Gnosis's `gnosis-model--number`).
 const MAX_COORDINATE: f64 = 1_000_000.0;
@@ -36,7 +36,7 @@ pub struct ObjMesh {
 /// is left of the model's budget, so a model's caps hold across its meshes
 /// and a file fails as soon as it would exceed them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ObjLimits {
+pub(crate) struct ObjLimits {
     pub max_vertices: usize,
     pub max_triangles: usize,
 }
@@ -361,13 +361,15 @@ impl IndexWord {
     }
 }
 
+#[cfg(test)]
 /// Parse OBJ `bytes` within `limits`.
-pub fn parse_obj(bytes: &[u8], limits: ObjLimits) -> Result<ObjMesh, ObjError> {
+pub(crate) fn parse_obj(bytes: &[u8], limits: ObjLimits) -> Result<ObjMesh, ObjError> {
     parse_obj_cancellable(bytes, limits, &|| false)
 }
 
+#[cfg(test)]
 /// [`parse_obj`], polling `cancelled` at bounded intervals.
-pub fn parse_obj_cancellable(
+pub(crate) fn parse_obj_cancellable(
     bytes: &[u8],
     limits: ObjLimits,
     cancelled: &dyn Fn() -> bool,
@@ -406,7 +408,7 @@ enum Record {
 /// triangles, it polls the cancel flag; the caps, including a face's
 /// reference allowance, are enforced as the bytes arrive. Errors are
 /// reported in file order (invalid UTF-8 too), whatever the chunking.
-pub struct ObjParser {
+pub(crate) struct ObjParser {
     limits: ObjLimits,
     vertices: Vec<[f64; 3]>,
     triangles: Vec<[u32; 3]>,
@@ -675,6 +677,7 @@ impl ObjParser {
     }
 }
 
+#[cfg(test)]
 /// Read and parse the OBJ file at `path`.
 ///
 /// Only a regular file is read (others are [`ObjError::NotRegular`], found
@@ -685,7 +688,7 @@ impl ObjParser {
 /// match before the mesh is returned, so the caller's verification and this
 /// parse see the same content. (A file that is both malformed and of the
 /// wrong digest reports the parse error found first.)
-pub fn read_obj_file(
+pub(crate) fn read_obj_file(
     path: &Path,
     sha256: Option<&[u8; 32]>,
     limits: ObjLimits,
@@ -697,7 +700,7 @@ pub fn read_obj_file(
 /// [`read_obj_file`] reading at most `max_bytes` (itself capped at
 /// [`MAX_OBJ_FILE_BYTES`]), so a caller can bound the input work of a whole
 /// scene, not only of one file. Returns the mesh and the bytes read.
-pub fn read_obj_file_within(
+pub(crate) fn read_obj_file_within(
     path: &Path,
     sha256: Option<&[u8; 32]>,
     limits: ObjLimits,
@@ -770,5 +773,4 @@ pub fn read_obj_file_within(
 }
 
 #[cfg(test)]
-#[path = "obj/tests.rs"]
 mod tests;

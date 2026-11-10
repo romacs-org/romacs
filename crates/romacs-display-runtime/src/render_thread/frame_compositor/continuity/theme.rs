@@ -6,7 +6,7 @@
 //! being told, and without the layout engine having to retain a copy of the
 //! previous frame's background to diff against.
 
-use crate::core::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use romacs_display_protocol::types::Rect;
 
 /// How far a background colour channel must move to count as a theme change.
@@ -54,5 +54,4 @@ pub(in crate::render_thread) fn theme_change(
 }
 
 #[cfg(test)]
-#[path = "theme/tests/theme_test.rs"]
 mod tests;

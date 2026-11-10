@@ -1,8 +1,6 @@
 use super::RenderApp;
 #[cfg(feature = "video")]
 use super::frame_sched::{NativeWindowId, PacingAction};
-#[cfg(feature = "webview")]
-use crate::thread_comm::InputEvent;
 
 #[cfg(feature = "video")]
 fn video_service_request(
@@ -17,9 +15,6 @@ fn video_service_request(
     }
     request
 }
-
-#[cfg(all(feature = "webview", target_os = "linux"))]
-use romacs_renderer_wgpu::WgpuRenderer;
 
 /// Publish one renderer image event, and say whether the evaluator needs to
 /// hear about it.
@@ -83,126 +78,6 @@ impl RenderApp {
             .unwrap_or_default();
         self.image_metadata.publish_cache_usage(usage);
     }
-
-    #[cfg(feature = "webview")]
-    pub(super) fn pump_glib(&mut self) {
-        let Some(system) = self.webview_system.as_mut() else {
-            return;
-        };
-        system.service();
-        for event in system.drain_events() {
-            self.comms.send_input(InputEvent::WebView(event));
-        }
-    }
-
-    #[cfg(not(feature = "webview"))]
-    pub(super) fn pump_glib(&mut self) {}
-
-    /// Process webkit frames and import to wgpu textures
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub(super) fn process_webkit_frames(&mut self) {
-        use romacs_renderer_wgpu::DmaBufBuffer;
-        use std::os::fd::OwnedFd;
-
-        let (Some(renderer), Some(system)) = (self.renderer.as_mut(), self.webview_system.as_mut())
-        else {
-            return;
-        };
-        let view_ids = system.view_ids();
-
-        let try_upload_dmabuf = |renderer: &mut WgpuRenderer,
-                                 view_id: romacs_webview::WebViewId,
-                                 dmabuf: romacs_webview::DmaBufFrame|
-         -> bool {
-            // Never turn producer synchronization into a render-thread stall.
-            // A future Vulkan semaphore-import path can consume the fence on
-            // the GPU; until then an unready experimental DMA-BUF frame is
-            // skipped and WPE remains free to produce its replacement.
-            match dmabuf.wait_until_ready(std::time::Duration::ZERO) {
-                Ok(romacs_webview::DmaBufReadiness::Ready) => {}
-                Ok(romacs_webview::DmaBufReadiness::TimedOut) => {
-                    tracing::warn!(
-                        "WPE rendering fence is not ready for webview {}; skipping frame",
-                        view_id.get()
-                    );
-                    return false;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "WPE rendering fence failed for webview {}: {}; skipping frame",
-                        view_id.get(),
-                        error
-                    );
-                    return false;
-                }
-            }
-            let width = dmabuf.width();
-            let height = dmabuf.height();
-            let fourcc = dmabuf.fourcc();
-            let modifier = dmabuf.modifier();
-            let planes = dmabuf.planes();
-            let num_planes = planes.len().min(4) as u32;
-            let mut fds: [Option<OwnedFd>; 4] = [None, None, None, None];
-            let mut strides = [0u32; 4];
-            let mut offsets = [0u32; 4];
-
-            for (index, plane) in planes.iter().take(4).enumerate() {
-                strides[index] = plane.stride();
-                offsets[index] = plane.offset();
-                let Ok(file) = plane.file().try_clone() else {
-                    tracing::warn!(
-                        "failed to duplicate DMA-BUF plane for webview {}; skipping frame",
-                        view_id.get()
-                    );
-                    return false;
-                };
-                fds[index] = Some(file.into());
-            }
-
-            let buffer = DmaBufBuffer::new(
-                fds, strides, offsets, num_planes, width, height, fourcc, modifier,
-            );
-
-            // Ownership of the complete frame crosses into the renderer. Its
-            // opaque WPE lease cannot be released until the exact GPU copy
-            // submission retires on the renderer's retirement worker.
-            match renderer.update_webview_dmabuf(view_id, buffer, dmabuf) {
-                Ok(()) => true,
-                Err(frame) => {
-                    // Return the still-owned native frame, not a future repaint
-                    // request: static pages must recover even if WPE is idle.
-                    frame.request_pixel_fallback();
-                    false
-                }
-            }
-        };
-
-        for view_id in view_ids {
-            let Some(frame) = system.take_frame(view_id) else {
-                continue;
-            };
-            match frame {
-                romacs_webview::WebViewFrame::DmaBuf(frame) => {
-                    if try_upload_dmabuf(renderer, view_id, frame) {
-                        tracing::debug!("imported DMA-BUF for webview {}", view_id.get());
-                    }
-                }
-                romacs_webview::WebViewFrame::Pixels(frame) => {
-                    if renderer.update_webview_pixels(
-                        view_id,
-                        frame.width(),
-                        frame.height(),
-                        frame.pixels(),
-                    ) {
-                        tracing::debug!("uploaded pixels for webview {}", view_id.get());
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(not(all(feature = "webview", target_os = "linux")))]
-    pub(super) fn process_webkit_frames(&mut self) {}
 
     /// Service native decoder events once. A due frame is mapped through the
     /// presentation-owned video index to exactly the native windows whose
@@ -309,19 +184,6 @@ impl RenderApp {
             .map_or(display_rate, |r| r.shader_surface_demand_rate(display_rate))
     }
 
-    /// Check if any WebKit view needs redraw
-    #[cfg(feature = "webview")]
-    pub(super) fn has_webkit_needing_redraw(&self) -> bool {
-        self.webview_system
-            .as_ref()
-            .is_some_and(romacs_webview::WebViewSystem::has_pending_frame)
-    }
-
-    #[cfg(not(feature = "webview"))]
-    pub(super) fn has_webkit_needing_redraw(&self) -> bool {
-        false
-    }
-
     /// Process pending image uploads (decode → GPU texture)
     pub(super) fn process_pending_images(&mut self) {
         let events = self
@@ -370,13 +232,10 @@ impl RenderApp {
     }
 
     /// Publish the complete set of image identities which can still be drawn.
-    /// Accepted presentations, deferred child presentations, and renderer-owned
-    /// toolbar chrome all participate in the same lifetime fence.
+    /// Accepted presentations and renderer-owned toolbar chrome participate in
+    /// the same lifetime fence.
     pub(super) fn synchronize_image_residency(&mut self) {
         let mut retained = self.frame_windows.retained_images();
-        for pending in self.pending_child_frames.values() {
-            retained.extend(pending.state.referenced_images().iter());
-        }
         retained.extend(self.toolbar.textures().values().copied());
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.synchronize_retained_images(retained);

@@ -1,0 +1,5 @@
+## Native leaf batch boundaries
+
+| # | Scope | GNU | VM2 | Reason / evidence |
+|---|---|---|---|---|
+| VM2-LEAF-SORT | `sort` default comparison, list identity and callback effects | Default comparator is native `value<`; stable timsort writes sorted elements back into the original list cons cells and exposes its callback/mutation order. | Default `value<` compares the runtime's numbers, strings, symbols, lists, vectors, bool-vectors, records, markers and buffers with GNU ordering, mismatch data and depth limits; process and symbol-with-position objects remain unavailable. Explicit comparators and keyword parsing work, with stable small-input natural-run/binary insertion. Inputs of 64 or more use stable insertion sort, with differing callback count/order and complexity; intermediate vector mutation/error effects are not matched. | Partial implementation, not complete GNU sort parity. Maintained value-order tests cover default sorts, mixed numeric precision, raw-byte names, circular lists and depth-limit recovery. Live corpus `tools/primh/evidence/sort.json` and the small-sort probes retain the separate sort limitations. | <!-- symbols: sort, value< -->

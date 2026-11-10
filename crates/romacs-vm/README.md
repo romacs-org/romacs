@@ -7,7 +7,7 @@ chain from source or restores it from a world image (`src/world`), and
 `--batch` does the same for noninteractive runs.
 
 GNU 32.0.50 remains the semantic oracle. Deliberate departures belong in
-[GNU-DIVERGENCES.md](GNU-DIVERGENCES.md), beginning with scalar `aset` replacement.
+[the divergence ledger](../../ledger/divergences/README.md), beginning with scalar `aset` replacement.
 A recorded departure changes an exact expected result; it never disables a test.
 
 ## Executable images
@@ -155,7 +155,7 @@ reentry stacks grow at guarded boundaries, and activations and the compiler
 refuse recoverably on low remaining native stack. There are signed 62-bit
 fixnums, plus arbitrary-precision integers read from radix and decimal
 constants and returned by `string-to-number`, but not yet produced by arithmetic
-or accepted by every consumer (see `GNU-DIVERGENCES.md` VM2-TIME1 and the root
+or accepted by every consumer (see `ledger/divergences/VM2-TIME1.md` and the root
 ledger's RADIX1 and VM2-FMT1 rows). There is no JIT, no general tail-call
 promise, no full `error-conditions` hierarchy, no `unwind-protect`, and no shared
 concurrent mutator heap. The lexical-only language policy remains in effect.

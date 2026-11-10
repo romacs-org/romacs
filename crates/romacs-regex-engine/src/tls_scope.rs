@@ -22,13 +22,13 @@ mod sealed {
 
 /// The two supported TLS storage kinds; callers cannot supply restoration code.
 pub(crate) trait TlsSlot<T>: sealed::Sealed {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     fn replace(&self, value: T) -> T;
     fn try_replace(&self, value: T) -> Result<T, T>;
 }
 
 impl<T> TlsSlot<T> for Cell<T> {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     #[inline]
     fn replace(&self, value: T) -> T {
         Cell::replace(self, value)
@@ -41,7 +41,7 @@ impl<T> TlsSlot<T> for Cell<T> {
 }
 
 impl<T> TlsSlot<T> for RefCell<T> {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     #[inline]
     fn replace(&self, value: T) -> T {
         std::mem::replace(&mut *self.borrow_mut(), value)
@@ -77,8 +77,8 @@ impl<T: 'static, Slot: TlsSlot<T> + 'static> std::fmt::Debug for TlsScope<T, Slo
 
 impl<T: 'static, Slot: TlsSlot<T> + 'static> TlsScope<T, Slot> {
     /// Install `value`, restoring the previous value when the scope drops.
-    /// Only the engine's test and fuzzing seams scope a value this way.
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    /// Only the engine's tests scope a value this way.
+    #[cfg(test)]
     #[inline]
     pub(crate) fn new(key: &'static LocalKey<Slot>, value: T) -> Self {
         Self {

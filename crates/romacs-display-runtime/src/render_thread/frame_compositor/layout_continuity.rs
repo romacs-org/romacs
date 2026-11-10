@@ -9,8 +9,8 @@
 use romacs_display_protocol::frame_time::EventTime;
 
 use super::{ReflowImprintsByWindow, ScrollAnchorsByWindow};
-use crate::core::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_windows::GuiFrameRenderState;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 
 /// The layout half of installing one presentation.
 ///
@@ -97,5 +97,4 @@ impl GuiFrameRenderState {
 }
 
 #[cfg(test)]
-#[path = "layout_continuity/tests/layout_continuity_test.rs"]
 mod tests;

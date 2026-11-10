@@ -19,14 +19,14 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 41] = [
+        let checks: [(&str, bool); 42] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
             ("external_roots", self.external_roots.is_empty()),
-            ("suspended_code", self.suspended_code.is_empty()),
+            ("suspended", self.suspended.is_empty()),
             ("signal_handlers", self.signal_handlers.is_empty()),
             ("propagated_escape", self.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
@@ -58,14 +58,15 @@ impl Vm {
             ("profiler", self.profiler.is_idle()),
             // A thread of this process: the running parse of a visit.
             ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
-            ("suspended_code", self.suspended_code.is_empty()),
+            ("suspended", self.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
             ("suspended_stacks", self.suspended_stacks.is_empty()),
             ("running_engines", self.running_engines == 0),
             ("gc_holds", self.gc_holds == 0),
-            ("aftermath_held", self.aftermath_held == 0),
+            ("unwinding", self.unwinding == 0),
             ("rooted_write", !self.rooted_write),
+            ("deferred_writes", self.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
@@ -116,7 +117,8 @@ impl Vm {
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     vm.world_quiescent()?;
-    let counters = [crate::expand::next_generated(), 0, 0, 0];
+    let [serials, writes] = crate::char_table::image_counters();
+    let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = Box::into_raw(Box::new((vm, carry))) as usize;
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
@@ -136,6 +138,7 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
         return None;
     }
     crate::expand::raise_generated(fields.counters[0]);
+    crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     Some(*root)
 }
@@ -156,6 +159,7 @@ mod tests {
         assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
         assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
         assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));
+        assert!(refusal(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(refusal(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
     }

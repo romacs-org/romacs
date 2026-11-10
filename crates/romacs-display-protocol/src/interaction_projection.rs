@@ -43,7 +43,7 @@ use crate::types::LiveDisplayWindowId;
 pub enum PresentationFrameSpace {}
 
 /// The translation from root-surface coordinates into a presentation's frame.
-pub type SurfaceToPresentation =
+pub(crate) type SurfaceToPresentation =
     SpaceTranslation<RootSurfaceSpace, PresentationFrameSpace, LogicalPixels>;
 
 /// A point known to be in the frame space of `presentation`.
@@ -222,5 +222,4 @@ impl InteractionProjection {
 }
 
 #[cfg(test)]
-#[path = "interaction_projection/tests/interaction_projection_test.rs"]
 mod tests;

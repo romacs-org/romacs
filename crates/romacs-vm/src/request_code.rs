@@ -62,7 +62,6 @@ impl Vm {
     fn install_slot(&mut self, function: Function, request: bool) -> usize {
         #[cfg(test)]
         INSTALLS.set(INSTALLS.get() + 1);
-        self.register_width = self.register_width.max(function.regs);
         let code = &mut self.request_code;
         let id = if request
             && let Some(id) = code.free.pop()
@@ -345,6 +344,7 @@ impl Vm {
             self.propagated_escape = None;
             self.propagated_escape_hooked = false;
             self.propagated_eval_depth = None;
+            self.drop_deferred_escapes();
         }
         // A request boundary: no engine's registers are live here, and any
         // suspended frame or caller below holds its Values in traced storage
@@ -365,11 +365,9 @@ impl Vm {
         }
         // An embedder's request ends here: a safe point for what collections
         // left pending, its result rooted (VM2-GC-FINALIZER). The run's
-        // failures are its own (its finalizers' are logged). No engine's mark
-        // is below: a panic in the run gives back its hold and frame here.
-        debug_assert!(self.eval_depth > 0 || self.aftermath_held == 0, "no engine runs at a request's end");
+        // failures are its own (its finalizers' are logged).
+        debug_assert!(self.eval_depth > 0 || !self.aftermath_held(), "no engine runs at a request's end");
         if self.eval_depth == 0 && let Some(runner) = self.safe_runner(0) {
-            let _unwind = self.unwind_mark();
             let frame = self.root_frame(&[*outcome.as_ref().unwrap_or(&Value::NIL)]);
             let _ = self.run_aftermath(runner, false);
             let [value] = self.release_frame(frame);
@@ -667,7 +665,7 @@ mod tests {
             let before = vm.request_code.unclaimed_caches.clone();
             assert!(!before.is_empty());
             ARTIFACT_FAULT.set(Some(fault));
-            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw(source)));
+            let caught = vm.catching(|vm| vm.eval_source_raw(source));
             ARTIFACT_FAULT.set(None);
             assert!(caught.is_err(), "the injected failure unwinds");
             assert!(!vm.request_code.compiling, "compiling is untouched");

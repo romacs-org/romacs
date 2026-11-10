@@ -8,7 +8,7 @@
 //! are the human/agent convenience views of the SAME state, so they cannot
 //! drift from what the renderer draws.
 //!
-//! Format (frozen — golden tests in `snapshot_text_test.rs` encode it):
+//! Format (frozen — golden tests in `snapshot_text/tests.rs` encode it):
 //!
 //! ```text
 //! === frame 1: 80x24 cols 640x384 px ===
@@ -48,9 +48,10 @@ impl FrameDisplayState {
         self.render_snapshot_text(false)
     }
 
+    #[cfg(test)]
     /// Like [`render_text`](Self::render_text), plus one `: run ...` line per
     /// face run under each row, carrying the face name and resolved colors.
-    pub fn render_text_faces(&self) -> String {
+    pub(crate) fn render_text_faces(&self) -> String {
         self.render_snapshot_text(true)
     }
 
@@ -291,5 +292,4 @@ fn hex(color: Color) -> String {
 }
 
 #[cfg(test)]
-#[path = "snapshot_text/tests/snapshot_text_test.rs"]
 mod tests;

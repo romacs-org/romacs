@@ -210,6 +210,197 @@ fn a_quit_expansion_raises_what_left_it() {
     assert_eq!(quit_into(&mut vm, &signal, form), r#"(error (error "cleanup"))"#);
 }
 
+/// A C-g that lands while a function's macro call expands quits that call,
+/// and only that call: the quit is raised at the call's reach once, and
+/// the next call expands the macro again and runs, as GNU's does (pinned
+/// GNU batch: `quit`, then `(before expanded)` twice; and `caught` for the
+/// handler in the same form). The quit must not stay with the function.
+#[test]
+fn a_quit_in_an_expansion_does_not_stay_in_the_function() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil) (defvar quit-async-expansions 0)");
+    // Armed, the expansion sets `quit-flag' and reaches a safepoint: the
+    // quit `maybe_quit` raises there is a C-g's.
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (setq quit-async-expansions (1+ quit-async-expansions))
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    let first = "(condition-case nil
+                     (progn (setq quit-async-arm t)
+                            (eval '(defun quit-async-h () (list 'before (quit-async-once))) t)
+                            (quit-async-h))
+                   (quit 'quit))";
+    assert_eq!(eval(&mut vm, first), "quit");
+    let again = "(condition-case nil (quit-async-h) (quit 'quit-again))";
+    assert_eq!(eval(&mut vm, again), "(before expanded)", "the quit stayed in the function");
+    assert_eq!(eval(&mut vm, again), "(before expanded)");
+    // The interrupted expansion, and one more when the call is reached again.
+    assert_eq!(eval(&mut vm, "quit-async-expansions"), "2");
+    // A handler in the same form still catches the quit, and the form runs
+    // the next time it is evaluated.
+    eval(&mut vm, "(eval '(defun quit-async-k () (condition-case nil (quit-async-once) (quit 'caught))) t)");
+    assert_eq!(eval(&mut vm, "(progn (setq quit-async-arm t) (quit-async-k))"), "caught");
+    assert_eq!(eval(&mut vm, "(quit-async-k)"), "expanded");
+}
+
+/// The same through `load`, whose forms compile outside `eval`: whether
+/// the quit ends the load or the first call, it is raised once, and no
+/// later call quits.
+#[test]
+fn a_quit_in_a_loaded_function_s_expansion_is_raised_once() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil)");
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    let file = std::env::temp_dir().join(format!("quit-async-once-{}.el", std::process::id()));
+    let _cleanup = Cleanup([file.clone()]);
+    std::fs::write(&file, ";;; -*- lexical-binding: t -*-\n(defun quit-async-l () (list 'before (quit-async-once)))\n").unwrap();
+    let first = format!("(condition-case nil (progn (setq quit-async-arm t) (load {:?} nil t t) (quit-async-l)) (quit 'quit))",
+                        file.display().to_string());
+    assert_eq!(eval(&mut vm, &first), "quit");
+    let again = "(condition-case nil (quit-async-l) (quit 'quit-again) (void-function 'not-loaded))";
+    assert_ne!(eval(&mut vm, again), "quit-again", "the quit stayed in the function");
+    assert_ne!(eval(&mut vm, again), "quit-again");
+}
+
+/// A `throw-on-input` throw that leaves an expansion is thrown once, to the
+/// form that bound `throw-on-input` (as `while-no-input` does); the
+/// function then runs anywhere.
+#[test]
+fn a_throw_on_input_in_an_expansion_is_thrown_once() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil)");
+    eval(&mut vm, "(defmacro quit-async-input ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag throw-on-input)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    let first = "(progn (setq quit-async-arm t)
+                        (catch 'quit-async-input
+                          (let ((throw-on-input 'quit-async-input))
+                            (eval '(defun quit-async-i () (list 'before (quit-async-input))) t)
+                            (quit-async-i))))";
+    assert_eq!(eval(&mut vm, first), "t");
+    assert_eq!(eval(&mut vm, "(quit-async-i)"), "(before expanded)", "the throw stayed in the function");
+}
+
+/// A quit that left the expansion of a call in a branch the interrupted
+/// evaluation does not take quits that evaluation all the same, at the end
+/// of the body that was compiling: the call the C-g interrupted. Nothing is
+/// kept for a later evaluation, of the branch or of anything else.
+#[test]
+fn a_quit_in_an_untaken_branch_s_expansion_quits_the_call_that_compiled() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil) (defvar quit-async-expansions 0)");
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (setq quit-async-expansions (1+ quit-async-expansions))
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    eval(&mut vm, "(eval '(defun quit-async-b (x) (if x (list 'took (quit-async-once)) 'skipped)) t)");
+    assert_eq!(eval(&mut vm, "(condition-case nil (progn (setq quit-async-arm t) (quit-async-b nil)) (quit 'quit))"), "quit");
+    assert_eq!(eval(&mut vm, "(list quit-flag (and (boundp 'romacs--deferred-escapes) romacs--deferred-escapes))"), "(nil nil)");
+    assert_eq!(eval(&mut vm, "(condition-case nil (quit-async-b nil) (quit 'quit-later))"), "skipped");
+    let taken = "(condition-case nil (quit-async-b t) (quit 'quit-later))";
+    assert_eq!(eval(&mut vm, taken), "(took expanded)", "the quit waited in the function");
+    assert_eq!(eval(&mut vm, taken), "(took expanded)");
+    assert_eq!(eval(&mut vm, "quit-async-expansions"), "2");
+}
+
+/// A quit the compiling evaluation neither reached nor ended on, because an
+/// error left it first, ends with the request: no later evaluation quits.
+#[test]
+fn a_deferred_quit_an_error_passed_over_ends_with_the_request() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil)");
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    eval(&mut vm, "(eval '(defun quit-async-e (x) (if x (quit-async-once) (error \"left\"))) t)");
+    assert_eq!(eval(&mut vm, "(condition-case e (progn (setq quit-async-arm t) (quit-async-e nil)) (quit 'quit) (error (car (cdr e))))"), "\"left\"");
+    assert_eq!(eval(&mut vm, "(list quit-flag (and (boundp 'romacs--deferred-escapes) romacs--deferred-escapes))"), "(nil nil)");
+    assert_eq!(eval(&mut vm, "(condition-case nil (quit-async-e t) (quit 'quit-later))"), "expanded");
+}
+
+/// A worker serves every job in one request, so a request's end is not a
+/// job's. A quit deferred in one job's compile, whose reach and body's end
+/// an error then passed over, ends with that job
+/// (`romacs--isolate-run-job`): the next job to take the branch runs, and
+/// does not quit for an interrupt it never had.
+#[test]
+fn a_deferred_quit_a_job_left_behind_ends_with_the_job() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil) (defvar quit-async-second nil)");
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    eval(&mut vm, "(eval '(defun quit-async-w (x) (if x (list 'took (quit-async-once)) (error \"left\"))) t)");
+    eval(&mut vm, "(defun quit-async-job-1 () (setq quit-async-arm t) (quit-async-w nil))");
+    eval(&mut vm, "(defun quit-async-job-2 () (setq quit-async-second (condition-case nil (quit-async-w t) (quit 'quit))))");
+    // Both jobs in one request, as the worker's loop runs them; a reply
+    // fails harmlessly without a parent.
+    let jobs = "(progn (romacs--isolate-run-job 1 (list 'quit-async-job-1 (freeze nil) (freeze nil) nil nil))
+                       (romacs--isolate-run-job 2 (list 'quit-async-job-2 (freeze nil) (freeze nil) nil nil))
+                       (list quit-async-arm quit-async-second))";
+    assert_eq!(eval(&mut vm, jobs), "(nil (took expanded))", "the second job took the first job's quit");
+}
+
+/// A handler landing between the deferred quit and its reach does not turn
+/// the quit into an ordinary error for an expansion it then leaves: taken
+/// at the reach it is a quit unwinding again, so the outer macro's
+/// expansion is left once and the outer macro does not run again.
+#[test]
+fn a_deferred_quit_taken_after_a_handler_landed_is_still_a_quit() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil) (defvar quit-async-outer-runs 0)");
+    eval(&mut vm, "(defmacro quit-async-once ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag t)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    eval(&mut vm, "(defmacro quit-async-landing ()
+                     (setq quit-async-outer-runs (1+ quit-async-outer-runs))
+                     (eval '(progn (condition-case nil (error \"x\") (error nil)) (quit-async-once)) t)
+                     nil)");
+    let form = "(progn (setq quit-async-arm t) (eval '(condition-case nil (quit-async-landing) (quit 'quit)) t))";
+    assert_eq!(eval(&mut vm, form), "quit");
+    assert_eq!(eval(&mut vm, "quit-async-outer-runs"), "1");
+}
+
+/// A `throw-on-input` throw that left the expansion of a call in an
+/// untaken branch is thrown at the end of the body that was compiling, to
+/// the form that bound `throw-on-input` (as `while-no-input` does), which
+/// the C-g interrupted: nothing is thrown later, to a tag no one catches.
+#[test]
+fn a_throw_on_input_in_an_untaken_branch_s_expansion_ends_with_its_form() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar quit-async-arm nil)");
+    eval(&mut vm, "(defmacro quit-async-input ()
+                     (when quit-async-arm
+                       (setq quit-async-arm nil quit-flag throw-on-input)
+                       (let ((i 0)) (while (< i 100000) (setq i (1+ i)))))
+                     ''expanded)");
+    let first = "(progn (setq quit-async-arm t)
+                        (catch 'quit-async-input
+                          (let ((throw-on-input 'quit-async-input))
+                            (eval '(defun quit-async-j (x) (if x (list 'took (quit-async-input)) 'skipped)) t)
+                            (quit-async-j nil))))";
+    assert_eq!(eval(&mut vm, first), "t");
+    assert_eq!(eval(&mut vm, "(condition-case e (quit-async-j nil) (error (list 'error (car e))))"), "skipped");
+    assert_eq!(eval(&mut vm, "(condition-case e (quit-async-j t) (error (list 'error (car e))))"), "(took expanded)");
+    assert_eq!(eval(&mut vm, "(list quit-flag (and (boundp 'romacs--deferred-escapes) romacs--deferred-escapes))"), "(nil nil)");
+}
+
 /// A quit taken by an `eval' nested in a macro's expansion leaves the
 /// outer expansion too: one C-g, and the outer macro does not run again.
 #[test]

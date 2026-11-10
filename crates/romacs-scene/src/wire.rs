@@ -28,7 +28,7 @@ pub const MAGIC: &[u8; 8] = b"VM2GFX01";
 /// At most this many bytes per message.
 pub const MAX_MESSAGE: usize = 4 << 20;
 /// The longest tween the wire carries, in seconds.
-pub const MAX_MOTION_SECS: f32 = 86_400.0;
+pub(crate) const MAX_MOTION_SECS: f32 = 86_400.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {

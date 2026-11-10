@@ -55,7 +55,7 @@ impl GuiFrameRenderState {
     /// interrupted motion a continuous retarget.
     pub(in crate::render_thread) fn measure_pane_layout(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         now: romacs_display_protocol::frame_time::EventTime,
     ) {
         let specs = self.compositor.pane_motion;
@@ -135,7 +135,7 @@ impl GuiFrameRenderState {
     /// measure.
     pub(in crate::render_thread) fn measure_scroll(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         next_anchors: &super::ScrollAnchorsByWindow,
     ) {
         self.compositor.pending.scrolls.clear();
@@ -225,7 +225,7 @@ impl GuiFrameRenderState {
     /// outgoing presentation is about to be replaced.
     pub(in crate::render_thread) fn observe_selection_change(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
     ) {
         self.compositor.pending.selection = match (self.compositor.baseline.as_ref(), next) {
             (Some(previous), Some(next)) => {
@@ -246,7 +246,7 @@ impl GuiFrameRenderState {
     /// theme and see nothing.
     pub(in crate::render_thread) fn observe_theme_change(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
     ) {
         if let (Some(previous), Some(next)) = (self.compositor.baseline.as_ref(), next)
             && let Some(change) = theme::theme_change(previous, next)
@@ -275,7 +275,7 @@ impl GuiFrameRenderState {
     /// and it changes every glyph while moving the viewport not at all.
     pub(in crate::render_thread) fn observe_shown_text(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
     ) {
         self.compositor.pending.shown_text_replaced.clear();
         let (Some(previous), Some(next)) = (self.compositor.baseline.as_ref(), next) else {
@@ -333,7 +333,7 @@ impl GuiFrameRenderState {
     /// the text *did* change, and matches rows by content instead.
     pub(in crate::render_thread) fn measure_reflow(
         &mut self,
-        next: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        next: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         next_imprints: &super::ReflowImprintsByWindow,
     ) {
         self.compositor.pending.reflows.clear();

@@ -594,7 +594,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     use super::write_coding as w;
     let (start, end, append, coding) = (r[w::START], r[w::END], r[w::APPEND], r[w::VAL]);
     let lcsu = cx.intern("last-coding-system-used");
-    cx.variable_set(lcsu, coding)?;
+    cx.store_variable(lcsu, coding)?;
     let text = if stringp(cx, start) { start } else {
         // A Lisp call during the choice may have edited the buffer.
         let (b, e) = (start.integer_value().unwrap(), end.integer_value().unwrap());
@@ -605,7 +605,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     };
     refuse_write_conversion(cx, coding)?;
     let encoded = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, true)?;
-    cx.variable_set(lcsu, coding)?;
+    cx.store_variable(lcsu, coding)?;
     // NUMBERP (append): an offset to seek to (fileio.c:5638).
     if append.integer_value().is_some() || cx.kind(append) == Kind::Float { file_offset(cx, append)?; }
     // fileio.c:5629: Flock_file (LOCKNAME) before the file is opened, but

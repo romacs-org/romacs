@@ -66,7 +66,7 @@ impl Shared {
 pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
-    pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub engine: Rc<RefCell<romacs_layout::LayoutEngine>>,
     pub images: crate::fonts::residency::Shared,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
     /// The process descriptors the next wait also watches.
@@ -78,7 +78,7 @@ pub struct GuiHost {
 /// with the event itself.
 fn classify(event: &InputEvent) -> Option<HostEvent> {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => classify(event),
+        InputEvent::Tracked { event, .. } => classify(event),
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
         &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
         // The read runs it as a special event (`romacs-model').

@@ -23,12 +23,14 @@ impl Leaf<'_> {
         }
         let mut table = crate::char_table::CharTable::new(purpose);
         table.initialize(2, Value::NIL).expect("two extra slots");
-        table.default = self.category_set();
+        let set = self.category_set();
+        table.set_default(set);
         for slot in 0..crate::char_table::CharTable::LEN / 65536 {
             let set = self.category_set();
             table.set_range(slot * 65536, slot * 65536 + 65535, set).expect("top-level slot");
         }
-        table.extras[0] = self.vector(&[Value::NIL; 95]);
+        let docs = self.vector(&[Value::NIL; 95]);
+        table.set_extra(0, docs);
         self.vm.allocate_object(data::Object::CharTable(Box::new(table)))
     }
 
@@ -43,7 +45,7 @@ impl Leaf<'_> {
 
     pub(crate) fn is_category_table(&mut self, value: Value) -> bool {
         let purpose = self.intern("category-table");
-        matches!(self.vm.object_if(value), Some(data::Object::CharTable(t)) if t.purpose == purpose)
+        matches!(self.vm.object_if(value), Some(data::Object::CharTable(t)) if t.purpose() == purpose)
     }
 
     /// The current buffer's table (BVAR category_table).
@@ -59,7 +61,7 @@ impl Leaf<'_> {
 
     pub(crate) fn set_current_category_table(&mut self, table: Value) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.category_table = table,
             data::Object::ByteBuffer(b) => b.category_table = table,
             _ => unreachable!("buffer_index validates"),
@@ -96,22 +98,22 @@ impl Leaf<'_> {
     }
 
     pub(crate) fn category_docstring(&mut self, table: Value, category: usize) -> super::super::Out {
-        let docs = self.category_table_ref(table)?.extras[0];
+        let docs = self.category_table_ref(table)?.extras()[0];
         self.vector_get(docs, Value::integer(category as i64 - 32).unwrap())
     }
 
     pub(crate) fn set_category_docstring(&mut self, table: Value, category: usize, doc: Value) -> std::result::Result<(), Fault> {
-        let docs = self.category_table_ref(table)?.extras[0];
+        let docs = self.category_table_ref(table)?.extras()[0];
         self.vector_set(docs, Value::integer(category as i64 - 32).unwrap(), doc).map(|_| ())
     }
 
     /// hash_get_category_set: one shared set per distinct contents.
     fn intern_category_set(&mut self, table: Value, set: Value) -> super::super::Out {
-        let mut hash = self.category_table(table)?.extras[1];
+        let mut hash = self.category_table(table)?.extras()[1];
         if hash == Value::NIL {
             hash = self.vm.allocate_object(data::Object::HashTable(Box::new(
                 crate::hash::HashTable::new(crate::hash::Test::Equal, crate::hash::Weakness::None, 65))));
-            self.category_table(table)?.extras[1] = hash;
+            self.category_table(table)?.set_extra(1, hash);
         }
         if let Some((key, _)) = self.vm.completion_hash_find(hash, set)? { return Ok(key); }
         self.vm.declaration_hash_put(hash, set, Value::NIL).map_err(Fault::Error)?;
@@ -139,17 +141,16 @@ impl Leaf<'_> {
     /// copy_category_table: fresh sets everywhere, a fresh docstring vector.
     pub(crate) fn copy_category_table(&mut self, table: Value) -> super::super::Out {
         let mut copy = self.category_table_ref(table)?.clone();
-        let mut entries = Vec::new();
-        copy.map_entries(&mut |value| entries.push(*value));
+        let entries = copy.entry_values();
         let mut copies = Vec::with_capacity(entries.len());
         for value in entries {
             copies.push(match self.bool_vector(value) { Ok(bits) => self.bool_vector_from(bits), Err(_) => value });
         }
         let mut next = copies.into_iter();
         copy.map_entries(&mut |value| if let Some(item) = next.next() { *value = item; });
-        if let Ok(bits) = self.bool_vector(copy.default) { copy.default = self.bool_vector_from(bits); }
-        let docs = self.vector_values(copy.extras[0])?;
-        copy.extras[0] = self.vector(&docs);
+        if let Ok(bits) = self.bool_vector(copy.default()) { copy.set_default(self.bool_vector_from(bits)); }
+        let docs = self.vector_values(copy.extras()[0])?;
+        copy.set_extra(0, self.vector(&docs));
         Ok(self.vm.allocate_object(data::Object::CharTable(Box::new(copy))))
     }
 }

@@ -430,7 +430,7 @@ fn a_missing_key_is_named() {
 // the same verdict --- and, when they pass, to print the same stamp.
 
 fn attestor_script() -> PathBuf {
-    romacs_infra::workspace_root().join("scripts/parity-reference-attest.sh")
+    romacs_infra::workspace_root().join("tools/parity-reference-attest.sh")
 }
 
 /// Write `manifest` to a file the shell attestor can read, comments and all.
@@ -711,8 +711,8 @@ struct PortTree {
 impl PortTree {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("port tree");
-        fs::create_dir(dir.path().join("scripts")).expect("fixture scripts");
-        let script = dir.path().join("scripts/parity-reference-attest.sh");
+        fs::create_dir(dir.path().join("tools")).expect("fixture tools");
+        let script = dir.path().join("tools/parity-reference-attest.sh");
         fs::copy(attestor_script(), &script).expect("copy actual attestor");
         let git = |args: &[&str]| {
             let output = std::process::Command::new("git")
@@ -737,7 +737,7 @@ impl PortTree {
                 .to_owned()
         };
         git(&["init", "--quiet", "--template=", "--object-format=sha1"]);
-        git(&["add", "scripts/parity-reference-attest.sh"]);
+        git(&["add", "tools/parity-reference-attest.sh"]);
         git(&[
             "-c",
             "user.name=Parity Fixture",

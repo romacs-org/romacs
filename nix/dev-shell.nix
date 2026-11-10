@@ -1,12 +1,11 @@
 {
   pkgs,
   rustToolchain,
-  wpeWebkit,
 }:
 let
   inherit (pkgs) lib;
   dependencies = import ./dependencies.nix {
-    inherit lib pkgs wpeWebkit;
+    inherit lib pkgs;
   };
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
@@ -29,7 +28,7 @@ pkgs.mkShell {
     pkgs.llvmPackages.clang
     # Frozen wall clock for date/time-sensitive oracle tests.
     pkgs.libfaketime
-    # scripts/build-icon-font.py builds assets/fonts/RomacsIcons.ttf.
+    # tools/build-icon-font builds assets/fonts/RomacsIcons.ttf.
     (pkgs.python3.withPackages (ps: [ ps.fonttools ]))
   ]
   ++ lib.optionals isLinux [
@@ -81,11 +80,6 @@ pkgs.mkShell {
       libdrm.dev
       mesa
       wayland.dev
-      wpeWebkit
-      libwpe
-      libwpe-fdo
-      # The webview reactor enumerates DRM render nodes with the `udev` crate.
-      udev.dev
     ]
   );
 
@@ -106,7 +100,6 @@ pkgs.mkShell {
   ''
   + lib.optionalString isLinux ''
     echo "xkbcommon: $(pkg-config --modversion xkbcommon 2>/dev/null || echo 'not found')"
-    echo "WPE WebKit: $(pkg-config --modversion wpe-webkit-2.0 2>/dev/null || echo 'not found')"
     echo ""
 
     # Library path for runtime. The linker supplies ncurses' RPATH.
@@ -119,11 +112,7 @@ pkgs.mkShell {
 
     export VK_DRIVER_FILES="$(echo ${pkgs.mesa}/share/vulkan/icd.d/*.json | tr ' ' ':')"
 
-    export WPE_BACKEND_LIBRARY="${pkgs.libwpe-fdo}/lib/libWPEBackend-fdo-1.0.so"
     export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules"
-    export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-    export WEBKIT_USE_SINGLE_WEB_PROCESS=1
-    export PATH="${wpeWebkit}/libexec/wpe-webkit-2.0:$PATH"
 
     # nix develop may lose display variables. Recover them from the active
     # desktop session when possible so GUI probes fail quickly and clearly.
@@ -168,11 +157,6 @@ pkgs.mkShell {
     else
       echo "Display: (no X11/Wayland display detected)"
     fi
-  ''
-  + lib.optionalString isDarwin ''
-    echo ""
-    echo "Note: WPE WebKit is not available on macOS."
-    echo "      WebKit-based features will be disabled."
   ''
   + ''
     export RUST_LOG="''${RUST_LOG:-debug}"

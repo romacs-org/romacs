@@ -7,6 +7,7 @@ description = "Lexical Elisp reader, register compiler and runtime for romacs"
 
 # Deliberately isolated: no inherited evaluator or workspace build graph.
 [dependencies]
+romacs-brand = { path = "../romacs-brand" }
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }
@@ -69,7 +70,7 @@ romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
 # layout_frame to display_apply_layout to (window-end). A dev-dependency keeps
 # this out of the shipped graph. Without it such a test can only live outside
 # the repository, where it rots unrun.
-romacs-layout2 = { path = "../romacs-layout2" }
+romacs-layout = { path = "../romacs-layout" }
 # Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
 

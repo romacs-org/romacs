@@ -21,14 +21,14 @@ use super::obj::read_obj_file_within;
 use super::scene::{ModelScene, remaining_limits};
 
 /// Most requests waiting behind the one being loaded.
-pub const MAX_QUEUED_LOADS: usize = 4;
+pub(crate) const MAX_QUEUED_LOADS: usize = 4;
 /// Most bytes one model may read over all its files: bounds the input work
 /// of 255 files of mostly comments, not only the accepted geometry.
-pub const MAX_MODEL_INPUT_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_MODEL_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// One model to load. `token` is the store's identity for this load; a
 /// result whose (id, token) is no longer live is dropped by the caller.
-pub struct LoadRequest {
+pub(crate) struct LoadRequest {
     pub id: u32,
     pub token: u64,
     pub meshes: Vec<ModelMeshSpec>,
@@ -36,7 +36,7 @@ pub struct LoadRequest {
 }
 
 /// The outcome of one [`LoadRequest`].
-pub struct LoadResult {
+pub(crate) struct LoadResult {
     pub id: u32,
     pub token: u64,
     pub outcome: Result<Arc<ModelScene>, String>,
@@ -45,7 +45,10 @@ pub struct LoadResult {
 /// Load `meshes` into a scene, within the model caps and the aggregate
 /// input-byte allowance, polling `cancel` through reading, parsing and
 /// scene construction.
-pub fn load_scene(meshes: &[ModelMeshSpec], cancel: &AtomicBool) -> Result<ModelScene, String> {
+pub(crate) fn load_scene(
+    meshes: &[ModelMeshSpec],
+    cancel: &AtomicBool,
+) -> Result<ModelScene, String> {
     if meshes.is_empty() || meshes.len() > super::scene::MAX_MODEL_MESHES {
         return Err(format!(
             "model needs 1..={} meshes",
@@ -106,7 +109,7 @@ pub(crate) fn probe(phase: &'static str, path: &std::path::Path) {
 pub(crate) fn probe(_phase: &'static str, _path: &std::path::Path) {}
 
 /// Handle to the loader thread, owned by the render thread.
-pub struct ModelLoader {
+pub(crate) struct ModelLoader {
     requests: Option<mpsc::SyncSender<LoadRequest>>,
     results: mpsc::Receiver<LoadResult>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -177,7 +180,7 @@ impl ModelLoader {
     }
 
     /// Whether any submitted load has not been answered yet.
-    pub fn has_pending(&self) -> bool {
+    pub(crate) fn has_pending(&self) -> bool {
         !self.live.is_empty()
     }
 
@@ -220,5 +223,4 @@ impl Drop for ModelLoader {
 }
 
 #[cfg(test)]
-#[path = "loader/tests.rs"]
 mod tests;

@@ -41,7 +41,7 @@ impl Leaf<'_> {
     }
     fn ts_mut(&mut self, v: Value) -> &mut ts::Object {
         let index = v.index(0).expect("checked treesit object") - 1;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Treesit(t) => t,
             _ => unreachable!("checked treesit object"),
         }
@@ -136,7 +136,7 @@ impl Leaf<'_> {
     }
     fn ts_buffer_text_mut(&mut self, buffer: Value) -> Option<&mut crate::text::Text> {
         let index = buffer.index(0).ok()? - 1;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => Some(b),
             _ => None,
         }

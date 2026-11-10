@@ -272,13 +272,16 @@ mod leaf {
         pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
             self.symbol_slot(v)
         }
-        /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
-        pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
-            if self.vm.trapped.is_empty() { return Ok(()); }
-            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| self.watcher_fault(text))
+        /// WRITE from this leaf (`Vm::write_from_native'). A failure comes back
+        /// only from a write made at once: with no engine to complete the
+        /// leaf, a watcher's signal stays pending as itself and a `throw',
+        /// which the leaf cannot carry out, is refused by name.
+        pub(crate) fn write(&mut self, write: crate::watchers::NativeWrite) -> std::result::Result<(), Fault> {
+            self.vm.write_from_native(write).map_err(|fault| match fault {
+                Fault::Error(text) => self.watcher_fault(text),
+                fault => fault,
+            })
         }
-        /// A write's failure as a fault: a watcher's signal stays pending as
-        /// itself. A leaf cannot carry a `throw' out, so one is refused by name.
         fn watcher_fault(&mut self, text: String) -> Fault {
             match self.vm.propagated_escape {
                 Some(crate::threaded::Escape::Signal(..) | crate::threaded::Escape::Error { .. }) => Fault::Escape,
@@ -851,14 +854,9 @@ mod leaf {
             if !matches!(self.vm.object_if(v), Some(data::Object::Vector(_))) {
                 return Err(Fault::Wrong("vectorp", v));
             }
-            let data::Object::Vector(a) = self.object_mut(v)? else {
-                unreachable!()
-            };
-            let item = usize::try_from(n)
-                .ok()
-                .and_then(|i| a.get_mut(i))
-                .ok_or(Fault::Range(v, index))?;
-            *item = value;
+            let object = self.writable_object(v)?;
+            let slot = usize::try_from(n).map_err(|_| Fault::Range(v, index))?;
+            self.vm.objects.update_element(object, slot, value).map_err(|_| Fault::Range(v, index))?;
             Ok(value)
         }
         pub fn setcar(&mut self, v: Value, value: Value) -> std::result::Result<Value, Fault> {
@@ -877,14 +875,14 @@ mod leaf {
             if Vm::image_value(v) && v.tag() == 3 {
                 return Err(self.read_only(v));
             }
-            let pair = v
+            let i = v
                 .index_if(3)
-                .and_then(|i| self.vm.conses.get_mut(i))
+                .filter(|&i| i < self.vm.conses.len())
                 .ok_or(Fault::Wrong("consp", v))?;
             if car {
-                pair.0 = value;
+                self.vm.conses.set_car(i, value);
             } else {
-                pair.1 = value;
+                self.vm.conses.set_cdr(i, value);
             }
             Ok(value)
         }
@@ -1082,25 +1080,10 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
-            // Only an INTERNED keyword is SYMBOL_NOWRITE (GNU lread.c
-            // intern_sym); an uninterned `:x' is an ordinary variable.
-            let name = &self.vm.symbol_names[slot];
-            if self.vm.protected_variable_slot(slot)
-                || (name.starts_with(':') && self.vm.names.get(name) == Some(&slot))
-            {
+            if self.vm.protected_variable_slot(slot) || self.vm.interned_keyword_slot(slot) {
                 return Err(Fault::SettingConstant(v));
             }
-            self.notify(slot, value, "set", Some(Value::NIL))?;
-            // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
-            if let Some(fwd) = self.vm.native_forwarding(slot) {
-                // A global variable's set_internal reports again.
-                if self.vm.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
-                    self.notify(slot, value, "set", Some(Value::NIL))?;
-                }
-                self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
-                return Ok(value);
-            }
-            self.vm.slots[slot].value = value;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::SetDefault, slot, value })?;
             Ok(value)
         }
         /// GNU `SYMBOL_CONSTANT_P` (lisp.h): nil, t, keywords and the
@@ -1110,7 +1093,7 @@ mod leaf {
                 return Ok(true);
             }
             let slot = self.symbol_slot(v)?;
-            Ok(self.vm.protected_variable_slot(slot) || self.vm.symbol_names[slot].starts_with(':'))
+            Ok(self.vm.protected_variable_slot(slot) || self.vm.interned_keyword_slot(slot))
         }
         /// GNU `SYMBOL_FORWARDED`: V is a built-in variable. Not followed
         /// through aliases (an alias is `SYMBOL_VARALIAS`).
@@ -1163,20 +1146,33 @@ mod leaf {
             Ok((value != Value::UNBOUND).then_some(value))
         }
         /// GNU `set_internal (..., SET_INTERNAL_BIND)` of an unbound variable.
+        pub fn variable_bound(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(v)?;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Bound, slot, value })
+        }
+        /// GNU `Fset`.
         pub fn variable_set(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
             if v == Value::NIL || v == Value::TRUE {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(|text| self.watcher_fault(text))
+            self.write(crate::watchers::NativeWrite::set(slot, value))
+        }
+        /// GNU C's `Vname = value`, which no watcher hears (`variable_set` is
+        /// `Fset`): a variable C assigns directly, or Romacs's own state.
+        pub fn store_variable(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(v)?;
+            self.vm.assign_variable(slot, value).map_err(Fault::Error)
         }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
         /// the named slot, holding its own constant value.
         pub fn make_variable_alias(&mut self, new: Value, base: Value) -> std::result::Result<(), Fault> {
-            let new = self.symbol_slot(new)?;
-            // eval.c:713: NEW's watchers see the alias before it is made.
-            self.notify(new, base, "defvaralias", Some(Value::NIL))?;
+            let slot = self.symbol_slot(new)?;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Alias, slot, value: base })
+        }
+        /// `make_variable_alias` once NEW's watchers have been told.
+        pub(in crate::prim) fn alias_now(&mut self, new: usize, base: Value) -> std::result::Result<(), Fault> {
             let base = if base == Value::NIL || base == Value::TRUE {
                 let slot = self.vm.slot(if base == Value::NIL { "nil" } else { "t" });
                 self.vm.slots[slot].value = base;
@@ -1186,7 +1182,7 @@ mod leaf {
                 // GNU binds an interned keyword to itself (lread.c intern);
                 // VM2 self-evaluates keywords without a value cell, so give
                 // the cell its GNU value before an alias can read it.
-                if self.vm.symbol_names[slot].starts_with(':') && self.vm.slots[slot].value == Value::UNBOUND {
+                if self.vm.interned_keyword_slot(slot) && self.vm.slots[slot].value == Value::UNBOUND {
                     self.vm.slots[slot].value = base;
                 }
                 slot
@@ -1424,9 +1420,8 @@ mod leaf {
         }
         pub fn symbol_name_value(&mut self, symbol: Value) -> super::Out {
             if let Some(&name) = self.vm.permanent_symbol_names.get(&symbol.0) { return Ok(name); }
-            if let Ok(slot) = self.symbol_slot(symbol) {
-                if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
-            }
+            if let Ok(slot) = self.symbol_slot(symbol)
+                && let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             let name = self.symbol_name(symbol)?;
             let value = match crate::symkey::to_internal(&name) {
                 Some(internal) => self.make_string(internal, true),
@@ -1450,8 +1445,13 @@ mod leaf {
         /// The private object V names, for writing; a frozen or image value
         /// is refused with `read_only`.
         pub(crate) fn object_mut(&mut self, v: Value) -> std::result::Result<&mut data::Object, Fault> {
+            let i = self.writable_object(v)?;
+            Ok(self.vm.objects.entry_mut(i))
+        }
+        /// As `object_mut`, the object's index, for a store that names its slot.
+        pub(crate) fn writable_object(&mut self, v: Value) -> std::result::Result<usize, Fault> {
             if Vm::image_value(v) { return Err(self.read_only(v)); }
-            self.vm.object_mut(v).map_err(Fault::Error)
+            self.vm.writable_object(v).map_err(Fault::Error)
         }
         /// GNU's `CHECK_IMPURE` signal for a write to the frozen or image
         /// object V (`frozen.rs`).
@@ -1591,13 +1591,13 @@ mod leaf {
             }
             let mut values = [Value::NIL; 4];
             for (i, table) in tables.into_iter().enumerate() {
-                self.vm.native_case_roots[i] = std::sync::Arc::downgrade(&table.root);
+                self.vm.native_case_roots[i] = std::sync::Arc::downgrade(table.root());
                 values[i] = self.vm.allocate_object(data::Object::CharTable(Box::new(table)));
             }
-            let data::Object::CharTable(down) = &mut self.vm.objects[values[0].index(0).unwrap() - 1] else { unreachable!() };
-            down.extras.copy_from_slice(&values[1..]);
-            let data::Object::CharTable(canon) = &mut self.vm.objects[values[2].index(0).unwrap() - 1] else { unreachable!() };
-            canon.extras[2] = values[3];
+            let data::Object::CharTable(down) = self.vm.objects.entry_mut(values[0].index(0).unwrap() - 1) else { unreachable!() };
+            down.set_extras(&values[1..]);
+            let data::Object::CharTable(canon) = self.vm.objects.entry_mut(values[2].index(0).unwrap() - 1) else { unreachable!() };
+            canon.set_extra(2, values[3]);
             self.vm.standard_case_tables = values;
             Ok(values[0])
         }
@@ -1636,9 +1636,9 @@ mod leaf {
             self.vm.char_table_runs(table).map_err(Fault::Error)
         }
         /// Fset or Fset_default of a plain global variable.
-        pub fn set_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
+        pub fn store_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
             let symbol = self.intern(name);
-            self.variable_set(symbol, value)
+            self.store_variable(symbol, value)
         }
         /// The one string naming font NAME: GNU's font-object holds its name,
         /// and face-font and query-font answer that very string, which
@@ -1699,8 +1699,7 @@ mod leaf {
             let mut table = char_table::CharTable::new(purpose);
             table.initialize(n, init).map_err(Fault::Error)?;
             let slot = self.vm.literal_table_slot(init);
-            table.root.lock().unwrap().slots.fill(slot.clone());
-            table.ascii = crate::char_table::CharTable::ascii_from_root(&table.root);
+            table.fill(&slot);
             Ok(self.vm.allocate_object(data::Object::CharTable(Box::new(table))))
         }
         pub fn char_table_extra(&mut self, table: Value, n: Value, set: Option<Value>) -> super::Out {
@@ -1708,17 +1707,17 @@ mod leaf {
                 return Err(Fault::Wrong("char-table-p", table));
             };
             let i = n.as_integer().map_err(|_| Fault::Wrong("fixnump", n))?;
-            if i < 0 || i as usize >= t.extras.len() { return Err(Fault::Range(table, n)); }
-            let old = t.extras[i as usize];
+            if i < 0 || i as usize >= t.extras().len() { return Err(Fault::Range(table, n)); }
+            let old = t.extras()[i as usize];
             if let Some(value) = set {
                 let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
-                t.extras[i as usize] = value;
+                t.set_extra(i as usize, value);
                 Ok(value)
             } else { Ok(old) }
         }
         pub fn char_table_subtype(&self, table: Value) -> std::result::Result<Value, Fault> {
             match self.vm.object_if(table) {
-                Some(data::Object::CharTable(t)) => Ok(t.purpose),
+                Some(data::Object::CharTable(t)) => Ok(t.purpose()),
                 _ => Err(Fault::Wrong("char-table-p", table)),
             }
         }
@@ -1726,7 +1725,7 @@ mod leaf {
             let Some(data::Object::CharTable(t)) = self.vm.object_if(table) else {
                 return Err(Fault::Wrong("char-table-p", table));
             };
-            let old = t.parent;
+            let old = t.parent();
             if let Some(parent) = parent {
                 if parent != Value::NIL && !matches!(self.vm.object_if(parent), Some(data::Object::CharTable(_))) {
                     return Err(Fault::Wrong("char-table-p", parent));
@@ -1735,10 +1734,10 @@ mod leaf {
                 let mut seen = HashSet::default();
                 while let Some(data::Object::CharTable(t)) = self.vm.object_if(next) {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
-                    next = t.parent;
+                    next = t.parent();
                 }
                 let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
-                t.parent = parent;
+                t.set_parent(parent);
                 Ok(parent)
             } else { Ok(old) }
         }
@@ -1758,7 +1757,7 @@ mod leaf {
             let slot = self.vm.literal_table_slot(value);
             let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
             if let Some((from, to)) = bounds { t.set_range_slot(from, to, slot).map_err(Fault::Error)?; }
-            else { t.default = value; }
+            else { t.set_default(value); }
             Ok(value)
         }
         pub fn list_limit(&self) -> usize {
@@ -1837,6 +1836,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod flight;
     mod compiled_lisp;
     mod casetab;
     mod casing;
@@ -1928,6 +1928,11 @@ pub(crate) fn line_field_position(vm: &mut Vm, n: Value, end: bool) -> std::resu
 /// (Leaf::hosted_rows_end).
 pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64) -> std::result::Result<i64, Fault> {
     Leaf::new(vm).hosted_rows_end(window, start, rows)
+}
+
+/// The effective `text-quoting-style' (Leaf::text_quoting_style).
+pub(crate) fn text_quoting_style(vm: &mut Vm) -> std::result::Result<&'static str, Fault> {
+    Leaf::new(vm).text_quoting_style()
 }
 
 /// Realize C-initialized coding variables before their first Lisp observation.
@@ -2112,6 +2117,14 @@ pub(crate) fn native_watcher(vm: &Vm, mut watcher: Value) -> Option<&'static Pri
     }
     None
 }
+/// `Leaf::alias_now`, for a write the watchers have heard (`Vm::perform_write`).
+pub(crate) fn alias_now(vm: &mut Vm, new: usize, base: Value) -> std::result::Result<(), Fault> {
+    Leaf::new(vm).alias_now(new, base)
+}
+/// `Leaf::clear_local_slot`, likewise.
+pub(crate) fn clear_local_slot(vm: &mut Vm, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
+    Leaf::new(vm).clear_local_slot(slot, buffer)
+}
 pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -> crate::Result<()> {
     let Some(d) = native_watcher(vm, watcher) else { return Err("VM2 variable watcher is not a native subr".into()); };
     let Body::Leaf(f) = d.body else { unreachable!("native_watcher checks the body") };
@@ -2221,7 +2234,7 @@ impl Vm {
             let previous = cx.variable_value(last)?.unwrap_or(Value::NIL);
             let string = cx.make_string(bytes.to_vec(), false);
             let decoded = cx.coding_convert_string(string, found, Value::NIL, Value::NIL, false);
-            cx.variable_set(last, previous)?;
+            cx.store_variable(last, previous)?;
             let view = cx.string_view(decoded?)?;
             if view.is_multibyte() { return Ok(view.bytes().to_vec()) }
             let mut out = Vec::with_capacity(view.bytes().len());

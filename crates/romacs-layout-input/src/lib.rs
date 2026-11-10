@@ -13,7 +13,7 @@ romacs_snapshot::snapshot_enum!(FontSelectionAttribute {
     FontSelectionAttribute::Weight => (),
     FontSelectionAttribute::Slant => (),
 });
-pub const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
+pub(crate) const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
     FontSelectionAttribute::Width, FontSelectionAttribute::Height,
     FontSelectionAttribute::Weight, FontSelectionAttribute::Slant,
 ];
@@ -184,7 +184,7 @@ impl FrameSnapshot {
 }
 
 /// Whether window lists A and B lay out alike (`WindowSnapshot::lays_out_like').
-pub fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
+pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
 }
 
@@ -615,11 +615,11 @@ pub const STATUS_BAR_PAD: f32 = 12.0;
 
 /// The least room between the centred zone and a side zone; a side that
 /// would come closer pushes the centre away (modeline.md §14.2).
-pub const STATUS_BAR_ZONE_GAP: f32 = 24.0;
+pub(crate) const STATUS_BAR_ZONE_GAP: f32 = 24.0;
 
 impl StatusBarSnapshot {
     /// Where each character goes (`BandMarks::places'), inside the bar's
-    /// padding. The painter (layout2) and `romacs-status-bar-string' (the
+    /// padding. The painter (romacs-layout) and `romacs-status-bar-string' (the
     /// VM) both place by this.
     pub fn places(&self, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
         self.marks.places(&self.text, self.width as f32, STATUS_BAR_PAD, advances)

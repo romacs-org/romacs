@@ -5,7 +5,7 @@
 //! with an `Auto` size take their measured content: text through [`Measure`]
 //! (the frame's font resolver at wiring time), cells as a grid of the font's
 //! cell, paths as their bounds, images at their natural size. An anchored
-//! node is placed at its anchor's box, which `layout2` publishes per window.
+//! node is placed at its anchor's box, which `romacs-layout` publishes per window.
 //!
 //! Boxes are relative to the parent's box. Layout reads properties, never
 //! motion: a size motion moves the drawn box only (§2.3), so a running motion
