@@ -184,6 +184,15 @@ pub(crate) struct PatternCache {
     len: usize,
     /// Uses so far: the clock `CachedPattern::used` reads.
     clock: u64,
+    /// The slots of the variables every search reads, found by name once:
+    /// a slot keeps its index for the life of the VM.
+    slots: Option<SearchSlots>,
+}
+#[derive(Clone, Copy)]
+struct SearchSlots {
+    case_fold: usize,
+    preserve_match_data: usize,
+    match_buffer: usize,
 }
 impl PatternCache {
     pub(crate) fn is_empty(&self) -> bool {
@@ -283,7 +292,7 @@ impl Vm {
         -> std::result::Result<Option<MatchRegisters>, prim::Fault> {
         if matcher.patterns[i].is_none() {
             let compiled = self.regexp_input(matcher.sources[i])
-                .and_then(|source| self.regexp_pattern(&source, false, matcher.key, matcher.translation.clone(), &matcher.syntax))
+                .and_then(|source| self.regexp_pattern(&source, false, matcher.key, || matcher.translation.clone(), &matcher.syntax))
                 .map_err(|fault| self.regexp_fault(fault))?;
             matcher.patterns[i] = Some(compiled);
         }
@@ -306,8 +315,8 @@ impl Vm {
     /// TRANSLATION KEY names (built as TRANSLATION) for the syntax table
     /// SOURCE reads: the cached one, or a new one cached in place of the
     /// least recently used.
-    fn regexp_pattern(&mut self, pattern: &Input, posix: bool, key: Translation, translation: Option<regex::CaseTranslation>,
-                      source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+    fn regexp_pattern(&mut self, pattern: &Input, posix: bool, key: Translation,
+                      translation: impl FnOnce() -> Option<regex::CaseTranslation>, source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let table = source.table();
         let cache = &mut self.regexp_cache;
         cache.clock += 1;
@@ -318,7 +327,7 @@ impl Vm {
             return Ok(entry.compiled.clone());
         }
         let mut compiled = regex::regex_compile_lisp_with_translation(
-            &EmacsStr::new(&pattern.bytes, pattern.multibyte), posix, translation,
+            &EmacsStr::new(&pattern.bytes, pattern.multibyte), posix, translation(),
         ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
         compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
         let syntax = compiled.used_syntax().then_some(table);
@@ -403,7 +412,7 @@ impl Vm {
                 Some((buffer, base)) => vm.regexp_buffer_syntax(buffer, base)?,
                 None => vm.regexp_syntax(None)?,
             };
-            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, None, &source)?;
+            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
             let mut compiled = compiled.borrow_mut();
             let syntax = syntax::VmSyntax::new(vm, source);
             compiled.set_target_multibyte(multibyte);
@@ -444,7 +453,7 @@ impl Vm {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let source = vm.regexp_syntax(Some(string))?;
-            let compiled = vm.regexp_pattern(&pattern, false, key, translation, &source)?;
+            let compiled = vm.regexp_pattern(&pattern, false, key, move || translation, &source)?;
             let mut compiled = compiled.borrow_mut();
             let syntax = syntax::VmSyntax::new(vm, source);
             compiled.set_target_multibyte(input.multibyte);
@@ -625,12 +634,24 @@ impl Vm {
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
     }
-    fn regexp_preserve(&self) -> bool {
-        self.slots[self.names["inhibit-changing-match-data"]].value != Value::NIL
+    fn search_slots(&mut self) -> SearchSlots {
+        if let Some(slots) = self.regexp_cache.slots { return slots; }
+        let slots = SearchSlots {
+            case_fold: self.names["case-fold-search"],
+            preserve_match_data: self.names["inhibit-changing-match-data"],
+            match_buffer: self.names["#:vm2-match-buffer"],
+        };
+        self.regexp_cache.slots = Some(slots);
+        slots
+    }
+    fn regexp_preserve(&mut self) -> bool {
+        let slot = self.search_slots().preserve_match_data;
+        self.slots[slot].value != Value::NIL
     }
     /// The current buffer's binding: case-fold-search is often buffer-local.
     fn regexp_case_fold(&mut self) -> SearchResult<bool> {
-        Ok(self.variable_value(self.names["case-fold-search"])? != Value::NIL)
+        let slot = self.search_slots().case_fold;
+        Ok(self.variable_value(slot)? != Value::NIL)
     }
     /// PATTERN for a search of MULTIBYTE text, for the longest match when
     /// POSIX, case-folded with the standard table when FOLDED, from the
@@ -643,12 +664,42 @@ impl Vm {
         folded: bool,
         source: &syntax::SyntaxSource,
     ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
-        let (key, translation) = if folded {
-            (Translation::Standard, Some(regex::CaseTranslation::standard()))
-        } else {
-            (Translation::None, None)
+        // The translation is built only for a pattern the cache lacks: the
+        // standard one is a 256-entry table.
+        let key = if folded { Translation::Standard } else { Translation::None };
+        let compiled = self.regexp_pattern(pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?;
+        compiled.borrow_mut().set_target_multibyte(multibyte);
+        Ok(compiled)
+    }
+    /// `regexp_compiled` of the string PATTERN, which a cached pattern
+    /// answers from the string's own bytes; only a miss copies them.
+    fn regexp_compiled_string(
+        &mut self,
+        pattern: Value,
+        multibyte: bool,
+        posix: bool,
+        folded: bool,
+        source: &syntax::SyntaxSource,
+    ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        let key = if folded { Translation::Standard } else { Translation::None };
+        let table = source.table();
+        let mut cache = std::mem::take(&mut self.regexp_cache);
+        cache.clock += 1;
+        let clock = cache.clock;
+        let hit = self.str_view(pattern).and_then(|view| {
+            let entry = cache.patterns.get_mut(view.bytes())?.iter_mut().find(|e| e.multibyte == view.is_multibyte()
+                && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))?;
+            entry.used = clock;
+            Some(entry.compiled.clone())
+        });
+        self.regexp_cache = cache;
+        let compiled = match hit {
+            Some(compiled) => compiled,
+            None => {
+                let pattern = self.regexp_input(pattern)?;
+                self.regexp_pattern(&pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?
+            }
         };
-        let compiled = self.regexp_pattern(pattern, posix, key, translation, source)?;
         compiled.borrow_mut().set_target_multibyte(multibyte);
         Ok(compiled)
     }
@@ -656,7 +707,7 @@ impl Vm {
     fn regexp_save(&mut self, groups: Vec<Option<(usize, usize)>>, buffer: bool) {
         self.regexp.groups = groups;
         self.regexp.succeeded = true;
-        let slot = self.names["#:vm2-match-buffer"];
+        let slot = self.search_slots().match_buffer;
         self.slots[slot].value = if buffer {
             self.slots[self.buffer_slot].value
         } else {
@@ -901,7 +952,7 @@ impl Vm {
             _ => (),
         }
         if p == StringMatch {
-            let pattern = self.regexp_input(args[0])?;
+            self.str_view(args[0]).ok_or(Fault::Wrong("stringp", args[0]))?;
             let input = self.regexp_input(args[1])?;
             let pos = if args[2] == Value::NIL {
                 0
@@ -918,7 +969,7 @@ impl Vm {
             }
             let folded = self.regexp_case_fold()?;
             let source = self.regexp_syntax(Some(args[1]))?;
-            let compiled = self.regexp_compiled(&pattern, input.multibyte, posix, folded, &source)?;
+            let compiled = self.regexp_compiled_string(args[0], input.multibyte, posix, folded, &source)?;
             let compiled = compiled.borrow();
             let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(pos as usize);
@@ -953,16 +1004,18 @@ impl Vm {
             1
         };
         let count = if matches!(p, ReSearchBackward | SearchBackward) { -count } else { count };
-        let mut pattern = self.regexp_input(args[0])?;
+        self.str_view(args[0]).ok_or(Fault::Wrong("stringp", args[0]))?;
         // search_command with RE false: the same search over STRING quoted,
         // which matches exactly where the literal does, with the same folding.
+        let mut literal = None;
         if matches!(p, SearchForward | SearchBackward) {
+            let pattern = self.regexp_input(args[0])?;
             let quoted: Vec<u8> = pattern.bytes.iter().flat_map(|&b| {
                 let special = b"[*.\\?+^$".contains(&b);
                 if special { vec![b'\\', b] } else { vec![b] }
             }).collect();
             let chars = pattern.len() + quoted.len() - pattern.bytes.len();
-            pattern = Input::new(quoted, chars, pattern.multibyte);
+            literal = Some(Input::new(quoted, chars, pattern.multibyte));
         }
         let index = self.buffer_index()?;
         let (accessible, base_char, chars, point_byte) = self.regexp_buffer_frame(index)?;
@@ -1017,7 +1070,10 @@ impl Vm {
         };
         let folded = self.regexp_case_fold()?;
         let source = self.regexp_syntax(None)?;
-        let compiled = self.regexp_compiled(&pattern, multibyte, posix, folded, &source)?;
+        let compiled = match &literal {
+            Some(pattern) => self.regexp_compiled(pattern, multibyte, posix, folded, &source)?,
+            None => self.regexp_compiled_string(args[0], multibyte, posix, folded, &source)?,
+        };
         let compiled = compiled.borrow();
         // What the engine can read: the candidates and the matches, which
         // end at the bound forward and at point backward (GNU's STOP), and
