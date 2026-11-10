@@ -323,7 +323,7 @@ This crate is not wired to redisplay yet. These are the contracts for wiring,
 not claims about the running editor. R90 removes Custom's machinery, not the
 user's preferences. `defface` and `face-remapping-alist` remain supported.
 
-## romacs-regex-engine
+## romacs-regex
 
 Reference: GNU Emacs 32.0.50, `src/regex-emacs.c` and `src/search.c` (the
 implementation, not the docstrings).

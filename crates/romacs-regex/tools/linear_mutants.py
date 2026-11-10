@@ -7,7 +7,7 @@ to the working tree, runs the named tests, requires that run to FAIL with the
 named test reported FAILED, and restores the file -- so a reviewer can re-run
 the whole list:
 
-    tools/linear_mutants.py            # from crates/romacs-regex-engine
+    tools/linear_mutants.py            # from crates/romacs-regex
     tools/linear_mutants.py M4 M5      # a subset
 
 Requires a clean copy of the files it edits (it refuses otherwise) and the
@@ -91,7 +91,7 @@ def run(mutant):
     path.write_text(original.replace(old, new))
     try:
         result = subprocess.run(
-            ["cargo", "test", "-p", "romacs-regex-engine", "--release", filt],
+            ["cargo", "test", "-p", "romacs-regex", "--release", filt],
             cwd=CRATE, capture_output=True, text=True, timeout=900)
         out = result.stdout + result.stderr
     except subprocess.TimeoutExpired:

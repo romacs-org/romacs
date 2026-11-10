@@ -38,7 +38,7 @@ const CRATES: &[&str] = &[
     "crates/romacs-face",
     "crates/romacs-layout-input",
     "crates/romacs-display-protocol",
-    "crates/romacs-regex-engine",
+    "crates/romacs-regex",
     "gnu-tests/runner",
 ];
 const BOUNDARY: &str = "crates/romacs-vm/src/host.rs";

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Write each evidence file's `pinned` map from a `cargo test --test primh_cmdloop`
-log: every NEW DIVERGENCE the Rust replay (fresh VM per row, collection floor 1)
-reports becomes a pin of the class it reported. Run only after each pinned row
+"""Write each evidence file's `pinned` map from a log of the callint replays
+(`cargo test -p romacs-vm --test primh -- primh_call_interactively ...`): every
+NEW DIVERGENCE the Rust replay (fresh VM per row, collection floor 1) reports
+becomes a pin of the class it reported. Run only after each pinned row
 has been checked against a DIVERGENCES.md row; prints the non-PRINTER pins.
 
   python3 pin_from_test.py TEST.log EVIDENCE_DIR

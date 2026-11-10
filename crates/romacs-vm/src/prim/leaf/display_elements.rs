@@ -8,7 +8,7 @@ use super::*;
 use super::display_motion::{Elem, Elements, Glyphless, Method, Shape, Slot, R};
 use crate::coordinates::{ByteOffset, CharOffset};
 use crate::data::Object;
-use romacs_regex_engine::emacs_char::{cat_eq, UnicodeCategory as Category};
+use romacs_regex::emacs_char::{cat_eq, UnicodeCategory as Category};
 use crate::overlay_order::{display_order, OverlayEntry};
 
 /// What a window shows of its buffer, fixed for one measurement.
@@ -578,7 +578,7 @@ impl<'l, 'a> Source<'l, 'a> {
             0x09 => Shape::Tab,
             0x0a => Shape::Glyph { c, width: 0 },
             0x20..0x7f => Shape::Glyph { c, width: 1 },
-            _ if romacs_regex_engine::emacs_char::char_byte8_p(c) => Shape::Glyph { c, width: 1 },
+            _ if romacs_regex::emacs_char::char_byte8_p(c) => Shape::Glyph { c, width: 1 },
             _ => Shape::Glyph { c, width: self.width(c) },
         })
     }
@@ -615,7 +615,7 @@ impl<'l, 'a> Source<'l, 'a> {
         }
         let ascii_control = (c < 0x20 && c != 0x0a && c != 0x09) || c == 0x7f;
         let nonascii = c >= 0x80;
-        let category = romacs_regex_engine::emacs_char::char_general_category(c);
+        let category = romacs_regex::emacs_char::char_general_category(c);
         let nobreak = nonascii && self.look.nobreak != Value::NIL;
         let space = nobreak && category.is_some_and(|k| cat_eq(k, Category::SpaceSeparator));
         let hyphen = nobreak && matches!(c, 0xad | 0x2010 | 0x2011);
@@ -635,8 +635,8 @@ impl<'l, 'a> Source<'l, 'a> {
                   if space { self.syms.nobreak_space } else { self.syms.nobreak_hyphen }))
         } else if space || hyphen {
             Some((vec![escape, if space { 0x20 } else { 0x2d }], slot_face(self, 2)))
-        } else if ascii_control || (nonascii && (romacs_regex_engine::emacs_char::char_byte8_p(c) || !printable(category))) {
-            let code = if romacs_regex_engine::emacs_char::char_byte8_p(c) { c & 0xff } else { c };
+        } else if ascii_control || (nonascii && (romacs_regex::emacs_char::char_byte8_p(c) || !printable(category))) {
+            let code = if romacs_regex::emacs_char::char_byte8_p(c) { c & 0xff } else { c };
             let digits = if self.look.raw_hex { format!("x{code:02x}") } else { format!("{code:03o}") };
             Some((std::iter::once(escape).chain(digits.bytes().map(u32::from)).collect(), slot_face(self, 2)))
         } else {
@@ -1071,7 +1071,7 @@ impl Leaf<'_> {
             special.push(c);
         }
         for c in special {
-            let category = romacs_regex_engine::emacs_char::char_general_category(c);
+            let category = romacs_regex::emacs_char::char_general_category(c);
             let nobreak = look.nobreak != Value::NIL
                 && (category.is_some_and(|k| cat_eq(k, Category::SpaceSeparator)) || matches!(c, 0xad | 0x2010 | 0x2011));
             if nobreak || (0x80..0xa0).contains(&c) || !printable(category) { return Ok(true); }
