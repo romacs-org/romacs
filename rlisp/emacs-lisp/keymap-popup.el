@@ -60,7 +60,8 @@ Common values:
 Each backend function receives a single buffer argument.
 :show displays the buffer, :fit refits after content changes,
 :hide removes the display and cleans up.  A backend's :title non-nil
-draws the popup's title (its mode line's text) as its first row.
+draws the popup's title (its mode line's text) as its first row, as
+does a popup window that draws no mode line of its own.
 The default is Romacs's layer where Romacs's menus are present, else
 a side window."
   :type '(choice (function-item :tag "Side window" keymap-popup-backend-side-window)
@@ -1512,7 +1513,8 @@ Returns nil when BUF is dead (the popup already closed)."
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (when-let* (((plist-get (keymap-popup--session-get buf :backend) :title))
+        (when-let* (((or (plist-get (keymap-popup--session-get buf :backend) :title)
+                         (and window (zerop (window-mode-line-height window)))))
                     (title (keymap-popup--title buf)))
           (insert (keymap-popup--fit-line title width) "\n\n"))
         (insert content)

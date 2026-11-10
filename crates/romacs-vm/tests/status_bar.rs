@@ -137,8 +137,8 @@ fn the_bar_shows_the_selected_window_and_a_prompt_its_origin() {
 #[test]
 fn the_bar_expands_the_mode_line_at_its_own_columns() {
     let mut vm = session();
-    // `%-' shows nothing in the bar (its dashes would fill it and hide
-    // the lines folded in); a string's `--', as GNU's. The painter clips
+    // `%-' shows nothing in the bar (its dashes would fill it); a
+    // string's `--', as GNU's. The painter clips
     // what the bar shows (`romacs-status-bar-string').
     let shows = |vm: &mut Vm| { bar(vm); eval(vm, "(romacs--status-bar-text)").trim_matches('"').to_owned() };
     eval(&mut vm, "(setq mode-line-format \"%b %-\")");
@@ -237,80 +237,40 @@ fn romacs_lines() -> Vm {
     vm
 }
 
-/// A window whose buffer sets its own format (keymap-popup's line) folds
-/// it into the bar while it is visible: after the selected window's line,
-/// a `context' segment in `mode-line-inactive'. A nil format adds nothing.
-/// A click there runs that window's line's binding: the bar maps it to
-/// the window and its column (`romacs--status-bar-target').
+/// The bar describes the selected window's buffer only: another window
+/// whose buffer sets its own format (a terminal's, a popup's) shows none
+/// of it there, and changes in that buffer leave the bar's expansion
+/// alone. A click maps the bar's column to the selected window and its
+/// column (`romacs--status-bar-target'); past the line, to nothing.
 #[test]
-fn a_windows_own_line_folds_into_the_bar() {
+fn another_windows_own_line_stays_out_of_the_bar() {
     let mut vm = session();
-    eval(&mut vm, "(set-face-attribute 'mode-line-inactive nil :background \"#202122\")");
     eval(&mut vm, "(setq mode-line-format '(\"main %b\"))");
-    eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below) w3 (split-window-right))");
-    eval(&mut vm, "(with-current-buffer (get-buffer-create \"*keymap-popup*\") (setq-local mode-line-format '(\"q  \" \"Gnosis Dashboard\")))");
-    eval(&mut vm, "(with-current-buffer (get-buffer-create \"bare\") (setq-local mode-line-format nil))");
-    eval(&mut vm, "(set-window-buffer w2 \"*keymap-popup*\")");
-    eval(&mut vm, "(set-window-buffer w3 \"bare\")");
-    let shown = bar(&mut vm);
-    assert_eq!(shown.text.utf8, "main *scratch* │ q  Gnosis Dashboard");
-    let context = shown.marks.segments.iter().find(|s| s.name == "context").expect("a context segment");
-    // With its separator, which goes with it when the bar is too narrow.
-    assert_eq!(&shown.text.utf8[context.bytes.clone()], " │ q  Gnosis Dashboard");
-    let run = shown.text.face_runs.iter().find(|r| r.bytes.start == context.bytes.start).expect("its face");
-    assert_eq!(shown.faces[run.face.0 as usize].background, [0x20, 0x21, 0x22]);
-    // Shown column 20 is the popup's `G', in the bar's text as a click
-    // reads it; the separator is no window's.
-    assert_eq!(eval(&mut vm, "(let ((target (romacs--status-bar-target 20))) (list (eq (nth 0 target) w2) (= (aref (nth 1 target) (nth 2 target)) ?G)))"), "(t t)");
-    assert_eq!(eval(&mut vm, "(eq (car (romacs--status-bar-target 3)) w1)"), "t");
-    assert_eq!(eval(&mut vm, "(romacs--status-bar-target 15)"), "nil");
-    // Narrower than both lines, the popup goes with its separator.
-    eval(&mut vm, "(setq mode-line-format (list (make-string 112 ?m)))");
-    assert_eq!(bar(&mut vm).text.utf8, "m".repeat(112));
-    eval(&mut vm, "(setq mode-line-format '(\"main %b\"))");
-    // Gone with its window.
-    eval(&mut vm, "(delete-window w2)");
-    assert_eq!(bar(&mut vm).text.utf8, "main *scratch*");
-}
-
-/// A folded line's own `right-align' marker is plain text: the bar's
-/// alignment is the selected line's, which here has none.
-#[test]
-fn a_context_marker_does_not_align_the_bar() {
-    let mut vm = session();
-    eval(&mut vm, "(setq-default mode-line-format '(\"MAIN\"))");
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
-    eval(&mut vm, "(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '((:propertize \" \" romacs-segment right-align) \"POP\")))");
+    eval(&mut vm, "(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '(\"POP \" (:eval (progn (setq pop-ran (1+ pop-ran)) \"\")))))");
+    eval(&mut vm, "(setq pop-ran 0)");
     eval(&mut vm, "(set-window-buffer w2 \"pop\")");
-    let shown = bar(&mut vm);
-    assert_eq!(shown.text.utf8, "MAIN │  POP");
-    assert_eq!(shown.marks.right_align(), None);
-    // A marker that is a string's own property, likewise.
-    eval(&mut vm, "(with-current-buffer \"pop\" (setq-local mode-line-format (list (propertize \" \" 'romacs-segment 'right-align) \"POP\")))");
-    let shown = bar(&mut vm);
-    assert_eq!(shown.text.utf8, "MAIN │  POP");
-    assert_eq!(shown.marks.right_align(), None);
+    assert_eq!(bar(&mut vm).text.utf8, "main *scratch*");
+    eval(&mut vm, "(with-current-buffer \"pop\" (insert \"output\"))");
+    assert_eq!(bar(&mut vm).text.utf8, "main *scratch*");
+    assert_eq!(eval(&mut vm, "pop-ran"), "0", "the other window's line never runs");
+    assert_eq!(eval(&mut vm, "(let ((target (romacs--status-bar-target 5))) (list (eq (nth 0 target) w1) (= (aref (nth 1 target) (nth 2 target)) ?*)))"), "(t t)");
+    assert_eq!(eval(&mut vm, "(romacs--status-bar-target 40)"), "nil");
+    // Selected, its line is the bar.
+    eval(&mut vm, "(select-window w2)");
+    assert_eq!(bar(&mut vm).text.utf8, "POP ");
 }
 
-/// A pill reads `romacs-pill-modified' only on the bar's own line, and
-/// from the owner's buffer as it was before the line's Lisp ran, which may
-/// collect: a modified owner with no line of its own leaves a context's
-/// pill in its own colour; a collecting line still recolours the owner's.
+/// A pill reads `romacs-pill-modified' from the owner's buffer as it was
+/// before the line's Lisp ran, which may collect: a collecting line still
+/// recolours it.
 #[test]
-fn only_the_owners_pill_reads_its_modified_state() {
+fn the_owners_pill_reads_its_modified_state() {
     let mut vm = session();
     vm.set_gc_stress(1);
     eval(&mut vm, "(set-face-attribute 'error nil :foreground \"#ff0000\")");
     let pill = "(:propertize \"ID\" romacs-segment id romacs-pill mode-line-highlight romacs-pill-modified error)";
-    eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
-    eval(&mut vm, &format!("(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '({pill})))"));
-    eval(&mut vm, "(set-window-buffer w2 \"pop\")");
-    eval(&mut vm, "(progn (setq-local mode-line-format nil) (insert \"x\"))");
-    let shown = bar(&mut vm);
-    let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the context's pill");
-    assert_eq!(id.pill.and_then(|p| p.foreground), None, "a context keeps its own colour: {:?}", shown.text.utf8);
-    // The owner's own line collects as it expands: its pill still recolours.
-    eval(&mut vm, &format!("(setq-local mode-line-format '((:eval (progn (garbage-collect) \"\")) {pill}))"));
+    eval(&mut vm, &format!("(progn (setq-local mode-line-format '((:eval (progn (garbage-collect) \"\")) {pill})) (insert \"x\"))"));
     let shown = bar(&mut vm);
     let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the owner's pill");
     assert_eq!(id.pill.and_then(|p| p.foreground), Some([0xff, 0, 0]));
@@ -341,20 +301,23 @@ fn projected_values_are_the_formats_data() {
     assert_eq!(eval(&mut vm, "(let* ((noninteractive nil) (s (format-mode-line (list :propertize (list (propertize \"a\" 'help-echo \"x\") (propertize \"b\" 'help-echo \"y\")) 'local-map '(keymap (1 . ignore)))))) (list (and (get-text-property 0 'local-map s) (eq (get-text-property 0 'local-map s) (get-text-property 1 'local-map s))) (equal (get-text-property 0 'help-echo s) \"x\") (equal (get-text-property 1 'help-echo s) \"y\")))"), "(t t t)");
 }
 
-/// A line's `:eval' that collects moves windows: the bar resolves them
-/// again by id, with split windows and popups.
+/// A line's `:eval' that collects moves windows: the bar keeps its
+/// window by id, so a click still finds it, with split windows.
 #[test]
-fn a_collecting_line_keeps_its_windows() {
+fn a_collecting_line_keeps_its_window() {
     let mut vm = session();
     vm.set_gc_stress(1);
-    eval(&mut vm, "(put 'gc-probe 'risky-local-variable t)");
     eval(&mut vm, "(setq-default mode-line-format '(:eval (progn (garbage-collect) \"MAIN\")))");
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below) w3 (split-window-right))");
     eval(&mut vm, "(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '(:eval (progn (garbage-collect) \"POP\"))))");
     eval(&mut vm, "(set-window-buffer w2 \"pop\")");
-    assert_eq!(bar(&mut vm).text.utf8, "MAIN │ POP");
+    assert_eq!(bar(&mut vm).text.utf8, "MAIN");
     eval(&mut vm, "(force-mode-line-update)");
-    assert_eq!(bar(&mut vm).text.utf8, "MAIN │ POP");
+    assert_eq!(bar(&mut vm).text.utf8, "MAIN");
+    assert_eq!(eval(&mut vm, "(eq (car (romacs--status-bar-target 1)) w1)"), "t");
+    eval(&mut vm, "(select-window w2)");
+    assert_eq!(bar(&mut vm).text.utf8, "POP");
+    assert_eq!(eval(&mut vm, "(eq (car (romacs--status-bar-target 1)) w2)"), "t");
 }
 
 /// The bar shows what GNU's redisplay updates a mode line for, without a

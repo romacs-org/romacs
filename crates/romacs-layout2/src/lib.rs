@@ -347,18 +347,6 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         });
         if let Some(text) = pill.foreground { pill_text.push((first..end, text, pill.background)); }
     }
-    // A line folded in from another window (a `context' segment, with its
-    // separator) on its own face's background, `mode-line-inactive''s.
-    for segment in band.marks.segments.iter().filter(|s| s.name == "context") {
-        let first = chars.partition_point(|c| c.0 < segment.bytes.start);
-        let end = chars.partition_point(|c| c.0 < segment.bytes.end);
-        let shown: Vec<(f32, f32)> = places[first..end].iter().filter_map(|place| *place).collect();
-        let (Some(&(start, _)), Some(&(last, width))) = (shown.first(), shown.last()) else { continue };
-        let own = band.faces[face_at(text, segment.bytes.start, face)].background;
-        if own != background {
-            frame.add_background(bounds.x + start, bounds.y, last + width - start, bounds.height, color(own));
-        }
-    }
     // A pill's text colour: copies of the faces it uses, in that foreground.
     // Above every face realized for the band, its glyphless ones too.
     let mut next = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(face_base).max(glyphless.end);
@@ -411,12 +399,8 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
             run.push((frame.glyphs.len() - 1, from, to - from, band_box));
         }
     };
-    // The context segments, swept with the characters in byte order.
-    let mut contexts: Vec<&std::ops::Range<usize>> = band.marks.segments.iter().filter(|s| band_box.is_some() && s.name == "context").map(|s| &s.bytes).collect();
-    contexts.sort_by_key(|bytes| bytes.start);
-    let mut contexts = contexts.into_iter().peekable();
     let mut filled = bounds.x + band.accent.map_or(0.0, |_| STATUS_BAR_ACCENT);
-    for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
+    for (i, (&(_, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
         if centre_marker.contains(&i) || right_marker.contains(&i) { continue; }
         let (ascent, height) = if boxes { (row_ascent, bounds.height) } else { (metrics[index].0, metrics[index].1) };
@@ -424,9 +408,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         fill(frame, &mut run, filled, left, background);
         let own = faces[index].decor.boxed;
         if own.is_none() && band_box.is_some() {
-            while contexts.next_if(|bytes| bytes.end <= byte).is_some() {}
-            let context = contexts.peek().is_some_and(|bytes| bytes.contains(&byte));
-            fill(frame, &mut run, left, left + width, if context { band.faces[index].background } else { background });
+            fill(frame, &mut run, left, left + width, background);
         }
         let at = match glyphless.get(index, shown) {
             Some(glyph) => {
