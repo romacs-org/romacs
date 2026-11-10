@@ -33,6 +33,12 @@ fn mesh_index(value: Value, meshes: usize) -> std::result::Result<u16, Fault> {
         .ok_or_else(|| error("Model mesh index out of range"))
 }
 
+/// A fixnum as the protocol's f64, as Lisp's `float` converts it.
+#[expect(clippy::cast_precision_loss, reason = "a fixnum past 2^53 rounds, as GNU's float does")]
+fn fixnum_f64(n: i64) -> f64 {
+    n as f64
+}
+
 /// A colour or background component, checked in 0..1 before it narrows.
 #[expect(clippy::cast_possible_truncation, reason = "a component in 0..1 keeps its value as f32")]
 fn component(value: f64) -> f32 {
@@ -47,9 +53,9 @@ impl Leaf<'_> {
         if live { Value::TRUE } else { Value::NIL }
     }
 
-    /// A number: a fixnum the model protocol can use (an i32), or a float.
+    /// A number: a fixnum or a float.
     fn model_number(&self, value: Value, what: &str) -> std::result::Result<f64, Fault> {
-        value.integer_value().and_then(|n| i32::try_from(n).ok()).map(f64::from)
+        value.integer_value().map(fixnum_f64)
             .map_or_else(|| self.float_value(value), Ok)
             .map_err(|_| error(format!("Model {what} must be a number")))
     }

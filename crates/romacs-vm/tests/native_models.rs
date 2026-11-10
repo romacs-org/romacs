@@ -115,13 +115,17 @@ fn bad_arguments_and_freed_models_are_refused_and_send_nothing() {
         ("(romacs-model--set-highlight 1 1 '(:mesh 2 :kind object) nil)", "mesh index out of range"),
         ("(romacs-model--set-highlight 1 1 '(:mesh 0 :kind point :face 0 :barycentric [1 1 1] :tolerance 1) nil)", "summing to 1"),
         ("(romacs-model--set-view 9 1 0 0 1)", "Model is destroyed"),
-        ("(romacs-model--set-highlight 1 1 (list :mesh 0 :kind 'point :face 0 :barycentric (make-vector 100000 0) :tolerance 1) nil)",
+        // Its length is checked before any weight is read: the symbols
+        // after the first three would otherwise fail as weights.
+        ("(romacs-model--set-highlight 1 1 (list :mesh 0 :kind 'point :face 0 :barycentric (vconcat [1 0 0] (make-vector 100000 'x)) :tolerance 1) nil)",
          "three weights"),
     ] {
         let got = eval(&mut vm, form);
         assert!(got.contains(error), "{form}: {got}");
     }
     assert!(log.borrow().updates.is_empty());
+    // A fixnum tolerance past the i32 range is a number like any other.
+    assert_eq!(eval(&mut vm, "(romacs-model--set-highlight 1 1 '(:mesh 0 :kind point :face 0 :barycentric [1 0 0] :tolerance 2147483648) nil)"), "nil");
     assert_eq!(eval(&mut vm, "(list (romacs-surface-destroy 1) (romacs-surface-destroy 1))"), "(t nil)");
     assert_eq!(log.borrow().freed, vec![1]);
     assert!(eval(&mut vm, "(romacs-model--set-view 1 1 0 0 1)").contains("Model is destroyed"));
