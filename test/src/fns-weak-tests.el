@@ -5,11 +5,17 @@
 ;; references off a conservative stack.  Romacs has no threads and exact roots,
 ;; so it runs on this one.
 
-;; The four `ft-weak-*-removal' tests are expected to fail for now: each finds
-;; one or two entries left, held by stale registers, since the whole register
-;; stack is traced.  They are the acceptance tests for tracing registers to the
-;; frame's top and clearing the dead tail, and that step removes their
-;; `:expected-result'.
+;; The four `ft-weak-*-removal' tests are the acceptance tests for tracing
+;; register files only to each engine's top and clearing the dead tail above
+;; it: with the whole file traced, each found one or two entries left, held by
+;; stale registers.  Their `-wide' twins collect from a frame wider than the
+;; populating one, whose registers are not yet written at the collection: they
+;; lie below the top and can still hold what the populating callee left, so
+;; only per-register liveness (stack maps) frees those, and they are expected
+;; to fail until it lands (DIVERGENCES VM2-GC-FINALIZER).  Whether they fail
+;; depends on frame layout: the wide frame's unwritten registers must lie where
+;; the populating callee's were, so a change to register allocation can turn
+;; them into unexpected passes with no change to the collector.
 
 ;;; Code:
 
@@ -119,18 +125,45 @@
     (ft--gc t)
     (ft--check-entries table pairs)))
 
-(ert-deftest ft-weak-key-removal ()
+(ert-deftest ft-weak-key-removal () (ft--test-weak-removal 'key))
+(ert-deftest ft-weak-value-removal () (ft--test-weak-removal 'value))
+(ert-deftest ft-weak-and-removal () (ft--test-weak-removal 'key-and-value))
+(ert-deftest ft-weak-or-removal () (ft--test-weak-removal 'key-or-value))
+
+;; A collecting frame 32 registers wider, none of them written before the
+;; collection.
+(defun ft--gc-wide (_execute-finalizers)
+  (garbage-collect)
+  (let* ((a0 (list 1)) (a1 (list a0)) (a2 (list a1)) (a3 (list a2)) (a4 (list a3))
+         (a5 (list a4)) (a6 (list a5)) (a7 (list a6)) (a8 (list a7)) (a9 (list a8))
+         (a10 (list a9)) (a11 (list a10)) (a12 (list a11)) (a13 (list a12))
+         (a14 (list a13)) (a15 (list a14)) (a16 (list a15)) (a17 (list a16))
+         (a18 (list a17)) (a19 (list a18)) (a20 (list a19)) (a21 (list a20))
+         (a22 (list a21)) (a23 (list a22)) (a24 (list a23)) (a25 (list a24))
+         (a26 (list a25)) (a27 (list a26)) (a28 (list a27)) (a29 (list a28))
+         (a30 (list a29)) (a31 (list a30)))
+    a31))
+
+(defun ft--test-weak-removal-wide (weakness)
+  (let* ((_ (ft--init-rng))
+         (table (make-hash-table :weakness weakness))
+         (f (lambda () (ft--populate-hashtable table (ft--nentries))))
+         (pairs (funcall f)))
+    (ft--gc-wide t)
+    (ft--check-entries table pairs)))
+
+(ert-deftest ft-weak-key-removal-wide ()
   :expected-result :failed
-  (ft--test-weak-removal 'key))
-(ert-deftest ft-weak-value-removal ()
+  (ft--test-weak-removal-wide 'key))
+(ert-deftest ft-weak-value-removal-wide ()
   :expected-result :failed
-  (ft--test-weak-removal 'value))
-(ert-deftest ft-weak-and-removal ()
+  (ft--test-weak-removal-wide 'value))
+(ert-deftest ft-weak-and-removal-wide ()
   :expected-result :failed
-  (ft--test-weak-removal 'key-and-value))
-(ert-deftest ft-weak-or-removal ()
+  (ft--test-weak-removal-wide 'key-and-value))
+(ert-deftest ft-weak-or-removal-wide ()
   :expected-result :failed
-  (ft--test-weak-removal 'key-or-value))
+  (ft--test-weak-removal-wide 'key-or-value))
 
 (defun ft--test-puthash (weakness)
   (let ((h (make-hash-table :weakness weakness))

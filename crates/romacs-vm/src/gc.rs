@@ -1064,6 +1064,8 @@ impl Vm {
         if !self.may_collect(0) {
             return false;
         }
+        // Every engine is suspended: trace each file only to its engine's top.
+        self.clear_dead_tails();
         let mut lap = Lap::start();
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
@@ -1275,10 +1277,12 @@ impl Vm {
             Some((cell.payload() as usize, pair))
         }).collect();
         self.cells.collector_compact(|v| rewrite(v));
+        // The traced register slots (`register_roots`); above the tops is NIL.
+        let tops = self.register_tops();
+        let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
         for v in roots
             .iter_mut()
-            .chain(self.stack.iter_mut())
-            .chain(self.suspended_stacks.iter_mut().flatten())
+            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
             .chain(self.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {

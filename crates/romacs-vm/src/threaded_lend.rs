@@ -93,6 +93,8 @@ impl Engine<'_> {
             file: self.vm.suspended_stacks.len(),
             function: self.function,
             regs: self.regs,
+            stack_used: std::mem::take(&mut self.stack_used),
+            spread_end: std::mem::take(&mut self.spread_end),
         };
         self.vm.suspended.push(record);
     }
@@ -106,6 +108,9 @@ impl Engine<'_> {
         self.controls = record.controls;
         self.escape = record.escape;
         self.frames = record.frames;
+        // Down to its top, if a collection cleared above it meanwhile.
+        self.stack_used = record.stack_used;
+        self.spread_end = record.spread_end;
     }
     /// The current frame's offset in the register stack.
     #[inline(always)]

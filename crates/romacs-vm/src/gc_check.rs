@@ -61,8 +61,7 @@ impl Vm {
             symbols: HashSet::default(),
         };
         let (mut values, mut code) = (roots.to_vec(), Vec::new());
-        values.extend_from_slice(&self.stack);
-        values.extend(self.suspended_stacks.iter().flatten().copied());
+        values.extend(self.register_roots().into_iter().flatten().copied());
         values.extend_from_slice(&self.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());

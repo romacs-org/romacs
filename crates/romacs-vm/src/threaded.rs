@@ -156,6 +156,7 @@ mod control_tests {
             apply_mark: None,
             stack_used: 0,
             limit: 0,
+            spread_end: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -275,6 +276,7 @@ mod control_tests {
             apply_mark: None,
             stack_used: 0,
             limit: 0,
+            spread_end: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -763,10 +765,34 @@ pub(super) struct Suspended {
     /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack`
     /// until something sets them aside.
     file: usize,
+    /// The running activation's function, or `K_FUNCTION` in a continuation.
     function: usize,
     regs: *mut Value,
+    /// The highest slot of its file written since the last collection: what
+    /// `Vm::clear_dead_tails` clears down to the top.
+    stack_used: usize,
+    spread_end: usize,
 }
 impl Suspended {
+    /// The end of the registers this engine still uses in FILE: its running
+    /// activation's window, and a pending spread's. A continuation's width is
+    /// its layout's, from its header; anything unreadable is the whole file,
+    /// so a fault costs retention, never a root.
+    fn top(&self, file: &[Value], functions: &[Arc<Function>]) -> usize {
+        let slot = std::mem::size_of::<Value>();
+        let start = (self.regs as usize).wrapping_sub(file.as_ptr() as usize) / slot;
+        let width = if self.function == K_FUNCTION {
+            let count = |at: usize| file.get(start + at).and_then(|v| v.integer_value()).and_then(|n| usize::try_from(n).ok());
+            count(K_SAVED_N).zip(count(K_ARGS_N)).map(|(saved, args)| K_SAVED + saved + args)
+        } else {
+            functions.get(self.function).map(|f| f.regs)
+        };
+        debug_assert!(width.is_some(), "a suspended activation's width is readable");
+        match width {
+            Some(width) if start <= file.len() => start.saturating_add(width).max(self.spread_end).min(file.len()),
+            _ => file.len(),
+        }
+    }
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()
     }
@@ -807,11 +833,50 @@ impl Suspended {
     }
 }
 impl Vm {
+    /// Each register file's traced end, in file order (`suspended_stacks`, then
+    /// `stack`): its engine's top, or the whole file for one no engine owns (a
+    /// kernel's, or the stack outside any engine). Read while every engine is
+    /// suspended, as in a collection (`may_collect(0)`).
+    pub(crate) fn register_tops(&self) -> Vec<usize> {
+        let mut tops: Vec<Option<usize>> = vec![None; self.suspended_stacks.len() + 1];
+        for record in &self.suspended {
+            debug_assert!(tops[record.file].is_none(), "one engine to a register file");
+            tops[record.file] = Some(record.top(self.register_file(record.file), &self.functions));
+        }
+        tops.into_iter().enumerate().map(|(i, top)| top.unwrap_or(self.register_file(i).len())).collect()
+    }
+    /// Register file I, in file order: `suspended_stacks[i]`, then `stack`.
+    /// A record's `file` always names one (`suspend_code`).
+    fn register_file(&self, i: usize) -> &[Value] {
+        self.suspended_stacks.get(i).unwrap_or(&self.stack)
+    }
+    /// Every register slot a collection traces, file by file: each from 0 to
+    /// its traced end (`register_tops`). Every Value in them is valid.
+    pub(crate) fn register_roots(&self) -> Vec<&[Value]> {
+        let tops = self.register_tops();
+        self.suspended_stacks.iter().chain(std::iter::once(&self.stack)).zip(tops).map(|(f, t)| &f[..t]).collect()
+    }
+    /// Before marking: NIL over every slot an engine wrote above its top since
+    /// the last collection, and its `stack_used` down to the top, so no stale
+    /// register keeps an object alive and none is traced later as a root.
+    pub(crate) fn clear_dead_tails(&mut self) {
+        for record in &mut self.suspended {
+            let file = self.suspended_stacks.get_mut(record.file).unwrap_or(&mut self.stack);
+            let top = record.top(file, &self.functions);
+            let end = record.stack_used.clamp(top, file.len());
+            file[top..end].fill(Value::NIL);
+            record.stack_used = top;
+            // Above `stack_used` a file holds NIL already: a missed raise of it fails here.
+            if self.gc_stress.verify || cfg!(debug_assertions) {
+                assert!(file[top..].iter().all(|&v| v == Value::NIL), "a register file holds a value above its engine's top");
+            }
+        }
+    }
     /// Every suspended engine's activations, oldest engine first, as Lisp data:
     /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function` or
-    /// `continuation` (`K_CODE`) for those its frames saved; the one it was in keeps
-    /// no instruction here to say which, so it is `running`, and its function is
-    /// its caller's in a continuation. FILE and START say where its registers are.
+    /// `continuation` (`K_CODE`) for those its frames saved, and `running` for
+    /// the one it was in. FUNCTION is nil in a continuation, which runs no
+    /// function's code. FILE and START say where its registers are.
     pub(crate) fn suspended_activations(&mut self) -> Value {
         let number = |n: usize| Value::integer(i64::try_from(n).expect("an index fits i64")).expect("an index fits a fixnum");
         let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
@@ -819,7 +884,8 @@ impl Vm {
         for (engine, record) in self.suspended.iter().enumerate() {
             let base = self.suspended_stacks.get(record.file).unwrap_or(&self.stack).as_ptr() as usize;
             let start = |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
-            let row = |kind, code: usize, regs| [number(engine), kind, number(code), number(record.file), number(start(regs))];
+            let code_of = |code: usize| if code == K_FUNCTION { Value::NIL } else { number(code) };
+            let row = |kind, code: usize, regs| [number(engine), kind, code_of(code), number(record.file), number(start(regs))];
             for frame in &record.frames {
                 let kind = if K_CODE.as_ptr_range().contains(&frame.pc) { continuation } else { function };
                 rows.push(row(kind, frame.function as usize, frame.regs));
@@ -1336,12 +1402,17 @@ pub(super) struct Engine<'a> {
     pub(super) vm: &'a mut Vm,
     code: Vec<Vec<Inst>>,
     rest: RestStack,
-    /// The highest slot of the file written since the engine began: frame
-    /// entry, a continuation's layout and `apply`'s spread raise it.
+    /// The highest slot of the file written since the last collection, or
+    /// since the engine began: frame entry, a continuation's layout and
+    /// `apply`'s spread raise it, and a collection lowers it to the engine's
+    /// top after clearing above (`Vm::clear_dead_tails`).
     stack_used: usize,
     /// The address just past the engine's register file, kept with the file
     /// (`frame_room`, `grow_registers`).
     limit: usize,
+    /// The end of `apply`'s spread while it is pending, else 0: the top a
+    /// collection traces covers it (`Suspended::top`).
+    spread_end: usize,
     frames: Vec<Frame>,
     native_mark: Option<usize>,
     apply_function: Option<Value>,
@@ -1425,6 +1496,7 @@ pub(super) fn assert_opaque_rest_compaction() {
         },
         stack_used: 0,
         limit: 0,
+        spread_end: 0,
         frames: vec![],
         native_mark: None,
         apply_function: None,
@@ -1672,6 +1744,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let mut engine = Engine {
         stack_used: width.max(args.len()),
         limit,
+        spread_end: 0,
         depth_base: vm.eval_depth,
         vm,
         code: program.code,
@@ -2682,6 +2755,8 @@ fn frame_room(e: &mut Engine<'_>, r: *mut Value, end: usize) -> Option<*mut Valu
 #[inline(never)]
 fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
+    // A native target of `apply` has read its spread.
+    e.spread_end = 0;
     // Native code made big payloads: poll, and collect if due, soon. The
     // request stays until a poll settles it; an engine that may not collect
     // (nested, or held) leaves it to the one it returns to, polling at its
@@ -3413,6 +3488,10 @@ unsafe fn enter_frame_marked(
         let end = new.offset_from(en.vm.stack.as_ptr()) as usize + en.vm.functions[function].regs;
         debug_assert!(end + WINDOW <= en.vm.stack.len(), "a window entered without room (`frame_room`)");
         en.stack_used = en.stack_used.max(end);
+        // A pending spread ends here: the next frame an engine enters is the
+        // spread's callee, whose window takes it as its arguments, an autoload's
+        // or a lambda list's retry included.
+        en.spread_end = 0;
         // The function-id entry cache guarantees lowering before frame entry.
         en.frames.push(Frame {
             pc: pc.add(1),
@@ -3450,12 +3529,19 @@ unsafe fn enter_frame_marked(
 // (`t2_call`), hand the value and the saved registers to the continuation
 // (`t2_resume`), and return K_RES to the primitive's caller (the ordinary
 // `ret`). Saved Values are therefore registers of a live frame: `Vm::collect`
-// traces and forwards the whole register stack, and an escape pops the
-// activation like any other frame. The continuation is a `fn` pointer, named by
+// traces and forwards them, the layout's width being the engine's top while it
+// runs (`Suspended::top`), and an escape pops the activation like any other
+// frame. The continuation is a `fn` pointer, named by
 // a fixnum register through `Engine::continuations`, so it captures nothing.
 //
-// While the activation runs, `e.function` stays the primitive caller's. No
-// K_CODE instruction reads it; a callee's base is the activation's own width.
+// While the activation runs, `e.function` is `K_FUNCTION`; the caller's is in
+// its frame. No K_CODE instruction reads it; a callee's base is the
+// activation's own width.
+/// `Engine::function` in a continuation (`K_CODE`) activation, which runs no
+/// function's code: the record's top then reads the layout's own width. No
+/// `K_CODE` instruction reads `e.function`; `ret` and unwinding restore the
+/// caller's from its frame.
+pub(super) const K_FUNCTION: usize = u32::MAX as usize;
 const K_RES: usize = 0;
 const K_THEN: usize = 1;
 const K_F: usize = 2;
@@ -3778,6 +3864,7 @@ unsafe fn take_step(
             });
             e.controls_base = e.controls.len();
             e.regs = k;
+            e.function = K_FUNCTION;
             e.dynamic = e.vm.dynamic.len();
         }
         let index = match e
@@ -3800,6 +3887,7 @@ unsafe fn take_step(
         std::ptr::copy_nonoverlapping(saved.as_ptr(), k.add(K_SAVED), saved.len());
         std::ptr::copy_nonoverlapping(args.as_ptr(), k.add(K_SAVED + saved.len()), args.len());
         e.stack_used = e.stack_used.max(offset + width);
+        e.spread_end = 0;
         if let Some(handlers) = handlers {
             let mark = e.vm.signal_handlers.len();
             for (conditions, function) in handlers.into_iter().rev() {
@@ -4017,6 +4105,7 @@ unsafe fn t2_prepare_apply(
         match e.vm.prepare_apply(start, argc, at) {
             Ok(Ok(window)) => {
                 e.stack_used = e.stack_used.max(window.1 + window.2);
+                e.spread_end = window.1 + window.2;
                 return Some((r, window.0, window.1, window.2));
             }
             Ok(Err(need)) => {
@@ -5919,6 +6008,65 @@ mod register_tests {
         assert_eq!(value, "(1 2 3)");
         let grown = vm.execution.registers.len();
         assert!(grown > FILE_START, "the predicate's frame grew the file: {grown}");
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+    }
+
+    /// What a returned call left in its registers is not a root: they lie
+    /// above the top, and the collection clears them.
+    #[test]
+    fn registers_above_the_top_are_not_roots() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        let value = vm.eval_source("(progn
+            (defun rt-fill (h n) (if (> n 0) (rt-fill h (1- n)) (puthash (list 'k) t h) nil))
+            (let ((h (make-hash-table :weakness 'key))) (rt-fill h 40) (garbage-collect) (hash-table-count h)))")
+            .unwrap();
+        assert_eq!(value.as_integer().unwrap(), 0, "the key only a returned frame held was freed");
+    }
+
+    /// A continuation runs no function's code, so its top is its layout's: a
+    /// moving collection inside its callee keeps and rewrites what it saved.
+    #[test]
+    fn a_continuation_keeps_its_layout_across_a_moving_collection() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.set_gc_moving(true);
+        let value = vm
+            .eval_source("(let ((xs (list 5 3 4 1 2))) (sort xs (lambda (a b) (garbage-collect) (< a b))))")
+            .unwrap()
+            .display()
+            .unwrap();
+        assert_eq!(value, "(1 2 3 4 5)");
+    }
+
+    /// `apply` of an autoload: the load runs, and collects, moving everything,
+    /// while the spread is pending, and the retried call reads its arguments
+    /// from the spread afterwards.
+    #[test]
+    fn an_autoloaded_apply_keeps_its_spread_across_a_moving_collection() {
+        let path = std::env::temp_dir().join(format!("romacs-spread-autoload-{}.el", std::process::id()));
+        std::fs::write(&path, "(garbage-collect)\n(defun sp-f (x y) (list x y))\n").unwrap();
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.set_gc_moving(true);
+        let source = format!(
+            "(progn (fset 'sp-f '(autoload \"{}\" nil nil nil)) (apply #'sp-f (list (list 'a) (list 'b))))",
+            path.display()
+        );
+        let value = vm.eval_source(&source).map(|v| v.display().unwrap());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(value.unwrap(), "((a) (b))");
+    }
+
+    /// A file grown past the cap is cut back when its engine ends.
+    #[test]
+    fn a_spare_file_past_the_cap_is_cut_back() {
+        let mut vm = Vm::new();
+        let bindings: String = (0..600).map(|i| format!("(v{i} {i})")).collect::<Vec<_>>().join(" ");
+        vm.eval_source_raw(&format!("(defun cap-probe (n) (let* ({bindings}) (if (> n 0) (cap-probe (1- n)) v599)))"))
+            .unwrap();
+        assert_eq!(vm.eval_source("(cap-probe 300)").unwrap().as_integer().unwrap(), 599);
+        assert_eq!(vm.execution.registers.len(), FILE_START, "a 180,000-slot file was kept");
         assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
