@@ -9,7 +9,7 @@
 use super::*;
 use crate::prim::leaf::Kind;
 use crate::coordinates::{ByteOffset, CharOffset};
-use romacs_regex_engine::{SyntaxClass, SyntaxLookup};
+use romacs_regex::{SyntaxClass, SyntaxLookup};
 
 impl Leaf<'_> {
     pub fn move_words(&mut self, count: Value) -> super::super::Out {

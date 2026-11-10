@@ -159,6 +159,8 @@ impl Vm {
         self.regexp_cache = Default::default();
         self.mode_line_forms.clear();
         self.lambda_lists.clear();
+        // An escape deferred in the builder is that session's own.
+        self.drop_deferred_escapes();
         self.status_bar_line = None;
         self.idle_since = None;
         for name in ["process-environment", "initial-environment", "exec-path"] {

@@ -1,6 +1,6 @@
 //! Lisp search boundary. Only owned text and integer offsets reach the engine.
 use crate::{coordinates::*, data::Object, *};
-use romacs_regex_engine::{self as regex, EmacsStr, MatchRegisters};
+use romacs_regex::{self as regex, EmacsStr, MatchRegisters};
 use std::ops::Range;
 #[path = "regexp_syntax.rs"]
 mod syntax;
@@ -1160,7 +1160,7 @@ thread_local! {
     static REGEXP_FRAMES: std::cell::Cell<Option<(*const crate::backtrace::Backtrace, *const Vec<String>)>> = const { std::cell::Cell::new(None) };
 }
 
-/// The matcher's quit probe (romacs_regex_engine::host): a C-g the host
+/// The matcher's quit probe (romacs_regex::host): a C-g the host
 /// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
     // An inspection leaves the match alone: only a real quit stops it.

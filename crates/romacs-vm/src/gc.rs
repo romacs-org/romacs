@@ -157,6 +157,26 @@ struct Marked {
     state: MarkState,
 }
 
+/// What a mark is for: a collection, which a key press ends while it marks
+/// when UNTIL_KEY; or a mark alone (`Vm::mark_only'), which keeps every weak
+/// entry when KEEP_WEAK.
+#[derive(Clone, Copy)]
+enum MarkFor {
+    Collection { until_key: bool },
+    Only { keep_weak: bool },
+}
+
+/// What a mark twin's mark found beside the tables' colours (`Vm::mark_only'):
+/// what `check_reachable' compares a mark with.
+pub(crate) struct MarkedSet {
+    pub(crate) code_marks: Vec<bool>,
+    pub(crate) obarray_symbols_live: HashSet<usize>,
+    pub(crate) region_marks: Vec<bool>,
+    /// Weak tables the weak rounds looked through, one per table per round.
+    #[cfg(test)]
+    pub(crate) weak_visits: usize,
+}
+
 /// What the coordinator gathers while marking.
 #[derive(Default)]
 struct MarkState {
@@ -164,6 +184,9 @@ struct MarkState {
     /// Weak hash tables reached; their entries are not traced until
     /// `weak_round' (the ephemeron fixpoint) decides which survive.
     weak_tables: Vec<usize>,
+    /// How many of `weak_tables' a mark that keeps every weak entry has
+    /// kept: their entries are pushed once, so they need no later round.
+    weak_kept: usize,
     /// Obarrays reached: each drops its removed entries of dead symbols.
     live_obarrays: Vec<usize>,
     obarray_symbols_live: HashSet<usize>,
@@ -174,6 +197,9 @@ struct MarkState {
     /// once, by the round that finds its list live, and those left at the
     /// fixpoint are the dead lists.
     untraced_lists: Vec<u64>,
+    /// Weak tables looked through, one per table per round (`MarkedSet`).
+    #[cfg(test)]
+    weak_visits: usize,
     /// Weak rounds run and `lambda_lists` entries traced (`Stress::last_mark`).
     #[cfg(test)]
     last_mark: (usize, usize),
@@ -789,36 +815,45 @@ impl Vm {
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
     /// LISTS, `lambda_lists` lent to the mark, is an ephemeron table too: a
-    /// live list keeps what its entry holds. Marking only grows, so the
-    /// rounds reach a fixpoint; weak tables reached by the new marks join
-    /// the next round. True when anything was pushed.
+    /// live list keeps what its entry holds. With KEEP_ALL (a mark twin's,
+    /// `Vm::mark_only'), every weak hash table entry is kept, its key live
+    /// from then on, so each table's entries go once, in the round after it
+    /// is reached: a chain of weak tables costs its length. LISTS stays an
+    /// ephemeron table, since a collection reads it only by a live list.
+    /// Marking only grows, so the rounds reach a fixpoint; weak tables
+    /// reached by the new marks join the next round. True when anything was
+    /// pushed.
     fn weak_round(
         &self,
         state: &mut MarkState,
         lists: &mut std::collections::HashMap<u64, source_cache::LambdaList>,
+        keep_all: bool,
         pending: &mut Vec<Value>,
         local_live: &mut HashSet<usize>,
     ) -> bool {
         #[cfg(test)]
         { state.last_mark.0 += 1; }
         let (symbols, regions) = (&state.obarray_symbols_live, &state.region_marks);
-        for &t in &state.weak_tables {
+        let from = if keep_all { state.weak_kept } else { 0 };
+        for &t in &state.weak_tables[from..] {
             let data::Object::HashTable(table) = &self.objects[t] else {
                 unreachable!("weak table index");
             };
+            #[cfg(test)]
+            { state.weak_visits += 1; }
             for (_, key, value) in table.entries() {
                 let (k, v) = (self.survives(symbols, regions, key), self.survives(symbols, regions, value));
                 // The buffer-keyed ephemeron owns a local value indirectly
                 // through a stable symbol-slot ID. The slot is NOT a global
                 // root: trace its moving Value only once its owner is live.
-                if k && table.weakness == hash::Weakness::Key
+                if (keep_all || k) && table.weakness == hash::Weakness::Key
                     && let Some(slot) = value.index_if(7).and_then(|i| i.checked_sub(1))
                     && self.local_binding_slots.contains(&slot)
                     && local_live.insert(slot)
                 {
                     pending.push(self.slots[slot].value);
                 }
-                if table.weakness.keep(k, v) {
+                if keep_all || table.weakness.keep(k, v) {
                     if !k {
                         pending.push(key);
                     }
@@ -827,6 +862,9 @@ impl Vm {
                     }
                 }
             }
+        }
+        if keep_all {
+            state.weak_kept = state.weak_tables.len();
         }
         // Traced once: what an entry pushes stays marked.
         state.untraced_lists.retain(|&list| {
@@ -890,7 +928,7 @@ impl Vm {
                 }
                 data::Object::SyntaxTable(t) => {
                     size_of_val(t)
-                        + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                        + t.len() * size_of::<(u32, romacs_regex::SyntaxClass)>()
                 }
                 data::Object::HashTable(t) => t.storage_bytes(false),
                 data::Object::Obarray(t) => t.storage_bytes(false),
@@ -941,7 +979,7 @@ impl Vm {
                     }
                     data::Object::SyntaxTable(t) => {
                         size_of_val(t)
-                            + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                            + t.len() * size_of::<(u32, romacs_regex::SyntaxClass)>()
                     }
                     data::Object::HashTable(t) => t.storage_bytes(true),
                     data::Object::Obarray(t) => t.storage_bytes(true),
@@ -955,7 +993,14 @@ impl Vm {
     /// heap: a compaction is a long stall that no key press can end, and a
     /// sweep gives back a dead tail without one.
     fn compacts(&mut self) -> bool {
-        std::mem::take(&mut self.allocation.compact) || (self.gc_stress.every > 0 && !self.gc_stress.inplace) || self.gc_stress.moving
+        let compacts = self.will_compact();
+        self.allocation.compact = false;
+        compacts
+    }
+    /// Whether the next collection compacts (`compacts'), asking nothing:
+    /// a mark twin's check names entries by where they are (`twin.rs').
+    pub(crate) fn will_compact(&self) -> bool {
+        self.allocation.compact || (self.gc_stress.every > 0 && !self.gc_stress.inplace) || self.gc_stress.moving
     }
     /// A collection stopped: the tables hold no marks.
     pub(crate) fn clear_marks(&mut self) {
@@ -1088,22 +1133,14 @@ impl Vm {
         // Every engine is suspended: trace each file only to its engine's top.
         self.clear_dead_tails();
         let mut lap = Lap::start();
-        // Buffers move and local bindings go (`Vm::eval_limit_local').
-        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
-        // Patterns kept for a table name it by a Value this may move.
-        self.clear_regexp_cache(true);
         let before = self.heap_objects();
-        // Finished nested runs' programs are caches: relowering what is used
-        // again costs less than tracing, retiring and forwarding every copy.
-        for program in &mut self.spare_programs {
-            program.forget_code();
-        }
+        self.clear_collection_caches();
         // Membership by slot, tested for every symbol and slot visited below.
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
         let local_binding = self.slot_set(self.local_binding_slots.iter());
         lap.lap(&mut self.gc_times, Phase::Setup);
         let n = gc_mark::threads(self.gc_stress.threads);
-        let Some(mut marked) = self.mark_heap(roots, &in_obarray, &local_binding, until_key, n, &mut lap) else { return false };
+        let Some(mut marked) = self.mark_heap(roots, &in_obarray, &local_binding, MarkFor::Collection { until_key }, n, &mut lap) else { return false };
         if self.gc_stress.verify {
             if n > 1 {
                 marked = self.verify_mark(marked, n, roots, &in_obarray, &local_binding);
@@ -1111,7 +1148,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         // From here the collection changes the heap: the last point a key
@@ -1445,10 +1482,40 @@ impl Vm {
         self.gc_stats.collections += 1;
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
     }
-    /// Mark from ROOTS and everything the VM holds, on N threads: what it
-    /// reached, or None when a key press ended it (UNTIL_KEY), its marks left
-    /// for the next mark to clear. Writes nothing but colours and its own state.
-    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], local_binding: &[bool], until_key: bool, n: usize, lap: &mut Lap) -> Option<Marked> {
+    /// What a collection drops before it marks, and a mark twin's parent
+    /// before it forks (phoenix M1): the caches that name objects by value
+    /// without rooting them, so none still names one the mark finds dead.
+    pub(crate) fn clear_collection_caches(&mut self) {
+        // Buffers move and local bindings go (`Vm::eval_limit_local').
+        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
+        // Patterns kept for a table name it by a Value this may move.
+        self.clear_regexp_cache(true);
+        // Finished nested runs' programs are caches: relowering what is used
+        // again costs less than tracing, retiring and forwarding every copy.
+        for program in &mut self.spare_programs {
+            program.forget_code();
+        }
+    }
+    /// A mark twin's mark (phoenix M2), in a process forked for it: the
+    /// collection's own mark from ROOTS and everything the VM holds, on one
+    /// thread, its finalizers doomed and its weak rounds run, every weak entry
+    /// kept when KEEP_WEAK, stopped before a collection drops anything or
+    /// sweeps. The colours stay in the tables (`Table::marked'); the rest is
+    /// returned.
+    pub(crate) fn mark_only(&mut self, roots: &[Value], keep_weak: bool) -> MarkedSet {
+        let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
+        let local_binding = self.slot_set(self.local_binding_slots.iter());
+        let marked = self.mark_heap(roots, &in_obarray, &local_binding, MarkFor::Only { keep_weak }, 1, &mut Lap(None)).expect("no key ends it");
+        let Marked { code_marks, state, .. } = marked;
+        MarkedSet { code_marks, obarray_symbols_live: state.obarray_symbols_live, region_marks: state.region_marks,
+                    #[cfg(test)] weak_visits: state.weak_visits }
+    }
+    /// Mark from ROOTS and everything the VM holds, on N threads, for FOR: what
+    /// it reached, or None when a key press ended it, its marks left for the
+    /// next mark to clear. Writes nothing but colours and its own state.
+    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], local_binding: &[bool], r#for: MarkFor, n: usize, lap: &mut Lap) -> Option<Marked> {
+        let until_key = matches!(r#for, MarkFor::Collection { until_key: true });
+        let keep_weak = matches!(r#for, MarkFor::Only { keep_weak: true });
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.external_roots);
@@ -1538,7 +1605,7 @@ impl Vm {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
-                if this.weak_round(&mut state, &mut lists, &mut pending, &mut local_live) {
+                if this.weak_round(&mut state, &mut lists, keep_weak, &mut pending, &mut local_live) {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
@@ -1567,7 +1634,7 @@ impl Vm {
         let colors = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         self.clear_marks();
         let mut lap = Lap(None);
-        let alone = self.mark_heap(roots, in_obarray, local_binding, false, 1, &mut lap).expect("no key ends it");
+        let alone = self.mark_heap(roots, in_obarray, local_binding, MarkFor::Collection { until_key: false }, 1, &mut lap).expect("no key ends it");
         let again = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         for (table, (colors, again)) in ["conses", "closures", "cells", "objects"].iter().zip(colors.iter().zip(&again)) {
             if let Some(i) = colors.iter().zip(again).position(|(a, b)| a != b) {
@@ -1871,6 +1938,57 @@ mod tests {
 
     fn conses(vm: &mut Vm, n: i64) -> Vec<Value> {
         (0..n).map(|i| vm.alloc_cons(Value::integer(i).unwrap(), Value::NIL)).collect()
+    }
+
+    /// A mark twin's mark (`mark_only') marks what the roots reach, keeps a
+    /// weak table's entries a collection's mark would drop, leaves the rest
+    /// unmarked, and frees nothing.
+    #[test]
+    fn a_twins_mark_keeps_weak_entries_and_frees_nothing() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let table = vm.eval_source_raw("(let ((h (make-hash-table :test 'eq :weakness 'key))) (puthash (list 'weak-key) (list 'weak-value) h) h)").unwrap();
+        let (key, value) = match vm.object(table).unwrap() {
+            data::Object::HashTable(t) => t.entries().map(|(_, k, v)| (k, v)).next().unwrap(),
+            _ => unreachable!("a hash table"),
+        };
+        let reached = vm.alloc_cons(Value::integer(1).unwrap(), Value::NIL);
+        let lost = vm.alloc_cons(Value::integer(2).unwrap(), Value::NIL);
+        let (conses, objects) = (vm.conses.len(), vm.objects.len());
+        vm.mark_only(&[table, reached], true);
+        let marked = |v: Value| vm.conses.marked(v.payload() as usize);
+        assert!(marked(reached));
+        assert!(!marked(lost), "nothing reaches it");
+        assert!(marked(key) && marked(value), "a weak entry is kept");
+        assert_eq!((vm.conses.len(), vm.objects.len()), (conses, objects), "nothing is freed");
+        assert!(vm.cons_pair(lost).is_ok(), "an unmarked entry stays allocated");
+    }
+
+    /// A mark twin's mark keeps a chain of weak tables, each reached only
+    /// through a dead-keyed entry of the one before, taking each once: a
+    /// rescan of every table each round would look through 1275, not 50.
+    #[test]
+    fn a_twins_mark_keeps_a_chain_of_weak_tables() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let first = vm.eval_source_raw("(let ((next nil)) (dotimes (_ 50) (let ((h (make-hash-table :test 'eq :weakness 'key))) \
+            (when next (puthash (list 'dead) next h)) (setq next h))) next)").unwrap();
+        let empty = vm.mark_only(&[], true).weak_visits;
+        vm.clear_marks();
+        let visits = vm.mark_only(&[first], true).weak_visits - empty;
+        assert_eq!(visits, 50, "each table of the chain is looked through once");
+        let (mut table, mut chain) = (Some(first), 0);
+        while let Some(t) = table {
+            assert!(vm.objects.marked(t.payload() as usize - 1), "table {chain} of the chain is kept");
+            chain += 1;
+            table = match vm.object(t).unwrap() {
+                data::Object::HashTable(h) => h.entries().map(|(_, _, value)| value).next(),
+                _ => unreachable!("a hash table"),
+            };
+        }
+        assert_eq!(chain, 50);
     }
 
     /// S3.1: a collection leaves live entries where they are, frees the
