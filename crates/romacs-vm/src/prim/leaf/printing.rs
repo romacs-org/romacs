@@ -29,8 +29,8 @@ impl Leaf<'_> {
                 // (six ordinary slots plus twelve box-drawing slots).
                 let purpose = self.intern("display-table");
                 let display_table = match self.vm.object_if(table) {
-                    Some(data::Object::CharTable(t)) => t.extras.len() == 18
-                        && t.purpose == purpose,
+                    Some(data::Object::CharTable(t)) => t.extras().len() == 18
+                        && t.purpose() == purpose,
                     _ => false,
                 };
                 let grave = if display_table {

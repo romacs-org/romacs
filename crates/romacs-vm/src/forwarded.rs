@@ -1304,7 +1304,8 @@ impl Vm {
                 let mut table = crate::char_table::CharTable::new(purpose);
                 table.initialize(spec.extras.len(), init).expect("small char-table");
                 for (slot, &extra) in spec.extras.iter().enumerate() {
-                    table.extras[slot] = self.materialize(extra);
+                    let extra = self.materialize(extra);
+                    table.set_extra(slot, extra);
                 }
                 for &(from, to, value) in spec.ranges {
                     let value = self.materialize(value);

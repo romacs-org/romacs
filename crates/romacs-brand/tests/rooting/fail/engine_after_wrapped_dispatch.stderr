@@ -1,0 +1,19 @@
+error[E0382]: borrow of moved value: `e`
+  --> tests/rooting/fail/engine_after_wrapped_dispatch.rs:11:5
+   |
+ 8 | fn bad(e: Eng<'_, Engine>) -> u64 {
+   |        - move occurs because `e` has type `romacs_brand::Eng<'_, standin::Engine>`, which does not implement the `Copy` trait
+ 9 |     let held = e.stack[0].0;
+10 |     let _out = (|| orchestrate(e, (), collects, then))();
+   |                 --             - variable moved due to use in closure
+   |                 |
+   |                 value moved into closure here
+11 |     e.stack.len() as u64 + held
+   |     ^ value borrowed here after move
+   |
+   = note: borrow occurs due to deref coercion to `standin::Engine`
+note: deref defined here
+  --> src/lib.rs
+   |
+   |     type Target = E;
+   |     ^^^^^^^^^^^

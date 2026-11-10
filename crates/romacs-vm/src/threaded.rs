@@ -12,6 +12,7 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
+pub(crate) use lend::{bind_from, call_frame, compile_form, eval_form, eval_text, expand_form, read_next, run_function, toplevel, unbind_to, unwind_to, write_from};
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
 use lend::{Nested, Orch, Pc, Write};
@@ -1276,6 +1277,8 @@ fn no_catch(e: &mut Engine<'_>) -> bool {
 /// traced, across every restore and handler that runs Lisp on the way.
 #[inline(never)]
 fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> Option<(usize, bool)> {
+    // What the native call that escaped queued came before its escape.
+    drain_writes(&mut m, gc.by_ref());
     let (mut original, failed_depth, hooked) = m.leaf((), |e, ()| {
         let original = e.error.take();
         if e.escape.is_none() {
@@ -2338,6 +2341,10 @@ unsafe fn poll_resume(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Val
 /// the quit test, then the instruction it resumes.
 #[inline(never)]
 fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect): (Pc<'x>, bool)) -> Continue<'x> {
+    // A step that polls next; and a native return that forgot is not lost.
+    if !drain_writes(&mut m, gc.by_ref()) {
+        return Continue::Stop;
+    }
     if collect {
         lend::collect(&mut m, gc.by_ref(), false);
     }
@@ -3603,6 +3610,10 @@ enum Continue<'x> {
     /// the frame's first index, the START and ARGC arguments, and whether
     /// the call came from a continuation's activation.
     Retry(Box<(Pc<'x>, RootFrame, (usize, usize), bool)>),
+    /// The instruction, after a native call's queued writes (`watchers.rs`),
+    /// its outcome published (`drained`). The other continuations drain for
+    /// themselves: `polled`, `collect_explicit`, `collect_idle`, `route_escape`.
+    Drain(Pc<'x>),
 }
 // SAFETY: instruction addresses (`Pc`), immediates, a root frame and indices.
 unsafe impl Plain for Continue<'_> {}
@@ -3661,8 +3672,48 @@ fn continue_lent(e: Eng<'_, '_>, to: Continue<'_>) -> Value {
         Continue::CollectIdle(pc) => orchestrate(e, pc, collect_idle, continue_at),
         Continue::Read(read) => orchestrate(e, read, read_body, continue_at),
         Continue::Retry(retry) => retry_call(e, retry),
+        Continue::Drain(pc) => orchestrate(e, pc, drained, continue_at),
         to => continue_at(e, to),
     }
+}
+/// A native call's queued writes, then the instruction.
+#[inline(never)]
+fn drained<'x, 'b>(mut m: Orch<'_, 'b, '_>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
+    if drain_writes(&mut m, gc.by_ref()) { Continue::At(pc) } else { Continue::Stop }
+}
+/// The writes the native call that just returned queued, in order, each a lend
+/// (`watchers.rs`). The call's outcome is already in registers, handler storage
+/// or `e.escape`. Whether all were made: a watcher's escape replaces any pending
+/// one and drops the rest, as it would have ended the call first.
+#[inline]
+fn drain_writes<'b>(m: &mut Orch<'_, 'b, '_>, gc: Gc<'_, 'b>) -> bool {
+    m.leaf((), |e, ()| e.vm.deferred_writes.is_empty()) || make_queued_writes(m, gc)
+}
+#[cold]
+#[inline(never)]
+fn make_queued_writes<'b>(m: &mut Orch<'_, 'b, '_>, mut gc: Gc<'_, 'b>) -> bool {
+    let Some((frame, writes)) = m.leaf((), |e, ()| e.vm.take_deferred()) else { return true };
+    let made = (0..writes).all(|i| lend::deferred_write(m, gc.by_ref(), (&frame, i), (), write_made));
+    m.leaf(frame, |e, frame| e.vm.drop_frame(frame));
+    made
+}
+fn write_made(e: &mut Engine<'_>, (): (), outcome: std::result::Result<(), prim::Fault>) -> bool {
+    let Err(fault) = outcome else { return true };
+    if let Some(escape) = e.vm.propagated_escape.take() {
+        e.escape = Some(escape);
+        e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+        e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+    } else {
+        let (condition, data) = e.vm.fault(fault);
+        e.escape = Some(Escape::Signal(condition, data));
+    }
+    false
+}
+/// PC, after the writes the native call before it queued (`watchers.rs`).
+#[cold]
+#[inline(never)]
+fn drain_at(e: Eng<'_, '_>, pc: Pc<'_>) -> Value {
+    continue_lent(e, Continue::Drain(pc))
 }
 /// Call FUNCTION (the frame's first value) again from the instruction, as the
 /// call site or the continuation would have.
@@ -3821,7 +3872,7 @@ unsafe fn take_step(
                 }
                 *r.add((*pc).a) = value;
                 debug_assert_eq!(r, e.regs, "a step continues in the current frame");
-                return Continue::At(Pc::new(pc.add(1)));
+                return step_at(e, Pc::new(pc.add(1)));
             }
             Ok(prim::Step::Call { f, args, then, saved }) => (f, args, then, saved),
             Ok(prim::Step::Handle { body, handlers: bindings }) => {
@@ -3909,9 +3960,15 @@ unsafe fn take_step(
             Continue::Poll(Pc::new(K_CODE.as_ptr()))
         } else {
             debug_assert_eq!(k, e.regs, "a step continues in the current frame");
-            Continue::At(Pc::new(K_CODE.as_ptr()))
+            step_at(e, Pc::new(K_CODE.as_ptr()))
         }
     }
+}
+/// Where a step continues once its Values are in registers or handler storage:
+/// PC, after any writes it queued.
+#[inline]
+fn step_at<'x>(e: &Engine<'_>, pc: Pc<'x>) -> Continue<'x> {
+    if e.vm.deferred_writes.is_empty() { Continue::At(pc) } else { Continue::Drain(pc) }
 }
 fn handler_bind_return(_: &mut prim::Leaf<'_>, value: Value, _: &[Value]) -> prim::Next {
     Ok(prim::Step::Done(value))
@@ -4039,7 +4096,7 @@ unsafe fn t2_dispatch(
                 };
                 leave_native(&mut e);
                 *r.add((*pc).a) = value;
-                advance(e, r, pc)
+                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
             }
         }
     }
@@ -4395,7 +4452,7 @@ unsafe fn leaf_call(
             en.budget = 0;
         }
         *r.add((*pc).a) = value;
-        advance(e, r, pc)
+        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 /// The call a failed leaf made, recorded now: its arguments are where they
@@ -4466,7 +4523,7 @@ unsafe fn cached_primitive(
         };
         leave_native(&mut e);
         *r.add((*pc).a) = value;
-        advance(e, r, pc)
+        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 #[cold]
@@ -4500,7 +4557,7 @@ unsafe fn primitive(
             Some(value) => {
                 leave_native(en);
                 *r.add((*pc).a) = value;
-                advance(e, r, pc)
+                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
             }
             None => {
                 if let Some((condition, data)) = signal {
@@ -4550,11 +4607,11 @@ fn force_lazy(e: &mut Engine<'_>, function: usize) -> bool {
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
-        let result = lend::deferred(e, Nested::Lazy(function));
+        let result = lend::deferred(e, function);
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         match result {
-            Ok(_) => true,
+            Ok(()) => true,
             Err(error) => {
                 if let Some(escape) = e.vm.propagated_escape.take() {
                     e.escape = Some(escape);
@@ -4875,6 +4932,9 @@ fn plain_runner(vm: &Vm, runner: Option<Value>) -> Option<Imm> {
 /// call's register; then the aftermath, at once (`Vm::finalizer_runner').
 #[inline(never)]
 fn collect_explicit<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
+    if !drain_writes(&mut m, gc.by_ref()) {
+        return Continue::Stop;
+    }
     let explicit = m.leaf((), |e, ()| std::mem::replace(&mut e.vm.collection_log.explicit, true));
     let collected = lend::collect(&mut m, gc.by_ref(), false);
     let runner = m.leaf((pc.a(), collected, explicit), |e, (dest, collected, explicit)| {
@@ -4895,6 +4955,9 @@ fn collect_explicit<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc:
 /// through the gate (a wait for input).
 #[inline(never)]
 fn collect_idle<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
+    if !drain_writes(&mut m, gc.by_ref()) {
+        return Continue::Stop;
+    }
     let collected = lend::collect(&mut m, gc.by_ref(), true);
     let runner = m.leaf((pc.a(), collected), |e, (dest, collected)| {
         e.set_reg(dest, if collected { Value::TRUE } else { Value::NIL });

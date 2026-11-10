@@ -11,8 +11,6 @@
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
 use rust_tokens::{Token, tokens};
-// The shared lexer's own list, which this test has no use for.
-const _: &[&str] = rust_tokens::CONVERTED;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -129,6 +127,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
+    // A native call's watched writes, from the write to its engine's drain;
+    // `may_collect` refuses while any waits (`watchers.rs`).
+    ("deferred_writes", Transient),
     ("dynamic", Root),
     // Custom symbols' entries are read with their symbol, and will shade at their store.
     ("conditions", Owed),
@@ -142,7 +143,10 @@ const VARIANTS: &[(&str, Class)] = &[
     ("Window", Barrier), ("Frame", Barrier), ("Terminal", Barrier), ("WindowConfiguration", Barrier),
     ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free),
     ("String", Barrier), ("RawString", Barrier), ("Vector", Barrier), ("BoolVector", Free), ("Record", Barrier),
-    // Their nodes are shared and locked: a node's store is its own (char_table.rs).
+    // Their nodes are shared and locked, so a node's store hooks no one entry:
+    // their contents are written only through char_table.rs's funnel (`wrote`),
+    // which every write method passes and the collector's barrier will hook.
+    // Past it only the collector's own visits write (PAST_THE_BARRIER).
     ("CharTable", Barrier), ("SubCharTable", Barrier), ("MapKeymapCursor", Barrier),
     // Text shared by indirect buffers is traced from the base alone.
     ("Buffer", Barrier),
@@ -271,6 +275,7 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
     ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
     ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
+    ("collector_visit_node", char_table_collector), ("collector_visit_values", char_table_collector),
 ];
 
 /// Whether a file under `src` may call a method.
@@ -278,6 +283,12 @@ type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
     ["table.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
+}
+
+/// The collector, and the char table and keymap cursor files that give it
+/// their visits: those write node contents past char_table.rs's funnel.
+fn char_table_collector(file: &str) -> bool {
+    collector(file) || file == "char_table.rs" || file == "map_keymap.rs"
 }
 
 /// Each file under `src` that names a method of PAST_THE_BARRIER it may not,
@@ -315,6 +326,8 @@ fn a_name_past_the_barrier_is_refused() {
         file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // collector_compact in a comment"),
         file("handle.rs", "fn f(vm: &mut Vm) { let collector_compact_count = 0; vm.hash_mut_ish(); let s = \"collector_prepend\"; }"),
         file("gcov.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); }"),
+        file("prim/leaf/casetab.rs", "fn f(t: &mut CharTable) { t.collector_visit_values(&mut seen, &mut |v| *v = NIL); char_table::collector_visit_node(t.root(), &mut seen, &mut |_| {}); }"),
+        file("map_keymap.rs", "fn f(n: &CharTableNodeHandle) { collector_visit_node(n, &mut seen, &mut |_| {}); }"),
     ];
     assert_eq!(names_past_the_barrier(&sources), [
         "window.rs: collector_compact", "window.rs: hash_mut",
@@ -322,6 +335,7 @@ fn a_name_past_the_barrier_is_refused() {
         "gc.rs: hash_mut",
         "frame.rs: hash_mut",
         "gcov.rs: collector_entries_mut",
+        "prim/leaf/casetab.rs: collector_visit_node", "prim/leaf/casetab.rs: collector_visit_values",
     ]);
 }
 
@@ -393,7 +407,10 @@ const CELLS: &[(&str, Behind)] = &[
     ("annotations.rs:AnnotatedBuffer.anchors", Plain), ("annotations.rs:AnnotatedBuffer.reversed_pairs", Plain),
     ("bytes.rs:BufferState.modification", Plain),
     // Char table nodes, shared between tables, sub-char-tables, views and
-    // keymap cursors: five rows for one lock. They are written through it.
+    // keymap cursors: five rows for one lock. Every write through it goes
+    // through char_table.rs's funnel (`wrote`), and only the collector's own
+    // visits write past it (PAST_THE_BARRIER); every field of `CharTable` and
+    // `CharTableNode` is private to that file.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
     ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
     ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
@@ -422,6 +439,8 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),
     ("text.rs:TextBody.coordinate", Plain), ("text.rs:TextBody.chunk", Plain), ("text.rs:TextBody.cold_chunks", Plain),
     ("text.rs:TextBody.cold_order", Plain), ("text.rs:TextBody.scanned_bytes", Plain), ("text.rs:TextBody.coordinate_steps", Plain),
+    // Parse-state summaries: positions and syntax codes, no Value.
+    ("text.rs:TextBody.syntax", Plain),
     // Text shared by indirect buffers, its properties among it: `TextBody`'s own write methods.
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
@@ -476,8 +495,6 @@ const PUBLIC_ALLOWED: &[(&str, &str)] = &[
     ("annotations.rs:AnnotatedBuffer", "buffer accessors"), ("annotations.rs:Marker", "marker accessors"),
     ("annotations.rs:Overlay", "overlay accessors"), ("bool_vector.rs:BoolVector", "bool-vector accessors"),
     ("bytes.rs:ByteBuffer", "buffer accessors"),
-    ("char_table.rs:CharTable", "the char-table write funnel (perf/gc-chartable)"),
-    ("char_table.rs:CharTableNode", "the char-table write funnel (perf/gc-chartable)"),
     ("data.rs:LispString", "string accessors"), ("frame.rs:Frame", "frame accessors"), ("frame.rs:Terminal", "terminal accessors"),
     ("hash.rs:HashTable", "hash table accessors"), ("obarray.rs:Obarray", "obarray accessors"),
     ("sqlite.rs:Handle", "sqlite handle accessors"), ("subprocess.rs:Process", "process accessors"),

@@ -59,6 +59,8 @@ romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, in
 pub(crate) struct QuietInsertion {
     inhibited: bool,
     undo: Option<(usize, i64, bool)>,
+    /// `deactivate-mark`'s slot, which no watcher hears.
+    deactivate: usize,
 }
 
 /// TMEM: SYMBOL is in SET, a list, or SET is any other non-nil value.
@@ -420,6 +422,9 @@ impl Vm {
     /// no Lisp before or after it. Undo, when on, is then recorded by
     /// `quiet_inserted'.
     pub(crate) fn quiet_insertion(&mut self) -> Option<QuietInsertion> {
+        // Its watchers are Lisp, and this insertion is the one that runs none.
+        let deactivate = self.change_slots().deactivate;
+        if self.variable_trapped(self.indirect_variable(deactivate)) { return None; }
         let index = self.buffer_index().ok()?;
         let Object::Buffer(b) = &self.objects[index] else { return None };
         if b.properties.has_intervals() || !b.intervals.is_empty() { return None; }
@@ -428,7 +433,7 @@ impl Vm {
         let prepared = self.prepare_change(end, end).ok()?;
         if prepared.before || prepared.after { return None; }
         let undo = (self.undo_list_of(index) != Value::TRUE).then_some((index, end, unmodified));
-        Some(QuietInsertion { inhibited: prepared.inhibited, undo })
+        Some(QuietInsertion { inhibited: prepared.inhibited, undo, deactivate })
     }
 
     /// The rest of a quiet insertion once its text is in: record_insert,
@@ -439,19 +444,27 @@ impl Vm {
         if let Some((index, point, unmodified)) = quiet.undo {
             self.record_insert(index, point, length as i64, unmodified).map_err(Fault::Error)?;
         }
-        if !quiet.inhibited { self.mark_deactivated()?; }
+        if !quiet.inhibited { self.store_deactivated(quiet.deactivate)?; }
         Ok(())
     }
 
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        // This buffer's own binding is t already: only a watcher could tell.
+        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.deferred_writes.is_empty() {
+            return self.write_from_native(crate::watchers::NativeWrite::set(deactivate, Value::TRUE));
+        }
+        self.store_deactivated(deactivate)
+    }
+    /// `mark_deactivated` where no watcher hears it, DEACTIVATE being its slot.
+    fn store_deactivated(&mut self, deactivate: usize) -> Faulty<()> {
+        // This buffer's own binding is t already: nothing changes. An inherited
+        // t is not its own, so the write still makes the binding.
         let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
-        if local != deactivate && self.slots[local].value == Value::TRUE && !self.variable_trapped(deactivate) {
+        if local != deactivate && self.slots[local].value == Value::TRUE {
             return Ok(());
         }
-        self.set_variable_value(deactivate, Value::TRUE).map_err(Fault::Error)
+        self.assign_variable(deactivate, Value::TRUE).map_err(Fault::Error)
     }
 
     /// Run a storage kernel on ARGS outside the engine's registers, which

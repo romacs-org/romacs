@@ -530,7 +530,7 @@ impl<'l, 'a> Source<'l, 'a> {
 
     fn extra(&self, table: Value, slot: usize) -> Value {
         match self.leaf.vm.object_if(table) {
-            Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
+            Some(Object::CharTable(t)) => t.extras().get(slot).copied().unwrap_or(Value::NIL),
             _ => Value::NIL,
         }
     }
@@ -678,7 +678,7 @@ impl<'l, 'a> Source<'l, 'a> {
     /// no look) for `zero-width', or None when C displays normally.
     fn glyphless(&mut self, c: u32) -> R<Option<(i64, Option<Glyphless>)>> {
         let table = self.look.glyphless;
-        let has_extra = matches!(self.leaf.vm.object_if(table), Some(Object::CharTable(t)) if !t.extras.is_empty());
+        let has_extra = matches!(self.leaf.vm.object_if(table), Some(Object::CharTable(t)) if !t.extras().is_empty());
         if !has_extra { return Ok(None); }
         let mut method = self.leaf.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
         // (GRAPHICAL . TEXT): a window-system frame's, else a terminal's.
@@ -1057,10 +1057,10 @@ impl Leaf<'_> {
         let look = Look::new(self)?;
         if let Some(table) = look.display_table
             && let Some(Object::CharTable(t)) = self.vm.object_if(table)
-            && (t.parent != Value::NIL || !t.all_nil() || t.extras.get(2..4).is_some_and(|s| s.iter().any(|&v| v != Value::NIL))) {
+            && (t.parent() != Value::NIL || !t.all_nil() || t.extras().get(2..4).is_some_and(|s| s.iter().any(|&v| v != Value::NIL))) {
             return Ok(true);
         }
-        let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras.is_empty() => Some(look.glyphless), _ => None };
+        let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras().is_empty() => Some(look.glyphless), _ => None };
         let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
         let text = &b.as_str()[from.min(b.as_str().len())..to.min(b.as_str().len())];
         let mut special = vec![];

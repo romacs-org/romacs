@@ -167,9 +167,9 @@ impl Vm {
                     String(s) | RawString(s) => s.properties.visit_values(&mut push),
                     HashTable(t) if t.weakness == hash::Weakness::None => t.visit_values(&mut push),
                     HashTable(_) => {}
-                    CharTable(t) => t.visit_values_seen(native, &mut push),
-                    SubCharTable(node) => char_table::visit_char_table_node_values(node, native, &mut push),
-                    MapKeymapCursor(c) => c.visit_values(native, &mut push),
+                    CharTable(t) => t.collector_visit_values(native, &mut push),
+                    SubCharTable(node) => char_table::collector_visit_node(node, native, &mut push),
+                    MapKeymapCursor(c) => c.collector_visit_values(native, &mut push),
                     Window(w) => w.visit_values(&mut push),
                     Frame(f) => f.visit_values(&mut push),
                     Terminal(t) => t.visit_values(&mut push),
