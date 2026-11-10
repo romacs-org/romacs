@@ -724,10 +724,19 @@ or a repeat."
   "A harness task's end STATE in a card's words."
   (pcase state ('completed "completed") ('failed "failed") (_ "cancelled")))
 
-(defun romacs-agent-ui--task-tool (table task)
-  "The tool id of TABLE's row running harness task TASK, or nil."
-  (cl-loop for id being the hash-keys of table using (hash-values row)
-           when (equal (plist-get row :task) task) return id))
+(defvar romacs-agent-ui--task-tools (make-hash-table :test #'eq :weakness 'key)
+  "Each session's running harness tasks: a table of task id to the tool id
+whose row runs it.  A task's event finds its row by it, not by a scan.")
+
+(defun romacs-agent-ui--task-tools (session)
+  "SESSION's table of running harness tasks (`romacs-agent-ui--task-tools')."
+  (or (gethash session romacs-agent-ui--task-tools)
+      (puthash session (make-hash-table :test #'equal) romacs-agent-ui--task-tools)))
+
+(defun romacs-agent-ui--forget-task (session row)
+  "ROW no longer runs its task: SESSION's index forgets it."
+  (when-let* ((task (plist-get row :task)))
+    (remhash task (romacs-agent-ui--task-tools session))))
 
 (defun romacs-agent-ui--track-task (session event)
   "Keep what task EVENT says of the work SESSION's harness runs under a tool
@@ -736,18 +745,20 @@ here for a tool that is not a subagent's: hidden while it runs in the
 foreground, as the tool's own card shows it."
   (let* ((table (or (romacs-agent-subagents session)
                     (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
-         (id (or (plist-get event :id) (romacs-agent-ui--task-tool table (plist-get event :task))))
+         (id (or (plist-get event :id) (gethash (plist-get event :task) (romacs-agent-ui--task-tools session))))
          (row (and id (or (gethash id table)
                           (list :tool id :state "running" :time (plist-get event :time) :title (plist-get event :title)
                                 :hidden (not (plist-get event :background)))))))
     (when row
      (puthash id
              (pcase (plist-get event :state)
-               ('started (plist-put row :task (plist-get event :task)))
+               ('started (puthash (plist-get event :task) id (romacs-agent-ui--task-tools session))
+                         (plist-put row :task (plist-get event :task)))
                ('backgrounded (plist-put row :hidden nil))
                ('progress (plist-put (plist-put row :activity (plist-get event :activity))
                                      :time (or (plist-get event :time) (plist-get row :time))))
                (end (let ((failed (eq end 'failed)))
+                      (romacs-agent-ui--forget-task session row)
                       (plist-put (plist-put (plist-put (plist-put row :task nil) :state (romacs-agent-ui--task-state end))
                                             :unseen failed)
                                  :time (or (plist-get event :time) (plist-get row :time))))))
@@ -763,6 +774,7 @@ new turn starts, and last turn's failures have been seen."
       (let ((row (gethash id table)))
         (cond (next (puthash id (plist-put row :unseen nil) table))
               ((and (equal (plist-get row :state) "running") (or gone (not (plist-get row :task))))
+               (romacs-agent-ui--forget-task session row)
                (puthash id (plist-put (plist-put (plist-put row :state "cancelled") :task nil)
                                       :time (or time (plist-get row :time)))
                         table)))))

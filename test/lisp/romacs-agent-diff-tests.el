@@ -117,7 +117,7 @@
     (romacs-agent-diff--snapshot session 5 'end)
     (romacs-agent-diff--snapshot session 3 'start)
     (romacs-agent-diff--snapshot session 5 'start)
-    (should (= (length (gethash "s" romacs-agent-diff--queues)) 2))
+    (should (= (length (car (gethash "s" romacs-agent-diff--queues))) 2))
     (romacs-agent-diff-tests--wait session 3)
     (should (equal (mapcar (lambda (c) (list (car c) (nth 1 c))) (romacs-agent-diff--checkpoints session))
                    '((3 start) (5 start) (5 end))))

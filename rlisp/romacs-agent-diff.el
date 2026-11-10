@@ -61,8 +61,9 @@ its message's request id and EDGE `start' or `end'."
               (lambda (a b) (if (= (car a) (car b)) (eq (nth 1 a) 'start) (< (car a) (car b)))))))))
 
 (defvar romacs-agent-diff--queues (make-hash-table :test #'equal)
-  "A session's id to its snapshots waiting, oldest first, while one runs:
-one at a time, each sees the project after the one before.")
+  "A session's id to its snapshots waiting while one runs, as (HEAD . LAST):
+HEAD the jobs oldest first, LAST its last cons, so a job joins in constant
+time.  One at a time, each sees the project after the one before.")
 
 (defun romacs-agent-diff--snapshot (session turn edge &optional then)
   "Checkpoint SESSION's project as TURN's EDGE, in the background and
@@ -73,14 +74,19 @@ root; nil when it is no git project or git fails.  Only a `start' or
          (queued (gethash id romacs-agent-diff--queues :none))
          (job (list session turn edge then)))
     (if (eq queued :none)
-        (progn (puthash id nil romacs-agent-diff--queues) (apply #'romacs-agent-diff--run job))
-      (puthash id (append queued (list job)) romacs-agent-diff--queues))))
+        (progn (puthash id (cons nil nil) romacs-agent-diff--queues) (apply #'romacs-agent-diff--run job))
+      (let ((cell (list job)))
+        (if (car queued) (setcdr (cdr queued) cell) (setcar queued cell))
+        (setcdr queued cell)))))
 
 (defun romacs-agent-diff--next (session)
   "SESSION's snapshot ended: run the next one waiting, if any."
-  (let* ((id (romacs-agent-id session)) (queued (gethash id romacs-agent-diff--queues)))
-    (if queued
-        (progn (puthash id (cdr queued) romacs-agent-diff--queues) (apply #'romacs-agent-diff--run (car queued)))
+  (let* ((id (romacs-agent-id session)) (queued (gethash id romacs-agent-diff--queues))
+         (head (car queued)))
+    (if head
+        (progn (setcar queued (cdr head))
+               (unless (cdr head) (setcdr queued nil))
+               (apply #'romacs-agent-diff--run (car head)))
       (remhash id romacs-agent-diff--queues))))
 
 (defun romacs-agent-diff--run (session turn edge then)

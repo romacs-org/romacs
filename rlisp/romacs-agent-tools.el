@@ -445,9 +445,8 @@ on once."
       (dolist (end ends)
         (when (romacs-agent-tools--wanted-p child (car end))
           (if (pcase (romacs-agent-tools--wake-rule child) ("none" nil) ("failure" (nth 2 end)) (_ t))
-              (puthash (romacs-agent-id parent)
-                       (append (gethash (romacs-agent-id parent) romacs-agent-tools--pending) (list (cons child end)))
-                       romacs-agent-tools--pending)
+              ;; Newest first: an end is added in constant time.
+              (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
             ;; Done with on its own: an earlier end still waiting stays wanted.
             (romacs-agent-tools--answer child (car end)))))
       (romacs-agent-tools--wake-soon parent))))
@@ -477,11 +476,16 @@ ended without its end handed on yet."
   "Wake PARENT once with the ends waiting for it, unless it is at work: its
 turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
   (unless (memq (romacs-agent-state parent) '(starting running waiting-approval))
-    (let* ((items (seq-filter (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item)))
-                              (gethash (romacs-agent-id parent) romacs-agent-tools--pending)))
-           (hold (romacs-agent-tools--all-pending-p parent))
-           (ready (seq-remove (lambda (item) (and hold (equal (romacs-agent-tools--wake-rule (car item)) "all"))) items)))
-      (puthash (romacs-agent-id parent) (seq-difference items ready #'eq) romacs-agent-tools--pending)
+    (let* ((hold (romacs-agent-tools--all-pending-p parent))
+           (held nil) (ready nil))
+      ;; One pass, oldest first: the ends still wanted, held or ready.
+      (dolist (item (reverse (gethash (romacs-agent-id parent) romacs-agent-tools--pending)))
+        (when (romacs-agent-tools--wanted-p (car item) (cadr item))
+          (if (and hold (equal (romacs-agent-tools--wake-rule (car item)) "all"))
+              (push item held)
+            (push item ready))))
+      (setq ready (nreverse ready))
+      (puthash (romacs-agent-id parent) held romacs-agent-tools--pending)
       (when ready
         (romacs-agent-tools--deliver
          parent
