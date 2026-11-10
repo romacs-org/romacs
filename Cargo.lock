@@ -3660,6 +3660,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-record"
+version = "0.0.20"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "romacs-regex-engine"
 version = "0.0.20"
 dependencies = [

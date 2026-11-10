@@ -1,0 +1,14 @@
+[package]
+name = "romacs-record"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Flat, versioned records between Romacs's processes: header, hello, handles, shared regions"
+
+[dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true

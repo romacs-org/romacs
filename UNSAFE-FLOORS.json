@@ -10,6 +10,7 @@
     "romacs-font-materializer": {"sites": 2, "undocumented": 0},
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
     "romacs-gui-tests": {"sites": 4, "undocumented": 1},
+    "romacs-record": {"sites": 20, "undocumented": 0},
     "romacs-regex-engine": {"sites": 6, "undocumented": 0},
     "romacs-renderer-wgpu": {"sites": 18, "undocumented": 0},
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
