@@ -285,10 +285,60 @@ journals what its harness writes."
         (should (eq (plist-get (car events) :type) 'answered))
         (should (= (hash-table-count (romacs-agent-approvals session)) 0))))))
 
+(defun romacs-agent-codex-tests--question (id text &rest fields)
+  (apply #'romacs-mcp--object "id" id "question" text "isOther" t "isSecret" :false fields))
+
+(ert-deftest romacs-agent-codex-questions ()
+  ;; Codex's questions are an approval's, by their text; the wire's by id.
+  (romacs-agent-codex-tests--with ()
+    (romacs-agent-codex-tests--ready session)
+    (let ((events nil) (romacs-agent-event-functions nil)
+          (asked (romacs-mcp--object
+                  "threadId" "th" "turnId" "t1" "itemId" "call" "isBlocking" t "autoResolutionMs" :null
+                  "questions" (vector (romacs-agent-codex-tests--question
+                                       "color" "Which color?" "header" "Color"
+                                       "options" (vector (romacs-mcp--object "label" "Red" "description" "warm")
+                                                         (romacs-mcp--object "label" "Blue" "description" "")))
+                                      (romacs-agent-codex-tests--question
+                                       "name" "What name?" "header" "Name" "options" :null)))))
+      (add-hook 'romacs-agent-event-functions (lambda (_session event) (push event events)))
+      (out "id" 5 "method" "item/tool/requestUserInput" "params" asked)
+      (let ((approval (cl-find 'approval events :key (lambda (e) (plist-get e :type)))))
+        (should (equal (plist-get approval :questions)
+                       '(("Which color?" :header "Color" :options ("Red" "Blue") :notes (("Red" . "warm")) :multi nil)
+                         ("What name?" :header "Name" :options nil :notes nil :multi nil))))
+        (should (eq (romacs-agent-state session) 'waiting-approval))
+        ;; An option by its label, other words as a note.
+        (romacs-agent-respond session (plist-get approval :request-id)
+                              '(:answers (("Which color?" . "Blue") ("What name?" . "Ada"))))
+        (let ((answers (gethash "answers" (gethash "result" (last-written)))))
+          (should (eql (gethash "id" (last-written)) 5))
+          (should (equal (gethash "answers" (gethash "color" answers)) ["Blue"]))
+          (should (equal (gethash "answers" (gethash "name" answers)) ["user_note: Ada"])))
+        (echo)
+        (should (equal (plist-get (car events) :behavior) "allow")))
+      ;; Dismissed: no answers.
+      (out "id" 6 "method" "item/tool/requestUserInput" "params" asked)
+      (romacs-agent-respond session (romacs-agent-codex-tests--asked events) nil)
+      (should (= (hash-table-count (gethash "answers" (gethash "result" (last-written)))) 0))
+      (echo)
+      (should (equal (plist-get (car events) :behavior) "deny"))
+      ;; A secret is not asked where its answer is journaled.
+      (setq events nil)
+      (out "id" 7 "method" "item/tool/requestUserInput"
+           "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "c2"
+                                        "questions" (vector (romacs-agent-codex-tests--question
+                                                             "pw" "Password?" "isSecret" t "options" :null))))
+      (should-not (cl-find 'approval events :key (lambda (e) (plist-get e :type))))
+      (should (string-match-p "secret" (plist-get (cl-find 'status events :key (lambda (e) (plist-get e :type))) :text)))
+      (should (eql (gethash "id" (last-written)) 7))
+      (should (gethash "error" (last-written))))))
+
 (ert-deftest romacs-agent-codex-refuses-other-requests ()
   (romacs-agent-codex-tests--with ()
     (romacs-agent-codex-tests--ready session)
-    (out "id" 7 "method" "item/tool/requestUserInput" "params" (romacs-mcp--object "questions" []))
+    (out "id" 7 "method" "mcpServer/elicitation/request"
+         "params" (romacs-mcp--object "threadId" "th" "serverName" "x" "mode" "url" "url" "https://example.org"))
     (let ((refusal (last-written)))
       (should (eql (gethash "id" refusal) 7))
       (should (= (gethash "code" (gethash "error" refusal)) -32601))
