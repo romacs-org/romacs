@@ -126,13 +126,13 @@ fn laid_out_frames_answer_pointer_queries_at_their_presentation() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(400, 300, line, column).unwrap();
     vm.eval_source("(progn (insert \"ROOT\") (set-buffer (get-buffer-create \"popup\")) (insert \"POPUP\") (setq mode-line-format nil))").unwrap();
     vm.eval_source("(let ((c (romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 2) (left . 30) (top . 5))))) \
                       (set-window-buffer (frame-root-window c) \"popup\"))").unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let query = |frame: &romacs_display_protocol::FrameGlyphBuffer| {
         let point = GeometryPoint::<RootSurfaceSpace, LogicalPixels>::from_px(5.0, 5.0).unwrap();
         PresentedHitQuery::new(InteractionProjection::settled(frame.presentation_id).map(point).unwrap())

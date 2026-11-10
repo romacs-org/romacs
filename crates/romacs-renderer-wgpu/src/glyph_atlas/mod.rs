@@ -21,7 +21,7 @@ use cosmic_text::{
 };
 
 use bitmap_fonts::BitmapFontReplayCache;
-use romacs_display_protocol::face::{BasicFaceId, Face};
+use romacs_display_protocol::face::Face;
 use romacs_display_protocol::font::{
     CharFontTable, FontCatalogGeneration, FontReplay, FontSlantKind, FrameFontBindings,
     ResolvedFont, ResolvedFontId, ResolvedFontTable, ResolvedGlyph, ShapedClusterTable,
@@ -1651,7 +1651,7 @@ impl WgpuGlyphAtlas {
         shaped_clusters: &ShapedClusterTable,
     ) {
         self.install_resolved_fonts(fonts.values());
-        if let Some(face) = faces.get(&BasicFaceId::Default.into())
+        if let Some(face) = faces.get(&romacs_display_protocol::types::FaceId::of_default())
             && self.default_face.as_deref() != Some(face)
         {
             self.default_face = Some(std::sync::Arc::new(face.clone()));
