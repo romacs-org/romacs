@@ -66,6 +66,9 @@ pub struct Display {
     released: std::collections::HashSet<u64>,
     /// Wakes the GUI's wait when a decode finishes.
     wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    /// Set by the worker after each result it sends: `finished_decodes`
+    /// looks at the worker's results only then, not on every call.
+    landed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The first 64 KiB of an SVG SOURCE, where its root start tag is.
@@ -98,9 +101,11 @@ struct Worker {
 }
 
 impl Worker {
-    /// A thread decoding with DECODER, waking WAKE after each result.
+    /// A thread decoding with DECODER, setting LANDED and waking WAKE
+    /// after each result.
     fn spawn(decoder: std::sync::Arc<romacs_imaging::decode::SemanticImageDecoder>,
-             wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Worker> {
+             wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+             landed: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Option<Worker> {
         let (jobs, inbox) = std::sync::mpsc::channel::<Job>();
         let (outbox, results) = std::sync::mpsc::channel();
         std::thread::Builder::new().name("image-decode".into()).spawn(move || {
@@ -112,6 +117,7 @@ impl Worker {
                 let result = decoder.decode_pixels(request).map_err(|diagnostic| diagnostic.message());
                 drop(reservation);
                 if outbox.send((id, result)).is_err() { break; }
+                landed.store(true, std::sync::atomic::Ordering::SeqCst);
                 if let Some(wake) = &wake { wake(); }
             }
         }).ok()?;
@@ -124,7 +130,8 @@ impl Display {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
                   opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None, lose_device_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
-                  finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
+                  finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None,
+                  landed: std::sync::Arc::default() })
     }
     /// This display, keeping decoded images' pixels in IMAGES.
     pub fn with_images(self, images: residency::Shared) -> Self {
@@ -362,7 +369,7 @@ impl romacs_vm::DisplayHost for Display {
             let decoded = self.images.decode_pixels(request).map_err(|d| { self.release_image(id); d.message() })?;
             return Ok(self.decoded_facts(id, decoded, false));
         };
-        if self.worker.is_none() { self.worker = Worker::spawn(self.images.clone(), self.wake.clone()); }
+        if self.worker.is_none() { self.worker = Worker::spawn(self.images.clone(), self.wake.clone(), self.landed.clone()); }
         let Some(worker) = &self.worker else {
             let decoded = self.images.decode_pixels(request).map_err(|d| { self.release_image(id); d.message() })?;
             return Ok(self.decoded_facts(id, decoded, false));
@@ -385,6 +392,11 @@ impl romacs_vm::DisplayHost for Display {
         }
     }
     fn finished_decodes(&mut self) -> Vec<(u64, Result<romacs_vm::ImageFacts, String>)> {
+        // Asked on every pass of the loop and of a read: nothing finished
+        // since the last call unless the worker said so, or a wait for
+        // another image (`finish_decode') took a result on the way.
+        if !self.landed.swap(false, std::sync::atomic::Ordering::SeqCst) && self.finished.is_empty() { return vec![]; }
+        romacs_display_protocol::call_count::count("decode.results");
         if let Some(worker) = &self.worker { while let Ok((id, result)) = worker.results.try_recv() { self.finished.insert(id, result); } }
         let ids: Vec<u64> = self.finished.keys().copied().collect();
         let mut out = vec![];

@@ -47,7 +47,10 @@ const SIDES: &[(&str, Side)] = &[
     // (`finish_decode` blocks on its results), and image files read
     // outside host.rs.
     ("display.decode_image", Cross), ("display.release_image", Cross), ("display.begin_decode", Cross),
-    ("display.finish_decode", Cross), ("display.finished_decodes", Cross), ("display.image_header_size", Cross),
+    ("display.finish_decode", Cross), ("display.image_header_size", Cross),
+    // fonts.rs: looks at the worker's results (`decode.results`) only
+    // once the worker has sent one.
+    ("display.finished_decodes", Through), ("decode.results", Cross),
     // prompt.rs: each calls the paint sender for the render thread's
     // input channel, paint channel, rendered state, clipboard, adapter,
     // window or pointer.
