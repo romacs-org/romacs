@@ -702,12 +702,11 @@ impl Vm {
             Some(entry.compiled.clone())
         });
         self.regexp_cache.patterns = patterns;
-        let compiled = match hit {
-            Some(compiled) => compiled,
-            None => {
-                let pattern = self.regexp_input(pattern)?;
-                self.regexp_pattern(&pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?
-            }
+        let compiled = if let Some(compiled) = hit {
+            compiled
+        } else {
+            let pattern = self.regexp_input(pattern)?;
+            self.regexp_pattern(&pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?
         };
         compiled.borrow_mut().set_target_multibyte(multibyte);
         Ok(compiled)
