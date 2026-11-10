@@ -156,6 +156,13 @@
   (romacs-agent-plan-tests--with 'codex
     (setf (romacs-agent-model session) "gpt-6.1-sol" (romacs-agent-harness-session session) "th")
     (let ((mode (lambda () (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))))
+      ;; A Codex not told of the experimental API (started before) refuses
+      ;; the turn that says it: none said.
+      (should-not (funcall mode))
+      (dolist (event (romacs-agent--codex-input-events
+                      session (romacs-mcp--object "method" "initialize" "id" 0
+                                                  "params" (romacs-mcp--object "capabilities" (romacs-mcp--object "experimentalApi" t)))))
+        (romacs-agent--raise session event))
       (should (equal (gethash "mode" (funcall mode)) "default"))
       (should (equal (gethash "model" (gethash "settings" (funcall mode))) "gpt-6.1-sol"))
       (romacs-agent-set-plan session t)

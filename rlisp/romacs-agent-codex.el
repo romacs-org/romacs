@@ -116,8 +116,11 @@ summarized in detail."
         (options (romacs-agent-options session)))
     (when-let* ((model (plist-get options :model))) (puthash "model" model params))
     (when-let* ((effort (plist-get options :effort))) (puthash "effort" effort params))
-    ;; Every turn says its mode, as T3 Code does: leaving plan mode clears it.
-    (when-let* ((model (or (plist-get options :model) (romacs-agent-model session))))
+    ;; Every turn says its mode, as T3 Code does: leaving plan mode clears
+    ;; it.  Only to a Codex that was told this client speaks its
+    ;; experimental API: one started before refuses the whole turn.
+    (when-let* (((plist-get (romacs-agent-driver-state session) :experimental))
+                (model (or (plist-get options :model) (romacs-agent-model session))))
       (puthash "collaborationMode"
                (romacs-mcp--object "mode" (if (plist-get options :plan) "plan" "default")
                                    "settings" (let ((settings (romacs-mcp--object "model" model)))
@@ -267,7 +270,11 @@ what to do should it miss its turn."
     (cond
      ((member method '("turn/start" "turn/steer")) (romacs-agent--codex-message session object))
      ((member method '("initialize" "initialized" "thread/start" "thread/resume" "thread/fork"))
-      (list (list :type 'handshake :state (list :sent (if (string-prefix-p "thread/" method) "thread" method)))))
+      (list (list :type 'handshake
+                  :state (append (list :sent (if (string-prefix-p "thread/" method) "thread" method))
+                                 (and (equal method "initialize")
+                                      (eq (gethash "experimentalApi" (gethash "capabilities" (gethash "params" object))) t)
+                                      (list :experimental t))))))
      (method nil)
      ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
       (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
