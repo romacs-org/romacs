@@ -377,6 +377,16 @@ impl Vm {
         self.profile_collection_end();
         collected
     }
+    /// `collect_marked', and, when one is due, a mark twin's check of what it
+    /// freed (`twin.rs'): forked from the state the collection starts from.
+    fn collect_twinned(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        let twin = crate::twin::fork_marks(self, roots);
+        let collected = self.collect_marked(roots, until_key);
+        if let Some(twin) = twin && collected {
+            crate::twin::check(self, twin);
+        }
+        collected
+    }
     fn collect_rooted(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         let live: Vec<Arc<AtomicU64>> = {
             let slots = self.rooted.slots.get_mut();
@@ -384,11 +394,11 @@ impl Vm {
             slots.iter().filter_map(Weak::upgrade).collect()
         };
         if live.is_empty() {
-            return self.collect_marked(roots, until_key);
+            return self.collect_twinned(roots, until_key);
         }
         let mut all = roots.to_vec();
         all.extend(live.iter().map(|s| Value(s.load(Ordering::Relaxed))));
-        if !self.collect_marked(&mut all, until_key) {
+        if !self.collect_twinned(&mut all, until_key) {
             return false;
         }
         roots.copy_from_slice(&all[..roots.len()]);
