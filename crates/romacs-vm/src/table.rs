@@ -426,11 +426,13 @@ impl<T> Table<T> {
     /// for one test of I.
     #[inline(always)]
     fn store_at(&mut self, i: usize) -> (&mut T, &mut u8, &mut Barrier) {
+        debug_assert_eq!(self.colors.len(), self.entries.len(), "a colour for every entry");
         let entry = &mut self.entries[i];
-        // SAFETY: I is within `entries` (just indexed), and `colors` is
-        // exactly as long: `push`, `alloc`, `cut`, `collector_compact`,
-        // `collector_prepend` and `dense` are all that change either length,
-        // and each leaves them equal.
+        // SAFETY: I is within `entries` (just indexed), and `colors` is never
+        // the shorter, at any instruction, so that a panic part way leaves it
+        // so: `push` and `collector_prepend` lengthen the colours first, `cut`
+        // and `collector_compact` shorten the entries first, and `dense`
+        // makes them equal. Nothing else changes either length.
         let color = unsafe { self.colors.get_unchecked_mut(i) };
         (entry, color, &mut self.barrier)
     }
@@ -475,8 +477,9 @@ impl<T> Table<T> {
         if self.entries.len() == self.entries.capacity() {
             self.grow();
         }
-        self.entries.push(value);
+        // The colour first: no entry is ever without one (`store_at').
         self.colors.push(IN_USE);
+        self.entries.push(value);
         self.entries.len() - 1
     }
     pub(crate) fn extend(&mut self, values: impl IntoIterator<Item = T>) {
@@ -573,8 +576,11 @@ impl<T> Table<T> {
         self.colors[i] & (IN_USE | MARK) == (IN_USE | MARK)
     }
     /// Every mark gone, and the free entries counted again: a collection
-    /// stopped short, perhaps part way through a sweep. The generations and
-    /// the log stay as they are: a mark changes neither.
+    /// stopped short. A mark changes neither the generations nor the log, so
+    /// one stopped while it marked leaves both as they were. One stopped
+    /// part way through its sweep has made some survivors old and clean and
+    /// not others; nothing reads the generations yet, and what does will
+    /// have to know of it.
     pub(crate) fn clear_marks(&mut self) {
         let (mut free, mut quarantined) = (0, 0);
         for color in &mut self.colors {
@@ -651,6 +657,8 @@ impl<T> Table<T> {
     }
     /// N fillers in front of every entry, which move up past them.
     pub(crate) fn collector_prepend(&mut self, n: usize, filler: impl FnMut() -> T) {
+        // Colours for them first, whatever FILLER does (`store_at').
+        self.colors.resize(self.entries.len() + n, FREE);
         self.entries.splice(0..0, std::iter::repeat_with(filler).take(n));
         self.dense();
     }
@@ -666,10 +674,12 @@ impl<T> Table<T> {
     /// is empty: what a world image holds, whose every entry is old to the
     /// process that restores it.
     pub(crate) fn settle_old(&mut self) {
-        debug_assert!(!self.marking, "no mark is in progress");
         for color in &mut self.colors {
             if *color & IN_USE != 0 { *color = OLD | IN_USE; }
         }
+        // Any marks a stopped collection left went with the rest.
+        self.marking = false;
+        self.generation += 1;
         self.barrier = Barrier::default();
     }
     /// Whether every entry in use is exactly old and the log is empty: what a
@@ -909,6 +919,61 @@ mod tests {
         assert!(t.old(young), "the young cons written survived, old and clean");
     }
 
+    /// Each of a cons's two stores dirties it.
+    #[test]
+    fn either_half_of_a_cons_written_dirties_it() {
+        let mut t = conses(2);
+        age(&mut t);
+        t.set_car(0, Value::TRUE);
+        assert_eq!(dirty(&t), [0]);
+        t.set_cdr(1, Value::TRUE);
+        assert_eq!(dirty(&t), [0, 1]);
+    }
+
+    /// The sweep's word at a time agrees with its entry at a time, whatever
+    /// the colours beside the mark: a word whose entries all survive leaves
+    /// each exactly old, and its free and quarantined entries as they were.
+    #[test]
+    fn a_word_of_survivors_of_every_colour_is_swept_to_old() {
+        let mut t = conses(40);
+        // Quarantine 3 and 12, free nothing else.
+        for i in (0..40).filter(|i| ![3, 12].contains(i)) { t.mark(i); }
+        assert_eq!(t.sweep(true, |_| {}), 2);
+        // Old and dirty, old and clean, young and dirty, young and clean.
+        let young: Vec<usize> = (0..8).map(|_| t.alloc((Value::NIL, Value::NIL))).collect();
+        assert_eq!(young[0], 40, "quarantined entries are not reused");
+        for i in [0, 5, 9, 17, 33, young[1], young[6]] { t.set_car(i, Value::TRUE); }
+        for i in (0..48).filter(|i| ![3, 12].contains(i)) { assert!(t.mark(i), "{i}"); }
+        assert!(!t.mark(3) && !t.mark(12), "nor ever marked");
+        assert_eq!(t.sweep(true, |_| panic!("nothing is dead")), 0);
+        assert!(t.settled() && dirty(&t).is_empty());
+        assert_eq!((t.len(), t.unused(), t.live()), (48, 2, 46));
+        assert!((0..48).all(|i| t.old(i) != [3, 12].contains(&i)) && t.is_free(3) && t.is_free(12));
+        // And a word with one dead entry among them, by the other path.
+        for i in (0..48).filter(|i| ![3, 12, 20].contains(i)) { t.mark(i); }
+        assert_eq!(t.sweep(false, |_| {}), 1);
+        assert!(t.settled() && t.is_free(20));
+        assert_eq!(t.alloc((Value::NIL, Value::NIL)), 20);
+    }
+
+    /// A filler that panics leaves no entry without a colour: a store into
+    /// what it had put in stays in bounds.
+    #[test]
+    fn a_panic_while_prepending_leaves_a_colour_for_every_entry() {
+        let mut t = conses(3);
+        let mut made = 0;
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.collector_prepend(4, || {
+                made += 1;
+                assert!(made < 3, "a filler's panic");
+                (Value::NIL, Value::NIL)
+            });
+        }));
+        assert!(caught.is_err());
+        assert!(t.colors.len() >= t.entries.len());
+        for i in 0..t.entries.len() { t.colors[i] = IN_USE; }
+    }
+
     /// A cell and a vector slot are dirtied as a cons is, and a store that
     /// fails writes nothing.
     #[test]
@@ -972,10 +1037,22 @@ mod tests {
             let (_, mut stores) = t.hash_mut(i).unwrap();
             stores.stored(key);
             stores.stored(value);
-            stores.stored(Value::integer(1).unwrap());
+            // Nothing that names no entry, or one no collection frees by parts.
+            for inert in [Value::NIL, Value::TRUE, Value::UNBOUND, Value::integer(1).unwrap(), Value::reference(3, 7), Value::reference(crate::image::IMAGE | 3, 3)] {
+                stores.stored(inert);
+            }
         }
         assert_eq!(t.logged(), [key, value]);
         assert_eq!(dirty(&t), [1]);
+        // An abandoned mark keeps the log, a settle and a compaction empty it.
+        t.clear_marks();
+        assert_eq!(t.logged(), [key, value]);
+        t.settle_old();
+        assert!(t.logged().is_empty() && t.settled());
+        t.hash_mut(0).unwrap().1.stored(key);
+        for i in 0..3 { t.mark(i); }
+        t.collector_compact(|_| {});
+        assert!(t.logged().is_empty() && t.settled());
     }
 
     /// A log that only a loop with no poll can fill gives up: it is dropped,
@@ -996,6 +1073,8 @@ mod tests {
         put(&mut t);
         assert!(t.logged().is_empty(), "nothing more is recorded");
         assert!(!t.settled(), "a lost log is not an empty one");
+        t.clear_marks();
+        assert!(t.log_lost(), "nor does an abandoned mark find it again");
         age(&mut t);
         assert!(!t.log_lost() && t.settled());
         put(&mut t);

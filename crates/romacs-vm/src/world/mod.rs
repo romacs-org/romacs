@@ -169,8 +169,6 @@ impl Vm {
         }
         self.environment_snapshot = None;
         self.isolate_forget_claim();
-        // To the process that restores it, the image is the old generation.
-        self.settle_generations();
     }
 
     /// A top-level FORM of a loaded file ends: a re-seed form's variable is

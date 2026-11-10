@@ -1796,16 +1796,16 @@ mod tests {
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
     }
 
-    /// An image holds only old entries and no log, whatever its builder had
-    /// allocated or stored since its last collection.
+    /// What a capture does to the heap it writes: only old entries and no
+    /// log, whatever was allocated or stored since the last collection.
     #[test]
-    fn a_normalized_world_is_one_old_generation() {
+    fn settling_leaves_one_old_generation() {
         let mut vm = Vm::new();
-        vm.eval_source_raw("(setq gen-old (list 1 2))").unwrap();
+        vm.eval_source_raw("(setq gen-old (list 1 2) gen-table (make-hash-table))").unwrap();
         vm.collect(&mut []);
-        vm.eval_source_raw("(setcar gen-old (list 3))").unwrap();
+        vm.eval_source_raw("(setcar gen-old (list 3)) (puthash (list 4) (list 5) gen-table)").unwrap();
         assert!(!settled(&vm));
-        vm.world_normalize();
+        vm.settle_generations();
         assert!(settled(&vm));
     }
 

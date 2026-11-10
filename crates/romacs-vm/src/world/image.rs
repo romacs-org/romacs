@@ -116,8 +116,11 @@ impl Vm {
 /// process's heap; nothing else allocates while the image is written, and
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
-pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
+pub fn capture<T: super::safe::SnapshotSafe + 'static>(mut vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     vm.world_quiescent()?;
+    // To the process that restores it, the image is the old generation,
+    // whatever was allocated or stored since the last collection.
+    vm.settle_generations();
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = Box::into_raw(Box::new((vm, carry))) as usize;
