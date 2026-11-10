@@ -34,13 +34,13 @@ crates/romacs-vm/src/display.rs:1368 delayed-variable reads through variable_val
 crates/romacs-vm/src/forwarded.rs:738 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs:1613 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/forwarded.rs:1809 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/gc.rs:189 Instant::now a collection's phase clock (`romacs--gc-phases'), running only once `host::collection_clock' started it, which no builder does, its heap being the image
-crates/romacs-vm/src/gc.rs:301 std::env::var the collector's thread count for a test (ROMACS_GC_WORKERS): what a collection leaves is the same at any count; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:302 std::env::var_os the collector's in-place stress mode (ROMACS_GC_INPLACE): stress collections free in place instead of moving; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:303 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
-crates/romacs-vm/src/gc.rs:304 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:1331 dynamic:saved collector: marks the saved values
-crates/romacs-vm/src/gc.rs:1460 dynamic:saved collector: forwards the saved values
+crates/romacs-vm/src/gc.rs:206 Instant::now a collection's phase clock (`romacs--gc-phases'), running only once `host::collection_clock' started it, which no builder does, its heap being the image
+crates/romacs-vm/src/gc.rs:318 std::env::var the collector's thread count for a test (ROMACS_GC_WORKERS): what a collection leaves is the same at any count; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs:319 std::env::var_os the collector's in-place stress mode (ROMACS_GC_INPLACE): stress collections free in place instead of moving; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs:320 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
+crates/romacs-vm/src/gc.rs:321 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs:1351 dynamic:saved collector: marks the saved values
+crates/romacs-vm/src/gc.rs:1509 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/gc_check.rs:83 dynamic:saved verify's reference marker: the saved values are roots it reads again
 crates/romacs-vm/src/hash.rs:934 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
