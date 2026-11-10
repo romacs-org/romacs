@@ -2225,6 +2225,8 @@ unsafe fn poll_resume(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Val
     e.budget = 10_000;
     #[cfg(test)]
     POLLS.with(|polls| polls.set(polls.get() + 1));
+    #[cfg(test)]
+    POLL_LOW.with(|low| low.set(low.get().min(eval_depth::stack_pointer())));
     // R193: the dispatch below must be a sibling call or every poll keeps a
     // frame: gdb on the gate-built (non-LTO) romacs-gnu-ert adapter showed
     // 74,600 poll_resume frames and SIGABRT under `(while t)` when the
@@ -5751,6 +5753,9 @@ fn write_late_lent<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: 
 thread_local! {
     /// The engine's polls (`poll_resume') on this thread, for tests.
     pub(crate) static POLLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The lowest native stack pointer a poll ran at on this thread: how deep
+    /// handlers dispatch.
+    pub(crate) static POLL_LOW: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
 }
 #[cfg(test)]
 #[path = "threaded_reader_gc_tests.rs"]
@@ -5839,6 +5844,67 @@ mod register_tests {
                 .any(|entry| entry.target == target),
             "ordinary primitives must populate call-site entries"
         );
+    }
+
+    /// SOURCE's value, and how far below this thread's start its polls ran, on
+    /// a stack deep enough that compiling it is never the limit.
+    fn poll_depth(source: String) -> (i64, usize) {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let top = eval_depth::stack_pointer();
+                let mut vm = Vm::new();
+                let value = vm.eval_source(&source).unwrap().as_integer().unwrap();
+                assert!(POLLS.with(std::cell::Cell::get) > 1, "the loop polled");
+                (value, top - POLL_LOW.with(std::cell::Cell::get))
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    /// Tail dispatch keeps the native stack flat however long a loop runs:
+    /// its polls sit as deep after 200,000 iterations as after 20,000, at any
+    /// opt level, by sibling calls in optimized builds and the trampoline in
+    /// debug ones. A dispatch that stopped being a tail call would deepen with
+    /// every instruction it ran.
+    #[test]
+    fn funcall_and_apply_tail_dispatch_has_bounded_native_stack() {
+        let run = |n: i64| {
+            let (value, depth) = poll_depth(format!(
+                "(let ((f #'abs) (g (lambda (&rest xs) (car xs))) (n 0) (i 0))
+                   (while (< i {n})
+                     (setq n (+ (funcall f i) (apply #'+ (list i 1)) (apply g i nil)
+                                (length (apply #'concat (list \"a\" \"b\"))))
+                           i (1+ i)))
+                   n)"
+            ));
+            assert_eq!(value, 3 * (n - 1) + 1 + 2);
+            depth
+        };
+        let (short, long) = (run(20_000), run(200_000));
+        assert!(
+            long.abs_diff(short) <= 4096,
+            "native stack at the polls: {short} bytes after 20,000 iterations, {long} after 200,000"
+        );
+    }
+
+    /// The control: nesting that does take native stack, `eval` inside `eval`,
+    /// with a polling loop at the bottom, shows deeper polls the deeper it goes.
+    #[test]
+    fn poll_depth_sees_native_nesting() {
+        let run = |n: i64| {
+            let (value, depth) = poll_depth(format!(
+                "(progn (defun pd-nest (n)
+                          (if (> n 0) (eval (list 'pd-nest (1- n)))
+                            (let ((i 0)) (while (< i 200000) (setq i (1+ i))) i)))
+                        (pd-nest {n}))"
+            ));
+            assert_eq!(value, 200_000);
+            depth
+        };
+        let (shallow, deep) = (run(4), run(40));
+        assert!(deep > shallow + 4096, "36 more `eval' levels: {shallow} bytes, then {deep}");
     }
 
     /// A continuation's callee whose width is known only once forced: `sort`
