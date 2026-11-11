@@ -394,6 +394,15 @@ class BaseCountsTest(unittest.TestCase):
         self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
         self.assertEqual(self.measured, [], 'the merge-base was kept')
 
+    def test_a_merge_base_from_before_the_move_keeps_its_floors(self):
+        self.git('checkout', '-q', 'trunk')
+        self.git('mv', str(smells.FLOORS), smells.FLOORS_BEFORE)
+        self.git('commit', '-q', '-m', 'the floors before the move')
+        self.git('checkout', '-q', '-B', 'branch')
+        self.git('mv', smells.FLOORS_BEFORE, str(smells.FLOORS))
+        self.commit(6)                                    # a rise of one, the floor unchanged
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
+
     def test_merging_the_trunk_moves_the_merge_base(self):
         self.commit(5, name='other')
         self.git('checkout', '-q', 'trunk')

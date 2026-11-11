@@ -616,6 +616,20 @@ class Verify(unittest.TestCase):
         self.assertEqual(status, pr.EXIT_LOWER, err)
         self.assertIn('lisp/b.el', err)
 
+    def test_a_base_from_before_the_move_still_holds_its_floors(self):
+        from unittest.mock import patch
+        with patch.object(pr, 'RATCHET_NAME', pr.RATCHET_BEFORE):
+            root = self.repo(ratchet(), ratchet())
+        git = lambda *a: subprocess.run(['git', '-C', str(root), '-c', 'user.name=t', '-c', 'user.email=t@t', *a],
+                                        check=True, capture_output=True, env=dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null'))
+        (root / pr.RATCHET_NAME).parent.mkdir(exist_ok=True)
+        git('mv', pr.RATCHET_BEFORE, pr.RATCHET_NAME)
+        write_ratchet(root, ratchet(warm=('lisp/a.el',)))   # the move drops a member
+        git('commit', '-q', '--no-gpg-sign', '-am', 'move')
+        status, err = self.verify(root)
+        self.assertEqual(status, pr.EXIT_LOWER, err)
+        self.assertIn('census-warm: 1 dropped (lisp/b.el)', err)
+
     def test_a_bad_base_is_refused_not_passed_over(self):
         root = self.repo(ratchet(), ratchet())
         with self.assertRaises(pr.Refusal):
