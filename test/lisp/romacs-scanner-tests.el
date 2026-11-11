@@ -78,7 +78,16 @@
     (let ((by-hand (romacs-scanner-tests--by-hand (point-min) (point-max) 'code)))
       (should (equal (cdr by-hand) '(2 11 23)))
       (should (equal (romacs-scanner-scan romacs-scanner-tests--semicolons) by-hand))
-      (should (equal (romacs-scanner-scan romacs-scanner-tests--semicolons 9 12) '(code 11))))))
+      (should (equal (romacs-scanner-scan romacs-scanner-tests--semicolons 9 12) '(code 11)))))
+  ;; A character above the BMP (four bytes) and raw eight-bit characters
+  ;; (two bytes each in multibyte text), and a region that starts after them.
+  (with-temp-buffer
+    (insert "😀;" (string-to-multibyte (unibyte-string #x80 #xff)) ";\"" (string-to-multibyte (unibyte-string #xc3)) ";\";")
+    (let ((by-hand (romacs-scanner-tests--by-hand (point-min) (point-max) 'code)))
+      (should (equal (cdr by-hand) '(2 5 10)))
+      (should (equal (romacs-scanner-scan romacs-scanner-tests--semicolons) by-hand))
+      (should (equal (romacs-scanner-scan romacs-scanner-tests--semicolons 5 (point-max))
+                     (romacs-scanner-tests--by-hand 5 (point-max) 'code))))))
 
 (ert-deftest romacs-scanner-reads-unibyte-text ()
   (with-temp-buffer
@@ -91,7 +100,27 @@
   (let ((non-ascii (romacs-scanner-make (lambda (_state char) (cons nil (eq char romacs-scanner-other))) nil)))
     (with-temp-buffer
       (insert "aéb日c")
-      (should (equal (romacs-scanner-scan non-ascii) '(nil 2 4))))))
+      (should (equal (romacs-scanner-scan non-ascii) '(nil 2 4))))
+    ;; In unibyte text every byte from 128 up is a character of its own,
+    ;; those that would trail a character in multibyte text included.
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert "a\200b\277\300c")
+      (should (equal (romacs-scanner-scan non-ascii) '(nil 2 4 5))))))
+
+(ert-deftest romacs-scanner-resumes-in-the-state-a-scan-returned ()
+  ;; Two states: a semicolon is marked only in the second, and every
+  ;; character moves to the other.
+  (let ((flip (romacs-scanner-make (lambda (state char) (cons (if state nil 'odd) (and state (eq char ?\;)))) nil)))
+    (should (equal (romacs-scanner-states flip) '(nil odd)))
+    (should (functionp (romacs-scanner-step flip)))
+    (with-temp-buffer
+      (insert ";;;;")
+      (should (equal (romacs-scanner-scan flip) '(nil 2 4)))
+      (should (equal (romacs-scanner-scan flip 1 5 'odd) '(odd 1 3)))
+      (should (equal (romacs-scanner-scan flip 2 5 (car (romacs-scanner-scan flip 1 2))) '(nil 2 4)))))
+  ;; Nil as any state but the first: a scan given nil could not mean it.
+  (should-error (romacs-scanner-make (lambda (state _char) (list (not state))) t)))
 
 (ert-deftest romacs-scanner-refuses-what-is-not-a-finite-pure-function ()
   ;; A state for every character seen: not finite.
@@ -99,6 +128,9 @@
   ;; An answer that depends on something besides its arguments.
   (let ((calls 0))
     (should-error (romacs-scanner-make (lambda (_state _char) (list (setq calls (1+ calls)))) 0)))
+  ;; A mark that depends on something besides its arguments.
+  (let ((calls 0))
+    (should-error (romacs-scanner-make (lambda (_state _char) (cons 'code (= 0 (% (setq calls (1+ calls)) 2)))) 'code)))
   ;; An answer that is not (STATE . MARK).
   (should-error (romacs-scanner-make (lambda (_state _char) 'code) 'code)))
 

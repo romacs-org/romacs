@@ -589,6 +589,27 @@ a value in `ivy-re-builders-alist'.
 
 ;;; Generated autoloads from romacs-scanner.el
 
+(autoload 'romacs-scanner-make "romacs-scanner"
+"Return the scanner whose step function is STEP and first state INITIAL.
+STEP is a pure function of a state and a character returning
+(NEW-STATE . MARK); see the commentary of this library.  It is called
+here on every character in every state reachable from INITIAL, and never
+again.
+
+(fn STEP INITIAL)")
+(autoload 'romacs-scanner-scan "romacs-scanner"
+"Run SCANNER over the current buffer's text from START to END.
+Return (STATE . POSITIONS): the state after the last character and the
+positions, in order, of the characters the step function marked.  START
+and END default to the accessible text's ends.  STATE is the state before
+START; nil means SCANNER's first state.
+
+(fn SCANNER &optional START END STATE)")
+(autoload 'romacs-scanner-count "romacs-scanner"
+"Run SCANNER as `romacs-scanner-scan' does; return (STATE . COUNT).
+COUNT is how many characters the step function marked.
+
+(fn SCANNER &optional START END STATE)")
 (autoload 'define-scanner "romacs-scanner"
 "Define NAME as the scanner with step function STEP and first state INITIAL.
 STEP is a pure function of a state and a character that returns
