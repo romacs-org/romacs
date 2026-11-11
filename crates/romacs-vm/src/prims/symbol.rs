@@ -43,7 +43,7 @@ fn native_comp_function_p(_cx, _object: Value) {
     Ok(Value::NIL)
 }}
 
-// Romacs loads no native modules (DEFUN-CENSUS.tsv `module-load'), so nothing
+// Romacs loads no native modules (ledger/defun-census.tsv `module-load'), so nothing
 // is a module function; help.el and packages asking about a function's kind
 // get GNU's answer for every other object.
 defsubr! { name = "module-function-p", gnu = "data.c:551", effect = Pure,
