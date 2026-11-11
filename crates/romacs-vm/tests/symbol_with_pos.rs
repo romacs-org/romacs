@@ -104,14 +104,14 @@ fn positioned_symbol_chain_frontier() {
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()]).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()]).unwrap();
     for file in ["debug-early.el", "byte-run.el", "backquote.el"] {
-        vm.load_file(&root.join("gnu-lisp/emacs-lisp").join(file)).unwrap();
+        vm.load_file(&root.join("lisp/gnu/emacs-lisp").join(file)).unwrap();
     }
     for file in ["subr.el", "keymap.el", "emacs-lisp/pcase.el", "emacs-lisp/gv.el", "emacs-lisp/inline.el"] {
-        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
+        vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
     }
-    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/ert.el")).map(|_| ());
+    let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp/ert.el")).map(|_| ());
     assert!(result.is_err(), "frontier must be remeasured if ERT loads");
     let report = vm.load_report();
     let cl_macs: Vec<_> = report["steps"].as_array().unwrap().iter()

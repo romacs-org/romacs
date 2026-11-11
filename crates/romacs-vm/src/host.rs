@@ -355,7 +355,7 @@ pub(crate) fn reseed_output() -> Option<&'static str> {
 
 /// The sites that may switch the startup phase, in order: the chain's batch
 /// steps, then an interactive session's, which supersede them.
-const STARTUP: [&str; 2] = ["/rlisp/romacs-loadup-bootstrap.el", "/rlisp/romacs-gui-loadup.el"];
+const STARTUP: [&str; 2] = ["/lisp/romacs/romacs-loadup-bootstrap.el", "/lisp/romacs/romacs-gui-loadup.el"];
 
 pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
@@ -704,7 +704,7 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
-/// The runtime tree (gnu-lisp/, rlisp/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
+/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
 /// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
 /// (an unpacked release tarball, wherever it lives), else [`build_root`].
 pub fn runtime_root() -> PathBuf {
@@ -714,10 +714,10 @@ pub fn runtime_root() -> PathBuf {
 }
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
-/// `gnu-lisp/` directory.
+/// `lisp/gnu/` directory.
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
-    probe(Probe::IsDir, root.join("gnu-lisp")).then_some(root)
+    probe(Probe::IsDir, root.join("lisp/gnu")).then_some(root)
 }
 
 /// The checkout this crate was built from: a compile-time path that no
@@ -3283,7 +3283,7 @@ mod tests {
         let root = build_root();
         assert!(root.is_absolute(), "{}", root.display());
         assert!(!root.components().any(|c| matches!(c, std::path::Component::ParentDir)), "{}", root.display());
-        assert!(root.join("gnu-lisp").is_dir() && root.join("etc").is_dir(), "{}", root.display());
+        assert!(root.join("lisp/gnu").is_dir() && root.join("etc").is_dir(), "{}", root.display());
     }
     /// A world built from a checkout keys only the kinds of the tree's
     /// entries, never their times, so editing the tree leaves it valid.
@@ -3336,7 +3336,7 @@ mod tests {
         let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
         let exe = prefix.join("bin/romacs-vm-gui");
         assert_eq!(installed_root(&exe), None);
-        std::fs::create_dir_all(prefix.join("share/romacs/gnu-lisp")).unwrap();
+        std::fs::create_dir_all(prefix.join("share/romacs/lisp/gnu")).unwrap();
         assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
         std::fs::remove_dir_all(&prefix).unwrap();
     }

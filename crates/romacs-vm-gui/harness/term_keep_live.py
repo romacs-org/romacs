@@ -38,7 +38,7 @@ today and are only recorded.
 
 usage: term_keep_live.py --romacs BIN --runtime DIR --harness DIR --output DIR --work DIR [--runs N] [modes]
 BIN is the host binary, with romacs-keeper beside it; DIR for --runtime is
-a tree with gnu-lisp, rlisp and etc; --harness is this directory.
+a tree with lisp/gnu, lisp/romacs and etc; --harness is this directory.
 """
 import argparse
 import hashlib
@@ -189,7 +189,7 @@ def one(args, index, output):
         env.pop('WGPU_BACKEND', None)
     runtime = Path(args.runtime)
     newer_env = dict(env, ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14',
-                     ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'gnu-lisp'))
+                     ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'lisp/gnu'))
     binary, extra = args.romacs, ''
     if args.older:
         # The session runs the older build with its own runtime; the restart
@@ -198,9 +198,9 @@ def one(args, index, output):
         newer = Path(args.runtime)
         extra = (f'(setq romacs-restart-command (list {lisp_string(args.romacs)} "--loadup"))\n'
                  f'(setq romacs-restart-environment (list {lisp_string("ROMACS_RUNTIME_ROOT=" + str(newer))} '
-                 f'{lisp_string("ROMACS_LISP_DIR=" + str(newer / "gnu-lisp"))}))')
+                 f'{lisp_string("ROMACS_LISP_DIR=" + str(newer / "lisp/gnu"))}))')
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14',
-               ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'gnu-lisp'))
+               ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'lisp/gnu'))
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(INIT.format(extra=extra, probe=lisp_string(str(parity_live.PROBE))))
     work = root / 'work'

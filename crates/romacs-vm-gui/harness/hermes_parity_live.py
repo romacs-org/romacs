@@ -4,7 +4,7 @@
 Each workflow starts a fresh pair of sessions (parity_live.py): pinned GNU
 Emacs (pgtk) and `romacs-vm-gui --loadup', each in its own private headless
 labwc with a private HOME/XDG/TMPDIR.  Both load hermes and its
-dependencies (keymap-popup, websocket, markdown-mode): the copies in rlisp/,
+dependencies (keymap-popup, websocket, markdown-mode): the copies in lisp/romacs/,
 or a profile config's hermes_sources (real_init.py), copied once into the
 work directory: GNU's copy byte-compiled, Romacs's as source.  Nothing here
 writes the sources or ~/.config.
@@ -66,7 +66,7 @@ def init_source(engine, lisp, url):
     defaults, which GNU takes as gnosis_parity_live.py's GNU does."""
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
                  '(setq scroll-conservatively 101)\n'
-                 f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
+                 f'(load {lisp_string(str(ROOT / "lisp/romacs/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     variables = ' '.join(PROBE_VARIABLES)
     return f''';; -*- lexical-binding: t -*-
 (setq load-path (cons {lisp_string(str(lisp))} load-path))

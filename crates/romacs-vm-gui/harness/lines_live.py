@@ -2,7 +2,7 @@
 """Lines in a native --loadup session, in a private headless compositor.
 
 tabs: GNU's own Lisp is visited from the command line (a copy of a
-gnu-lisp/ file with TABs).  Every glyph the binary submits on the file's
+lisp/gnu/ file with TABs).  Every glyph the binary submits on the file's
 rows must sit at the column GNU gives it on a terminal frame: TABs stop at
 multiples of `tab-width' from the line start, a control character shows as
 its escape.  The window's font is monospace, so a column is x from the
@@ -51,7 +51,7 @@ import fileio_live as fio
 import live_oracle as live
 
 ROOT = Path(__file__).resolve().parents[3]
-TAB_FILE = ROOT / 'gnu-lisp/help-macro.el'
+TAB_FILE = ROOT / 'lisp/gnu/help-macro.el'
 
 # The journeys start where a GNU init that inhibits the startup screen
 # starts: in *scratch*, or in the visited file alone.  Without it GNU, and

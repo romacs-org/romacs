@@ -35,10 +35,10 @@ class Scoreboard(unittest.TestCase):
         from types import SimpleNamespace
         self.assertIs(run.source_bootstrap_chain(SimpleNamespace()), run.BOOTSTRAP_CHAIN)
         self.assertEqual(run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert')),
-                         ['rlisp/romacs-loadup-bootstrap.el', 'gnu-lisp/help-fns.el',
-                          'rlisp/romacs-cl-print.el'])
+                         ['lisp/romacs/romacs-loadup-bootstrap.el', 'lisp/gnu/help-fns.el',
+                          'lisp/romacs/romacs-cl-print.el'])
         self.assertEqual(run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert', harness='mini')),
-                         ['rlisp/romacs-loadup-bootstrap.el'])
+                         ['lisp/romacs/romacs-loadup-bootstrap.el'])
         for harness in ('mini', 'real'):
             with self.assertRaisesRegex(run.Refusal, 'requires --engine romacs'):
                 run.cmd_run(SimpleNamespace(bootstrap='ert', harness=harness, engine='gnu',

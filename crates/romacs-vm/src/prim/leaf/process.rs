@@ -1,6 +1,6 @@
 //! GNU process.c and callproc.c state for prims/process.rs: process objects,
 //! Vprocess_alist, channels, status conversion and output decoding. Nothing
-//! here calls Lisp; rlisp/vm/subprocess.el composes these with filters,
+//! here calls Lisp; lisp/romacs/vm/subprocess.el composes these with filters,
 //! sentinels and timers.
 use super::*;
 use crate::anchors::Bias;

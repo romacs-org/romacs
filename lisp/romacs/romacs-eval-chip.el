@@ -51,7 +51,7 @@ a chip at point, rather than as a toast."
     (pp-eval-last-sexp . romacs-eval-chip--pp-p))
   "Each evaluation command and its rule: a function of the command's
 arguments, non-nil when the command printed its value to the echo area
-last (gnu-lisp/progmodes/elisp-mode.el, gnu-lisp/emacs-lisp/pp.el).")
+last (lisp/gnu/progmodes/elisp-mode.el, lisp/gnu/emacs-lisp/pp.el).")
 
 (defvar romacs-eval-chip--pp-echo nil
   "How `pp-display-expression' showed its value: `echo', `buffer' or nil.")
@@ -249,7 +249,7 @@ showed its value.  Its echo branch messages its output buffer's one line
   "Arm a chip at point for the command loop's report of DATA, the error
 of the command just run in a buffer window: not a quit, not in a prompt,
 not where an evaluation armed its own.  Runs before `romacs--cmd-error'
-\(rlisp/vm/keyboard.el) reports it, so a process filter's or sentinel's
+\(lisp/romacs/vm/keyboard.el) reports it, so a process filter's or sentinel's
 error, which `command-error-function' also reports, stays a toast."
   (when (and romacs-eval-chip-command-errors
              (not (memq 'quit (get (car data) 'error-conditions)))

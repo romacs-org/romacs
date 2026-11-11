@@ -3,7 +3,7 @@
 //! The keeper holds what must outlive the session process: descriptors,
 //! and the children it is the parent of. The session holds duplicates of
 //! the descriptors of the handles it owns and reads and writes them
-//! directly; nothing flows through the keeper. `rlisp/romacs-keeper.el` is
+//! directly; nothing flows through the keeper. `lisp/romacs/romacs-keeper.el` is
 //! the Lisp face of this; the policy (whether to use a keeper, its idle
 //! time, deadlines) lives there.
 

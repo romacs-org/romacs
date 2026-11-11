@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent sessions (rlisp/romacs-agent.el, romacs-agent-host, the
+"""Agent sessions (lisp/romacs/romacs-agent.el, romacs-agent-host, the
 reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
@@ -842,7 +842,7 @@ def build_dir(a, commit):
     (d / 'romacs-vm-gui').symlink_to(binary)
     for name in ('romacs-mcp', 'romacs-agent-host'):
         (d / name).symlink_to(binary.with_name(name))
-    for root in ('gnu-lisp', 'rlisp', 'etc'):
+    for root in ('lisp/gnu', 'lisp/romacs', 'etc'):
         (d / root).symlink_to(runtime / root)
     (d / 'build.json').write_text(json.dumps({'commit': commit}))
     return d
@@ -1316,7 +1316,7 @@ def environment(args, base):
     a = Agents(args, base, 'ev')
     try:
         a.up()
-        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/gnu-lisp',
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp/gnu',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
                   'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
         parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',

@@ -48,7 +48,7 @@ fn romacs(vm: &mut Vm, expression: &str) -> String {
 #[test]
 fn printing_runs_change_hooks_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = CASES.lines().filter(|line| !line.is_empty())
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(expression), romacs(&mut vm, expression));

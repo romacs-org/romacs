@@ -34,7 +34,7 @@ impl Vm {
             ("layout_host", self.layout_host.is_none()),
             ("display", self.display.is_none()),
             // Restored as the renderer's default, which the options in the
-            // image must then also hold (rlisp/romacs-effects.el).
+            // image must then also hold (lisp/romacs/romacs-effects.el).
             ("visual", *self.visual == romacs_display_protocol::VisualConfig::default()),
             ("session_host", self.session_host.is_none()),
             ("terminal_host", self.terminal_host.is_none()),

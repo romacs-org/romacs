@@ -825,7 +825,7 @@ adapter from that value to Custom."
 
 (defun romacs-theme--table-rows (properties palette)
   "`romacs-theme-rows''s value for a theme of PROPERTIES with its own
-roles, on PALETTE (rlisp/romacs-theme-roles.el)."
+roles, on PALETTE (lisp/romacs/romacs-theme-roles.el)."
   (require 'romacs-theme-roles)
   (romacs-theme-roles-rows palette (plist-get properties :faces) (plist-get properties :variables)))
 
@@ -860,7 +860,7 @@ faces' own specs.  With :modus (`romacs-theme--modus-palette') and
 Custom, its faces are Modus's table over that palette, Romacs's own faces
 over them from :palette, then :floor's floors and :faces on top.  With
 :table and Custom, the palette makes every role of that table itself
-\(rlisp/romacs-theme-roles.el), floors apply, and :faces and :variables,
+\(lisp/romacs/romacs-theme-roles.el), floors apply, and :faces and :variables,
 as `def-romacs-theme' takes them, go on top.
 :style is kept as the theme's `romacs-style' property.  Defining it
 changes no face that shows."

@@ -836,7 +836,7 @@ buffer and whether a handler rebuilt that buffer's text."
   "Buffer-local, set: lock this buffer's file at its next edit though it is
 modified.  GNU locks only at the first edit of an unmodified buffer; a
 restored buffer is modified already, so a lock another editor held at the
-restore would never be asked about.  rlisp/vm/insdel.el locks while this
+restore would never be asked about.  lisp/romacs/vm/insdel.el locks while this
 is local and removes it once `lock-file' returns; a refusal refuses the
 edit and the next one asks again.  Permanent: a change of major mode
 leaves the buffer modified, so it must keep the pending lock too.")
@@ -1263,13 +1263,13 @@ romacs-vm-gui with its own runtime) or a binary (its runtime its own)."
   (let ((target (expand-file-name target)))
     (cond ((file-directory-p target)
            (let ((binary (expand-file-name "romacs-vm-gui" target)))
-             (dolist (path (list binary (expand-file-name "gnu-lisp" target) (expand-file-name "rlisp" target)))
+             (dolist (path (list binary (expand-file-name "lisp/gnu" target) (expand-file-name "lisp/romacs" target)))
                (unless (file-exists-p path) (user-error "Not a build directory: %s has no %s" target
                                                        (file-name-nondirectory path))))
              (unless (file-executable-p binary) (user-error "%s is not executable" binary))
              (list (cons binary (warm-restart--launch-flags (cdr (warm-restart--argv))))
                    (concat "ROMACS_RUNTIME_ROOT=" target)
-                   (concat "ROMACS_LISP_DIR=" (expand-file-name "gnu-lisp" target)))))
+                   (concat "ROMACS_LISP_DIR=" (expand-file-name "lisp/gnu" target)))))
           ((file-executable-p target)
            (list (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))))
           (t (user-error "No build at %s" target)))))

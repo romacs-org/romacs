@@ -1,6 +1,6 @@
 //! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S]`:
 //! the relay an agent session's harness runs as its Romacs MCP server
-//! (rlisp/romacs-agent.el). Unlike the plain relay it reads the lines it
+//! (lisp/romacs/romacs-agent.el). Unlike the plain relay it reads the lines it
 //! copies, so the harness's MCP session outlives the Romacs server it
 //! reaches:
 //!

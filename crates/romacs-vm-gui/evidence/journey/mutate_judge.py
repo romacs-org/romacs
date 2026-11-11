@@ -13,7 +13,7 @@ from pathlib import Path
 
 run, trace, frontier, missing, defuns = sys.argv[1:6]
 HERE = Path(__file__).resolve().parent
-base = {m: json.loads((Path(run) / m / 'record.json').read_text()) for m in ('default', 'gnu-lisp')}
+base = {m: json.loads((Path(run) / m / 'record.json').read_text()) for m in ('default', 'lisp/gnu')}
 
 
 def obs(r, rung, action, nth=0):

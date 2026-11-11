@@ -5,7 +5,7 @@
 ;;; Commentary:
 ;; The faces the panes, layers, toasts, the landing and the completion
 ;; panel are drawn in.  None carries a colour of its own: a theme sets
-;; them (rlisp/romacs-theme.el), and without one they inherit standard
+;; them (lisp/romacs/romacs-theme.el), and without one they inherit standard
 ;; faces or are derived from them (romacs-chrome.el
 ;; `romacs-chrome-derived-faces').
 

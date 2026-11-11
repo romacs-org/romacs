@@ -281,7 +281,7 @@ fn suffix_member(cx: &Leaf<'_>, needle: Value, list: Value) -> std::result::Resu
 }
 
 // `concat' of the elements of a list: Fmapconcat's Fconcat over its
-// results, which the prelude's `mapconcat' collects (rlisp/vm/prelude.el).
+// results, which the prelude's `mapconcat' collects (lisp/romacs/vm/prelude.el).
 defsubr! { name = "romacs--concat-list", gnu = "fns.c:3484", effect = Pure,
 fn concat_list(cx, parts: Value) {
     let parts = list_elements(cx, parts)?;

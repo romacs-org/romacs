@@ -1,4 +1,4 @@
-//! The keeper's one leaf primitive: what `rlisp/romacs-keeper.el` is built
+//! The keeper's one leaf primitive: what `lisp/romacs/romacs-keeper.el` is built
 //! on. Not in GNU (ledger/divergences/VM2-KEEPER.md).
 use super::Value;
 

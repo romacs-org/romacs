@@ -137,7 +137,7 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 /// the batch world of the compile environment in the store's `worlds/`,
 /// and that world's identity keys every artifact. An interactive session
 /// never waits for a compile: a load with no artifact reads source and the
-/// session compiles the file in the background (rlisp/romacs-precompile.el).
+/// session compiles the file in the background (lisp/romacs/romacs-precompile.el).
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
@@ -160,7 +160,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
-    if let Some(parent) = dir.parent() { runtime.push(parent.join("rlisp")); }
+    if let Some(parent) = dir.parent() { runtime.push(parent.join("lisp/romacs")); }
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
     let recipe = recipe_in(&dir, |name| environment.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()));
