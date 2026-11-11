@@ -1400,8 +1400,9 @@ card's text is trimmed.  A card is made only if the editor could open it
 and save it again unchanged; text it reads as Org structure, such as an
 answer line starting with =- =, an Org heading, a table or an unindented
 source block, makes the card invalid, and the error names the field and
-what the editor would keep.  A call that fails this way holds Gnosis for
-longer, since each of its themata is then checked alone.
+what the editor would keep; resubmitting that kept value works.  A call
+whose combined draft cannot be read back at all holds Gnosis for longer,
+since each of its themata is then checked alone.
 
 ** Editing Themata
 

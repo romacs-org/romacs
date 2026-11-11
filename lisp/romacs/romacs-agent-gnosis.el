@@ -293,7 +293,8 @@ across all calls; omit it rather than number cards per call), or when omitted th
 tags), makes a retry idempotent: a card already created reports exists with its ids. Outer whitespace is trimmed. \
 Text the Gnosis editor would read as Org structure, so could not keep unchanged (a line starting \"- \", \"+ \" \
 or \"1) \" inside an answer, an Org heading, a table, an unindented #+begin_src block), makes the card invalid; \
-the error names the field and what the editor would keep. Indent a source block two spaces to keep it. dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
+the error names the field and what the editor would keep; resubmit that kept value (a source block's body \
+indented two spaces, its delimiters not). dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
 status: created|exists|would-create|invalid, ids?, themata?, error?}]}; with any card invalid nothing is written."
     (list romacs-agent-gnosis--instance '("cards" . "array") '("dry-run" . "boolean")) '("cards")
   (gnosis-agent-content-create (vconcat (mapcar #'romacs-agent-gnosis--data (gethash "cards" arguments)))
