@@ -36,7 +36,7 @@ possible; say so where you do.
   behavior; implement missing runtime substrate in its existing Rust module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
   the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
-  each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
+  each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
   deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
   lowered floors with the change. Raising a floor is a deliberate commit.
 - `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
@@ -46,7 +46,7 @@ possible; say so where you do.
   holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
   `master`): a count above the merge-base's own fails. A drop needs no
   record, and a branch never lowers a floor. Adding a smell takes raising its
-  floor in `SMELL-FLOORS.json` by as much, and a new top-level entry takes
+  floor in `ledger/smell-floors.json` by as much, and a new top-level entry takes
   listing it there: a deliberate commit with its reason. `smells.py check
   --absolute` holds the trunk to that file at a checkpoint, where `lower`
   records the drops. The file merges by its meaning, each side's raise added:

@@ -26,6 +26,7 @@ class CandidateContract(unittest.TestCase):
         self.original = json.loads((ROOT / PR.RATCHET_NAME).read_text())
         self.data = copy.deepcopy(self.original)
         self.path = self.root / PR.RATCHET_NAME
+        self.path.parent.mkdir()
         self.write()
         for name in PR.GATE_TESTS:
             target = self.root / name

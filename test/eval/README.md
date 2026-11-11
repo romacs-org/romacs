@@ -1,7 +1,7 @@
 # Unwired E2 fixture and experiment
 
 `core-rows.el` copies the five bytecode rows and four helpers from
-`bench/core-bench.el`. Regenerate with `python3 scripts/dump-eval-rows`.
+`test/bench/core-bench.el`. Regenerate with `python3 scripts/dump-eval-rows`.
 The command compiles both sources with `/usr/bin/emacs -Q --batch`, compares
 all nine functions including nested closures, records GNU answers, and emits
 the test-only Rust materializer. The `.elc` and its SHA-256 are retained;

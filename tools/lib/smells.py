@@ -5,7 +5,7 @@ One report of the smells the cleanup removes, and a ratchet on each, so a
 removed smell cannot come back. The scope is the unsafe census's: every .rs
 file in a Cargo package, credited to its nearest package
 (tools/lib/unsafe_census.py, which also keeps the unsafe floors in
-UNSAFE-FLOORS.json; `report` shows its kinds and SAFETY coverage here too).
+ledger/unsafe-floors.json; `report` shows its kinds and SAFETY coverage here too).
 
 Per crate:
   allows      lint names in `allow(...)` or `expect(...)` attributes that are
@@ -38,7 +38,7 @@ else master): a count fails when it is above what the same count measures on
 the merge-base's tree. A change answers for what it adds and for nothing else:
 not for floors lowered since it forked, and not for a rise the floors' slack
 would have hidden. A drop needs no record. The one way to add a smell is to
-raise its floor in SMELL-FLOORS.json by as much, a hand edit made deliberately
+raise its floor in ledger/smell-floors.json by as much, a hand edit made deliberately
 in its own commit with its reason; a new layout entry, a generated file among
 them, is added to its list the same way. A branch does not lower a floor or drop a listed entry either: the
 merge may not have its drop, so `lower` records drops on the trunk.
@@ -83,7 +83,10 @@ import derived_artifacts  # noqa: E402
 import primitive_index  # noqa: E402
 import unsafe_census  # noqa: E402
 
-FLOORS = Path('SMELL-FLOORS.json')
+FLOORS = Path('ledger/smell-floors.json')
+# Where a merge-base from before the records moved into ledger/ keeps its
+# floors; it goes once no open branch's merge-base predates the move.
+FLOORS_BEFORE = 'SMELL-FLOORS.json'
 CRATE_SMELLS = ('allows', 'todos', 'long_files')
 COUNTED = ('legacy_primitives', 'primitives_outside_prims')
 LISTED = ('root', 'members_outside_crates', 'generated')
@@ -393,7 +396,7 @@ def base_side(root, rev, floors, now=None):
     tree = now and clean_tree(root)
     if tree:
         keep(kept(tree, how), now)
-    was = git(root, 'show', f'{commit}:{FLOORS}')
+    was = git(root, 'show', f'{commit}:{FLOORS}') or git(root, 'show', f'{commit}:{FLOORS_BEFORE}')
     empty = {'crates': {}, 'lints': {}, 'layout': {}}
     return json.loads(was) if was else empty, base_counts(root, commit, floors, how), commit
 
@@ -480,7 +483,7 @@ def as_floors(rule, long_file_lines, now):
 
 
 def dump(floors):
-    """FLOORS as SMELL-FLOORS.json text, one line per crate, lint and entry,
+    """FLOORS as ledger/smell-floors.json text, one line per crate, lint and entry,
     so lanes that lower different ones merge cleanly."""
     def lines(items):
         return ',\n'.join(f'    {item}' for item in items)

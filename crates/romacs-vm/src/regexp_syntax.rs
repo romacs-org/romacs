@@ -188,6 +188,33 @@ struct PropertySubject {
     base: usize,
 }
 
+/// What is derived from one syntax table's contents and lasts between
+/// searches: that it is a syntax table whose parents do not loop, and,
+/// from the second search that finds it holding, the entries of the ASCII
+/// characters. It holds for TABLE while no char table has been written
+/// (`char_table::writes`) and TABLE is the table of that serial; a
+/// collection forgets it, since it holds Values. The entries, not their
+/// classes: an entry is a cons a program may alter without writing the
+/// table. They wait for the second search so that code alternating
+/// between two tables pays the check each time, as before, and no more.
+pub(super) struct SyntaxMemo {
+    table: Value,
+    serial: u64,
+    writes: u64,
+    /// The entries, once read; `Value::UNBOUND` for one not held.
+    entries: Option<[Value; 128]>,
+}
+impl Default for SyntaxMemo {
+    fn default() -> Self {
+        Self { table: Value::UNBOUND, serial: 0, writes: 0, entries: None }
+    }
+}
+impl SyntaxMemo {
+    pub(super) fn forget(&mut self) {
+        if self.table != Value::UNBOUND { *self = Self::default(); }
+    }
+}
+
 pub(crate) struct VmSyntax<'a> {
     vm: &'a Vm,
     table: Value,
@@ -215,7 +242,7 @@ impl<'a> VmSyntax<'a> {
         }
     }
     fn class(&self, code: u32) -> SyntaxClass {
-        let lookup = || self.vm.regexp_table_class(self.table, code).unwrap_or(SyntaxClass::Whitespace);
+        let lookup = || self.vm.regexp_memo_class(self.table, code).unwrap_or(SyntaxClass::Whitespace);
         match self.ascii.get(code as usize) {
             Some(memo) => memo.get().unwrap_or_else(|| { let class = lookup(); memo.set(Some(class)); class }),
             None => lookup(),
@@ -293,7 +320,7 @@ impl Vm {
     }
 
     fn regexp_standard_syntax(&mut self) -> Value {
-        let slot = self.names["#:vm2-standard-syntax"];
+        let slot = self.search_slots().standard_syntax;
         if self.slots[slot].value == Value::NIL {
             let purpose = self.intern("syntax-table");
             // This symbol is interned during primitive registration. Defer its
@@ -407,6 +434,26 @@ impl Vm {
             _ => Err(Fault::Wrong("syntax-table-p", table)),
         }
     }
+    /// `regexp_table_class`, the entry of an ASCII CODE read from the memo
+    /// while it holds for TABLE.
+    fn regexp_memo_class(&self, table: Value, code: u32) -> Option<SyntaxClass> {
+        let memo = &self.regexp_cache.syntax;
+        let held = memo.entries.as_ref().and_then(|entries| entries.get(code as usize)).copied()
+            .filter(|&entry| entry != Value::UNBOUND && memo.table == table && memo.writes == crate::char_table::writes());
+        match held {
+            Some(entry) => Some(Self::entry_class(self.cons_pair(entry).ok())),
+            None => self.regexp_table_class(table, code),
+        }
+    }
+    fn entry_class(entry: Option<(Value, Value)>) -> SyntaxClass {
+        entry.and_then(|(n, _)| n.integer_value()).and_then(SyntaxClass::from_code).unwrap_or(SyntaxClass::Whitespace)
+    }
+    /// Whether the memo holds for TABLE as it is now.
+    fn syntax_memo_holds(&self, table: Value) -> bool {
+        let memo = &self.regexp_cache.syntax;
+        // Serial 0 is no table's: the empty memo holds for nothing.
+        memo.serial != 0 && memo.table == table && memo.writes == crate::char_table::writes() && memo.serial == self.char_table_serial(table)
+    }
     pub(crate) fn regexp_table_class(&self, table: Value, code: u32) -> Option<SyntaxClass> {
         let entry = self.char_table_get(table, code as usize).ok()?;
         let class = self
@@ -502,10 +549,23 @@ impl Vm {
         self.regexp_syntax_source(table, buffer, base)
     }
     fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
-        self.regexp_syntax_table(current)?;
-        // char_table_get follows parents, so a cycle must be refused here.
-        if self.char_table_parents_cycle(current) {
-            return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
+        // What the memo holds for was checked when it was made.
+        if self.syntax_memo_holds(current) {
+            if self.regexp_cache.syntax.entries.is_none() {
+                let mut entries = [Value::UNBOUND; 128];
+                for (code, entry) in entries.iter_mut().enumerate() {
+                    if let Ok(value) = self.char_table_get(current, code) { *entry = value; }
+                }
+                self.regexp_cache.syntax.entries = Some(entries);
+            }
+        } else {
+            self.regexp_syntax_table(current)?;
+            // char_table_get follows parents, so a cycle must be refused here.
+            if self.char_table_parents_cycle(current) {
+                return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
+            }
+            let serial = self.char_table_serial(current);
+            self.regexp_cache.syntax = SyntaxMemo { table: current, serial, writes: crate::char_table::writes(), entries: None };
         }
         // parse-sexp-lookup-properties: the subject's `syntax-table'
         // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
@@ -518,7 +578,7 @@ impl Vm {
         // The binding where the search runs: `syntax-propertize' sets it
         // buffer-locally, and a treesit `#match?' searches its parser's
         // buffer, which need not be current.
-        let slot = self.names["parse-sexp-lookup-properties"];
+        let slot = self.search_slots().lookup_properties;
         let current_buffer = self.slots[self.buffer_slot].value;
         let lookup = match self.object_if(object) {
             Some(Object::Buffer(_) | Object::ByteBuffer(_)) if object != current_buffer => self.value_in_buffer(slot, object),

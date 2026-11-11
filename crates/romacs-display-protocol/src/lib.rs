@@ -6,6 +6,7 @@
 // `too_many_arguments` is allowed crate-wide rather than at each of the ~15 sites.
 #![allow(clippy::too_many_arguments)]
 
+pub mod call_count;
 pub mod animated_visual;
 pub(crate) mod child_frame_animation;
 pub mod cursor;

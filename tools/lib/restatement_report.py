@@ -3,7 +3,7 @@
 
     python3 tools/lib/restatement_report.py OLD.json NEW.json [--command FILE] > REPORT.md
 
-OLD is the ratchet in force (parity-ratchet.json), NEW what
+OLD is the ratchet in force (ledger/parity-ratchet.json), NEW what
 `parity_ratchet.py record --out NEW.json` measured. The report shows the
 arithmetic from the recorded figure to the honest ones, and lists EVERY
 member whose standing changes with its class and evidence. It decides
