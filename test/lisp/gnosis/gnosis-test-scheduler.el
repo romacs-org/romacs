@@ -450,7 +450,61 @@ A recompute today's FSRS refuses is drift too, never a replay failure."
       (cl-letf (((symbol-function 'gnosis-fsrs-transition)
                  (lambda (&rest _) (error "Refused"))))
         (should (equal '((:error "Refused"))
-                       (cdar (cdar (gnosis-scheduler-drift gnosis-db)))))))))
+                       (cdar (cdar (gnosis-scheduler-drift gnosis-db))))))
+      ;; A thema whose history does not replay is listed, not fatal.
+      (let ((replay (symbol-function 'gnosis-scheduler-replay)))
+        (cl-letf (((symbol-function 'gnosis-scheduler-replay)
+                   (lambda (baseline &rest args)
+                     (if (= 2 (car baseline)) (error "Broken")
+                       (apply replay baseline args)))))
+          (should (equal '((2 (:error "Broken")))
+                         (gnosis-scheduler-drift gnosis-db))))))))
+
+(ert-deftest gnosis-test-scheduler-drift-uses-each-configs-own-terms ()
+  "Recompute each review under its configuration's retention and weights."
+  (gnosis-test-scheduler--with-db
+    (gnosis-test-scheduler--seed-state)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
+    (let* ((baseline (car (gnosis-sqlite-select
+                           gnosis-db "SELECT * FROM scheduler_baseline")))
+           (row (copy-sequence (car (gnosis-sqlite-select
+                                     gnosis-db "SELECT * FROM review_events"))))
+           (weights (copy-sequence gnosis-fsrs-default-parameters))
+           (_ (aset weights 2 5.0))
+           (result (gnosis-fsrs-transition nil 0 'success 0.8 weights))
+           (interval (plist-get result :calendar-interval-days))
+           (replay (lambda (terms)
+                     (mapcar #'car (cdar (plist-get
+                                          (gnosis-scheduler-replay
+                                           baseline (list row)
+                                           (gnosis-scheduler--config-table
+                                            (list '(1 0.9) (cons 2 terms)))
+                                           0)
+                                          :drift))))))
+      (setcar (nthcdr 2 row) 2)
+      (setcar (nthcdr 9 row) (plist-get result :stability))
+      (setcar (nthcdr 10 row) (plist-get result :difficulty))
+      (setcar (nthcdr 11 row) (plist-get result :raw-interval-days))
+      (setcar (nthcdr 12 row) interval)
+      (setcar (nthcdr 13 row) (gnosis-scheduler--add-days 20260830 interval))
+      (should-not (funcall replay (list 0.8 weights)))
+      (should (equal '(:stability :raw-interval-days) (funcall replay (list 0.8 nil))))
+      (should (equal '(:raw-interval-days) (funcall replay (list 0.9 weights)))))))
+
+(ert-deftest gnosis-test-scheduler-reviews-on-under-a-new-implementation ()
+  "A state recorded under an earlier implementation of the model reviews on."
+  (gnosis-test-scheduler--with-db
+    (gnosis-test-scheduler--seed-state)
+    (gnosis-sqlite-execute
+     gnosis-db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
+     (list 2 gnosis-fsrs--algorithm gnosis-fsrs--model "fsrs-rs-6.0.0" 0.9
+           gnosis-fsrs-default-parameters))
+    (gnosis-sqlite-execute
+     gnosis-db "UPDATE scheduler_state SET config_id = 2 WHERE thema_id = 1")
+    (should (plist-get (gnosis-scheduler-accept-review
+                        gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
+                       :inserted-p))))
 
 (ert-deftest gnosis-test-scheduler-fit-parameters-reads-effective-history ()
   "Fit to non-void events of themata whose history Gnosis holds whole.

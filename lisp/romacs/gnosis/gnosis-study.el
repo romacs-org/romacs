@@ -30,7 +30,6 @@
 (require 'gnosis-nodes)
 (require 'gnosis-links)
 (require 'gnosis-tags)
-(require 'gnosis-scheduler)
 (require 'keymap-popup)
 (require 'tabulated-list)
 
@@ -655,17 +654,14 @@ Do not fit parameters or claim personalized calibration from these counts."
                     "SELECT COUNT(*) FROM review_voids"
                     "SELECT COUNT(*) FROM practice_voids"
                     "SELECT COUNT(*) FROM scheduler_config"))
-         (counts (append (mapcar (lambda (sql) (caar (gnosis-sqlite-select db sql))) queries)
-                         (list (apply #'+ (mapcar (lambda (thema) (length (cdr thema)))
-                                                  (gnosis-scheduler-drift db)))))))
+         (counts (mapcar (lambda (sql) (caar (gnosis-sqlite-select db sql))) queries)))
     (with-current-buffer (generate-new-buffer "*Gnosis History Evidence*")
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (apply #'format
                        (concat "Aggregate-only baseline reviews: %d\nEffective scheduled events: %d\n"
                                "Delayed scheduled events: %d\nPractice exposures (including voided grades): %d\n"
-                               "Voided scheduled grades: %d\nVoided practice grades: %d\nConfig versions: %d\n"
-                               "Events today's FSRS schedules differently: %d\n") counts)
+                               "Voided scheduled grades: %d\nVoided practice grades: %d\nConfig versions: %d\n") counts)
                 "\nThese counts do not establish learning effectiveness.\n"
                 "Baseline aggregates lack event-level times/outcomes.  Content edits are not versioned.\n"
                 "Practice exposures are retained but excluded from FSRS replay and fitting.\n"

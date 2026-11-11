@@ -1612,12 +1612,15 @@ This calendar policy does not promise identical due dates to Anki or
 the fsrs-rs scheduling example.  Accepted reviews retain their original
 scheduling evidence.  Replay takes each review's recorded result and
 checks that the next review continues it, so history stays valid when
-the FSRS implementation or its parameters change.  Replay also recomputes
+the FSRS implementation or its parameters change, and a thema reviewed
+under an earlier implementation of the model reviews on.  New parameters
+need each card's memory state recomputed first; Gnosis does not apply
+fitted weights yet.  Replay also recomputes
 each review with today's FSRS and reports, without rejecting, any review
 it would schedule differently by more than 0.01%, under that review's own
 configuration.  Rebuilding a thema's state after an undo shows that
-report as a warning, and the history audit counts it across the
-collection (~gnosis-scheduler-drift~ lists it).  A configuration
+report as a warning; =M-x gnosis-scheduler-drift= checks the whole
+collection.  A configuration
 names the model and its reference implementation, fsrs-rs 6.6.1.
 Reviews accepted before Romacs built in the crate were computed by an
 Elisp port of it under the same name; they agree with the crate within
