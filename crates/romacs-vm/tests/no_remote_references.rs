@@ -123,7 +123,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
-    ("completion_walks", Free), ("completion_case_memo", Free),
+    ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     ("stack", Root), ("external_roots", Root),
     // Not roots: the collector dooms those it does not reach.
