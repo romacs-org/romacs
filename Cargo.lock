@@ -3385,6 +3385,8 @@ dependencies = [
 name = "romacs-allocator"
 version = "0.0.20"
 dependencies = [
+ "libc",
+ "rustix",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
 ]
