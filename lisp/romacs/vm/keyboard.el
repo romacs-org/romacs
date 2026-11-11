@@ -189,16 +189,33 @@ on.  A VM without the process prelude runs no timers."
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
+(defun romacs--batch-input-may-come-p ()
+  "Non-nil while something could still queue input for a batch read.
+That is a live file notification watch, a one-shot timer or a live
+process, whose callbacks may set `unread-command-events'.  A repeating
+timer alone does not count: a wait only it could end may never end."
+  (or (and (fboundp 'romacs--file-notify-watching-p) (romacs--file-notify-watching-p))
+      ;; Slot 4 of a timer is its repeat delay (timer.el `timer--repeat-delay'),
+      ;; read directly: a bare VM has not loaded timer.el.
+      (and (boundp 'timer-list)
+           (catch 'found
+             (dolist (timer timer-list) (unless (aref timer 4) (throw 'found t)))))
+      (and (fboundp 'process-list)
+           (catch 'found
+             (dolist (process (process-list))
+               (when (process-live-p process) (throw 'found t)))))))
+
 (defun romacs--read-batch-wait (seconds)
   "kbd_buffer_get_event's wait with no terminal to read: run timers,
 process output and file notification events until SECONDS pass, input is
-requeued, or, without SECONDS, no watch is left."
+requeued, or, without SECONDS, nothing could queue any more input
+\(`romacs--batch-input-may-come-p')."
   (let ((end (and seconds (+ (float-time) seconds))) (waiting t))
     (while waiting
       (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
       (let ((left (and end (- end (float-time)))))
         (if (or (romacs--unread-p) (and left (<= left 0))
-                (and (null end) (not (romacs--file-notify-watching-p))))
+                (and (null end) (not (romacs--batch-input-may-come-p))))
             (setq waiting nil)
           (romacs--wait-reading-process-output (or left 'forever) nil 0 t))))))
 
@@ -446,12 +463,12 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
      ((setq c (romacs--take-user-signal))
       (when (romacs--special-event c) (setq c nil again t)))
      ((and (fboundp 'romacs--wait-reading-process-output)
-           (or seconds (and (fboundp 'romacs--file-notify-watching-p) (romacs--file-notify-watching-p))))
-      ;; Batch GNU built with file notification (GNU/Linux) waits here, in
-      ;; kbd_buffer_get_event: timers, process output and file
-      ;; notification events run until SECONDS pass or, without SECONDS,
-      ;; for as long as a watch is live.  Input a timer requeued is read
-      ;; next; with no watch left, end of input comes as below.
+           (or seconds (romacs--batch-input-may-come-p)))
+      ;; Batch GNU waits here, in kbd_buffer_get_event: timers, process
+      ;; output and file notification events run until SECONDS pass or,
+      ;; without SECONDS, for as long as one of them could still queue
+      ;; input.  Input a timer or filter requeued is read next; once
+      ;; nothing could, end of input comes as below.
       (romacs--read-batch-wait seconds)
       (when (or (romacs--unread-p) (null seconds)) (setq again t)))
      (seconds)
