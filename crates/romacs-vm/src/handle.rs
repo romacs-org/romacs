@@ -368,8 +368,11 @@ impl Vm {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
         let late = self.collection_late();
+        // An automatic collection due only by what was made since the last
+        // one is a minor; whatever asks for a collection by name gets a full.
+        let minor = !until_key && !self.collection_log.explicit && !self.full_due() && self.minor_due();
         let last = std::mem::take(&mut self.gc_times);
-        let collected = self.collect_rooted(roots, until_key);
+        let collected = if minor { self.collect_minor_rooted(roots) } else { self.collect_rooted(roots, until_key) };
         if !collected {
             self.gc_times = last;
         }
@@ -381,7 +384,7 @@ impl Vm {
             }
             let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
             self.count_collection(elapsed.unwrap_or(0));
-            self.note_collection(elapsed, until_key, late);
+            self.note_collection(elapsed, until_key, minor, late);
         }
         self.profile_collection_end();
         collected
@@ -395,6 +398,15 @@ impl Vm {
             crate::twin::check(self, twin);
         }
         collected
+    }
+    /// A minor from ROOTS and the live `Rooted` slots, which it only reads:
+    /// nothing moves.
+    fn collect_minor_rooted(&mut self, roots: &[Value]) -> bool {
+        let slots = self.rooted.slots.get_mut();
+        slots.retain(|w| w.strong_count() > 0);
+        let mut all = roots.to_vec();
+        all.extend(slots.iter().filter_map(Weak::upgrade).map(|s| Value(s.load(Ordering::Relaxed))));
+        self.collect_minor(&all)
     }
     fn collect_rooted(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         let live: Vec<Arc<AtomicU64>> = {

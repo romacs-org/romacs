@@ -57,6 +57,9 @@ pub(crate) struct Stress {
     /// (`ROMACS_GC_INPLACE'): free entries are reused at once, so a Value a
     /// native frame kept names something else.
     inplace: bool,
+    /// Automatic collections may be minors (`ROMACS_GC_MINOR' or
+    /// [`Vm::set_gc_minor`]): off until a minor's pause meets its bar.
+    minor: bool,
     /// Faults a test plants in this VM's collections, and no other's.
     #[cfg(test)]
     pub(crate) faults: Faults,
@@ -69,7 +72,7 @@ pub(crate) struct Stress {
     #[cfg(test)]
     pub(crate) last_mark: (usize, usize),
 }
-romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving, threads, inplace, #[cfg(test)] faults, #[cfg(test)] buried, #[cfg(test)] last_mark });
+romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving, threads, inplace, minor, #[cfg(test)] faults, #[cfg(test)] buried, #[cfg(test)] last_mark });
 
 /// What a test breaks in a collection, to see a check catch it.
 #[cfg(test)]
@@ -98,6 +101,8 @@ pub(crate) struct CollectionRecord {
     pub(crate) idle: bool,
     /// Asked for by `garbage-collect' or the host.
     pub(crate) explicit: bool,
+    /// A minor: only what was made since the last collection could go.
+    pub(crate) minor: bool,
     /// Its pause in microseconds: a 120 Hz frame is 8.3 ms.
     pub(crate) us: u32,
     /// The command it ran in or at the end of, "anonymous" for a closure: a
@@ -124,7 +129,7 @@ pub(crate) struct CollectionRecord {
     /// float, as the trigger is.
     pub(crate) late: f64,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes, late });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, minor, us, command, key, redisplay, at, objects, bytes, late });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -245,8 +250,11 @@ pub(crate) struct Allocation {
     pub(crate) consed: Consed,
     /// The next collection compacts (`Vm::collect_compacting').
     pub(crate) compact: bool,
+    /// ALLOCATED when the last collection ended: what was handed out since
+    /// is the young, and makes a minor due (`Vm::minor_due').
+    pub(crate) collected_at: u64,
 }
-romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact });
+romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at });
 
 /// What the last mark found in the objects table: `garbage-collect's
 /// statistics and the pacing's traced slots, counted once per entry.
@@ -310,6 +318,9 @@ const CONS_BYTES: i64 = 16;
 /// Allocation between the running engine's requests to poll for a
 /// collection (`Vm::poll_requested`).
 const POLL_STEP: u64 = 256 << 10;
+/// Bytes handed out since the last collection that make a minor due: 256K
+/// objects at a cons's charge. A late poll adds up to `POLL_STEP'.
+const MINOR_BYTES: u64 = (256 << 10) * CONS_BYTES as u64;
 /// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
 /// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
 pub(crate) const MEMORY_FULL: &str = "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs";
@@ -347,13 +358,14 @@ impl Stress {
         let verify = std::env::var_os("ROMACS_GC_VERIFY").is_some_and(|v| !v.is_empty() && v != "0");
         let threads = std::env::var("ROMACS_GC_WORKERS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
         let inplace = std::env::var_os("ROMACS_GC_INPLACE").is_some_and(|v| !v.is_empty() && v != "0");
-        Self { every, verify, threads, inplace, ..Self::default() }
+        let minor = std::env::var_os("ROMACS_GC_MINOR").is_some_and(|v| !v.is_empty() && v != "0");
+        Self { every, verify, threads, inplace, minor, ..Self::default() }
     }
     /// This process's test mode, from its environment, for a VM a world
     /// carried here: the fillers the last collection left stay counted.
     pub(crate) fn rearm(&mut self) {
         let fresh = Self::from_env();
-        (self.every, self.entries, self.verify, self.threads, self.inplace) = (fresh.every, fresh.entries, fresh.verify, fresh.threads, fresh.inplace);
+        (self.every, self.entries, self.verify, self.threads, self.inplace, self.minor) = (fresh.every, fresh.entries, fresh.verify, fresh.threads, fresh.inplace, fresh.minor);
         // A child or a restored VM plants none of its parent's faults.
         #[cfg(test)]
         { self.faults = Faults::default(); }
@@ -603,10 +615,10 @@ impl Vm {
     /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off. The
     /// verify and moving modes stay as they are.
     pub fn set_gc_stress(&mut self, every: u32) {
-        let Stress { verify, moving, threads, inplace, .. } = self.gc_stress;
+        let Stress { verify, moving, threads, inplace, minor, .. } = self.gc_stress;
         #[cfg(test)]
         let (faults, buried) = (self.gc_stress.faults, self.gc_stress.buried);
-        self.gc_stress = Stress { every, verify, moving, threads, inplace, ..Stress::default() };
+        self.gc_stress = Stress { every, verify, moving, threads, inplace, minor, ..Stress::default() };
         #[cfg(test)]
         { (self.gc_stress.faults, self.gc_stress.buried) = (faults, buried); }
     }
@@ -619,6 +631,10 @@ impl Vm {
     /// entries reused (or quarantined).
     pub fn set_gc_verify(&mut self, verify: bool) {
         self.gc_stress.verify = verify;
+    }
+    /// Let automatic collections be minors, or not (`ROMACS_GC_MINOR').
+    pub fn set_gc_minor(&mut self, minor: bool) {
+        self.gc_stress.minor = minor;
     }
     /// Make every collection compact, as stress collections do, or return
     /// to compacting on demand (`compacts').
@@ -652,6 +668,18 @@ impl Vm {
     /// traverses, retained objects and compiled code units. Both variables
     /// are read live, so binding them takes effect at once.
     pub(crate) fn collection_due(&self) -> bool {
+        self.full_due() || self.minor_due()
+    }
+    /// Whether a minor is due: minors are on, nothing asks this VM to move
+    /// its heap or paces it as a job's child, and MINOR_BYTES were handed
+    /// out since the last collection. `gc-cons-threshold' paces fulls, by
+    /// what the heap has grown since the last one, minors or not.
+    pub(crate) fn minor_due(&self) -> bool {
+        self.gc_stress.minor && !self.will_compact() && self.job_budget.is_none()
+            && self.allocation.allocated - self.allocation.collected_at >= MINOR_BYTES
+    }
+    /// Whether a full collection is due, by GNU's rule above.
+    pub(crate) fn full_due(&self) -> bool {
         // Frozen region ids are scarce: at 75% in use, collect now.
         if self.region_collect {
             return true;
@@ -730,6 +758,7 @@ impl Vm {
     /// vector slots the live heap keeps, for the proportional rule.
     fn settle_payload(&mut self) {
         self.gc_payload_bytes = 0;
+        self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
         self.gc_retained_slots = self.gc_census.vector_slots;
         if self.job_budget.is_some() { self.measure_retained_payload(); }
@@ -1103,7 +1132,7 @@ impl Vm {
     /// Keep a finished collection's record, `elapsed_ns` long if a clock timed
     /// it, IDLE as in `collect_until_key`. One look at the host and one at the
     /// command variable, per collection: a key pays nothing.
-    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool, late: f64) {
+    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool, minor: bool, late: f64) {
         let explicit = std::mem::take(&mut self.collection_log.explicit);
         if self.collection_log.records.len() >= COLLECTION_RECORDS {
             self.collection_log.dropped += 1;
@@ -1117,7 +1146,7 @@ impl Vm {
             .and_then(|_| crate::host::clock().duration_since(std::time::UNIX_EPOCH).ok())
             .map(|since| since.as_secs_f64());
         let (objects, bytes) = (self.private_objects(), self.live_bytes_estimate());
-        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes, late });
+        self.collection_log.records.push(CollectionRecord { idle, explicit, minor, us, command, key, redisplay, at, objects, bytes, late });
     }
     /// What the tables hold at their entries' own sizes.
     fn table_bytes(&self) -> usize {
@@ -1155,7 +1184,7 @@ impl Vm {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
         let mut result = Value::NIL;
         for record in records.into_iter().rev() {
-            let kind = if record.idle { "idle" } else if record.explicit { "explicit" } else { "automatic" };
+            let kind = if record.minor { "minor" } else if record.idle { "idle" } else if record.explicit { "explicit" } else { "automatic" };
             let met = match (&record.command, record.key, record.redisplay) {
                 (Some(_), ..) => self.intern("command"),
                 (None, true, _) => self.intern("key"),
@@ -1594,6 +1623,7 @@ impl Vm {
         }
         if [self.conses.log_lost(), self.closures.log_lost(), self.cells.log_lost(), self.objects.log_lost()].contains(&true) {
             self.settle_generations();
+            self.settle_minor();
             return true;
         }
         self.clear_dead_tails();
@@ -1628,7 +1658,16 @@ impl Vm {
         self.empty_dead_caches(&symbols, &regions);
         self.sweep_in_place(&marking, own, &dead);
         if self.gc_stress.verify { self.check_settled(); }
+        self.settle_minor();
         true
+    }
+    /// A minor's books: the young start again from here, and no poll is
+    /// pending. What the last full kept stays the base a full is paced
+    /// from, so what this promoted counts toward the next one.
+    fn settle_minor(&mut self) {
+        self.allocation.collected_at = self.allocation.allocated;
+        self.settle_poll();
+        self.gc_stats.collections += 1;
     }
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
@@ -2013,6 +2052,29 @@ mod tests {
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
         vm.collect(&mut []);
         assert_eq!(vm.eval_source_raw("(car minor-list)").map(|v| vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap() == Value::TRUE && v != Value::NIL).unwrap(), true, "and a full after it finds the heap whole");
+    }
+
+    /// With minors on, allocation alone brings them: each frees the garbage
+    /// made since the last, keeps what a variable still holds, and is
+    /// recorded as a minor. `gc-cons-threshold' paces fulls, and here asks
+    /// for none.
+    #[test]
+    fn allocation_brings_minors_when_they_are_on() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_minor(true);
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000 minor-keep nil)").unwrap();
+        vm.collect(&mut []);
+        vm.collection_log = CollectionLog::default();
+        let before = vm.conses.live();
+        vm.eval_source_raw("(dotimes (i 1200000) (let ((c (list i i))) (when (= 0 (% i 2000)) (setq minor-keep (cons c minor-keep)))))").unwrap();
+        let minors = vm.collection_log.records.iter().filter(|record| record.minor).count();
+        assert!(minors >= 4, "2.4M conses, a minor each 256K objects: {minors}");
+        assert_eq!(vm.collection_log.records.len(), minors, "and no full");
+        assert!(vm.conses.live() < before + 400_000, "the garbage went: {before} to {}", vm.conses.live());
+        let kept = vm.eval_source_raw("(equal (list (length minor-keep) (car (car minor-keep)) (car (nth 599 minor-keep))) '(600 1198000 0))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what the variable holds survives every minor");
     }
 
     /// With a log lost a minor frees nothing and promotes everything.
