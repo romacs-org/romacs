@@ -18,7 +18,7 @@
 # fixtures and requires it to agree with the Rust reader on every one of them.
 # Two implementations that are not held together are how a guard rots.
 #
-# The manifest format is deliberately tiny (see parity-reference.toml).  This
+# The manifest format is deliberately tiny (see ledger/parity-reference.toml).  This
 # parser REFUSES a line it does not understand rather than skipping it: a pin
 # that silently stops being read is the failure this whole file exists to
 # prevent.
@@ -37,7 +37,7 @@ usage() {
 # But GNU and this port are pinned in opposite ways and must not share a
 # predicate:
 #
-#   GNU is PINNED.  There is one right answer, parity-reference.toml records
+#   GNU is PINNED.  There is one right answer, ledger/parity-reference.toml records
 #   it, and anything else is REFUSED.
 #
 #   This port is NOT pinnable.  It changes every commit; there is no constant
@@ -147,7 +147,7 @@ case "$depth" in
 esac
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-manifest="${ROMACS_PARITY_REFERENCE_FILE:-$root/parity-reference.toml}"
+manifest="${ROMACS_PARITY_REFERENCE_FILE:-$root/ledger/parity-reference.toml}"
 
 refuse() {
   echo "parity reference: $*" >&2

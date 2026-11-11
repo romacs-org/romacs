@@ -17,7 +17,7 @@ import primh
 here = Path(__file__).resolve().parent
 spec = primh.load_spec(here / 'specs/string-to-number.json')
 ev = primh.evidence(spec)
-result = subprocess.run([_portable_os.environ.get('ROMACS_VM2_BIN', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'target/debug/romacs-vm')), '--gc-floor', '1', '--eval-stream'], input=''.join(json.dumps({'source': r['source']}) + '\n' for r in ev['cases']), capture_output=True, text=True, check=True)
+result = subprocess.run([_portable_os.environ.get('ROMACS_VM2_BIN', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'ledger/parity-reference.toml').is_file()) / 'target/debug/romacs-vm')), '--gc-floor', '1', '--eval-stream'], input=''.join(json.dumps({'source': r['source']}) + '\n' for r in ev['cases']), capture_output=True, text=True, check=True)
 actuals = [json.loads(line) for line in result.stdout.splitlines()]
 assert len(actuals) == len(ev['cases']) == 626
 pins, reviewed = {}, []

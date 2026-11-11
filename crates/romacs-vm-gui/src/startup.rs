@@ -304,7 +304,7 @@ fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce
 
 /// The runtime tree around the GNU Lisp directory `dir`
 /// (`<root>/lisp/gnu`): the checkout or an installed `share/romacs`, which
-/// the bundled Lisp and LISP-BUNDLED.json's paths are relative to.
+/// the bundled Lisp and lisp/bundled.json's paths are relative to.
 #[must_use]
 pub fn runtime_of(dir: &std::path::Path) -> Option<&std::path::Path> {
     dir.parent()?.parent()
@@ -313,7 +313,7 @@ pub fn runtime_of(dir: &std::path::Path) -> Option<&std::path::Path> {
 /// Where the bundled Lisp lives beside lisp/gnu/, declared once for
 /// [`runtime_load_path`] and the autoload generator (tools/lib/bundled_autoloads.py).
 fn bundled_layout() -> Result<serde_json::Value, String> {
-    serde_json::from_str(include_str!("../../../LISP-BUNDLED.json")).map_err(|e| format!("LISP-BUNDLED.json: {e}"))
+    serde_json::from_str(include_str!("../../../lisp/bundled.json")).map_err(|e| format!("lisp/bundled.json: {e}"))
 }
 
 /// The GNU-loadup chain `--loadup` shares with the batch package runner,
@@ -346,7 +346,7 @@ pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
 
 /// The bundled packages' autoloads beside the GNU Lisp directory `dir`, when present.
 pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
-    let file = bundled_layout()?["autoloads"].as_str().ok_or("LISP-BUNDLED.json: no autoloads path")?.to_owned();
+    let file = bundled_layout()?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
     Ok(runtime_of(dir).map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
 }
 
@@ -369,8 +369,8 @@ pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
     let mut path = Vec::new();
     root_and_children(dir, &mut path, &[])?;
     let layout = bundled_layout()?;
-    for root in layout["roots"].as_array().ok_or("LISP-BUNDLED.json: no roots")? {
-        let bad = || format!("LISP-BUNDLED.json: malformed root {root}");
+    for root in layout["roots"].as_array().ok_or("lisp/bundled.json: no roots")? {
+        let bad = || format!("lisp/bundled.json: malformed root {root}");
         let relative = root["path"].as_str().ok_or_else(bad)?;
         let excluded: Vec<&str> = root["exclude"].as_array().ok_or_else(bad)?.iter()
             .map(|name| name.as_str().ok_or_else(bad)).collect::<Result<_, _>>()?;

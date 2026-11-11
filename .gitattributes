@@ -128,6 +128,6 @@ lib-src/rcs2log diff=shell
 java/INSTALL -whitespace
 
 lisp/romacs/romacs-bundled-autoloads.el merge=romacs-derived
-SMELL-FLOORS.json merge=romacs-floors
-UNSAFE-FLOORS.json merge=romacs-unsafe-floors
+ledger/smell-floors.json merge=romacs-floors
+ledger/unsafe-floors.json merge=romacs-unsafe-floors
 crates/romacs-vm/tests/host_boundary_allow.txt merge=romacs-host-allow
