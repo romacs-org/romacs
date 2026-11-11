@@ -969,7 +969,7 @@ impl Vm {
         let mut tail = self.annotation_variable("char-property-alias-alist");
         for _ in 0..=self.list_limit() {
             if tail == Value::NIL {
-                break;
+                return Ok(Vec::new());
             }
             let (entry, rest) = self.cons_pair(tail)?;
             let (alias_key, aliases) = self.cons_pair(entry)?;
@@ -978,7 +978,7 @@ impl Vm {
             }
             tail = rest;
         }
-        Ok(Vec::new())
+        Err("circular list".into())
     }
     /// The names of KEY's aliases, which decide
     /// [`Self::annotation_resolve`] of KEY where neither KEY nor `category`
