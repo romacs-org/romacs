@@ -67,7 +67,7 @@ def identity(binary):
     """What the binary itself reports, plus the digest of the file that ran."""
     env = {"PATH": "/usr/bin:/bin", "HOME": os.environ.get("TMPDIR", "/tmp"), "LANG": "C.UTF-8"}
     r = subprocess.run([str(binary), "-Q", "--batch", "--eval", PROBE],
-                       capture_output=True, text=True, env=env, timeout=60)
+                       capture_output=True, text=True, env=env, timeout=600)  # a hang, not a slow start
     if r.returncode != 0:
         raise OracleError(f"{binary} exited {r.returncode}: {r.stderr.strip()[-300:]}")
     try:
