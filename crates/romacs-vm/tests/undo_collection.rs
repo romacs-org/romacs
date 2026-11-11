@@ -222,9 +222,10 @@ impl HostInput for KeyAt {
 
 /// A key press that arrives while the undo round is at work ends the mark:
 /// the round looks for one between buffers, as it decides and again as it
-/// walks. With 1,500 buffers that is 3,000 looks; the rest of this small
-/// heap's mark makes a few dozen, so a press at the 2,500th look is seen
-/// only by a round that looks in both.
+/// walks, and a scan of a list this short makes no look of its own. With
+/// 1,500 buffers that is 1,500 looks and then 1,500 more; the rest of this
+/// small heap's mark makes a few dozen, so a press at the 2,500th look is
+/// seen only by a round that looks in both.
 #[test]
 fn a_key_press_during_the_undo_round_ends_the_mark() {
     let mut vm = Vm::new();

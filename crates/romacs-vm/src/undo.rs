@@ -91,15 +91,17 @@ struct UndoScan<'a, 'k> {
     next: Value,
     /// How many more conses: a circular list comes to an end.
     fuel: usize,
-    /// A mark's look for a key press, every `UNDO_KEY_POLL` conses; and
-    /// whether it found one, which ends the scan with nothing decided.
+    /// A mark's look for a key press, at every `UNDO_KEY_POLL` conses this
+    /// scan has passed, so that a short list costs no look; and whether it
+    /// found one, which ends the scan with nothing decided.
     key: Option<&'k mut dyn FnMut() -> bool>,
+    passed: usize,
     stopped: bool,
 }
 
 impl<'a, 'k> UndoScan<'a, 'k> {
     fn new(vm: &'a Vm, list: Value, key: Option<&'k mut dyn FnMut() -> bool>) -> Self {
-        Self { vm, size: 0, prev: None, next: list, fuel: vm.conses.len(), key, stopped: false }
+        Self { vm, size: 0, prev: None, next: list, fuel: vm.conses.len(), key, passed: 0, stopped: false }
     }
     /// The entry at NEXT, while there is a cons there to look at.
     fn entry(&self) -> Option<Value> {
@@ -112,7 +114,8 @@ impl<'a, 'k> UndoScan<'a, 'k> {
         self.prev = Some(i);
         self.next = cdr;
         self.fuel -= 1;
-        if self.fuel.is_multiple_of(UNDO_KEY_POLL) && self.key.as_mut().is_some_and(|key| key()) {
+        self.passed += 1;
+        if self.passed.is_multiple_of(UNDO_KEY_POLL) && self.key.as_mut().is_some_and(|key| key()) {
             (self.stopped, self.fuel) = (true, 0);
         }
     }
@@ -362,10 +365,12 @@ impl Vm {
         // quit leaves the rest to the next collection; the run's later ones,
         // which have asked about some, look whatever the note says.
         if !std::mem::take(&mut self.undo_offers_due) && asked == Value::NIL { return Ok(Value::NIL); }
-        let mut excluded = Vec::new();
+        // As many as there are conses: a circular list comes to an end.
+        let mut excluded = HashSet::default();
         let mut rest = asked;
-        while let Some((_, buffer, next)) = self.plain_cons(rest) {
-            excluded.push(buffer);
+        for _ in 0..self.conses.len() {
+            let Some((_, buffer, next)) = self.plain_cons(rest) else { break };
+            excluded.insert(buffer.0);
             rest = next;
         }
         // Looked for afresh each time: what the function did about one buffer,
@@ -373,7 +378,7 @@ impl Vm {
         // One asked about already is not asked again in this run, whatever
         // has happened to its list since.
         for buffer in self.buffer_order() {
-            if excluded.contains(&buffer) { continue; }
+            if excluded.contains(&buffer.0) { continue; }
             let Some(size) = self.undo_offer_size(buffer)? else { continue };
             return Ok(self.alloc_cons(buffer, Value::integer(size)?));
         }
@@ -619,7 +624,11 @@ mod tests {
         let limits = UndoLimits { limit: i64::MAX, strong: i64::MAX, outer: None, offers: false };
         let mut looks = 0;
         assert!(matches!(vm.undo_cut(list, limits, Some(&mut || { looks += 1; false })), Some(UndoCut::Keep)));
-        assert!(looks >= 3, "{looks} looks over a record of three polls' length");
+        assert_eq!(looks, 3, "one look for each poll's length of the record");
+        let short = vm.alloc_cons(Value::NIL, Value::NIL);
+        let mut looks = 0;
+        assert!(vm.undo_cut(short, limits, Some(&mut || { looks += 1; false })).is_some());
+        assert_eq!(looks, 0, "and none for a list shorter than that, whatever the heap's size");
         let mut looks = 0;
         assert!(vm.undo_cut(list, limits, Some(&mut || { looks += 1; looks == 2 })).is_none(), "ended by the second look");
         assert_eq!(looks, 2);
