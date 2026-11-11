@@ -508,6 +508,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
 
 
+;;; Generated autoloads from romacs-nnheader.el
+
+(register-definition-prefixes "romacs-nnheader" '("romacs-nnheader--find-etc"))
+
+
 ;;; Generated autoloads from romacs-oclosure.el
 
 (register-definition-prefixes "romacs-oclosure" '("oclosure-type"))
