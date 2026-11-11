@@ -1048,6 +1048,29 @@ impl Vm {
         self.cells.clear_marks();
         self.objects.clear_marks();
     }
+    /// Every table as a completed collection leaves it, its entries old and
+    /// its log empty, without collecting: what a world image holds, since to
+    /// the process that restores it the image is the old generation.
+    pub(crate) fn settle_generations(&mut self) {
+        self.conses.settle_old();
+        self.closures.settle_old();
+        self.cells.settle_old();
+        self.objects.settle_old();
+    }
+    /// Whether every table is as a completed collection leaves it: its
+    /// entries old and clean, its log empty.
+    #[cfg(test)]
+    pub(crate) fn generations_settled(&self) -> bool {
+        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled()
+    }
+    /// Under verify, after a full collection: every entry in use is
+    /// exactly old and no log holds anything, or the next collection would
+    /// start from generations this one did not leave.
+    fn check_settled(&self) {
+        for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
+            assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
+        }
+    }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
         let dead: Vec<usize> = self.obarray_symbol_names.keys().copied().filter(|slot| !live.contains(slot)).collect();
@@ -1330,6 +1353,7 @@ impl Vm {
             lap.lap(&mut self.gc_times, Phase::Shrink);
             self.settle_collection(before);
             lap.lap(&mut self.gc_times, Phase::Settle);
+            if verify { self.check_settled(); }
             return true;
         }
         // Compaction: every live entry moves down, every reference is
@@ -1510,6 +1534,7 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Shrink);
         self.settle_collection(before);
         lap.lap(&mut self.gc_times, Phase::Settle);
+        if self.gc_stress.verify { self.check_settled(); }
         true
     }
     /// A collection's books, BEFORE being the objects it found.
@@ -1792,6 +1817,40 @@ mod tests {
         }
         assert_eq!(deferral(-0.5), 0.0);
         assert_eq!(deferral(f64::NAN), 0.0);
+    }
+
+    /// A collection leaves every survivor old and no log; Lisp's stores into
+    /// what survived reach the logs, and the next collection empties them.
+    #[test]
+    fn a_collection_settles_the_generations_and_lisp_stores_are_logged() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gen-list (list 1 2 3) gen-vector (make-vector 4 nil) gen-table (make-hash-table))").unwrap();
+        assert!(!vm.generations_settled(), "what was just made is young");
+        vm.collect(&mut []);
+        assert!(vm.generations_settled());
+        vm.eval_source_raw("(setcar gen-list (list 4)) (setcdr (cdr gen-list) (list 5)) (setcar (cdr gen-list) 6)").unwrap();
+        assert_eq!(vm.conses.dirty_old().count(), 2, "the two old conses written");
+        vm.eval_source_raw("(aset gen-vector 0 (list 7)) (aset gen-vector 1 'symbol) (puthash (list 8) (list 9) gen-table)").unwrap();
+        assert_eq!(vm.objects.logged().len(), 2, "a strong table's key and value");
+        assert!(vm.objects.dirty_old().count() >= 1, "and a short vector");
+        vm.collect(&mut []);
+        assert!(vm.generations_settled());
+        let kept = vm.eval_source_raw("(equal (list (car gen-list) (cdr (cdr gen-list)) (aref gen-vector 0) (hash-table-count gen-table)) '((4) (5) (7) 1))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what the stores put in survives");
+    }
+
+    /// What a capture does to the heap it writes: only old entries and no
+    /// log, whatever was allocated or stored since the last collection.
+    #[test]
+    fn settling_leaves_one_old_generation() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(setq gen-old (list 1 2) gen-table (make-hash-table))").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(setcar gen-old (list 3)) (puthash (list 4) (list 5) gen-table)").unwrap();
+        assert!(!vm.generations_settled());
+        vm.settle_generations();
+        assert!(vm.generations_settled());
     }
 
     #[test]
