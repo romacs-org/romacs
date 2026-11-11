@@ -697,6 +697,7 @@ mod leaf {
             let mut properties = crate::properties::Properties::new();
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
+                    if s.properties.is_empty() { continue; }
                     if multibyte && !s.is_multibyte() {
                         // A unibyte part widened: its runs stretch with it.
                         crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
@@ -713,19 +714,30 @@ mod leaf {
             self.vm.allocate_object(object)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
-            let mut size=0;
-            for &arg in args {
-                let view=self.vm.str_view(arg)?;
-                if !(view.is_multibyte() && view.len()==view.bytes().len()) && !view.bytes().is_ascii() { return None; }
-                size+=view.bytes().len();
+            self.concat_ascii_joined(args, None)
+        }
+        /// `concat_ascii` of ARGS with SEPARATOR between each two, or `None`
+        /// when one is not an ASCII string. Each part is looked up once.
+        pub fn concat_ascii_joined(&mut self, args: &[Value], separator: Option<Value>) -> Option<Value> {
+            let ascii = |view: &crate::lstring::StrView<'_>| (view.is_multibyte() && view.len() == view.bytes().len()) || view.bytes().is_ascii();
+            let mut parts = Vec::with_capacity(2 * args.len());
+            let mut bytes = Vec::new();
+            {
+                let separator = match separator {
+                    Some(value) => Some((value, self.vm.str_view(value).filter(|view| ascii(view))?.bytes())),
+                    None => None,
+                };
+                for (index, &arg) in args.iter().enumerate() {
+                    if let (Some((value, text)), true) = (separator, index > 0) {
+                        parts.push((value, bytes.len()));
+                        bytes.extend_from_slice(text);
+                    }
+                    let view = self.vm.str_view(arg).filter(|view| ascii(view))?;
+                    parts.push((arg, bytes.len()));
+                    bytes.extend_from_slice(view.bytes());
+                }
             }
-            let mut bytes=Vec::with_capacity(size);
-            let mut parts=Vec::with_capacity(args.len());
-            for &arg in args {
-                parts.push((arg, bytes.len()));
-                bytes.extend_from_slice(self.vm.str_view(arg)?.bytes());
-            }
-            Some(self.concat_result(bytes,false,&parts))
+            Some(self.concat_result(bytes, false, &parts))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
