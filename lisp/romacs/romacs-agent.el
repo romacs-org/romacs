@@ -2023,7 +2023,10 @@ CONFIG-DIR (nil: the harness's default), started with OPTIONS as
 `romacs-agent-start' takes them (a delegated task's :parent, :wake and
 :request among them).  A persistent harness resumes THREAD at once; a
 per-turn one with its first message.  Romacs only reads TRANSCRIPT.  A
-session already going on with THREAD is continued, OPTIONS unused."
+session already going on with THREAD is continued, OPTIONS unused.  An
+import that fails before its supervisor starts leaves nothing behind:
+its directory would otherwise tell every later import that another
+Romacs is resuming THREAD.  Once started, the supervisor owns it."
   (unless (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) thread)
     (user-error "Not a conversation id: %s" thread))
   (romacs-agent--check-config-dir provider config-dir)
@@ -2032,19 +2035,33 @@ session already going on with THREAD is continued, OPTIONS unused."
     (if existing
         (romacs-agent--continue existing)
       (make-directory (romacs-agent--state-root) t)
-      ;; Made once: a second server importing it meanwhile is told so.
-      (condition-case nil (make-directory (expand-file-name id (romacs-agent--state-root)))
-        (file-already-exists (user-error "Another Romacs is resuming this conversation: try again")))
-      (let ((session (romacs-agent--create
-                      :id id :harness harness :provider provider :config-dir config-dir :cwd cwd :title title
-                      :harness-session thread :options options
-                      :imported (list :path transcript :size (file-attribute-size (file-attributes transcript))))))
-        (if (romacs-agent--per-turn-p session)
-            (progn (setf (romacs-agent-state session) 'idle)
-                   (romacs-agent--manifest session nil))
-          (romacs-agent--launch session (romacs-agent--argv session t))
-          (romacs-agent--attach session 50))
-        session))))
+      (let ((dir (expand-file-name id (romacs-agent--state-root))) (session nil))
+        ;; Made once: a second server importing it meanwhile is told so.
+        (condition-case nil (make-directory dir)
+          (file-already-exists (user-error "Another Romacs is resuming this conversation: try again")))
+        (unwind-protect
+            (progn
+              (setq session (romacs-agent--create
+                             :id id :harness harness :provider provider :config-dir config-dir :cwd cwd :title title
+                             :harness-session thread :options options
+                             :imported (list :path transcript :size (file-attribute-size (file-attributes transcript)))))
+              (if (romacs-agent--per-turn-p session)
+                  (romacs-agent--manifest session nil)
+                (let ((argv (romacs-agent--argv session t)))
+                  ;; Its supervisor's from here.
+                  (setq dir nil)
+                  (romacs-agent--launch session argv)
+                  (romacs-agent--attach session 50)))
+              (setq dir nil)
+              (when (romacs-agent--per-turn-p session) (setf (romacs-agent-state session) 'idle))
+              session)
+          ;; Failed before: no session, no request naming it, and no
+          ;; directory claiming one.
+          (when dir
+            (remhash id romacs-agent--sessions)
+            (when (plist-get options :request)
+              (remhash (cons (plist-get options :parent) (plist-get options :request)) romacs-agent--requests))
+            (delete-directory dir t)))))))
 
 (defun romacs-agent-fork (session)
   "Start a session going on from SESSION's conversation as it stands, in

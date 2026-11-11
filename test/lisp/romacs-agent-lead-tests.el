@@ -223,6 +223,28 @@ what waited for that end goes."
     (should-not launched)
     (should (gethash "taskId" (romacs-agent-lead-tests--adopt cwd)))))
 
+(ert-deftest romacs-agent-lead-a-failed-import-leaves-nothing ()
+  (romacs-agent-lead-tests--with
+    (cl-letf (((symbol-function 'romacs-agent--argv) (lambda (&rest _) (error "No MCP configuration"))))
+      (should-error (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1")))
+    (should (= (hash-table-count romacs-agent--sessions) 1))
+    (should-not (directory-files (romacs-agent--state-root) nil "\\`[0-9a-f]\\{8\\}-"))
+    ;; Not "another Romacs is resuming it": another session adopts it.
+    (setq caller romacs-agent-lead-tests--other)
+    (should (gethash "taskId" (romacs-agent-lead-tests--adopt cwd)))
+    (should (= (length launched) 1))
+    ;; The failed request names nothing: its retry is refused, not given another's task.
+    (setq caller romacs-agent-lead-tests--lead)
+    (should-error (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1") :type 'user-error)))
+
+(ert-deftest romacs-agent-lead-a-started-supervisor-keeps-its-directory ()
+  (romacs-agent-lead-tests--with
+    ;; Failing once its supervisor runs: the directory is the supervisor's.
+    (cl-letf (((symbol-function 'romacs-agent--launch) (lambda (&rest _) (error "manifest: no space"))))
+      (should-error (romacs-agent-lead-tests--adopt cwd)))
+    (should (directory-files (romacs-agent--state-root) nil "\\`[0-9a-f]\\{8\\}-"))
+    (should (= (hash-table-count romacs-agent--sessions) 2))))
+
 ;;; Ends that wake no one
 
 (ert-deftest romacs-agent-lead-empty-and-quiet-ends-wake-no-one ()
