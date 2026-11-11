@@ -119,7 +119,7 @@ fn read_done(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
     if read == Value::NIL {
         return Ok(Step::Done(val));
     }
-    string_to_object(cx, val, default).map(Step::Done)
+    string_to_object(cx, val, default)
 }
 
 /// Fread_string's tail (minibuf.c:1457): an empty answer becomes DEFAULT-VALUE,
@@ -133,8 +133,11 @@ fn string_done(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
     Ok(Step::Done(val))
 }
 
-/// GNU `string_to_object' (minibuf.c:269).
-fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Out {
+/// GNU `string_to_object' (minibuf.c:269): VAL, or DEFAULT for an empty
+/// answer, read by the `read-from-string' subr itself, as GNU's C calls it
+/// (advice on the symbol does not apply). Reading may call Lisp, so it is a
+/// call: an activation GNU's C call lacks, seen in a backtrace and in eval depth.
+fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Next {
     if cx.string_view(val).is_ok_and(|s| s.chars == 0) {
         if cx.string_view(default).is_ok() {
             val = default;
@@ -142,7 +145,14 @@ fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Out {
             val = car;
         }
     }
-    let read = cx.read_from_string(val, Value::NIL, Value::NIL)?;
+    let f = crate::prim::subr_named("read-from-string").ok_or_else(|| Fault::Error("read-from-string is not declared".into()))?;
+    Ok(Step::Call { f, args: vec![val], then: object_read, saved: vec![val] })
+}
+
+/// `string_to_object''s tail: the object READ from the text saved, whose
+/// rest may only be whitespace.
+fn object_read(cx: &mut Leaf<'_>, read: Value, saved: &[Value]) -> Next {
+    let val = saved[0];
     let (object, end) = cx.pair(read).expect("read-from-string returns (OBJECT . POSITION)");
     let end = end.integer_value().expect("read position is a fixnum") as usize;
     let view = cx.string_view(val)?;
@@ -156,7 +166,7 @@ fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Out {
             return Err(Fault::Signal(condition, data));
         }
     }
-    Ok(object)
+    Ok(Step::Done(object))
 }
 
 fn fixnum(v: Value) -> std::result::Result<i64, Fault> {

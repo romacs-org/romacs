@@ -336,7 +336,6 @@ impl Vm {
             }
             Primitive::Eval => self.eval_primitive(args),
             Primitive::Macroexpand => self.macroexpand_primitive(args),
-            Primitive::ReadHostEvent => self.read_host_event(args),
             Primitive::FormatModeLine => self.format_mode_line(args),
             _ => unreachable!(),
         }
@@ -815,7 +814,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         // safepoint of its own still lets C-g end the load, the forms before it
         // kept.
         m.leaf((), |vm, ()| vm.poll_quit())?;
-        let read = crate::threaded::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
+        let read = crate::reader::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
             read.map(|read| read.map(|(value, begin, used)| (vm.source_form(value, 0), begin, used)))
         });
         let Some((form, begin, used)) = read.map_err(|e| {

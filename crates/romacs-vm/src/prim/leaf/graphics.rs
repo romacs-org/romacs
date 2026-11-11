@@ -459,7 +459,7 @@ impl Leaf<'_> {
         // `:relief', as image.c's lookup_image takes it into img->relief.
         let relief = if entry.failed { 0 } else { spec.get(":relief").and_then(|r| r.integer_value()).unwrap_or(0).clamp(-0x7fff, 0x7fff) };
         Ok(Some(romacs_layout_input::InlineImage {
-            byte: 0, image, width: advance, ascent, descent: descent.max(0),
+            byte: 0, image, surface: 0, width: advance, ascent, descent: descent.max(0),
             body_x: if x == 0 { hmargin } else { 0 }, body_y: if y == 0 { vmargin } else { 0 },
             source: (x, y, w, h), full: (width, height), relief, relief_background: entry.facts.background,
         }))
@@ -672,6 +672,9 @@ fn placeholder_of_key(key: &ImageKey) -> ImageFacts {
     placeholder_sized(dim(":width"), dim(":height"))
 }
 
+/// An image loader's error, logged to `*Messages*` unshown (GNU's `image_error`).
+pub(crate) const IMAGE_ERROR_LOG: &str = "(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))";
+
 impl crate::Vm {
     /// ENTRY, pending, as its decode FINISHED it: its final facts, or
     /// GNU's placeholder and the loader's message.
@@ -716,7 +719,7 @@ impl crate::Vm {
         let (messages, landed) = self.image_completions();
         for message in messages {
             let text = self.allocate_object(crate::data::Object::String(Box::new(crate::data::LispString::new(&message))));
-            self.call_prepared_source_propagating("(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))", &[text])?;
+            self.call_prepared_source_propagating(IMAGE_ERROR_LOG, &[text])?;
         }
         Ok(landed)
     }

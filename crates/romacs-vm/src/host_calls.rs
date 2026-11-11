@@ -20,7 +20,7 @@
 //! the wrappers to the traits: a method they do not forward would run the
 //! trait's default instead of the embedder's.
 use crate::{DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, HostEvent, HostFrame, HostInput, ImageFacts, ImageQuery,
-            LayoutHost, NativeWindow, OpenedFont, TerminalHost, TerminalInputState, TerminalSnapshot, WindowEnd};
+            LayoutHost, ModelCreate, NativeWindow, OpenedFont, TerminalHost, TerminalInputState, TerminalSnapshot, WindowEnd};
 use romacs_layout_input::{FontsetState, FrameSnapshot, MeasureInput, Measured, OpenedDefFont};
 use std::time::Duration;
 
@@ -43,6 +43,11 @@ const SIDES: &[(&str, Side)] = &[
     ("display.set_fontsets", Local), ("display.opened_def_font", Local),
     // main.rs: hooks that call the paint sender.
     ("display.set_frame_alpha", Through), ("display.set_visual_config", Through), ("display.lose_device", Through),
+    // fonts.rs: native models go to the renderer through the paint sender.
+    ("display.model_available", Through), ("display.create_model", Through), ("display.update_model", Through),
+    // fonts.rs: noted in the evaluator's own residency list; the command
+    // goes later, as `sender.free_surface`.
+    ("display.free_surface", Local),
     // fonts.rs: the decoder and channels shared with the decode worker
     // (`finish_decode` blocks on its results), and image files read
     // outside host.rs.
@@ -67,7 +72,7 @@ const SIDES: &[(&str, Side)] = &[
     ("sender.submit_scene", Cross), ("sender.load_image", Cross), ("sender.retire_image", Cross),
     ("sender.debug_lose_device", Cross), ("sender.set_frame_alpha", Cross), ("sender.set_title", Cross),
     ("sender.hide_primary", Cross), ("sender.set_visual_config", Cross), ("sender.raise_primary", Cross),
-    ("sender.shutdown", Cross),
+    ("sender.shutdown", Cross), ("sender.create_model", Cross), ("sender.update_model", Cross), ("sender.free_surface", Cross),
     // requests that block for the render thread's answer (a rendered
     // presentation, the clipboard, a window made):
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
@@ -77,6 +82,7 @@ const SIDES: &[(&str, Side)] = &[
     // the pointer.
     ("sender.input", Cross), ("sender.render_poll", Cross), ("sender.take_lost_images", Cross),
     ("sender.images_reset_pending", Cross), ("sender.software_adapter", Cross), ("sender.pointer", Cross),
+    ("sender.model_renderer_live", Cross),
 ];
 
 /// The host.rs results that are the process's own: its clocks, counters,
@@ -143,6 +149,7 @@ impl LayoutHost for Counted<Box<dyn LayoutHost>> {
 impl DisplayHost for Counted<Box<dyn DisplayHost>> {
     fn window_system(&self) -> &str { count("display.window_system"); self.0.window_system() }
     fn display_name(&self) -> String { count("display.display_name"); self.0.display_name() }
+    fn model_available(&self) -> bool { count("display.model_available"); self.0.model_available() }
     counted! { "display";
         fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity>;
         fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>>;
@@ -162,6 +169,9 @@ impl DisplayHost for Counted<Box<dyn DisplayHost>> {
         fn finish_decode(&mut self, id: u64, quit: &dyn Fn() -> bool) -> Result<ImageFacts, String>;
         fn finished_decodes(&mut self) -> Vec<(u64, Result<ImageFacts, String>)>;
         fn image_header_size(&mut self, path: &str) -> Option<(u32, u32)>;
+        fn create_model(&mut self, id: u32, model: ModelCreate) -> Result<(), String>;
+        fn update_model(&mut self, id: u32, req: u64, change: romacs_display_protocol::model::ModelChange) -> Result<(), String>;
+        fn free_surface(&mut self, id: u32);
     }
 }
 

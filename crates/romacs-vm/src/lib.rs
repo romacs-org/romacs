@@ -55,7 +55,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, ModelCreate, NO_MODELS, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
@@ -1377,6 +1377,8 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    /// A host wait in progress, its host moved out of `host_input`.
+    host_wait: Option<host_input::HostWait>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1525,11 +1527,6 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
-    /// Payload since the last collection crossed another `POLL_PAYLOAD'
-    /// bytes, or an engine ended with a collection's aftermath pending: the
-    /// engine polls, and collects if due, at its next jump or call
-    /// (`leave_native'), as GNU's maybe_gc runs at every call.
-    collect_poll: bool,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1756,7 +1753,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     collection_log,
     gc_retained,
     gc_payload_bytes,
-    collect_poll,
     gc_retained_slots,
     gc_code,
     gc_holds,
@@ -1832,6 +1828,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     status_bar_line,
     suspended,
     host_input,
+    host_wait,
     layout_host,
     display,
     visual,
@@ -1924,6 +1921,7 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            host_wait: None,
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -1989,7 +1987,6 @@ impl Vm {
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
-            collect_poll: false,
             gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,

@@ -903,3 +903,27 @@ fn oclosure_p(cx: &mut Leaf<'_>, fun: Value) -> bool {
     doc != Value::NIL && !matches!(cx.kind(doc), Kind::String | Kind::Bytes)
         && doc.integer_value().is_none() && !saved_doc
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every subr's interactive form that is Lisp, `(...)', reads without the
+    /// permission, as `call-interactively' reads it in a leaf: no `\N{NAME}'
+    /// by name in them.
+    #[test]
+    fn subr_interactive_forms_read_without_lisp() {
+        let mut vm = Vm::new();
+        let mut forms = 0;
+        for index in 0.. {
+            if crate::prim::descriptor(index).is_none() { break }
+            let Some(Some(spec)) = subr_intspec(Value::reference(index, 6)) else { continue };
+            if !spec.starts_with('(') { continue }
+            let string = vm.make_lisp_string(spec.as_bytes().to_vec(), true);
+            let end = vm.str_view(string).unwrap().len();
+            assert!(matches!(vm.read_string_unlent(string, 0, end), Ok(Some(_))), "{spec}");
+            forms += 1;
+        }
+        assert!(forms > 0, "no interactive form is Lisp");
+    }
+}

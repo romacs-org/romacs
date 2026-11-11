@@ -2,16 +2,23 @@
 """Render current crate imports without editing provenance-hashed producers.
 
   render_replay.py primh SPEC... --out TEST.rs
+  render_replay.py primh SPEC... --into TEST.rs
   render_replay.py varh --out TEST.rs
 
 The original harness validates evidence and renders its original template;
 Only emitted Rust is adapted to the current crate name and value-display API.
+`--into` adds each SPEC's replay to TEST.rs, a file rendered from the same
+template (tests/primh.rs holds every primitive's), and keeps those it has.
 """
 import argparse
 import importlib.util
+import os
+import re
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPLAY = re.compile(r'^#\[test\] fn primh_\w+\(\) \{ replay\(.*\); \}$', re.M)
 
 
 def load_harness(family):
@@ -42,13 +49,48 @@ def render(family, specs, out):
     path.write_text(text.replace("vm.display(v)", "v.display()"))
 
 
+def head(text):
+    """TEXT up to its first replay line: the rendered template."""
+    found = REPLAY.search(text)
+    return text[:found.start()] if found else text
+
+
+def into(specs, target):
+    """Add the replays of SPECS that TARGET lacks to TARGET, which must begin
+    with the template as rendered now."""
+    path = Path(target)
+    # Beside TARGET, so the rendered include paths are TARGET's.
+    handle, name = tempfile.mkstemp(dir=path.parent, prefix=".render-", suffix=".rs")
+    os.close(handle)
+    fresh = Path(name)
+    try:
+        render("primh", specs, str(fresh))
+        text = fresh.read_text()
+    finally:
+        fresh.unlink()
+    current = path.read_text()
+    if head(current) != head(text):
+        raise ValueError(f"{target} does not begin with the template as rendered now")
+    present = set(REPLAY.findall(current))
+    added = [line for line in REPLAY.findall(text) if line not in present]
+    path.write_text(current + "".join(f"{line}\n" for line in added))
+    return added
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("family", choices=("primh", "varh"))
     parser.add_argument("spec", nargs="*")
-    parser.add_argument("--out", required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--out")
+    target.add_argument("--into")
     args = parser.parse_args()
-    render(args.family, args.spec, args.out)
+    if args.into and args.family != "primh":
+        parser.error("--into adds primitive replays: primh only")
+    if args.into:
+        into(args.spec, args.into)
+    else:
+        render(args.family, args.spec, args.out)
 
 
 if __name__ == "__main__":

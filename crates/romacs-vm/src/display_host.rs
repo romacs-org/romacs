@@ -5,6 +5,9 @@
 //! the batch chain, so a world, captured before that, never holds it.
 use crate::Vm;
 
+mod models;
+pub(crate) use models::Surfaces;
+
 /// An installed font face: GNU's font-entity, with styles in font.c's
 /// numeric scales (Fontconfig's numbers).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +158,39 @@ pub trait DisplayHost {
     /// from its header alone (`romacs-image-header-size`); None when the
     /// header does not give it.
     fn image_header_size(&mut self, _path: &str) -> Option<(u32, u32)> { None }
+    /// Whether a GPU renderer is live now to draw native models
+    /// (`romacs-model-available-p`).
+    fn model_available(&self) -> bool { false }
+    /// Create native model surface ID as MODEL describes. It loads
+    /// asynchronously: its outcome comes back as a [`crate::HostEvent::Model`].
+    /// # Errors
+    /// The display's refusal (no renderer, or busy); nothing was created.
+    fn create_model(&mut self, _id: u32, _model: ModelCreate) -> Result<(), String> {
+        Err(NO_MODELS.into())
+    }
+    /// Lisp's request REQ for model ID, settled in order by the renderer.
+    ///
+    /// # Errors
+    /// The display's refusal (no renderer, or busy); nothing was sent.
+    fn update_model(&mut self, _id: u32, _req: u64, _change: romacs_display_protocol::model::ModelChange) -> Result<(), String> {
+        Err(NO_MODELS.into())
+    }
+    /// Free surface ID once no presented frame shows it.
+    fn free_surface(&mut self, _id: u32) {}
+}
+
+/// A display without native model support says so.
+pub const NO_MODELS: &str = "this display draws no native models";
+
+/// What creating a native model asks of the display.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelCreate {
+    pub meshes: Vec<romacs_display_protocol::model::ModelMeshSpec>,
+    pub view: romacs_display_protocol::model::ModelView,
+    /// sRGB RGBA, alpha linear.
+    pub background: [f32; 4],
+    /// Logical pixels.
+    pub size: (u32, u32),
 }
 
 /// The attached display: closed until the session opens it.
@@ -165,6 +201,8 @@ pub(crate) struct Display {
     /// face realized to: `frame-parameters' and `face-font' name them on
     /// every call.
     pub face_fonts: rustc_hash::FxHashMap<(String, u32, u16, bool, u16), String>,
+    /// The native surfaces Lisp holds on this display.
+    pub surfaces: Surfaces,
 }
 
 impl Vm {
@@ -172,7 +210,7 @@ impl Vm {
     /// stays closed, the frame an initial-terminal frame, until
     /// [`Vm::open_display`].
     pub fn set_display_host(&mut self, host: Option<Box<dyn DisplayHost>>) {
-        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: Default::default() });
+        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), surfaces: Surfaces::default() });
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer

@@ -411,22 +411,43 @@ an imported session's own turns know better."
         (:context-used (setf (romacs-agent-context-used session) (plist-get facts key)))
         (:context-window (setf (romacs-agent-context-window session) (plist-get facts key)))))))
 
+(defun romacs-agent-history-first-request (harness imported)
+  "The first request of the transcript IMPORTED names, read from its head
+by HARNESS's history, or nil."
+  (let ((path (plist-get imported :path)))
+    (when (file-readable-p path)
+      (let ((end (min (or (plist-get imported :size) (file-attribute-size (file-attributes path)) 0) (* 512 1024))))
+        (cl-find 'input (funcall (romacs-agent-history--get harness :events)
+                                 (romacs-agent-history--read path 0 end (romacs-agent-history--get harness :keep)))
+                 :key (lambda (event) (plist-get event :type)))))))
+
+(defun romacs-agent-history-events (harness imported)
+  "The events of the transcript IMPORTED names (:path, and :size, how much
+of it was the harness's before Romacs went on with it), read by HARNESS's
+history: its last `romacs-agent-history-view-bytes', from a prompt on.
+Return (EVENTS . CUT), CUT whether earlier turns were left out; nil when
+the file is gone."
+  (let* ((path (plist-get imported :path))
+         (end (or (plist-get imported :size) (file-attribute-size (file-attributes path)) 0))
+         (beg (max 0 (- end romacs-agent-history-view-bytes))))
+    (when (file-readable-p path)
+      (let ((events (funcall (romacs-agent-history--get harness :events)
+                             (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
+        ;; Cut: from the first prompt on.
+        (when (> beg 0)
+          (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events)))
+        (cons events (> beg 0))))))
+
 (defun romacs-agent-history-draw (session imported)
   "Draw the transcript IMPORTED names (:path, and :size, how much of it
 was the harness's before Romacs went on with it) into the current chat
 buffer, for SESSION: its end, from a prompt on."
   (let* ((path (plist-get imported :path))
-         (end (or (plist-get imported :size) (file-attribute-size (file-attributes path)) 0))
-         (beg (max 0 (- end romacs-agent-history-view-bytes)))
-         (harness (romacs-agent-harness session))
-         (events (and (file-readable-p path)
-                      (funcall (romacs-agent-history--get harness :events)
-                               (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
+         (read (romacs-agent-history-events (romacs-agent-harness session) imported))
+         (events (car read))
          (started (make-hash-table :test #'equal))
          (facts nil))
-    ;; Cut: from the first prompt on.
-    (when (> beg 0)
-      (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events))
+    (when (cdr read)
       (romacs-agent-ui--insert (format "· earlier turns are in %s\n" (abbreviate-file-name path)) 'face 'romacs-agent-dim))
     (unless (file-readable-p path)
       (romacs-agent-ui--insert (format "! %s is gone\n" (abbreviate-file-name path)) 'face 'romacs-agent-error))

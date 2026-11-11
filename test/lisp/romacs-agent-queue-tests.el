@@ -8,10 +8,15 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+;; Codex's app-server driver is persistent: a per-turn harness is a test
+;; harness's.
+(romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"
+                             :config-default "~/.perturn")
+
 (ert-deftest romacs-agent-queued-message-stays-until-sent ()
   ;; The harness went between the turn's end and the send: the send fails,
   ;; and the message is still first, counted, for the next end or a resume.
-  (let ((session (romacs-agent--make :id "55555555-6666-4777-8888-999999999999" :harness 'claude
+  (let ((session (romacs-agent--make :id "55555555-6666-4777-8888-999999999999" :harness 'claude :driver-state (list :initialized t :ready t)
                                      :state 'running :host-socket "/nonexistent/host.sock")))
     (romacs-agent-send-later session "first")
     (romacs-agent-send-later session "second")
@@ -23,7 +28,7 @@
     (should (= (romacs-agent-queue-length session) 3))
     ;; Sent now: off the queue, in order.
     (let ((sent nil))
-      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
         (romacs-agent--send-next session)
         (romacs-agent--send-next session))
       (should (= (length sent) 2))
@@ -33,7 +38,7 @@
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
   ;; while its message is being sent: the next is sent after, once each.
-  (let ((session (romacs-agent--make :id "66666666-7777-4888-8999-aaaaaaaaaaaa" :harness 'codex
+  (let ((session (romacs-agent--make :id "66666666-7777-4888-8999-aaaaaaaaaaaa" :harness 'perturn
                                      :state 'running))
         (turns nil))
     (romacs-agent-send-later session "first")
@@ -53,11 +58,11 @@
 (ert-deftest romacs-agent-resume-sends-what-waits ()
   ;; A send failed after the turn's end; the resumed harness is starting,
   ;; and what waits goes to it.
-  (let ((session (romacs-agent--make :id "77777777-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude
+  (let ((session (romacs-agent--make :id "77777777-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :driver-state (list :initialized t :ready t)
                                      :state 'starting))
         (sent nil))
     (romacs-agent-send-later session "waited")
-    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
       (romacs-agent--send-next session)
       (should (null sent))
       (romacs-agent--send-next session t))
@@ -70,7 +75,7 @@
   ;; takes it up again when resumed, and what waits goes at that turn's end;
   ;; one that ended between turns gets it once attached.
   (dolist (cut '(nil t))
-    (let* ((session (romacs-agent--make :id "88888888-9999-4aaa-8bbb-cccccccccccc" :harness 'claude
+    (let* ((session (romacs-agent--make :id "88888888-9999-4aaa-8bbb-cccccccccccc" :harness 'claude :driver-state (list :initialized t :ready t)
                                         :provider "claude"))
            (romacs-agent-event-functions nil)
            (waiting nil))
@@ -92,7 +97,9 @@
       (when cut
         (let ((sent nil))
           (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
-                    ((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+                    ((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
+            ;; The resumed run's startup is answered, then its turn ends.
+            (romacs-agent--raise session (list :type 'handshake :state (list :initialized t :ready t)))
             (romacs-agent--raise session (list :type 'done :text "resumed" :seq 4))
             (romacs-agent--send-next session))
           (should (= (length sent) 1))

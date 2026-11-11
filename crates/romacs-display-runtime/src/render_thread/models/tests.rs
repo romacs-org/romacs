@@ -873,3 +873,47 @@ fn older_pictures_are_forgotten_with_the_device_and_the_window() {
         "B's older pictures died with the device"
     );
 }
+
+// ----------------------------------------------------------------------
+// The evaluator's commands reach the store; liveness reaches the evaluator.
+
+/// `ModelCreate` starts a load, `ModelUpdate` answers on the input channel,
+/// and `ModelFree` frees the model; a second free is nothing.
+#[test]
+fn model_commands_create_update_and_free_a_model() {
+    use crate::thread_comm::AssetCommand;
+    let (mut app, emacs) = app_with_channel();
+    let path = std::env::temp_dir().join(format!("romacs-model-command-{}.obj", std::process::id()));
+    std::fs::write(&path, b"v -1 -1 0\nv 1 -1 0\nv 1 1 0\nf 1 2 3\n").unwrap();
+    app.handle_asset(AssetCommand::ModelCreate {
+        id: MODEL,
+        meshes: vec![ModelMeshSpec { path, sha256: None }],
+        view: ModelView::default(),
+        background: [0.0, 0.0, 0.0, 1.0],
+        width: 64,
+        height: 32,
+    });
+    assert!(app.models.contains(MODEL));
+    app.handle_asset(AssetCommand::ModelUpdate { id: MODEL, req: 1, change: yaw(0.5) });
+    assert!(
+        model_events(&emacs).iter().any(|e| matches!(e, InputEvent::Model { id: MODEL, .. })),
+        "the update is answered on the input channel"
+    );
+    app.handle_asset(AssetCommand::ModelFree { id: MODEL });
+    assert!(!app.models.contains(MODEL));
+    app.handle_asset(AssetCommand::ModelFree { id: MODEL });
+    assert!(!app.models.contains(MODEL));
+}
+
+/// The evaluator sees the renderer go and come back
+/// (`romacs-model-available-p`).
+#[test]
+fn renderer_liveness_reaches_the_evaluator() {
+    use std::sync::atomic::Ordering;
+    let (mut app, emacs) = app_with_channel();
+    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    app.note_models_renderer_ready();
+    assert!(emacs.model_renderer.load(Ordering::Acquire));
+    app.note_models_renderer_lost();
+    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+}

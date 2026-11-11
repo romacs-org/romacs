@@ -3,7 +3,7 @@
 
 Each mutant edits exactly one site of src/prims/minibuf.rs or minibuf.el,
 asserts the edit applied, builds, and runs the recorded-corpus replay
-(tests/primh_minibuf.rs) plus tests/minibuf.rs. A mutant is KILLED only when
+(tests/primh.rs) plus tests/minibuf.rs. A mutant is KILLED only when
 the run fails at a corpus or test assertion; a compile error is not a kill.
 Usage (owned checkout with the project environment): python3 minibuf_mutants.py
 """
@@ -43,7 +43,7 @@ MUTANTS = [
 
 
 def run():
-    r = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "primh_minibuf", "--test", "minibuf"],
+    r = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "primh", "--test", "minibuf"],
                        capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 

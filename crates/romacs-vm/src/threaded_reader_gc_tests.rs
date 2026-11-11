@@ -156,13 +156,13 @@ fn a_held_collection_keeps_its_request_without_polling_at_every_return() {
     POLLS.with(|polls| polls.set(0));
     vm.eval_source("(progn (setq held-big (make-string 4000000 ?x)) (dotimes (_ 5000) (make-string 4 ?y)))").unwrap();
     let polls = POLLS.with(|polls| polls.get());
-    assert!(vm.collect_poll, "the request waits for the hold");
+    assert!(vm.poll_requested(), "the request waits for the hold");
     assert!(polls < 50, "{polls} polls over 5000 native returns under a hold");
     vm.gc_holds -= 1;
     let before = vm.heap_stats().collections;
     vm.eval_source("(dotimes (_ 3) (make-string 4 ?y))").unwrap();
     assert!(vm.heap_stats().collections > before, "collected once the hold ended");
-    assert!(!vm.collect_poll);
+    assert!(!vm.poll_requested());
 }
 
 #[test]
