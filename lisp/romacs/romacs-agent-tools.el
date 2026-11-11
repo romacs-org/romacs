@@ -313,6 +313,7 @@ call stays running until its answer is ready."
      "role" (funcall null (plist-get options :role)) "parent" (funcall null (plist-get options :parent))
      "turns" (romacs-agent-turns session) "result" (funcall null (romacs-agent-reply session))
      "cost" (funcall null (romacs-agent-cost session))
+     "cwd" (funcall null (romacs-agent-cwd session)) "conversation" (romacs-agent--native-id session)
      "worktree" (funcall null (plist-get options :worktree)) "branch" (funcall null (plist-get options :branch))
      "pendingApproval" (if (> (hash-table-count (romacs-agent-approvals session)) 0) t :false)
      "next" (if (equal status "running") (romacs-agent-tools--running-next session) :null))))
@@ -356,7 +357,9 @@ anything."
 
 (defconst romacs-agent-tools--child-note
   "You are a delegated task: your parent sees only your final reply.  Do the work yourself, \
-start no delegated tasks unless your task says to, and end with a self-contained result."
+start no delegated tasks unless your task says to, and end with a self-contained result.  A later \
+turn your parent need not act on (no landing, decision or blocker) may end with a reply starting \
+[quiet]: it wakes no one, and your parent can still read it."
   "What a delegated session is told after its task: in its first message,
 not its system prompt, which stays its parent's.")
 
@@ -434,6 +437,22 @@ one; once every task of the parent's delegated with \"all\" has ended; never
 first, each (CHILD . END): the ends that come while it works, or close
 together, wake it once.")
 
+(defconst romacs-agent-tools--quiet "[quiet]"
+  "What a child's reply starts with when its parent need not act on it:
+the end wakes no one, and romacs_task_status still has it.")
+
+(defun romacs-agent-tools--wakes-p (child end)
+  "Whether CHILD's turn END, (SEQ RESULT FAILED), wakes its parent: a
+failure, unless its rule is \"none\"; another end by its rule, unless
+its result is empty (a resumed harness's own turn) or quiet
+\(`romacs-agent-tools--quiet')."
+  (let ((result (string-trim (or (nth 1 end) ""))))
+    (pcase (romacs-agent-tools--wake-rule child)
+      ("none" nil)
+      ("failure" (nth 2 end))
+      (_ (or (nth 2 end)
+             (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result))))))))
+
 (defun romacs-agent-tools--wake (child)
   "Hand CHILD's new turn ends to its parent's next wake, as CHILD's wake
 rule says; an end no rule lets wake it is done with.  Each end is handed
@@ -444,7 +463,7 @@ on once."
     (when parent
       (dolist (end ends)
         (when (romacs-agent-tools--wanted-p child (car end))
-          (if (pcase (romacs-agent-tools--wake-rule child) ("none" nil) ("failure" (nth 2 end)) (_ t))
+          (if (romacs-agent-tools--wakes-p child end)
               ;; Newest first: an end is added in constant time.
               (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
             ;; Done with on its own: an earlier end still waiting stays wanted.
@@ -557,7 +576,9 @@ started with the same clientRequestId.  The child runs on the instance
 its target names, else on its delegating session's own (claude to
 claude, codex to codex); a caller that is no agent session gets the
 default instance.  With isolation \"worktree\" it runs in a new
-worktree of its directory's repository (`romacs-agent-worktree-create')."
+worktree of its directory's repository (`romacs-agent-worktree-create');
+with resume it goes on with that conversation of the instance's
+\(`romacs-agent-tools--adopt')."
   (romacs-mcp--instance arguments)
   (let* ((parent (romacs-agent-tools--caller))
          (request (gethash "clientRequestId" arguments))
@@ -575,26 +596,127 @@ worktree of its directory's repository (`romacs-agent-worktree-create')."
                   default-directory))
          ;; This request's arrival: a deferred answer runs with none active.
          (arrived (or (plist-get romacs-mcp--active :arrived) (float-time)))
+         (start-options (list :model (gethash "model" target)
+                              :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
+                              :role (gethash "role" arguments) :parent parent :request request :wake wake))
          (start (lambda (cwd &rest worktree)
                   (romacs-agent-start
                    cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
-                   (gethash "title" arguments) provider
-                   (append (list :model (gethash "model" target)
-                                 :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
-                                 :role (gethash "role" arguments) :parent parent :request request
-                                 :wake wake)
-                           worktree))))
+                   (gethash "title" arguments) provider (append start-options worktree))))
          (answer (lambda (child)
                    (if (equal (gethash "mode" arguments) "wait")
                        (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
                      (romacs-agent-tools--task child))))
          (known (and request (romacs-agent-requested parent request))))
     (cond (known (funcall answer known))
+          ((gethash "resume" arguments)
+           (funcall answer (romacs-agent-tools--adopt arguments provider start-options)))
           ((equal (gethash "isolation" arguments) "worktree")
            ;; A child that cannot start leaves no worktree behind.
            (romacs-agent--start-instance provider)
            (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start) answer))
           (t (funcall answer (funcall start cwd))))))
+
+(defun romacs-agent-tools--own (session caller what)
+  "SESSION, when CALLER delegated it (a caller that is no agent session
+owns the sessions none delegated); else a `user-error' saying only its
+parent may do WHAT."
+  (let ((parent (plist-get (romacs-agent-options session) :parent)))
+    (unless (equal parent caller)
+      (user-error "%s (%s) is %s: only the session that delegated it may %s"
+                  (romacs-agent-id session) (romacs-agent-title session)
+                  (if parent (format "task of session %s" parent) "no delegated task") what))
+    session))
+
+(defun romacs-agent-tools--tell (child text)
+  "Send TEXT to CHILD as its next message by the session's own send:
+now when it is idle, once its running turn ends, once its harness is
+back when it had ended.  Its next turn end wakes its parent by its wake
+rule, as its first did.  An empty TEXT sends nothing."
+  (when (romacs-agent-cancelled child)
+    (user-error "Task %s (%s) was cancelled" (romacs-agent-id child) (romacs-agent-title child)))
+  (unless (string-empty-p (string-trim text))
+    ;; One starting is going on already: attaching it again would take its
+    ;; supervisor from the attachment under way.
+    (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+    (romacs-agent-send-later child text))
+  child)
+
+(defun romacs-agent-tools--send (arguments)
+  "Send ARGUMENTS' message to the caller's task taskId."
+  (romacs-mcp--instance arguments)
+  (let ((child (romacs-agent-tools--own (romacs-agent-tools--known arguments) (romacs-agent-tools--caller)
+                                        "send it messages")))
+    (when (string-empty-p (string-trim (or (gethash "message" arguments) "")))
+      (user-error "message is empty"))
+    (romacs-agent-tools--task (romacs-agent-tools--tell child (gethash "message" arguments)))))
+
+(defun romacs-agent-tools--same-directory-p (a b)
+  (equal (file-name-as-directory (file-truename a)) (file-name-as-directory (file-truename b))))
+
+(defun romacs-agent-tools--adopt (arguments provider options)
+  "The caller's task going on with the conversation ARGUMENTS' resume
+names, of instance PROVIDER, in its own directory cwd, started with
+OPTIONS: imported (`romacs-agent-import') with task as its next message,
+as is, no brief around it.  A conversation a session already goes on
+with is that task, sent nothing, when the caller delegated it, and
+refused otherwise.  Its transcript is found as the history finds one."
+  (require 'romacs-agent-history)
+  (let* ((thread (gethash "resume" arguments))
+         (cwd (or (gethash "cwd" arguments)
+                  (user-error "resume needs cwd: the directory conversation %s was held in" thread)))
+         (instance (romacs-agent--start-instance provider))
+         (harness (plist-get instance :harness))
+         (config-dir (romacs-agent--config-dir instance))
+         (known (romacs-agent--conversation harness config-dir thread)))
+    (when (equal (gethash "isolation" arguments) "worktree")
+      (user-error "resume goes on in the conversation's own directory: isolation worktree does not apply"))
+    (if known
+        (romacs-agent-tools--own known (plist-get options :parent) "take it over")
+      (let ((item (or (romacs-agent-history-find harness config-dir thread)
+                      (user-error "No %s conversation %s in %s: name the instance that ran it as target.provider"
+                                  (plist-get (romacs-agent--driver-of harness) :display) thread
+                                  (romacs-agent--home harness config-dir)))))
+        (unless (plist-get item :cwd)
+          (user-error "Conversation %s names no directory it was held in: it cannot be resumed" thread))
+        (unless (romacs-agent-tools--same-directory-p (plist-get item :cwd) cwd)
+          (user-error "Conversation %s was held in %s: give that directory as cwd" thread (plist-get item :cwd)))
+        (romacs-agent-tools--tell
+         (romacs-agent-import harness thread (plist-get item :path) (expand-file-name cwd)
+                              (or (gethash "title" arguments) (plist-get item :title) (romacs-agent--short thread))
+                              (plist-get instance :name) config-dir
+                              (romacs-agent--instance-options instance options))
+         (gethash "task" arguments))))))
+
+(defconst romacs-agent-tools--row-result 300
+  "The most of a task's result a row of romacs_task_list carries.")
+
+(defun romacs-agent-tools--row (session)
+  "SESSION's task record as romacs_task_list shows it: its result's
+head and length, and no advice."
+  (let* ((task (romacs-agent-tools--task session)) (result (gethash "result" task)))
+    (remhash "next" task)
+    (when (stringp result)
+      (puthash "resultChars" (length result) task)
+      (when (> (length result) romacs-agent-tools--row-result)
+        (puthash "result" (concat (substring result 0 romacs-agent-tools--row-result) "…") task)))
+    task))
+
+(defun romacs-agent-tools--list (arguments)
+  "The caller's tasks, or with all every session's, most recently active
+first, as rows (`romacs-agent-tools--row').  The records are the
+sessions' own on disk: a restarted server lists them all."
+  (romacs-mcp--instance arguments)
+  (let* ((caller (romacs-agent-tools--caller))
+         (all (eq (gethash "all" arguments) t))
+         (tasks (cl-remove-if-not
+                 (lambda (session) (let ((parent (plist-get (romacs-agent-options session) :parent)))
+                                     (or (equal parent caller) (and all parent))))
+                 (romacs-agent-sessions))))
+    (romacs-mcp--object
+     "tasks" (vconcat (mapcar #'romacs-agent-tools--row
+                              (sort tasks (lambda (a b) (> (or (romacs-agent-last-time a) 0)
+                                                           (or (romacs-agent-last-time b) 0)))))))))
 
 (defvar romacs-agent-tools--making (make-hash-table :test #'equal)
   "A caller's (PARENT . CLIENT-REQUEST-ID) to its isolated task being made:
@@ -898,12 +1020,17 @@ provider defaults to your own session's instance \
        "see romacs_orchestrator_capabilities")
    " (romacs_orchestrator_capabilities has their models and options). mode async (default) answers at once with \
 the taskId and wakes you with the child's result when its turn ends: end your turn then, do not poll. Ends that come \
-together or while you work wake you once. wake: end (default), failure (only a failure wakes you), all (one wake when \
+together or while you work wake you once; an empty result, or one a child starts with [quiet] (nothing for you to \
+act on: no landing, decision or blocker), wakes no one and stays readable by romacs_task_status. wake: end (default), failure (only a failure wakes you), all (one wake when \
 every task you delegated with all has ended), none (read it with romacs_task_status). mode wait answers when it ends, asks for an \
 approval, or timeoutMs (default 600000) passes, and the child goes on. The same clientRequestId returns the task it \
 started before. isolation \"worktree\" gives the child its own checkout of cwd's repository, on a new branch at your \
 HEAD: it commits there, and you merge the branch and remove the worktree (the task's worktree and branch); Romacs \
-never removes one. Use it for children that edit files at the same time."))
+never removes one. Use it for children that edit files at the same time. resume takes over an existing conversation \
+of the provider (a Claude Code session id or a Codex thread id) as your task: cwd is required, the directory it was \
+held in; task is sent to it as is, as its next message (empty: none). Taking over one you already own returns its \
+task and sends nothing; one another session owns is refused. Talk to a running task with romacs_task_send; \
+romacs_task_list finds your tasks again."))
 
 (romacs-mcp-register-tool
  "romacs_delegate_task"
@@ -926,7 +1053,10 @@ never removes one. Use it for children that edit files at the same time."))
                 "cwd" (romacs-mcp--object "type" "string") "title" (romacs-mcp--object "type" "string")
                 "isolation" (romacs-mcp--object "type" "string" "enum" ["shared" "worktree"])
                 "timeoutMs" (romacs-mcp--object "type" "integer")
-                "clientRequestId" (romacs-mcp--object "type" "string"))
+                "clientRequestId" (romacs-mcp--object "type" "string")
+                "resume" (romacs-mcp--object
+                          "type" "string"
+                          "description" "A conversation id of the provider's to go on with, in cwd, instead of a new one."))
   "required" ["task"] "additionalProperties" :false)
  #'romacs-agent-tools--delegate)
 
@@ -936,6 +1066,24 @@ never removes one. Use it for children that edit files at the same time."))
 last result."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
  (lambda (arguments) (romacs-mcp--instance arguments) (romacs-agent-tools--task (romacs-agent-tools--known arguments)))
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_task_send"
+ "Send a message to a task you delegated (only its parent may), by its session's own send: at once when it is \
+idle, after its running turn when it is busy, resuming its harness when it had ended. Its next turn end wakes you \
+with its reply by the task's wake rule, as its first did: end your turn then, do not poll. Answers its task record."
+ (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string") ("message" . "string")) '("taskId" "message"))
+ #'romacs-agent-tools--send)
+
+(romacs-mcp-register-tool
+ "romacs_task_list"
+ "The tasks you delegated (with all, every session's), most recently active first: each task's record with the \
+first 300 characters of its result and resultChars, its whole length. They are kept on disk, so a restarted Romacs \
+or a lead that lost its context finds them again. Read one whole with romacs_task_status; talk to one with \
+romacs_task_send."
+ (romacs-mcp--schema '(("instance" . "string") ("all" . "boolean")) nil)
+ #'romacs-agent-tools--list
  (romacs-mcp--object "readOnlyHint" t))
 
 (romacs-mcp-register-tool

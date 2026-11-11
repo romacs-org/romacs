@@ -581,6 +581,7 @@ instances) is derived again when it changes.")
       given) called once the rollback is journaled and before that run;
       a `user-error' when it cannot;
   :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
+      :find (DIRECTORY ID), the transcript of conversation ID or nil,
       :keep, :describe and :events (`romacs-agent-history').
 
 Defining it again replaces it."
@@ -1941,6 +1942,16 @@ or its configuration directory missing."
     (romacs-agent--check-config-dir (plist-get instance :name) (plist-get instance :config-dir))
     instance))
 
+(defun romacs-agent--instance-options (instance options)
+  "A session's start OPTIONS on INSTANCE: what they ask for, else the
+instance's model and effort (the effort only when it fits the model)."
+  (append (and (not (plist-get options :model)) (plist-get instance :model)
+               (list :model (plist-get instance :model)))
+          (and (not (plist-get options :effort)) (plist-get instance :effort)
+               (romacs-agent--effort-fits-p instance (plist-get options :model) (plist-get instance :effort))
+               (list :effort (plist-get instance :effort)))
+          options))
+
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
   "Start a session working in the project directory CWD under instance
@@ -1957,14 +1968,7 @@ Interactively, open the chat without sending an initial prompt."
          (session (progn
                     (romacs-agent--create
                      :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
-                     ;; What the start asks for, else the instance's defaults.
-                     :options (append (and (not (plist-get options :model)) (plist-get instance :model)
-                                           (list :model (plist-get instance :model)))
-                                      (and (not (plist-get options :effort)) (plist-get instance :effort)
-                                           (romacs-agent--effort-fits-p instance (plist-get options :model)
-                                                                        (plist-get instance :effort))
-                                           (list :effort (plist-get instance :effort)))
-                                      options)
+                     :options (romacs-agent--instance-options instance options)
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                      ;; The project's name until the first prompt names it.
                      :title (or title (file-name-nondirectory (directory-file-name (expand-file-name cwd))))
@@ -1999,34 +2003,41 @@ known, with its private directory."
     (romacs-agent--index session)
     session))
 
-(defun romacs-agent-import (harness thread transcript cwd title provider config-dir)
+(defun romacs-agent--conversation (harness config-dir thread)
+  "The session going on with HARNESS's conversation THREAD in CONFIG-DIR,
+known or recorded (and loaded then), or nil.  Sessions are named by the
+conversation's identity: one directory per conversation, so every server
+finds the one that goes on with it.  Sessions imported before took
+THREAD itself as their id."
+  (let ((legacy (expand-file-name thread (romacs-agent--state-root))))
+    (or (romacs-agent--native-session harness config-dir thread)
+        (romacs-agent--load (expand-file-name (romacs-agent--import-id harness config-dir thread)
+                                              (romacs-agent--state-root)))
+        (and (file-directory-p legacy) (romacs-agent--load legacy)
+             (romacs-agent--native-session harness config-dir thread)))))
+
+(defun romacs-agent-import (harness thread transcript cwd title provider config-dir &optional options)
   "A session going on with HARNESS's own conversation THREAD, kept in its
 TRANSCRIPT, in CWD, titled TITLE, under instance PROVIDER run with
-CONFIG-DIR (nil: the harness's default).  A persistent harness resumes
-THREAD at once; a per-turn one with its first message.  Romacs only
-reads TRANSCRIPT."
+CONFIG-DIR (nil: the harness's default), started with OPTIONS as
+`romacs-agent-start' takes them (a delegated task's :parent, :wake and
+:request among them).  A persistent harness resumes THREAD at once; a
+per-turn one with its first message.  Romacs only reads TRANSCRIPT.  A
+session already going on with THREAD is continued, OPTIONS unused."
   (unless (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) thread)
     (user-error "Not a conversation id: %s" thread))
   (romacs-agent--check-config-dir provider config-dir)
-  ;; Named by the conversation's identity: one directory per conversation,
-  ;; so every server finds the one that goes on with it.  Sessions imported
-  ;; before took THREAD itself as their id.
-  (let* ((id (romacs-agent--import-id harness config-dir thread))
-         (dir (expand-file-name id (romacs-agent--state-root)))
-         (legacy (expand-file-name thread (romacs-agent--state-root)))
-         (existing (or (romacs-agent--native-session harness config-dir thread)
-                       (romacs-agent--load dir)
-                       (and (file-directory-p legacy) (romacs-agent--load legacy)
-                            (romacs-agent--native-session harness config-dir thread)))))
+  (let ((id (romacs-agent--import-id harness config-dir thread))
+        (existing (romacs-agent--conversation harness config-dir thread)))
     (if existing
         (romacs-agent--continue existing)
       (make-directory (romacs-agent--state-root) t)
       ;; Made once: a second server importing it meanwhile is told so.
-      (condition-case nil (make-directory dir)
+      (condition-case nil (make-directory (expand-file-name id (romacs-agent--state-root)))
         (file-already-exists (user-error "Another Romacs is resuming this conversation: try again")))
       (let ((session (romacs-agent--create
                       :id id :harness harness :provider provider :config-dir config-dir :cwd cwd :title title
-                      :harness-session thread
+                      :harness-session thread :options options
                       :imported (list :path transcript :size (file-attribute-size (file-attributes transcript))))))
         (if (romacs-agent--per-turn-p session)
             (progn (setf (romacs-agent-state session) 'idle)
