@@ -963,11 +963,9 @@ impl Vm {
         }
         Ok(None)
     }
-    /// The names of KEY's aliases in `char-property-alias-alist`, which
-    /// decide [`Self::annotation_resolve`] of KEY where neither KEY nor
-    /// `category` gives it.  Walks the alist to KEY's entry; copies only
-    /// that entry's names.
-    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
+    /// KEY's aliases in `char-property-alias-alist`: `assq`, stopping at
+    /// KEY's entry and copying nothing of the others.
+    fn annotation_aliases(&self, key: Value) -> Result<Vec<Value>> {
         let mut tail = self.annotation_variable("char-property-alias-alist");
         for _ in 0..=self.list_limit() {
             if tail == Value::NIL {
@@ -976,11 +974,17 @@ impl Vm {
             let (entry, rest) = self.cons_pair(tail)?;
             let (alias_key, aliases) = self.cons_pair(entry)?;
             if alias_key == key {
-                return self.list_values(aliases)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect();
+                return self.list_values(aliases);
             }
             tail = rest;
         }
         Ok(Vec::new())
+    }
+    /// The names of KEY's aliases, which decide
+    /// [`Self::annotation_resolve`] of KEY where neither KEY nor `category`
+    /// gives it.
+    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
+        self.annotation_aliases(key)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect()
     }
     /// The name KEY's own property layer has.
     pub(super) fn annotation_key_name(&self, key: Value) -> Result<&str> {
@@ -990,18 +994,9 @@ impl Vm {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }
-        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
-            let (alias_key, aliases) = self.cons_pair(entry)?;
-            if alias_key == key {
-                for alias in self.list_values(aliases)? {
-                    if let Some(v) = self
-                        .annotation_base(raw, alias)?
-                        .filter(|v| *v != Value::NIL)
-                    {
-                        return Ok(v);
-                    }
-                }
-                break;
+        for alias in self.annotation_aliases(key)? {
+            if let Some(v) = self.annotation_base(raw, alias)?.filter(|v| *v != Value::NIL) {
+                return Ok(v);
             }
         }
         Ok(self
