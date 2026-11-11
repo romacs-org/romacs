@@ -35,7 +35,7 @@ NEW = dict(MOVES)
 # GNU's pinned text and the vendored packages; this tool, its test and the
 # layout test, which hold the old names as data; and the smell floors, which
 # keep the old entries until the trunk lowers them at a checkpoint.
-EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'gnu-tests/test/', 'SMELL-FLOORS.json',
+EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'gnu-tests/test/', 'ledger/smell-floors.json',
           'tools/lib/lisp_tree.py', 'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
 
 # An old name standing alone: not inside `--gnu-lisp' or `owned_in_rlisp',
