@@ -51,24 +51,13 @@
        (= value value)
        (<= (abs value) 1.0e100)))
 
-(defun gnosis-fsrs--validate-input
-    (prior-state elapsed-days outcome desired-retention)
-  "Validate PRIOR-STATE, ELAPSED-DAYS, OUTCOME, and DESIRED-RETENTION."
-  (unless (and (integerp elapsed-days) (>= elapsed-days 0)
-               (memq outcome '(failure success))
-               (gnosis-fsrs--finite-number-p desired-retention)
-               (< 0 desired-retention 1))
-    (error "Invalid FSRS transition input"))
-  (if prior-state
-      (let ((stability (plist-get prior-state :stability))
-            (difficulty (plist-get prior-state :difficulty)))
-        (unless (and (gnosis-fsrs--finite-number-p stability)
-                     (> stability 0)
-                     (gnosis-fsrs--finite-number-p difficulty)
-                     (<= 1 difficulty 10))
-          (error "Invalid FSRS memory state")))
-    (unless (zerop elapsed-days)
-      (error "New FSRS state must have zero elapsed days"))))
+(defun gnosis-fsrs--validate-input (prior-state elapsed-days outcome)
+  "Validate OUTCOME, and ELAPSED-DAYS for a new card (nil PRIOR-STATE).
+The primitive checks the numbers themselves."
+  (unless (memq outcome '(failure success))
+    (error "Invalid FSRS outcome: %S" outcome))
+  (unless (or prior-state (eql elapsed-days 0))
+    (error "New FSRS state must have zero elapsed days")))
 
 (defun gnosis-fsrs-transition
     (prior-state elapsed-days outcome &optional desired-retention parameters)
@@ -82,7 +71,7 @@ PARAMETERS are the model weights, nil for the defaults.
 The result has :stability, :difficulty, the unrounded
 :raw-interval-days and whole :calendar-interval-days, at least one."
   (let ((retention (or desired-retention gnosis-fsrs-default-retention)))
-    (gnosis-fsrs--validate-input prior-state elapsed-days outcome retention)
+    (gnosis-fsrs--validate-input prior-state elapsed-days outcome)
     (let* ((memory (and prior-state
                         (cons (plist-get prior-state :stability)
                               (plist-get prior-state :difficulty))))

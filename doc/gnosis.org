@@ -1614,8 +1614,10 @@ scheduling evidence.  Replay takes each review's recorded result and
 checks that the next review continues it, so history stays valid when
 the FSRS implementation or its parameters change.  Replay also recomputes
 each review with today's FSRS and reports, without rejecting, any review
-it would schedule differently by more than 0.01%; rebuilding a thema's
-state after an undo shows that report as a warning.  A configuration
+it would schedule differently by more than 0.01%, under that review's own
+configuration.  Rebuilding a thema's state after an undo shows that
+report as a warning, and the history audit counts it across the
+collection (~gnosis-scheduler-drift~ lists it).  A configuration
 names the model and its reference implementation, fsrs-rs 6.6.1.
 Reviews accepted before Romacs built in the crate were computed by an
 Elisp port of it under the same name; they agree with the crate within

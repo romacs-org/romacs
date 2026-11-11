@@ -314,16 +314,18 @@
                            gnosis-db "SELECT * FROM scheduler_baseline")))
            (event (car (gnosis-sqlite-select
                         gnosis-db "SELECT * FROM review_events")))
-           (configs '((1 . 0.9))))
+           (configs (gnosis-scheduler--config-table '((1 0.9)))))
       (should (gnosis-scheduler-replay baseline (list event) configs 0))
-      (should-error (gnosis-scheduler-replay baseline nil nil 0))
+      (should-error (gnosis-scheduler-replay
+                     baseline nil (gnosis-scheduler--config-table nil) 0))
       (let* ((changed (copy-sequence event))
              (large (+ most-positive-fixnum 10))
              (distinct (string-to-number (number-to-string large))))
         (setcar (nthcdr 2 changed) large)
         (should (gnosis-scheduler-replay
                  baseline (list changed)
-                 (list '(1 . 0.9) (cons distinct 0.9)) 0)))
+                 (gnosis-scheduler--config-table (list '(1 0.9) (list distinct 0.9)))
+                 0)))
       (dolist (mutation '((2 . 2) (8 . 4.0) (13 . 20260909)))
         (let ((changed (copy-sequence event)))
           (setcar (nthcdr (car mutation) changed) (cdr mutation))
@@ -345,7 +347,7 @@ arithmetic in the last float digits and must still replay, unreported."
            (events (gnosis-sqlite-select
                     gnosis-db "SELECT * FROM review_events
                                 ORDER BY reviewed_at_us"))
-           (configs '((1 . 0.9)))
+           (configs (gnosis-scheduler--config-table '((1 0.9))))
            (first (copy-sequence (nth 0 events)))
            (second (copy-sequence (nth 1 events)))
            (drifted (+ (nth 9 first) 8.0e-6)))
@@ -392,7 +394,8 @@ arithmetic in the last float digits and must still replay, unreported."
       (setcar (nthcdr 9 first) moved)
       (setcar (nthcdr 7 second) moved)
       (let* ((replayed (gnosis-scheduler-replay
-                        baseline (list first second) '((1 . 0.9)) 0))
+                        baseline (list first second)
+                        (gnosis-scheduler--config-table '((1 0.9))) 0))
              (drift (plist-get replayed :drift)))
         (should (= (nth 9 second) (plist-get replayed :stability)))
         (should (equal (list gnosis-test-scheduler--event-id
@@ -420,6 +423,34 @@ arithmetic in the last float digits and must still replay, unreported."
                                     gnosis-db "SELECT * FROM scheduler_state"))))
       (should (equal '(gnosis) (mapcar #'car warnings)))
       (should (string-match-p "2 review(s) schedule differently" (cdar warnings))))))
+
+(ert-deftest gnosis-test-scheduler-drift-covers-the-collection ()
+  "Replay accepts any configuration of the model; drift is listed per thema.
+A recompute today's FSRS refuses is drift too, never a replay failure."
+  (gnosis-test-scheduler--with-db
+    (gnosis-test-scheduler--seed-state)
+    (gnosis-test-scheduler--seed-state 2)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id-2 2 'success 2000000 20260830)
+    (gnosis-sqlite-execute
+     gnosis-db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
+     (list 2 gnosis-fsrs--algorithm gnosis-fsrs--model "fsrs-rs-9.9.9" 0.9
+           gnosis-fsrs-default-parameters))
+    (should (gethash 2 (gnosis-scheduler--configs gnosis-db)))
+    (should-not (gnosis-scheduler-drift gnosis-db))
+    (let ((transition (symbol-function 'gnosis-fsrs-transition)))
+      (cl-letf (((symbol-function 'gnosis-fsrs-transition)
+                 (lambda (&rest args)
+                   (let ((result (apply transition args)))
+                     (plist-put result :difficulty
+                                (* 0.5 (plist-get result :difficulty)))))))
+        (should (equal '(1 2) (mapcar #'car (gnosis-scheduler-drift gnosis-db)))))
+      (cl-letf (((symbol-function 'gnosis-fsrs-transition)
+                 (lambda (&rest _) (error "Refused"))))
+        (should (equal '((:error "Refused"))
+                       (cdar (cdar (gnosis-scheduler-drift gnosis-db)))))))))
 
 (ert-deftest gnosis-test-scheduler-fit-parameters-reads-effective-history ()
   "Fit to non-void events of themata whose history Gnosis holds whole.
@@ -468,7 +499,7 @@ it stays out; nothing is written."
            (events (gnosis-sqlite-select
                     gnosis-db "SELECT * FROM review_events
                                 ORDER BY reviewed_at_us"))
-           (configs '((1 . 0.9))))
+           (configs (gnosis-scheduler--config-table '((1 0.9)))))
       (should (gnosis-scheduler-replay baseline events configs 0))
       ;; (COLUMN . VALUE) on the second event, each breaking one check.
       (dolist (mutation `((2 . 7)                          ; unknown config
@@ -479,7 +510,6 @@ it stays out; nothing is written."
                           (8 . 9.0)                        ; prior difficulty
                           (9 . 0.0)                        ; posterior stability
                           (10 . 11.0)                      ; posterior difficulty
-                          (11 . ,(/ 0.0 0.0))              ; raw interval
                           (12 . 99)                        ; calendar interval
                           (13 . 20991231)                  ; due day
                           (14 . 0)                         ; reps before

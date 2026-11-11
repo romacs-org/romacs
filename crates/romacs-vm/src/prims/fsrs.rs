@@ -72,7 +72,8 @@ fn romacs_fsrs_retrievability(cx, parameters: Value, stability: Value, elapsed_d
 // weights recent items more, so their order is the reviews' order.  It
 // drops outliers before its thresholds: with under 8 items left the result
 // is the defaults, and with under 64 only the initial stabilities move.
-defsubr! { name = "romacs-fsrs-compute-parameters", gnu = "romacs:fsrs", effect = Pure,
+// Not pure: the crate reads FSRS_NO_OUTLIER from the environment.
+defsubr! { name = "romacs-fsrs-compute-parameters", gnu = "romacs:fsrs", effect = Reads,
 fn romacs_fsrs_compute_parameters(cx, reviews: Value) {
     let mut histories: HashMap<i64, Vec<FSRSReview>> = HashMap::new();
     let mut train_set = vec![];
@@ -296,10 +297,13 @@ mod tests {
                (let ((time (romacs-fsrs-compute-parameters by-time))
                      (card (romacs-fsrs-compute-parameters (nreverse by-card))))
                  (list (plist-get time :items) (plist-get card :items)
+                       ;; Past the initial stabilities: the full fit ran.
+                       (not (equal (substring (plist-get time :parameters) 4)
+                                   (substring (plist-get (romacs-fsrs-compute-parameters nil) :parameters) 4)))
                        (equal (plist-get time :parameters) (plist-get card :parameters))
                        (equal (plist-get time :parameters)
                               (plist-get (romacs-fsrs-compute-parameters by-time) :parameters)))))");
-        assert_eq!(shown, "(180 180 nil t)");
+        assert_eq!(shown, "(180 180 t nil t)");
     }
 
     /// Retrievability clips the decay as the crate's model does, so a
