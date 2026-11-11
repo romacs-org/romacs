@@ -24,6 +24,7 @@
 //! | `fastmap` | first-byte sets | `analyze_first`, `re_compile_fastmap` |
 //! | `scan` | candidate scans | `re_search_2`'s fastmap loop |
 //! | `search` | the search loop | `re_search_2` |
+//! | `syntax_lead` | first characters by syntax class | none |
 //! | `matcher` | match entry points | `re_match_2` |
 //! | `matcher::exec` | the backtracker's loop | `re_match_2_internal` |
 //! | `matcher::fail` | the failure stack | `PUSH_FAILURE_POINT`, `POP_FAILURE_POINT`, `CHECK_INFINITE_LOOP` |
@@ -48,6 +49,7 @@ pub(crate) mod pattern;
 pub(crate) mod scan;
 pub(crate) mod search;
 pub(crate) mod syntax;
+pub(crate) mod syntax_lead;
 pub(crate) mod translate;
 
 #[cfg(test)]
@@ -73,6 +75,10 @@ mod fail_stack_parity_tests;
 #[cfg(test)]
 #[path = "tests/start_anchor_test.rs"]
 mod start_anchor_tests;
+
+#[cfg(test)]
+#[path = "tests/syntax_lead_test.rs"]
+mod syntax_lead_tests;
 
 #[cfg(test)]
 #[path = "tests/host_boundary_test.rs"]

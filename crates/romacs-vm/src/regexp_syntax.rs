@@ -194,6 +194,9 @@ pub(crate) struct VmSyntax<'a> {
     /// Memo of the ASCII classes this call has read.
     ascii: [std::cell::Cell<Option<SyntaxClass>>; 128],
     subject: Option<PropertySubject>,
+    /// The subject's `syntax-table` runs, for a text or string: a search
+    /// reads the property at one position after another.
+    reader: Option<crate::properties::KeyReader<'a>>,
     id: usize,
 }
 impl<'a> VmSyntax<'a> {
@@ -204,6 +207,11 @@ impl<'a> VmSyntax<'a> {
         static NEXT: AtomicUsize = AtomicUsize::new(1);
         // A subject without `syntax-table' properties reads the table alone.
         let subject = source.subject.filter(|s| vm.has_syntax_properties(s.object));
+        let reader = subject.and_then(|s| match vm.object_if(s.object)? {
+            Object::Buffer(t) => Some(t.properties.reader("syntax-table")),
+            Object::String(s) | Object::RawString(s) => Some(s.properties.reader("syntax-table")),
+            _ => None,
+        });
         Self {
             vm,
             table: source.table,
@@ -211,6 +219,7 @@ impl<'a> VmSyntax<'a> {
             // for each slot, cost more than many searches.
             ascii: [const { std::cell::Cell::new(None) }; 128],
             subject,
+            reader,
             id: NEXT.fetch_add(1, Ordering::Relaxed),
         }
     }
@@ -224,7 +233,10 @@ impl<'a> VmSyntax<'a> {
     /// The class a `syntax-table' property gives CODE at POS, if any.
     fn property_class(&self, code: u32, pos: usize) -> Option<SyntaxClass> {
         let s = self.subject?;
-        let value = self.vm.syntax_property(s.object, s.base + pos)?;
+        let value = match &self.reader {
+            Some(reader) => reader.get(ByteOffset(s.base + pos))?,
+            None => self.vm.syntax_property(s.object, s.base + pos)?,
+        };
         self.vm.regexp_property_class(value, code)
     }
 }
