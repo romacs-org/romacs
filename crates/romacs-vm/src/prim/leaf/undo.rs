@@ -15,9 +15,9 @@ impl Leaf<'_> {
         Ok(Value::NIL)
     }
 
-    /// `Vm::take_undo_offers`.
-    pub(crate) fn take_undo_offers(&mut self) -> super::super::Out {
-        self.vm.take_undo_offers().map_err(Fault::Error)
+    /// `Vm::take_undo_offer`.
+    pub(crate) fn take_undo_offer(&mut self, again: Value) -> super::super::Out {
+        self.vm.take_undo_offer(again != Value::NIL).map_err(Fault::Error)
     }
 
     /// `Vm::answer_undo_offer`.

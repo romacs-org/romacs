@@ -19,12 +19,14 @@ fn note_command_point(cx) {
     cx.note_command_point()
 }}
 
-// The buffers `undo-outer-limit-function' is to be asked about, with the size
-// to ask, ((BUFFER . SIZE)...), for `romacs--offer-undo-lists'
-// (lisp/romacs/vm/prelude.el). Nil until a collection finds another (VM2-UNDO-OUTER).
-defsubr! { name = "romacs--take-undo-offers", gnu = "undo.c:361", effect = Global,
-fn take_undo_offers(cx) {
-    cx.take_undo_offers()
+// The next buffer `undo-outer-limit-function' is to be asked about, with the
+// size to ask, (BUFFER . SIZE), as things stand now, for
+// `romacs--offer-undo-lists' (lisp/romacs/vm/prelude.el). Nil when no
+// collection has found one since the last run of them, unless AGAIN, which a
+// run passes after its first (VM2-UNDO-OUTER).
+defsubr! { name = "romacs--take-undo-offer", gnu = "undo.c:361", effect = Global,
+fn take_undo_offer(cx; optional again: Value) {
+    cx.take_undo_offer(again)
 }}
 
 // The rest of truncate_undo_list and compact_buffer for BUFFER, on ANSWER, what

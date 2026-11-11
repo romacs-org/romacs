@@ -254,6 +254,32 @@ fn an_error_from_the_function_leaves_the_list() {
     assert_eq!(shown(&mut vm, "(list undo-test-asked (length buffer-undo-list))"), "(1 5)");
 }
 
+/// Each buffer is asked about as it stands when its turn comes: one the
+/// function has already dealt with while answering for another is not.
+#[test]
+fn a_list_the_function_emptied_while_asked_about_another_is_not_offered() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(ORACLE_SETUP).unwrap();
+    vm.eval_source("(setq undo-limit 10 undo-strong-limit 20 undo-outer-limit 40 undo-test-asked nil \
+        undo-outer-limit-function (lambda (_) \
+          (setq undo-test-asked (cons (buffer-name) undo-test-asked)) \
+          (let ((here (buffer-name)) (names '(\"undo\" \"other\"))) \
+            (while names \
+              (if (equal (car names) here) nil \
+                (with-current-buffer (car names) (setq buffer-undo-list nil))) \
+              (setq names (cdr names)))) \
+          t))").unwrap();
+    for name in ["undo", "other"] {
+        vm.eval_source(&format!("(progn (set-buffer (get-buffer-create \"{name}\")) (buffer-enable-undo) \
+            (let ((buffer-undo-list t)) (insert \"x\")) \
+            (setq buffer-undo-list (list (cons \"abcdefghij\" 1) nil '(1 . 2) nil '(3 . 4))) nil)")).unwrap();
+    }
+    vm.eval_source("(garbage-collect)").unwrap();
+    vm.eval_source("(garbage-collect)").unwrap();
+    assert_eq!(shown(&mut vm, "(length undo-test-asked)"), "1");
+}
+
 /// A collection nobody asked for runs `undo-outer-limit-function` at a later
 /// safe point, with the list's buffer current for it and the running code's
 /// put back; the same forms on the pinned GNU give the same answers.

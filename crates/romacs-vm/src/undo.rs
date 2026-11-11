@@ -76,7 +76,7 @@ pub(crate) enum UndoEdit {
     List(usize, Value),
     /// `BUF_COMPACT` catches up with MODIFF.
     Compacted(usize),
-    /// `undo-outer-limit-function` is to be asked: `Vm::take_undo_offers`
+    /// `undo-outer-limit-function` is to be asked: `Vm::take_undo_offer`
     /// finds which buffers. Until one answers, its `BUF_COMPACT` stays behind,
     /// so that a quit from the function leaves it to the next collection, as
     /// one out of GNU's `compact_buffer` does.
@@ -121,6 +121,19 @@ impl<'a> UndoScan<'a> {
         self.next != Value::NIL && self.next.tag() != 3
     }
 }
+
+/// What a mark's undo rounds have decided, written only once the mark can no
+/// longer be abandoned: the conses cut after, kept across rounds so that a
+/// buffer reached later, sharing a tail with one cut earlier, keeps the cut;
+/// and the edits.
+#[derive(Default)]
+pub(super) struct UndoDecided {
+    pub(super) cuts: HashSet<usize>,
+    pub(super) edits: Vec<UndoEdit>,
+}
+
+/// Conses of an undo list a walk passes between its looks for a key press.
+const UNDO_KEY_POLL: usize = 4096;
 
 impl Vm {
     /// V's index and halves if it is a cons of the table: what an undo list's
@@ -175,15 +188,20 @@ impl Vm {
     /// changes to EDITS. Marks of objects do not change here, so what one
     /// buffer's walk finds does not depend on another's, and the threads' mark
     /// and a verifying one agree.
-    pub(super) fn undo_round(&self, mut owners: Vec<usize>, view: &UndoView, marking: &gc_mark::Marking, pending: &mut Vec<Value>, edits: &mut Vec<UndoEdit>) {
+    /// False when KEY, asked between buffers and every few thousand conses
+    /// of a walk, says a key press ends the mark: nothing was written, and
+    /// what was decided is dropped with the mark.
+    pub(super) fn undo_round(&self, mut owners: Vec<usize>, view: &UndoView, marking: &gc_mark::Marking, pending: &mut Vec<Value>, decided: &mut UndoDecided, key: &mut dyn FnMut() -> bool) -> bool {
         owners.sort_unstable();
-        let mut cuts = HashSet::default();
-        let lists: Vec<(usize, Value)> = owners.into_iter()
-            .filter_map(|buffer| self.undo_decide(buffer, view, &mut cuts, edits))
-            .collect();
-        for (buffer, list) in lists {
-            self.undo_walk(buffer, list, &cuts, marking, pending, edits);
+        let mut lists = Vec::new();
+        for buffer in owners {
+            if key() { return false; }
+            lists.extend(self.undo_decide(buffer, view, &mut decided.cuts, &mut decided.edits));
         }
+        for (buffer, list) in lists {
+            if !self.undo_walk(buffer, list, marking, pending, decided, key) { return false; }
+        }
+        true
     }
 
     /// `compact_buffer` on BUFFER: its cut, if it changed since the last, into
@@ -218,21 +236,29 @@ impl Vm {
     /// the others are unlinked in EDITS, unmarked. At a cons already marked the
     /// rest of the list is too. What it ends in is traced as it is, and so is
     /// what is left of a circle of dead entries.
-    fn undo_walk(&self, buffer: usize, list: Value, cuts: &HashSet<usize>, marking: &gc_mark::Marking, pending: &mut Vec<Value>, edits: &mut Vec<UndoEdit>) {
+    fn undo_walk(&self, buffer: usize, list: Value, marking: &gc_mark::Marking, pending: &mut Vec<Value>, decided: &mut UndoDecided, key: &mut dyn FnMut() -> bool) -> bool {
+        let UndoDecided { cuts, edits } = decided;
         let (mut tail, mut kept) = (list, None);
-        for _ in 0..self.conses.len() {
+        // The dead entries passed since the last kept one: meeting one of
+        // them again is a circle of dead entries, and the walk is over.
+        let mut dropped = HashSet::default();
+        for step in 0..self.conses.len() {
+            if step % UNDO_KEY_POLL == UNDO_KEY_POLL - 1 && key() { return false; }
             let Some((i, car, cdr)) = self.plain_cons(tail) else { break };
             let next = if cuts.contains(&i) { Value::NIL } else { cdr };
             if self.undo_entry_dead(car) {
+                if !dropped.insert(i) { break; }
                 edits.push(kept.map_or(UndoEdit::List(buffer, next), |cons| UndoEdit::Cdr(cons, next)));
             } else {
-                if !marking.conses.claim(i) { return; }
+                if !marking.conses.claim(i) { return true; }
                 if car != Value::NIL { pending.push(car); }
                 kept = Some(i);
+                dropped.clear();
             }
             tail = next;
         }
         pending.push(tail);
+        true
     }
 
     /// The changes a mark decided on, now that it is sure to collect.
@@ -313,15 +339,18 @@ impl Vm {
     /// noted any: ((BUFFER . SIZE)...), each live buffer changed since it was
     /// last compacted whose first record is past the limit. Nil at once when
     /// no collection noted any.
-    pub(crate) fn take_undo_offers(&mut self) -> Result<Value> {
-        if !std::mem::take(&mut self.undo_offers_due) { return Ok(Value::NIL); }
-        let mut offers = Value::NIL;
-        for buffer in self.buffer_order().into_iter().rev() {
+    pub(crate) fn take_undo_offer(&mut self, again: bool) -> Result<Value> {
+        // The first of a run takes the collection's note with it, so that a
+        // quit leaves the rest to the next collection; the run's later ones
+        // (AGAIN) look whatever the note says.
+        if !std::mem::take(&mut self.undo_offers_due) && !again { return Ok(Value::NIL); }
+        // Looked for afresh each time: what the function did about one buffer,
+        // or what happened while it asked, may have changed another's list.
+        for buffer in self.buffer_order() {
             let Some(size) = self.undo_offer_size(buffer)? else { continue };
-            let offer = self.alloc_cons(buffer, Value::integer(size)?);
-            offers = self.alloc_cons(offer, offers);
+            return Ok(self.alloc_cons(buffer, Value::integer(size)?));
         }
-        Ok(offers)
+        Ok(Value::NIL)
     }
 
     /// The first record's size if the function is to be asked about BUFFER.

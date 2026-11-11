@@ -204,7 +204,11 @@ struct MarkState {
     /// Buffers reached whose undo list `Vm::undo_round` has yet to look at.
     undo_owners: Vec<usize>,
     /// What it decided, for once the mark can no longer be abandoned.
-    undo_edits: Vec<undo::UndoEdit>,
+    undo: undo::UndoDecided,
+    /// A mark that keeps every weak entry (a mark twin's) holds undo lists
+    /// whole too: what it leaves unmarked must be dead while Lisp runs on,
+    /// and no list is cut for it.
+    undo_strong: bool,
     /// `lambda_lists` keys whose entry is not traced yet: each is traced
     /// once, by the round that finds its list live, and those left at the
     /// fixpoint are the dead lists.
@@ -1076,6 +1080,18 @@ impl Vm {
             assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
         }
     }
+    /// Every Value the buffer at objects entry I holds, its undo list
+    /// included, whatever a mark would pass over: what a mark twin's bound
+    /// roots for each buffer it reaches.
+    pub(crate) fn buffer_values(&mut self, i: usize) -> Vec<Value> {
+        let mut values = Vec::new();
+        match &mut self.objects.collector_entries_mut()[i] {
+            data::Object::Buffer(buffer) => buffer.visit_values(&mut |v| values.push(*v)),
+            data::Object::ByteBuffer(buffer) => buffer.visit_values(&mut |v| values.push(*v)),
+            _ => {}
+        }
+        values
+    }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
         let dead: Vec<usize> = self.obarray_symbol_names.keys().copied().filter(|slot| !live.contains(slot)).collect();
@@ -1219,12 +1235,12 @@ impl Vm {
             marked = self.verify_mark(marked, n, roots, &in_obarray, &local_binding);
         }
         // Before the reference walk, which follows the lists this leaves.
-        self.apply_undo_edits(std::mem::take(&mut marked.state.undo_edits));
+        self.apply_undo_edits(std::mem::take(&mut marked.state.undo.edits));
         if self.gc_stress.verify {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo_edits: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         lap.lap(&mut self.gc_times, Phase::Mark);
@@ -1647,7 +1663,7 @@ impl Vm {
         }
         lap.lap(&mut self.gc_times, Phase::Roots);
         let untraced_lists = self.lambda_lists.keys().copied().collect();
-        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, ..MarkState::default() };
+        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, undo_strong: keep_weak, ..MarkState::default() };
         state.region_marks[0] = true;
         // GNU dooms finalizers once, after the roots and before the weak
         // tables' contents are marked.
@@ -1682,7 +1698,8 @@ impl Vm {
                 // tables. A buffer one of those reaches comes back here.
                 if !state.undo_owners.is_empty() {
                     let owners = std::mem::take(&mut state.undo_owners);
-                    this.undo_round(owners, &undo_limits, &marking, &mut pending, &mut state.undo_edits);
+                    if !this.undo_round(owners, &undo_limits, &marking, &mut pending, &mut state.undo,
+                        &mut || host.as_mut().is_some_and(|host| host.key_pending())) { return false; }
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
@@ -1726,7 +1743,7 @@ impl Vm {
                 panic!("threads and one thread disagree on {table} entry {i}: {} against {}", colors[i], again[i]);
             }
         }
-        assert_eq!(threads.state.undo_edits, alone.state.undo_edits, "threads and one thread decided different undo edits");
+        assert_eq!(threads.state.undo.edits, alone.state.undo.edits, "threads and one thread decided different undo edits");
         assert_eq!(threads.code_marks, alone.code_marks, "threads and one thread reached different code");
         assert_eq!(threads.census, alone.census, "threads and one thread counted different objects");
         assert_eq!(threads.doomed, alone.doomed, "threads and one thread doomed different finalizers");
@@ -1786,12 +1803,12 @@ impl Vm {
             data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Buffer(t) => {
-                let weak = t.owns_undo_list().then_some(self.undo_list_slot);
+                let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
                 t.visit_values_but(weak, &mut |v| if keep(v) { pending.push(*v) });
             }
             data::Object::ByteBuffer(t) => {
-                let weak = t.owns_undo_list().then_some(self.undo_list_slot);
+                let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
                 t.visit_values_but(weak, &mut |v| if keep(v) { pending.push(*v) });
             }
