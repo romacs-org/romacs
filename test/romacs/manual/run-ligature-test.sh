@@ -11,7 +11,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/ligature-test.log
 SCREENSHOT=/tmp/ligature-screenshot.png

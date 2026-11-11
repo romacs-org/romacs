@@ -110,7 +110,7 @@ line's `env' sets only its own configuration variable."
                   (should-not (member (concat "--setenv=" name) args)))))))))))
 
 (defconst romacs-agent-driver-test--fakerpc
-  (expand-file-name "../../crates/romacs-vm-gui/harness/fakerpc.el"
+  (expand-file-name "../../../crates/romacs-vm-gui/harness/fakerpc.el"
                     (file-name-directory (or load-file-name buffer-file-name))))
 
 (defun romacs-agent-driver-test--feed (session seq key object)

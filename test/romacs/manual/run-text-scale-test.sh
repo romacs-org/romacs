@@ -14,7 +14,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/text-scale-test.log
 SCREENSHOT=/tmp/text-scale-screenshot.png

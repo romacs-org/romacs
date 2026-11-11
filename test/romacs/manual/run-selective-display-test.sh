@@ -4,7 +4,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/selective-display-test.log
 SCREENSHOT=/tmp/selective-display-screenshot.png

@@ -11,7 +11,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROMACS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROMACS_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EMACS_BIN="$ROMACS_ROOT/target/release/romacs-vm-gui"
 TEST_EL="$SCRIPT_DIR/image-type-test.el"
 LOG_FILE="/tmp/romacs-image-type-test-$$.log"

@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 DISPLAY_ENV="${DISPLAY:-:0}"
 ORACLE_ELISP="test/romacs/manual/romacs-oracle-parity.el"

@@ -68,7 +68,7 @@ def run(output):
     assert version("mcp") == "1.30.0", version("mcp")
     executable = Path(os.environ["ROMACS"]).resolve()
     relay = Path(os.environ["ROMACS_MCP_RELAY"]).resolve()
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[3]
     root = Path(tempfile.mkdtemp(prefix="nmcp-sdk-", dir=os.environ["TMPDIR"]))
     for name in ("home", "run", "cache", "config", "state", "data"):
         (root / name).mkdir(mode=0o700)

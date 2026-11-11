@@ -12,7 +12,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/line-numbers-test.log
 SCREENSHOT=/tmp/line-numbers-screenshot.png

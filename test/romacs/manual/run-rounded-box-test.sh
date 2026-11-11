@@ -11,7 +11,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/rounded-box-test.log
 SCREENSHOT=/tmp/rounded-box-screenshot.png

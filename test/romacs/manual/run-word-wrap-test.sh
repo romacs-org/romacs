@@ -13,7 +13,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/word-wrap-test.log
 SCREENSHOT=/tmp/word-wrap-screenshot.png

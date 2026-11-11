@@ -4,7 +4,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 LOG=/tmp/whitespace-test.log
 SCREENSHOT=/tmp/whitespace-screenshot.png

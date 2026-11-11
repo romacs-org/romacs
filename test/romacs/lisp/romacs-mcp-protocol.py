@@ -68,7 +68,7 @@ class Wire:
 
 def run(output):
     executable = Path(os.environ["ROMACS"]).resolve()
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[3]
     root = Path(tempfile.mkdtemp(prefix="nmcp-", dir=os.environ.get("TMPDIR")))
     for name in ("home", "run", "state", "cache", "config", "data"):
         (root / name).mkdir(mode=0o700)

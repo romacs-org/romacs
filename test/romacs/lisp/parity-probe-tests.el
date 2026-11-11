@@ -17,7 +17,7 @@
 (defvar parity-probe-tests--dir (make-temp-file "parity-probe-" t))
 (add-hook 'kill-emacs-hook (lambda () (delete-directory parity-probe-tests--dir t)))
 (let ((process-environment (cons (concat "PARITY_PROBE_DIR=" parity-probe-tests--dir) process-environment)))
-  (load (expand-file-name "../../crates/romacs-vm-gui/harness/parity_probe.el"
+  (load (expand-file-name "../../../crates/romacs-vm-gui/harness/parity_probe.el"
                           (file-name-directory (or load-file-name buffer-file-name)))
         nil t))
 ;; The tests call the poll themselves.

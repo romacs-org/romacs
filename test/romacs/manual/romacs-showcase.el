@@ -49,7 +49,7 @@ Each line is prefixed with a relative timestamp from showcase start."
 
 (defvar showcase--logo-path
   (let ((dir (file-name-directory (or load-file-name default-directory))))
-    (expand-file-name "../../assets/logo-128.png" dir))
+    (expand-file-name "../../../assets/logo-128.png" dir))
   "Path to the Romacs logo.")
 
 (defvar showcase--image-path
