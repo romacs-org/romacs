@@ -180,6 +180,7 @@
       ".github",
       ".gitignore",
       "AGENTS.md",
+      "ARCHITECTURE.md",
       "COPYING",
       "Cargo.lock",
       "Cargo.toml",
