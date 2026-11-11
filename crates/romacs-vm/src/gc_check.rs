@@ -198,7 +198,6 @@ impl Vm {
             op.visit_values(&mut |v| values.push(*v));
             match op {
                 Op::Closure(_, child, _) => code.push(child),
-                Op::Direct(_, _, cache, _, _) => values.push(self.caches[cache].target),
                 _ => {}
             }
         }

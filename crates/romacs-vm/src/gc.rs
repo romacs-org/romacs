@@ -1290,6 +1290,14 @@ impl Vm {
             lap.lap(&mut self.gc_times, Phase::Settle);
             return true;
         }
+        // A call cache whose target died is stale: its symbol's function
+        // changed since it was filled, or the slot would hold the target
+        // live. Nothing reads it until it is filled again, so it is emptied
+        // here rather than forwarded.
+        let stale: Vec<usize> = self.caches.iter().enumerate()
+            .filter(|(_, cache)| !self.survives(&obarray_symbols_live, &region_marks, cache.target))
+            .map(|(i, _)| i).collect();
+        for i in stale { self.caches[i] = Cache { version: 0, target: Value::UNBOUND }; }
         // Compaction: every live entry moves down, every reference is
         // rewritten, and no entry is left free. Past here a panic leaves the
         // references half rewritten, which nothing can undo.
@@ -1750,6 +1758,28 @@ mod tests {
         }
         assert_eq!(deferral(-0.5), 0.0);
         assert_eq!(deferral(f64::NAN), 0.0);
+    }
+
+    /// A call site's cache keeps nothing alive: once its symbol is redefined,
+    /// what the old function held is garbage, though a site that has not
+    /// run since still names it; and a compaction empties such a cache
+    /// instead of forwarding a dead reference.
+    #[test]
+    fn a_stale_call_cache_keeps_nothing_alive() {
+        for moving in [false, true] {
+            let mut vm = Vm::new();
+            vm.set_gc_moving(moving);
+            vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
+            vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+            vm.eval_source_raw("(cache-caller)").unwrap();
+            vm.collect(&mut []);
+            let slots = vm.gc_census.vector_slots;
+            assert!(slots >= 5000, "the callee holds its vector");
+            vm.eval_source_raw("(fset 'cache-callee #'(lambda () nil))").unwrap();
+            vm.collect(&mut []);
+            assert!(vm.gc_census.vector_slots + 5000 <= slots, "the old callee's vector died (moving: {moving})");
+            assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+        }
     }
 
     #[test]
