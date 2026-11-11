@@ -221,6 +221,14 @@ impl Vm {
     pub fn collect_garbage_until_key(&mut self) -> bool {
         self.collect_until_key(&mut [], true)
     }
+    /// The calls entered so far: one for every Lisp function called and for
+    /// every primitive called that can itself call Lisp (the backtrace's
+    /// call counter; a leaf primitive enters nothing). It depends on the
+    /// Lisp run alone, not on the host or its load, so the difference
+    /// across a command pins how much Lisp that command runs.
+    pub fn calls_entered(&self) -> usize {
+        self.backtrace.calls_entered()
+    }
     /// Evaluate a UTF-8 source file sequentially in this persistent strand.
     /// This call may mark and compact; the result borrows the VM.
     pub fn eval_source(&mut self, source: &str) -> Result<Local<'_>> {
