@@ -1,4 +1,4 @@
-# EXCLUSIONS.toml -- the ONLY way a GNU test may be set aside on romacs.
+# ledger/gnu-test-exclusions.toml -- the ONLY way a GNU test may be set aside on romacs.
 #
 # A row moves ONE failing deftest out of `failing` into `intentional-divergence`
 # or `out-of-scope`. It never makes a test pass and is never counted as passing.

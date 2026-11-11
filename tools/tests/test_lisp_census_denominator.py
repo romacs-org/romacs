@@ -37,7 +37,7 @@ class DenominatorTests(unittest.TestCase):
             manifest = {'gnu_commit': pin,
                         'sources': {'fixture': {'paths': ['lisp/same.el'], 'recipe': 'fixture'}},
                         'files': [['lisp/gnu/generated.el', hashlib.sha256(b'nil').hexdigest(), 'fixture']]}
-            (root / 'LISP-GENERATED.json').write_text(json.dumps(manifest))
+            (root / 'ledger/lisp-generated.json').write_text(json.dumps(manifest))
             with patch.object(census, 'ROOT', root), patch.object(census, 'GNU_SOURCE', gnu), \
                     patch.object(census, 'GNU_PIN', pin):
                 inventory = census.oracle_inventory()
@@ -49,7 +49,7 @@ class DenominatorTests(unittest.TestCase):
                 self.assertEqual(summary['gnu_parity']['gnu_target_total'], 1)
                 self.assertEqual(summary['generated_support'], {'loaded': 1, 'total': 1})
                 manifest['files'][0][1] = '0' * 64
-                (root / 'LISP-GENERATED.json').write_text(json.dumps(manifest))
+                (root / 'ledger/lisp-generated.json').write_text(json.dumps(manifest))
                 with self.assertRaisesRegex(RuntimeError, 'SUPPORT'):
                     census.oracle_inventory()
 

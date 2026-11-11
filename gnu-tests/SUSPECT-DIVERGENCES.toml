@@ -2,7 +2,7 @@
 #
 # Source: a read-only audit of DIVERGENCES.md against GNU src/*.c at
 # 45b0f7699df, whose corrections were never applied. An
-# EXCLUSIONS.toml row citing one of these ids is never counted as a verified
+# ledger/gnu-test-exclusions.toml row citing one of these ids is never counted as a verified
 # divergence: run.py files the test under `excluded-unverified-row`, which is
 # debt, not parity evidence. Remove an id only in the commit that corrects its
 # DIVERGENCES.md row with implementation evidence.

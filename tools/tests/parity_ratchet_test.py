@@ -977,13 +977,13 @@ class CensusPopulation(unittest.TestCase):
         self.manifest = {'gnu_commit': self.pin,
                          'sources': {'fixture': {'paths': ['lisp/a.el'], 'recipe': 'fixture generator'}},
                          'files': [[self.support, pr.sha256_file(self.root / self.support), 'fixture']]}
-        (self.root / 'LISP-PIN.json').write_text(json.dumps({
+        (self.root / 'ledger/lisp-pin.json').write_text(json.dumps({
             'gnu_commit': self.pin, 'lisp_tree': git('rev-parse', 'HEAD:lisp'),
-            'generated_support': 'LISP-GENERATED.json'}))
+            'generated_support': 'ledger/lisp-generated.json'}))
         self.write_manifest()
 
     def write_manifest(self):
-        (self.root / 'LISP-GENERATED.json').write_text(json.dumps(self.manifest))
+        (self.root / 'ledger/lisp-generated.json').write_text(json.dumps(self.manifest))
 
     def test_population_is_exact_pristine_pin_plus_validated_generated_support(self):
         pristine, support = pr.census_population(self.root)

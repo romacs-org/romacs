@@ -125,7 +125,7 @@ fn an_absent_gnu_path_is_refused() {
 }
 
 /// With a repository, undeclared Lisp is refused even if ignored; ignored
-/// compiled products are not inputs. LISP-PIN.json must name GNU's pin/tree.
+/// compiled products are not inputs. ledger/lisp-pin.json must name GNU's pin/tree.
 #[test]
 fn with_a_repository_extras_and_a_wrong_pin_record_are_refused() {
     let f = Fixture::new("extra");
@@ -138,7 +138,7 @@ fn with_a_repository_extras_and_a_wrong_pin_record_are_refused() {
     git(&["init", "-q"]);
     let tree = Command::new("git").arg("-C").arg(f.dir.join("gnu")).args(["rev-parse", "HEAD:lisp"]).output().unwrap();
     let tree = String::from_utf8(tree.stdout).unwrap().trim().to_owned();
-    let record = |commit: &str, tree: &str| std::fs::write(root.join("LISP-PIN.json"),
+    let record = |commit: &str, tree: &str| std::fs::write(root.join("ledger/lisp-pin.json"),
         format!("{{\"gnu_commit\": \"{commit}\", \"lisp_tree\": \"{tree}\"}}\n")).unwrap();
     record(&f.pin, &tree);
     std::fs::write(root.join(".gitignore"), "lisp/gnu/generated.elc\nlisp/gnu/generated.el\n").unwrap();
@@ -155,11 +155,11 @@ fn with_a_repository_extras_and_a_wrong_pin_record_are_refused() {
     std::fs::remove_file(root.join("lisp/gnu/ours.el")).unwrap();
 
     record(&f.pin, "0000000000000000000000000000000000000000");
-    refused(&f.check(), "LISP-PIN.json: lisp_tree");
+    refused(&f.check(), "ledger/lisp-pin.json: lisp_tree");
     record("1111111111111111111111111111111111111111", &tree);
-    refused(&f.check(), "LISP-PIN.json: gnu_commit");
-    std::fs::remove_file(root.join("LISP-PIN.json")).unwrap();
-    refused(&f.check(), "LISP-PIN.json is missing");
+    refused(&f.check(), "ledger/lisp-pin.json: gnu_commit");
+    std::fs::remove_file(root.join("ledger/lisp-pin.json")).unwrap();
+    refused(&f.check(), "ledger/lisp-pin.json is missing");
 }
 
 #[test]

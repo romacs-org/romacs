@@ -20,10 +20,10 @@ from derived_artifacts import ARTIFACTS  # noqa: E402
 AUTOLOADS = ARTIFACTS[0]
 MERGED = 'merged artifacts must describe both source branches'
 OWNED = ('tools/check-derived', 'tools/derived', 'tools/lib/derived_artifacts.py', '.gitattributes',
-         'LISP-BUNDLED.json')
+         'lisp/bundled.json')
 AUTOLOADS_FIXTURE = '''import json
 from pathlib import Path
-output = Path(json.loads(Path('LISP-BUNDLED.json').read_text())['autoloads'])
+output = Path(json.loads(Path('lisp/bundled.json').read_text())['autoloads'])
 output.parent.mkdir(parents=True, exist_ok=True)
 inputs = sorted(p.stem for p in Path('.').glob('autoload-input-*.txt'))
 output.write_text(f';;; {output.name} --- fixture\\n' + ''.join(f';; {i}\\n' for i in inputs)

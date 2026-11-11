@@ -259,7 +259,7 @@ class BindingTests(unittest.TestCase):
             git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'source')
             original = git('rev-parse', 'HEAD')
             digest = binding.projection(root)
-            (root / 'parity-ratchet.json').write_text('output')
+            (root / 'ledger/parity-ratchet.json').write_text('output')
             git('add', '.')
             git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'output')
             self.assertEqual(digest, binding.projection(root))
