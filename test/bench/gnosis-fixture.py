@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write a deterministic synthetic Gnosis database for core-bench.
 
-bench/gnosis-fixture.py OUT.db [N]
+test/bench/gnosis-fixture.py OUT.db [N]
 
 Schema: the Gnosis tables read by the themata dashboard (themata,
 thema_tag, scheduler_baseline, scheduler_state, scheduler_config) with the

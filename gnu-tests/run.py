@@ -4,7 +4,7 @@
     python3 gnu-tests/run.py run src/fns-tests.el           # one file, by hand
     python3 gnu-tests/run.py run --all --jobs 16            # the whole suite
     python3 gnu-tests/run.py baseline src/fns-tests.el      # (re)record GNU's verdicts
-    python3 gnu-tests/run.py check-ledger                   # validate EXCLUSIONS.toml
+    python3 gnu-tests/run.py check-ledger                   # validate ledger/gnu-test-exclusions.toml
     python3 gnu-tests/run.py verify-pin                     # the import is pristine
 
 Every deftest gets exactly one VERDICT:
@@ -15,9 +15,9 @@ Every deftest gets exactly one VERDICT:
     not-yet-runnable  romacs never ran it: its file, its definition or the
                       harness could not get that far
 and every verdict other than `passed` gets exactly one CATEGORY:
-    intentional-divergence  ONLY via an EXCLUSIONS.toml row bound to a
+    intentional-divergence  ONLY via an ledger/gnu-test-exclusions.toml row bound to a
                             DIVERGENCES.md entry (validated; see below)
-    out-of-scope            ONLY via an EXCLUSIONS.toml row, same validation
+    out-of-scope            ONLY via an ledger/gnu-test-exclusions.toml row, same validation
     not-yet-implemented     names what is missing (`missing`), derived
                             mechanically from the failure, never asserted
     failing                 everything else
@@ -57,15 +57,15 @@ import tomllib
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 TESTS = HERE / 'test'
-PIN_FILE = HERE / 'PIN.json'
-LEDGER = HERE / 'EXCLUSIONS.toml'
+PIN_FILE = ROOT / 'ledger/gnu-tests-pin.json'
+LEDGER = ROOT / 'ledger/gnu-test-exclusions.toml'
 BASELINE = HERE / 'baseline'
 HARNESS = HERE / 'harness' / 'romacs-mini-ert.el'
 # Loaded by the adapter right after HARNESS (mini mode): records every
 # should-error that absent machinery satisfied. A separate file so HARNESS,
 # whose digest every GNU baseline is bound to, stays byte-identical.
 HARNESS_AUDIT = HERE / 'harness' / 'romacs-mini-ert-audit.el'
-REFERENCE = ROOT / 'parity-reference.toml'
+REFERENCE = ROOT / 'ledger/parity-reference.toml'
 EXTRACT = HERE / 'tools' / 'extract-forms.el'
 GNU_RUN = HERE / 'tools' / 'gnu-run.el'
 # GNU lisp/loadup.el order, loaded as far as it reaches (same list and rule as
@@ -207,16 +207,16 @@ def gnu_test_tree(gnu: pathlib.Path, commit: str, patterns: list) -> tuple[str, 
 # The pristine import
 
 def pin(root: pathlib.Path = ROOT) -> dict:
-    return json.loads((root / 'gnu-tests' / 'PIN.json').read_text())
+    return json.loads((root / 'ledger/gnu-tests-pin.json').read_text())
 
 
 def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> dict:
     """Refuse unless gnu-tests/test is byte-for-byte GNU's test/ at the pin,
-    less the GNU files PIN.json's `excluded` drops deliberately.
+    less the GNU files ledger/gnu-tests-pin.json's `excluded` drops deliberately.
 
     The git tree id of the WORKING content of gnu-tests/test (computed by
     git_tree_id, no repository needed, so it also holds in the gate's source
-    mirror) must equal PIN.json's `test_tree`. Any edit, addition, deletion or
+    mirror) must equal ledger/gnu-tests-pin.json's `test_tree`. Any edit, addition, deletion or
     mode change anywhere under it changes the id. With GNU, `test_tree` must
     also be what GNU's own `test/` at the pin hashes to without the excluded
     paths, so the record stays anchored to GNU, not to the local bytes.
@@ -227,16 +227,16 @@ def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> di
     if gnu is not None:
         want, stale = gnu_test_tree(gnu, p['gnu_commit'], p.get('excluded', []))
         if want != p['test_tree']:
-            problems.append(f'PIN.json test_tree {p["test_tree"]} is not GNU {p["gnu_commit"][:11]}:test '
+            problems.append(f'ledger/gnu-tests-pin.json test_tree {p["test_tree"]} is not GNU {p["gnu_commit"][:11]}:test '
                             f'without its excluded paths ({want}).')
-        problems += [f'PIN.json excluded pattern {pattern!r} matches nothing in GNU\'s test/.' for pattern in stale]
+        problems += [f'ledger/gnu-tests-pin.json excluded pattern {pattern!r} matches nothing in GNU\'s test/.' for pattern in stale]
     if actual != p['test_tree']:
         problems.append(f'its content hashes to git tree {actual}; GNU {p["gnu_commit"][:11]}:test is '
                         f'{p["test_tree"]}. Something under gnu-tests/test was edited, added, '
                         'removed or re-moded (see `git status gnu-tests/test`).')
     if problems:
         raise Refusal(3, 'gnu-tests/test is not the pristine GNU import:\n' + '\n'.join(problems)
-                      + '\nNever edit an imported test in place; record divergences in EXCLUSIONS.toml.')
+                      + '\nNever edit an imported test in place; record divergences in ledger/gnu-test-exclusions.toml.')
     return p
 
 
@@ -495,7 +495,7 @@ def pinned_oracle() -> dict:
         raise Refusal(3, f'baselines are recorded only by the pinned GNU: {e}') from None
     if ident['sha256'] != pinned_gnu_sha256():
         raise Refusal(3, f'{ident["path"]} reports the pinned revision but its sha256 {ident["sha256"]} is not '
-                         f'parity-reference.toml executable_sha256 {pinned_gnu_sha256()}; refusing to record')
+                         f'ledger/parity-reference.toml executable_sha256 {pinned_gnu_sha256()}; refusing to record')
     return ident
 
 
@@ -561,7 +561,7 @@ def lane_files() -> set[str]:
 
 
 def pinned_gnu_sha256(reference: pathlib.Path = REFERENCE) -> str:
-    """The executable digest of the pinned GNU (parity-reference.toml)."""
+    """The executable digest of the pinned GNU (ledger/parity-reference.toml)."""
     try:
         with open(reference, 'rb') as stream:
             digest = tomllib.load(stream).get('executable_sha256', '')
@@ -589,7 +589,7 @@ def baseline_provenance_problem(rel: str, record: dict, expected: str) -> str | 
         return None
     return (f'GNU baseline gnu-tests/baseline/{rel}.json was recorded by {gnu.get("emacs") or "<no binary named>"} '
             f'(sha256 {recorded or "<none>"}), not by the pinned GNU (expected sha256 {expected}, '
-            f'parity-reference.toml executable_sha256). A baseline from another binary is not GNU\'s answer at '
+            f'ledger/parity-reference.toml executable_sha256). A baseline from another binary is not GNU\'s answer at '
             f'the pin, so it is refused, never used. Re-recording is its own explicit, deliberate step '
             f'(it changes what the suite counts): {RERECORD_COMMAND}')
 
@@ -883,7 +883,7 @@ def classify(name: str, gnu: dict | None, fidelity: dict | None, romacs: dict | 
             row['reason'] = f'GNU {g}, romacs {r}'
     if row['verdict'] == 'passed':
         if exclusion:
-            raise Refusal(2, f'{exclusion["file"]}::{name} PASSES on romacs but EXCLUSIONS.toml excludes it '
+            raise Refusal(2, f'{exclusion["file"]}::{name} PASSES on romacs but ledger/gnu-test-exclusions.toml excludes it '
                              f'(divergence {exclusion["divergence"]}); delete the row')
         return row
     if exclusion:
@@ -969,7 +969,7 @@ def classify_file(rel: str, baseline: dict, plan: dict, run: dict | None, ledger
             extras.append({'file': rel, 'test': name, 'romacs': romacs[name]['outcome']})
     for (f, t), ex in ledger.items():
         if f == rel and t not in gnu:
-            raise Refusal(2, f'EXCLUSIONS.toml names {rel}::{t}, which GNU does not define')
+            raise Refusal(2, f'ledger/gnu-test-exclusions.toml names {rel}::{t}, which GNU does not define')
     return rows, extras
 
 
@@ -1044,7 +1044,7 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
                           - collections.Counter((ref or {}).get('vacuous_void_function', []))).elements())
         exclusion = ledger.get((rel, name))
         if engine == 'romacs' and exclusion and passed:
-            raise Refusal(2, f'{rel}::{name} PASSES but EXCLUSIONS.toml excludes it')
+            raise Refusal(2, f'{rel}::{name} PASSES but ledger/gnu-test-exclusions.toml excludes it')
         rows.append({'file': rel, 'test': name, 'harness': 'gnu-ert', 'engine': engine,
                      'outcome': result and result['outcome'],
                      'as_expected': result and result['as_expected'], 'gnu': ref,
@@ -1054,7 +1054,7 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
                      'verdict': 'passed' if passed else 'failed'})
     for file, name in ledger:
         if file == rel and name not in reference:
-            raise Refusal(2, f'EXCLUSIONS.toml names {rel}::{name}, which GNU does not register')
+            raise Refusal(2, f'ledger/gnu-test-exclusions.toml names {rel}::{name}, which GNU does not register')
     return rows
 
 
