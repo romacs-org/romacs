@@ -5,7 +5,7 @@
 //! counts those, in romacs-display-protocol's `call_count`).
 //!
 //! A call's side says where it would land if the evaluator ran in its own
-//! process with layout and fonts beside it: `Local` when the GUI's
+//! process with layout and fonts beside it: `Own` when the GUI's
 //! implementation touches only state the evaluator's thread owns, `Cross`
 //! when it reaches another thread or a descriptor the display side would
 //! own, and `Through` for a trait method whose crossings are the paint
@@ -24,30 +24,32 @@ use crate::{DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, HostEven
 use romacs_layout_input::{FontsetState, FrameSnapshot, MeasureInput, Measured, OpenedDefFont};
 use std::time::Duration;
 
-/// Where a call would land with the evaluator in its own process.
+/// Where a call would land with the evaluator in its own process. `Own`
+/// is Lisp's `local`: the crate's rooted handle is `Local`, and a second
+/// public item of that name makes the compiler spell both out in full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Side { Local, Cross, Through }
+pub enum Side { Own, Cross, Through }
 
-use Side::{Cross, Local, Through};
+use Side::{Cross, Own, Through};
 
 /// Each counted trait method and loop call with its side, by what
 /// romacs-vm-gui's implementation touches.
 const SIDES: &[(&str, Side)] = &[
     // measure.rs: the layout engine, an Rc the evaluator's thread owns.
-    ("layout.measure", Local), ("layout.lay_out", Local),
+    ("layout.measure", Own), ("layout.lay_out", Own),
     // fonts.rs: a constant, the process environment, and the display's own
     // font resolver and tables.
-    ("display.window_system", Local), ("display.display_name", Local), ("display.list_fonts", Local),
-    ("display.family_fonts", Local), ("display.font_families", Local), ("display.open_font", Local),
-    ("display.char_font", Local), ("display.glyph_metrics", Local), ("display.clear_font_cache", Local),
-    ("display.set_fontsets", Local), ("display.opened_def_font", Local),
+    ("display.window_system", Own), ("display.display_name", Own), ("display.list_fonts", Own),
+    ("display.family_fonts", Own), ("display.font_families", Own), ("display.open_font", Own),
+    ("display.char_font", Own), ("display.glyph_metrics", Own), ("display.clear_font_cache", Own),
+    ("display.set_fontsets", Own), ("display.opened_def_font", Own),
     // main.rs: hooks that call the paint sender.
     ("display.set_frame_alpha", Through), ("display.set_visual_config", Through), ("display.lose_device", Through),
     // fonts.rs: native models go to the renderer through the paint sender.
     ("display.model_available", Through), ("display.create_model", Through), ("display.update_model", Through),
     // fonts.rs: noted in the evaluator's own residency list; the command
     // goes later, as `sender.free_surface`.
-    ("display.free_surface", Local),
+    ("display.free_surface", Own),
     // fonts.rs: the decoder and channels shared with the decode worker
     // (`finish_decode` blocks on its results), and image files read
     // outside host.rs.
@@ -63,7 +65,7 @@ const SIDES: &[(&str, Side)] = &[
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
     ("input.native_window", Through), ("input.pointer", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
-    ("input.watch_processes", Local), ("input.images_behind", Local),
+    ("input.watch_processes", Own), ("input.images_behind", Own),
     // terminal_service.rs: each session's terminal is locked against its
     // pty thread, and the mailbox against every session's.
     ("terminal.create", Cross), ("terminal.send", Cross), ("terminal.resize", Cross), ("terminal.input_state", Cross),
@@ -72,7 +74,7 @@ const SIDES: &[(&str, Side)] = &[
     ("sender.submit_scene", Cross), ("sender.load_image", Cross), ("sender.retire_image", Cross),
     ("sender.debug_lose_device", Cross), ("sender.set_frame_alpha", Cross), ("sender.set_title", Cross),
     ("sender.hide_primary", Cross), ("sender.set_visual_config", Cross), ("sender.raise_primary", Cross),
-    ("sender.shutdown", Cross), ("sender.create_model", Cross), ("sender.update_model", Cross), ("sender.free_surface", Cross),
+    ("sender.shutdown", Cross), ("sender.on_render", Cross), ("sender.create_model", Cross), ("sender.update_model", Cross), ("sender.free_surface", Cross),
     // requests that block for the render thread's answer (a rendered
     // presentation, the clipboard, a window made):
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
@@ -95,7 +97,7 @@ const OWN: &[&str] = &["monotonic", "clock", "boot-clock", "run-time", "instruct
 pub fn side(name: &str) -> Side {
     match SIDES.iter().find(|(known, _)| *known == name) {
         Some(&(_, side)) => side,
-        None if OWN.contains(&name) => Local,
+        None if OWN.contains(&name) => Own,
         None => Cross,
     }
 }
@@ -114,7 +116,7 @@ impl crate::Vm {
         let mut list = crate::Value::NIL;
         for (name, side, n) in counts().into_iter().rev() {
             let n = crate::Value::integer(i64::try_from(n).map_err(|e| e.to_string())?)?;
-            let side = self.intern(match side { Local => "local", Cross => "cross", Through => "through" });
+            let side = self.intern(match side { Own => "local", Cross => "cross", Through => "through" });
             let name = self.intern(name);
             let mut row = self.keymap_cons(n, crate::Value::NIL);
             row = self.keymap_cons(side, row);
@@ -246,6 +248,6 @@ mod tests {
         let mut host = Counted(Box::new(Terminals) as Box<dyn TerminalHost>);
         assert_eq!((host.changed_sessions(), host.changed_sessions()), (vec![7], vec![7]));
         assert_eq!(counted("terminal.changed_sessions"), was + 2);
-        assert_eq!((side("layout.lay_out"), side("clock"), side("read-file"), side("input.redisplay"), side("sender.wait_for_render")), (Local, Local, Cross, Through, Cross));
+        assert_eq!((side("layout.lay_out"), side("clock"), side("read-file"), side("input.redisplay"), side("sender.wait_for_render")), (Own, Own, Cross, Through, Cross));
     }
 }

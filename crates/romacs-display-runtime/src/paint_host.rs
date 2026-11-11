@@ -334,6 +334,7 @@ impl PaintSender {
     ///
     /// When a waiter is already registered on this sender.
     pub fn on_render(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        romacs_display_protocol::call_count::count("sender.on_render");
         let registered = self.diagnostics.wake.set(wake).is_ok();
         assert!(registered, "one render waiter per paint sender");
     }
