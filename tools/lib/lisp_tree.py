@@ -10,7 +10,7 @@ lisp/romacs, side by side under the runtime root.
 A reference is a path relative to the runtime root (the checkout, or an
 installed share/romacs), so `gnu-lisp' becomes `lisp/gnu' wherever it names
 the tree: in a path, a string, a comment.  Left alone: the pinned GNU trees
-(lisp/gnu, gnu-tests/test), the vendored packages (lisp/romacs/deps), and
+(lisp/gnu, test/gnu/test), the vendored packages (lisp/romacs/deps), and
 the `--gnu-lisp' options and identifiers that merely contain a name.
 
 Deterministic and idempotent: each command run twice changes nothing more.
@@ -35,7 +35,7 @@ NEW = dict(MOVES)
 # GNU's pinned text and the vendored packages; this tool, its test and the
 # layout test, which hold the old names as data; and the smell floors, which
 # keep the old entries until the trunk lowers them at a checkpoint.
-EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'gnu-tests/test/', 'ledger/smell-floors.json',
+EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'test/gnu/test/', 'ledger/smell-floors.json',
           'tools/lib/lisp_tree.py', 'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
 
 # An old name standing alone: not inside `--gnu-lisp' or `owned_in_rlisp',

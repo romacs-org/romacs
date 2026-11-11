@@ -51,7 +51,9 @@ possible; say so where you do.
   --absolute` holds the trunk to that file at a checkpoint, where `lower`
   records the drops. The file merges by its meaning, each side's raise added:
   `tools/derived setup` installs the merge driver once per repository, and
-  `python3 tools/lib/smells.py resolve` does the same by hand.
+  `python3 tools/lib/smells.py resolve` does the same by hand. The same setup
+  installs the driver that merges the host boundary allow-list entry by
+  entry (`tools/lib/host_allow.py`).
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -165,8 +167,8 @@ The other commands:
   or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `tools/test-ert` keeps
   each file's output. Lisp edits take effect without a rebuild. `make check-runner`
   checks the runner itself against pinned GNU.
-- ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
-- Real GNU ERT execution: `python3 gnu-tests/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
+- ERT report/parser checks: `python3 -m unittest discover -s test/gnu/tests -p test_ert_report.py`.
+- Real GNU ERT execution: `python3 test/gnu/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
 - Scaling probes: `python3 crates/romacs-vm-gui/harness/scaling_live.py --binary BINARY --output OUTPUT`,
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The

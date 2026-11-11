@@ -12,7 +12,7 @@
 (require 'package)
 
 (defconst romacs-package-tests--archive
-  (expand-file-name "../../../gnu-tests/test/lisp/emacs-lisp/package-resources/"
+  (expand-file-name "../../../test/gnu/test/lisp/emacs-lisp/package-resources/"
                     (file-name-directory (or load-file-name buffer-file-name))))
 
 (defmacro romacs-package-tests--with-archive (&rest body)

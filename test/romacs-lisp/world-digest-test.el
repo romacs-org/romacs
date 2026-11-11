@@ -1,7 +1,7 @@
 ;;; world-digest-test.el --- The world differential's digest  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-(load (expand-file-name "../../gnu-tests/tools/world-digest.el"
+(load (expand-file-name "../../test/gnu/tools/world-digest.el"
                         (file-name-directory (or load-file-name buffer-file-name)))
       nil t)
 
