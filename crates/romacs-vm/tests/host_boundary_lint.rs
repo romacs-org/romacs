@@ -24,23 +24,22 @@
 //! (`type-alias`).
 //! Type-qualified calls are matched in both `Type::f` and `<Type>::f` forms.
 //!
-//! Every match needs an entry in `host_boundary_allow.txt`, one exact
-//! `PATH ITEM API MARK REASON` per line: the line of the items named ITEM in
-//! the file PATH that spells API and whose text hashes to MARK. ITEM is the
-//! path of the enclosing named items (`module::Type::method`; an impl is
-//! named by its header, `-` is the file's top level). Two such lines alike
-//! in one item fail, since nothing but its position would tell one from the
-//! other: make them differ, or join them. So an entry follows its site
-//! through every edit but one to the site's own line or its item's name,
-//! and an edit to the
-//! line asks for its reason again.//! line asks for its reason again. An entry that matches nothing fails, so
-//! the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` deliberately rewrites the
-//! list for the current tree: a reason is kept where its entry still names a
-//! site; a site no entry names takes the reason of an unused entry of its
-//! item, else of its path and API, as a guess marked `pending:`, else it is
+//! Every match needs an entry in `host_boundary_allow.txt`, one exact `PATH
+//! ITEM API MARK REASON` per line: the line of the items named ITEM in the
+//! file PATH that spells API and whose text hashes to MARK. ITEM is the path
+//! of the enclosing named items (`module::Type::method`; an impl is named by
+//! its header, `-` is the file's top level). Two such lines alike in one item
+//! fail, since nothing but its position would tell one from the other: make
+//! them differ, or join them. So an entry follows its site through every edit
+//! but one to the site's own line or its item's name, and an edit to the line
+//! asks for its reason again. An entry that matches nothing fails, so the
+//! list cannot rot. `ROMACS_HOST_LINT_BLESS=1` deliberately rewrites the list
+//! for the current tree: a reason is kept where its entry still names a site;
+//! a site no entry names takes the reason of an unused entry of its item,
+//! else of its path and API, as a guess marked `pending:`, else it is
 //! `pending`. Both fail until the site is migrated or given a reason. The
-//! rewrite also re-keys `PATH:LINE API REASON` entries, the list's form
-//! until branches forked before this one have merged.
+//! rewrite also re-keys `PATH:LINE API REASON` entries, the list's form until
+//! branches forked before this one have merged.
 //!
 //! The list is a set of entries, and `.gitattributes` names a driver that
 //! merges it as one (`tools/lib/host_allow.py`, installed by `tools/derived
