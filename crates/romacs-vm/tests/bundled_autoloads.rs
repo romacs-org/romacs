@@ -1,4 +1,4 @@
-//! The bundled packages' generated autoloads (LISP-BUNDLED.json) in the GNU
+//! The bundled packages' generated autoloads (lisp/bundled.json) in the GNU
 //! world the package ERT runner boots: each command is an autoload until it
 //! is called, and calling it loads the package's own file from its directory.
 use romacs_vm::Vm;
@@ -17,7 +17,7 @@ fn query(vm: &mut Vm, form: &str) -> String {
 #[test]
 fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("LISP-BUNDLED.json")).unwrap()).unwrap();
+    let layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("lisp/bundled.json")).unwrap()).unwrap();
     let autoloads = root.join(layout["autoloads"].as_str().unwrap());
     let text = std::fs::read_to_string(&autoloads).unwrap();
     // The package directories the artifact says it scanned, in its order.
