@@ -347,7 +347,7 @@ The workloads, and how each is counted, are in the script's docstring:
   workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
-  not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
+  not comparable with `test/gnu/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
 * session, real commands and keys in a GUI session on headless labwc:
   dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,

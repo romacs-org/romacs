@@ -21,7 +21,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'gnu-tests'))
+sys.path.insert(0, str(ROOT / 'test/gnu'))
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
 from bundled_autoloads import directories
@@ -50,7 +50,7 @@ def bundled_names(bases):
 
 
 def packages(bases):
-    """Test directories of bundled code; GNU's own run under gnu-tests."""
+    """Test directories of bundled code; GNU's own run under test/gnu."""
     names = bundled_names(bases)
     gnu = {p.name for p in (ROOT / 'lisp/gnu').iterdir()}
     return sorted(d for d in TESTS.iterdir() if d.is_dir() and d.name in names and d.name not in gnu)
@@ -76,7 +76,7 @@ def all_suites(bases):
 
 def driver(path, selector):
     quote = json.dumps(str(path), ensure_ascii=False)
-    reporter = (ROOT / 'gnu-tests/harness/romacs-real-ert-reporter.el').read_text()
+    reporter = (ROOT / 'test/gnu/harness/romacs-real-ert-reporter.el').read_text()
     return (f"(setq load-prefer-newer t)\n(require 'ert)\n(load {quote} nil t t)\n"
             f"(setq ert-scoreboard-selector '{selector})\n(kill-emacs (progn {reporter}))\n")
 

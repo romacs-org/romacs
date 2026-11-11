@@ -167,8 +167,8 @@ The other commands:
   or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `tools/test-ert` keeps
   each file's output. Lisp edits take effect without a rebuild. `make check-runner`
   checks the runner itself against pinned GNU.
-- ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
-- Real GNU ERT execution: `python3 gnu-tests/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
+- ERT report/parser checks: `python3 -m unittest discover -s test/gnu/tests -p test_ert_report.py`.
+- Real GNU ERT execution: `python3 test/gnu/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
 - Scaling probes: `python3 crates/romacs-vm-gui/harness/scaling_live.py --binary BINARY --output OUTPUT`,
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The

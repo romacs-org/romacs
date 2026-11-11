@@ -615,13 +615,7 @@ def main():
             if command_line.startswith(b'sleep\x007777\x00'):
                 os.kill(background_pid, 9)
         for child in (process, keyboard, compositor):
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=8)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=8)
+            live.stop(child)
         (output / 'report.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
         (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
         print(json.dumps(report, ensure_ascii=False))

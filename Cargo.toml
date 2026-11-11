@@ -30,7 +30,7 @@ members = [
     "crates/romacs-infra",
     "crates/romacs-video",
     "crates/romacs-video-model",
-    "gnu-tests/runner",
+    "crates/romacs-gnu-tests",
 ]
 default-members = [
     "crates/romacs-vm",

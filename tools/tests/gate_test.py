@@ -130,7 +130,7 @@ class BuildAndRun(unittest.TestCase):
     def setUp(self):
         def source(*args, **kwargs):
             self.assertEqual(args[-1], 'source')
-            self.assertTrue(args[-2].endswith('/gnu-tests/tools/gate_vacuity.py'))
+            self.assertTrue(args[-2].endswith('/test/gnu/tools/gate_vacuity.py'))
             return b'{}'
         self.enterContext(mock.patch.object(gate, 'out', side_effect=source))
 

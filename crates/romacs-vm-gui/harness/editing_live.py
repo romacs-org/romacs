@@ -211,13 +211,7 @@ def main():
         return 1
     finally:
         for child in (process, keyboard, compositor):
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
+            live.stop(child)
         (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
         (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
 

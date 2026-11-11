@@ -1,5 +1,6 @@
 ;;; romacs-agent-environment-tests.el --- A harness's environment -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'cl-lib)
 (require 'romacs-mcp)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
@@ -34,6 +35,23 @@
         (should (equal (romacs-agent-tools--eval arguments) "(nil \"editor\" \"eval\")"))
         (should (equal (getenv "KEEP_ME") "editor"))
         (should (equal (getenv "ROMACS_USAGE_LOG") "/stale"))))))
+
+(ert-deftest romacs-agent-eval-keeps-its-budget-when-the-endpoint-reloads ()
+  ;; Loading romacs-mcp.el again (a live load) keeps the agent layer's
+  ;; romacs_eval, budgetMs and all; with none registered it gives its own.
+  (let ((romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+    (cl-letf (((symbol-function 'run-at-time) #'ignore))
+      (romacs-mcp-register-tool "romacs_eval" "Budgeted."
+                                (romacs-mcp--schema '(("code" . "string") ("budgetMs" . "integer")) '("code"))
+                                #'ignore)
+      (load "romacs-mcp" nil t)
+      (should (equal (plist-get (cdr (assoc "romacs_eval" romacs-mcp-tools)) :description) "Budgeted."))
+      ;; Accepted: an unknown argument would signal.
+      (romacs-mcp--arguments (plist-get (cdr (assoc "romacs_eval" romacs-mcp-tools)) :schema)
+                             (romacs-mcp--object "code" "1" "budgetMs" 10))
+      (setq romacs-mcp-tools (assoc-delete-all "romacs_eval" romacs-mcp-tools))
+      (load "romacs-mcp" nil t)
+      (should (eq (plist-get (cdr (assoc "romacs_eval" romacs-mcp-tools)) :handler) #'romacs-mcp--eval)))))
 
 (provide 'romacs-agent-environment-tests)
 ;;; romacs-agent-environment-tests.el ends here
