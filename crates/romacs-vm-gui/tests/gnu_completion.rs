@@ -412,7 +412,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         "(200 7 0)", "(\"cand-06\" (5 5 60 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "((1 t \"second\") nil romacs-layer-toast-error romacs-layer-toast-error nil (t t t t) t)",
-                        "(\"Wrote ~/.../lisp/romacs/romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/.../aaaaaaaaaaa...aaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv ...\" \"line one\\nline two ...\" \"Wrote\\n/.../界界界界界...界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
+                        "(\"Wrote ~/.../romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/.../aaaaaaaaaaa...aaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv ...\" \"line one\\nline two ...\" \"Wrote\\n/.../界界界界界...界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
                         "(\"a      \\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ...\" 8)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal

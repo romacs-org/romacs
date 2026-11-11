@@ -15,7 +15,7 @@ import jlib  # noqa: E402
 
 binary, out = sys.argv[1], Path(sys.argv[2])
 reps = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-FLAGS = {'default': '', 'loadup': '--loadup', 'lisp/gnu': '--gnu-lisp'}
+FLAGS = {'default': '', 'loadup': '--loadup', 'gnu-only': '--gnu-lisp'}
 results = {}
 for rep in range(reps):
     for mode, flag in FLAGS.items():

@@ -842,7 +842,7 @@ def build_dir(a, commit):
     (d / 'romacs-vm-gui').symlink_to(binary)
     for name in ('romacs-mcp', 'romacs-agent-host'):
         (d / name).symlink_to(binary.with_name(name))
-    for root in ('lisp/gnu', 'lisp/romacs', 'etc'):
+    for root in ('lisp', 'etc'):
         (d / root).symlink_to(runtime / root)
     (d / 'build.json').write_text(json.dumps({'commit': commit}))
     return d

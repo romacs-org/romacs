@@ -64,7 +64,7 @@ def runtime(root, romacs):
     directory = root / 'runtime'
     directory.mkdir()
     (directory / 'romacs-vm-gui').symlink_to(romacs)
-    for name in ('lisp/gnu', 'lisp/romacs', 'etc'):
+    for name in ('lisp', 'etc'):
         (directory / name).symlink_to(parity_live.ROOT / name)
     return directory
 

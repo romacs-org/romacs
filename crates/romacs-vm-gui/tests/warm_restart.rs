@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/warm-restart-session.el");
-const RLISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/romacs");
+const ROMACS_LISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/romacs");
 
 fn dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("romacs-warm-restart-{name}-{}", std::process::id()));
@@ -29,7 +29,7 @@ fn lisp(path: &Path) -> String {
 fn batch(dir: &Path, source: &str) -> String {
     let script = dir.join(format!("script-{}.el", source.len()));
     std::fs::write(&script, format!("(setq load-path (cons {} load-path))\n(load {} nil t)\n{source}\n",
-                                    lisp(Path::new(RLISP)), lisp(Path::new(FIXTURE)))).unwrap();
+                                    lisp(Path::new(ROMACS_LISP)), lisp(Path::new(FIXTURE)))).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
         .args(["-Q", "--batch", "-l"]).arg(&script).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
