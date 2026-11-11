@@ -11,7 +11,7 @@ use crate::prim::leaf::{PropertyBegin, Retry};
 // the face; then GNU's retry state (Retry) and whether modification hooks
 // were inhibited. The hooks run in Lisp (romacs--before-change, which
 // returns the overlay hooks it met, and romacs--after-change in
-// rlisp/vm/insdel.el); these registers are traced.
+// lisp/romacs/vm/insdel.el); these registers are traced.
 fn edit_of(cx: &mut Leaf<'_>, kind: Value, arg: Value) -> std::result::Result<PropertyEdit, Fault> {
     Ok(match kind.integer_value() {
         Some(0 | 3) => PropertyEdit::Add(arg),

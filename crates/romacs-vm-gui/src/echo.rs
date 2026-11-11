@@ -1,9 +1,9 @@
 //! Echo area: the message a command left, and its clearing when the next
 //! command starts (keyboard.c command_loop_1). A command's error reaches
 //! the echo area as GNU's does, through `command-error-function' in the
-//! Lisp command loop (rlisp/vm/keyboard.el). Each change runs
+//! Lisp command loop (lisp/romacs/vm/keyboard.el). Each change runs
 //! `romacs-echo-area-functions' with the message, or nil once cleared,
-//! where a layer shows messages (rlisp/romacs-complete.el).
+//! where a layer shows messages (lisp/romacs/romacs-complete.el).
 use romacs_vm::Vm;
 
 /// The echo area's Lisp, defined once per VM: by `install' when a session
@@ -215,6 +215,7 @@ mod tests {
         let loadup = started.loadup.as_ref().unwrap();
         assert!(loadup.rows.iter().any(|r| r.site.name == "emacs-lisp/backquote"
             && matches!(r.outcome, crate::loadup::Outcome::Complete { .. })), "{}", loadup.table());
+        assert!(loadup.rows.iter().flat_map(|r| &r.nested).any(|n| n.0 == "emacs-lisp/pcase.el"), "{}", loadup.table());
         assert!(started.bindings.is_empty(), "--gnu-lisp installs no stand-ins");
         let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
         // GNU's global-map is subr.el's, not VM2's built-in one.

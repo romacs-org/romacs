@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; rlisp/romacs-saved-settings.el in a `--loadup' session, with GNU's cus-edit
+;; lisp/romacs/romacs-saved-settings.el in a `--loadup' session, with GNU's cus-edit
 ;; (gnu_completion.rs `romacs_saved_settings_lisp_tests_pass').  The journey through
 ;; a real session: harness/options_live.py.
 

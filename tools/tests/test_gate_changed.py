@@ -61,7 +61,7 @@ class ChangedFilter(unittest.TestCase):
 
     def test_a_base_leaves_out_what_came_before_it(self):
         self.git('checkout', '-q', '-b', 'trunk')
-        self.write('rlisp/x.el')
+        self.write('lisp/romacs/x.el')
         self.git('add', '.')
         self.git('commit', '-q', '-m', 'unmappable, on trunk')
         self.git('checkout', '-q', '-b', 'lane')
@@ -73,11 +73,11 @@ class ChangedFilter(unittest.TestCase):
         names = ['crates/romacs-vm/src/source_cache/prepared.rs', 'crates/romacs-vm/tests/quit_async.rs', 'doc/x.org']
         self.write(*names)
         self.assertEqual(filter_for(names), changed_filter(self.repo))
-        self.assertIsNone(filter_for([*names, 'rlisp/x.el']))
+        self.assertIsNone(filter_for([*names, 'lisp/romacs/x.el']))
         self.assertEqual(filter_for([]).count('|') + 1, len(STRUCTURAL))
 
     def test_what_cannot_be_mapped_runs_everything(self):
-        for name in ('rlisp/x.el', 'crates/romacs-vm/src/lib.rs'):
+        for name in ('lisp/romacs/x.el', 'crates/romacs-vm/src/lib.rs'):
             with self.subTest(name):
                 self.write(name)
                 self.assertIsNone(changed_filter(self.repo))

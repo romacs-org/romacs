@@ -27,7 +27,7 @@ mod tests {
     use std::path::PathBuf;
 
     const STATUSES: [&str; 3] = ["needed", "elsewhere", "absent"];
-    /// The rlisp/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
+    /// The lisp/romacs/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
     const LAZY_HALVES: [&str; 9] = ["keyboard.el", "minibuf.el", "window-change.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
 
     fn root() -> PathBuf { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")) }
@@ -65,7 +65,7 @@ mod tests {
             // loop, the minibuffer, insdel, messages, scrolling, treesit),
             // as a session's first commands install them.
             for half in LAZY_HALVES {
-                vm.eval_source(&std::fs::read_to_string(root().join("rlisp/vm").join(half)).unwrap()).unwrap();
+                vm.eval_source(&std::fs::read_to_string(root().join("lisp/romacs/vm").join(half)).unwrap()).unwrap();
             }
             let quoted: Vec<String> = names.iter().map(|n| serde_json::to_string(n).unwrap()).collect();
             // Written one name a line to a file, read back as UTF-8.

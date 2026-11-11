@@ -1,4 +1,4 @@
-//! A session image's container (rlisp/warm-restart.el): a printed Lisp form
+//! A session image's container (lisp/romacs/warm-restart.el): a printed Lisp form
 //! and a table of text blobs, each the raw internal bytes of one buffer's
 //! whole text. Lisp prints and reads the form; only the text, which is the
 //! bulk, crosses here, as memory copies, never through a coding system.

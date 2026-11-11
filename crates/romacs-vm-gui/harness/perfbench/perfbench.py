@@ -116,7 +116,7 @@ usage: perfbench.py --romacs BIN [--runtime DIR] [--commit SHA] [--quick] [--rom
                     [--previous RESULTS.json] [--gnosis-db COPY --gnosis-db-repo REPO]
                     [--profile-config FILE (ROMACS_BENCH_PROFILE)]
 The GNU engine is /usr/bin/emacs (or --gnu).  A binary installed
-beside its runtime (gnu-lisp/, rlisp/) uses that runtime; otherwise give
+beside its runtime (lisp/gnu/, lisp/romacs/) uses that runtime; otherwise give
 --runtime, or the binary loads the Lisp of the checkout it was built in.
 """
 import argparse
@@ -264,7 +264,7 @@ BY_NAME_ONLY = ('init', 'apps')
 # one ERT file it grew past 80 GB of memory and swap until the kernel stepped
 # in.  Romacs reserves a large arena and is not limited this way.
 NEOMACS_MEMORY = 8 << 30
-INSTALL_TREES = ('gnu-lisp', 'rlisp', 'etc')  # what an installation ships beside its binary
+INSTALL_TREES = ('lisp', 'etc')  # what an installation ships beside its binary
 LISP_JOBS = 8  # compile processes at a time, staging an installation
 
 
@@ -657,7 +657,7 @@ def stage_install(cache, binary, runtime):
     print(f'staging an installation in {root}, compiling its Lisp', flush=True)
     done = subprocess.run([str(staged), '--compile-lisp-tree', '--jobs', str(LISP_JOBS)], cwd=root, timeout=3600,
                           env={'PATH': os.environ['PATH'], 'HOME': str(home), 'LANG': 'C.UTF-8',
-                               'ROMACS_RUNTIME_ROOT': str(root), 'ROMACS_LISP_DIR': str(root / 'gnu-lisp')},
+                               'ROMACS_RUNTIME_ROOT': str(root), 'ROMACS_LISP_DIR': str(root / 'lisp/gnu')},
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
     # 2: complete, with files that failed to compile and load as source.
     if done.returncode not in (0, 2):
@@ -1783,7 +1783,7 @@ class Context:
         self.compared = tuple(self.engines)
         self.memory = {'neomacs': NEOMACS_MEMORY}
         self.engine_env = {'gnu': {}, 'neomacs': {}, 'romacs': {'ROMACS_RUNTIME_ROOT': str(runtime),
-                                                 'ROMACS_LISP_DIR': str(runtime / 'gnu-lisp'),
+                                                 'ROMACS_LISP_DIR': str(runtime / 'lisp/gnu'),
                                                  'ROMACS_COMPILED_LISP': 'on' if store else 'off',
                                                  'ROMACS_GNU_SOURCE': os.environ.get('ROMACS_GNU_SOURCE', '')}}
         # Private trees hold compositor sockets, which take 108 bytes at most.
@@ -1860,9 +1860,9 @@ def neomacs_build(args):
 def runtime_of(args):
     binary = Path(args.romacs).resolve()
     for candidate in (args.runtime, os.environ.get('ROMACS_RUNTIME_ROOT'), binary.parent):
-        if candidate and (Path(candidate) / 'gnu-lisp').is_dir() and (Path(candidate) / 'rlisp').is_dir():
+        if candidate and (Path(candidate) / 'lisp/gnu').is_dir() and (Path(candidate) / 'lisp/romacs').is_dir():
             return Path(candidate).resolve()
-    raise SystemExit('no runtime: give --runtime DIR (holding gnu-lisp/ and rlisp/)')
+    raise SystemExit('no runtime: give --runtime DIR (holding lisp/gnu/ and lisp/romacs/)')
 
 
 def commit_of(args):
@@ -1911,7 +1911,7 @@ def main():
     if not args.romacs_source:
         romacs, install = stage_install(cache, romacs, runtime)
         runtime, store = romacs.parent, romacs.with_name(f'{romacs.name}.lisp')
-    os.environ.update(ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'gnu-lisp'),
+    os.environ.update(ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'lisp/gnu'),
                       ROMACS_COMPILED_LISP='on' if store else 'off')
     started = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     run_dir = out_root / commit[:12] / started

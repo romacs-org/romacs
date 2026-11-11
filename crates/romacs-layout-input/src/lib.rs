@@ -142,7 +142,7 @@ pub struct FrameChrome {
 }
 
 /// The material a frame's layers are drawn in, from its `romacs-style'
-/// parameter (rlisp/romacs-chrome.el); the default is the `flat' style.
+/// parameter (lisp/romacs/romacs-chrome.el); the default is the `flat' style.
 /// LAYER_RADIUS is the corners of a layer that names none, BAND_RADIUS of a
 /// picker's selected row; SHADOW is a layer's (reach, drop, opacity), GLOW
 /// its (reach, opacity), in pixels.

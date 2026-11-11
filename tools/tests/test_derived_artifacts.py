@@ -34,7 +34,7 @@ STUB = 'GNU_SOURCE = "."\nif __name__ == "__main__":\n    raise SystemExit(0)\n'
 CHECKERS = ('tools/lib/python_tests.py', 'tools/lib/lisp_oracle.py', 'gnu-tests/run.py', 'tools/lib/parity_ratchet.py',
             'tools/lib/gnu_arity.py', 'tools/lib/gnu_defvars.py', 'tools/lib/icon_font.py', 'tools/lib/bundled_fonts.py',
             'tools/lib/treesit_grammars.py', 'tools/lib/unsafe_census.py', 'tools/lib/smells.py',
-            'tools/lib/divergence_index.py')
+            'tools/lib/divergence_index.py', 'tools/lib/lisp_tree.py')
 
 
 def run(root, *args, check=True, env=None):
