@@ -349,4 +349,64 @@ impl Leaf<'_> {
         corpus.end(start);
         Ok(())
     }
+    /// Whether strings A and B begin with the same LENGTH characters, as
+    /// `string_compare::codes' reads them (a unibyte byte above 127 a raw
+    /// byte): compared in place, up to the first difference.
+    pub(crate) fn completion_same_prefix(&self, a: Value, b: Value, length: usize) -> std::result::Result<bool, Fault> {
+        let a = self.vm.str_view(a).ok_or(Fault::Wrong("stringp", a))?;
+        let b = self.vm.str_view(b).ok_or(Fault::Wrong("stringp", b))?;
+        let code = |multibyte: bool| move |c: u32| if !multibyte && c >= 128 { c + crate::lstring::BYTE8_OFFSET } else { c };
+        if a.chars < length || b.chars < length {
+            return Ok(false);
+        }
+        // One byte to a character in each (ASCII, or unibyte): a byte above
+        // 127 is a raw byte in a unibyte string and in no ASCII one, so the
+        // bytes agree exactly when the characters do.
+        if a.bytes.len() == a.chars && b.bytes.len() == b.chars {
+            return Ok(a.bytes[..length] == b.bytes[..length]);
+        }
+        Ok(a.chars().map(code(a.multibyte)).take(length).eq(b.chars().map(code(b.multibyte)).take(length)))
+    }
+
+    /// The interned, defined symbols whose `commandp' verdict the command
+    /// set must judge now (command_set.rs): every one on its first ask,
+    /// else those whose definition or interning changed, and every alias.
+    /// Each other changed slot leaves the set here.
+    pub(crate) fn command_set_stale(&mut self) -> Vec<(usize, Value)> {
+        let vm = &mut *self.vm;
+        let slots: Vec<usize> = match vm.command_set.take_stale() {
+            crate::command_set::Stale::Fresh => return Vec::new(),
+            crate::command_set::Stale::All => (0..vm.slots.len()).collect(),
+            crate::command_set::Stale::Changed(mut changed) => {
+                changed.extend((0..vm.slots.len()).filter(|&slot| vm.slots[slot].function.index_if(7).is_some()));
+                changed.sort_unstable();
+                changed.dedup();
+                changed
+            }
+        };
+        let mut stale = Vec::new();
+        for slot in slots {
+            let named = vm.in_initial_obarray(slot) && !matches!(vm.symbol_names[slot].as_str(), "nil" | "t");
+            if named && !matches!(vm.slots[slot].function, Value::NIL | Value::UNBOUND) {
+                stale.push((slot, Value::reference(slot + 1, 7)));
+            } else {
+                vm.command_set.set(slot, false);
+            }
+        }
+        stale
+    }
+
+    pub(crate) fn command_set_mark(&mut self, slot: usize, member: bool) {
+        self.vm.command_set.set(slot, member);
+    }
+
+    /// The command set's symbols, in the initial obarray's order.
+    pub(crate) fn command_set_symbols(&mut self) -> Value {
+        let slots: Vec<usize> = self.vm.command_set.slots().collect();
+        slots.into_iter().rev().fold(Value::NIL, |list, slot| self.cons(Value::reference(slot + 1, 7), list))
+    }
+
+    pub(crate) fn command_set_epoch(&self) -> u64 {
+        self.vm.command_set.epoch()
+    }
 }

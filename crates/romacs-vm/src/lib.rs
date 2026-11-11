@@ -22,6 +22,7 @@ mod map_keymap;
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod command_set;
 mod command;
 mod interpreted_closure;
 mod oclosure;
@@ -1633,6 +1634,8 @@ pub struct Vm {
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
     completion_walks: u64,
+    /// The symbols M-x lists (command_set.rs).
+    command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
@@ -1794,6 +1797,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     referrers,
     local_owners,
     completion_walks,
+    command_set,
     completion_case_memo,
     caches,
     stack,
@@ -2032,6 +2036,7 @@ impl Vm {
             referrers: None,
             local_owners: None,
             completion_walks: 0,
+            command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
             stack: vec![],
@@ -2202,12 +2207,17 @@ impl Vm {
             self.macros.remove(&slot);
         }
         self.world_version = world;
+        self.command_set.changed(slot);
         Ok(())
     }
     /// Record whether `names' maps SLOT's name to SLOT.
     fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
         if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
         self.initial_obarray[slot] = interned;
+        // A void symbol's interning changes no command.
+        if self.slots.get(slot).is_some_and(|s| !matches!(s.function, Value::NIL | Value::UNBOUND)) {
+            self.command_set.changed(slot);
+        }
     }
     /// Whether SLOT's symbol is interned in the initial obarray.
     fn in_initial_obarray(&self, slot: usize) -> bool {

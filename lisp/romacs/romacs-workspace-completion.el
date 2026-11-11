@@ -88,10 +88,11 @@ GNU's `commandp'; calling it loads the file."
 
 (defun romacs-command-names ()
   "Return currently defined interactive command names, sorted for completion."
-  (let ((names nil))
-    (mapatoms (lambda (symbol)
-                (when (romacs-command-p symbol)
-                  (setq names (cons (symbol-name symbol) names)))))
+  (let ((symbols (romacs-command-symbols)) (names nil))
+    (while symbols
+      (when (romacs-command-p (car symbols))
+        (setq names (cons (symbol-name (car symbols)) names)))
+      (setq symbols (cdr symbols)))
     (sort names 'string-lessp)))
 
 (defun read-extended-command (&optional prompt)

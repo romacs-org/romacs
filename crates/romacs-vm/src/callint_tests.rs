@@ -89,3 +89,40 @@ fn interactive_form_follows_aliases_with_an_empty_cons_arena() {
     assert_eq!(show(&mut vm, "(interactive-form 'forward-char)"), "(interactive \"^p\")");
     assert!(vm.conses.len() <= 2, "the fixture empties the cons arena");
 }
+
+/// `all-completions' with `commandp' judges each candidate in its loop: a
+/// walk over many symbols keeps one native frame, as GNU's does.
+#[test]
+fn commandp_walks_many_symbols_at_one_depth() {
+    let mut vm = Vm::new();
+    let count = show(&mut vm, "
+      (let ((i 0))
+        (while (< i 200000)
+          (intern (concat \"walk-symbol-\" (number-to-string i)))
+          (setq i (1+ i)))
+        (fset 'walk-symbol-7 (lambda () (interactive) 7))
+        (fset 'walk-symbol-99999 (lambda () (interactive) 9)))
+      (length (all-completions \"walk-symbol-\" obarray 'commandp))");
+    assert_eq!(count, "2");
+}
+
+/// The command set follows every write that changes a verdict: a definition,
+/// an alias's target, `fmakunbound' and `unintern'.
+#[test]
+fn command_symbols_follow_definitions() {
+    let mut vm = Vm::new();
+    let members = "(let (found) (dolist (s '(set-a set-b set-c set-d)) (when (memq s (romacs-command-symbols)) (push s found))) (nreverse found))";
+    show(&mut vm, "(progn (defalias 'set-a (lambda () (interactive) 1)) (defalias 'set-b 'set-c) (defalias 'set-c (lambda () 1)) (defalias 'set-d (lambda () (interactive) 4)))");
+    assert_eq!(show(&mut vm, members), "(set-a set-d)");
+    let epoch = show(&mut vm, "(romacs-command-epoch)");
+    show(&mut vm, "(defalias 'set-c (lambda () (interactive) 3))");
+    assert_eq!(show(&mut vm, members), "(set-a set-b set-c set-d)", "an alias follows its target");
+    show(&mut vm, "(progn (fmakunbound 'set-a) (unintern \"set-d\" obarray))");
+    assert_eq!(show(&mut vm, members), "(set-b set-c)");
+    assert_ne!(show(&mut vm, "(romacs-command-epoch)"), epoch);
+    let epoch = show(&mut vm, "(romacs-command-epoch)");
+    show(&mut vm, "(put 'unrelated-symbol 'p 1)");
+    assert_eq!(show(&mut vm, "(romacs-command-epoch)"), epoch, "a non-member's plist is no change");
+    show(&mut vm, "(put 'set-b 'completion-predicate 'ignore)");
+    assert_ne!(show(&mut vm, "(romacs-command-epoch)"), epoch, "a member's plist is");
+}
