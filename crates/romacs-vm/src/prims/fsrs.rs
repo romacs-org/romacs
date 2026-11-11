@@ -3,8 +3,8 @@
 //! and the optimizer are the crate's, so Romacs answers what fsrs-rs does.
 //!
 //! PARAMETERS is a vector or list of 17, 19 or 21 numbers (FSRS-4.5, 5 or
-//! 6 weights, the older ones filled as the crate fills them), or nil for
-//! the crate's FSRS-6 defaults.  MEMORY is nil for a new card, else
+//! 6 weights, the older ones filled and all clipped as the crate does), or
+//! nil for the crate's FSRS-6 defaults.  MEMORY is nil for a new card, else
 //! (STABILITY . DIFFICULTY).  RATING is 1 Again, 2 Hard, 3 Good or 4 Easy.
 //! Days are whole days; stability and intervals are in days.  The crate
 //! computes in single precision, and floats here carry its values exactly.
@@ -12,14 +12,19 @@ use super::Value;
 use super::leaf_scalars::number;
 use crate::prim::{Fault, Leaf};
 use super::orderless::{elements, list};
+use std::collections::HashMap;
 use ::fsrs::{ComputeParametersInput, FSRSItem, FSRSReview, MemoryState, FSRS};
 
 type Result<T> = std::result::Result<T, Fault>;
 
+/// The range the crate clips the decay weight (w20) to when it builds a
+/// model (fsrs-rs parameter_clipper.rs), which it does not expose.
+const DECAY_CLIP: (f32, f32) = (0.1, 0.8);
+
 // The state after RATING, ELAPSED-DAYS after MEMORY was last reviewed
 // under PARAMETERS, and the interval in days that reaches RETENTION:
 // (:stability S :difficulty D :interval I).  The interval is unrounded.
-defsubr! { name = "romacs-fsrs-next-state", gnu = "romacs:fsrs", effect = Reads,
+defsubr! { name = "romacs-fsrs-next-state", gnu = "romacs:fsrs", effect = Pure,
 fn romacs_fsrs_next_state(cx, parameters: Value, memory: Value, elapsed_days: Value, rating: Value, retention: Value) {
     let model = model(cx, parameters)?;
     let memory = memory_state(cx, memory)?;
@@ -35,7 +40,7 @@ fn romacs_fsrs_next_state(cx, parameters: Value, memory: Value, elapsed_days: Va
 
 // The unrounded interval in days at which a card of STABILITY falls to
 // RETENTION under PARAMETERS.
-defsubr! { name = "romacs-fsrs-interval", gnu = "romacs:fsrs", effect = Reads,
+defsubr! { name = "romacs-fsrs-interval", gnu = "romacs:fsrs", effect = Pure,
 fn romacs_fsrs_interval(cx, parameters: Value, stability: Value, retention: Value) {
     let model = model(cx, parameters)?;
     let stability = positive(cx, stability)?;
@@ -44,65 +49,56 @@ fn romacs_fsrs_interval(cx, parameters: Value, stability: Value, retention: Valu
 }}
 
 // The probability of recalling a card of STABILITY ELAPSED-DAYS after its
-// last review, on PARAMETERS' forgetting curve.  ELAPSED-DAYS may be
+// last review, on PARAMETERS' forgetting curve, its decay clipped as the
+// crate clips it for the other primitives.  ELAPSED-DAYS may be
 // fractional.
-defsubr! { name = "romacs-fsrs-retrievability", gnu = "romacs:fsrs", effect = Reads,
+defsubr! { name = "romacs-fsrs-retrievability", gnu = "romacs:fsrs", effect = Pure,
 fn romacs_fsrs_retrievability(cx, parameters: Value, stability: Value, elapsed_days: Value) {
     let weights = weights(cx, parameters)?;
     let stability = positive(cx, stability)?;
     let elapsed = number(cx, elapsed_days)?;
     if !(elapsed >= 0.0 && elapsed.is_finite()) { return Err(Fault::Wrong("natnump", elapsed_days)); }
     let memory = MemoryState { stability, difficulty: 5.0 };
-    Ok(cx.float(f64::from(::fsrs::current_retrievability(memory, single(elapsed), weights[20]))))
+    let decay = weights[20].clamp(DECAY_CLIP.0, DECAY_CLIP.1);
+    Ok(cx.float(f64::from(::fsrs::current_retrievability(memory, single(elapsed), decay))))
 }}
 
-// Weights fitted to HISTORIES by the crate's optimizer, as Anki trains
-// them: (:parameters VECTOR :items N).  HISTORIES holds one list per card
-// of (RATING . ELAPSED-DAYS) reviews, oldest first, the first with zero
-// elapsed days.  Every later review a day or more after the one before is
-// an item to predict, and N counts them.  Under 8 items the result is the
-// defaults; under 64 only the initial stabilities are fitted.
-defsubr! { name = "romacs-fsrs-compute-parameters", gnu = "romacs:fsrs", effect = Reads,
-fn romacs_fsrs_compute_parameters(cx, histories: Value) {
+// Weights fitted to REVIEWS by the crate's optimizer, as Anki trains
+// them: (:parameters VECTOR :items N).  REVIEWS is a list of
+// (CARD RATING ELAPSED-DAYS), oldest first across all cards, CARD an
+// integer naming the card; a card's first review has zero elapsed days.
+// Each later review a day or more after the one before is an item to
+// predict, with the card's reviews so far; N counts them.  The crate
+// weights recent items more, so their order is the reviews' order.  It
+// drops outliers before its thresholds: with under 8 items left the result
+// is the defaults, and with under 64 only the initial stabilities move.
+defsubr! { name = "romacs-fsrs-compute-parameters", gnu = "romacs:fsrs", effect = Pure,
+fn romacs_fsrs_compute_parameters(cx, reviews: Value) {
+    let mut histories: HashMap<i64, Vec<FSRSReview>> = HashMap::new();
     let mut train_set = vec![];
     let mut card_ids = vec![];
-    for (card, history) in elements(cx, histories)?.into_iter().enumerate() {
-        let reviews = reviews(cx, history)?;
-        for item in items(&reviews) {
-            train_set.push(item);
-            card_ids.push(i64::try_from(card).map_err(|_| Fault::Wrong("fixnump", histories))?);
+    for entry in elements(cx, reviews)? {
+        let fields = elements(cx, entry)?;
+        let [card, rating, elapsed] = fields[..] else { return Err(Fault::Wrong("listp", entry)) };
+        let card = card.integer_value().ok_or(Fault::Wrong("integerp", card))?;
+        let rating = match whole(rating, 4)? { 0 => return Err(Fault::Wrong("natnump", rating)), r => r };
+        let delta_t = whole(elapsed, u32::MAX)?;
+        let history = histories.entry(card).or_default();
+        if history.is_empty() && delta_t != 0 { return Err(Fault::Wrong("zerop", elapsed)); }
+        history.push(FSRSReview { rating, delta_t });
+        if history.len() > 1 && delta_t > 0 {
+            train_set.push(FSRSItem { reviews: history.clone() });
+            card_ids.push(card);
         }
     }
-    let count = train_set.len();
+    let count = Value::fixnum(i64::try_from(train_set.len()).unwrap_or(i64::MAX))
+        .ok_or(Fault::Wrong("fixnump", reviews))?;
     let input = ComputeParametersInput { train_set, card_ids: Some(card_ids), ..Default::default() };
     let fitted = ::fsrs::compute_parameters(input).map_err(|e| failed(&e))?;
     let fitted: Vec<Value> = fitted.into_iter().map(|w| cx.float(f64::from(w))).collect();
-    let keys = [cx.intern(":parameters"), cx.intern(":items")];
-    let values = [cx.vector(&fitted), i64::try_from(count).ok().and_then(Value::fixnum).ok_or(Fault::Wrong("fixnump", histories))?];
-    Ok(list(cx, &[keys[0], values[0], keys[1], values[1]]))
+    let items = [cx.intern(":parameters"), cx.vector(&fitted), cx.intern(":items"), count];
+    Ok(list(cx, &items))
 }}
-
-/// The items Anki trains on from one card's REVIEWS: each prefix ending
-/// in a review at least a day after the one before.
-fn items(reviews: &[FSRSReview]) -> impl Iterator<Item = FSRSItem> + '_ {
-    (1..reviews.len())
-        .filter(|&end| reviews[end].delta_t > 0)
-        .map(|end| FSRSItem { reviews: reviews[..=end].to_vec() })
-}
-
-/// One card's (RATING . ELAPSED-DAYS) list as crate reviews.
-fn reviews(cx: &mut Leaf<'_>, history: Value) -> Result<Vec<FSRSReview>> {
-    let mut out = vec![];
-    for review in elements(cx, history)? {
-        let (rating, delta) = cx.pair(review).ok_or(Fault::Wrong("consp", review))?;
-        let rating = whole(rating, 4)?;
-        if rating == 0 { return Err(Fault::Wrong("natnump", review)); }
-        let delta_t = whole(delta, u32::MAX)?;
-        if out.is_empty() && delta_t != 0 { return Err(Fault::Wrong("zerop", delta)); }
-        out.push(FSRSReview { rating, delta_t });
-    }
-    Ok(out)
-}
 
 /// The crate's model for PARAMETERS, nil meaning the defaults.
 fn model(cx: &mut Leaf<'_>, parameters: Value) -> Result<FSRS> {
@@ -137,16 +133,19 @@ fn memory_state(cx: &mut Leaf<'_>, memory: Value) -> Result<Option<MemoryState>>
     Ok(Some(MemoryState { stability, difficulty: single(d) }))
 }
 
-/// VALUE as a finite number above zero.
+/// VALUE as a finite number above zero at single precision.
 fn positive(cx: &mut Leaf<'_>, value: Value) -> Result<f32> {
-    let x = number(cx, value)?;
-    if x > 0.0 && x.is_finite() { Ok(single(x)) } else { Err(Fault::Wrong("cl-plusp", value)) }
+    let x = single(number(cx, value)?);
+    if x > 0.0 && x.is_finite() { Ok(x) } else { Err(Fault::Range(value, Value::integer(0).unwrap())) }
 }
 
-/// VALUE as a probability strictly between 0 and 1.
+/// VALUE, strictly between 0 and 1, at single precision.  One just
+/// below 1 may round to 1 (an interval of 0 days); one that rounds to 0
+/// would give an infinite interval and is refused.
 fn probability(cx: &mut Leaf<'_>, value: Value) -> Result<f32> {
     let x = number(cx, value)?;
-    if x > 0.0 && x < 1.0 { Ok(single(x)) } else { Err(Fault::Range(value, Value::integer(1).unwrap())) }
+    let narrow = single(x);
+    if x > 0.0 && x < 1.0 && narrow > 0.0 { Ok(narrow) } else { Err(Fault::Range(value, Value::integer(1).unwrap())) }
 }
 
 /// VALUE as an integer in 0..=MAX.
@@ -218,17 +217,21 @@ mod tests {
                (list (equal (romacs-fsrs-next-state w '(4.0 . 5.0) 3 3 0.9)
                             (romacs-fsrs-next-state nil '(4.0 . 5.0) 3 3 0.9))
                      (= (romacs-fsrs-retrievability w 4.0 4) (romacs-fsrs-retrievability nil 4.0 4))
-                     (< (abs (- 0.9 (romacs-fsrs-retrievability nil 4.0 4))) 1e-6)))");
-        assert_eq!(shown, "(t t t)");
+                     (< (abs (- 0.9 (romacs-fsrs-retrievability nil 4.0 4))) 1e-6)
+                     ;; Just below 1 rounds to 1 in single precision: no interval.
+                     (= 0.0 (romacs-fsrs-interval nil 1.0 0.9999999999999999))))");
+        assert_eq!(shown, "(t t t t)");
     }
 
     #[test]
     fn rejects_malformed_input() {
         let shown = eval(
             "(let (out)
-               (dolist (form '((romacs-fsrs-compute-parameters '(((3 . 2))))
+               (dolist (form '((romacs-fsrs-compute-parameters '((7 3 2)))
                                (romacs-fsrs-interval [1 2 3] 1.0 0.9)
+                               (romacs-fsrs-interval nil 1.0 1.0e-50)
                                (romacs-fsrs-interval nil 1.0 1.0)
+                               (romacs-fsrs-interval nil 1.0e-50 0.9)
                                (romacs-fsrs-next-state nil nil -1 3 0.9)
                                (romacs-fsrs-next-state nil '(1.0 . 11) 1 3 0.9)
                                (romacs-fsrs-next-state nil '(0 . 5) 1 3 0.9)
@@ -236,28 +239,75 @@ mod tests {
                                (romacs-fsrs-next-state nil nil 0 5 0.9))
                              out)
                  (setq out (cons (condition-case e (eval form t) (error (car e))) out))))");
-        assert_eq!(shown, "(wrong-type-argument wrong-type-argument wrong-type-argument args-out-of-range \
-                           wrong-type-argument args-out-of-range error wrong-type-argument)");
+        assert_eq!(shown, "(wrong-type-argument wrong-type-argument args-out-of-range args-out-of-range \
+                           wrong-type-argument args-out-of-range args-out-of-range args-out-of-range \
+                           error wrong-type-argument)");
     }
 
     /// Few items keep the defaults; enough fit the initial stabilities.
+    /// Reviews of different cards interleave; each card keeps its own
+    /// history.
     #[test]
     fn optimizer_counts_items_and_fits_what_the_data_supports() {
         let shown = eval(
-            "(let ((few (romacs-fsrs-compute-parameters '(((3 . 0) (3 . 1) (3 . 0) (1 . 4)))))
-                   (cards nil) (n 0))
+            "(let ((few (romacs-fsrs-compute-parameters
+                         '((7 3 0) (8 3 0) (7 3 1) (8 1 2) (7 3 0) (7 1 4))))
+                   (firsts nil) (seconds nil) (n 0))
                (while (< n 40)
-                 (setq cards (cons (list (cons (if (= 0 (% n 3)) 1 3) 0)
-                                         (cons (if (= 0 (% n 4)) 1 3) (1+ (% n 3))))
-                                   cards)
+                 (setq firsts (cons (list n (if (= 0 (% n 3)) 1 3) 0) firsts)
+                       seconds (cons (list n (if (= 0 (% n 4)) 1 3) (1+ (% n 3))) seconds)
                        n (1+ n)))
-               (let ((many (romacs-fsrs-compute-parameters cards)))
+               (let ((many (romacs-fsrs-compute-parameters
+                            (append (nreverse firsts) (nreverse seconds)))))
                  (list (plist-get few :items) (length (plist-get few :parameters))
                        (< (abs (- (aref (plist-get few :parameters) 0) 0.212)) 1e-6)
                        (plist-get many :items)
                        (equal (substring (plist-get many :parameters) 4)
                               (substring (plist-get few :parameters) 4))
                        (equal (plist-get many :parameters) (plist-get few :parameters)))))");
-        assert_eq!(shown, "(2 21 t 40 t nil)");
+        assert_eq!(shown, "(3 21 t 40 t nil)");
+    }
+
+    /// The crate weights later items more, so the reviews' order reaches
+    /// the fit: the same reviews in time order and card by card differ.
+    #[test]
+    fn optimizer_weights_reviews_in_the_order_given() {
+        let shown = eval(
+            "(let ((steps '((0 . 0) (1 . 1) (2 . 3) (3 . 7))) by-time by-card (n 0))
+               (dolist (step steps)
+                 (setq n 0)
+                 (while (< n 60)
+                   (setq by-time (cons (list n (if (= 0 (% (+ n (car step)) 5)) 1 3) (cdr step))
+                                       by-time)
+                         n (1+ n))))
+               (setq by-time (nreverse by-time) n 0)
+               (while (< n 60)
+                 (dolist (review by-time)
+                   (when (= n (car review)) (setq by-card (cons review by-card))))
+                 (setq n (1+ n)))
+               (let ((time (romacs-fsrs-compute-parameters by-time))
+                     (card (romacs-fsrs-compute-parameters (nreverse by-card))))
+                 (list (plist-get time :items) (plist-get card :items)
+                       (equal (plist-get time :parameters) (plist-get card :parameters))
+                       (equal (plist-get time :parameters)
+                              (plist-get (romacs-fsrs-compute-parameters by-time) :parameters)))))");
+        assert_eq!(shown, "(180 180 nil t)");
+    }
+
+    /// Retrievability clips the decay as the crate's model does, so a
+    /// card is at RETENTION after the interval that targets it.
+    #[test]
+    fn retrievability_agrees_with_interval_for_clipped_weights() {
+        let shown = eval(
+            "(let ((w (vconcat (substring [0.212 1.2931 2.3065 8.2956 6.4133 0.8334 3.0194 0.001 1.8722
+                                          0.1666 0.796 1.4835 0.0614 0.2629 1.6483 0.6014 1.8729
+                                          0.5425 0.0912 0.0658] 0)
+                               [0.02])))
+               (list (< (abs (- 0.8 (romacs-fsrs-retrievability
+                                      w 5.0 (romacs-fsrs-interval w 5.0 0.8))))
+                        1e-4)
+                     (= (romacs-fsrs-retrievability w 5.0 3)
+                        (romacs-fsrs-retrievability (vconcat (substring w 0 20) [0.1]) 5.0 3))))");
+        assert_eq!(shown, "(t t)");
     }
 }

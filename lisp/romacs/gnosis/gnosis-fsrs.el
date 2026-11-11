@@ -17,10 +17,10 @@
 
 ;; FSRS-6 transitions for Gnosis binary review outcomes: failure selects
 ;; Again and success Good.  The arithmetic is fsrs-rs 6.6.1, the library
-;; Anki uses, through Romacs's `romacs-fsrs-next-state',
-;; `romacs-fsrs-interval' and `romacs-fsrs-retrievability'.  PARAMETERS
-;; arguments are a scheduler configuration's weights, nil meaning the
-;; defaults below.
+;; Anki uses, through Romacs's `romacs-fsrs-next-state'; intervals and
+;; recall come from `romacs-fsrs-interval' and
+;; `romacs-fsrs-retrievability'.  PARAMETERS arguments are a scheduler
+;; configuration's weights, nil meaning the defaults below.
 
 ;;; Code:
 
@@ -94,16 +94,6 @@ The result has :stability, :difficulty, the unrounded
             :difficulty (plist-get next :difficulty)
             :raw-interval-days interval
             :calendar-interval-days (max 1 (round interval))))))
-
-(defun gnosis-fsrs-interval (stability retention &optional parameters)
-  "Return the unrounded interval in days for STABILITY at RETENTION.
-PARAMETERS are the model weights, nil for the defaults."
-  (romacs-fsrs-interval parameters stability retention))
-
-(defun gnosis-fsrs-retrievability (elapsed-days stability &optional parameters)
-  "Return recall probability ELAPSED-DAYS after a review at STABILITY.
-PARAMETERS are the model weights, nil for the defaults."
-  (romacs-fsrs-retrievability parameters stability elapsed-days))
 
 (provide 'gnosis-fsrs)
 ;;; gnosis-fsrs.el ends here

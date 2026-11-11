@@ -1522,6 +1522,18 @@ require its longest model interval to fit the current year's scheduler
 calendar.  Unsupported values signal `user-error'; intervals are not capped.
 
 (fn RETENTION)" t)
+(autoload 'gnosis-scheduler-fit-parameters "gnosis-scheduler"
+"Return FSRS weights fitted to the effective review history in DB.
+The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area.
+
+(fn &optional DB)" t)
 (register-definition-prefixes "gnosis-scheduler" '("gnosis-scheduler-"))
 
 

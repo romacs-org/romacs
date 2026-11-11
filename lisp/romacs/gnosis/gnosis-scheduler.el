@@ -558,42 +558,52 @@ rebuild only from the baseline and effective, non-void review events."
 
 ;;; Fitting weights to the review history
 
-(defun gnosis-scheduler--histories (rows)
-  "Group ROWS of (THEMA-ID RATING ELAPSED-DAYS), each thema's in order.
-Return one list of (RATING . ELAPSED-DAYS) per thema, in ROWS' order."
-  (let (histories current id)
-    (pcase-dolist (`(,thema ,rating ,elapsed) rows)
-      (unless (eql thema id)
-        (when current (push (nreverse current) histories))
-        (setq id thema current nil))
-      (push (cons rating elapsed) current))
-    (when current (push (nreverse current) histories))
-    (nreverse histories)))
-
+;;;###autoload
 (defun gnosis-scheduler-fit-parameters (&optional db)
   "Return FSRS weights fitted to the effective review history in DB.
 The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
-The plist has `:parameters', `:items' (the reviews it could learn from)
-and `:fitted': `none' when the weights are the defaults (too little
-history), `initial-stability' when only the first four moved, else `all'."
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area."
+  (interactive)
   (let* ((db (or db (gnosis--ensure-db)))
-         (rows (gnosis-sqlite-select
-                db "SELECT thema_id, rating, elapsed_days FROM review_events
-                     WHERE event_id NOT IN (SELECT event_id FROM review_voids)
-                     ORDER BY thema_id, reviewed_at_us, event_id"))
          (fit (romacs-fsrs-compute-parameters
-               (gnosis-scheduler--histories rows)))
+               (gnosis-sqlite-select
+                db "SELECT e.thema_id, e.rating, e.elapsed_days
+                      FROM review_events AS e
+                      JOIN scheduler_baseline AS b ON b.thema_id = e.thema_id
+                     WHERE b.reps = 0
+                       AND e.event_id NOT IN (SELECT event_id FROM review_voids)
+                     ORDER BY e.reviewed_at_us, e.event_id")))
          (weights (plist-get fit :parameters))
          (kept (lambda (from)
                  (cl-loop for i from from below (length weights)
                           always (< (abs (- (aref weights i)
                                             (aref gnosis-fsrs-default-parameters i)))
-                                    1e-6)))))
-    (list :parameters weights
-          :items (plist-get fit :items)
-          :fitted (cond ((funcall kept 0) 'none)
-                        ((funcall kept 4) 'initial-stability)
-                        (t 'all)))))
+                                    1e-6))))
+         (result (list :parameters weights
+                       :items (plist-get fit :items)
+                       :fitted (cond ((funcall kept 0) 'none)
+                                     ((funcall kept 4) 'initial-stability)
+                                     (t 'all)))))
+    (when (called-interactively-p 'interactive)
+      (message "FSRS fit from %d reviews: %s"
+               (plist-get result :items)
+               (pcase (plist-get result :fitted)
+                 ('none "too little history; the defaults stand")
+                 ('initial-stability
+                  (format "initial stabilities %s days (defaults %s)"
+                          (mapconcat (lambda (w) (format "%.2f" w))
+                                     (substring weights 0 4) " ")
+                          (mapconcat (lambda (w) (format "%.2f" w))
+                                     (substring gnosis-fsrs-default-parameters 0 4)
+                                     " ")))
+                 ('all "every weight fitted"))))
+    result))
 
 (provide 'gnosis-scheduler)
 ;;; gnosis-scheduler.el ends here

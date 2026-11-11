@@ -422,15 +422,27 @@ arithmetic in the last float digits and must still replay, unreported."
       (should (string-match-p "2 review(s) schedule differently" (cdar warnings))))))
 
 (ert-deftest gnosis-test-scheduler-fit-parameters-reads-effective-history ()
-  "Fit weights to non-void events grouped per thema, writing nothing."
-  (should (equal '(((3 . 0) (1 . 2)) ((3 . 0)))
-                 (gnosis-scheduler--histories '((1 3 0) (1 1 2) (2 3 0)))))
+  "Fit to non-void events of themata whose history Gnosis holds whole.
+A thema migrated with earlier repetitions would enter as a new card, so
+it stays out; nothing is written."
   (gnosis-test-scheduler--with-db
     (gnosis-test-scheduler--seed-state)
+    (gnosis-test-scheduler--seed-state 2)
+    (gnosis-sqlite-execute
+     gnosis-db "INSERT INTO themata (id, type, keimenon, hypothesis, answer, source_guid)
+                VALUES (3, 'basic', 'Q', ?, ?, NULL)" (list '("") '("A")))
+    (gnosis-sqlite-execute
+     gnosis-db "INSERT INTO scheduler_baseline VALUES (3, 20260830, 5, 1)")
+    (gnosis-sqlite-execute
+     gnosis-db "INSERT INTO scheduler_state VALUES (3, 1, NULL, NULL, NULL, NULL, 20260830, 5, 1, 0)")
     (gnosis-scheduler-accept-review
      gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
     (gnosis-scheduler-accept-review
+     (make-string 64 ?d) 3 'success 1500000 20260830)
+    (gnosis-scheduler-accept-review
      gnosis-test-scheduler--event-id-2 1 'failure 2000000 20260901)
+    (gnosis-scheduler-accept-review
+     (make-string 64 ?e) 3 'success 2500000 20260905)
     (let ((configs (gnosis-sqlite-select gnosis-db "SELECT * FROM scheduler_config"))
           (fit (gnosis-scheduler-fit-parameters gnosis-db)))
       (should (= 1 (plist-get fit :items)))
@@ -442,6 +454,44 @@ arithmetic in the last float digits and must still replay, unreported."
                                     gnosis-test-scheduler--event-id-2)
       (should (= 0 (plist-get (gnosis-scheduler-fit-parameters gnosis-db)
                               :items))))))
+
+(ert-deftest gnosis-test-scheduler-replay-checks-every-evidence-field ()
+  "Reject each break in an event's continuation of the replayed state."
+  (gnosis-test-scheduler--with-db
+    (gnosis-test-scheduler--seed-state)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id-2 1 'success 2000000 20260901)
+    (let* ((baseline (car (gnosis-sqlite-select
+                           gnosis-db "SELECT * FROM scheduler_baseline")))
+           (events (gnosis-sqlite-select
+                    gnosis-db "SELECT * FROM review_events
+                                ORDER BY reviewed_at_us"))
+           (configs '((1 . 0.9))))
+      (should (gnosis-scheduler-replay baseline events configs 0))
+      ;; (COLUMN . VALUE) on the second event, each breaking one check.
+      (dolist (mutation `((2 . 7)                          ; unknown config
+                          (3 . 1000000)                    ; not after the first
+                          (5 . 2)                          ; rating outside 1/3
+                          (6 . 1)                          ; elapsed days
+                          (7 . 3.0)                        ; prior stability
+                          (8 . 9.0)                        ; prior difficulty
+                          (9 . 0.0)                        ; posterior stability
+                          (10 . 11.0)                      ; posterior difficulty
+                          (11 . ,(/ 0.0 0.0))              ; raw interval
+                          (12 . 99)                        ; calendar interval
+                          (13 . 20991231)                  ; due day
+                          (14 . 0)                         ; reps before
+                          (15 . 5)                         ; reps after
+                          (16 . 1)                         ; lapses before
+                          (17 . 1)                         ; lapses after
+                          (18 . 1)))                       ; new
+        (let ((second (copy-sequence (nth 1 events))))
+          (setcar (nthcdr (car mutation) second) (cdr mutation))
+          (should-error
+           (gnosis-scheduler-replay baseline (list (nth 0 events) second)
+                                    configs 0)))))))
 
 (ert-deftest gnosis-test-scheduler-rebuild-requires-current-suspension ()
   "Preserve the explicit current suspension fact during projection rebuild."

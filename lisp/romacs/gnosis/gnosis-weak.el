@@ -94,8 +94,8 @@ its last scheduled review and LAPSES its failure count.  The plist has
 `:score' in [0, 1], `:retrievability', `:difficulty' and `:lapses'.
 Retrievability uses the pinned FSRS model; nothing here is fitted."
   (when (and (numberp stability) (> stability 0) (numberp difficulty))
-    (let* ((retrievability (gnosis-fsrs-retrievability
-                            (max 0 elapsed-days) stability))
+    (let* ((retrievability (romacs-fsrs-retrievability
+                            nil stability (max 0 elapsed-days)))
            (difficulty (min 10.0 (max 1.0 (float difficulty))))
            (lapses (max 0 (or lapses 0)))
            (parts (list (- 1.0 retrievability)
