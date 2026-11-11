@@ -1006,10 +1006,13 @@ Keep boot identity and companion receipts until the editor process exits."
  "romacs_help" "Every tool, by group, with one line each."
  (romacs-mcp--schema nil nil) #'romacs-mcp--help
  (romacs-mcp--object "readOnlyHint" t))
-(romacs-mcp-register-tool
- "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."
- (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("code"))
- #'romacs-mcp--eval)
+;; The editor's own, until a layer registers a richer one (romacs-agent-tools's,
+;; with a budget): loading this file again keeps that one.
+(unless (assoc "romacs_eval" romacs-mcp-tools)
+  (romacs-mcp-register-tool
+   "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."
+   (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("code"))
+   #'romacs-mcp--eval))
 
 (provide 'romacs-mcp)
 ;;; romacs-mcp.el ends here
