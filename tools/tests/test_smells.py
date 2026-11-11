@@ -162,14 +162,14 @@ class RatchetTest(unittest.TestCase):
 
     def test_a_new_top_level_entry_or_outside_member_fails(self):
         found = smells.problems(floors(), now(root=('crates', 'tools', 'logs'), outside=('tests/x', 'tests/y')))
-        self.assertEqual(found, ['layout root: logs is new; adding one is a deliberate edit of SMELL-FLOORS.json',
+        self.assertEqual(found, ['layout root: logs is new; adding one is a deliberate edit of ledger/smell-floors.json',
                                  'layout members_outside_crates: tests/y is new; adding one is a deliberate '
-                                 'edit of SMELL-FLOORS.json'])
+                                 'edit of ledger/smell-floors.json'])
 
     def test_a_new_generated_file_fails_until_listed(self):
         found = smells.problems(floors(), now(generated=('Cargo.lock', 'tools/new_index.json')))
         self.assertEqual(found, ['layout generated: tools/new_index.json is new; adding one is a deliberate edit '
-                                 'of SMELL-FLOORS.json'])
+                                 'of ledger/smell-floors.json'])
 
     def test_a_header_says_generated(self):
         heads = {'a.rs': '// @generated\n', 'b.el': ';; Do not edit.\n',
@@ -243,7 +243,7 @@ def counts(lint=3, allows=2, legacy=5, root=('crates', 'tools'), generated=('Car
 
 def rise(what, have, had, over=1):
     return (f"{what}: {have}, above the {had} of its merge-base"
-            f"; remove {over}, or set its floor in SMELL-FLOORS.json {over} above the merge-base's")
+            f"; remove {over}, or set its floor in ledger/smell-floors.json {over} above the merge-base's")
 
 
 class MergeBaseTest(unittest.TestCase):
@@ -275,7 +275,7 @@ class MergeBaseTest(unittest.TestCase):
         self.assertEqual(smells.rises(raised, was, counts(), counts(lint=5)), [])
         self.assertEqual(smells.rises(raised, was, counts(), counts(lint=6)),
                          ["lint clippy::doc_markdown: 6, above the 3 of its merge-base and the 2 its floor was raised by"
-                          "; remove 1, or set its floor in SMELL-FLOORS.json 3 above the merge-base's"])
+                          "; remove 1, or set its floor in ledger/smell-floors.json 3 above the merge-base's"])
 
     def test_the_same_raise_on_both_sides_merges_to_one_and_the_failure_says_what_to_set(self):
         # The branch and the trunk each added one and raised the floor 9 -> 10.
@@ -284,7 +284,7 @@ class MergeBaseTest(unittest.TestCase):
         merged = counts(lint=10)
         self.assertEqual(smells.rises(merged, merged, counts(lint=6), counts(lint=7)),
                          ["lint clippy::doc_markdown: 7, above the 6 of its merge-base"
-                          "; remove 1, or set its floor in SMELL-FLOORS.json 1 above the merge-base's"])
+                          "; remove 1, or set its floor in ledger/smell-floors.json 1 above the merge-base's"])
         self.assertEqual(smells.rises(counts(lint=11), merged, counts(lint=6), counts(lint=7)), [])
 
     def test_a_branch_does_not_lower_a_floor_or_drop_a_listing(self):
@@ -313,7 +313,7 @@ class MergeBaseTest(unittest.TestCase):
     def test_a_new_top_level_entry_is_listed_or_fails(self):
         tree = counts(root=('crates', 'tools', 'logs'))
         self.assertEqual(smells.rises(counts(), counts(), counts(), tree),
-                         ['layout root: logs is new; adding one is a deliberate edit of SMELL-FLOORS.json'])
+                         ['layout root: logs is new; adding one is a deliberate edit of ledger/smell-floors.json'])
         listed = counts(root=('crates', 'tools', 'logs'))
         self.assertEqual(smells.rises(listed, counts(), counts(), tree), [])
         # A listing the merge-base already had is not this change's: `logs` was
@@ -325,7 +325,7 @@ class MergeBaseTest(unittest.TestCase):
         more = ('Cargo.lock', 'tools/new_index.json')
         self.assertEqual(smells.rises(counts(), counts(), counts(), counts(generated=more)),
                          ['layout generated: tools/new_index.json is new; adding one is a deliberate edit '
-                          'of SMELL-FLOORS.json'])
+                          'of ledger/smell-floors.json'])
         self.assertEqual(smells.rises(counts(generated=more), counts(), counts(), counts(generated=more)), [])
         self.assertEqual(smells.rises(counts(), counts(), counts(), counts(generated=())), [])
 
@@ -367,6 +367,7 @@ class BaseCountsTest(unittest.TestCase):
 
     def commit(self, n, floor=9, name='n'):
         (Path(self.repo) / name).write_text(str(n))
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({'rule': 'r', 'long_file_lines': 1500,
                                                                   **counts(lint=floor)}))
         self.git('add', '-A')
@@ -392,6 +393,15 @@ class BaseCountsTest(unittest.TestCase):
         self.commit(6)
         self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
         self.assertEqual(self.measured, [], 'the merge-base was kept')
+
+    def test_a_merge_base_from_before_the_move_keeps_its_floors(self):
+        self.git('checkout', '-q', 'trunk')
+        self.git('mv', str(smells.FLOORS), smells.FLOORS_BEFORE)
+        self.git('commit', '-q', '-m', 'the floors before the move')
+        self.git('checkout', '-q', '-B', 'branch')
+        self.git('mv', smells.FLOORS_BEFORE, str(smells.FLOORS))
+        self.commit(6)                                    # a rise of one, the floor unchanged
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
 
     def test_merging_the_trunk_moves_the_merge_base(self):
         self.commit(5, name='other')
@@ -494,6 +504,7 @@ class MergeDriverTest(unittest.TestCase):
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def commit(self, floor, other=1):
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({**floors(), 'lints': {
             'clippy::doc_markdown': floor, 'clippy::other': other}}))
         self.git('add', '-A')

@@ -1335,6 +1335,18 @@ impl Vm {
                 t.reclaim_removed(&obarray_symbols_live);
             }
         }
+        // A call cache whose target died is stale: its symbol's function
+        // changed since it was filled, or the symbol itself, in an obarray
+        // of its own, is dead; else the cell would hold the target live. It
+        // is emptied now, while the marks are whole, so that no
+        // cache names a freed entry once this collection is over: the next
+        // may cut that entry off its table, or compact and rewrite every
+        // reference it keeps.
+        for i in 0..self.caches.len() {
+            if !self.survives(&obarray_symbols_live, &region_marks, self.caches[i].target) {
+                self.caches[i] = Cache { version: 0, target: Value::UNBOUND };
+            }
+        }
         let compacting = self.compacts();
         lap.lap(&mut self.gc_times, Phase::Census);
         if !compacting {
@@ -1849,6 +1861,60 @@ mod tests {
         }
         assert_eq!(deferral(-0.5), 0.0);
         assert_eq!(deferral(f64::NAN), 0.0);
+    }
+
+    /// A cache left stale by a collection that frees in place names nothing
+    /// by the time a later one compacts: the old callee, the last closure
+    /// made, is cut off its table's tail by the first.
+    #[test]
+    fn a_stale_call_cache_is_emptied_before_a_later_compaction() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+        vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
+        vm.eval_source_raw("(cache-caller)").unwrap();
+        vm.eval_source_raw("(fset 'cache-callee 'list)").unwrap();
+        let closures = vm.closures.len();
+        vm.collect(&mut []);
+        assert!(vm.closures.len() < closures, "the old callee was the tail, and is cut");
+        vm.set_gc_moving(true);
+        vm.collect(&mut []);
+        assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+    }
+
+    /// The keymaps' late setup rewrites two function cells. A site that
+    /// cached what one named before must see the change, whether or not
+    /// what it cached is still alive: a cache is trusted only under its
+    /// slot's version, so every write of a function cell moves it on.
+    #[test]
+    fn a_function_cell_rewritten_by_keymap_setup_is_not_called_from_a_cache() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(fset 'ESC-prefix (setq cache-kept #'(lambda () 7)))").unwrap();
+        vm.eval_source_raw("(fset 'cache-caller #'(lambda () (ESC-prefix)))").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_ok(), "the closure, while the alias names it");
+        vm.eval_source_raw("(make-keymap)").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_err(), "a keymap is no function to call with no event");
+    }
+
+    /// A call site's cache keeps no closure alive: once its symbol is
+    /// redefined, what the old closure captured is garbage, though a site
+    /// that has not run since was the last to name it; and a collection
+    /// that compacts copes as one that frees in place does.
+    #[test]
+    fn a_stale_call_cache_keeps_nothing_alive() {
+        for moving in [false, true] {
+            let mut vm = Vm::new();
+            vm.set_gc_moving(moving);
+            vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
+            vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+            vm.eval_source_raw("(cache-caller)").unwrap();
+            vm.collect(&mut []);
+            let slots = vm.gc_census.vector_slots;
+            assert!(slots >= 5000, "the callee holds its vector");
+            vm.eval_source_raw("(fset 'cache-callee #'(lambda () nil))").unwrap();
+            vm.collect(&mut []);
+            assert!(vm.gc_census.vector_slots + 5000 <= slots, "the old callee's vector died (moving: {moving})");
+            assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+        }
     }
 
     /// A collection leaves every survivor old and no log; Lisp's stores into

@@ -1,4 +1,5 @@
-# Dependency policy enforced by the `cargo-deny` CI job.
+# Dependency policy for cargo-deny. Nothing runs it automatically yet; from
+# the repository root: `cargo deny check --config .cargo/deny.toml`.
 
 [advisories]
 ignore = [
