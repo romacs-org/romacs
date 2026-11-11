@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run GNU Emacs's own test suite (gnu-tests/test, pristine at the pin) on romacs.
+"""Run GNU Emacs's own test suite (test/gnu/test, pristine at the pin) on romacs.
 
-    python3 gnu-tests/run.py run src/fns-tests.el           # one file, by hand
-    python3 gnu-tests/run.py run --all --jobs 16            # the whole suite
-    python3 gnu-tests/run.py baseline src/fns-tests.el      # (re)record GNU's verdicts
-    python3 gnu-tests/run.py check-ledger                   # validate ledger/gnu-test-exclusions.toml
-    python3 gnu-tests/run.py verify-pin                     # the import is pristine
+    python3 test/gnu/run.py run src/fns-tests.el           # one file, by hand
+    python3 test/gnu/run.py run --all --jobs 16            # the whole suite
+    python3 test/gnu/run.py baseline src/fns-tests.el      # (re)record GNU's verdicts
+    python3 test/gnu/run.py check-ledger                   # validate ledger/gnu-test-exclusions.toml
+    python3 test/gnu/run.py verify-pin                     # the import is pristine
 
 Every deftest gets exactly one VERDICT:
     passed            romacs gave GNU's own as-expected outcome
@@ -211,10 +211,10 @@ def pin(root: pathlib.Path = ROOT) -> dict:
 
 
 def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> dict:
-    """Refuse unless gnu-tests/test is byte-for-byte GNU's test/ at the pin,
+    """Refuse unless test/gnu/test is byte-for-byte GNU's test/ at the pin,
     less the GNU files ledger/gnu-tests-pin.json's `excluded` drops deliberately.
 
-    The git tree id of the WORKING content of gnu-tests/test (computed by
+    The git tree id of the WORKING content of test/gnu/test (computed by
     git_tree_id, no repository needed, so it also holds in the gate's source
     mirror) must equal ledger/gnu-tests-pin.json's `test_tree`. Any edit, addition, deletion or
     mode change anywhere under it changes the id. With GNU, `test_tree` must
@@ -222,7 +222,7 @@ def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> di
     paths, so the record stays anchored to GNU, not to the local bytes.
     """
     p = pin(root)
-    actual = git_tree_id(root / 'gnu-tests' / 'test')
+    actual = git_tree_id(root / 'test/gnu' / 'test')
     problems = []
     if gnu is not None:
         want, stale = gnu_test_tree(gnu, p['gnu_commit'], p.get('excluded', []))
@@ -232,22 +232,22 @@ def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> di
         problems += [f'ledger/gnu-tests-pin.json excluded pattern {pattern!r} matches nothing in GNU\'s test/.' for pattern in stale]
     if actual != p['test_tree']:
         problems.append(f'its content hashes to git tree {actual}; GNU {p["gnu_commit"][:11]}:test is '
-                        f'{p["test_tree"]}. Something under gnu-tests/test was edited, added, '
-                        'removed or re-moded (see `git status gnu-tests/test`).')
+                        f'{p["test_tree"]}. Something under test/gnu/test was edited, added, '
+                        'removed or re-moded (see `git status test/gnu/test`).')
     if problems:
-        raise Refusal(3, 'gnu-tests/test is not the pristine GNU import:\n' + '\n'.join(problems)
+        raise Refusal(3, 'test/gnu/test is not the pristine GNU import:\n' + '\n'.join(problems)
                       + '\nNever edit an imported test in place; record divergences in ledger/gnu-test-exclusions.toml.')
     return p
 
 
-# Tests run in a scratch COPY of the import, never in gnu-tests/test itself:
+# Tests run in a scratch COPY of the import, never in test/gnu/test itself:
 # GNU's own tests write beside themselves (bytecomp-resources/*.elc, gnus
 # random_seed), and a run must not be able to make the import non-pristine.
 RUN_TESTS = TESTS
 
 
 class ScratchTree:
-    """Copy gnu-tests/test to a scratch directory, prove the copy pristine."""
+    """Copy test/gnu/test to a scratch directory, prove the copy pristine."""
 
     def __enter__(self):
         global RUN_TESTS
@@ -289,7 +289,7 @@ def normalize(name: str) -> str:
     p = pathlib.Path(name)
     if p.is_absolute():
         p = p.resolve().relative_to(TESTS)
-    elif p.parts[:2] == ('gnu-tests', 'test'):
+    elif p.parts[:2] == ('test/gnu', 'test'):
         p = pathlib.Path(*p.parts[2:])
     elif p.parts[:1] == ('test',):
         p = pathlib.Path(*p.parts[1:])
@@ -540,7 +540,7 @@ def record_baseline(files: list[str], jobs: int, timeout: int, force: bool = Fal
     if stray:
         # A GNU test resolved a path against this lane's own files and wrote
         # there: the baseline did not run the way `make check' runs.
-        raise Refusal(4, 'GNU tests wrote into gnu-tests/ during the baseline: ' + ', '.join(sorted(stray)[:20]))
+        raise Refusal(4, 'GNU tests wrote into test/gnu/ during the baseline: ' + ', '.join(sorted(stray)[:20]))
     return 0
 
 
@@ -572,7 +572,7 @@ def pinned_gnu_sha256(reference: pathlib.Path = REFERENCE) -> str:
     return digest
 
 
-RERECORD_COMMAND = 'ROMACS_GNU_ORACLE=<pinned GNU emacs> python3 gnu-tests/run.py baseline --all --force'
+RERECORD_COMMAND = 'ROMACS_GNU_ORACLE=<pinned GNU emacs> python3 test/gnu/run.py baseline --all --force'
 
 
 def baseline_provenance_problem(rel: str, record: dict, expected: str) -> str | None:
@@ -587,7 +587,7 @@ def baseline_provenance_problem(rel: str, record: dict, expected: str) -> str | 
     recorded = gnu.get('sha256')
     if recorded == expected:
         return None
-    return (f'GNU baseline gnu-tests/baseline/{rel}.json was recorded by {gnu.get("emacs") or "<no binary named>"} '
+    return (f'GNU baseline test/gnu/baseline/{rel}.json was recorded by {gnu.get("emacs") or "<no binary named>"} '
             f'(sha256 {recorded or "<none>"}), not by the pinned GNU (expected sha256 {expected}, '
             f'ledger/parity-reference.toml executable_sha256). A baseline from another binary is not GNU\'s answer at '
             f'the pin, so it is refused, never used. Re-recording is its own explicit, deliberate step '
@@ -755,7 +755,7 @@ def vacuous_catches(romacs: dict, fidelity: dict | None, evidence: dict | None) 
 
     romacs['caught'] lists each should-error whose condition was void-function,
     void-variable or invalid-function and not one the test asked for
-    (gnu-tests/harness/romacs-mini-ert-audit.el). A catch is excused only when
+    (test/gnu/harness/romacs-mini-ert-audit.el). A catch is excused only when
     pinned GNU caught the same condition and datum with matching multiplicity.
     Legacy baselines without a full audit use historical evidence until a
     fresh pinned GNU audit is obtained by refresh_catch_audit. Returns None
@@ -1084,7 +1084,7 @@ def cmd_scoreboard(args) -> int:
              else [normalize(f) for f in args.files])
     if not files or args.jobs < 1:
         raise Refusal(2, 'name test files, or --all; jobs must be positive')
-    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'test/gnu' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     if out.exists() and any(out.iterdir()):
         raise Refusal(2, 'scoreboard output directory must be empty')
     (out / 'log').mkdir(parents=True, exist_ok=True)
@@ -1221,7 +1221,7 @@ def cmd_run(args) -> int:
     files = suite_files() if args.all else [normalize(f) for f in args.files]
     if not files:
         raise Refusal(2, 'name test files, or --all')
-    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'test/gnu' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     (out / 'log').mkdir(parents=True, exist_ok=True)
     baselines = {rel: load_baseline(rel) for rel in files}
     binary = pathlib.Path(args.bin) if args.bin else build_adapter()
@@ -1354,7 +1354,7 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == 'verify-pin':
             p = verify_pin(gnu=pathlib.Path(args.gnu) if args.gnu else None)
-            print(f'gnu-tests/test is GNU {p["gnu_commit"]}:test less {len(p.get("excluded", []))} excluded '
+            print(f'test/gnu/test is GNU {p["gnu_commit"]}:test less {len(p.get("excluded", []))} excluded '
                   f'pattern(s), tree {p["test_tree"]}, unmodified')
             return 0
     except Refusal as e:

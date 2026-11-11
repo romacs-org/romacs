@@ -2,7 +2,7 @@
 """Prove each of the runner's own tests can fail: apply one mutation that
 removes what the test protects, run the test, require it to FAIL, restore.
 
-    ROMACS_GNU_ERT=<adapter> python3 gnu-tests/tests/mutants.py [NAME...]
+    ROMACS_GNU_ERT=<adapter> python3 test/gnu/tests/mutants.py [NAME...]
 
 Exit 0 only if every mutant was killed (its targeted test failed) AND the
 unmutated suite passes afterwards.  Files are restored byte-for-byte in a

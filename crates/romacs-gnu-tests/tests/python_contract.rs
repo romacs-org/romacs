@@ -1,4 +1,4 @@
-//! Puts the GNU-suite runner's own tests (gnu-tests/tests/test_run.py) under
+//! Puts the GNU-suite runner's own tests (test/gnu/tests/test_run.py) under
 //! the gate.  Each class runs separately so a red names what broke.  The
 //! adapter under test is the one Cargo just built for this package.
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ fn python_class(class: &str) {
 fn python_contract(script: &str, class: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("python3")
-        .arg(root.join("gnu-tests/tests").join(script))
+        .arg(root.join("test/gnu/tests").join(script))
         .arg("-v")
         .arg(class)
         .env("ROMACS_GNU_ERT", env!("CARGO_BIN_EXE_romacs-gnu-ert"))

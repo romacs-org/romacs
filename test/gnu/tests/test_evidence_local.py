@@ -12,7 +12,7 @@ from unittest.mock import patch
 from test_vacuity_classifier import receipt_fixture, captured_receipt_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'gnu-tests/tools'))
+sys.path.insert(0, str(ROOT / 'test/gnu/tools'))
 import member_evidence
 import vacuity_binding as binding
 sys.path.insert(0, str(ROOT / 'tools/lib'))
@@ -31,7 +31,7 @@ class TreeEvidenceLocalTests(unittest.TestCase):
         expected = member_evidence.build(root, receipt)['members']
         self.assertEqual(member_evidence.load(root), expected)
         self.assertEqual(parity_ratchet.load_evidence(root), expected)
-        spec = importlib.util.spec_from_file_location('captured_gnu_run', ROOT / 'gnu-tests/run.py')
+        spec = importlib.util.spec_from_file_location('captured_gnu_run', ROOT / 'test/gnu/run.py')
         runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(runner)
         with patch.object(runner, 'ROOT', root):
@@ -69,7 +69,7 @@ class EvidenceLocalTests(unittest.TestCase):
         self.assertEqual(member_evidence.write(ROOT, self.receipt), self.members)
         expected = member_evidence.build(ROOT, self.data)['members']
         self.assertEqual(parity_ratchet.load_evidence(ROOT), expected)
-        spec = importlib.util.spec_from_file_location('gnu_run_evidence', ROOT / 'gnu-tests/run.py')
+        spec = importlib.util.spec_from_file_location('gnu_run_evidence', ROOT / 'test/gnu/run.py')
         runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(runner)
         self.assertEqual(runner.load_member_evidence(), expected)

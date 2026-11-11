@@ -8,7 +8,7 @@
 ;; condition.  Under the reduced harness those are how absent machinery reads
 ;; as a pass: (should-error (read "#<")) "passes" when `read' does not exist.
 ;;
-;; gnu-tests/run.py decides from these whether a romacs pass is real (pinned
+;; test/gnu/run.py decides from these whether a romacs pass is real (pinned
 ;; GNU caught the same condition) or vacuous; this file only reports.  It is a
 ;; separate file so the harness, whose sha256 every GNU baseline is bound to,
 ;; stays byte-identical.  GNU's own side of the same guard is gnu-run.el's

@@ -1,4 +1,4 @@
-//! VM-side adapter for the GNU test runner (`gnu-tests/run.py`).
+//! VM-side adapter for the GNU test runner (`test/gnu/run.py`).
 //!
 //! One process evaluates ONE GNU test file in ONE fresh VM. Real mode loads
 //! pinned GNU ERT and the target with ordinary load semantics, optionally applies

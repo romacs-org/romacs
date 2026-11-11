@@ -68,10 +68,10 @@ def main():
               f'(tree {source["tree"]}, executable {digest})', flush=True)
         return
     with (run / 'subject-probe.log').open('w') as log:
-        subprocess.run([sys.executable, '-B', str(ROOT / 'gnu-tests/tools/probe-vacuity-focus.py'),
+        subprocess.run([sys.executable, '-B', str(ROOT / 'test/gnu/tools/probe-vacuity-focus.py'),
                         '--subject-only', '--output', str(audit), '--binary', str(binary),
                         '--build-receipt', str(receipt)], check=True, stdout=log, stderr=log)
-        subprocess.run([sys.executable, '-B', str(ROOT / 'gnu-tests/tools/import-vacuity-evidence.py'),
+        subprocess.run([sys.executable, '-B', str(ROOT / 'test/gnu/tools/import-vacuity-evidence.py'),
                         str(audit), '--format', 'subject', '--output', str(output)],
                        check=True, stdout=log, stderr=log)
     verify()

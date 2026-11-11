@@ -22,17 +22,17 @@ import tempfile
 import time
 
 NAME = re.compile(r'(^|/)(test_[^/]*|test-[^/]*|[^/]*_test)\.py$')
-OUTSIDE = ('lisp/gnu/', 'gnu-tests/test/', 'test/')
+OUTSIDE = ('lisp/gnu/', 'test/gnu/test/', 'test/')
 # Test files another runner owns: path -> the runner that names it.
 ELSEWHERE = {
-    **{f'gnu-tests/tests/{name}.py': 'gnu-tests/runner/tests/python_contract.rs'
+    **{f'test/gnu/tests/{name}.py': 'crates/romacs-gnu-tests/tests/python_contract.rs'
        for name in ('test_run', 'test_ert_report', 'test_real_romacs', 'test_ert_adapter',
                     'test_scoreboard', 'test_vacuity_classifier', 'test_evidence_local',
                     'test_audit_manifest', 'test_gate_vacuity')},
     'crates/romacs-vm-gui/harness/test_fileio_live.py': 'crates/romacs-vm-gui/tests/fileio_observer.rs',
     'crates/romacs-vm-gui/harness/test_find_file_live.py': 'crates/romacs-vm-gui/tests/find_file.rs',
     'crates/romacs-vm-gui/harness/test_scaling_live.py': 'crates/romacs-vm-gui/tests/scaling.rs',
-    'tools/tests/parity_ratchet_test.py': 'gnu-tests/runner/tests/parity_ratchet.rs',
+    'tools/tests/parity_ratchet_test.py': 'crates/romacs-gnu-tests/tests/parity_ratchet.rs',
     'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
     # Needs a built host, which only Cargo can promise.
     'tools/tests/test_elisp_runner.py': 'crates/romacs-vm/tests/elisp_runner.rs',

@@ -93,7 +93,7 @@ def execute(root, test=None):
                'test_scoreboard' + ('.Scoreboard.' + test if test else '')]
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
     env.pop('PYTHONPATH', None)
-    proc = subprocess.run(command, cwd=root / 'gnu-tests' / 'tests', env=env,
+    proc = subprocess.run(command, cwd=root / 'test/gnu' / 'tests', env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, timeout=60)
     return command, proc
@@ -116,7 +116,7 @@ def main(argv=None):
               'tests_sha256': hashlib.sha256(tests.encode()).hexdigest(), 'mutants': []}
     with tempfile.TemporaryDirectory(prefix='cli-mutants-', dir=evidence) as temporary:
         root = Path(temporary)
-        isolated = root / 'gnu-tests'
+        isolated = root / 'test/gnu'
         (isolated / 'tests').mkdir(parents=True)
         (isolated / 'tests' / 'test_scoreboard.py').write_text(tests)
         (isolated / 'run.py').write_text(source)

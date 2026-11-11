@@ -100,7 +100,7 @@ def main():
     if hashlib.sha256(oracle.read_bytes()).hexdigest() != GNU_SHA:
         raise ValueError('GNU binary does not match required pin')
     for rel, original, _ in FORMS.values():
-        if original not in (ROOT / 'gnu-tests/test' / rel).read_text():
+        if original not in (ROOT / 'test/gnu/test' / rel).read_text():
             raise ValueError(f'exact source slice changed: {rel}')
     source = _source(ROOT)
     # Separate build settlement from the audit directory's empty-start guard.
@@ -143,7 +143,7 @@ def main():
         save(build_dir / 'receipt.json', receipt)
         build_inputs = [build_dir / 'stdout', build_dir / 'stderr',
                         build_dir / 'environment.json']
-    harness = ROOT / 'gnu-tests/harness/romacs-mini-ert.el'
+    harness = ROOT / 'test/gnu/harness/romacs-mini-ert.el'
     cases = []
     commands = []
     if args.subject_only:
@@ -184,8 +184,8 @@ def main():
                     'revision': GNU_REV, 'sha256': GNU_SHA}},
                   'romacs': {'path': str(binary), 'provenance': {'kind': 'build-receipt',
                     'path': str(build_dir / 'receipt.json')}}},
-        harness_files=[__file__, harness, ROOT / 'gnu-tests/tools/audit_manifest.py',
-                       ROOT / 'gnu-tests/tools/vacuity_classifier.py',
+        harness_files=[__file__, harness, ROOT / 'test/gnu/tools/audit_manifest.py',
+                       ROOT / 'test/gnu/tools/vacuity_classifier.py',
                        *build_inputs,
                        Path(sys.executable).resolve(), *native_inputs], commands=commands)
     observations = []
@@ -195,7 +195,7 @@ def main():
         if engine != 'romacs-mini':
             setup.insert(0, '(setq lexical-binding t)')
         if engine == 'romacs-mini':
-            save(path, {'file': str(ROOT / 'gnu-tests/test' / rel),
+            save(path, {'file': str(ROOT / 'test/gnu/test' / rel),
                         'forms': [{'ordinal': i, 'line': 1, 'source': s}
                                   for i, s in enumerate([*setup, form], 1)]})
         else:

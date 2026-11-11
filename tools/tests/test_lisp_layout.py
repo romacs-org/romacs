@@ -34,7 +34,7 @@ class LispLayoutTests(unittest.TestCase):
             rf'''(?:\}}/lisp{tree}(?:/|\b)|\$(?:root|ROOT)/lisp{tree}(?:/|\b)|'''
             rf'''(?:ROOT|root)\s*/\s*['"]lisp{tree}(?:/|['"]))'''
         )
-        for directory in ('scripts', 'tools', 'crates', 'gnu-tests/tests'):
+        for directory in ('scripts', 'tools', 'crates', 'test/gnu/tests'):
             for parent, children, files in os.walk(ROOT / directory):
                 children[:] = [name for name in children if name not in ('target', '__pycache__')]
                 for name in files:

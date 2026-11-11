@@ -16,7 +16,7 @@ from vacuity_classifier import replay
 OUTPUTS = frozenset(('ledger/parity-ratchet.json',))
 RECEIPT = 'VACUITY-VERDICT.json'
 MEMBERS = 'MEMBER-EVIDENCE.json'
-POLICY = 'gnu-tests/member-evidence-policy.json'
+POLICY = 'test/gnu/member-evidence-policy.json'
 
 
 def git_root(root):
