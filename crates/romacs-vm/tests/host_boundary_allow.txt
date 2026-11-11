@@ -9,7 +9,7 @@ crates/romacs-regex/src/engine/dfa/filter.rs:102 std::env::var romacs-vm depends
 crates/romacs-regex/src/engine/dfa/filter.rs:122 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
 crates/romacs-regex/src/engine/dfa/filter.rs:126 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
 crates/romacs-regex/src/engine/dfa/filter.rs:169 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex/src/engine/search.rs:123 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
+crates/romacs-regex/src/engine/search.rs:125 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
 crates/romacs-vm/src/autoload.rs:189 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/backtrace.rs:315 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/backtrace.rs:321 dynamic:saved reads the bound variable, owner or flag, not the saved value
