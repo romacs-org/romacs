@@ -6,7 +6,7 @@ use std::process::Command;
 fn candidate_ratchet_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("python3")
-        .arg(root.join("gnu-tests/runner/candidate_ratchet_contract.py"))
+        .arg(root.join("crates/romacs-gnu-tests/candidate_ratchet_contract.py"))
         .arg("-v")
         .current_dir(&root)
         .output()

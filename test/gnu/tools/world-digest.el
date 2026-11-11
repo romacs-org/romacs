@@ -6,7 +6,7 @@
 ;; loaded at the same point in a VM booted from source and in one restored
 ;; from a world, it writes one line per Lisp-visible root to the file
 ;; `world-digest-file' (or $WORLD_DIGEST_OUT), ROOT TAB NAME TAB SHA-1 of
-;; the root's printed value.  gnu-tests/tools/world_diff.py compares two
+;; the root's printed value.  test/gnu/tools/world_diff.py compares two
 ;; such files.  It reads through Lisp only, independently of how a world
 ;; is encoded: every interned symbol's default value, function and plist,
 ;; the obarray's members in the order symbols were made, the features,

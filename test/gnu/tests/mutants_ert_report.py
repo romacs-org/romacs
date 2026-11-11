@@ -8,14 +8,14 @@ import re
 import tempfile
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[3]
 OUT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path(tempfile.gettempdir()) / 'ert-reporter-mutants'
 OUT.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(ROOT / 'gnu-tests'))
-spec = importlib.util.spec_from_file_location('test_ert_report', ROOT / 'gnu-tests/tests/test_ert_report.py')
+sys.path.insert(0, str(ROOT / 'test/gnu'))
+spec = importlib.util.spec_from_file_location('test_ert_report', ROOT / 'test/gnu/tests/test_ert_report.py')
 tests = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tests)
-source = (ROOT / 'gnu-tests/ert_report.py').read_text()
+source = (ROOT / 'test/gnu/ert_report.py').read_text()
 mutants = [
     ('accept-absent', '    names = None', '    if not output:\n        return {}\n    names = None', 'Parser.test_absent_truncated_and_garbled_reports'),
     ('accept-garbled', "raise ReportError('garbled ERT protocol', output, evidence()) from error", 'return {}', 'Parser.test_absent_truncated_and_garbled_reports'),

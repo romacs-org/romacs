@@ -1,4 +1,4 @@
-# gnu-tests: GNU Emacs's own test suite as romacs's parity specification
+# test/gnu: GNU Emacs's own test suite as romacs's parity specification
 
 `test/` here is GNU Emacs's `test/` directory at the oracle pin
 `45b0f7699df`, imported byte for byte (`ledger/gnu-tests-pin.json`), less the GNU files that
@@ -20,10 +20,10 @@ not the 0.1.0 `test/lisp` runtime denominator.
 
 ## Run it
 
-    python3 gnu-tests/run.py run src/fns-tests.el          # one file
-    python3 gnu-tests/run.py run --all --jobs 16           # everything
-    python3 gnu-tests/run.py verify-pin
-    python3 gnu-tests/run.py check-ledger [--ledger FILE]
+    python3 test/gnu/run.py run src/fns-tests.el          # one file
+    python3 test/gnu/run.py run --all --jobs 16           # everything
+    python3 test/gnu/run.py verify-pin
+    python3 test/gnu/run.py check-ledger [--ledger FILE]
 
 Output: `summary.json` (machine-readable), `results.jsonl` (one row per
 deftest), `log/<file>.log` (the adapter's raw event stream). Exit 0 only if
@@ -134,7 +134,7 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
   naming the file and both hashes. Every baseline committed before this
   check was recorded by `/usr/bin/emacs-32.0.50`; re-recording them is a
   separate, deliberate act:
-  `ROMACS_GNU_ORACLE=<pinned emacs> python3 gnu-tests/run.py baseline --all --force`.
+  `ROMACS_GNU_ORACLE=<pinned emacs> python3 test/gnu/run.py baseline --all --force`.
 - **Two labelled numbers**: `gnu_suite.passed` (REDUCED harness,
   `reduced_harness` says so) and `gnu_suite.real_ert` (GNU `ert.el`,
   unmodified). `gnu_suite.honest.counted` is the headline candidate for the

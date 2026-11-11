@@ -1,4 +1,4 @@
-//! VM-side adapter for the GNU test runner (`gnu-tests/run.py`).
+//! VM-side adapter for the GNU test runner (`test/gnu/run.py`).
 //!
 //! One process evaluates ONE GNU test file in ONE fresh VM. Real mode loads
 //! pinned GNU ERT and the target with ordinary load semantics, optionally applies
@@ -308,7 +308,7 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     } else {
         eval(
             vm,
-            include_str!("../../harness/romacs-real-ert-reporter.el"),
+            include_str!("../../../test/gnu/harness/romacs-real-ert-reporter.el"),
         )
         .map(shown)
     };

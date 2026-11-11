@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The GNU-suite runner's own tests.  Run by the gate through
-gnu-tests/runner/tests/python_contract.rs, or by hand:
+crates/romacs-gnu-tests/tests/python_contract.rs, or by hand:
 
-    ROMACS_GNU_ERT=<target>/release/romacs-gnu-ert python3 gnu-tests/tests/test_run.py -v
+    ROMACS_GNU_ERT=<target>/release/romacs-gnu-ert python3 test/gnu/tests/test_run.py -v
 
 What each class protects, and the mutant that proves it can fail, is listed in
-gnu-tests/tests/MUTANTS.md (replayed by gnu-tests/tests/mutants.py).
+test/gnu/tests/MUTANTS.md (replayed by test/gnu/tests/mutants.py).
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import run  # noqa: E402
 
-FIXTURES = HERE.parent / 'runner' / 'tests' / 'fixtures'
+FIXTURES = HERE.parents[2] / 'crates/romacs-gnu-tests/tests/fixtures'
 BIN = os.environ.get('ROMACS_GNU_ERT')
 
 
@@ -77,6 +77,20 @@ class LoadPath(unittest.TestCase):
             (root / 'lisp/gnu/textmodes').mkdir(parents=True)
             with patch.object(run, 'ROOT', root):
                 self.assertEqual(run.load_path(), [str(root / 'lisp/gnu'), str(root / 'lisp/gnu/textmodes')])
+
+
+class SourceDirectory(unittest.TestCase):
+    def test_gnu_tests_find_romacs_sources_and_gnus_top_level_fixtures(self):
+        source = run.source_directory()
+        self.assertTrue((source / 'crates/romacs-vm/src/prims').is_dir())
+        self.assertTrue((source / 'nextstep/GNUstep/Emacs.base/Resources/emacs.tiff').is_file())
+        self.assertTrue((source / 'test/data').is_dir())
+        self.assertIs(run.source_directory(), source)
+
+    def test_a_test_file_is_named_from_the_suite_or_the_repository(self):
+        for name in ('src/fns-tests.el', 'test/src/fns-tests.el', 'test/gnu/test/src/fns-tests.el',
+                     str(run.TESTS / 'src/fns-tests.el')):
+            self.assertEqual(run.normalize(name), 'src/fns-tests.el', name)
 
 
 class Classification(unittest.TestCase):
@@ -160,7 +174,7 @@ class Honesty(unittest.TestCase):
         record = {'gnu': {'emacs': '/usr/bin/emacs-32.0.50', 'sha256': DISTRO_SHA, 'version': 'GNU Emacs 32.0.50'}}
         problem = run.baseline_provenance_problem('src/fns-tests.el', record, PIN_SHA)
         self.assertTrue(problem, 'a baseline recorded by the distro binary was accepted as GNU at the pin')
-        for needle in ('gnu-tests/baseline/src/fns-tests.el.json', DISTRO_SHA, PIN_SHA, '/usr/bin/emacs-32.0.50',
+        for needle in ('test/gnu/baseline/src/fns-tests.el.json', DISTRO_SHA, PIN_SHA, '/usr/bin/emacs-32.0.50',
                        'run.py baseline --all --force'):
             self.assertIn(needle, problem, 'the refusal must name the baseline, both hashes and the re-record step')
         self.assertIsNone(run.baseline_provenance_problem(
@@ -494,12 +508,12 @@ class Pin(unittest.TestCase):
     def test_an_edited_import_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'gnu-tests').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
-            shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
+            shutil.copytree(run.TESTS, root / 'test/gnu' / 'test', symlinks=True)
             run.verify_pin(root)
-            victim = root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.el'
+            victim = root / 'test/gnu' / 'test' / 'src' / 'fns-tests.el'
             victim.write_text(victim.read_text().replace('(should (', '(should-not (', 1))
             with self.assertRaises(run.Refusal) as ctx:
                 run.verify_pin(root)
@@ -508,11 +522,11 @@ class Pin(unittest.TestCase):
     def test_a_stray_file_in_the_import_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'gnu-tests').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
-            shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
-            (root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.elc').write_text('compiled')
+            shutil.copytree(run.TESTS, root / 'test/gnu' / 'test', symlinks=True)
+            (root / 'test/gnu' / 'test' / 'src' / 'fns-tests.elc').write_text('compiled')
             with self.assertRaises(run.Refusal):
                 run.verify_pin(root)
 
@@ -528,11 +542,11 @@ class Pin(unittest.TestCase):
         run.verify_pin(gnu=run.GNU_MIRROR)
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'gnu-tests').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             forged = dict(p, test_tree=run.git_tree_id(run.TESTS), excluded=p['excluded'] + ['src/fns-tests.el'])
             (root / 'ledger/gnu-tests-pin.json').write_text(json.dumps(forged))
-            shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
+            shutil.copytree(run.TESTS, root / 'test/gnu' / 'test', symlinks=True)
             with self.assertRaises(run.Refusal):
                 run.verify_pin(root, gnu=run.GNU_MIRROR)
 

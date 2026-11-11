@@ -25,8 +25,8 @@ or historical budget entry for those two is moved by this implementation.
 ## Evidence lifecycle
 
 1. Commit the classifier on a clean tree, then run:
-   `python3 gnu-tests/tools/probe-vacuity-focus.py --subject-only --output AUDIT`.
-2. `python3 gnu-tests/tools/import-vacuity-evidence.py AUDIT --format subject
+   `python3 test/gnu/tools/probe-vacuity-focus.py --subject-only --output AUDIT`.
+2. `python3 test/gnu/tools/import-vacuity-evidence.py AUDIT --format subject
    --output RUN_DIR/VACUITY-VERDICT.json` verifies the original full manifest,
    replays raw outputs, checks exact recipe inventory and probe text, then writes
    the portable receipt and `RUN_DIR/MEMBER-EVIDENCE.json`. RUN_DIR must be outside
