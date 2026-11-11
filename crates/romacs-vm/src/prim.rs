@@ -712,13 +712,6 @@ mod leaf {
                 else { data::Object::RawString(Box::new(string)) };
             self.vm.allocate_object(object)
         }
-        /// The current buffer's text from character position START to END as
-        /// one run of bytes in GNU's internal form, and whether the buffer is
-        /// multibyte, for a scan (prims/scanner.rs). None when the positions
-        /// are not in order within the accessible text.
-        pub fn scan_region<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> std::result::Result<Option<R>, Fault> {
-            self.vm.with_region_bytes(start, end, scan).map_err(Fault::Error)
-        }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
             let mut size=0;
             for &arg in args {
@@ -1865,6 +1858,13 @@ mod leaf {
                 return Ok(self.vm.allocate_object(object));
             }
             Ok(self.vm.make_lisp_string(bytes, multibyte))
+        }
+        /// The current buffer's text from character position START to END as
+        /// one run of bytes in GNU's internal form, and whether the buffer is
+        /// multibyte, for a scan (prims/scanner.rs). None when the positions
+        /// are not in order within the accessible text.
+        pub fn scan_region<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> std::result::Result<Option<R>, Fault> {
+            self.vm.with_region_bytes(start, end, scan).map_err(Fault::Error)
         }
     }
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
