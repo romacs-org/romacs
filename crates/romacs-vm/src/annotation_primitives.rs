@@ -1336,7 +1336,7 @@ impl Vm {
     /// OBJECT's text in BYTES as stretches over which textget of PROP is
     /// one value, in order, until F answers one: what F answered, or None
     /// when none did.  The stretches are the runs of the properties that
-    /// decide PROP (`annotation_deciding_keys`), so the cost is theirs, not
+    /// decide PROP (itself, `category`, and its aliases where it is unset), so the cost is theirs, not
     /// the positions' nor every property's.
     fn property_value_runs<T>(
         &self,
@@ -1350,20 +1350,37 @@ impl Vm {
             Some(Object::Buffer(b)) => &b.properties,
             _ => return Ok(RunWalk::ByPosition),
         };
-        let Ok(keys) = self.annotation_deciding_keys(prop) else { return Ok(RunWalk::ByPosition) };
+        let Ok(name) = self.annotation_key_name(prop) else { return Ok(RunWalk::ByPosition) };
+        // PROP's aliases decide only where PROP itself is unset: they are
+        // looked up at the first such run, and the walk goes on from that
+        // run with their boundaries too.
+        let mut keys = vec![name, "category"];
+        let mut aliased = false;
+        let mut from = bytes.start;
         // Where none of the keys is set, the defaults alone answer.
         let mut unset = None;
-        for (run, values) in properties.key_runs(bytes, keys) {
-            let here = if let (true, Some(value)) = (values.is_empty(), unset) {
-                value
-            } else {
-                let value = self.annotation_resolve(&values, prop).map_err(crate::prim::Fault::Error)?;
-                if values.is_empty() { unset = Some(value); }
-                value
-            };
-            if let Some(answer) = f(run, here) { return Ok(RunWalk::Walked(Some(answer))); }
+        'walk: loop {
+            for (run, values) in properties.key_runs(from..bytes.end, keys.iter().copied()) {
+                if !aliased && !values.iter().any(|(key, _)| *key == name) {
+                    aliased = true;
+                    let Ok(aliases) = self.annotation_alias_names(prop) else { return Ok(RunWalk::ByPosition) };
+                    if !aliases.is_empty() {
+                        keys.extend(aliases);
+                        from = run.start;
+                        continue 'walk;
+                    }
+                }
+                let here = if let (true, Some(value)) = (values.is_empty(), unset) {
+                    value
+                } else {
+                    let value = self.annotation_resolve(&values, prop).map_err(crate::prim::Fault::Error)?;
+                    if values.is_empty() { unset = Some(value); }
+                    value
+                };
+                if let Some(answer) = f(run, here) { return Ok(RunWalk::Walked(Some(answer))); }
+            }
+            return Ok(RunWalk::Walked(None));
         }
-        Ok(RunWalk::Walked(None))
     }
 
     pub(crate) fn next_single_char_property_change_values(

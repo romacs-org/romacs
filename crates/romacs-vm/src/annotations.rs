@@ -963,21 +963,28 @@ impl Vm {
         }
         Ok(None)
     }
-    /// The names of the properties whose values at a position decide
-    /// [`Self::annotation_resolve`] of KEY there: KEY, `category`, and
-    /// KEY's aliases in `char-property-alias-alist`.
-    pub(super) fn annotation_deciding_keys(&self, key: Value) -> Result<Vec<&str>> {
-        let mut names = vec![self.annotation_symbol_name(key)?, "category"];
-        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
-            let (alias_key, aliases) = self.cons_pair(entry)?;
-            if alias_key == key {
-                for alias in self.list_values(aliases)? {
-                    names.push(self.annotation_symbol_name(alias)?);
-                }
+    /// The names of KEY's aliases in `char-property-alias-alist`, which
+    /// decide [`Self::annotation_resolve`] of KEY where neither KEY nor
+    /// `category` gives it.  Walks the alist to KEY's entry; copies only
+    /// that entry's names.
+    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
+        let mut tail = self.annotation_variable("char-property-alias-alist");
+        for _ in 0..=self.list_limit() {
+            if tail == Value::NIL {
                 break;
             }
+            let (entry, rest) = self.cons_pair(tail)?;
+            let (alias_key, aliases) = self.cons_pair(entry)?;
+            if alias_key == key {
+                return self.list_values(aliases)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect();
+            }
+            tail = rest;
         }
-        Ok(names)
+        Ok(Vec::new())
+    }
+    /// The name KEY's own property layer has.
+    pub(super) fn annotation_key_name(&self, key: Value) -> Result<&str> {
+        self.annotation_symbol_name(key)
     }
     pub(super) fn annotation_resolve(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
