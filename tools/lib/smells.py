@@ -188,12 +188,48 @@ def clippy_tree(base, root):
     return Path(base) / hashlib.sha1(str(Path(root).resolve()).encode()).hexdigest()[:12]
 
 
-def orphans(base):
-    """The clippy trees under BASE whose checkout no longer exists. A tree
-    without its owner file (made before trees named their checkout) is left
-    to the idle sweep."""
-    return sorted(tree for tree in Path(base).glob('*/')
-                  if (tree / OWNER).is_file() and not Path((tree / OWNER).read_text().strip()).exists())
+def owner(tree):
+    """The checkout TREE records, exactly as written, or None."""
+    try:
+        return (tree / OWNER).read_text()
+    except OSError:
+        return None
+
+
+def orphan(tree):
+    """Whether TREE, a clippy tree, outlived its checkout: it is a real
+    directory named for the checkout it records, that checkout is gone, and
+    the directory that held it is still there (a removed worktree, not an
+    unmounted disk).  A tree without its owner file (made before trees named
+    their checkout) is left to the idle sweep."""
+    path = owner(tree)
+    return (path is not None and not tree.is_symlink() and tree.is_dir()
+            and tree == clippy_tree(tree.parent, path)
+            and not Path(path).exists() and Path(path).parent.is_dir())
+
+
+def tree_lock(base, tree_name):
+    """An open lock file for the clippy tree TREE_NAME, beside it under BASE
+    so removing the tree leaves the lock."""
+    return open(Path(base) / f'{tree_name}.lock', 'a')
+
+
+def prune(base):
+    """Remove the clippy trees under BASE that outlived their checkout,
+    each under its lock, rechecked once held; a tree in use is skipped."""
+    removed = []
+    for tree in sorted(Path(base).iterdir()):
+        if not orphan(tree):
+            continue
+        with tree_lock(base, tree.name) as held:
+            try:
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            if orphan(tree):
+                shutil.rmtree(tree)
+                removed.append(tree)
+    return removed
 
 
 def run_clippy(root):
@@ -207,10 +243,15 @@ def run_clippy(root):
     env = dict(os.environ)
     if env.get('ROMACS_CLIPPY_TARGET_DIR'):
         tree = clippy_tree(env['ROMACS_CLIPPY_TARGET_DIR'], root)
-        tree.mkdir(parents=True, exist_ok=True)
-        (tree / OWNER).write_text(str(Path(root).resolve()))
-        env['CARGO_TARGET_DIR'] = str(tree)
-    done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
+        tree.parent.mkdir(parents=True, exist_ok=True)
+        with tree_lock(tree.parent, tree.name) as held:
+            fcntl.flock(held, fcntl.LOCK_EX)    # `prune` removes no tree in use
+            tree.mkdir(exist_ok=True)
+            (tree / OWNER).write_text(str(Path(root).resolve()))
+            env['CARGO_TARGET_DIR'] = str(tree)
+            done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
+    else:
+        done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
     if done.returncode:
         raise ValueError(f'`{" ".join(CLIPPY)}` failed with {done.returncode}; a failed build counts nothing')
     return done.stdout.splitlines()
@@ -567,8 +608,7 @@ def main():
     path = Path(args.root) / FLOORS
     if args.command == 'prune':
         base = os.environ.get('ROMACS_CLIPPY_TARGET_DIR')
-        for tree in orphans(base) if base else []:
-            shutil.rmtree(tree)
+        for tree in prune(base) if base and Path(base).is_dir() else []:
             print(f'smells: removed {tree}, whose checkout is gone')
         return 0
     if args.command == 'merge':

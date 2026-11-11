@@ -251,33 +251,64 @@ def rise(what, have, had, over=1):
 class ClippyTreeTest(unittest.TestCase):
     """A checkout's clippy tree names its checkout, and goes when the checkout does."""
 
-    def test_a_tree_whose_checkout_is_gone_is_pruned(self):
-        base, live, gone = (Path(tempfile.mkdtemp()) for _ in range(3))
-        self.addCleanup(shutil.rmtree, base)
-        self.addCleanup(shutil.rmtree, live)
-        legacy = base / 'legacy'
-        legacy.mkdir()
-        for checkout in (live, gone):
-            tree = smells.clippy_tree(base, checkout)
-            tree.mkdir()
-            (tree / smells.OWNER).write_text(str(checkout.resolve()))
-        shutil.rmtree(gone)
-        self.assertEqual(smells.orphans(base), [smells.clippy_tree(base, gone)])
-        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(base)}), \
+    def setUp(self):
+        self.base, self.home = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.base)
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def tree(self, checkout, record=None):
+        tree = smells.clippy_tree(self.base, checkout)
+        tree.mkdir()
+        (tree / smells.OWNER).write_text(str(checkout.resolve()) if record is None else record)
+        return tree
+
+    def prune(self):
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
                 mock.patch.object(sys, 'argv', ['smells.py', 'prune']), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(smells.main(), 0)
-        self.assertEqual(sorted(p.name for p in base.iterdir()),
-                         sorted([legacy.name, smells.clippy_tree(base, live).name]))
+        return sorted(p.name for p in self.base.iterdir() if not p.name.endswith('.lock'))
+
+    def test_only_a_tree_whose_checkout_is_gone_is_pruned(self):
+        live, gone = self.home / 'live', self.home / 'gone'
+        live.mkdir(), gone.mkdir()
+        kept = [self.tree(live), self.base / 'legacy']
+        kept[1].mkdir()
+        self.tree(gone)
+        gone.rmdir()
+        self.assertEqual(self.prune(), sorted(p.name for p in kept))
+
+    def test_a_recorded_path_is_read_exactly(self):
+        live = self.home / 'live\n'
+        live.mkdir()
+        tree = self.tree(live)
+        self.assertEqual(self.prune(), [tree.name])
+
+    def test_a_checkout_whose_disk_is_away_is_kept(self):
+        tree = self.tree(self.home / 'unmounted/repo')
+        self.assertEqual(self.prune(), [tree.name])
+
+    def test_a_directory_not_named_for_its_recorded_checkout_is_kept(self):
+        foreign = self.base / 'archive'
+        foreign.mkdir()
+        (foreign / smells.OWNER).write_text(str(self.home / 'gone'))
+        self.assertEqual(self.prune(), ['archive'])
+
+    def test_a_tree_in_use_is_kept(self):
+        gone = self.home / 'gone'
+        tree = self.tree(gone)
+        with smells.tree_lock(self.base, tree.name) as held:
+            smells.fcntl.flock(held, smells.fcntl.LOCK_EX)
+            self.assertEqual(self.prune(), [tree.name])
+        self.assertEqual(self.prune(), [])
 
     def test_running_clippy_records_the_checkout(self):
-        base, checkout = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, base)
-        self.addCleanup(shutil.rmtree, checkout)
+        checkout = self.home / 'repo'
+        checkout.mkdir()
         done = subprocess.CompletedProcess([], 0, stdout='')
-        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(base)}), \
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
                 mock.patch.object(smells.subprocess, 'run', return_value=done) as run:
             smells.run_clippy(checkout)
-        tree = smells.clippy_tree(base, checkout)
+        tree = smells.clippy_tree(self.base, checkout)
         self.assertEqual((tree / smells.OWNER).read_text(), str(checkout.resolve()))
         self.assertEqual(run.call_args.kwargs['env']['CARGO_TARGET_DIR'], str(tree))
 
