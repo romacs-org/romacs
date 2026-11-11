@@ -1611,9 +1611,11 @@ one-day minimum.  Thus 2.5 days becomes 2 and 3.5 days becomes 4.
 This calendar policy does not promise identical due dates to Anki or
 the fsrs-rs scheduling example.  Accepted reviews retain their original
 scheduling evidence.  Replay takes each review's recorded result and
-checks that the next review continues it; it does not recompute old
-reviews, so history stays valid when the FSRS implementation or its
-parameters change.
+checks that the next review continues it, so history stays valid when
+the FSRS implementation or its parameters change.  Replay also recomputes
+each review with today's FSRS and reports, without rejecting, any review
+it would schedule differently by more than 0.01%; rebuilding a thema's
+state after an undo shows that report as a warning.
 
 Use =M-x gnosis-scheduler-set-retention= to set a user-wide target strictly
 between 0 and 1, for example =0.9=.  Each changed value creates an
