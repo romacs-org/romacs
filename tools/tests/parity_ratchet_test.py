@@ -518,15 +518,15 @@ class Provenance(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = pathlib.Path(tmp.name)
-        (root / 'gnu-lisp').mkdir()
-        (root / 'gnu-lisp' / 'a.el').write_text('(a)')
+        (root / 'lisp/gnu').mkdir()
+        (root / 'lisp/gnu' / 'a.el').write_text('(a)')
         before = pr.input_fingerprint(root)
-        os.utime(root / 'gnu-lisp' / 'a.el', (1, 1))
+        os.utime(root / 'lisp/gnu' / 'a.el', (1, 1))
         self.assertEqual(pr.input_fingerprint(root), before)
-        (root / 'gnu-lisp' / 'a.el').write_text('(b)')
+        (root / 'lisp/gnu' / 'a.el').write_text('(b)')
         self.assertNotEqual(pr.input_fingerprint(root), before)
-        (root / 'gnu-lisp' / 'a.el').write_text('(a)')
-        (root / 'gnu-lisp' / 'new.el').write_text('')
+        (root / 'lisp/gnu' / 'a.el').write_text('(a)')
+        (root / 'lisp/gnu' / 'new.el').write_text('')
         self.assertNotEqual(pr.input_fingerprint(root), before)
 
     def test_the_ledger_ignores_a_private_home(self):
@@ -955,13 +955,13 @@ class CensusPopulation(unittest.TestCase):
         self.directory = self.enterContext(tempfile.TemporaryDirectory(prefix='census-population-'))
         base = pathlib.Path(self.directory)
         self.root, self.gnu = base / 'root', base / 'gnu'
-        for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
+        for directory, lisp in ((self.root, 'lisp/gnu'), (self.gnu, 'lisp')):
             (directory / lisp).mkdir(parents=True)
         (self.root / 'tools/lib').mkdir(parents=True)
         import shutil
         shutil.copyfile(ROOT / 'tools/lib/lisp_oracle.py', self.root / 'tools/lib/lisp_oracle.py')
         for name in ('a.el', 'b.el'):
-            for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
+            for directory, lisp in ((self.root, 'lisp/gnu'), (self.gnu, 'lisp')):
                 (directory / lisp / name).write_text('(provide \'fixture)\n')
         def git(*args):
             return subprocess.check_output(['git', '-C', str(self.gnu), *args], text=True).strip()
@@ -972,7 +972,7 @@ class CensusPopulation(unittest.TestCase):
         self.pin = git('rev-parse', 'HEAD')
         self.enterContext(patch.object(pr, 'GNU_PIN', self.pin))
         self.enterContext(patch.object(pr, 'GNU_SOURCE', self.gnu))
-        self.support = 'gnu-lisp/generated.el'
+        self.support = 'lisp/gnu/generated.el'
         (self.root / self.support).write_text('(provide \'generated)\n')
         self.manifest = {'gnu_commit': self.pin,
                          'sources': {'fixture': {'paths': ['lisp/a.el'], 'recipe': 'fixture generator'}},
@@ -987,20 +987,20 @@ class CensusPopulation(unittest.TestCase):
 
     def test_population_is_exact_pristine_pin_plus_validated_generated_support(self):
         pristine, support = pr.census_population(self.root)
-        self.assertEqual(pristine, {'gnu-lisp/a.el', 'gnu-lisp/b.el'})
+        self.assertEqual(pristine, {'lisp/gnu/a.el', 'lisp/gnu/b.el'})
         self.assertEqual(support, {self.support})
 
     def test_missing_extra_modified_or_duplicate_population_is_refused(self):
         mutations = ('missing', 'extra', 'modified', 'support-bytes', 'support-pin', 'support-duplicate')
         for mutation in mutations:
             with self.subTest(mutation=mutation):
-                path = self.root / 'gnu-lisp/a.el'
+                path = self.root / 'lisp/gnu/a.el'
                 original = path.read_bytes()
                 saved = copy.deepcopy(self.manifest)
                 if mutation == 'missing':
                     path.unlink()
                 elif mutation == 'extra':
-                    (self.root / 'gnu-lisp/extra.el').write_text('nil')
+                    (self.root / 'lisp/gnu/extra.el').write_text('nil')
                 elif mutation == 'modified':
                     path.write_text('nil')
                 elif mutation == 'support-bytes':
@@ -1013,20 +1013,20 @@ class CensusPopulation(unittest.TestCase):
                 with self.assertRaises(pr.Refusal):
                     pr.census_population(self.root)
                 path.write_bytes(original)
-                (self.root / 'gnu-lisp/extra.el').unlink(missing_ok=True)
+                (self.root / 'lisp/gnu/extra.el').unlink(missing_ok=True)
                 self.manifest = saved
                 self.write_manifest()
 
     def measure(self, oracle_edit=lambda rows: rows, row_edit=lambda row: row):
         from types import SimpleNamespace
-        files = sorted((self.root / 'gnu-lisp').glob('*.el'))
+        files = sorted((self.root / 'lisp/gnu').glob('*.el'))
         oracle = oracle_edit([{'path': str(p), 'form_count': 1, 'status': 'ok'} for p in files])
         self.executed = []
         def run_file(path, entry, *args):
             self.executed.append(path.relative_to(self.root).as_posix())
             return row_edit(dict(file=path.relative_to(self.root).as_posix(), forms_evaluated=1,
                                  total_forms=1, loaded=True, mode='cold'))
-        lc = SimpleNamespace(ROOT=self.root, run_file=run_file, load_path=lambda root: [root / 'gnu-lisp'])
+        lc = SimpleNamespace(ROOT=self.root, run_file=run_file, load_path=lambda root: [root / 'lisp/gnu'])
         load = pr.load_module
         def module(path, name):
             return lc if name == 'lisp_census' else load(path, name)
@@ -1042,12 +1042,12 @@ class CensusPopulation(unittest.TestCase):
 
     def test_all_targets_execute_but_support_is_not_parity_credit(self):
         measured = self.measure()
-        self.assertEqual(sorted(self.executed), ['gnu-lisp/a.el', 'gnu-lisp/b.el', self.support])
+        self.assertEqual(sorted(self.executed), ['lisp/gnu/a.el', 'lisp/gnu/b.el', self.support])
         self.assertEqual(measured['files_executed'], 3)
         self.assertEqual((measured['files_measured'], measured['files_reported']), (2, 2))
         self.assertEqual(measured['members']['census-cold'], ['lisp/a.el', 'lisp/b.el'])
         self.assertEqual(measured['verdicts']['lisp/a.el'], 'loaded')
-        self.assertNotIn('gnu-lisp/a.el', measured['verdicts'])
+        self.assertNotIn('lisp/gnu/a.el', measured['verdicts'])
         self.assertEqual(measured['generated_support'], {
             'total': 1, 'reported': 1, 'loaded': [self.support], 'unreported': []})
 
@@ -1062,7 +1062,7 @@ class CensusPopulation(unittest.TestCase):
             self.measure(row_edit=lambda row: dict(row, file='lisp/a.el'))
 
     def test_partial_pristine_or_support_reports_cannot_pass(self):
-        for missing in ('gnu-lisp/a.el', self.support):
+        for missing in ('lisp/gnu/a.el', self.support):
             with self.subTest(missing=missing):
                 measured = self.measure(row_edit=lambda row: dict(row, forms_evaluated=None, loaded=False)
                                         if row['file'] == missing else row)

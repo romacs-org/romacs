@@ -15,7 +15,7 @@
 ;;; Code:
 
 
-;;; Directory rlisp
+;;; Directory lisp/romacs
 
 
 ;;; Generated autoloads from ob-wgsl.el
@@ -822,7 +822,7 @@ for running a newer build.
 (register-definition-prefixes "warm-restart" '("romacs-restart-" "warm-restart-"))
 
 
-;;; Directory rlisp/emacs-lisp
+;;; Directory lisp/romacs/emacs-lisp
 
 
 ;;; Generated autoloads from keymap-popup.el
@@ -902,7 +902,7 @@ shadowed by those controls are omitted from the displayed entries.
 (register-definition-prefixes "keymap-popup" '("keymap-popup-"))
 
 
-;;; Directory rlisp/gnosis
+;;; Directory lisp/romacs/gnosis
 
 
 ;;; Generated autoloads from gnosis.el
@@ -1697,7 +1697,7 @@ customize `gnosis-weak-indicators' to turn the indicators off.")
 (register-definition-prefixes "gnosis-weak" '("gnosis-weak-"))
 
 
-;;; Directory rlisp/hermes
+;;; Directory lisp/romacs/hermes
 
 
 ;;; Generated autoloads from hermes.el
@@ -2358,7 +2358,7 @@ disabled.
 (register-definition-prefixes "hermes-transport-cli" '("hermes-"))
 
 
-;;; Directory rlisp/jabber
+;;; Directory lisp/romacs/jabber
 
 
 ;;; Generated autoloads from jabber.el
@@ -3257,7 +3257,7 @@ accepted when checking for an existing handler.
 (register-definition-prefixes "jabber-xml" '("jabber-"))
 
 
-;;; Directory rlisp/term
+;;; Directory lisp/romacs/term
 
 
 ;;; Generated autoloads from romacs-preload.el
@@ -3265,7 +3265,7 @@ accepted when checking for an existing handler.
 (register-definition-prefixes "romacs-preload" '("x-gtk-use-system-tooltips"))
 
 
-;;; Directory rlisp/deps/fsm
+;;; Directory lisp/romacs/deps/fsm
 
 
 ;;; Generated autoloads from fsm.el
@@ -3273,7 +3273,7 @@ accepted when checking for an existing handler.
 (register-definition-prefixes "fsm" '("fsm-"))
 
 
-;;; Directory rlisp/deps/markdown-mode
+;;; Directory lisp/romacs/deps/markdown-mode
 
 
 ;;; Generated autoloads from markdown-mode.el
@@ -3332,7 +3332,7 @@ disabled.
 (register-definition-prefixes "markdown-mode" '("defun-markdown-" "gfm-" "markdown"))
 
 
-;;; Directory rlisp/deps/websocket
+;;; Directory lisp/romacs/deps/websocket
 
 
 ;;; Generated autoloads from websocket.el

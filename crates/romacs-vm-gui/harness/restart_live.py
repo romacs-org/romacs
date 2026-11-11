@@ -15,7 +15,7 @@ still hold their original text.
 
   same    the new process is the same binary (romacs-restart's default).
   newer   the session runs --older BINARY from --older-runtime DIR (its
-          own copy of rlisp, gnu-lisp and etc, as an installed build has),
+          own copy of lisp/romacs, lisp/gnu and etc, as an installed build has),
           and `romacs-restart-command' names --romacs: the new process is
           the newer build with its own runtime.
 
@@ -122,7 +122,7 @@ def start(args, base, name):
     if name == 'newer':
         binary = args.older
         runtime = Path(args.older_runtime)
-        env.update(ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'gnu-lisp'))
+        env.update(ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'lisp/gnu'))
         extra = f'(setq romacs-restart-command (list {lisp_string(args.romacs)} "--loadup"))'
         # The newer build's world, prepared as an installer would, with its
         # own runtime: what the restart command's environment gives it.
@@ -244,7 +244,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--romacs', required=True)
     parser.add_argument('--older', help='newer: the build the session starts in')
-    parser.add_argument('--older-runtime', help="newer: that build's runtime directory (rlisp, gnu-lisp, etc)")
+    parser.add_argument('--older-runtime', help="newer: that build's runtime directory (lisp/romacs, lisp/gnu, etc)")
     parser.add_argument('--output', required=True)
     parser.add_argument('--work', default=os.environ.get('TMPDIR', '/tmp'))
     parser.add_argument('--tools', default=parity_live.TOOLS)

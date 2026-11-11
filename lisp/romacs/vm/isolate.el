@@ -19,7 +19,7 @@
 ;; `thread-last-error'.
 ;;
 ;; Delivery: results, errors and messages arrive at wait points.  The
-;; command loop's idle (`romacs--isolate-idle', rlisp/vm/keyboard.el and
+;; command loop's idle (`romacs--isolate-idle', lisp/romacs/vm/keyboard.el and
 ;; the GUI's timers) and `isolate-await' pump them; a worker's loop
 ;; (`romacs--isolate-serve') takes its jobs the same way.
 

@@ -1722,7 +1722,7 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
         :fit #'keymap-popup--fit-child-frame
         :hide #'keymap-popup--hide-child-frame))
 
-;; Romacs's `panel' menu (rlisp/romacs-popup.el): a layer across the
+;; Romacs's `panel' menu (lisp/romacs/romacs-popup.el): a layer across the
 ;; frame's bottom above the status bar, in Romacs's menu look.  The popup's
 ;; mode-line text becomes its first row; the layer's window has no mode line.
 

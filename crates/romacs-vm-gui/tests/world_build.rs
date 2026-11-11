@@ -31,7 +31,7 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
 }
 
 /// A `--batch' session's world holds the stock theme the chain enables
-/// (rlisp/romacs-theme.el `romacs-theme-start'): the session that prepares
+/// (lisp/romacs/romacs-theme.el `romacs-theme-start'): the session that prepares
 /// it and one restored from it both start in `default'. The first says why
 /// it booted from source under ROMACS_DIAGNOSTICS=1; the second says nothing.
 #[test]

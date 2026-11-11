@@ -439,7 +439,7 @@ impl Vm {
     }
     /// buffer.c other_buffer_safely, the last defence of Fkill_buffer once
     /// `replace-buffer-in-windows' and `other-buffer' (the Lisp half,
-    /// rlisp/vm/buffer_lifecycle.el) have had their say: the first buffer in
+    /// lisp/romacs/vm/buffer_lifecycle.el) have had their say: the first buffer in
     /// ORDER other than BUFFER that is live, not hidden and not the
     /// minibuffer's, a text buffer when a window will SHOW it, else a new
     /// *scratch*.

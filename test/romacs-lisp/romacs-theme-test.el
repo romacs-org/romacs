@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; rlisp/romacs-theme.el's colours, palettes and faces, in the machine's own
+;; lisp/romacs/romacs-theme.el's colours, palettes and faces, in the machine's own
 ;; prelude without GNU's Lisp, where themes are declared as the faces' own
 ;; specs.  With Custom (the stock theme enabled, replaced, disabled):
 ;; crates/romacs-vm-gui/tests/romacs-theme-custom-test.el.

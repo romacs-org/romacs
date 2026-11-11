@@ -24,7 +24,7 @@
 
 ;; The catch-up of the personal archive, of rooms and of chats
 ;; (jabber-mam.el) runs in a worker VM (Romacs's isolates,
-;; rlisp/vm/isolate.el) over an XMPP session of its own, so a long
+;; lisp/romacs/vm/isolate.el) over an XMPP session of its own, so a long
 ;; catch-up never holds the editor: the worker reads the socket, parses
 ;; the stanzas, pages the archives and writes the database.  The session
 ;; it opens is quiet and read-only: a resource of its own, no presence,

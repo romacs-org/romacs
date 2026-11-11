@@ -1,4 +1,4 @@
-//! The help primitives (rlisp/romacs-help.el, keymap.c and syntax.c in
+//! The help primitives (lisp/romacs/romacs-help.el, keymap.c and syntax.c in
 //! GNU) against pinned GNU 32.0.50 on the loadup chain, each case's value
 //! with the text it inserted and that text's `font-lock-face' runs:
 //! `text-char-description', `internal-describe-syntax-value',
@@ -15,7 +15,7 @@ fn bootstrapped(root: &Path) -> Vm {
     let mut vm = Vm::new();
     vm.eval_source("(setq noninteractive t)").unwrap();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
+    let lisp = root.join("lisp/gnu");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
@@ -25,10 +25,10 @@ fn bootstrapped(root: &Path) -> Vm {
     let mut paths = vec![lisp.clone()];
     paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
     if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("rlisp"));
+    paths.push(root.join("lisp/romacs"));
     vm.set_load_path(&paths).unwrap();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
     vm
 }
 

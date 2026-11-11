@@ -277,7 +277,7 @@ impl Vm {
     /// already arrived, as a press the host counted or as `quit-flag', so
     /// the read returns the quit character at once (GNU's
     /// quit_throw_to_read_char). `quit-flag' is cleared: the reader acts on
-    /// the key as read_char's caller does on its quit (rlisp/vm/keyboard.el).
+    /// the key as read_char's caller does on its quit (lisp/romacs/vm/keyboard.el).
     /// When `quit-flag' is `throw-on-input''s tag the read returns nothing
     /// and leaves it for the next safepoint, which throws.
     pub(crate) fn take_read_quit(&mut self) -> ReadQuit {

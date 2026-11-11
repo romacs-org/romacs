@@ -53,7 +53,7 @@ fn insert_file_contents_runs_change_hooks_as_gnu() {
     std::fs::write(&file, b"XY").unwrap();
     std::fs::write(&empty, b"").unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = CASES.lines().filter(|line| !line.is_empty())
         .map(|line| line.replace("FILE", &lisp(&file)).replace("EMPTY", &lisp(&empty)))
         .filter_map(|expression| {
@@ -81,7 +81,7 @@ fn insert_file_contents_replace_matches_gnu() {
     let files = [("f1", &b"abc12def"[..]), ("f2", b"abc"), ("f3", "\u{3bb}b".as_bytes()), ("f4", b"xbcy"), ("f5", b"")];
     for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let cases = [("abcXYZdef", "f1", "(point-max)", "nil"), ("abcdef", "f2", "(point-max)", "nil"),
                  ("\u{3bb}a", "f3", "(point-max)", "nil"), ("abcXYZdef", "f1", "5", "nil"),
                  ("abcd", "f4", "(point-max)", "(narrow-to-region 2 4)"), ("abc", "f5", "2", "nil"),
@@ -117,7 +117,7 @@ fn insert_file_contents_records_undo_as_gnu() {
     std::fs::write(dir.join("f1"), b"abc12def").unwrap();
     std::fs::write(dir.join("f2"), b"XY").unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = UNDO_CASES.lines().filter(|line| !line.is_empty())
         .map(|line| line.replace("F1", &lisp(&dir.join("f1"))).replace("F2", &lisp(&dir.join("f2"))))
         .filter_map(|expression| {
@@ -137,7 +137,7 @@ fn a_raw_byte_replace_matches_gnu() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("f"), b"abc\xce\xbb\xffdef").unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let expression = format!("(progn (set-buffer (generate-new-buffer \"ifc-raw\")) (buffer-enable-undo) (insert \"abcXYZdef\") (undo-boundary)
       (let ((before (copy-tree buffer-undo-list)) (coding-system-for-read 'utf-8))
         (list (condition-case e (insert-file-contents {} nil nil nil t) (error e)) (buffer-string) (point) (equal buffer-undo-list before))))",
@@ -161,7 +161,7 @@ fn insert_file_contents_replace_checks_the_ranges_it_changes() {
     std::fs::write(dir.join("f1"), b"abc12def").unwrap();
     std::fs::write(dir.join("same"), b"abcXYZdef").unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = [("1 3", "f1"), ("1 3", "same"), ("4 7", "f1"), ("3 4", "f1")].iter()
         .map(|(ro, file)| READ_ONLY_CASES.trim().replace("RO", ro).replace("FILE", &lisp(&dir.join(file))))
         .filter_map(|expression| {
@@ -187,7 +187,7 @@ fn visiting_replace_does_not_ask_about_supersession_as_gnu() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("visited.txt");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = ["", "(narrow-to-region 1 2)"].iter()
         .map(|narrow| VISIT_CASE.replace("FILE", &lisp(&file)).replace("NARROW", narrow))
         .filter_map(|expression| {

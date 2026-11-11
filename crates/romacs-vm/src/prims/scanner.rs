@@ -1,4 +1,4 @@
-//! Scanners (rlisp/romacs-scanner.el): a table tabulated from a Lisp step
+//! Scanners (lisp/romacs/romacs-scanner.el): a table tabulated from a Lisp step
 //! function, run over buffer text. Romacs's own; GNU has no equivalent.
 use crate::prim::Fault;
 use crate::Value;

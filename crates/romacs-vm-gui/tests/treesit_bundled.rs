@@ -19,7 +19,7 @@ fn bootstrapped(user: &Path) -> Vm {
     let mut vm = Vm::new();
     vm.eval_source("(setq noninteractive t)").unwrap();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
+    let lisp = root.join("lisp/gnu");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
@@ -27,10 +27,10 @@ fn bootstrapped(user: &Path) -> Vm {
     names.sort();
     let mut paths = vec![lisp.clone()];
     paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("rlisp"));
+    paths.push(root.join("lisp/romacs"));
     vm.set_load_path(&paths).unwrap();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
     vm.eval_source(&format!("(setq user-emacs-directory {:?} treesit-extra-load-path nil)", format!("{}/", user.display()))).unwrap();
     vm
 }
@@ -111,7 +111,7 @@ fn a_library_in_the_users_grammar_directory_comes_first() {
 }
 
 /// Each bundled grammar is the repository and commit its GNU ts mode
-/// names in `treesit-language-source-alist' (read from gnu-lisp/, its
+/// names in `treesit-language-source-alist' (read from lisp/gnu/, its
 /// entries evaluated as the files would).
 #[test]
 fn bundled_grammars_are_the_commits_gnu_pins() {
@@ -119,7 +119,7 @@ fn bundled_grammars_are_the_commits_gnu_pins() {
     let report = on_big_stack(move || {
         let mut vm = bootstrapped(&user);
         let files: Vec<String> = ["progmodes", "textmodes"].iter().flat_map(|dir| {
-            std::fs::read_dir(root().join("gnu-lisp").join(dir)).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
+            std::fs::read_dir(root().join("lisp/gnu").join(dir)).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
                 .filter(|p| p.extension().is_some_and(|x| x == "el")
                     && std::fs::read_to_string(p).is_ok_and(|t| t.contains("'treesit-language-source-alist")))
                 .map(|p| format!("{:?}", p.display().to_string()))
@@ -146,7 +146,7 @@ fn bundled_grammars_are_the_commits_gnu_pins() {
     assert_eq!(report, "nil");
 }
 
-/// rlisp/romacs-treesit.el around `after-find-file': a visit's parse reaches
+/// lisp/romacs/romacs-treesit.el around `after-find-file': a visit's parse reaches
 /// the mode's parser; a visit that cannot use one (unibyte, NOMODES, a file
 /// whose local mode overrules the guess) neither fails nor leaves one behind.
 #[test]

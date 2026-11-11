@@ -1,6 +1,6 @@
 //! `romacs--scanner-run` (prims/scanner.rs): a table tabulated from a Lisp
 //! step function, run over buffer text. The Lisp side and its tests are
-//! rlisp/romacs-scanner.el and test/lisp/romacs-scanner-tests.el.
+//! lisp/romacs/romacs-scanner.el and test/lisp/romacs-scanner-tests.el.
 use romacs_vm::Vm;
 
 fn eval(vm: &mut Vm, source: &str) -> String {

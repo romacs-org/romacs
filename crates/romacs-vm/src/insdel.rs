@@ -3,7 +3,7 @@
 //! (verify_interval_modification in textprop.c, report_overlay_modification
 //! in buffer.c), the storage edit with its undo records (undo.c), and whether
 //! signal_after_change has anything to run. The hooks themselves run in Lisp
-//! (`romacs--before-change' and `romacs--after-change' in rlisp/vm/insdel.el)
+//! (`romacs--before-change' and `romacs--after-change' in lisp/romacs/vm/insdel.el)
 //! and only when one can run: an edit with no hook and no undo-auto Lisp runs
 //! no Lisp at all.
 use super::*;

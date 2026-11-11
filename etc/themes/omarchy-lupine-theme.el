@@ -7,7 +7,7 @@
 
 ;;; Commentary:
 ;; The Lupine palette as a Romacs theme: its base colours, from
-;; which rlisp/romacs-theme.el derives every face.
+;; which lisp/romacs/romacs-theme.el derives every face.
 
 ;;; Code:
 
