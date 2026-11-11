@@ -460,6 +460,29 @@ A recompute today's FSRS refuses is drift too, never a replay failure."
           (should (equal '((2 (:error "Broken")))
                          (gnosis-scheduler-drift gnosis-db))))))))
 
+(ert-deftest gnosis-test-scheduler-drift-report-separates-broken-histories ()
+  "The drift report counts drifting and broken themata apart and lists both."
+  (let ((messages nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (format &rest args) (push (apply #'format format args) messages)))
+              ((symbol-function 'display-buffer) #'ignore))
+      (gnosis-scheduler--drift-report nil 4)
+      (should (string-match-p "All 4 reviewed themata replay" (car messages)))
+      (gnosis-scheduler--drift-report
+       '((1 ("aaaaaaaaaaaaaaaa" (:stability 2.0 2.5)))
+         (2 ("bbbbbbbbbbbbbbbb" (:error "Refused")))
+         (3 (:error "Review event does not replay")))
+       4)
+      (should (string-match-p "2 of 4 reviewed themata schedule differently.*1 do not replay"
+                              (car messages)))
+      (with-current-buffer "*Gnosis Drift*"
+        (should (string-match-p "Thema 1\n  review aaaaaaaaaaaa\n    stability 2.0, today 2.5"
+                                (buffer-string)))
+        (should (string-match-p "today's FSRS refuses it: Refused" (buffer-string)))
+        (should (string-match-p "Thema 3 does not replay: Review event does not replay"
+                                (buffer-string)))
+        (kill-buffer)))))
+
 (ert-deftest gnosis-test-scheduler-drift-uses-each-configs-own-terms ()
   "Recompute each review under its configuration's retention and weights."
   (gnosis-test-scheduler--with-db
@@ -517,19 +540,37 @@ A recompute today's FSRS refuses is drift too, never a replay failure."
                  (plist-get (gnosis-scheduler-replay-thema 3 0 gnosis-db) :stability)))
       (should (equal '(4) (mapcar #'car (gnosis-scheduler-drift gnosis-db)))))))
 
-(ert-deftest gnosis-test-scheduler-reviews-on-under-a-new-implementation ()
-  "A state recorded under an earlier implementation of the model reviews on."
+(ert-deftest gnosis-test-scheduler-reviews-on-after-an-implementation-upgrade ()
+  "After the FSRS implementation's name changes, reviews and retention go on.
+New reviews record a configuration under today's name, made once and
+then found; the history recorded before replays without drift."
   (gnosis-test-scheduler--with-db
     (gnosis-test-scheduler--seed-state)
-    (gnosis-sqlite-execute
-     gnosis-db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
-     (list 2 gnosis-fsrs--algorithm gnosis-fsrs--model "fsrs-rs-6.0.0" 0.9
-           gnosis-fsrs-default-parameters))
-    (gnosis-sqlite-execute
-     gnosis-db "UPDATE scheduler_state SET config_id = 2 WHERE thema_id = 1")
-    (should (plist-get (gnosis-scheduler-accept-review
-                        gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
-                       :inserted-p))))
+    (gnosis-test-scheduler--seed-state 2)
+    (gnosis-scheduler-accept-review
+     gnosis-test-scheduler--event-id 1 'success 1000000 20260830)
+    (let* ((gnosis-fsrs--implementation "fsrs-rs-7.0.0")
+           (next (gnosis-scheduler-accept-review
+                  gnosis-test-scheduler--event-id-2 1 'failure 2000000 20260901))
+           (config (plist-get next :config-id)))
+      (should (plist-get next :inserted-p))
+      (should-not (= 1 config))
+      (should (equal "fsrs-rs-7.0.0"
+                     (caar (gnosis-sqlite-select
+                            gnosis-db "SELECT implementation FROM scheduler_config WHERE id = ?"
+                            (list config)))))
+      (should (= config (plist-get (gnosis-scheduler-accept-review
+                                    (make-string 64 ?c) 2 'success 3000000 20260901)
+                                   :config-id)))
+      (should (= 2 (plist-get (gnosis-scheduler-replay-thema 1 0) :reps)))
+      (should-not (gnosis-scheduler-drift gnosis-db))
+      ;; Retention changes too, the new config under today's name.
+      (let ((retention (gnosis-scheduler-set-retention 0.85)))
+        (should (equal '(0.85 "fsrs-rs-7.0.0")
+                       (car (gnosis-sqlite-select
+                             gnosis-db "SELECT desired_retention, implementation
+                                         FROM scheduler_config WHERE id = ?"
+                             (list retention)))))))))
 
 (ert-deftest gnosis-test-scheduler-fit-parameters-reads-effective-history ()
   "Fit to non-void events of themata whose history Gnosis holds whole.
