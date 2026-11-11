@@ -1005,6 +1005,17 @@ impl TextBody {
         }
         self.chunk.borrow()
     }
+    /// The text from byte B, a character boundary before the end, to the
+    /// end of the piece holding it, for F: a scan reads a run of bytes at
+    /// once instead of a character at a time.
+    pub(crate) fn with_text_from<R>(&self, b: ByteOffset, f: impl FnOnce(&str) -> R) -> R {
+        let prefix = self.bytes_len - self.tail.len();
+        if b.0 >= prefix {
+            return f(&self.tail[b.0 - prefix..]);
+        }
+        let chunk = self.chunk_for_byte(b.0);
+        f(&chunk.text[b.0 - chunk.byte..])
+    }
     fn chunk_for_byte(&self, b: usize) -> std::cell::Ref<'_, ChunkCursor> {
         let hit = {
             let cur = self.chunk.borrow();

@@ -620,7 +620,15 @@ impl KeyReader<'_> {
         self.run.set((start, start + run.len as usize, value));
         value
     }
-}
+    /// The end of a stretch from AT over which the key has no value: AT
+    /// itself when it has one there, `usize::MAX` when none follows the
+    /// key's last run.  The stretch may end before the next value.
+    pub fn unset_until(&self, at: ByteOffset) -> usize {
+        if self.get(at).is_some() {
+            return at.0;
+        }
+        let (start, end, _) = self.run.get();
+        if start <= at.0 && at.0 < end { end } else { usize::MAX }
     }
 }
 
