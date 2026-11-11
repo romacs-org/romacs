@@ -189,21 +189,24 @@ struct PropertySubject {
 }
 
 /// What is derived from one syntax table's contents and lasts between
-/// searches: that it is a syntax table whose parents do not loop, and the
-/// entries of the ASCII characters read so far. It holds for TABLE while
-/// no char table has been written (`char_table::writes`) and TABLE is the
-/// table of that serial; a collection forgets it, since it holds Values.
-/// The entries, not their classes: an entry is a cons a program may alter
-/// without writing the table.
+/// searches: that it is a syntax table whose parents do not loop, and,
+/// from the second search that finds it holding, the entries of the ASCII
+/// characters. It holds for TABLE while no char table has been written
+/// (`char_table::writes`) and TABLE is the table of that serial; a
+/// collection forgets it, since it holds Values. The entries, not their
+/// classes: an entry is a cons a program may alter without writing the
+/// table. They wait for the second search so that code alternating
+/// between two tables pays the check each time, as before, and no more.
 pub(super) struct SyntaxMemo {
     table: Value,
     serial: u64,
     writes: u64,
-    entries: [std::cell::Cell<Value>; 128],
+    /// The entries, once read; `Value::UNBOUND` for one not held.
+    entries: Option<[Value; 128]>,
 }
 impl Default for SyntaxMemo {
     fn default() -> Self {
-        Self { table: Value::UNBOUND, serial: 0, writes: 0, entries: [const { std::cell::Cell::new(Value::UNBOUND) }; 128] }
+        Self { table: Value::UNBOUND, serial: 0, writes: 0, entries: None }
     }
 }
 impl SyntaxMemo {
@@ -435,14 +438,12 @@ impl Vm {
     /// while it holds for TABLE.
     fn regexp_memo_class(&self, table: Value, code: u32) -> Option<SyntaxClass> {
         let memo = &self.regexp_cache.syntax;
-        let Some(cell) = memo.entries.get(code as usize)
-            .filter(|_| memo.table == table && memo.writes == crate::char_table::writes()) else {
-            return self.regexp_table_class(table, code);
-        };
-        if cell.get() == Value::UNBOUND {
-            cell.set(self.char_table_get(table, code as usize).ok()?);
+        let held = memo.entries.as_ref().and_then(|entries| entries.get(code as usize)).copied()
+            .filter(|&entry| entry != Value::UNBOUND && memo.table == table && memo.writes == crate::char_table::writes());
+        match held {
+            Some(entry) => Some(Self::entry_class(self.cons_pair(entry).ok())),
+            None => self.regexp_table_class(table, code),
         }
-        Some(Self::entry_class(self.cons_pair(cell.get()).ok()))
     }
     fn entry_class(entry: Option<(Value, Value)>) -> SyntaxClass {
         entry.and_then(|(n, _)| n.integer_value()).and_then(SyntaxClass::from_code).unwrap_or(SyntaxClass::Whitespace)
@@ -549,14 +550,22 @@ impl Vm {
     }
     fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
         // What the memo holds for was checked when it was made.
-        if !self.syntax_memo_holds(current) {
+        if self.syntax_memo_holds(current) {
+            if self.regexp_cache.syntax.entries.is_none() {
+                let mut entries = [Value::UNBOUND; 128];
+                for (code, entry) in entries.iter_mut().enumerate() {
+                    if let Ok(value) = self.char_table_get(current, code) { *entry = value; }
+                }
+                self.regexp_cache.syntax.entries = Some(entries);
+            }
+        } else {
             self.regexp_syntax_table(current)?;
             // char_table_get follows parents, so a cycle must be refused here.
             if self.char_table_parents_cycle(current) {
                 return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
             }
             let serial = self.char_table_serial(current);
-            self.regexp_cache.syntax = SyntaxMemo { table: current, serial, writes: crate::char_table::writes(), ..SyntaxMemo::default() };
+            self.regexp_cache.syntax = SyntaxMemo { table: current, serial, writes: crate::char_table::writes(), entries: None };
         }
         // parse-sexp-lookup-properties: the subject's `syntax-table'
         // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
