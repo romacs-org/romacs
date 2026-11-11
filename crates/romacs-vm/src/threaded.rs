@@ -1796,15 +1796,24 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // watcher notification does not extend into it.
     engine.vm.running_engines += 1;
     let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
+    if engine.vm.stress_due() && engine.vm.may_collect(1) {
+        orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
+    }
     // A poll allocation asked for (`Vm::poll_requested`) outlives the engine
     // that asked: an entry collects if one is due, so forms run an engine
     // each (a loaded file's) collect between them, as GNU's eval_sub does,
-    // and the first tick takes the rest (aftermath, a quit).
-    let requested = engine.vm.poll_requested();
-    if (engine.vm.stress_due() || (requested && engine.vm.collection_due())) && engine.vm.may_collect(1) {
-        orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
+    // and the first tick takes the rest (aftermath, a quit). With nothing
+    // due it settles here, as a poll would, so engines that never tick do
+    // not each look again; an engine that may not collect leaves the request
+    // to one that may, as `leave_native` does.
+    if engine.vm.poll_requested() && engine.vm.may_collect(1) {
+        if engine.vm.collection_due() {
+            orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
+        } else if !engine.vm.aftermath_pending() {
+            engine.vm.settle_poll();
+        }
+        engine.budget = 0;
     }
-    if requested { engine.budget = 0; }
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
     let quit = if crate::host::safepoint_pending() || engine.vm.quit_due() {
