@@ -2792,12 +2792,14 @@ pub fn fork_isolate() -> io::Result<i32> {
 /// `twin.rs`): 0 in the child, else the child's pid. The child has the
 /// caller's thread alone, so a lock another thread held stays held in it:
 /// the allocator's is held across the fork (`arena::across_fork`), and the
-/// child takes no other lock and ends with `exit_at_once`. It dies with the
-/// forking thread, even one that ends without unwinding (`_exit`), and ends
-/// at once if that thread was gone before it could ask.
+/// child takes no other lock and ends with `exit_at_once`. It reads only
+/// what the forking thread itself wrote, which is what lets the fork be a
+/// lazy one where the heap is in a file (`romacs_allocator::file_heap`). It
+/// dies with the forking thread, even one that ends without unwinding
+/// (`_exit`), and ends at once if that thread was gone before it could ask.
 pub(crate) fn fork_threaded() -> io::Result<i32> {
     let parent = std::process::id();
-    let pid = crate::world::arena::across_fork(fork)?;
+    let pid = crate::world::arena::across_fork(|| romacs_allocator::file_heap::lazily(fork))?;
     if pid == 0 && (set_parent_death_signal(libc::SIGKILL).is_err() || std::os::unix::process::parent_id() != parent) {
         exit_at_once(0);
     }
