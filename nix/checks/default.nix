@@ -62,7 +62,6 @@ let
         test -d ${checkedPackage}/share/romacs/lisp/romacs
         test -d ${checkedPackage}/share/romacs/lisp/romacs/deps
         test ! -e ${checkedPackage}/share/romacs/vendor-lisp
-        test ! -e ${checkedPackage}/share/romacs/lisp
         test ! -e ${checkedPackage}/share/romacs/lisp-bundled
         test -d ${checkedPackage}/share/romacs/etc
         test -f ${checkedPackage}/share/emacs/site-lisp/site-start.el

@@ -3853,6 +3853,7 @@ dependencies = [
  "romacs-snapshot",
  "romacs-test-fonts",
  "romacs-vm",
+ "rustix",
  "serde_json",
  "tracing",
  "tracing-subscriber",

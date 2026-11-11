@@ -43,7 +43,7 @@ exec "$(dirname "$(readlink -f "$0")")/romacs-vm-gui" --loadup "$@"
 EOF
 chmod 0755 "$stage/bin/romacs"
 mkdir -p "$stage/share/romacs"
-cp -r "$repo/lisp/gnu" "$repo/lisp/romacs" "$repo/etc" "$stage/share/romacs/"
+cp -r "$repo/lisp" "$repo/etc" "$stage/share/romacs/"
 mkdir -p "$stage/share/romacs/assets"
 cp -r "$repo/assets/fonts" "$stage/share/romacs/assets/"
 bash "$repo/tools/install-linux-desktop-assets.sh" "$stage"

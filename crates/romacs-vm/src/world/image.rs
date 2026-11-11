@@ -16,10 +16,29 @@ use super::arena::{self, ImageFields};
 use crate::{LocalZone, Value, Vm};
 use std::sync::atomic::Ordering;
 
+/// A VM a capture may write. Only `Vm::at_rest_for_image` makes one, and the
+/// image's root is built from nothing else, so a capture that skipped it
+/// would not compile.
+struct AtRest(Vm);
+
+/// The boxed root an image is written for: VM and what the embedder carries.
+fn image_root<T>(vm: AtRest, carry: T) -> usize {
+    Box::into_raw(Box::new((vm.0, carry))) as usize
+}
+
 impl Vm {
+    /// All a capture asks of the VM before it writes it: at rest
+    /// (`world_quiescent`), and its heap one old generation with no log,
+    /// whatever was allocated or stored since the last collection, since to
+    /// the process that restores the image all of it is old.
+    fn at_rest_for_image(mut self) -> Result<AtRest, String> {
+        self.world_quiescent()?;
+        self.settle_generations();
+        Ok(AtRest(self))
+    }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 43] = [
+        let checks: [(&str, bool); 44] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -118,10 +137,10 @@ impl Vm {
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
-    vm.world_quiescent()?;
+    let vm = vm.at_rest_for_image()?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
-    let root = Box::into_raw(Box::new((vm, carry))) as usize;
+    let root = image_root(vm, carry);
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
     // The VM stays allocated: the image owns it, and this process exits.
@@ -147,7 +166,35 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
 
 #[cfg(test)]
 mod tests {
-    use crate::Vm;
+    use crate::{Value, Vm};
+
+    /// What a capture writes is one old generation: an entry made and a
+    /// store since the last collection are settled before the write. The
+    /// image's root takes only what `at_rest_for_image` returns.
+    #[test]
+    fn a_capture_settles_the_generations_before_it_writes() {
+        use crate::hash::{HashTable, Test, Weakness};
+        let mut vm = Vm::new();
+        let old = vm.alloc_cons(Value::NIL, Value::NIL);
+        let table = vm.allocate_object(crate::data::Object::HashTable(Box::new(HashTable::new(Test::Eq, Weakness::None, 8))));
+        let mut roots = [old, table];
+        vm.collect(&mut roots);
+        assert_eq!(roots[1].index_if(0), Some(1), "the table is the first object");
+        assert!(vm.generations_settled());
+        // Each alone would leave the heap unsettled: a young entry, a dirty
+        // old one, and a log.
+        let unsettle: [fn(&mut Vm, Value); 3] = [
+            |vm, _| { vm.alloc_cons(Value::NIL, Value::NIL); },
+            |vm, old| vm.conses.set_car(old.index_if(3).unwrap(), Value::TRUE),
+            |vm, old| vm.objects.log_a_put(0, old),
+        ];
+        for change in unsettle {
+            change(&mut vm, roots[0]);
+            assert!(!vm.generations_settled());
+            vm = vm.at_rest_for_image().expect("a VM at rest").0;
+            assert!(vm.generations_settled());
+        }
+    }
 
     #[test]
     fn the_collectors_reentry_state_is_at_rest_or_refused() {

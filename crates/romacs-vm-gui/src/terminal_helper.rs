@@ -90,7 +90,6 @@ impl Size {
 unsafe extern "C" {
     fn pidfd_open(pid: i32, flags: u32) -> i32;
     fn pidfd_send_signal(fd: i32, signal: i32, info: *const std::ffi::c_void, flags: u32) -> i32;
-    fn tcgetpgrp(fd: i32) -> i32;
 }
 
 /// The pty, the shell and the emulator.
@@ -219,9 +218,9 @@ impl Terminal {
     }
 
     fn shell_foreground(&self) -> bool {
-        use std::os::fd::AsRawFd;
-        // SAFETY: tcgetpgrp takes a descriptor this file owns and no pointers.
-        self.running && self.foreground.as_ref().is_some_and(|(master, pid)| unsafe { tcgetpgrp(master.as_raw_fd()) } == *pid)
+        self.running && self.foreground.as_ref().is_some_and(|(master, pid)| {
+            rustix::termios::tcgetpgrp(master).is_ok_and(|group| group.as_raw_nonzero().get() == *pid)
+        })
     }
 
     /// The push that brings a session from the last push to now: the lines
