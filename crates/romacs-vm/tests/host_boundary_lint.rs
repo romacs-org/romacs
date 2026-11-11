@@ -26,13 +26,14 @@
 //!
 //! Every match needs an entry in `host_boundary_allow.txt`, one exact
 //! `PATH ITEM API MARK REASON` per line: the line of the items named ITEM in
-//! the file PATH that spells API and whose text hashes to MARK. Lines alike
-//! in one item are one site under one reason, their number in the mark
-//! (`*N`): nothing but their text tells them apart. ITEM is the path of the
-//! enclosing named items (`module::Type::method`; an impl is named by its
-//! header, `-` //! is the file's top level). So an entry follows its site through every edit
-//! but one to the site's own line or its item's name, and an edit to the
-//! line asks for its reason again. An entry that matches nothing fails, so
+//! the file PATH that spells API and whose text hashes to MARK. ITEM is the
+//! path of the enclosing named items (`module::Type::method`; an impl is
+//! named by its header, `-` is the file's top level). Two such lines alike
+//! in one item fail, since nothing but its position would tell one from the
+//! other: make them differ, or join them. So an entry follows its site
+//! through every edit but one to the site's own line or its item's name,
+//! and an edit to the
+//! line asks for its reason again.//! line asks for its reason again. An entry that matches nothing fails, so
 //! the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` deliberately rewrites the
 //! list for the current tree: a reason is kept where its entry still names a
 //! site; a site no entry names takes the reason of an unused entry of its
@@ -584,18 +585,14 @@ fn item_path(items: &[Item], at: usize) -> String {
 /// The violations of REL for SITES, each an item, an API and a line; SPELT
 /// is each line's text. A site is one line of an item that spells an API,
 /// however often. Its mark is the hash of the line's text, so no other line
-/// can take its entry; lines alike share a mark that counts them (`*N`).
+/// can take its entry; lines alike share a key, which `problems` refuses.
 fn marked(rel: &str, sites: Vec<(String, &'static str, usize)>, spelt: &BTreeMap<usize, Vec<u8>>) -> Vec<Violation> {
     // FNV-1a, 64 bits: two lines of one item do not share a mark by chance.
     let hash = |line: usize| spelt[&line].iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
     let mut sites: Vec<(String, &'static str, u64, usize)> = sites.into_iter().map(|(item, api, line)| (item, api, hash(line), line)).collect();
     sites.sort();
     sites.dedup();
-    sites.iter().map(|(item, api, hash, line)| {
-        let alike = sites.iter().filter(|s| (&s.0, s.1, s.2) == (item, *api, *hash)).count();
-        let mark = if alike == 1 { format!("{hash:016x}") } else { format!("{hash:016x}*{alike}") };
-        Violation { path: rel.to_owned(), item: item.clone(), api, mark, line: *line }
-    }).collect()
+    sites.into_iter().map(|(item, api, hash, line)| Violation { path: rel.to_owned(), item, api, mark: format!("{hash:016x}"), line }).collect()
 }
 
 /// The `.rs` files under DIR, recursively.
@@ -865,9 +862,19 @@ fn violations(rel: &str, v: &Views) -> Vec<Violation> {
     sites.extend(type_aliases(&v.code, &toks).into_iter().map(|at| (at, TYPE_ALIAS)));
     let newlines: Vec<usize> = v.code.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
     let line = |at: usize| newlines.partition_point(|&n| n < at) + 1;
+    // Each line's tokens on their own, a space only between two words of it.
     let mut spelt: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
-    for (&b, &at) in text.text.iter().zip(&text.at) {
-        spelt.entry(line(at)).or_default().push(b);
+    let mut last: Option<(usize, bool)> = None;
+    for &(at, tok) in &toks {
+        let (here, word) = (line(at), !matches!(tok, Tok::Punct(_)));
+        let out = spelt.entry(here).or_default();
+        if word && last == Some((here, true)) { out.push(b' '); }
+        last = Some((here, word));
+        match tok {
+            Tok::Ident(a, b) => out.extend_from_slice(&v.text[a..b]),
+            Tok::Punct(b) => out.push(b),
+            Tok::Str(a, b) => out.extend_from_slice(&v.text[a - 1..=b]),
+        }
     }
     // A character literal is no token: the code view blanks it whole.
     for (at, (&b, &code)) in v.text.iter().zip(&v.code).enumerate() {
@@ -925,8 +932,7 @@ fn parse_entries(text: &str) -> Vec<Entry> {
             (path, Place::Line(line), word("API"))
         } else {
             let (item, api, mark) = (word("item"), word("API"), word("mark"));
-            let hash = mark.split_once('*').map_or(mark, |(hash, _)| hash);
-            assert!(hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "no mark: {l}");
+            assert!(mark.len() == 16 && mark.bytes().all(|b| b.is_ascii_hexdigit()), "no mark: {l}");
             (first, Place::Item(item.to_owned(), mark.to_owned()), api)
         };
         assert!(known(api), "unknown API: {l}");
@@ -941,12 +947,21 @@ fn render(e: &Entry) -> String {
     }
 }
 
-/// What is wrong with the list TEXT for the sites FOUND: an entry that is
-/// keyed by a line, has no reason or repeats another's key, a site no entry
-/// covers, and an entry that covers none.
+/// What is wrong with the list TEXT for the sites FOUND: lines alike in one
+/// item, an entry that is keyed by a line, has no reason or repeats
+/// another's key, a site no entry covers, and an entry that covers none.
 fn problems(text: &str, found: &[Violation]) -> Vec<String> {
     let entries = parse_entries(text);
     let mut out = Vec::new();
+    let key = |w: &Violation| (w.path.clone(), w.item.clone(), w.api, w.mark.clone());
+    for (n, v) in found.iter().enumerate() {
+        if n > 0 && key(&found[n - 1]) == key(v) { continue; }
+        let lines: Vec<String> = found[n..].iter().take_while(|w| key(w) == key(v)).map(|w| w.line.to_string()).collect();
+        if lines.len() > 1 {
+            out.push(format!("  lines alike: {} {} {} {} (lines {}): make them differ, or join them",
+                             v.path, v.item, v.api, v.mark, lines.join(", ")));
+        }
+    }
     for (n, e) in entries.iter().enumerate() {
         let twice = entries[..n].iter().any(|d| d.path == e.path && d.place == e.place && d.api == e.api);
         let fault = if matches!(e.place, Place::Line(_)) { Some("keyed by line") }
@@ -1068,6 +1083,11 @@ fn listed(old: &str, source: &str) -> String {
     lines.join("\n") + "\n"
 }
 
+/// The mark of the site of SOURCE whose line holds TEXT.
+fn mark(source: &str, text: &str) -> String {
+    sites(source).into_iter().find(|v| source.lines().nth(v.line - 1).unwrap().contains(text)).unwrap().mark
+}
+
 /// The reason LIST gives the site of SOURCE whose line holds TEXT.
 fn reason(list: &str, source: &str, text: &str) -> String {
     let site = sites(source).into_iter().find(|v| source.lines().nth(v.line - 1).unwrap().contains(text)).unwrap();
@@ -1108,6 +1128,8 @@ fn an_entry_follows_its_site_through_edits_elsewhere() {
     let (first, inner) = READS.split_at(READS.find("mod inner").unwrap());
     let moved = format!("{inner}{first}");
     let exchanged = READS.replace("read(\"b\")", "read(\"x\")").replace("read(\"d\")", "read(\"b\")").replace("read(\"x\")", "read(\"d\")");
+    let returned = READS.replace("fn first() {\n    std::fs", "fn first() {\n    return\n    std::fs");
+    assert_eq!(mark(&returned, "\"a\""), mark(READS, "\"a\""));
     let spaced = READS.replace("std::fs::read(\"d\");", "std :: fs::read( \"d\" ) ; // Why.");
     for source in [&shifted, &moved, &exchanged, &spaced] {
         assert_eq!(problems(&list, &sites(source)), NONE);
@@ -1124,7 +1146,6 @@ fn an_entry_follows_its_site_through_edits_elsewhere() {
 #[test]
 fn a_removed_site_and_a_new_site_are_reported() {
     let list = listed("", READS);
-    let mark = |source: &str, text: &str| sites(source).into_iter().find(|v| source.lines().nth(v.line - 1).unwrap().contains(text)).unwrap().mark;
     let d = mark(READS, "\"d\"");
     let removed = READS.replace("            std::fs::read(\"d\");\n", "");
     assert_eq!(problems(&list, &sites(&removed)), [
@@ -1149,16 +1170,17 @@ fn a_removed_site_and_a_new_site_are_reported() {
     assert_eq!(reason(&rewritten, &replaced, "\"b\""), "for std::fs::read(\"b\");");
     assert_eq!(problems(&rewritten, &sites(&replaced)).len(), 1, "{rewritten}");
     assert!(problems(&rewritten, &sites(&replaced))[0].starts_with("  no reason: "));
-    // Of two lines alike, one goes: they were one site, and what is left
-    // is another.
+    // Two lines alike in one item fail, whatever the list says, even where
+    // the list before the migration gave them reasons of their own.
     let alike = "fn both() {\n    std::fs::read(\"a\");\n    let _ = 1;\n    std::fs::read(\"a\");\n}\n";
-    let both = listed("", alike);
-    assert_eq!((both.lines().count(), problems(&both, &sites(alike))), (3, vec![]));
-    assert!(both.contains("*2 for std::fs::read"));
-    let one = alike.replacen("    std::fs::read(\"a\");\n", "", 1);
-    let faults = problems(&both, &sites(&one));
-    assert!(faults.len() == 2 && faults[0].starts_with("  unlisted src/lib.rs both std::fs ") && faults[1].starts_with("  stale src/lib.rs both std::fs "), "{faults:?}");
-    assert_eq!(reason(&bless(parse_entries(&both), &sites(&one)), &one, "\"a\""), "pending: for std::fs::read(\"a\");");
+    let by_line = "src/lib.rs:2 std::fs one reason\nsrc/lib.rs:4 std::fs another reason\n";
+    let both = bless(parse_entries(by_line), &sites(alike));
+    assert_eq!(both.lines().count(), 3, "{both}");
+    assert_eq!(problems(&both, &sites(alike)), [
+        format!("  lines alike: src/lib.rs both std::fs {} (lines 2, 4): make them differ, or join them", mark(alike, "\"a\"")),
+    ]);
+    let joined = alike.replacen("    std::fs::read(\"a\");\n", "", 1);
+    assert_eq!(problems(&both, &sites(&joined)), NONE);
     // A character on the line is part of what the reason was given for.
     let dashed = "fn f(p: &str) { std::fs::read(p.replace('a', \"b\")); }\n";
     assert_ne!(mark(dashed, "read"), mark(&dashed.replace("'a'", "'/'"), "read"));
@@ -1198,12 +1220,12 @@ fn last() { std::fs::read(\"last\"); }
     assert_eq!(item(15), Some("Logged.for[u64;N]::LOG"));
     assert_eq!(item(17), Some("open!"));
     assert_eq!(item(19), Some("last"));
-    // Sites have keys of their own, the twins by their lines' text; lines
-    // alike are one site that counts them.
+    // Sites have keys of their own, the twins by their lines' text; only
+    // lines alike in one item share one, which fails.
     let keys: BTreeSet<(String, &str, String)> = sites(source).into_iter().map(|v| (v.item, v.api, v.mark)).collect();
     assert_eq!(keys.len(), sites(source).len() - 1);
-    let marks: Vec<String> = sites(source).into_iter().filter(|v| v.line == 9 || v.line == 10).map(|v| v.mark).collect();
-    assert!(marks[0] == marks[1] && marks[0].ends_with("*2"), "{marks:?}");
+    let alike: Vec<String> = problems(&listed("", source), &sites(source));
+    assert!(alike.len() == 1 && alike[0].starts_with("  lines alike: src/lib.rs Leaf<'a,T>::new std::fs ") && alike[0].contains("(lines 9, 10)"), "{alike:?}");
 }
 
 #[test]

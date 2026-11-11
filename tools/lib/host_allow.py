@@ -29,31 +29,36 @@ def entries(text):
 
 
 def merged(base, ours, theirs):
-    """The three-way merge of three lists' texts, entry by entry, under
-    OURS's comment lines and in the order the lint writes. ValueError when
-    the sides change one entry differently."""
+    """(text, conflicts): the three-way merge of three lists' texts, entry by
+    entry, under OURS's comment lines and in the order the lint writes, and
+    the keys the sides changed differently. Such an entry keeps each side's
+    line it has, which the lint then reports (listed twice, or stale)."""
     b, o, t = entries(base), entries(ours), entries(theirs)
     out = [line for line in ours.splitlines() if line.startswith('#')]
+    conflicts = []
     for key in sorted(set(b) | set(o) | set(t)):
         was, mine, yours = b.get(key), o.get(key), t.get(key)
         if mine != was and yours != was and mine != yours:
-            raise ValueError(f'{" ".join(key)} changed differently on the two sides')
-        line = yours if mine == was else mine
-        if line is not None:
+            conflicts.append(' '.join(key))
+            out.extend(line for line in (mine, yours) if line is not None)
+        elif (line := yours if mine == was else mine) is not None:
             out.append(line)
-    return '\n'.join(out) + '\n'
+    return '\n'.join(out) + '\n', conflicts
 
 
 def merge_files(base, ours, theirs):
-    """Write the merge over OURS. 1, leaving OURS, when it has a conflict:
-    git then reports the file as it would without a driver."""
+    """Write the merge over OURS: 0, or 1 when the sides changed an entry
+    differently, so git leaves the file unmerged with both its lines in it.
+    1, leaving OURS, when a side lists a key twice."""
     try:
-        text = merged(*(Path(p).read_text() for p in (base, ours, theirs)))
+        text, conflicts = merged(*(Path(p).read_text() for p in (base, ours, theirs)))
     except (OSError, ValueError) as error:
         print(f'host_allow: {error}', file=sys.stderr)
         return 1
     Path(ours).write_text(text)
-    return 0
+    for key in conflicts:
+        print(f'host_allow: {key} changed differently on the two sides', file=sys.stderr)
+    return 1 if conflicts else 0
 
 
 def main(argv):
