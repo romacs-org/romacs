@@ -421,7 +421,7 @@ impl RenderApp {
 
         // The busy indicator appears or goes on the last frame, which the
         // evaluator does not repaint while it runs.
-        if self.busy_toast.update(now, self.comms.evaluator_busy_span()) {
+        if self.busy_toast.update(now, || self.comms.evaluator_busy_for()) {
             let shown = self.busy_toast.shown();
             self.frame_windows.for_each_top_level_window_mut(|window_state| {
                 window_state.render.overlays.busy = shown;
@@ -496,7 +496,7 @@ impl RenderApp {
         if let Some(animation) = self.service_text_animations(now.into_instant()) {
             deadline = Some(deadline.map_or(animation, |d| d.min(animation)));
         }
-        if let Some(busy) = self.busy_toast.deadline(now) {
+        if let Some(busy) = self.busy_toast.deadline() {
             let busy = busy.into_instant();
             deadline = Some(deadline.map_or(busy, |d| d.min(busy)));
         }

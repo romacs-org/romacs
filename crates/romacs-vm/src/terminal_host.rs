@@ -166,7 +166,7 @@ impl Vm {
         if host.is_some() {
             self.declare_terminal_errors()?;
         }
-        self.terminal_host = host;
+        self.terminal_host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn TerminalHost>);
         Ok(())
     }
 

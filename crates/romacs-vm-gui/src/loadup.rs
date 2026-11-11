@@ -488,7 +488,7 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         ok: step.status == romacs_vm::LoadStepStatus::Ok, error: step.error.clone(), source: step.source.clone(),
     }).collect();
     // GNU's directory leads the path in both regimes.
-    let gnu = search.first().map(PathBuf::as_path).unwrap_or(Path::new(""));
+    let gnu = search.first().map_or(Path::new(""), PathBuf::as_path);
     let mut rows = vec![];
     for site in &sites {
         let entry = log_entry(vm, site.index)?;

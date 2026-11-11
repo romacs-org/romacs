@@ -165,5 +165,44 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(unsafe_census.problems(ROOT), [])
 
 
+
+class MergeTest(unittest.TestCase):
+    @staticmethod
+    def floors(**crates):
+        return {'rule': 'r', 'crates': {c: {'sites': s, 'undocumented': u} for c, (s, u) in crates.items()},
+                unsafe_census.PENDING: {}}
+
+    def test_both_sides_removals_count(self):
+        base, ours, theirs = self.floors(vm=(851, 486)), self.floors(vm=(849, 486)), self.floors(vm=(845, 484))
+        self.assertEqual(unsafe_census.merged(base, ours, theirs)['crates'], {'vm': {'sites': 843, 'undocumented': 484}})
+
+    def test_a_crate_one_side_added_or_emptied(self):
+        base = self.floors(vm=(10, 1), old=(2, 0))
+        ours = self.floors(vm=(10, 1), new=(3, 0))
+        theirs = self.floors(vm=(9, 1), old=(2, 0))
+        self.assertEqual(unsafe_census.merged(base, ours, theirs)['crates'],
+                         {'new': {'sites': 3, 'undocumented': 0}, 'vm': {'sites': 9, 'undocumented': 1}})
+
+    def test_pending_entries_merge_three_ways(self):
+        def merge(b, o, t):
+            sides = [{**self.floors(vm=(1, 0)), unsafe_census.PENDING: m} for m in (b, o, t)]
+            return unsafe_census.merged(*sides)[unsafe_census.PENDING]
+        self.assertEqual(merge({'a': 'x'}, {}, {'a': 'x'}), {}, 'a removal on our side stays removed')
+        self.assertEqual(merge({'a': 'x'}, {'a': 'x'}, {}), {}, 'a removal on their side stays removed')
+        self.assertEqual(merge({}, {'a': 'x'}, {'b': 'y'}), {'a': 'x', 'b': 'y'}, 'both additions kept')
+        self.assertEqual(merge({'a': 'x'}, {'a': 'x'}, {'a': 'z'}), {'a': 'z'}, 'one side changed it')
+        with self.assertRaises(ValueError):
+            merge({'a': 'x'}, {'a': 'y'}, {'a': 'z'})
+
+    def test_the_driver_writes_ours_and_refuses_what_does_not_parse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / name for name in ('base', 'ours', 'theirs')]
+            for path, floors in zip(paths, (self.floors(vm=(5, 0)), self.floors(vm=(4, 0)), self.floors(vm=(3, 0)))):
+                path.write_text(unsafe_census.dump(floors))
+            self.assertEqual(unsafe_census.merge_files(*paths), 0)
+            self.assertEqual(json.loads(paths[1].read_text())['crates'], {'vm': {'sites': 2, 'undocumented': 0}})
+            paths[2].write_text('<<<<<<<')
+            self.assertEqual(unsafe_census.merge_files(*paths), 1)
+
 if __name__ == '__main__':
     unittest.main()
