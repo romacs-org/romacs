@@ -1372,6 +1372,25 @@ generate questions automatically.  It requires an existing source ID.
 Finish or cancel any open =*Gnosis NEW*= draft before starting another;
 creation commands will not overwrite it.
 
+*** Creating Themata from an Agent
+
+Agents create themata in batches through Romacs's MCP server, with the
+=gnosis_cards_create= tool (=gnosis-agent-content-create= from Lisp).
+Agent sessions started in Romacs reach the same server.  One call takes
+1 to 500 cards, each ={type, question, answer [], choices [], hints [],
+parathema, rubric, aliases [], tags [], key}=: =choices= for =mcq= and
+=mc-cloze=, =hints= for the other types, =rubric= for =agent-eval=.
+Every type Gnosis has is accepted and saved as the ordinary editor saves
+it, so a =double= card makes two themata and each type's own rules
+apply.  Gnosis has no decks; tags organise themata.
+
+A call is all or none: every card is checked first, and with any card
+invalid nothing is written.  Each card's result says why it is invalid,
+by its position in the call.  With =dry-run= the call reports what each
+card would make and writes nothing.  A card's =key=, or its content when
+it has none, is stored with what it made, so a retried call reports
+those cards as =exists= with their IDs instead of making them again.
+
 ** Editing Themata
 
 To edit an existing thema, use =M-x gnosis-edit-thema= or press =e=

@@ -440,5 +440,164 @@ service; callers decide whether the shown plan is approved."
       (gnosis-agent-content-fetch
        (vconcat (mapcar (lambda (item) (plist-get item :id)) (plist-get plan :items)))))))
 
+;;; Creating themata
+
+(defconst gnosis-agent-content--card-keys
+  '(:key :type :question :answer :choices :hints :parathema :rubric :aliases :tags)
+  "Fields of a card record for `gnosis-agent-content-create'.")
+
+(defconst gnosis-agent-content--choice-types '("mcq" "mc-cloze")
+  "Types whose alternatives are choices rather than hints.")
+
+(defconst gnosis-agent-content--create-limit 500
+  "Most cards one `gnosis-agent-content-create' call takes.")
+
+(defun gnosis-agent-content--texts (value field &optional nonempty)
+  "Return VALUE, a vector of strings for FIELD, as a list.
+Nil means none.  With NONEMPTY, require at least one nonempty string."
+  (unless (and (or (null value) (vectorp value))
+               (seq-every-p (lambda (s) (and (stringp s) (not (string-empty-p (string-trim s)))))
+                            value))
+    (user-error "%s must be an array of nonempty strings" field))
+  (when (and nonempty (zerop (length value)))
+    (user-error "%s must hold at least one string" field))
+  (append value nil))
+
+(defun gnosis-agent-content--card (card)
+  "Return CARD as `gnosis-save-thema' takes it, or signal what is wrong.
+CARD is a plist of `gnosis-agent-content--card-keys'."
+  (unless (and (consp card) (plistp card))
+    (user-error "Each card must be an object"))
+  (let ((unknown (cl-loop for (key _) on card by #'cddr
+                          unless (memq key gnosis-agent-content--card-keys) collect key)))
+    (when unknown (user-error "Unknown fields: %s" (mapconcat #'symbol-name unknown " "))))
+  (let* ((type (plist-get card :type))
+         (types (mapcar (lambda (entry) (downcase (car entry))) gnosis-thema-types))
+         (choices (gnosis-agent-content--texts (plist-get card :choices) "choices"))
+         (hints (gnosis-agent-content--texts (plist-get card :hints) "hints"))
+         (tags (gnosis-agent-content--texts (plist-get card :tags) "tags"))
+         (aliases (gnosis-agent-content--texts (plist-get card :aliases) "aliases"))
+         (answer nil))
+    (unless (and (stringp type) (member (downcase type) types))
+      (user-error "type must be one of: %s" (mapconcat #'identity types ", ")))
+    ;; A cloze may mark its blanks inline instead, with no answer.
+    (setq answer (gnosis-agent-content--texts (plist-get card :answer) "answer"
+                                              (not (equal (downcase type) "cloze"))))
+    (unless (and (stringp (plist-get card :question))
+                 (not (string-empty-p (string-trim (plist-get card :question)))))
+      (user-error "question must be a nonempty string"))
+    (dolist (key '(:parathema :rubric :key))
+      (unless (or (null (plist-get card key)) (stringp (plist-get card key)))
+        (user-error "%s must be a string" (substring (symbol-name key) 1))))
+    (if (member (downcase type) gnosis-agent-content--choice-types)
+        (when hints (user-error "%s takes choices, not hints" type))
+      (when choices (user-error "%s takes hints, not choices" type)))
+    (list "NEW" (downcase type) (plist-get card :question)
+          (if (member (downcase type) gnosis-agent-content--choice-types) choices hints)
+          answer (or (plist-get card :parathema) "") tags nil aliases
+          (plist-get card :rubric))))
+
+(defun gnosis-agent-content--card-key (card thema)
+  "Return CARD's idempotency key: its own, or a hash of THEMA's content."
+  (or (plist-get card :key)
+      (secure-hash 'sha256 (gnosis-sqlite--serialize
+                            (list (nth 1 thema) (nth 2 thema) (nth 3 thema) (nth 4 thema))))))
+
+(defun gnosis-agent-content--existing (guids)
+  "Return an alist of each of GUIDS held by themata to their decimal IDs."
+  (when guids
+    (let (found)
+      (pcase-dolist (`(,id ,guid)
+                     (gnosis-sqlite-select
+                      (gnosis--ensure-db)
+                      (format "SELECT id, source_guid FROM themata WHERE source_guid IN (%s)
+                               ORDER BY id"
+                              (mapconcat (lambda (_) "?") guids ","))
+                      guids))
+        (push (number-to-string id) (alist-get guid found nil nil #'equal)))
+      (mapcar (lambda (entry) (cons (car entry) (nreverse (cdr entry)))) found))))
+
+(cl-defun gnosis-agent-content-create (cards &key dry-run)
+  "Create themata from CARDS, a vector of card records, all or none.
+Each record is a plist of `gnosis-agent-content--card-keys': `:type' (one
+of `gnosis-thema-types'), `:question', `:answer' (a vector), `:choices'
+\(mcq and mc-cloze) or `:hints' (the others), `:parathema', `:rubric'
+\(agent-eval), `:aliases' and `:tags' (vectors), and `:key'.  A card is
+saved as Gnosis saves any thema (`gnosis-save-thema'), so each type's own
+rules apply; a double or cloze card may make several themata.
+
+The key, or a hash of the card's type, question, hints or choices and
+answer when none is given, makes creation idempotent: a card whose key
+is already stored is reported `exists' with its IDs, not made again.
+Every card is checked before anything is kept: with any card invalid,
+or with DRY-RUN, nothing is written.
+
+Return (:dry-run BOOL :written BOOL :cards [RESULT...]), each RESULT
+\(:index N :key KEY :status STATUS ...): `created' or `exists' with
+`:ids' (decimal strings), `invalid' with `:error', or `would-create' with
+`:themata', the number it makes, when nothing was written."
+  (unless (and (vectorp cards) (< 0 (length cards) (1+ gnosis-agent-content--create-limit)))
+    (user-error "cards must be an array of 1 to %d records" gnosis-agent-content--create-limit))
+  (let* ((prepared
+          (cl-loop for card across cards for index from 0
+                   collect (condition-case err
+                               (let ((thema (gnosis-agent-content--card card)))
+                                 (list index (gnosis-agent-content--card-key card thema) thema nil))
+                             (error (list index (and (listp card) (plist-get card :key)) nil
+                                          (error-message-string err))))))
+         (seen (make-hash-table :test #'equal))
+         (prepared (mapcar (lambda (entry)
+                             (pcase-let ((`(,index ,key ,thema ,error) entry))
+                               (cond (error entry)
+                                     ((gethash key seen)
+                                      (list index key nil "key repeats an earlier card in this call"))
+                                     (t (puthash key t seen) entry))))
+                           prepared))
+         (existing (gnosis-agent-content--existing
+                    (delq nil (mapcar (lambda (entry)
+                                        (and (nth 2 entry) (concat "agent:" (nth 1 entry))))
+                                      prepared))))
+         (db (gnosis--ensure-db))
+         results written)
+    (catch 'gnosis-agent-content--undo
+      (gnosis-sqlite-with-transaction db
+        (setq results
+              (mapcar
+               (lambda (entry)
+                 (pcase-let* ((`(,index ,key ,thema ,error) entry)
+                              (guid (and key (concat "agent:" key)))
+                              (ids (and thema (alist-get guid existing nil nil #'equal)))
+                              (saved (and thema (not ids) (gnosis-save-thema thema t))))
+                   (cond
+                    (error (list :index index :key key :status "invalid" :error error))
+                    (ids (list :index index :key key :status "exists" :ids (vconcat ids)))
+                    ((stringp saved)
+                     (list :index index :key key :status "invalid"
+                           :error (replace-regexp-in-string "\\`Line [^:]*: " "" saved)))
+                    (t
+                     (dolist (id saved)
+                       (gnosis-sqlite-execute
+                        db "UPDATE themata SET source_guid = ? WHERE id = ?" (list guid id)))
+                     (list :index index :key key :status (if dry-run "would-create" "created")
+                           :ids (vconcat (mapcar #'number-to-string (sort saved #'<))))))))
+               prepared))
+        (when (or dry-run
+                  (seq-some (lambda (r) (equal (plist-get r :status) "invalid")) results))
+          (throw 'gnosis-agent-content--undo nil))
+        (setq written (seq-some (lambda (r) (equal (plist-get r :status) "created")) results))))
+    (list :dry-run (if dry-run t :false)
+          :written (if written t :false)
+          :cards (vconcat
+                  (mapcar (lambda (result)
+                            ;; Nothing was kept: no IDs to point at, only how
+                            ;; many themata the card makes.
+                            (if (and (not written) (member (plist-get result :status)
+                                                           '("created" "would-create")))
+                                (list :index (plist-get result :index) :key (plist-get result :key)
+                                      :status "would-create"
+                                      :themata (length (plist-get result :ids)))
+                              result))
+                          results)))))
+
 (provide 'gnosis-agent-content)
 ;;; gnosis-agent-content.el ends here
