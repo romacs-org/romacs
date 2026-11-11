@@ -725,6 +725,7 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 ///      development build);
 ///   4. the tree it was built in, while it still sits in that build's Cargo
 ///      target directory.
+///
 /// The tree found must be one of this executable's generation. With none
 /// found, or a wrong one, the process says which and why and ends: loading
 /// another tree's Lisp and data into this executable fails later, and
@@ -754,7 +755,7 @@ pub fn runtime_root() -> PathBuf {
 }
 
 /// [`runtime_root`], or why there is none.
-pub fn located_runtime() -> Result<PathBuf, String> {
+fn located_runtime() -> Result<PathBuf, String> {
     let exe = current_exe().ok();
     let (root, from) = if let Some(dir) = getenv("ROMACS_RUNTIME_ROOT") {
         (PathBuf::from(dir), "ROMACS_RUNTIME_ROOT")
