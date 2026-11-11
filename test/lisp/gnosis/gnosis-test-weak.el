@@ -630,7 +630,17 @@ Return the matching note text."
                    (lambda () (cl-incf walks) (funcall walk))))
           (gnosis-weak-refresh))
         (should (= 1 walks))
-        (should (equal '((8 . " ● 1")) (gnosis-test-weak--indicators)))))))
+        (should (equal '((8 . " ● 1")) (gnosis-test-weak--indicators)))
+        ;; A note with no node IDs is walked once too.
+        (with-temp-buffer
+          (org-mode)
+          (insert "* No node here\nBody\n")
+          (setq walks 0)
+          (cl-letf (((symbol-function 'gnosis-weak--buffer-nodes)
+                     (lambda () (cl-incf walks) (funcall walk))))
+            (gnosis-weak-refresh))
+          (should (= 1 walks))
+          (should-not (gnosis-test-weak--indicators)))))))
 
 (ert-deftest gnosis-weak-collection-scale-refresh-is-bounded ()
   "5,000 linked themata over 2,000 headings: open defers, refresh is fast."

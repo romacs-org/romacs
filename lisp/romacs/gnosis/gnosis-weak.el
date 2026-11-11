@@ -330,7 +330,8 @@ ANCHORS are the buffer's (ID . ANCHOR) pairs when the caller has just
 read them (`gnosis-weak--buffer-nodes').  Replace all existing
 indicators; never read the database."
   (gnosis-weak--clear)
-  (when gnosis-weak--nodes
+  ;; With no weak node there is nothing to place, and no reason to walk.
+  (when (and gnosis-weak--nodes (> (hash-table-count gnosis-weak--nodes) 0))
     (let ((keys (gnosis-weak--keys-help)))
       (save-restriction
         (widen)
