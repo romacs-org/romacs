@@ -77,7 +77,7 @@ class EvidenceLocalTests(unittest.TestCase):
 
     def test_policy_projection_does_not_require_historical_run_prose(self):
         evidence = member_evidence.build(ROOT, self.data)['members']
-        recorded = json.loads((ROOT / 'parity-ratchet.json').read_text())
+        recorded = json.loads((ROOT / 'ledger/parity-ratchet.json').read_text())
         problems = parity_ratchet.regeneration_problems(recorded, evidence)
         self.assertEqual(problems, [])
         key = next(key for key, value in evidence.items()
@@ -215,7 +215,7 @@ class EvidenceLocalTests(unittest.TestCase):
                 member_evidence.build(ROOT, self.data)
 
     def test_old_output_paths_are_not_source_exemptions(self):
-        self.assertEqual(binding.OUTPUTS, frozenset(('parity-ratchet.json',)))
+        self.assertEqual(binding.OUTPUTS, frozenset(('ledger/parity-ratchet.json',)))
 
 
 if __name__ == '__main__':
