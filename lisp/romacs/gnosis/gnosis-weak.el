@@ -324,15 +324,17 @@ Ignore narrowing."
     (widen)
     (remove-overlays (point-min) (point-max) 'gnosis-weak t)))
 
-(defun gnosis-weak--place ()
+(defun gnosis-weak--place (&optional anchors)
   "Show indicators for the cached weak nodes at their current anchors.
-Replace all existing indicators; never read the database."
+ANCHORS are the buffer's (ID . ANCHOR) pairs when the caller has just
+read them (`gnosis-weak--buffer-nodes').  Replace all existing
+indicators; never read the database."
   (gnosis-weak--clear)
   (when gnosis-weak--nodes
     (let ((keys (gnosis-weak--keys-help)))
       (save-restriction
         (widen)
-        (pcase-dolist (`(,id . ,anchor) (gnosis-weak--buffer-nodes))
+        (pcase-dolist (`(,id . ,anchor) (or anchors (gnosis-weak--buffer-nodes)))
           (when-let* ((node (gethash id gnosis-weak--nodes)))
             ;; Span exactly the anchor line so `display-local-help' shows the
             ;; details from the keyboard.  Neither end advances: text typed
@@ -361,12 +363,13 @@ Mode hooks call this from an idle timer instead; see
   (interactive)
   (with-current-buffer (or buffer (current-buffer))
     (condition-case err
-        (let* ((ids (mapcar #'car (gnosis-weak--buffer-nodes)))
+        (let* ((anchors (gnosis-weak--buffer-nodes))
+               (ids (delete-dups (mapcar #'car anchors)))
                (nodes (and ids (gnosis-weak-aggregate
-                                (gnosis-weak--rows (delete-dups ids))
+                                (gnosis-weak--rows ids)
                                 (gnosis--today-int)))))
           (setq gnosis-weak--nodes (gnosis-weak--cache nodes))
-          (gnosis-weak--place)
+          (gnosis-weak--place anchors)
           (setq gnosis-weak--refreshed-at (float-time))
           nodes)
       (error (setq gnosis-weak--nodes nil)
