@@ -95,8 +95,8 @@ Themata support the following text question types:
   text is chosen from a list of options.
 
 Image-region and image-occlusion questions add image-based review.
-Model Find and Model Name questions use the separately installed optional
-3D backend; see the model installation requirements below.
+Model Find and Model Name questions draw their scene with Romacs's native
+GPU renderer; see the model display requirements below.
 
 *** The Link Between Nodes and Themata
 
@@ -1214,11 +1214,36 @@ automatically delete shared assets.  Missing, corrupt or altered resources
 are unavailable, never incorrect answers.  Re-import changed geometry as
 a new revision and explicitly attach it to a thema.
 
+**** Native model display
+
+In graphical Romacs, models draw with the native GPU renderer: nothing to
+install.  ~gnosis-model-backend~ chooses the renderer: =auto= (the default)
+uses the native one while a GPU renderer is live, else the optional canvas
+backend below when ~gnosis-model-renderer-directory~ names one; =romacs=
+and =canvas-3d= force one and refuse rather than fall back.  In =--batch=
+or after the renderer is lost, opening a model says why the 3D display is
+off; ordinary text cards keep working.  =M-x gnosis-model-explore= opens a
+managed scene to study: drag to orbit, use the wheel or =+= / =-= to zoom,
+and click a structure to see which targets contain the click.  A click is
+an observation, never an answer.  =F= and =N= save a Find or Name card for
+the picked target at the current view after a confirmation, =A= authors
+point and region targets on the scene (~gnosis-model-author-scene~), =l=
+hides or shows the names and =q= closes the viewer.
+
+Agents use the same operations through the =gnosis_model_*= tools:
+=gnosis_model_status=, =gnosis_model_scenes=, =gnosis_model_describe=,
+=gnosis_model_show= (optionally without names, for an unaided probe, or
+with targets highlighted as cues), =gnosis_model_observe= (the learner's
+latest click as an observation, with the targets containing it),
+=gnosis_model_close=, and =gnosis_model_card_preview= followed by an
+explicit =gnosis_model_card_save=.  None of them grades, schedules or
+records practice; a saved card is an ordinary new thema.
+
 **** Optional canvas backend
 
 Ordinary Gnosis and advanced numeric model authoring do not require a
-renderer.  Visual authoring and 3D review require graphical GNU Emacs built
-with native canvas image support (=canvas-refresh= and the =canvas= image
+renderer.  Outside Romacs's native display, visual authoring and 3D review
+require graphical GNU Emacs built with native canvas image support (=canvas-refresh= and the =canvas= image
 type, currently Emacs 32 development builds), plus an OpenGL/EGL-capable
 environment.  Stock Emacs without canvas
 support cannot display 3D; ordinary Gnosis remains usable.
@@ -1255,8 +1280,7 @@ Point the installed core at that absolute directory:
 #+end_src
 
 Gnosis loads the backend only when opening a model.  Romacs does not ship
-=canvas-3d= for now: with ~gnosis-model-renderer-directory~ nil, the 3D display
-is off and the rest of Gnosis works without it.  The renderer uses
+=canvas-3d=; it draws models natively instead (see above).  The renderer uses
 =.venv/bin/python= beside its library; a separately prepared interpreter
 can be selected with ~canvas-3d-python-command~.  Opening or authoring never
 installs dependencies or accesses the network.  Missing capabilities show

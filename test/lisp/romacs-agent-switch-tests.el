@@ -57,31 +57,17 @@
 (ert-deftest romacs-agent-switch-keeps-a-long-title-s-value ()
   (let* ((title (make-string 60 ?x))
          (session (romacs-agent-switch-tests--session title))
-         (row (romacs-agent-ui--switch-row title session 44 120 nil)))
+         (row (romacs-agent-ui--switch-row title session 44 120)))
     (should (equal (substring-no-properties (car row)) title))
     (should (= (string-width (get-text-property 0 'display (car row))) 44))))
 
 (ert-deftest romacs-agent-switch-cuts-a-title-with-the-session-s-ellipsis ()
   (let* ((truncate-string-ellipsis "...")
          (row (romacs-agent-ui--switch-row
-               (make-string 60 ?x) (romacs-agent-switch-tests--session "s") 44 120 nil))
+               (make-string 60 ?x) (romacs-agent-switch-tests--session "s") 44 120))
          (shown (get-text-property 0 'display (car row))))
     (should (string-suffix-p "..." shown))
     (should (= (string-width shown) 44))))
-
-(ert-deftest romacs-agent-switch-row-fits-its-width ()
-  (let ((session (romacs-agent-switch-tests--session
-                  "s" :model "claude-opus-5-5" :provider "a-long-provider" :context-used 250000 :context-window 1000000
-                  :queue-length 12 :last-time (float-time) :reply "text")))
-    (dolist (width '(120 58 30 12))
-      (should (<= (string-width (romacs-agent-ui--switch-suffix session width nil)) width)))
-    ;; The context comes first of the facts.
-    (should (string-match-p "25%" (romacs-agent-ui--switch-suffix session 30 nil)))))
-
-(ert-deftest romacs-agent-switch-reads-only-what-a-reply-can-show ()
-  (let ((reply (concat (make-string 40 ?a) (make-string 1000 ?\s) "tail")))
-    (should-not (string-match-p "tail" (romacs-agent-ui--one-line reply 40)))
-    (should (<= (string-width (romacs-agent-ui--one-line reply 40)) 40))))
 
 (ert-deftest romacs-agent-switch-offers-every-session ()
   (let* ((root (romacs-agent-switch-tests--session "root"))
@@ -129,40 +115,36 @@
       (romacs-agent-switch-chat session)
       (should (equal action '(display-buffer-same-window))))))
 
-(ert-deftest romacs-agent-switch-resolves-the-provider-once-per-table ()
-  (let* ((calls 0)
-         (names (romacs-agent-ui--session-names
-                 (list (romacs-agent-switch-tests--session "a" :provider "mine")
-                       (romacs-agent-switch-tests--session "b" :provider "other")))))
-    (cl-letf (((symbol-function 'romacs-agent--default-provider) (lambda () (cl-incf calls) "mine")))
-      (let* ((table (romacs-agent-ui--session-table (car names) (cdr names) 120))
-             (rows (funcall (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata))) (cdr names))))
-        (should (= calls 1))
-        (should-not (string-match-p "mine" (nth 2 (nth 0 rows))))
-        (should (string-match-p "other" (nth 2 (nth 1 rows))))))))
-
-(ert-deftest romacs-agent-switch-row-says-what-matters-on-one-line ()
+(ert-deftest romacs-agent-switch-row-is-its-time-and-project ()
   (let* ((session (romacs-agent-switch-tests--session
-                   "s" :model "claude-opus-5-5" :context-used 250000 :context-window 1000000
-                   :done-seq 2 :seen-seq 1 :queue-length 2 :last-time (- (float-time) 120)
-                   :reply "The first line of the reply\nand a second"))
-         (row (romacs-agent-ui--switch-suffix session 120 nil)))
-    (should (string-match-p "opus-5-5" row))
-    (should (string-match-p "25%" row))
-    (should (string-match-p "romacs" row))
-    (should (string-match-p "2 queued" row))
-    (should (string-match-p "●" row))
-    (should (string-match-p "The first line of the reply and a second" row))
-    (should-not (string-match-p "\n" row))
-    (should (<= (string-width row) 120))
-    ;; Narrow: the facts stay, the reply goes first.
-    (let ((narrow (romacs-agent-ui--switch-suffix session 60 nil)))
-      (should (string-match-p "25%" narrow))
-      (should-not (string-match-p "second" narrow)))))
+                   "s" :model "claude-opus-5-5" :provider "other" :context-used 850000 :context-window 1000000
+                   :done-seq 2 :seen-seq 1 :queue-length 2 :last-time (- (float-time) 120) :reply "a reply"))
+         (row (romacs-agent-ui--switch-suffix session 120)))
+    ;; Only when and where: nothing else to read past.
+    (should (equal (substring-no-properties row) "  2m  romacs"))
+    (should (eq (get-text-property (string-search "romacs" row) 'face row) 'romacs-agent-project))
+    (dolist (width '(120 12 4 0))
+      (should (<= (string-width (romacs-agent-ui--switch-suffix session width)) width)))))
+
+(ert-deftest romacs-agent-switch-a-long-title-leaves-time-and-project ()
+  ;; A narrow switcher (a 100-column frame): the title gives way.
+  (let* ((names (romacs-agent-ui--session-names
+                 (list (romacs-agent-switch-tests--session (make-string 80 ?x) :last-time (- (float-time) 120)))))
+         (table (romacs-agent-ui--session-table (car names) (cdr names) 44))
+         (row (car (funcall (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata))) (cdr names)))))
+    (should (string-match-p "2m  romacs" (substring-no-properties (nth 2 row))))
+    (should (<= (+ 2 (string-width (get-text-property 0 'display (car row))) (string-width (nth 2 row))) 44))))
+
+(ert-deftest romacs-agent-switch-marks-only-what-wants-you ()
+  (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :turns 1))) " "))
+  (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'running))) "●"))
+  (should (equal (substring-no-properties
+                  (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'waiting-approval)))
+                 "◆")))
 
 (ert-deftest romacs-agent-switch-copes-with-a-bare-session ()
   (let ((row (romacs-agent-ui--switch-suffix
-              (romacs-agent--make :id "abcdef12-1111-4222-8333-444444444444" :harness 'claude :state 'ended) 80 nil)))
+              (romacs-agent--make :id "abcdef12-1111-4222-8333-444444444444" :harness 'claude :state 'ended) 80)))
     (should (stringp row))
     (should-not (string-match-p "nil" row))))
 

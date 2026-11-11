@@ -39,7 +39,7 @@ pub struct HostFrame {
 }
 
 /// What the host answers a read with.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum HostEvent {
     /// A complete input event, GNU's encoding (an integer or a symbol name).
     Key(CommandEvent),
@@ -57,6 +57,9 @@ pub enum HostEvent {
     /// The frame gained (true) or lost focus: keyboard.c's FOCUS_IN_EVENT
     /// and FOCUS_OUT_EVENT, read as GNU's special events.
     Focus(bool),
+    /// The renderer's event about native model ID, read as the special
+    /// event `(romacs-model ID TYPE PLIST)` (`display_host/models.rs`).
+    Model { id: u32, event: romacs_display_protocol::model::ModelEvent },
 }
 
 /// The embedder's keyboard, screen, and optional native clipboard.
@@ -501,6 +504,8 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
             let frame = vm.frame_value_peek();
             vm.list_value(&[kind, frame])
         }
+        // A native model's event: the special event `(romacs-model ID TYPE PLIST)`.
+        HostEvent::Model { id, event } => vm.model_event_value(id, &event),
         HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
         HostEvent::Closed => {
             // Its data tells it from a C-g's (`romacs--host-event').
