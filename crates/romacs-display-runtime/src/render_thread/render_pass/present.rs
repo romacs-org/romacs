@@ -237,7 +237,6 @@ impl RenderApp {
                 frame.presentation_id,
                 logical_size,
                 window_state.scale_factor(),
-                window_state.render.compositor.input_scroll.staged_tokens(),
             );
             window.pre_present_notify();
         }
@@ -263,7 +262,6 @@ impl RenderApp {
         );
         // Read the actual per-window renderer atlas only after successful drawing
         // and presentation. Missing atlas is missing evidence, never zero.
-        #[cfg(feature = "core-free")]
         if let Some(diagnostics) = &self.comms.paint_diagnostics
             && is_primary_frame
             && let Some(atlas) = self

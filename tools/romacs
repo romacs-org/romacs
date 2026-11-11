@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# romacs -- build if needed, then open the romacs GUI on this Wayland session.
+#
+#   tools/romacs [--loadup | --gnu-lisp] [--geometry WxH] [--trace-latency]
+#
+#   (default)      VM2's own workspace, no GNU Lisp; every journey key is a
+#                  romacs stand-in (also --no-gnu-lisp).
+#   --loadup       run GNU's lisp/loadup.el in its own order, every load site
+#                  the VM can reach; then, for each journey key whose GNU
+#                  command did not load, a romacs stand-in named romacs-...
+#                  With ROMACS_DIAGNOSTICS=1 the log lists every load
+#                  site's outcome (romacs-loadup:) and every paint.
+#                  It boots from its world in $XDG_CACHE_HOME/romacs/worlds:
+#                  the first launch after a build or an input change builds
+#                  it, about a boot from source, and later launches restore it
+#                  in well under a second. ROMACS_WORLD=off boots from source;
+#                  romacs-vm-gui --world-reset forgets failed builds, and
+#                  --world-reset=all removes the store.
+#   --gnu-lisp     loadup.el alone: no stand-ins, no Rum workspace.
+#
+# Builds romacs-vm-gui in RELEASE (debug is 10-50x slower and makes typing
+# lag) from the checkout this script lives in, into a target directory owned by
+# the launcher, then runs it with GNU's lisp/ from the same checkout. cargo
+# decides whether anything needs rebuilding; an up-to-date build costs ~1s.
+#
+# Environment (all optional):
+#   ROMACS_GUI_FONT / ROMACS_GUI_FONT_SIZE   font family / points (default Iosevka 14
+#                                            when fontconfig has it)
+#   ROMACS_TARGET_DIR                        build directory
+#   ROMACS_NO_BUILD=1                        run the existing binary as-is
+set -euo pipefail
+
+root=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+target=${ROMACS_TARGET_DIR:-${CARGO_TARGET_DIR:-$root/target}}
+case "$target" in /*) ;; *) target="$root/$target" ;; esac
+bin=$target/release/romacs-vm-gui
+
+if [ "${ROMACS_NO_BUILD:-}" != 1 ]; then
+    command -v cargo >/dev/null || { echo "romacs: cargo not found" >&2; exit 1; }
+    mkdir -p "$target"
+    echo "romacs: building release from $root" >&2
+    # Build from the checkout: cargo finds .cargo/config.toml (which the build
+    # scripts require) from the working directory, not from --manifest-path.
+    # Never inherit a lane's target dir or git overrides into the build.
+    if ! (cd "$root" && env -u GIT_DIR -u GIT_WORK_TREE CARGO_TARGET_DIR="$target" \
+        cargo build --release --locked -p romacs-vm-gui) >"$target/romacs-build.log" 2>&1; then
+        tail -n 30 "$target/romacs-build.log" >&2
+        echo "romacs: build failed; full log $target/romacs-build.log" >&2
+        exit 1
+    fi
+fi
+[ -x "$bin" ] || { echo "romacs: no binary at $bin" >&2; exit 1; }
+
+# This session's compositor, never a guess at another one.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    sock=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-[0-9]*' ! -name '*.lock' -type s | sort | head -1)
+    [ -n "$sock" ] && export WAYLAND_DISPLAY=$(basename "$sock")
+fi
+[ -n "${WAYLAND_DISPLAY:-}" ] || { echo "romacs: no Wayland socket in $XDG_RUNTIME_DIR" >&2; exit 1; }
+
+if [ -z "${ROMACS_GUI_FONT:-}" ] && command -v fc-list >/dev/null \
+   && fc-list : family | grep -qx 'Iosevka'; then
+    export ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=${ROMACS_GUI_FONT_SIZE:-14}
+fi
+
+# GNU's Lisp from this checkout; the GUI loads loadup.el's preload chain.
+export ROMACS_LISP_DIR="$root/gnu-lisp"
+# A lane's RUST_MIN_STACK must not hide the evaluator's own 64 MiB reservation.
+unset RUST_MIN_STACK
+
+# Server-first (rlisp/romacs-server.el, DIVERGENCES.md SERVER2): connect to
+# the server named ROMACS_SERVER (default romacs), starting it as a user
+# unit when none runs, and ask it for a window; ROMACS_SERVER=off runs a
+# standalone session as before. Batch and installer runs stay standalone.
+server=${ROMACS_SERVER-romacs}
+case " $* " in *" --batch "*|*" --world-build "*|*" --help "*|*" --world-reset"*) server=off ;; esac
+if [ "$server" != off ]; then
+    # The server tells when the binary a new launch would run is rebuilt.
+    export ROMACS_BUILD_WATCH="$bin"
+    exec "$bin" --server "$server" "$@"
+fi
+
+echo "romacs: $bin on $WAYLAND_DISPLAY" >&2
+# stdout carries only machine-readable command replies, stderr per-frame
+# diagnostics; keep both out of the terminal, and show the log on failure.
+log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/romacs
+mkdir -p "$log_dir"
+log=$log_dir/romacs.log
+echo "romacs: log $log" >&2
+status=0
+"$bin" "$@" >/dev/null 2>"$log" || status=$?
+if [ "$status" -ne 0 ]; then
+    echo "romacs: exited with status $status; last lines of $log:" >&2
+    tail -n 20 "$log" >&2
+fi
+exit "$status"

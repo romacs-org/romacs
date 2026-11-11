@@ -1,6 +1,6 @@
 //! Lisp search boundary. Only owned text and integer offsets reach the engine.
 use crate::{coordinates::*, data::Object, *};
-use romacs_regex_engine::{self as regex, EmacsStr, MatchRegisters};
+use romacs_regex::{self as regex, EmacsStr, MatchRegisters};
 use std::ops::Range;
 #[path = "regexp_syntax.rs"]
 mod syntax;
@@ -353,7 +353,7 @@ impl Vm {
             let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, false, &source)).collect::<SearchResult<Vec<_>>>()?;
             // Compiling may have collected: find the buffer again.
             let index = vm.buffer_index()?;
-            let Object::Buffer(b) = &mut vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
+            let Object::Buffer(b) = vm.objects.entry_mut(index) else { return Err(Fault::Internal("multibyte buffer required".into())) };
             let accessible = b.accessible();
             let range = accessible.start.0..accessible.end.0;
             // Without raw bytes the text is its internal form: both read
@@ -563,7 +563,7 @@ impl Vm {
         if reseat != Value::NIL && matches!(self.object_if(value), Some(Object::Marker(_))) {
             if Self::image_value(cell) { return Err(prim::Fault::Error("Attempt to modify read-only object".into())); }
             self.set_marker_object(value, Value::NIL, Value::NIL).map_err(prim::Fault::Error)?;
-            self.conses[cell.index(3).map_err(prim::Fault::Error)?].0 = Value::NIL;
+            self.conses.set_car(cell.index(3).map_err(prim::Fault::Error)?, Value::NIL);
         }
         Ok(())
     }
@@ -592,7 +592,7 @@ impl Vm {
     /// lies within its accessible bytes, readable contiguously: for a
     /// multibyte buffer, the window its text gives (`search_window').
     fn regexp_buffer_window(&mut self, index: usize, need: Range<usize>) -> Range<usize> {
-        match &mut self.objects[index] {
+        match self.objects.entry_mut(index) {
             Object::Buffer(t) => {
                 let r = t.accessible();
                 t.search_window(need, r.start.0..r.end.0)
@@ -832,14 +832,14 @@ impl Vm {
             if reseat != Value::NIL && matches!(self.object_if(old), Some(Object::Marker(_))) {
                 self.set_marker_object(old, Value::NIL, Value::NIL)?;
             }
-            self.conses[index].0 = values.get(i).copied().unwrap_or(Value::NIL);
+            self.conses.set_car(index, values.get(i).copied().unwrap_or(Value::NIL));
             previous = Some(index);
             tail = next;
             i += 1;
         }
         if i < values.len() {
             let rest = self.list_value(&values[i..]);
-            self.conses[previous.expect("nonempty reuse")].1 = rest;
+            self.conses.set_cdr(previous.expect("nonempty reuse"), rest);
         }
         Ok(reuse)
     }
@@ -1092,7 +1092,7 @@ impl Vm {
         }
         // Recover the buffer after the engine, rather than retaining its index.
         let index = self.buffer_index()?;
-        match &mut self.objects[index] {
+        match self.objects.entry_mut(index) {
             Object::Buffer(t) => t.point = ByteOffset(point + window.start),
             Object::ByteBuffer(t) => t.point = ByteOffset(point + window.start),
             _ => unreachable!("buffer_index validates"),
@@ -1160,7 +1160,7 @@ thread_local! {
     static REGEXP_FRAMES: std::cell::Cell<Option<(*const crate::backtrace::Backtrace, *const Vec<String>)>> = const { std::cell::Cell::new(None) };
 }
 
-/// The matcher's quit probe (romacs_regex_engine::host): a C-g the host
+/// The matcher's quit probe (romacs_regex::host): a C-g the host
 /// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
     // An inspection leaves the match alone: only a real quit stops it.

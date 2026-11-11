@@ -25,7 +25,7 @@ def main():
     binary = args.binary_dir / 'romacs-vm'
     producer = args.binary_dir / 'romacs-vm-image'
     root = Path(__file__).resolve().parents[3]
-    attrs = load(root / 'scripts/romacs_accept_counter.py', 'counter').attributes
+    attrs = load(root / 'tools/lib/romacs_accept_counter.py', 'counter').attributes
     setup = ['progn'] + [['defun', f'cold-{i}', [], ['+', i, 1]] for i in range(args.functions)]
     entry = ['cold-42']
     source = args.output.parent / 's8-snapshot-input.json'

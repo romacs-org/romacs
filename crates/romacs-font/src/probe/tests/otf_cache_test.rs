@@ -213,11 +213,9 @@ fn failed_read_is_retryable_and_cache_is_bounded() {
     );
 }
 
-#[cfg(target_os = "linux")]
 fn px_cache() -> PxMetricsCache {
     std::sync::Mutex::new(FileCache::new(256))
 }
-#[cfg(target_os = "linux")]
 fn px_counted(cache: &PxMetricsCache, file: &str, px: u32, probes: &mut usize) -> Option<FontPxMetrics> {
     observe_file(cache, file, (0, px, None), || {
         *probes += 1;
@@ -226,7 +224,6 @@ fn px_counted(cache: &PxMetricsCache, file: &str, px: u32, probes: &mut usize) -
 }
 
 // The FreeType probe exists only with the Fontconfig adapter.
-#[cfg(target_os = "linux")]
 #[test]
 fn px_metrics_are_probed_once_per_unchanged_file_and_size() {
     let font = Fixture::new(&std::fs::read(romacs_test_fonts::noto_sans_mono_variable()).unwrap());
@@ -249,7 +246,6 @@ fn px_metrics_are_probed_once_per_unchanged_file_and_size() {
 }
 
 // The FreeType probe exists only with the Fontconfig adapter.
-#[cfg(target_os = "linux")]
 #[test]
 fn unreadable_or_missing_fonts_are_not_cached() {
     use std::os::unix::fs::PermissionsExt;

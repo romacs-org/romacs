@@ -18,12 +18,13 @@ fn settled_point(
 }
 
 use crate::{
-    Color, FaceId, FrameRect, InteractionId, PointerAppearanceId, PointerAppearancePhase,
-    PointerAppearanceSelection, PointerDrawMode, PointerImageRelief, PointerReliefCornerErase,
-    PointerReliefEdges, PointerReliefMargins, PresentedPaintSpan, PresentedPointerAppearance,
-    PresentedPointerDamageRow, PresentedPointerMap, PresentedPointerMapError,
-    PresentedPointerRegion, PresentedPointerSourceAppearance, PresentedPointerSourceMap,
-    PresentedPrimitiveKind, PresentedSourcePaintSpan,
+    Color, DisplayWindowId, FaceId, FrameRect, InteractionId, PointerAppearanceId,
+    PointerAppearancePhase, PointerAppearanceSelection, PointerDrawMode, PointerImageRelief,
+    PointerReliefCornerErase, PointerReliefEdges, PointerReliefMargins, PosnPointRole,
+    PresentedPaintSpan, PresentedPointerAppearance, PresentedPointerDamageRow, PresentedPointerMap,
+    PresentedPointerMapError, PresentedPointerRegion, PresentedPointerSourceAppearance,
+    PresentedPointerSourceMap, PresentedPrimitiveKind, PresentedSourcePaintSpan,
+    PresentedTextPosition,
 };
 
 #[test]
@@ -1578,4 +1579,42 @@ fn presented_pointer_glyph_spans_reject_non_text_frame_primitives() {
         buffer.install_presented_pointer(vec![], vec![appearance]),
         Err(PresentedPointerMapError::PrimitiveKindMismatch)
     );
+}
+
+#[test]
+fn point_roles_transport_without_changing_physical_hit_bounds_or_legacy_json() {
+    let bounds = FrameRect::new(5.0, 8.0, 2.0, 1.0).unwrap();
+    let base = PresentedTextPosition::new(DisplayWindowId::new(3), bounds, 7, 0, 4);
+    let legacy_json = serde_json::to_string(&base).unwrap();
+    assert!(!legacy_json.contains("point_role"));
+    let legacy: PresentedTextPosition = serde_json::from_str(&legacy_json).unwrap();
+    assert_eq!(legacy.point_role(), PosnPointRole::Glyph);
+    for role in [
+        PosnPointRole::Glyph,
+        PosnPointRole::OverlaidMarker,
+        PosnPointRole::InsertionBoundary,
+        PosnPointRole::SyntheticBoundary,
+    ] {
+        let point = base.with_point_role(role);
+        let restored: PresentedTextPosition =
+            serde_json::from_str(&serde_json::to_string(&point).unwrap()).unwrap();
+        assert_eq!(restored, point);
+        assert_eq!(restored.bounds(), bounds);
+        assert_eq!(restored.buffer_position(), 7);
+    }
+}
+
+/// A frame whose producer builds no hit regions (layout2 stamps only its
+/// presentation) answers a pointer query at that presentation with no hit,
+/// not as stale: the render thread used to drop every wheel notch and
+/// pointer move over such a frame.
+#[test]
+fn a_frame_without_hit_regions_answers_no_hit_at_its_presentation() {
+    use crate::{FrameGlyphBuffer, PresentedHitQuery, frame_chrome::PresentationId};
+
+    let mut frame = FrameGlyphBuffer::with_size(200.0, 100.0);
+    frame.presentation_id = PresentationId::new(9);
+    let query = PresentedHitQuery::new(settled_point(frame.presentation_id, 5.0, 5.0));
+    assert!(frame.resolve_presented_hit(query).unwrap().is_none());
+    assert!(frame.presented_hit_index().resolve(query).unwrap().is_none());
 }

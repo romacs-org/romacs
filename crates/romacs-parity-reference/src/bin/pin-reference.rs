@@ -1,9 +1,7 @@
-//! `cargo run -p xtask -- pin-reference` --- deliberate re-baselining of the
+//! `cargo run -p romacs-parity-reference --bin pin-reference` --- deliberate re-baselining of the
 //! GNU Emacs every parity number is measured against.
 //!
-//! It lives beside the manifest it rewrites rather than inside xtask, which
-//! launches it. xtask is a command launcher; linking this in dragged the
-//! parity library into every `cargo xtask fresh-build`.
+//! It lives beside the manifest it rewrites.
 //!
 //! # Why re-pinning is a command and not an edit (ledger 214)
 //!
@@ -125,7 +123,7 @@ impl Options {
 }
 
 fn usage() -> String {
-    "usage: cargo run -p xtask -- pin-reference --emacs PATH --reason \"...\" \
+    "usage: cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason \"...\" \
      [--mirror-commit SHA] [--build-time STAMP] [--dry-run]"
         .to_string()
 }

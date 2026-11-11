@@ -1,6 +1,6 @@
 ;;; draft-files-test.el --- Disposable draft filesystem boundary -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; scripts/test-elisp supplies a private HOME, removed after the run.
+;; tools/test-elisp supplies a private HOME, removed after the run.
 
 (defun draft-files-test-path (name)
   (expand-file-name (concat "~/" name)))

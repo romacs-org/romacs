@@ -52,7 +52,7 @@ pub enum SurfaceContract {
 }
 
 /// Number of user `vec4<f32>` uniform slots in the prelude's `custom` array.
-pub const SURFACE_USER_UNIFORM_SLOTS: usize = 8;
+pub(crate) const SURFACE_USER_UNIFORM_SLOTS: usize = 8;
 
 /// How one uniform-block member is laid out and spelled in each dialect.
 #[derive(Clone, Copy)]
@@ -146,7 +146,7 @@ macro_rules! surface_uniform_block {
         /// implicit hole instead of an explicit one.
         #[repr(C)]
         #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-        pub struct SurfaceUniforms {
+        pub(crate) struct SurfaceUniforms {
             $($(#[doc = $doc])* $vis $field: $rust_ty,)+
         }
 
@@ -259,7 +259,7 @@ const fn surface_uniform_block_span() -> usize {
 /// Uniform-buffer size in bytes, read off the struct rather than restated.
 /// A buffer smaller than the block is the one layout mistake wgpu rejects, and
 /// it used to be the only one anything caught.
-pub const SURFACE_UNIFORM_BYTES: u64 = size_of::<SurfaceUniforms>() as u64;
+pub(crate) const SURFACE_UNIFORM_BYTES: u64 = size_of::<SurfaceUniforms>() as u64;
 
 /// Why a user shader was refused before any GPU saw it.
 ///
@@ -558,5 +558,4 @@ pub fn validate_surface_glsl(
 }
 
 #[cfg(test)]
-#[path = "shader_surface/tests/shader_surface_test.rs"]
 mod tests;

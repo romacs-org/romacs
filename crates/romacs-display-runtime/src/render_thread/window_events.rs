@@ -15,20 +15,16 @@ impl RenderApp {
         window: WindowId,
         key: PhysicalKey,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
         let pressed = matches!(&event, InputEvent::Key { pressed: true, .. });
-        let result = self.comms.send_key_input_with_receipt(event);
+        let read = self.comms.send_key_input_with_receipt(event);
         if pressed {
-            self.key_repeats.queued(window, key, result.0.clone());
+            self.key_repeats.queued(window, key, read);
             // The key may start a long command: look at the evaluator later.
             if self.comms.input_interrupt.is_some() {
                 self.busy_toast.arm(romacs_display_protocol::frame_time::observe_platform_now());
             }
         }
-        (result.1, result.2)
     }
 
     /// Record the physical modifier keys' own press and release.
@@ -221,7 +217,7 @@ impl RenderApp {
             // OS-delivered RedrawRequested for a surface the
             // compositor is not showing.
             if !self.frame_coordinator.is_eligible(sched_id) {
-                super::frame_stats::count_plan(sched_id, &plan);
+                super::frame_stats::count_plan(&plan);
                 return;
             }
             if !plan.should_present {
@@ -234,7 +230,7 @@ impl RenderApp {
                 // than rendered unattributed.
                 plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
             }
-            super::frame_stats::count_plan(sched_id, &plan);
+            super::frame_stats::count_plan(&plan);
             if plan.reasons.is_empty() {
                 super::frame_stats::count(
                     &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
@@ -301,7 +297,7 @@ impl RenderApp {
         ) {
             return;
         }
-        // Retirement precedes menus, tooltips and IME interception: a
+        // Retirement precedes menu-bar and IME interception: a
         // release/focus loss cannot leave repeat authority behind there.
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
@@ -312,54 +308,15 @@ impl RenderApp {
             }
             _ => {}
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .tooltips
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
-        {
-            return;
-        }
-        let live_owner = self.frame_windows.get_by_winit(window_id).is_some();
-        let dismiss = match &event {
-            WindowEvent::PointerButton {
-                state: ElementState::Pressed,
-                ..
-            }
-            | WindowEvent::MouseWheel { .. } => live_owner,
-            WindowEvent::KeyboardInput { event, .. } => {
-                live_owner && event.state == ElementState::Pressed
-            }
-            WindowEvent::PointerLeft { .. } => {
-                self.tooltips.owns_parent(window_id)
-                    || (live_owner && self.tooltips.owner().is_none())
-            }
-            WindowEvent::CloseRequested | WindowEvent::Destroyed => {
-                self.tooltips.owns_parent(window_id)
-            }
-            _ => false,
-        };
-        if dismiss {
-            self.comms.tooltip_context.invalidate();
-            self.tooltips.hide();
-        }
         if self.handle_native_menu_bar_event(window_id, &event)
             || self.handle_native_menu_bar_key(window_id, &event)
         {
             return;
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .menus
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
+        if self.gpu.is_some()
+            && self.renderer.is_some()
+            && self.menu_bar.event(window_id, &event)
         {
-            // Reconcile native hierarchy changes after this event batch,
-            // never while winit is dispatching a borrowed update batch.
-            while let Some(index) = self.menus.take_result() {
-                self.comms.send_input(InputEvent::MenuSelection {
-                    index: index.index(),
-                    token: Some(index.token),
-                });
-            }
             self.sync_menu_heading();
             return;
         }
@@ -452,7 +409,7 @@ impl RenderApp {
                 let retirements = if focused {
                     Vec::new()
                 } else {
-                    let menu_owns_focus = self.menus.owns_parent(window_id);
+                    let menu_owns_focus = self.menu_bar.owns_parent(window_id);
                     self.frame_windows
                         .get_by_winit_mut(window_id)
                         .map(|window| {
@@ -511,35 +468,6 @@ impl RenderApp {
                 // animation where Lisp already put the layer.
                 if state == ElementState::Pressed {
                     self.frame_windows.finish_top_level_child_frame_animations();
-                }
-                #[cfg(feature = "webview")]
-                if let Some(target) = self.focused_webview {
-                    use winit::platform::scancode::PhysicalKeyExtScancode;
-
-                    // The external WebView API has its own numeric key-value
-                    // contract. Keep this conversion at that boundary; the
-                    // editor transport retains the typed identity below.
-                    let key_value = match Self::translate_key_input(&logical_key) {
-                        Some(FrontendKey::Character(character)) => character as u32,
-                        Some(FrontendKey::Keysym(keysym)) => keysym,
-                        None => 0,
-                    };
-                    if key_value != 0
-                        && let Some(system) = self.webview_system.as_mut()
-                    {
-                        let input = romacs_webview::WebViewInput::Keyboard {
-                            key_value,
-                            hardware_key_code: physical_key.to_scancode().unwrap_or(0),
-                            state: match state {
-                                ElementState::Pressed => romacs_webview::ButtonState::Pressed,
-                                ElementState::Released => romacs_webview::ButtonState::Released,
-                            },
-                            modifiers: Self::webview_modifiers(self.modifiers),
-                        };
-                        if let Err(error) = system.input(target, input) {
-                            tracing::warn!(view = %target.view(), %error, "dropping WebView keyboard input");
-                        }
-                    }
                 }
                 if state == ElementState::Pressed
                     && !self.key_repeats.admit(window_id, physical_key, repeat)
@@ -642,11 +570,8 @@ impl RenderApp {
                     if !handled_via_text {
                         // `logical_key` is the layout's key with Shift applied
                         // and no command modifier folded in, which is what GNU
-                        // reads for a command chord. macOS is the one window
-                        // system that would compose an Option chord into
-                        // another character first, and the frame window asks
-                        // it not to (`apply_option_key_policy`), so no
-                        // per-event substitution is needed here.
+                        // reads for a command chord, so no per-event
+                        // substitution is needed here.
                         let key = Self::translate_key_input(&logical_key);
                         if let Some(key) = key {
                             let key_modifiers = match key {
@@ -675,7 +600,7 @@ impl RenderApp {
                             if self.effects.idle_dim.enabled {
                                 self.record_idle_dim_activity(window_id);
                             }
-                            let (receipt, token) = self.send_native_key(
+                            self.send_native_key(
                                 window_id,
                                 physical_key,
                                 InputEvent::Key {
@@ -685,17 +610,6 @@ impl RenderApp {
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },
                             );
-                            if state == ElementState::Pressed
-                                && matches!(key, FrontendKey::Keysym(0xff55 | 0xff56))
-                                && let Some(receipt) = receipt
-                                && let Some(window) = self.frame_windows.get_by_winit_mut(window_id)
-                            {
-                                window
-                                    .render
-                                    .compositor
-                                    .input_scroll
-                                    .observe_input(receipt, token);
-                            }
                         } else if state == ElementState::Pressed {
                             tracing::debug!(
                                 "KeyboardInput dropped after translation: logical_key={:?} physical_key={:?} text={:?} mods=0x{:x}",

@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location('parity_ratchet', ROOT / 'tools/parity_ratchet.py')
+SPEC = importlib.util.spec_from_file_location('parity_ratchet', ROOT / 'tools/lib/parity_ratchet.py')
 assert SPEC is not None and SPEC.loader is not None
 PR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PR)
@@ -46,7 +46,7 @@ class CandidateContract(unittest.TestCase):
     def run_cli(self, *args):
         env = dict(os.environ, ROMACS_MEMBER_EVIDENCE=str(self.root / 'absent-evidence'),
                    ROMACS_VACUITY_RECEIPT=str(self.root / 'absent-receipt'))
-        return subprocess.run([sys.executable, str(ROOT / 'tools/parity_ratchet.py'),
+        return subprocess.run([sys.executable, str(ROOT / 'tools/lib/parity_ratchet.py'),
                                *args, '--root', str(self.root)], env=env, text=True, capture_output=True)
 
     def candidate(self):

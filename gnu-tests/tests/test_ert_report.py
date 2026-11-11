@@ -135,7 +135,7 @@ class Native(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = pathlib.Path(self.temp.name)
         self.ert = pathlib.Path(__file__).resolve().parents[2] / 'gnu-lisp/emacs-lisp/ert.el'
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'scripts'))
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'tools/lib'))
         import gnu_oracle
         binary = os.environ.get('ROMACS_GNU_ORACLE') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
         self.binary = gnu_oracle.require(binary)['path']

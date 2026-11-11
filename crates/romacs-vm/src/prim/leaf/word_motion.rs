@@ -9,7 +9,7 @@
 use super::*;
 use crate::prim::leaf::Kind;
 use crate::coordinates::{ByteOffset, CharOffset};
-use romacs_regex_engine::{SyntaxClass, SyntaxLookup};
+use romacs_regex::{SyntaxClass, SyntaxLookup};
 
 impl Leaf<'_> {
     pub fn move_words(&mut self, count: Value) -> super::super::Out {
@@ -164,7 +164,7 @@ impl Leaf<'_> {
             _ => return Err(Fault::Error("buffer required".into())),
         };
         drop(syntax);
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(buffer) => buffer.point = point,
             data::Object::ByteBuffer(buffer) => buffer.point = point,
             _ => unreachable!("matched above"),

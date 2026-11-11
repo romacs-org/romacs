@@ -11,6 +11,11 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+;; Codex's app-server driver is persistent: what a per-turn harness does is
+;; a test harness's, reading the lines `codex exec' wrote.
+(romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"
+                             :config-default "~/.perturn" :events #'romacs-agent--codex-events)
+
 (defun romacs-agent-attach-race-tests--closed (session)
   "SESSION's connection, closed as a supervisor leaving closes it."
   (let ((process (make-process :name "closed" :command '("true") :noquery t :sentinel #'ignore)))
@@ -27,7 +32,7 @@
 (defmacro romacs-agent-attach-race-tests--with (&rest body)
   (declare (indent 0))
   `(let* ((dir (make-temp-file "romacs-attach-race-" t))
-          (session (romacs-agent--make :id "s" :harness 'codex :provider "codex" :dir dir :state 'starting
+          (session (romacs-agent--make :id "s" :harness 'perturn :provider "perturn" :dir dir :state 'starting
                                        :journal-start 0)))
      (unwind-protect (cl-letf (((symbol-function 'romacs-agent--drop-relays) #'ignore)) ,@body)
        (delete-directory dir t))))

@@ -27,7 +27,7 @@ pub struct Allocation {
 /// `cursor_y + shelf_height`. When the page cannot fit the requested
 /// height, allocation fails and the caller should create a new page.
 #[derive(Debug)]
-pub struct ShelfAllocator {
+pub(crate) struct ShelfAllocator {
     page_size: u32,
     padding: u32,
     cursor_x: u32,
@@ -114,5 +114,4 @@ impl ShelfAllocator {
 }
 
 #[cfg(test)]
-#[path = "allocator/tests/allocator_test.rs"]
 mod tests;

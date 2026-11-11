@@ -87,6 +87,29 @@ fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, 
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
 
+/// An init file named with `--init-file` that does not exist is an error
+/// naming it, never a session that silently runs without it.
+#[test]
+fn a_missing_explicit_init_file_is_an_error() {
+    use std::io::Write;
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-missing-init-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing-init.el");
+    let mut child = Command::new(romacs)
+        .arg("--batch").arg(root.join("rlisp")).arg("--init-file").arg(&missing)
+        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("gnu-lisp"))
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+        .spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"(boundp 'user-init-file)").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{}{stderr}", String::from_utf8_lossy(&output.stdout));
+    assert!(stderr.contains(&missing.display().to_string()), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// A batch program's settings stay out of an init, as a session's do
 /// (rlisp/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.
@@ -201,7 +224,7 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     }
     let args: Vec<String> = ["-Q", "--batch", "--eval",
         "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
-        .iter().map(|a| a.to_string()).collect();
+        .iter().map(ToString::to_string).collect();
     let expected = run(&gnu, &home, &args, false);
     let actual = run(romacs, &home, &args, false);
     let _ = std::fs::remove_dir_all(&dir);
@@ -217,7 +240,7 @@ fn batch_without_worlds_boots_from_source_as_pinned_gnu_does() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
     let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (princ (list noninteractive window-system (length command-line-args))) (kill-emacs 4))"]
-        .iter().map(|a| a.to_string()).collect();
+        .iter().map(ToString::to_string).collect();
     for world in [false, true] {
         let dir = std::env::temp_dir().join(format!("romacs-batch-source-{}-{world}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -351,17 +374,11 @@ fn a_batch_world_restores_under_another_processor_affinity() {
 /// (`arena::heap_is_image`) as a session does.
 #[test]
 fn a_process_booted_from_source_times_its_collections() {
-    let home = std::env::temp_dir().join(format!("romacs-batch-from-source-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
-        .args(["-Q", "--batch", "--eval", "(progn (garbage-collect) (princ (list (> gc-elapsed 0.0))))"])
-        .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &home)
-        .env("XDG_CONFIG_HOME", home.join("config")).env("XDG_CACHE_HOME", home.join("cache"))
-        .env("TMPDIR", &home).env("LANG", "C.UTF-8").env("ROMACS_WORLD", "off")
-        .envs(["ROMACS_RUNTIME_ROOT", "ROMACS_LISP_DIR", "LD_LIBRARY_PATH"].iter()
-              .filter_map(|name| Some((name, std::env::var_os(name)?))))
-        .output().unwrap();
-    std::fs::remove_dir_all(&home).unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "(t)");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-from-source-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (garbage-collect) (princ (list (> gc-elapsed 0.0))))"]
+        .iter().map(ToString::to_string).collect();
+    let (status, stdout, stderr) = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir, &args, false);
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!((status, stdout.as_str()), (Some(0), "(t)"), "{stderr}");
 }

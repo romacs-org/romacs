@@ -8,13 +8,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EMACS="${EMACS:-./target/release/romacs}"
+EMACS="${EMACS:-./target/release/romacs-vm-gui}"
 LOG="${LOG:-/tmp/font-family-test.log}"
 TIMEOUT="${TIMEOUT:-8s}"
 
 if [ ! -x "$EMACS" ]; then
     echo "ERROR: Romacs binary not found or not executable: $EMACS"
-    echo "Run: cargo xtask fresh-build --release"
+    echo "Run: cargo build --release -p romacs-vm-gui"
     exit 1
 fi
 

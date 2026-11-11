@@ -32,7 +32,7 @@ impl Leaf<'_> {
     }
     pub(super) fn process_mut(&mut self, v: Value) -> &mut Process {
         let index = v.index(0).expect("checked process") - 1;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Process(p) => p,
             _ => unreachable!("checked process"),
         }
@@ -659,7 +659,7 @@ impl Leaf<'_> {
             if bytes.is_ascii() && !bytes.contains(&b'\r') {
                 // Nothing to detect: the text, and the coding system stays.
                 let text = self.make_string(bytes, true);
-                self.variable_set(last_used, coding)?;
+                self.store_variable(last_used, coding)?;
                 return Ok(text);
             }
             match self.coding_detected_system(spec, attrs, &bytes)? {

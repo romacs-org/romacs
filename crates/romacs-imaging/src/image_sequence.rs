@@ -329,6 +329,12 @@ impl Drop for ImageSequenceReservation {
     }
 }
 
+impl Default for ImageSequenceCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImageSequenceCache {
     pub fn reserve(self: &Arc<Self>, sequence: ImageSequenceId) -> ImageSequenceReservation {
         self.state

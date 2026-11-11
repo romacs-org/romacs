@@ -162,3 +162,21 @@ fn first_prompt_widening_with_a_suspended_caller() {
     assert_eq!(eval(&mut vm, "(romacs-w1 \"P: \")"), "\"\"");
     assert_eq!(eval(&mut vm, "(list \"x\" (romacs-w1 \"P: \") \"y\")"), "(\"x\" \"\" \"y\")");
 }
+
+/// GNU `string_to_object` (minibuf.c:269) reads the answer with
+/// `read-from-string`: a `\N{NAME}` calls `char-from-name` (here a stand-in
+/// with GNU's answer for BULLET), and trailing text other than whitespace
+/// signals.
+#[test]
+fn a_read_answer_may_call_lisp_and_refuses_trailing_text() {
+    let mut vm = Vm::new();
+    eval(&mut vm, r#"(defun char-from-name (name &optional _) (and (equal name "BULLET") 8226))"#);
+    for (source, gnu) in [
+        (keys(r#""?\\N{BULLET}\r""#, r#"(read-from-minibuffer "P: " nil nil t)"#), "8226"),
+        (keys(r#""(a)  \r""#, r#"(read-from-minibuffer "P: " nil nil t)"#), "(a)"),
+        (keys(r#""1 2\r""#, r#"(condition-case e (read-from-minibuffer "P: " nil nil t) (error e))"#),
+         r#"(invalid-read-syntax "Trailing garbage following expression")"#),
+    ] {
+        assert_eq!(eval(&mut vm, &source), gnu, "{source}");
+    }
+}

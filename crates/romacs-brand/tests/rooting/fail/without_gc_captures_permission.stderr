@@ -1,0 +1,20 @@
+error[E0308]: mismatched types
+ --> tests/rooting/fail/without_gc_captures_permission.rs:7:23
+  |
+7 |     without_gc(e, (), |mut m, ()| collect(&mut m, gc));
+  |     ----------        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected fn pointer, found closure
+  |     |
+  |     arguments to this function are incorrect
+  |
+  = note: expected fn pointer `for<'m, 'b> fn(romacs_brand::Mx<'m, 'b, standin::Engine>, ())`
+                found closure `{closure@$DIR/tests/rooting/fail/without_gc_captures_permission.rs:7:23: 7:34}`
+note: closures can only be coerced to `fn` types if they do not capture any variables
+ --> tests/rooting/fail/without_gc_captures_permission.rs:7:51
+  |
+7 |     without_gc(e, (), |mut m, ()| collect(&mut m, gc));
+  |                                                   ^^ `gc` captured here
+note: function defined here
+ --> src/lib.rs
+  |
+  | pub fn without_gc<E, A: Plain, N: Plain>(e: &mut E, a: A, body: for<'m, 'b> fn(Mx<'m, 'b, E>, A) -> N) -> N {
+  |        ^^^^^^^^^^

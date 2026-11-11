@@ -438,7 +438,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Opt
     let world = world.clone();
     crate::spawn_evaluator(move || -> Result<(), String> {
         // The fonts load before the build is confined.
-        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
+        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         let mut roots = build_roots(&dir);
         roots.extend(plan.iter().flat_map(|(plan, _)| plan.directories()));
@@ -453,7 +453,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Opt
 /// libraries for a layer. The world's VM, its carry and its events (the
 /// plan replayed, with the entries refused), for `World::build` to publish.
 fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
-               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>, plan: Option<&(Plan, Vec<Entry>)>) -> Result<(Vm, Carry, serde_json::Value), String> {
+               engine: std::rc::Rc<std::cell::RefCell<romacs_layout::LayoutEngine>>, plan: Option<&(Plan, Vec<Entry>)>) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
@@ -462,7 +462,7 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     vm.declare_terminal_errors()?;
     vm.set_echo_area_host(true);
     if let Some(floor) = floor { vm.set_collection_floor(floor); }
-    let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+    let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
     vm.set_frame_geometry(width, height, line_height, column_width)?;
     vm.eval_source(INTERPROGRAM)?;
     let font = launch_font()?;

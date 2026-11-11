@@ -159,6 +159,8 @@ impl Vm {
         self.regexp_cache = Default::default();
         self.mode_line_forms.clear();
         self.lambda_lists.clear();
+        // An escape deferred in the builder is that session's own.
+        self.drop_deferred_escapes();
         self.status_bar_line = None;
         self.idle_since = None;
         for name in ["process-environment", "initial-environment", "exec-path"] {
@@ -804,9 +806,9 @@ fn property_runs(properties: &crate::properties::Properties, len: usize, hasher:
 /// digest.
 fn char_table_content(table: &crate::char_table::CharTable, hasher: &mut sha2::Sha256) -> Result<Vec<Value>, &'static str> {
     use sha2::Digest;
-    let mut values = vec![table.purpose, table.default, table.parent];
-    hasher.update(table.extras.len().to_le_bytes());
-    values.extend(&table.extras);
+    let mut values = vec![table.purpose(), table.default(), table.parent()];
+    hasher.update(table.extras().len().to_le_bytes());
+    values.extend(table.extras());
     let span = |at| table.span(at).map_err(|_| "char-table");
     let (mut from, (mut value, _, mut to)) = (0, span(0)?);
     while to + 1 < crate::char_table::CharTable::LEN {

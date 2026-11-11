@@ -14,9 +14,6 @@ use crate::layout::Solved;
 use crate::node::{Dim, Kind, Node, NodeId, SceneId};
 use crate::scene::{Scene, ancestors};
 
-/// Default pool, `ROMACS_SCENE_BUDGET_MB` at wiring time.
-pub const DEFAULT_POOL_BYTES: u64 = 256 << 20;
-
 /// A resolved texture plus its 4× MSAA colour buffer, RGBA8.
 const TARGET_BYTES_PER_PIXEL: f64 = 4.0 * 5.0;
 /// Tessellated vertices and indices per path element, generously.

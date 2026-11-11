@@ -81,6 +81,11 @@ impl Leaf<'_> {
     pub(crate) fn replace_change(&mut self, from: i64, to: i64, text: Value) -> std::result::Result<Option<(i64, i64, i64)>, Fault> {
         self.vm.replace_change(from, to, text)
     }
+    /// FROM..TO of the current buffer as a string without its properties.
+    pub(crate) fn region_plain_text(&mut self, from: i64, to: i64) -> std::result::Result<Value, Fault> {
+        let buffer = self.current_buffer()?;
+        self.vm.buffer_plain_text(buffer, from, to)
+    }
     pub(crate) fn modify_text(&mut self, from: i64, to: i64) -> std::result::Result<(), Fault> {
         self.vm.modify_text(from, to)
     }
@@ -90,7 +95,7 @@ impl Leaf<'_> {
     /// Fwiden for erase-buffer.
     pub(crate) fn widen_current(&mut self) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.widen(),
             data::Object::ByteBuffer(b) => b.restriction = crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(b.bytes.len()),
             _ => return Err(Fault::Error("buffer required".into())),

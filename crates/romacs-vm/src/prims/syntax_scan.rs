@@ -2,10 +2,11 @@
 //! engine run (`crate::syntax_scan`); where GNU calls Lisp in the middle of
 //! one (`internal--syntax-propertize', `syntax-ppss'), the run stops, the
 //! engine performs the call, and the scan runs again from its arguments,
-//! which wait with the answers so far in the continuation's registers. The
-//! rerun starts where the first run started and replays the syntax the
-//! stopped run read (the scan's memory), so it reaches the stop exactly as
-//! GNU's single scan did.
+//! which wait with the answers so far in the continuation's registers.
+//! `parse-partial-sexp' goes on where it stopped, from the state it stopped
+//! in (the scan's memory), reading nothing twice, as GNU's single scan does;
+//! the other scans start again where they started and replay the syntax the
+//! stopped run read, so they reach the stop exactly as GNU's did.
 use super::*;
 use crate::prim::{SyntaxOp as Op, SyntaxOutcome as Outcome};
 
@@ -53,6 +54,9 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
                       oldstate: Value, commentstop: Value) -> Step {
     start(cx, Op::ParsePartialSexp, &[from, to, targetdepth, stopbefore, oldstate, commentstop])
 }}
+
+defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
+fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
 
 /// Registers: the operation, its six arguments, the `syntax-ppss' answers,
 /// the scan's memory.

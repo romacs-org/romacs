@@ -78,7 +78,9 @@ fn image_top_level_defvar_yank_menu_remains_mutable() {
     let (mut loaded, _) = Vm::from_code_image(image.clone(), [61; 32]).unwrap();
     let startup = loaded.heap_stats();
     eprintln!("YANK_MENU_STARTUP: {} objects / {} bytes", startup.live_objects, startup.live_bytes);
-    assert_eq!((startup.live_objects, startup.live_bytes), (4, 195), "EXECUTABLE_IMAGE_RESTORE_ALLOCATION_RATCHET");
+    // 203: a string's `Properties` holds one word for the boxed log of
+    // `syntax-table` changes that a buffer's syntax summaries take.
+    assert_eq!((startup.live_objects, startup.live_bytes), (4, 203), "EXECUTABLE_IMAGE_RESTORE_ALLOCATION_RATCHET");
     assert_eq!(loaded.image_functions_materialized(), 0, "YANK_MENU_COLD_CODE");
     loaded.collect_garbage();
     let result = loaded.eval_source("(setcdr (cdr freeze-menu) (cons '(entry . 7) nil)) (list (eq freeze-menu freeze-alias) (eq freeze-menu (cdr (symbol-function 'freeze-menu-map))) freeze-menu)");

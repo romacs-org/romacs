@@ -9,16 +9,16 @@ romacs-vm = { path = "../romacs-vm" }
 romacs-grammars = { path = "../romacs-grammars" }
 romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-layout-input = { path = "../romacs-layout-input" }
-romacs-layout2 = { path = "../romacs-layout2" }
+romacs-layout = { path = "../romacs-layout" }
 romacs-display-protocol.workspace = true
 romacs-logo.workspace = true
 romacs-font.workspace = true
 romacs-face.workspace = true
 romacs-imaging.workspace = true
 romacs-renderer-wgpu.workspace = true
-romacs-display-runtime = { path = "../romacs-display-runtime", default-features = false, features = ["core-free"] }
+romacs-display-runtime = { path = "../romacs-display-runtime" }
 serde_json.workspace = true
-libc.workspace = true
+rustix = { workspace = true, features = ["termios", "time"] }
 crossbeam-channel.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 /// A native window, as the render thread names it.
-pub type WindowKey = u64;
+pub(crate) type WindowKey = u64;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Readiness {
@@ -41,7 +41,7 @@ impl Readiness {
         self.settled
     }
 
-    pub fn interacting(&self) -> bool {
+    pub(crate) fn interacting(&self) -> bool {
         self.interacting
     }
 
@@ -57,7 +57,7 @@ impl Readiness {
         self.settled = self.settled.max(req);
     }
 
-    pub fn set_interacting(&mut self, interacting: bool) {
+    pub(crate) fn set_interacting(&mut self, interacting: bool) {
         self.interacting = interacting;
     }
 
@@ -69,7 +69,7 @@ impl Readiness {
     /// `window` presented a frame that shows this model (or may: an older
     /// picture blended in) at no one rev. It is a member, and the fence
     /// stays down until it presents a settled frame.
-    pub fn presented_unsettled(&mut self, window: WindowKey) {
+    pub(crate) fn presented_unsettled(&mut self, window: WindowKey) {
         self.showing.insert(window, None);
     }
 
@@ -80,11 +80,11 @@ impl Readiness {
     }
 
     /// No window shows this model any more (its texture is gone).
-    pub fn left_all(&mut self) {
+    pub(crate) fn left_all(&mut self) {
         self.showing.clear();
     }
 
-    pub fn is_showing_in(&self, window: WindowKey) -> bool {
+    pub(crate) fn is_showing_in(&self, window: WindowKey) -> bool {
         self.showing.contains_key(&window)
     }
 
@@ -116,5 +116,4 @@ impl Readiness {
 }
 
 #[cfg(test)]
-#[path = "readiness/tests.rs"]
 mod tests;

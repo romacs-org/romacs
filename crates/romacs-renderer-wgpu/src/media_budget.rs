@@ -1,33 +1,30 @@
 //! Unified memory budget management for all media caches.
 //!
-//! Provides a shared memory budget across images, video frames, WebKit views,
-//! and shader surfaces. Each cache reports its usage; eviction is coordinated
+//! Provides a shared memory budget across images, video frames and shader
+//! surfaces. Each cache reports its usage; eviction is coordinated
 //! centrally.
 //!
 //! Wiring status: `WgpuRenderer` owns the instance
 //! (`ROMACS_MEDIA_BUDGET_MB` overrides the default limit at init, applied
 //! by the render thread via `set_media_budget_limit`). Every cache reports
 //! usage through `MediaAccounting` events drained per frame (images and
-//! videos at texture create/free, webkit at view create/resize/destroy,
-//! shader surfaces inline at create/free with physical bytes), and the
+//! videos at texture create/free, shader surfaces inline at create/free with physical bytes), and the
 //! inline-media draw phases `touch` what they composite so LRU order is
 //! real. The eviction driver runs on over-budget surface creates and frees
 //! *recreatable* (declarative-spec) surfaces only; other media types are
 //! accounted but never evicted by this driver (images have their own
-//! internal LRU; video/webkit are droppable only with playback/view state
-//! loss).
+//! internal LRU; video is droppable only with playback state loss).
 
 use std::collections::BTreeMap;
 
 /// Media type for priority ordering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MediaType {
+pub(crate) enum MediaType {
     /// Static images (lowest priority - can be reloaded)
     Image,
     /// Video frames (medium priority - can be re-decoded)
+    #[cfg(any(test, feature = "video"))]
     Video,
-    /// WebKit surfaces (highest priority - expensive to recreate)
-    WebKit,
     /// Shader surfaces (evicted last: imperative ids handed to Lisp cannot
     /// be recreated by the renderer; declarative specs re-resolve on the
     /// next redisplay walk. The budget itself cannot tell the two apart —
@@ -40,7 +37,7 @@ pub enum MediaType {
 /// and applied to the budget. Caches stay decoupled from the budget: they
 /// only append events at texture-lifecycle points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaAccounting {
+pub(crate) enum MediaAccounting {
     /// Texture created or resized (re-registration replaces the old size).
     Registered {
         media_type: MediaType,
@@ -53,7 +50,7 @@ pub enum MediaAccounting {
 
 /// Entry in the media budget tracker
 #[derive(Debug)]
-pub struct BudgetEntry {
+pub(crate) struct BudgetEntry {
     pub media_type: MediaType,
     pub id: u32,
     pub size_bytes: usize,
@@ -61,7 +58,7 @@ pub struct BudgetEntry {
 }
 
 /// Unified media budget manager
-pub struct MediaBudget {
+pub(crate) struct MediaBudget {
     /// Maximum total memory in bytes (default: 256MB)
     max_memory: usize,
     /// Current total memory usage
@@ -112,7 +109,7 @@ impl MediaBudget {
     }
 
     /// Unregister a media item
-    pub fn unregister(&mut self, media_type: MediaType, id: u32) {
+    pub(crate) fn unregister(&mut self, media_type: MediaType, id: u32) {
         let key = self
             .entries
             .iter()
@@ -160,7 +157,7 @@ impl MediaBudget {
     }
 
     /// Get items to evict to make room for new_size bytes
-    pub fn get_eviction_candidates(&self, new_size: usize) -> Vec<(MediaType, u32)> {
+    pub(crate) fn get_eviction_candidates(&self, new_size: usize) -> Vec<(MediaType, u32)> {
         let mut candidates = Vec::new();
         let target = self.current_memory + new_size;
 
@@ -183,17 +180,17 @@ impl MediaBudget {
     }
 
     /// Check if we're over budget
-    pub fn is_over_budget(&self) -> bool {
+    pub(crate) fn is_over_budget(&self) -> bool {
         self.current_memory > self.max_memory
     }
 
     /// Get current memory usage
-    pub fn current_usage(&self) -> usize {
+    pub(crate) fn current_usage(&self) -> usize {
         self.current_memory
     }
 
     /// Get max memory limit
-    pub fn max_limit(&self) -> usize {
+    pub(crate) fn max_limit(&self) -> usize {
         self.max_memory
     }
 }
@@ -205,5 +202,4 @@ impl Default for MediaBudget {
 }
 
 #[cfg(test)]
-#[path = "media_budget/tests/media_budget_test.rs"]
 mod tests;

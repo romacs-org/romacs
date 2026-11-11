@@ -225,7 +225,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
         "widen" | "garbage-collect" | "redraw-display" | "unix-sync" | "do-auto-save" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
-        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "scroll-left" | "scroll-right" => "^P\np", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
+        "decode-coding-region" | "encode-coding-region" => "r\nzCoding system: ", "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "scroll-left" | "scroll-right" => "^P\np", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
         "search-forward" => "MSearch: ", "lossage-size" => "(list (read-number \"Set maximum keystrokes to: \" (lossage-size)))",
         "re-search-forward" => "sRE search: ",
         "re-search-backward" => "sRE search backward: ",
@@ -443,7 +443,7 @@ fn recorded(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 fn run_command(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     for (i, name) in COMMAND_VARS.iter().enumerate() {
         let symbol = cx.intern(name);
-        cx.variable_set(symbol, saved[SAVED_VARS + i])?;
+        cx.store_variable(symbol, saved[SAVED_VARS + i])?;
     }
     let mut args = vec![saved[FUNCTION]];
     let mut tail = saved[ARGS];
@@ -902,4 +902,28 @@ fn oclosure_p(cx: &mut Leaf<'_>, fun: Value) -> bool {
         matches!(cx.kind(file), Kind::String | Kind::Bytes) && offset.integer_value().is_some());
     doc != Value::NIL && !matches!(cx.kind(doc), Kind::String | Kind::Bytes)
         && doc.integer_value().is_none() && !saved_doc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every subr's interactive form that is Lisp, `(...)', reads without the
+    /// permission, as `call-interactively' reads it in a leaf: no `\N{NAME}'
+    /// by name in them.
+    #[test]
+    fn subr_interactive_forms_read_without_lisp() {
+        let mut vm = Vm::new();
+        let mut forms = 0;
+        for index in 0.. {
+            if crate::prim::descriptor(index).is_none() { break }
+            let Some(Some(spec)) = subr_intspec(Value::reference(index, 6)) else { continue };
+            if !spec.starts_with('(') { continue }
+            let string = vm.make_lisp_string(spec.as_bytes().to_vec(), true);
+            let end = vm.str_view(string).unwrap().len();
+            assert!(matches!(vm.read_string_unlent(string, 0, end), Ok(Some(_))), "{spec}");
+            forms += 1;
+        }
+        assert!(forms > 0, "no interactive form is Lisp");
+    }
 }

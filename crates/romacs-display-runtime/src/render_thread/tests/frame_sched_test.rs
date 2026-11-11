@@ -907,7 +907,6 @@ fn demand_reason_names_are_an_explicit_golden_in_index_order() {
             "pane_motion",
             "child_frame_motion",
             "video",
-            "webkit",
             "shader_surface",
             "frame_shader",
             "terminal",
@@ -923,7 +922,7 @@ fn demand_reason_names_are_an_explicit_golden_in_index_order() {
             "transient_effect",
         ]
     );
-    assert_eq!(DemandReason::COUNT, 22);
+    assert_eq!(DemandReason::COUNT, 21);
 }
 
 #[test]
@@ -948,7 +947,6 @@ fn plan_attributes_the_frame_to_its_driving_reasons() {
     let plan = c.begin_frame(win(1), tick_at(now.plus(ms(1))));
     assert!(plan.reasons.contains(DemandReason::CursorAnimation));
     assert!(plan.reasons.contains(DemandReason::EditorCommit));
-    assert!(!plan.reasons.contains(DemandReason::Webkit));
     assert_eq!(
         plan.reasons.iter().collect::<Vec<_>>(),
         vec![DemandReason::EditorCommit, DemandReason::CursorAnimation]
@@ -981,60 +979,6 @@ fn an_ambient_24_hz_demand_attributes_every_frame_it_drives() {
         }
     }
     assert_eq!(attributed, 10);
-}
-
-#[test]
-fn per_window_attribution_names_the_blinking_window_only() {
-    // Design-doc Observability: "counters per native window and process-wide
-    // totals ... active demand reasons". A window with a standing cursor-blink
-    // deadline reports cursor_animation as an active per-window reason; an
-    // idle sibling window reports none and accrues no per-window plan counts.
-    use super::super::frame_stats;
-    let mut c = FrameCoordinator::new();
-    let now = t0();
-    // Window 1: blink deadline (the shape declare_frame_demands submits).
-    c.submit_demand(
-        win(1),
-        FrameDemand {
-            invalidation: Invalidation::CompositeOnly {
-                layers: LayerMask::CURSOR_EFFECTS,
-            },
-            cadence: Cadence::At(now.plus(ms(500))),
-            reason: DemandReason::CursorAnimation,
-        },
-        now,
-    );
-    // Window 2 exists (tracked by the coordinator) but has no demand.
-    c.set_focused(win(2), true);
-
-    frame_stats::publish_window_demand(c.window_demand());
-    let snap = frame_stats::window_snapshots();
-    let by_id = |id: u64| snap.iter().find(|w| w.window == id).unwrap();
-    assert_eq!(by_id(1).active_reasons, vec!["cursor_animation"]);
-    assert_eq!(by_id(2).active_reasons, Vec::<&str>::new());
-
-    // The blink deadline fires; the planned frame is attributed per-window.
-    let plan = c.begin_frame(win(1), tick_at(now.plus(ms(500))));
-    assert!(plan.reasons.contains(DemandReason::CursorAnimation));
-    frame_stats::count_plan(win(1), &plan);
-    let snap = frame_stats::window_snapshots();
-    let by_id = |id: u64| snap.iter().find(|w| w.window == id).unwrap();
-    assert_eq!(
-        by_id(1).demand_reasons[DemandReason::CursorAnimation.index()],
-        1
-    );
-    assert_eq!(by_id(2).demand_reasons.iter().sum::<u64>(), 0);
-
-    // Once the demand is consumed, republishing clears the active reason.
-    frame_stats::publish_window_demand(c.window_demand());
-    let snap = frame_stats::window_snapshots();
-    assert!(snap.iter().all(|w| w.active_reasons.is_empty()));
-
-    // A removed window's per-window stats do not outlive it.
-    c.remove_window(win(2));
-    frame_stats::publish_window_demand(c.window_demand());
-    let snap = frame_stats::window_snapshots();
-    assert!(snap.iter().all(|w| w.window != 2));
 }
 
 #[test]
@@ -1269,45 +1213,6 @@ fn demand_reason_sets_deduplicate_and_iterate_in_declaration_order() {
     assert!(empty.is_empty());
     assert!(empty.iter().next().is_none());
     assert!(!empty.contains(DemandReason::EditorCommit));
-}
-
-#[test]
-fn per_window_counters_preserve_every_reason_in_diagnostic_order() {
-    use super::super::frame_stats;
-    let window = win(99);
-    let reasons: DemandReasonSet = DemandReason::ALL.into_iter().collect();
-    frame_stats::publish_window_demand(std::iter::once((window, reasons)));
-    let initial = frame_stats::window_snapshots();
-    assert_eq!(initial.len(), 1);
-    assert_eq!(initial[0].demand_reasons, [0; DemandReason::COUNT]);
-
-    for (index, reason) in DemandReason::ALL.into_iter().enumerate() {
-        let plan = FramePlan {
-            tick: tick_at(t0()),
-            work: RenderWork::CompositeOnly {
-                layers: LayerMask::CURSOR_EFFECTS,
-            },
-            should_present: true,
-            reasons: std::iter::once(reason).collect(),
-        };
-        for _ in 0..=index {
-            frame_stats::count_plan(window, &plan);
-        }
-    }
-    let expected = std::array::from_fn(|index| index as u64 + 1);
-    let snapshot = frame_stats::window_snapshots();
-    assert_eq!(snapshot[0].window, window.0);
-    assert_eq!(snapshot[0].active_reasons, frame_stats::DEMAND_REASON_NAMES);
-    assert_eq!(snapshot[0].demand_reasons, expected);
-
-    // Reconciliation changes active demand without discarding accumulated counts.
-    frame_stats::publish_window_demand(std::iter::once((window, DemandReasonSet::empty())));
-    let reconciled = frame_stats::window_snapshots();
-    assert!(reconciled[0].active_reasons.is_empty());
-    assert_eq!(reconciled[0].demand_reasons, expected);
-
-    frame_stats::publish_window_demand(std::iter::empty());
-    assert!(frame_stats::window_snapshots().is_empty());
 }
 
 #[test]

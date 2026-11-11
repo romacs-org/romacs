@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-GUIERR1 | GUI `eval-last-sexp` recoverable error text | GNU `src/print.c:1058` calls `print_error_message`, implemented at `src/print.c:1070`; GNU 32.0.50 `eval-last-sexp` reports `Arithmetic error`, `Wrong type argument: listp, 1`, `Boom`, `Symbol’s function definition is void: undefined-fn`, `Symbol’s value as variable is void: undefined-var` (transcript `crates/romacs-vm-gui/evidence/usable/gnu-eval-last-sexp-errors.txt`); unbalanced text before point is `Scan error: "Unbalanced parentheses", 8, 1` | Lisp signals now echo exactly `error-message-string` of the caught error, matching those five GNU texts. The bridge's own failure (no complete datum before point) still echoes `Error: No complete sexp before point`, not GNU's scan error; GNU's `eval-expression-print-format` suffix (`42 (#o52, #x2a, ?*)`) is not printed for integers | **User-observable** echo text only on the stand-in path (GNU's `elisp-mode.el` `eval-last-sexp` cannot load yet); no Lisp-visible value differs | <!-- symbols: eval-last-sexp, error-message-string -->

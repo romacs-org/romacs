@@ -253,7 +253,7 @@ impl Leaf<'_> {
             let (begv, zv) = leaf.accessible_positions(buffer)?;
             let specs = leaf.vm.list_values(specs).map_err(Fault::Error)?;
             let mut source = Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?;
-            specs.into_iter().map(|spec| source.band_stretch(spec)).collect()
+            Ok(specs.into_iter().map(|spec| source.band_stretch(spec)).collect())
         })
     }
 
@@ -323,7 +323,7 @@ impl Leaf<'_> {
             };
             let distance = (b.len_chars() as i64 + 1 - end).max(0) as usize;
             let index = w.index(0).map_err(Fault::Error)? - 1;
-            if let Object::Window(x) = &mut self.vm.objects[index] { x.end_distance = distance; }
+            if let Object::Window(x) = self.vm.objects.entry_mut(index) { x.end_distance = distance; }
             if laid.is_some() { self.vm.record_end_laid(w).map_err(Fault::Error)?; }
         }
         Ok(())
@@ -1029,7 +1029,7 @@ impl Leaf<'_> {
     fn special_glyph(&mut self, slot: usize) -> std::result::Result<Value, Fault> {
         Ok(match self.display_table()? {
             Some(table) => match self.vm.object_if(table) {
-                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
+                Some(Object::CharTable(t)) => t.extras().get(slot).copied().unwrap_or(Value::NIL),
                 _ => Value::NIL,
             },
             None => Value::NIL,
@@ -1107,7 +1107,7 @@ fn limits(args: &TextSizeArgs) -> (Option<i64>, i64) {
 /// host's pixels: the text area, less the truncation or continuation
 /// glyph's advance in the default face when there is no right fringe to
 /// show its indicator in (xdisp.c:3510-3518). The host continues,
-/// truncates and word-wraps rows as GNU does (romacs-layout2 `WordBreaks').
+/// truncates and word-wraps rows as GNU does (romacs-layout `WordBreaks').
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
     let glyph = hosted.source().leaf().host_line_glyph(usize::from(cx.wrap != Wrap::Truncate))?;
     let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(glyph)?.0 };

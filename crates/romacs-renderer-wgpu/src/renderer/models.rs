@@ -198,5 +198,4 @@ impl ModelGpuHost for WgpuRenderer {
 }
 
 #[cfg(test)]
-#[path = "models/tests.rs"]
 mod tests;

@@ -14,7 +14,7 @@ struct State {
     terminal: bool,
 }
 #[derive(Default)]
-pub struct NativeWindowWaits(Mutex<State>);
+pub(crate) struct NativeWindowWaits(Mutex<State>);
 impl NativeWindowWaits {
     pub fn register(&self, frame: u64, live: Arc<AtomicBool>, deadline: Instant) {
         self.0
@@ -29,9 +29,10 @@ impl NativeWindowWaits {
     pub fn terminal(&self) -> bool {
         self.0.lock().unwrap().terminal
     }
+    #[cfg(test)]
     /// Claim terminal connection disposition before the exact socket shutdown.
     /// Finishing the synchronous call is serialized with this claim.
-    pub fn interrupt_required(&self) -> bool {
+    pub(crate) fn interrupt_required(&self) -> bool {
         let mut state = self.0.lock().unwrap();
         if state
             .active
@@ -60,8 +61,6 @@ impl NativeWindowWaits {
             }
             state.active = Some(frame);
         }
-        #[cfg(feature = "gui-test-hooks")]
-        crate::gui_test_controls::mark("window-constructor");
         let result = work();
         let mut state = self.0.lock().unwrap();
         state.active = None;
@@ -77,5 +76,4 @@ impl NativeWindowWaits {
 }
 
 #[cfg(test)]
-#[path = "native_window_wait/tests/mod.rs"]
 mod tests;

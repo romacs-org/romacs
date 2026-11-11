@@ -1,6 +1,6 @@
 use super::*;
 use crate::regexp::Translation;
-use romacs_regex_engine::{CaseTable, CaseTranslation};
+use romacs_regex::{CaseTable, CaseTranslation};
 
 #[derive(Debug)]
 struct CompletionCase {
@@ -98,7 +98,7 @@ impl Leaf<'_> {
     fn walk_case_ranges(&mut self, canon: Value, walk: Option<u64>)
         -> std::result::Result<std::sync::Arc<Vec<(u32, u32, i64)>>, Fault> {
         let root = match self.vm.object_if(canon) {
-            Some(data::Object::CharTable(table)) => std::sync::Arc::as_ptr(&table.root) as usize,
+            Some(data::Object::CharTable(table)) => std::sync::Arc::as_ptr(table.root()) as usize,
             _ => 0,
         };
         if let (Some(walk), Some((at, kept, ranges))) = (walk, &self.vm.completion_case_memo)

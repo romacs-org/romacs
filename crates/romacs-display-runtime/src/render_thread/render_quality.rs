@@ -8,9 +8,10 @@
 
 use romacs_display_protocol::motion_spec::MotionSpec;
 use std::num::NonZeroU16;
+use super::transitions::TransitionPolicy;
 
 use romacs_display_protocol::{
-    EffectOperation, EffectValue, FrameGlyphBuffer, TransitionPolicy, VisualConfig,
+    EffectOperation, EffectValue, FrameGlyphBuffer, VisualConfig,
 };
 
 /// Coarse cost class of the active adapter.
@@ -456,5 +457,4 @@ fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {
 }
 
 #[cfg(test)]
-#[path = "render_quality/tests/render_quality_test.rs"]
 mod tests;

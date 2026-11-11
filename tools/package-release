@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# package-release -- assemble and archive a relocatable Linux release.
+#
+#   tools/package-release NAME BIN_DIR OUT_DIR
+#
+# BIN_DIR holds builds of romacs-vm-gui, romacs-mcp and romacs-agent-host. Writes
+# OUT_DIR/NAME.tar.gz, which unpacks to NAME/:
+#
+#   bin/romacs-vm-gui  bin/romacs-mcp  bin/romacs-agent-host
+#   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
+#   share/romacs/{gnu-lisp,rlisp,etc,assets/fonts}  share/applications  share/icons
+#
+# The binary finds share/romacs beside its bin/ (host::runtime_root), so the
+# tree works wherever it is unpacked. tools/ci/smoke-release checks the
+# archive itself.
+set -euo pipefail
+
+if (($# != 3)); then
+    echo "usage: $0 NAME BIN_DIR OUT_DIR" >&2
+    exit 2
+fi
+name=$1
+bin_dir=$(cd "$2" && pwd)
+mkdir -p "$3"
+out_dir=$(cd "$3" && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+stage=$out_dir/$name
+
+if [ -e "$stage" ] || [ -e "$stage.tar.gz" ]; then
+    echo "package-release: $stage or its archive already exists" >&2
+    exit 1
+fi
+
+install -D -m 0755 "$bin_dir/romacs-vm-gui" "$stage/bin/romacs-vm-gui"
+install -D -m 0755 "$bin_dir/romacs-mcp" "$stage/bin/romacs-mcp"
+install -D -m 0755 "$bin_dir/romacs-agent-host" "$stage/bin/romacs-agent-host"
+# A later mode argument overrides this one.
+cat >"$stage/bin/romacs" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$(readlink -f "$0")")/romacs-vm-gui" --loadup "$@"
+EOF
+chmod 0755 "$stage/bin/romacs"
+mkdir -p "$stage/share/romacs"
+cp -r "$repo/gnu-lisp" "$repo/rlisp" "$repo/etc" "$stage/share/romacs/"
+mkdir -p "$stage/share/romacs/assets"
+cp -r "$repo/assets/fonts" "$stage/share/romacs/assets/"
+bash "$repo/tools/install-linux-desktop-assets.sh" "$stage"
+cp "$repo/COPYING" "$stage/"
+
+tar -C "$out_dir" --sort=name --owner=0 --group=0 --numeric-owner \
+    -czf "$stage.tar.gz" "$name"
+echo "package-release: wrote $stage.tar.gz"

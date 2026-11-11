@@ -76,14 +76,20 @@ fn every_option_starts_at_the_renderers_default() {
     assert_eq!(printed(&mut vm, "(and (boundp 'romacs-effect-cursor-glow) (plist-member romacs-effect-cursor-glow :enabled) t)"), "t");
 }
 
-/// `romacs-cursor-shape-mode': a bar where text goes in, a block in a
-/// read-only or special buffer, set as a buffer's mode or read-only state
-/// changes; a cursor something else chose, or the user's own default, is
-/// left alone, and turning the mode off gives every buffer its default back.
+/// `romacs-cursor-shape-mode': the bar in every buffer by default; with
+/// `romacs-cursor-view-type' set, a read-only or special buffer gets that
+/// instead, set as a buffer's mode or read-only state changes. A cursor
+/// something else chose, or the user's own default, is left alone, and
+/// turning the mode off gives every buffer its default back.
 #[test]
-fn the_cursor_is_a_bar_where_text_goes_in_and_a_block_where_it_does_not() {
+fn the_cursor_is_one_bar_and_a_block_where_text_does_not_go_in_is_opt_in() {
     let (mut vm, _) = session();
-    let report = printed(&mut vm, "(progn (romacs-cursor-shape-mode 1)
+    let same = printed(&mut vm, "(progn (romacs-cursor-shape-mode 1)
+      (list (with-current-buffer (get-buffer-create \"plain\") (text-mode) cursor-type)
+            (with-current-buffer (get-buffer-create \"seen\") (special-mode) cursor-type)
+            (with-current-buffer \"plain\" (read-only-mode 1) (prog1 cursor-type (read-only-mode -1)))))");
+    assert_eq!(same, "((bar . 2) (bar . 2) (bar . 2))", "one cursor everywhere by default");
+    let report = printed(&mut vm, "(progn (setq romacs-cursor-view-type 'box) (romacs-cursor-shape-mode 1)
       (list (with-current-buffer (get-buffer-create \"edit\") (text-mode) cursor-type)
             (with-current-buffer (get-buffer-create \"view\") (special-mode) cursor-type)
             (with-current-buffer \"edit\" (read-only-mode 1) (prog1 cursor-type (read-only-mode -1)))

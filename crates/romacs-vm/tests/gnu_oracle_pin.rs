@@ -15,7 +15,7 @@
 //!   in a legacy ledger, and vm2/minibuf's 2, were re-recorded at the pin with
 //!   every case unchanged (`tools/primh/oracle-drift/rerecord.py`), and the
 //!   ledger was retired with them.
-//! * `the_recorder_refuses_*`: `scripts/gnu_oracle.py`, through which
+//! * `the_recorder_refuses_*`: `tools/lib/gnu_oracle.py`, through which
 //!   `tools/primh/record.py` chooses its GNU, refuses an unset, relative or
 //!   non-pin oracle, judged by what the binary itself reports.
 use std::path::PathBuf;
@@ -127,13 +127,13 @@ impl Fake {
 
 fn oracle(value: Option<&str>) -> Output {
     let mut cmd = Command::new("python3");
-    cmd.arg(repo().join("scripts/gnu_oracle.py"))
+    cmd.arg(repo().join("tools/lib/gnu_oracle.py"))
         .arg("check")
         .env_remove("ROMACS_GNU_ORACLE");
     if let Some(v) = value {
         cmd.env("ROMACS_GNU_ORACLE", v);
     }
-    cmd.output().expect("python3 runs scripts/gnu_oracle.py")
+    cmd.output().expect("python3 runs tools/lib/gnu_oracle.py")
 }
 
 fn text(out: &Output) -> String {

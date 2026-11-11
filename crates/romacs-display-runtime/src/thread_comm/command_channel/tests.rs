@@ -1,6 +1,10 @@
 use super::*;
-use crate::thread_comm::{AssetCommand, ConfigCommand, FrameRef, UiCommand, WindowCommand};
+use crate::thread_comm::{AssetCommand, FrameRef, WindowCommand};
 use romacs_display_protocol::ImageId;
+
+const IMAGE_0: ImageId = ImageId::new(0);
+const IMAGE_7: ImageId = ImageId::new(7);
+const IMAGE_64: ImageId = ImageId::new(64);
 
 fn asset(id: u32) -> RenderCommand {
     RenderCommand::Asset(AssetCommand::ImageRetire {
@@ -18,10 +22,8 @@ fn asset_id(command: RenderCommand) -> ImageId {
 fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     let (tx, rx) = command_channel(64);
     tx.try_send(asset(1)).unwrap();
-    tx.try_send(RenderCommand::Config(ConfigCommand::SetShowFps {
-        enabled: true,
-    }))
-    .unwrap();
+    tx.try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .unwrap();
     tx.try_send(asset(2)).unwrap();
     tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow {
         frame: FrameRef::Frame(42),
@@ -34,7 +36,7 @@ fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     assert!(matches!(tx.try_send(asset(63)), Err(TrySendError::Full(_))));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Config(ConfigCommand::SetShowFps { enabled: true })
+        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
     ));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
@@ -71,17 +73,15 @@ fn ordinary_receive_prioritizes_shutdown_without_reordering_assets() {
 fn selective_consumption_unblocks_a_backpressured_sender_without_asset_loss() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Config(ConfigCommand::SetShowFps {
-        enabled: true,
-    }))
-    .unwrap();
+    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .unwrap();
     let (done, result) = bounded(1);
     let worker = std::thread::spawn(move || {
         done.send(tx.send(asset(2))).unwrap();
     });
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Config(ConfigCommand::SetShowFps { enabled: true })
+        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
     ));
     assert!(result.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
     assert_eq!(asset_id(rx.recv().unwrap()), ImageId::new(1));
@@ -129,10 +129,8 @@ fn sender_clones_disconnect_only_after_last_drop_and_pending_commands_are_draine
 #[test]
 fn tty_select_wake_is_rearmed_for_pending_work_and_stale_wakes_are_not_disconnects() {
     let (tx, rx) = command_channel(2);
-    tx.send(RenderCommand::Ui(UiCommand::VisualBell {
-        frame: FrameRef::Frame(42),
-    }))
-    .unwrap();
+    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .unwrap();
     tx.send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
         .unwrap();
     rx.available().recv_timeout(Duration::from_secs(1)).unwrap();
@@ -141,7 +139,7 @@ fn tty_select_wake_is_rearmed_for_pending_work_and_stale_wakes_are_not_disconnec
         RenderCommand::Lifecycle(LifecycleCommand::Shutdown)
     ));
     rx.available().recv_timeout(Duration::from_secs(1)).unwrap();
-    assert!(matches!(rx.try_recv().unwrap(), RenderCommand::Ui(_)));
+    assert!(matches!(rx.try_recv().unwrap(), RenderCommand::Window(_)));
     assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     tx.send(asset(1)).unwrap();
     assert_eq!(asset_id(rx.try_recv().unwrap()), ImageId::new(1));
@@ -156,13 +154,17 @@ fn shutdown_coalesces_outside_full_fifo_and_preserves_rejected_work() {
     let (sender, receiver) = command_channel(crate::thread_comm::COMMAND_CHANNEL_CAPACITY);
     for id in 0..crate::thread_comm::COMMAND_CHANNEL_CAPACITY as u32 {
         sender
-            .try_send(RenderCommand::Asset(AssetCommand::SurfaceFree { id }))
+            .try_send(RenderCommand::Asset(AssetCommand::ImageRetire {
+                image: ImageId::new(id),
+            }))
             .unwrap();
     }
     assert!(matches!(
-        sender.try_send(RenderCommand::Asset(AssetCommand::SurfaceFree { id: 64 })),
+        sender.try_send(RenderCommand::Asset(AssetCommand::ImageRetire {
+            image: IMAGE_64
+        })),
         Err(TrySendError::Full(RenderCommand::Asset(
-            AssetCommand::SurfaceFree { id: 64 }
+            AssetCommand::ImageRetire { image: IMAGE_64 }
         )))
     ));
     for _ in 0..1000 {
@@ -174,7 +176,7 @@ fn shutdown_coalesces_outside_full_fifo_and_preserves_rejected_work() {
     assert!(!receiver.take_shutdown());
     for id in 0..crate::thread_comm::COMMAND_CHANNEL_CAPACITY as u32 {
         assert!(
-            matches!(receiver.recv().unwrap(), RenderCommand::Asset(AssetCommand::SurfaceFree { id: actual }) if actual == id)
+            matches!(receiver.recv().unwrap(), RenderCommand::Asset(AssetCommand::ImageRetire { image: actual }) if actual == ImageId::new(id))
         );
     }
     assert!(receiver.is_empty());
@@ -187,14 +189,12 @@ fn cloned_producers_keep_stream_alive_and_disconnect_returns_ownership() {
     drop(sender);
     assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
     other
-        .send(RenderCommand::Config(ConfigCommand::SetShowFps {
-            enabled: true,
-        }))
+        .send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
         .unwrap();
     drop(other);
     assert!(matches!(
         receiver.recv().unwrap(),
-        RenderCommand::Config(ConfigCommand::SetShowFps { enabled: true })
+        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
     ));
     assert!(matches!(
         receiver.try_recv(),
@@ -209,9 +209,11 @@ fn cloned_producers_keep_stream_alive_and_disconnect_returns_ownership() {
         )))
     ));
     assert!(matches!(
-        sender.send(RenderCommand::Asset(AssetCommand::SurfaceFree { id: 7 })),
-        Err(SendError(RenderCommand::Asset(AssetCommand::SurfaceFree {
-            id: 7
+        sender.send(RenderCommand::Asset(AssetCommand::ImageRetire {
+            image: IMAGE_7
+        })),
+        Err(SendError(RenderCommand::Asset(AssetCommand::ImageRetire {
+            image: IMAGE_7
         })))
     ));
 }
@@ -222,15 +224,19 @@ fn blocking_sender_resumes_on_space_or_owner_disconnect() {
         let (sender, receiver) = command_channel(crate::thread_comm::COMMAND_CHANNEL_CAPACITY);
         for id in 0..crate::thread_comm::COMMAND_CHANNEL_CAPACITY as u32 {
             sender
-                .try_send(RenderCommand::Asset(AssetCommand::SurfaceFree { id }))
+                .try_send(RenderCommand::Asset(AssetCommand::ImageRetire {
+                    image: ImageId::new(id),
+                }))
                 .unwrap();
         }
         let (started, start) = bounded(1);
         let (done, result) = bounded(1);
         let worker = std::thread::spawn(move || {
             started.send(()).unwrap();
-            done.send(sender.send(RenderCommand::Asset(AssetCommand::SurfaceFree { id: 64 })))
-                .unwrap();
+            done.send(sender.send(RenderCommand::Asset(AssetCommand::ImageRetire {
+                image: IMAGE_64,
+            })))
+            .unwrap();
         });
         start.recv().unwrap();
         assert!(matches!(result.try_recv(), Err(TryRecvError::Empty)));
@@ -240,14 +246,14 @@ fn blocking_sender_resumes_on_space_or_owner_disconnect() {
                 result
                     .recv_timeout(std::time::Duration::from_secs(1))
                     .unwrap(),
-                Err(SendError(RenderCommand::Asset(AssetCommand::SurfaceFree {
-                    id: 64
+                Err(SendError(RenderCommand::Asset(AssetCommand::ImageRetire {
+                    image: IMAGE_64
                 })))
             ));
         } else {
             assert!(matches!(
                 receiver.try_recv().unwrap(),
-                RenderCommand::Asset(AssetCommand::SurfaceFree { id: 0 })
+                RenderCommand::Asset(AssetCommand::ImageRetire { image: IMAGE_0 })
             ));
             assert!(
                 result
@@ -257,7 +263,7 @@ fn blocking_sender_resumes_on_space_or_owner_disconnect() {
             );
             for id in 1..=crate::thread_comm::COMMAND_CHANNEL_CAPACITY as u32 {
                 assert!(
-                    matches!(receiver.try_recv().unwrap(), RenderCommand::Asset(AssetCommand::SurfaceFree { id: actual }) if actual == id)
+                    matches!(receiver.try_recv().unwrap(), RenderCommand::Asset(AssetCommand::ImageRetire { image: actual }) if actual == ImageId::new(id))
                 );
             }
             assert!(receiver.is_empty());
@@ -316,10 +322,8 @@ fn independent_shutdown_retains_len_timeout_fifo_and_last_sender_disconnect() {
 fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Config(ConfigCommand::SetShowFps {
-        enabled: true,
-    }))
-    .unwrap();
+    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .unwrap();
     assert!(!rx.has_startup_command_for(false));
     assert!(rx.has_startup_command_for(true));
     assert!(matches!(
@@ -333,7 +337,7 @@ fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     ));
     assert!(matches!(
         rx.try_recv_startup_for(true, true).unwrap(),
-        RenderCommand::Config(ConfigCommand::SetShowFps { enabled: true })
+        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
     ));
     assert!(!rx.has_startup_command_for(true));
     assert!(matches!(
@@ -345,4 +349,25 @@ fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
         rx.try_recv_startup_for(true, false),
         Err(TryRecvError::Disconnected)
     ));
+}
+
+/// A producer held within a limit is refused at it while the channel still
+/// takes everyone else's commands, up to its capacity.
+#[test]
+fn a_limited_producer_leaves_the_rest_of_the_channel() {
+    let capacity = crate::thread_comm::COMMAND_CHANNEL_CAPACITY;
+    let room = crate::thread_comm::MODEL_REQUEST_ROOM;
+    assert!(room < capacity / 2, "a publication's commands fit beside the requests");
+    let (sender, receiver) = command_channel(capacity);
+    let retire = |id| RenderCommand::Asset(AssetCommand::ImageRetire { image: ImageId::new(id) });
+    let (room_ids, capacity_ids) = (u32::try_from(room).unwrap(), u32::try_from(capacity).unwrap());
+    for id in 0..room_ids {
+        sender.try_send_within(retire(id), room).unwrap();
+    }
+    assert!(matches!(sender.try_send_within(retire(999), room), Err(TrySendError::Full(_))));
+    for id in room_ids..capacity_ids {
+        sender.try_send(retire(id)).unwrap();
+    }
+    assert!(matches!(sender.try_send(retire(999)), Err(TrySendError::Full(_))));
+    assert_eq!(receiver.len(), capacity);
 }

@@ -1,13 +1,11 @@
 //! Media methods for WgpuRenderer.
 
-use super::super::image_cache::ImageCache;
 use super::WgpuRenderer;
 #[cfg(feature = "video")]
 use romacs_display_protocol::VideoId;
 use romacs_display_protocol::{
     ImageAnimationPolicy, ImageColorContext, ImageFrameIndex, ImageId, ImageLoadToken,
-    ImageMaskPolicy, ImageRealization, ImageRotation, ImageSequenceId, ImageSequenceRetirement,
-    ImageSizeSpec,
+    ImageMaskPolicy, ImageRealization, ImageRotation, ImageSequenceId, ImageSizeSpec,
 };
 #[cfg(feature = "video")]
 use romacs_video::{PlaybackAction, VideoOpenRequest};
@@ -78,21 +76,6 @@ impl WgpuRenderer {
         self.caches.image.memory_usage()
     }
 
-    /// Load image from file path (async - returns immediately)
-    /// Returns image ID, actual texture loads in background
-    pub fn load_image_file(
-        &mut self,
-        path: &str,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        colors: ImageColorContext,
-    ) -> ImageId {
-        let raster_scale = self.scale_factor;
-        self.caches
-            .image
-            .load_file(path, size, rotation, colors, raster_scale)
-    }
-
     /// Realize chrome using its owning window's scale, not the last drawn window.
     pub fn load_toolbar_icon(&mut self, key: &romacs_display_protocol::ToolBarIconKey) -> ImageId {
         match key.source() {
@@ -106,51 +89,6 @@ impl WgpuRenderer {
                 )
             }
         }
-    }
-
-    /// Load image from file path with a pre-allocated ID (for threaded mode)
-    #[allow(clippy::too_many_arguments)]
-    pub fn load_image_file_with_id(
-        &mut self,
-        load: ImageLoadToken,
-        path: &str,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        realization: ImageRealization,
-        colors: ImageColorContext,
-        mask: ImageMaskPolicy,
-        animation: ImageAnimationPolicy,
-        frame: ImageFrameIndex,
-        sequence: ImageSequenceId,
-        identity: romacs_display_protocol::image_diagnostic::ImageLoadIdentity,
-    ) {
-        self.caches.image.load_file_with_id(
-            load,
-            path,
-            size,
-            rotation,
-            realization,
-            colors,
-            mask,
-            animation,
-            frame,
-            sequence,
-            identity,
-        )
-    }
-
-    /// Load image from data (async - returns immediately)
-    pub fn load_image_data(
-        &mut self,
-        data: &[u8],
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        colors: ImageColorContext,
-    ) -> ImageId {
-        let raster_scale = self.scale_factor;
-        self.caches
-            .image
-            .load_data(data, size, rotation, colors, raster_scale)
     }
 
     /// Load image from data with pre-allocated ID (for threaded mode)
@@ -186,48 +124,6 @@ impl WgpuRenderer {
         )
     }
 
-    /// Invalidate CPU-side animation decoder/compositor state independently
-    /// from frame textures.
-    pub fn retire_image_sequence(&mut self, retirement: ImageSequenceRetirement) {
-        self.caches.image.retire_sequence(retirement);
-    }
-
-    /// Load image from raw ARGB32 pixel data
-    pub fn load_image_argb32(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> ImageId {
-        self.caches.image.load_raw_argb32(
-            data,
-            width,
-            height,
-            stride,
-            ImageSizeSpec::default(),
-            ImageRotation::None,
-        )
-    }
-
-    /// Load image from raw RGB24 pixel data
-    pub fn load_image_rgb24(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> ImageId {
-        self.caches.image.load_raw_rgb24(
-            data,
-            width,
-            height,
-            stride,
-            ImageSizeSpec::default(),
-            ImageRotation::None,
-        )
-    }
-
     /// Load image from raw ARGB32 pixel data with pre-allocated ID (for threaded mode)
     pub fn load_image_argb32_with_id(
         &mut self,
@@ -240,30 +136,6 @@ impl WgpuRenderer {
         self.caches
             .image
             .load_raw_argb32_with_id(load, data, width, height, stride)
-    }
-
-    /// Load image from raw RGB24 pixel data with pre-allocated ID (for threaded mode)
-    pub fn load_image_rgb24_with_id(
-        &mut self,
-        load: ImageLoadToken,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) {
-        self.caches
-            .image
-            .load_raw_rgb24_with_id(load, data, width, height, stride)
-    }
-
-    /// Query image file dimensions for a pending-image placeholder.
-    pub fn query_image_file_size(path: &str) -> Option<(u32, u32)> {
-        ImageCache::query_file_dimensions(path).map(|extent| extent.dimensions())
-    }
-
-    /// Query image data dimensions for a pending-image placeholder.
-    pub fn query_image_data_size(data: &[u8]) -> Option<(u32, u32)> {
-        ImageCache::query_data_dimensions(data).map(|extent| extent.dimensions())
     }
 
     /// Get image dimensions (works for pending and loaded images)
@@ -305,13 +177,13 @@ impl WgpuRenderer {
     /// Load video from file path (async - returns immediately)
     /// Returns video ID, frames decode in background
     #[cfg(feature = "video")]
-    pub fn load_video_file(&mut self, path: &str) -> u32 {
+    pub(crate) fn load_video_file(&mut self, path: &str) -> u32 {
         self.caches.video.load_file(path)
     }
 
     /// Load video from file path with a pre-allocated ID.
     #[cfg(feature = "video")]
-    pub fn load_video_file_with_id(
+    pub(crate) fn load_video_file_with_id(
         &mut self,
         id: u32,
         path: &str,
@@ -325,7 +197,13 @@ impl WgpuRenderer {
 
     /// Load video from URI with a pre-allocated ID.
     #[cfg(feature = "video")]
-    pub fn load_video_uri_with_id(&mut self, id: u32, uri: &str, loop_count: i32, autoplay: bool) {
+    pub(crate) fn load_video_uri_with_id(
+        &mut self,
+        id: u32,
+        uri: &str,
+        loop_count: i32,
+        autoplay: bool,
+    ) {
         self.caches
             .video
             .load_uri_with_id(id, uri, loop_count, autoplay);
@@ -333,31 +211,31 @@ impl WgpuRenderer {
 
     /// Open one stable editor video session from a fully typed request.
     #[cfg(feature = "video")]
-    pub fn open_video(&mut self, id: VideoId, request: VideoOpenRequest) {
+    pub(crate) fn open_video(&mut self, id: VideoId, request: VideoOpenRequest) {
         self.caches.video.open(id, request);
     }
 
     /// Apply one typed playback transition to an existing video session.
     #[cfg(feature = "video")]
-    pub fn control_video(&mut self, id: VideoId, action: PlaybackAction) {
+    pub(crate) fn control_video(&mut self, id: VideoId, action: PlaybackAction) {
         self.caches.video.control(id, action);
     }
 
     /// Close one stable editor video session.
     #[cfg(feature = "video")]
-    pub fn close_video(&mut self, id: VideoId) {
+    pub(crate) fn close_video(&mut self, id: VideoId) {
         self.caches.video.close(id);
     }
 
     /// Snapshot the native video pipeline without exposing renderer handles.
     #[cfg(feature = "video")]
-    pub fn video_diagnostics(&self) -> Result<romacs_video::VideoDiagnostics, String> {
+    pub(crate) fn video_diagnostics(&self) -> Result<romacs_video::VideoDiagnostics, String> {
         self.caches.video.diagnostics()
     }
 
     /// Acknowledge a new native-video diagnostics measurement epoch.
     #[cfg(feature = "video")]
-    pub fn begin_video_measurement_epoch(&mut self) -> Result<(), String> {
+    pub(crate) fn begin_video_measurement_epoch(&mut self) -> Result<(), String> {
         self.caches.video.begin_measurement_epoch()?;
         self.gpu_frame_timer.begin_measurement_epoch();
         Ok(())
@@ -383,43 +261,43 @@ impl WgpuRenderer {
 
     /// Get video dimensions
     #[cfg(feature = "video")]
-    pub fn get_video_size(&self, id: u32) -> Option<(u32, u32)> {
+    pub(crate) fn get_video_size(&self, id: u32) -> Option<(u32, u32)> {
         self.caches.video.get_dimensions(id)
     }
 
     /// Get video state
     #[cfg(feature = "video")]
-    pub fn get_video_state(&self, id: u32) -> Option<super::super::video_cache::VideoState> {
+    pub(crate) fn get_video_state(&self, id: u32) -> Option<super::super::video_cache::VideoState> {
         self.caches.video.get_state(id)
     }
 
     /// Play video
     #[cfg(feature = "video")]
-    pub fn video_play(&mut self, id: u32) {
+    pub(crate) fn video_play(&mut self, id: u32) {
         self.caches.video.play(id)
     }
 
     /// Pause video
     #[cfg(feature = "video")]
-    pub fn video_pause(&mut self, id: u32) {
+    pub(crate) fn video_pause(&mut self, id: u32) {
         self.caches.video.pause(id)
     }
 
     /// Stop video
     #[cfg(feature = "video")]
-    pub fn video_stop(&mut self, id: u32) {
+    pub(crate) fn video_stop(&mut self, id: u32) {
         self.caches.video.stop(id)
     }
 
     /// Set video loop count (-1 for infinite)
     #[cfg(feature = "video")]
-    pub fn video_set_loop(&mut self, id: u32, count: i32) {
+    pub(crate) fn video_set_loop(&mut self, id: u32, count: i32) {
         self.caches.video.set_loop(id, count)
     }
 
     /// Free a video from cache
     #[cfg(feature = "video")]
-    pub fn free_video(&mut self, id: u32) {
+    pub(crate) fn free_video(&mut self, id: u32) {
         self.caches.video.remove(id)
     }
 
@@ -448,7 +326,7 @@ impl WgpuRenderer {
 
     /// Get cached video for rendering
     #[cfg(feature = "video")]
-    pub fn get_video(&self, id: u32) -> Option<&super::super::video_cache::CachedVideo> {
+    pub(crate) fn get_video(&self, id: u32) -> Option<&super::super::video_cache::CachedVideo> {
         self.caches.video.get(id)
     }
 
@@ -491,32 +369,6 @@ impl WgpuRenderer {
             channel0,
         )?;
         self.register_surface_bytes(id, width_px, height_px, recreatable);
-        Ok(())
-    }
-
-    /// Create a static surface from raw RGBA8 pixel data. Pixel surfaces are
-    /// only created through the imperative API, so they are never
-    /// budget-evictable.
-    pub fn create_pixel_surface(
-        &mut self,
-        id: u32,
-        data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> Result<(), String> {
-        let layout = self.caches.image.bind_group_layout();
-        let sampler = self.caches.image.sampler();
-        let (width_px, height_px) = self.caches.surface.create_pixels(
-            &self.device,
-            &self.queue,
-            layout,
-            sampler,
-            id,
-            data,
-            width,
-            height,
-        )?;
-        self.register_surface_bytes(id, width_px, height_px, false);
         Ok(())
     }
 
@@ -575,10 +427,6 @@ impl WgpuRenderer {
         }
         #[cfg(feature = "video")]
         for event in self.caches.video.drain_accounting() {
-            self.media_budget.apply(event);
-        }
-        #[cfg(all(feature = "webview", target_os = "linux"))]
-        for event in self.caches.webview.drain_accounting() {
             self.media_budget.apply(event);
         }
     }
@@ -773,24 +621,6 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    /// Update one named uniform on the installed frame post shader (cheap;
-    /// no recompile). Unknown names warn inside [`crate::frame_post::FramePost::set_uniform`];
-    /// no shader installed warns here — the host errors to Lisp before this
-    /// point, so hitting it means install/remove raced ahead in the queue.
-    pub fn set_frame_post_uniform(&mut self, name: &str, value: [f32; 4]) {
-        match self.frame_post.as_mut() {
-            Some(post) => post.set_uniform(name, value),
-            None => tracing::warn!("set_frame_post_uniform: no frame post shader installed"),
-        }
-    }
-
-    /// Remove the full-frame post shader.
-    pub fn clear_frame_post(&mut self) {
-        if self.frame_post.take().is_some() {
-            tracing::info!("frame post shader removed");
-        }
-    }
-
     /// Whether a frame post shader is installed.
     pub fn has_frame_post(&self) -> bool {
         self.frame_post.is_some()
@@ -827,59 +657,5 @@ impl WgpuRenderer {
             );
             self.submit_commands([commands]);
         }
-    }
-
-    /// Update a WebView in the cache from a DMA-BUF buffer.
-    /// Returns the native frame on failure so its owner can capture pixels.
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn update_webview_dmabuf<R: Send + 'static>(
-        &mut self,
-        view_id: romacs_display_protocol::WebViewId,
-        buffer: super::super::external_buffer::DmaBufBuffer,
-        retained_frame: R,
-    ) -> Result<(), R> {
-        self.caches
-            .webview
-            .update_view(view_id, buffer, retained_frame, &self.device, &self.queue)
-    }
-
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn webview_import_formats(&self) -> romacs_display_protocol::DmaBufImportFormats {
-        self.caches.webview.import_formats()
-    }
-
-    /// Update a WebView in the cache from pixel data.
-    /// Returns true if successful.
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn update_webview_pixels(
-        &mut self,
-        view_id: romacs_display_protocol::WebViewId,
-        width: u32,
-        height: u32,
-        pixels: &[u8],
-    ) -> bool {
-        self.caches.webview.update_view_from_pixels(
-            view_id,
-            width,
-            height,
-            pixels,
-            &self.device,
-            &self.queue,
-        )
-    }
-
-    /// Release whatever the renderer holds for a closed WebView.
-    ///
-    /// Only the Linux WPE path composites web content through a texture
-    /// cache; the native-overlay backends on macOS and Windows own their
-    /// views outside the renderer, so there is nothing to release here.  The
-    /// method exists on every `webview` build so the display runtime's close
-    /// path is one call, not a per-target `cfg`.
-    #[cfg(feature = "webview")]
-    pub fn remove_webview(&mut self, view_id: romacs_display_protocol::WebViewId) {
-        #[cfg(target_os = "linux")]
-        self.caches.webview.remove(view_id);
-        #[cfg(not(target_os = "linux"))]
-        let _ = view_id;
     }
 }

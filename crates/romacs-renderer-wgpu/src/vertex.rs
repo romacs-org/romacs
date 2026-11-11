@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 /// Vertex for solid color rectangles.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct RectVertex {
+pub(crate) struct RectVertex {
     pub position: [f32; 2],
     pub color: [f32; 4],
 }
@@ -34,12 +34,13 @@ impl RectVertex {
 /// Vertex for textured quads (images, video, webkit).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct TextureVertex {
+pub(crate) struct TextureVertex {
     pub position: [f32; 2],
     pub tex_coords: [f32; 2],
 }
 
 impl TextureVertex {
+    #[cfg(test)]
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TextureVertex>() as wgpu::BufferAddress,
@@ -63,7 +64,7 @@ impl TextureVertex {
 /// Vertex for glyph rendering (textured with color).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct GlyphVertex {
+pub(crate) struct GlyphVertex {
     pub position: [f32; 2],
     pub tex_coords: [f32; 2],
     pub color: [f32; 4],
@@ -101,7 +102,7 @@ impl GlyphVertex {
 /// Unlike image quads, a coverage quad cannot omit its background.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct CoverageGlyphVertex {
+pub(crate) struct CoverageGlyphVertex {
     pub position: [f32; 2],
     pub tex_coords: [f32; 2],
     pub fg_color: [f32; 4],
@@ -149,7 +150,7 @@ impl CoverageGlyphVertex {
 /// compute the signed distance field per-pixel for anti-aliased rounded corners.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct RoundedRectVertex {
+pub(crate) struct RoundedRectVertex {
     /// Quad corner position (screen pixels, slightly oversized for AA fringe)
     pub position: [f32; 2],
     /// Border color (RGBA, linear)
@@ -267,5 +268,4 @@ pub struct Uniforms {
 }
 
 #[cfg(test)]
-#[path = "vertex/tests/vertex_test.rs"]
 mod tests;

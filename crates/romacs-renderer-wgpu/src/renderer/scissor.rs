@@ -35,5 +35,4 @@ impl SurfaceScissor {
 }
 
 #[cfg(test)]
-#[path = "scissor/tests/scissor_test.rs"]
 mod tests;

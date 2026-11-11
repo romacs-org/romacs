@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-EMPTYSYM1 | A symbol with an empty name prints as nothing | `print_object`, Lisp_Symbol arm (`src/print.c:2496-2500`): with `print-gensym` nil (or for an interned symbol) a zero-byte name prints `##`, so `(prin1-to-string (intern ""))` and `(prin1-to-string (make-symbol ""))` are both `"##"` | VM2's printer emits the empty name verbatim, so both are `""` (and `(list (intern "") (make-symbol ""))` prints `( )`); true before `keywordp` existed (the 23deaa2a binary gives the same rows). The symbols themselves agree: `symbol-name`, `eq` and `keywordp` (nil for both, harness rows `keywordp/0026`, `/0027`). The two pinned `keywordp` harness rows, `keywordp/0071` and `/0079`, are the printer family of these two values and call no `keywordp` | **Package-observable** only when printing the empty-named symbol (`prin1`, `format "%S"`), whose GNU output `##` reads back as that symbol and VM2's empty output does not. Belongs in the printer, not in any primitive | <!-- symbols: prin1, prin1-to-string, intern, make-symbol -->

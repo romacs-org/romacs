@@ -65,7 +65,8 @@ impl CursorBarWidth {
         Self(width)
     }
 
-    pub fn from_lisp_fixnum(width: i64) -> Option<Self> {
+    #[cfg(test)]
+    pub(crate) fn from_lisp_fixnum(width: i64) -> Option<Self> {
         if (0..=i64::from(i32::MAX)).contains(&width) {
             Some(Self(width as u32))
         } else {
@@ -77,14 +78,16 @@ impl CursorBarWidth {
         self.0
     }
 
+    #[cfg(test)]
     /// Pixel dimension used by renderers for bar/hbar drawing.
-    pub fn render_px(self) -> f32 {
+    pub(crate) fn render_px(self) -> f32 {
         self.0.max(1) as f32
     }
 
+    #[cfg(test)]
     /// GNU narrows bar cursors in non-selected windows by one pixel when the
     /// alternate cursor is `t`.
-    pub fn narrowed_for_non_selected_bar(self) -> Self {
+    pub(crate) fn narrowed_for_non_selected_bar(self) -> Self {
         if self.0 > 1 { Self(self.0 - 1) } else { self }
     }
 }
@@ -135,10 +138,6 @@ impl CursorSpec {
     pub const fn hbar(width: CursorBarWidth) -> Self {
         Self::new(CursorKind::Hbar, width)
     }
-
-    pub fn to_style(self) -> Option<CursorStyle> {
-        CursorStyle::from_spec(self)
-    }
 }
 
 /// Cursor visual style, carrying backend drawing dimensions.
@@ -159,31 +158,6 @@ pub enum CursorStyle {
 }
 
 impl CursorStyle {
-    /// Convert a resolved semantic cursor spec into a renderable style.
-    pub fn from_spec(spec: CursorSpec) -> Option<Self> {
-        Self::from_kind(spec.cursor_kind, spec.bar_width)
-    }
-
-    /// Convert a `CursorKind` plus bar width into a renderable `CursorStyle`.
-    /// `Default` collapses to `FilledBox` and `NoCursor` returns `None`.
-    pub fn from_kind(kind: CursorKind, bar_width: CursorBarWidth) -> Option<Self> {
-        match kind {
-            CursorKind::FilledBox | CursorKind::Default => Some(Self::FilledBox),
-            CursorKind::HollowBox => Some(Self::Hollow),
-            CursorKind::Bar => Some(Self::Bar(bar_width.render_px())),
-            CursorKind::Hbar => Some(Self::Hbar(bar_width.render_px())),
-            CursorKind::NoCursor => None,
-        }
-    }
-
-    /// Legacy entry point that accepts the old raw cursor byte.
-    #[deprecated(note = "use CursorStyle::from_kind with CursorKind for GNU-parity encoding")]
-    pub fn from_type(cursor_type: u8, bar_width: i32) -> Option<Self> {
-        let kind = CursorKind::from_gnu_code(cursor_type as i8)?;
-        let width = CursorBarWidth::new(bar_width.max(0) as u32);
-        Self::from_kind(kind, width)
-    }
-
     /// Returns true if this is a hollow cursor.
     pub fn is_hollow(&self) -> bool {
         matches!(self, Self::Hollow)
@@ -202,5 +176,4 @@ impl CursorStyle {
 }
 
 #[cfg(test)]
-#[path = "cursor/tests/cursor_test.rs"]
 mod tests;

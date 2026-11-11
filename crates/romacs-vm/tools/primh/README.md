@@ -10,7 +10,7 @@ Run from the repository root. Build the pinned oracle once, then use `record.py`
 not direct `primh.py record` or `bulk.py record` calls:
 
 ```sh
-scripts/build-gnu-oracle.sh
+tools/build-gnu-oracle.sh
 H=crates/romacs-vm/tools/primh
 PIN=$(python3 -c 'import tomllib; print(tomllib.load(open("parity-reference.toml", "rb"))["mirror_commit"])')
 export ROMACS_GNU_ORACLE="${GNU_ORACLE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/gnu-emacs-pin}/$PIN/bin/emacs"
@@ -31,11 +31,16 @@ pins only if all case results are unchanged.
 
 To derive new specs, pass the current Cargo build-script output explicitly to
 `primh.py from-manifest MANIFEST --out DIR --gnu "$ROMACS_GNU_ORACLE" --only NAME`.
-Do not copy a fingerprinted OUT_DIR from another build. Generate current Rust
-replays with `python3 "$H/render_replay.py" primh SPEC... --out TEST.rs`. The
-original producer and template remain byte-pinned recording inputs; the renderer
-adapts only their emitted crate import and value-display calls. Review generated
-changes with the corresponding specs.
+Do not copy a fingerprinted OUT_DIR from another build. Every primitive's
+replay is one `#[test]` line of `tests/primh.rs`, under one copy of the
+template: add new ones with
+`python3 "$H/render_replay.py" primh SPEC... --into crates/romacs-vm/tests/primh.rs`, which
+keeps the replays the file has. The replays edited by hand after rendering
+(`primh_eval.rs`, `primh_mapc.rs`, `primh_mapcan.rs`, `primh_map_keymap.rs`,
+`primh_cmdloop_pins.rs`) keep their own files. `--out TEST.rs` renders a file
+of its own. The original producer and template remain byte-pinned recording
+inputs; the renderer adapts only their emitted crate import and value-display
+calls. Review generated changes with the corresponding specs.
 
 Run reports belong under `target/evidence/`; the `evidence/` corpus and code
 currently under `logs/` are maintained inputs, not disposable output directories.

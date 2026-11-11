@@ -2,7 +2,7 @@ Romacs's icons: the glyphs in this directory (*.svg), the codepoint list
 (codepoints.txt) and the provenance list (sources.txt).
 
 Each *.svg but romacs.svg is an upstream glyph, scaled and placed in one text cell by
-scripts/import-icon-glyphs.py from Symbols Nerd Font Mono 3.4.0
+tools/import-icon-glyphs from Symbols Nerd Font Mono 3.4.0
 (Nerd Fonts, https://github.com/ryanoasis/nerd-fonts). That font is
 Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com) and is
 licensed under the SIL Open Font License 1.1; Romacs Icons is a Modified
@@ -50,5 +50,5 @@ under the GNU General Public License, version 3 or (at your option) any
 later version (see COPYING).
 
 assets/fonts/RomacsIcons.ttf is built from the glyphs by
-scripts/build-icon-font.py, under the SIL Open Font License 1.1
+tools/build-icon-font, under the SIL Open Font License 1.1
 (../fonts/OFL.txt), its glyphs under their sets' licences above as well.

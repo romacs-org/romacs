@@ -68,7 +68,7 @@ pub enum PropertyKind {
 /// A trait rather than a match inside the macro, so adding a property type
 /// fails to compile until its kind is stated rather than silently degrading to
 /// something vague.
-pub trait EffectProperty {
+pub(crate) trait EffectProperty {
     const KIND: PropertyKind;
 }
 
@@ -1770,7 +1770,6 @@ effect_config!(
 );
 
 #[cfg(test)]
-#[path = "effect_config/tests/effect_config_test.rs"]
 mod tests;
 
 /// Container for all visual effect configurations.

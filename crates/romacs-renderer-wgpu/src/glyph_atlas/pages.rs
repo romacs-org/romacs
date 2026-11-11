@@ -55,7 +55,8 @@ impl GlyphAtlasPages {
         id
     }
 
-    pub fn page_counts(&self) -> (usize, usize, usize) {
+    #[cfg(test)]
+    pub(crate) fn page_counts(&self) -> (usize, usize, usize) {
         (self.alpha.len(), self.subpixel.len(), self.color.len())
     }
 
@@ -118,7 +119,7 @@ impl GlyphAtlasPages {
         })
     }
 
-    pub fn allocate_alpha(
+    pub(crate) fn allocate_alpha(
         &mut self,
         size: PixelSize,
         device: &wgpu::Device,
@@ -187,7 +188,7 @@ impl GlyphAtlasPages {
         })
     }
 
-    pub fn allocate_subpixel(
+    pub(crate) fn allocate_subpixel(
         &mut self,
         size: PixelSize,
         device: &wgpu::Device,
@@ -256,7 +257,7 @@ impl GlyphAtlasPages {
         })
     }
 
-    pub fn allocate_color(
+    pub(crate) fn allocate_color(
         &mut self,
         size: PixelSize,
         device: &wgpu::Device,
@@ -325,15 +326,18 @@ impl GlyphAtlasPages {
         })
     }
 
-    pub fn alpha_page(&self, id: PageId<AlphaMask>) -> Option<&AtlasPage<AlphaMask>> {
+    pub(crate) fn alpha_page(&self, id: PageId<AlphaMask>) -> Option<&AtlasPage<AlphaMask>> {
         self.alpha.iter().find(|p| p.id == id)
     }
 
-    pub fn subpixel_page(&self, id: PageId<SubpixelMask>) -> Option<&AtlasPage<SubpixelMask>> {
+    pub(crate) fn subpixel_page(
+        &self,
+        id: PageId<SubpixelMask>,
+    ) -> Option<&AtlasPage<SubpixelMask>> {
         self.subpixel.iter().find(|p| p.id == id)
     }
 
-    pub fn color_page(&self, id: PageId<ColorRgba>) -> Option<&AtlasPage<ColorRgba>> {
+    pub(crate) fn color_page(&self, id: PageId<ColorRgba>) -> Option<&AtlasPage<ColorRgba>> {
         self.color.iter().find(|p| p.id == id)
     }
 
@@ -349,28 +353,28 @@ impl GlyphAtlasPages {
         }
     }
 
-    pub fn pin_alpha(&mut self, id: PageId<AlphaMask>, frame: u64) {
+    pub(crate) fn pin_alpha(&mut self, id: PageId<AlphaMask>, frame: u64) {
         if let Some(page) = self.alpha.iter_mut().find(|p| p.id == id) {
             page.pinned_this_frame = true;
             page.last_used_frame = frame;
         }
     }
 
-    pub fn pin_subpixel(&mut self, id: PageId<SubpixelMask>, frame: u64) {
+    pub(crate) fn pin_subpixel(&mut self, id: PageId<SubpixelMask>, frame: u64) {
         if let Some(page) = self.subpixel.iter_mut().find(|p| p.id == id) {
             page.pinned_this_frame = true;
             page.last_used_frame = frame;
         }
     }
 
-    pub fn pin_color(&mut self, id: PageId<ColorRgba>, frame: u64) {
+    pub(crate) fn pin_color(&mut self, id: PageId<ColorRgba>, frame: u64) {
         if let Some(page) = self.color.iter_mut().find(|p| p.id == id) {
             page.pinned_this_frame = true;
             page.last_used_frame = frame;
         }
     }
 
-    pub fn lru_unpinned_alpha(&self) -> Option<usize> {
+    pub(crate) fn lru_unpinned_alpha(&self) -> Option<usize> {
         self.alpha
             .iter()
             .enumerate()
@@ -379,7 +383,7 @@ impl GlyphAtlasPages {
             .map(|(i, _)| i)
     }
 
-    pub fn lru_unpinned_subpixel(&self) -> Option<usize> {
+    pub(crate) fn lru_unpinned_subpixel(&self) -> Option<usize> {
         self.subpixel
             .iter()
             .enumerate()
@@ -388,7 +392,7 @@ impl GlyphAtlasPages {
             .map(|(i, _)| i)
     }
 
-    pub fn lru_unpinned_color(&self) -> Option<usize> {
+    pub(crate) fn lru_unpinned_color(&self) -> Option<usize> {
         self.color
             .iter()
             .enumerate()
@@ -397,7 +401,7 @@ impl GlyphAtlasPages {
             .map(|(i, _)| i)
     }
 
-    pub fn reset_alpha_page(
+    pub(crate) fn reset_alpha_page(
         &mut self,
         index: usize,
         frame: u64,
@@ -410,7 +414,7 @@ impl GlyphAtlasPages {
         Some((page.id, page.generation))
     }
 
-    pub fn reset_subpixel_page(
+    pub(crate) fn reset_subpixel_page(
         &mut self,
         index: usize,
         frame: u64,
@@ -423,7 +427,7 @@ impl GlyphAtlasPages {
         Some((page.id, page.generation))
     }
 
-    pub fn reset_color_page(
+    pub(crate) fn reset_color_page(
         &mut self,
         index: usize,
         frame: u64,
@@ -438,5 +442,4 @@ impl GlyphAtlasPages {
 }
 
 #[cfg(test)]
-#[path = "pages/tests/pages_test.rs"]
 mod tests;

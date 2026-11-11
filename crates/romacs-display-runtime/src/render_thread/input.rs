@@ -1,9 +1,7 @@
 //! Input translation and window chrome hit-testing.
 
-use crate::backend::wgpu::{
-    ROMACS_ALT_MASK, ROMACS_CTRL_MASK, ROMACS_HYPER_MASK, ROMACS_META_MASK, ROMACS_SUPER_MASK,
-};
 use crate::host_types::FrontendKey;
+use romacs_display_protocol::TransportModifierBit;
 use winit::keyboard::{Key, NamedKey, NativeKey};
 
 use super::RenderApp;
@@ -13,7 +11,7 @@ use crate::thread_comm::PopupAnchorRect;
 use romacs_display_protocol::frame_chrome::{ChromeAction, FramePoint, FrameRect};
 
 pub(super) fn frame_chrome_hit(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     x: f32,
     y: f32,
 ) -> Option<(&ChromeAction, FrameRect)> {
@@ -21,7 +19,7 @@ pub(super) fn frame_chrome_hit(
 }
 
 pub(super) fn frame_chrome_owns_pointer(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     x: f32,
     y: f32,
 ) -> bool {
@@ -264,17 +262,10 @@ impl RenderApp {
             // Text is handled by translate_key_input, never interpreted as a keysym.
             Key::Character(_) => 0,
             // A key winit could not name at all.  X11 and Wayland hand over
-            // the raw keysym, which is already this port's identity; the
-            // platforms whose native key is a scancode or a virtual-key code
-            // get a reserved band, so the key keeps an identity and stays
-            // bindable instead of being dropped.
+            // the raw keysym, which is already this port's identity, so the
+            // key stays bindable instead of being dropped.
             Key::Unidentified(native) => match native {
                 NativeKey::Xkb(keysym) => *keysym,
-                NativeKey::MacOS(scancode) => crate::host_types::native_key_macos(*scancode),
-                NativeKey::Windows(virtual_key) => {
-                    crate::host_types::native_key_windows(*virtual_key)
-                }
-                NativeKey::Android(keycode) => crate::host_types::native_key_android(*keycode),
                 NativeKey::Unidentified => {
                     tracing::debug!("unidentified native key carries no identity");
                     0
@@ -300,11 +291,11 @@ impl RenderApp {
     /// (`src/keyboard.c:7941`).
     pub(super) fn translate_committed_text(text: &str, modifiers: u32) -> Option<Vec<FrontendKey>> {
         let command_modifiers_active = modifiers
-            & (ROMACS_CTRL_MASK
-                | ROMACS_META_MASK
-                | ROMACS_SUPER_MASK
-                | ROMACS_ALT_MASK
-                | ROMACS_HYPER_MASK)
+            & (TransportModifierBit::Ctrl.mask()
+                | TransportModifierBit::Meta.mask()
+                | TransportModifierBit::Super.mask()
+                | TransportModifierBit::Alt.mask()
+                | TransportModifierBit::Hyper.mask())
             != 0;
         if command_modifiers_active {
             return None;
@@ -490,7 +481,7 @@ impl RenderApp {
         x: f32,
         y: f32,
     ) -> u32 {
-        if chrome.decorations_enabled || chrome.is_fullscreen || chrome.titlebar_height <= 0.0 {
+        if chrome.decorations_enabled || chrome.titlebar_height <= 0.0 {
             return 0;
         }
         let w = logical_width;
@@ -552,5 +543,4 @@ impl RenderApp {
 }
 
 #[cfg(test)]
-#[path = "input/tests/input_test.rs"]
 mod tests;

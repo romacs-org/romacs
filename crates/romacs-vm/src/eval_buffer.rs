@@ -94,7 +94,7 @@ impl Vm {
                     self.stack[start].as_integer()?
                 };
                 let index = self.buffer_index()?;
-                let shortage = match &mut self.objects[index] {
+                let shortage = match self.objects.entry_mut(index) {
                     Object::Buffer(b) => {
                         let range = b.accessible();
                         let (pos, shortage) = line_motion(b.body(), range.start.0..range.end.0, b.point.0, count);
@@ -116,7 +116,8 @@ impl Vm {
                 let slot = self.slot("major-mode");
                 self.make_local_variable(slot)?;
                 let mode = self.intern("emacs-lisp-mode");
-                self.set_variable_value(slot, mode)?;
+                // As `set` writes: a watcher runs at the engine's drain.
+                self.write_from_native(crate::watchers::NativeWrite::set(slot, mode)).map_err(crate::watchers::fault_text)?;
                 Ok(Value::NIL)
             }
             MenuBarMode => {
@@ -130,7 +131,7 @@ impl Vm {
                     true
                 };
                 let value = if enabled { Value::TRUE } else { Value::NIL };
-                self.set_variable_value(slot, value)?;
+                self.write_from_native(crate::watchers::NativeWrite::set(slot, value)).map_err(crate::watchers::fault_text)?;
                 Ok(value)
             }
             ForceModeLineUpdate => {

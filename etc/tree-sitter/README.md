@@ -11,8 +11,8 @@ The crates are crates.io releases whose sources are that commit's, or the
 commit itself as a git dependency where no release is.
 `crates/romacs-grammars/sources.json` records the SHA-256 of every source
 file each build compiles, as fetched from the upstream repository at the
-commit; `tools/treesit_grammars.py check` (run by `scripts/check-derived`)
-holds Cargo's sources to it. `tools/treesit_grammars.py so --out DIR`
+commit; `tools/lib/treesit_grammars.py check` (run by `tools/check-derived`)
+holds Cargo's sources to it. `tools/lib/treesit_grammars.py so --out DIR`
 builds the same grammars as shared libraries, which GNU Emacs loads from
 `treesit-extra-load-path`.
 

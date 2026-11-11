@@ -106,7 +106,7 @@ pub(crate) fn build_surface_pipeline(
 
 /// Largest allowed surface edge in physical pixels (matches
 /// `ImageCache::MAX_TEXTURE_SIZE`).
-pub const MAX_SURFACE_SIZE: u32 = 4096;
+pub(crate) const MAX_SURFACE_SIZE: u32 = 4096;
 
 /// How long after its last composite a surface still counts as visible for
 /// animation demand.
@@ -173,7 +173,7 @@ pub struct CachedShaderSurface {
 
 /// A rendered-texture surface entry built by
 /// [`ShaderSurfaceCache::prepare_rendered`] and not yet installed.
-pub struct PreparedSurface(CachedShaderSurface);
+pub(crate) struct PreparedSurface(CachedShaderSurface);
 
 impl PreparedSurface {
     /// The same entry, marked as holding premultiplied colour, so the
@@ -467,8 +467,9 @@ impl ShaderSurfaceCache {
 
     /// Create a static surface from raw RGBA8 pixels (stage 1: GPU texture
     /// from Lisp data, no shader).
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn create_pixels(
+    pub(crate) fn create_pixels(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -544,39 +545,10 @@ impl ShaderSurfaceCache {
         Ok((width, height))
     }
 
-    /// Install an already-rendered texture (a native model view, design
-    /// §4.1) as surface `id`, so both composite paths sample it unchanged.
-    /// Like pixel surfaces it has no pipeline, so DPI rescale leaves it as is.
-    /// A rejected composite bind group is an error and installs nothing.
-    #[allow(clippy::too_many_arguments)]
-    pub fn insert_rendered(
-        &mut self,
-        device: &wgpu::Device,
-        composite_layout: &wgpu::BindGroupLayout,
-        composite_sampler: &wgpu::Sampler,
-        id: u32,
-        texture: wgpu::Texture,
-        view: wgpu::TextureView,
-        logical: (u32, u32),
-        physical: (u32, u32),
-    ) -> Result<(), String> {
-        let prepared = Self::prepare_rendered(
-            device,
-            composite_layout,
-            composite_sampler,
-            texture,
-            view,
-            logical,
-            physical,
-        )?;
-        self.install_prepared(id, prepared);
-        Ok(())
-    }
-
-    /// The fallible half of [`Self::insert_rendered`]: build the surface
-    /// entry (its composite bind group) without touching the cache, so a
+    /// Build the surface entry (its composite bind group) for a rendered
+    /// texture without touching the cache. This is the fallible step, so a
     /// caller can stage it with other resources and commit all or nothing.
-    pub fn prepare_rendered(
+    pub(crate) fn prepare_rendered(
         device: &wgpu::Device,
         composite_layout: &wgpu::BindGroupLayout,
         composite_sampler: &wgpu::Sampler,
@@ -620,9 +592,9 @@ impl ShaderSurfaceCache {
         }))
     }
 
-    /// The infallible half of [`Self::insert_rendered`]: install (or
-    /// replace) surface `id`.
-    pub fn install_prepared(&mut self, id: u32, prepared: PreparedSurface) {
+    /// Install (or replace) surface `id` from [`Self::prepare_rendered`],
+    /// the infallible step.
+    pub(crate) fn install_prepared(&mut self, id: u32, prepared: PreparedSurface) {
         self.surfaces.insert(id, prepared.0);
     }
 
@@ -731,7 +703,7 @@ impl ShaderSurfaceCache {
     /// convention. zw (click state) are left untouched. Sub-half-pixel moves
     /// neither rewrite nor dirty, so a static surface re-renders on real
     /// hover movement, not every frame the pointer rests on it.
-    pub fn set_mouse_uv(&mut self, id: u32, u: f32, v: f32) {
+    pub(crate) fn set_mouse_uv(&mut self, id: u32, u: f32, v: f32) {
         let Some(surface) = self.surfaces.get_mut(&id) else {
             return;
         };
@@ -755,7 +727,7 @@ impl ShaderSurfaceCache {
     /// zw stay positive while the button is held; `set_mouse_release` negates
     /// them. No dirty threshold: even a press at the previous position must
     /// re-render, because the sign flip is the signal.
-    pub fn set_mouse_press_uv(&mut self, id: u32, u: f32, v: f32) {
+    pub(crate) fn set_mouse_press_uv(&mut self, id: u32, u: f32, v: f32) {
         if self.pressed.is_some_and(|p| p != id) {
             // A new press landed on a different surface while another was
             // still held (multi-button corner) — release the old one so its
@@ -778,7 +750,7 @@ impl ShaderSurfaceCache {
     /// End the click on whichever surface is pressed: negate `iMouse.zw`
     /// (Shadertoy "not pressed; last click was here"). No-op when nothing is
     /// pressed, so callers may invoke it on every button release.
-    pub fn set_mouse_release(&mut self) {
+    pub(crate) fn set_mouse_release(&mut self) {
         let Some(id) = self.pressed.take() else {
             return;
         };
@@ -801,7 +773,7 @@ impl ShaderSurfaceCache {
 
     /// Stamp a surface as composited this frame; animation demand and the
     /// iTime clock stay live for `ACTIVE_GRACE` past the last composite.
-    pub fn mark_drawn(&mut self, id: u32) {
+    pub(crate) fn mark_drawn(&mut self, id: u32) {
         self.composited = true;
         self.drawn.insert(id);
         if let Some(surface) = self.surfaces.get_mut(&id) {
@@ -816,7 +788,7 @@ impl ShaderSurfaceCache {
     /// A glyph composite pass reached a visible surface glyph for `id`,
     /// whether or not the cache holds a texture for it. Recorded only while
     /// a retained build collects ([`Self::collect_referenced`]).
-    pub fn note_referenced(&mut self, id: u32) {
+    pub(crate) fn note_referenced(&mut self, id: u32) {
         if self.collecting_referenced {
             self.referenced.insert(id);
         }
@@ -824,33 +796,33 @@ impl ShaderSurfaceCache {
 
     /// A retained build starts: collect the references its passes make,
     /// until [`Self::take_referenced`].
-    pub fn collect_referenced(&mut self) {
+    pub(crate) fn collect_referenced(&mut self) {
         self.referenced.clear();
         self.collecting_referenced = true;
     }
 
     /// The surfaces referenced since [`Self::collect_referenced`]; ends the
     /// collection.
-    pub fn take_referenced(&mut self) -> std::collections::HashSet<u32> {
+    pub(crate) fn take_referenced(&mut self) -> std::collections::HashSet<u32> {
         self.collecting_referenced = false;
         std::mem::take(&mut self.referenced)
     }
 
     /// A glyph composite pass ran (even one drawing no surface).
-    pub fn note_composite(&mut self) {
+    pub(crate) fn note_composite(&mut self) {
         self.composited = true;
     }
 
     /// The surfaces composited since the last call; `None` when no glyph
     /// composite ran.
-    pub fn take_drawn(&mut self) -> Option<std::collections::HashSet<u32>> {
+    pub(crate) fn take_drawn(&mut self) -> Option<std::collections::HashSet<u32>> {
         let drawn = std::mem::take(&mut self.drawn);
         std::mem::replace(&mut self.composited, false).then_some(drawn)
     }
 
     /// Whether any animated surface was composited recently — the
     /// `DemandReason::ShaderSurface` signal.
-    pub fn has_active_surfaces(&self) -> bool {
+    pub(crate) fn has_active_surfaces(&self) -> bool {
         // LIFETIME, NOT PHASE: called by the scheduler to decide whether to
         // ask for a frame at all, so there is no frame sample to date it to.
         let now = Instant::now();
@@ -866,7 +838,7 @@ impl ShaderSurfaceCache {
     /// active animated surface is `:fps`-capped and the highest cap is `n`.
     /// Only sustained animation counts; a one-shot `dirty` surface gets its
     /// single frame via the redraw request regardless of cadence.
-    pub fn active_animation_max_fps(&self) -> Option<u32> {
+    pub(crate) fn active_animation_max_fps(&self) -> Option<u32> {
         // LIFETIME, NOT PHASE: same scheduler query, same reasoning as
         // `has_active_surfaces`.
         let now = Instant::now();
@@ -887,7 +859,7 @@ impl ShaderSurfaceCache {
     /// (surface-to-surface channels resolve internally). The caller resolves
     /// these against the image/video caches and passes the views into
     /// [`Self::render_pending`].
-    pub fn external_channel_sources(&self) -> Vec<SurfaceChannelSource> {
+    pub(crate) fn external_channel_sources(&self) -> Vec<SurfaceChannelSource> {
         let mut sources: Vec<SurfaceChannelSource> = self
             .surfaces
             .values()
@@ -1066,5 +1038,4 @@ impl CachedShaderSurface {
 }
 
 #[cfg(test)]
-#[path = "shader_surface_cache/tests/shader_surface_cache_test.rs"]
 mod tests;

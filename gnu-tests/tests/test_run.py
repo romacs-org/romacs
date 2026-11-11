@@ -514,8 +514,27 @@ class Pin(unittest.TestCase):
             with self.assertRaises(run.Refusal):
                 run.verify_pin(root)
 
+    @unittest.skipUnless((run.GNU_MIRROR / '.git').exists() or (run.GNU_MIRROR / 'HEAD').exists(),
+                         'needs the pinned GNU repository')
+    def test_test_tree_is_gnus_test_less_its_exclusions(self):
+        p = run.pin()
+        whole = subprocess.run(['git', '-C', str(run.GNU_MIRROR), 'rev-parse', p['gnu_commit'] + ':test'],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(run.gnu_test_tree(run.GNU_MIRROR, p['gnu_commit'], []), (whole, []))
+        self.assertEqual(run.gnu_test_tree(run.GNU_MIRROR, p['gnu_commit'], p['excluded']), (p['test_tree'], []))
+        self.assertEqual(run.gnu_test_tree(run.GNU_MIRROR, p['gnu_commit'], ['no-such-file'])[1], ['no-such-file'])
+        run.verify_pin(gnu=run.GNU_MIRROR)
+        with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
+            root = pathlib.Path(tmp)
+            (root / 'gnu-tests').mkdir()
+            forged = dict(p, test_tree=run.git_tree_id(run.TESTS), excluded=p['excluded'] + ['src/fns-tests.el'])
+            (root / 'gnu-tests' / 'PIN.json').write_text(json.dumps(forged))
+            shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
+            with self.assertRaises(run.Refusal):
+                run.verify_pin(root, gnu=run.GNU_MIRROR)
+
     def test_the_bootstrap_chain_is_the_census_chain(self):
-        tree = ast.parse((run.ROOT / 'scripts' / 'lisp-census.py').read_text())
+        tree = ast.parse((run.ROOT / 'tools' / 'lisp-census').read_text())
         census = next(ast.literal_eval(n.value) for n in ast.walk(tree)
                       if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'BOOTSTRAP_CHAIN'
                                                            for t in n.targets))

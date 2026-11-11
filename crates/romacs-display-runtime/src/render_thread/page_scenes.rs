@@ -23,7 +23,9 @@ use kurbo::{Rect, Size};
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
 use romacs_display_protocol::text_animation::{LogoColours, TextAnimation, TextAnimationKind};
 use romacs_display_protocol::types::{FaceId, SurfaceId};
-use romacs_renderer_wgpu::shader_surface::{SurfaceChannelSource, SurfaceShaderLanguage, SurfaceUniformInit};
+use romacs_renderer_wgpu::shader_surface::{
+    SurfaceChannelSource, SurfaceShaderLanguage, SurfaceUniformInit,
+};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use romacs_scene::draw::{DrawList, Source};
 use romacs_scene::layout::{self, Measure, Measured};

@@ -113,7 +113,7 @@ impl WgpuRenderer {
     /// vertex_color`, so the alpha rides on the vertex color and the
     /// draw-parameters snapshot stays the shared identity one.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_child_crossfade_quad(
+    pub(crate) fn draw_child_crossfade_quad(
         &mut self,
         view: &wgpu::TextureView,
         snapshot_bind_group: &wgpu::BindGroup,
@@ -353,65 +353,6 @@ impl WgpuRenderer {
             scale,
             pivot,
         );
-    }
-
-    /// Capture the complete unscaled child picture in an already budgeted lease.
-    /// The caller includes shadow extent in its dimensions; opacity is not baked.
-    #[allow(clippy::too_many_arguments)]
-    pub fn capture_child_frame_picture(
-        &mut self,
-        picture: &super::SnapshotLease,
-        child: &FrameGlyphBuffer,
-        atlas: &mut WgpuGlyphAtlas,
-        corner_radius: f32,
-        shadow_enabled: bool,
-        shadow_layers: u32,
-        shadow_offset: f32,
-        shadow_opacity: f32,
-    ) {
-        self.clear_child_picture(picture.view());
-        atlas.set_current_frame_fonts(child.font_bindings());
-        let w = picture.size().width();
-        let h = picture.size().height();
-        // Only the target-local clip attachment changes. Do not resize or
-        // reconfigure an installed native surface to the capture dimensions.
-        let previous_size = (
-            self.stencil.texture.view().texture().width(),
-            self.stencil.texture.view().texture().height(),
-        );
-        if previous_size != (w, h) {
-            self.install_stencil_targets(w, h);
-        }
-        self.render_child_frame_picture(
-            picture.view(),
-            child,
-            0.0,
-            0.0,
-            RootSurfaceRect::new(
-                0.0,
-                0.0,
-                w as f32 / self.scale_factor,
-                h as f32 / self.scale_factor,
-            )
-            .unwrap(),
-            atlas,
-            w,
-            h,
-            false,
-            None,
-            corner_radius,
-            shadow_enabled,
-            shadow_layers,
-            shadow_offset,
-            shadow_opacity,
-            None,
-            1.0,
-            1.0,
-            [0.0; 2],
-        );
-        if previous_size != (w, h) {
-            self.install_stencil_targets(previous_size.0, previous_size.1);
-        }
     }
 
     fn clear_child_picture(&self, view: &wgpu::TextureView) {
@@ -898,5 +839,4 @@ impl WgpuRenderer {
 }
 
 #[cfg(test)]
-#[path = "child_frames/tests/child_frames_test.rs"]
 mod tests;

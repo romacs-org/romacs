@@ -9,7 +9,7 @@
 //! region's bytes are attached (`attach`), so every accessor that is total
 //! over private objects is total over frozen ones through `Vm::object`,
 //! `Vm::object_if` and `Vm::cons_pair`; mutation goes through `Vm::object_mut`
-//! and `Vm::cons_mut`, which refuse with GNU's read-only error.
+//! and `Vm::writable_cons`, which refuse with GNU's read-only error.
 //!
 //! One encoding (`VM2FRZ01`) serves both directions: `freeze` walks a graph
 //! (private or frozen) into bytes and attaches them as a new region; `thaw`
@@ -230,7 +230,7 @@ impl<'a> Walk<'a> {
             | Object::Float(_) | Object::Bignum(_) | Object::BoolVector(_) => true,
             // A syntax table is a char-table whose purpose says so (GNU's
             // own) or the native one; both refuse, as the design states.
-            Object::CharTable(t) => !self.symbol_named(t.purpose, "syntax-table"),
+            Object::CharTable(t) => !self.symbol_named(t.purpose(), "syntax-table"),
             // A table on a test `define-hash-table-test' named stays with
             // its isolate, as the test's definition does.
             Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings
@@ -293,10 +293,10 @@ impl<'a> Walk<'a> {
                             }
                         }
                         Object::CharTable(t) => {
-                            pending.push((t.purpose, Some(node), Label::Purpose));
-                            pending.push((t.default, Some(node), Label::Default));
-                            pending.push((t.parent, Some(node), Label::Parent));
-                            for (i, &v) in t.extras.iter().enumerate() { pending.push((v, Some(node), Label::Extra(i))); }
+                            pending.push((t.purpose(), Some(node), Label::Purpose));
+                            pending.push((t.default(), Some(node), Label::Default));
+                            pending.push((t.parent(), Some(node), Label::Parent));
+                            for (i, &v) in t.extras().iter().enumerate() { pending.push((v, Some(node), Label::Extra(i))); }
                             for (from, _, v) in char_table_runs(t).map_err(|_| self.refusal(node))? {
                                 pending.push((v, Some(node), Label::Range(from)));
                             }
@@ -409,11 +409,11 @@ impl<'a> Walk<'a> {
             }
             Object::CharTable(t) => {
                 w.u8(KIND_CHAR_TABLE);
-                w.u64(self.edge(t.purpose).word());
-                w.u64(self.edge(t.default).word());
-                w.u64(self.edge(t.parent).word());
-                w.u32(t.extras.len() as u32);
-                for &v in &t.extras { w.u64(self.edge(v).word()); }
+                w.u64(self.edge(t.purpose()).word());
+                w.u64(self.edge(t.default()).word());
+                w.u64(self.edge(t.parent()).word());
+                w.u32(t.extras().len() as u32);
+                for &v in t.extras() { w.u64(self.edge(v).word()); }
                 let runs = char_table_runs(t).expect("discovered char-table");
                 w.u64(runs.len() as u64);
                 for (from, to, v) in runs {
@@ -433,7 +433,7 @@ fn char_table_runs(t: &char_table::CharTable) -> Result<Vec<(usize, usize, Value
     let mut runs = vec![];
     let mut at = 0;
     while at < char_table::CharTable::LEN {
-        let (value, from, to) = char_table::CharTableNode::checked_span(&t.root, at)?;
+        let (value, from, to) = char_table::CharTableNode::checked_span(t.root(), at)?;
         if from != at { return Err("invalid sub-char-table geometry".into()); }
         if let Some(last) = runs.last_mut().filter(|(_, _, v): &&mut (usize, usize, Value)| *v == value) {
             last.1 = to;
@@ -724,13 +724,15 @@ impl Vm {
             let filled = table.storage_bytes(false).saturating_sub(empty);
             self.allocation.allocated += filled as u64;
             self.allocation.consed.vector_cells += (filled / size_of::<Value>()) as u64;
-            self.objects[base + i] = Object::HashTable(Box::new(table));
+            *self.objects.entry_mut(base + i) = Object::HashTable(Box::new(table));
         }
         Ok(place.value(decoded.root, &symbols))
     }
 
     /// Attach BACKING as a new region: its root value. Signals when every
-    /// id is live.
+    /// id is live. The region raises the collector's count through
+    /// `region_weight`, not `Allocation::allocated`, so it asks the engine
+    /// for no poll: the budget's poll bounds what it makes due.
     pub(crate) fn attach(&mut self, backing: Backing) -> Result<Value> {
         let bytes = backing.bytes().map_err(|e| e.to_string())?;
         let decoded = decode(&bytes)?;
@@ -807,9 +809,9 @@ impl Vm {
                 DecodedObject::CharTable { purpose, default, parent, extras, runs } => {
                     let mut table = char_table::CharTable::new(value(*purpose));
                     table.initialize(extras.len(), Value::NIL)?;
-                    for (slot, &e) in extras.iter().enumerate() { table.extras[slot] = value(e); }
-                    table.default = value(*default);
-                    table.parent = value(*parent);
+                    for (slot, &e) in extras.iter().enumerate() { table.set_extra(slot, value(e)); }
+                    table.set_default(value(*default));
+                    table.set_parent(value(*parent));
                     for &(from, to, e) in runs { table.set_range(from, to, value(e))?; }
                     Object::CharTable(Box::new(table))
                 }

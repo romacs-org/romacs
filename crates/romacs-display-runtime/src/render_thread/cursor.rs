@@ -1,8 +1,8 @@
 //! Cursor animation and size transition state. Blinking is Lisp's:
 //! GNU's blink-cursor-mode turns a window's cursor off in the frame.
 
-use crate::core::frame_glyphs::CursorStyle;
-use crate::core::types::{
+use romacs_display_protocol::frame_glyphs::CursorStyle;
+use romacs_display_protocol::types::{
     AnimatedCursor, CursorAnimStyle, DisplayFrameId, DisplayWindowId, ease_in_out_cubic,
     ease_linear, ease_out_cubic, ease_out_expo, ease_out_quad,
 };
@@ -686,5 +686,4 @@ impl CursorState {
 }
 
 #[cfg(test)]
-#[path = "cursor/tests/cursor_test.rs"]
 mod tests;

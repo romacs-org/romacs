@@ -107,7 +107,7 @@ impl Vm {
         }
         let mut marks = Vec::with_capacity(family.len() - 1);
         for member in family.into_iter().filter(|&m| m != index) {
-            let Object::Buffer(b) = &mut self.objects[member] else { continue };
+            let Object::Buffer(b) = self.objects.entry_mut(member) else { continue };
             let (r, pt) = (b.accessible(), b.point);
             let mut at = |p: ByteOffset, bias| b.anchors.create(p.0 as u32, bias).expect("position in shared text");
             marks.push((member, [at(r.start, Bias::Left), at(pt, Bias::Left), at(r.end, Bias::Right)]));
@@ -120,7 +120,7 @@ impl Vm {
     pub(crate) fn family_fetch(&mut self, marks: Option<FamilyMarks>) {
         let Some(FamilyMarks(marks)) = marks else { return };
         for (member, handles) in marks {
-            let Object::Buffer(b) = &mut self.objects[member] else { continue };
+            let Object::Buffer(b) = self.objects.entry_mut(member) else { continue };
             let [begv, pt, zv] = handles.map(|h| ByteOffset(b.anchors.resolve(h).expect("family mark") as usize));
             for h in handles {
                 b.anchors.remove(h);
@@ -151,7 +151,7 @@ impl Vm {
         buffer.base = base;
         buffer.state.inhibit_buffer_hooks = inhibit_hooks;
         let value = self.register_buffer(buffer, name)?;
-        let Object::Buffer(b) = &mut self.objects[arena(base)?] else { unreachable!("base buffer") };
+        let Object::Buffer(b) = self.objects.entry_mut(arena(base)?) else { unreachable!("base buffer") };
         b.indirect.push(value);
         Ok(value)
     }
@@ -178,7 +178,7 @@ impl Vm {
         overlays.sort_by_key(|&(_, start, _, inserted)| (start, std::cmp::Reverse(inserted)));
         per_buffer.reset_visit();
         let mark = per_buffer.editor_mark();
-        let Object::Buffer(to) = &mut self.objects[arena(buffer)?] else { return Err("buffer required".into()) };
+        let Object::Buffer(to) = self.objects.entry_mut(arena(buffer)?) else { return Err("buffer required".into()) };
         to.per_buffer = per_buffer;
         to.local_keymap = keymap;
         to.case_tables = cases;
@@ -199,9 +199,9 @@ impl Vm {
             let (bias, at) = (m.bias, self.marker_anchors(base)?.resolve(anchor).ok_or("invalid mark")?);
             let copy = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer, anchor: None, bias, last_position: 0 })));
             let anchor = self.marker_anchors_mut(buffer)?.create(at, bias).ok_or("invalid mark")?;
-            let Object::Marker(m) = &mut self.objects[arena(copy)?] else { unreachable!("new marker") };
+            let Object::Marker(m) = self.objects.entry_mut(arena(copy)?) else { unreachable!("new marker") };
             m.anchor = Some(anchor);
-            let Object::Buffer(to) = &mut self.objects[arena(buffer)?] else { unreachable!("indirect buffer") };
+            let Object::Buffer(to) = self.objects.entry_mut(arena(buffer)?) else { unreachable!("indirect buffer") };
             to.per_buffer.set_editor_mark(copy);
         }
         for (overlay, start, end, _) in overlays {
@@ -244,7 +244,7 @@ impl Vm {
             buffer, start: Some(start), end: Some(end), front: source.front, rear: source.rear, properties: source.properties.clone(),
             inserted: 0,
         })));
-        let Object::Buffer(b) = &mut self.objects[arena(buffer)?] else { unreachable!("indirect buffer") };
+        let Object::Buffer(b) = self.objects.entry_mut(arena(buffer)?) else { unreachable!("indirect buffer") };
         // The turned-over overlays are the shared text's, of every member.
         if b.reversed_pairs.contains_key(&a) {
             b.reversed_pairs.insert(start, end);
@@ -279,7 +279,7 @@ impl Vm {
         if base == Value::NIL {
             return Ok(());
         }
-        if let Object::Buffer(base) = &mut self.objects[arena(base)?] {
+        if let Object::Buffer(base) = self.objects.entry_mut(arena(base)?) {
             base.indirect.retain(|&v| v != value);
         }
         let mut overlays = Vec::new();
@@ -294,7 +294,7 @@ impl Vm {
         for overlay in overlays {
             self.delete_overlay_object(overlay)?;
         }
-        let Object::Buffer(b) = &mut self.objects[index] else { unreachable!("indirect buffer") };
+        let Object::Buffer(b) = self.objects.entry_mut(index) else { unreachable!("indirect buffer") };
         for anchor in markers {
             b.anchors.remove(anchor);
         }
@@ -325,7 +325,7 @@ mod tests {
         let base = vm.create_named_buffer("gc-base", false).unwrap();
         let leaf = vm.allocate_object(Object::String(Box::new(crate::data::LispString::new("λ"))));
         let vector = vm.allocate_object(Object::Vector(vec![leaf, Value::integer(7).unwrap()]));
-        let Object::Buffer(b) = &mut vm.objects[arena(base).unwrap()] else { panic!() };
+        let Object::Buffer(b) = vm.objects.entry_mut(arena(base).unwrap()) else { panic!() };
         assert!(b.replace(ByteOffset(0)..ByteOffset(0), "aλЖz".as_bytes()).is_ok());
         b.properties.put(ByteOffset(1)..ByteOffset(5), "probe", vector);
         let indirect = vm.make_indirect_buffer(base, "gc-indirect", false).unwrap();
@@ -354,24 +354,24 @@ mod tests {
     fn edit_through_one_member_moves_the_others_positions_as_markers() {
         let mut vm = Vm::new();
         let base = vm.create_named_buffer("pos-base", false).unwrap();
-        let Object::Buffer(b) = &mut vm.objects[arena(base).unwrap()] else { panic!() };
+        let Object::Buffer(b) = vm.objects.entry_mut(arena(base).unwrap()) else { panic!() };
         assert!(b.replace(ByteOffset(0)..ByteOffset(0), b"0123456789").is_ok());
         let indirect = vm.make_indirect_buffer(base, "pos-indirect", false).unwrap();
         let (bi, ii) = (arena(base).unwrap(), arena(indirect).unwrap());
-        let Object::Buffer(i) = &mut vm.objects[ii] else { panic!() };
+        let Object::Buffer(i) = vm.objects.entry_mut(ii) else { panic!() };
         assert!(i.narrow(ByteOffset(2)..ByteOffset(6)).is_ok());
         i.point = ByteOffset(2);
         // An insertion at the indirect buffer's BEGV and point leaves them
         // before it and its ZV after the text past it.
         let marks = vm.family_record(bi);
-        let Object::Buffer(b) = &mut vm.objects[bi] else { panic!() };
+        let Object::Buffer(b) = vm.objects.entry_mut(bi) else { panic!() };
         assert!(b.replace(ByteOffset(2)..ByteOffset(2), b"ab").is_ok());
         vm.family_fetch(marks);
         let Object::Buffer(i) = &vm.objects[ii] else { panic!() };
         assert_eq!((i.accessible(), i.point), (ByteOffset(2)..ByteOffset(8), ByteOffset(2)));
         // A deletion around them collapses them to its start.
         let marks = vm.family_record(bi);
-        let Object::Buffer(b) = &mut vm.objects[bi] else { panic!() };
+        let Object::Buffer(b) = vm.objects.entry_mut(bi) else { panic!() };
         assert!(b.replace(ByteOffset(1)..ByteOffset(9), b"").is_ok());
         vm.family_fetch(marks);
         let Object::Buffer(i) = &vm.objects[ii] else { panic!() };

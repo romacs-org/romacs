@@ -2,9 +2,207 @@
 //! notify_variable_watchers. Watchers run before the write they observe.
 //! A native leaf subr runs in place, as GNU calls a subr directly; any other
 //! watcher is funcalled, from whatever write point reached it.
+//!
+//! A native call keeps Values in Rust locals, so it cannot run Lisp that may
+//! collect. Its writes of a trapped variable wait in `deferred_writes`, the
+//! store with its notifications, until the engine that called it has published
+//! the call's outcome (`threaded::drained`). So those watchers run after the
+//! rest of the call, before the next instruction, and may collect and throw.
 use crate::*;
+use crate::gc::RootFrame;
+use crate::prim::Fault;
+
+/// What a native write does: the watchers are told, then its store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WriteKind {
+    /// GNU `Fset` of VALUE.
+    Set,
+    /// GNU `set_internal` of VALUE with `SET_INTERNAL_BIND`: `let` reported.
+    Bound,
+    /// GNU `Fset_default` of VALUE.
+    SetDefault,
+    /// `defvaralias`: the variable becomes an alias of the symbol VALUE.
+    Alias,
+    /// A kept local: `makunbound` reported with VALUE, and no store.
+    Report,
+    /// `makunbound` reported with nil, then the current buffer's binding goes.
+    ClearLocal,
+    /// A permanent hook's filter: `makunbound` reported with VALUE, then stored.
+    StoreLocal,
+    /// `defalias-fset-function` (data.c:993), the variable being the function's
+    /// symbol: VALUE is (HOOK DEFINITION . DOCSTRING). The hook stores the
+    /// definition, then a non-nil docstring is put (data.c:1021).
+    Defalias,
+}
+romacs_snapshot::snapshot_enum!(WriteKind {
+    WriteKind::Set => (),
+    WriteKind::Bound => (),
+    WriteKind::SetDefault => (),
+    WriteKind::Alias => (),
+    WriteKind::Report => (),
+    WriteKind::ClearLocal => (),
+    WriteKind::StoreLocal => (),
+    WriteKind::Defalias => (),
+});
+const WRITE_KINDS: [WriteKind; 8] = [WriteKind::Set, WriteKind::Bound, WriteKind::SetDefault, WriteKind::Alias,
+    WriteKind::Report, WriteKind::ClearLocal, WriteKind::StoreLocal, WriteKind::Defalias];
+/// A write of the variable at SLOT that its watchers hear.
+#[derive(Clone, Copy)]
+pub(crate) struct NativeWrite {
+    pub(crate) kind: WriteKind,
+    pub(crate) slot: usize,
+    pub(crate) value: Value,
+}
+romacs_snapshot::snapshot_struct!(NativeWrite { kind, slot, value });
+impl NativeWrite {
+    pub(crate) fn set(slot: usize, value: Value) -> Self {
+        Self { kind: WriteKind::Set, slot, value }
+    }
+}
+
+/// A legacy primitive's text for FAULT, from a write it made or queued: the
+/// writes it makes fail only with text.
+pub(crate) fn fault_text(fault: Fault) -> String {
+    match fault {
+        Fault::Error(text) => text,
+        _ => "a native write failed".into(),
+    }
+}
 
 impl Vm {
+    /// WRITE from native code: at once when nothing can hear it or no engine
+    /// will complete this call; else queued, as is whatever follows a queued
+    /// write, so the writes keep their order. A native body that queues calls
+    /// no Lisp in place afterwards: a nested engine's first native return
+    /// would drain this queue inside that call.
+    pub(crate) fn write_from_native(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
+        let heard = write.kind == WriteKind::Defalias || self.variable_trapped(self.indirect_variable(write.slot));
+        if !self.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended.len()) {
+            let buffer = self.slots[self.buffer_slot].value;
+            self.deferred_writes.push((write, buffer));
+            return Ok(());
+        }
+        if !heard && write.kind == WriteKind::Set {
+            return self.assign_variable(write.slot, write.value).map_err(Fault::Error);
+        }
+        self.perform_write(write)
+    }
+    /// The queue, for a drain whose watchers may collect: a frame holding each
+    /// write's symbol, value, buffer and kind, and how many writes.
+    pub(crate) fn take_deferred(&mut self) -> Option<(RootFrame, usize)> {
+        if self.deferred_writes.is_empty() { return None; }
+        let writes = std::mem::take(&mut self.deferred_writes);
+        let values: Vec<Value> = writes.iter().flat_map(|(write, buffer)| {
+            let kind = WRITE_KINDS.iter().position(|&kind| kind == write.kind).expect("every kind is listed");
+            [Value::reference(write.slot + 1, 7), write.value, *buffer, Value::integer(i64::try_from(kind).expect("a small index")).expect("a small index")]
+        }).collect();
+        Some((self.root_frame(&values), writes.len()))
+    }
+    /// Write number I of a frame `take_deferred` made, in the buffer it was
+    /// made in: the buffer current now is current again after, or a watcher's
+    /// own `set-buffer` stands when that was the same one. If a watcher has
+    /// killed that buffer the write runs in the current one, as GNU's C goes on
+    /// with `current_buffer`, but what it meant for a binding of the killed
+    /// buffer has nothing left to do.
+    pub(crate) fn perform_deferred(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
+        // A queued `set`'s own store fault keeps GNU's condition, as the legacy
+        // call's text did (`forwarded_condition`); the value is the queue's, rooted.
+        match self.perform_queued(frame, i) {
+            Err(Fault::Error(error)) if self.propagated_escape.is_none() && self.queued_kind(frame, i) == WriteKind::Set => {
+                let value = self.rooted(frame, 4 * i + 1);
+                Err(self.forwarded_condition(&error, value).map_or(Fault::Error(error), |(condition, data)| Fault::Signal(condition, data)))
+            }
+            outcome => outcome,
+        }
+    }
+    fn queued_kind(&self, frame: &RootFrame, i: usize) -> WriteKind {
+        let index = self.rooted(frame, 4 * i + 3).integer_value().and_then(|index| usize::try_from(index).ok()).expect("a kind's index");
+        WRITE_KINDS[index]
+    }
+    fn perform_queued(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
+        let slot = usize::try_from(self.rooted(frame, 4 * i).payload()).expect("a symbol's slot") - 1;
+        let kind = self.queued_kind(frame, i);
+        let write = NativeWrite { kind, slot, value: self.rooted(frame, 4 * i + 1) };
+        let buffer = self.rooted(frame, 4 * i + 2);
+        if !self.live_buffer_value(buffer) {
+            let kind = if matches!(kind, WriteKind::ClearLocal | WriteKind::StoreLocal) { WriteKind::Report } else { kind };
+            return self.perform_write(NativeWrite { kind, ..write });
+        }
+        let current = self.slots[self.buffer_slot].value;
+        if buffer == current {
+            return self.perform_write(write);
+        }
+        let saved = self.root_frame(&[current]);
+        self.slots[self.buffer_slot].value = buffer;
+        let outcome = self.perform_write(write);
+        let [current] = self.release_frame(saved);
+        if self.live_buffer_value(current) { self.slots[self.buffer_slot].value = current; }
+        outcome
+    }
+    /// Tell the watchers, then store. A watcher's escape waits in
+    /// `propagated_escape` behind `Fault::Error`; a store's fault is itself.
+    fn perform_write(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
+        let NativeWrite { kind, slot, value } = write;
+        if kind == WriteKind::Set {
+            return self.set_variable_value(slot, value).map_err(Fault::Error);
+        }
+        // The value and the buffer are rooted across the watchers, read back.
+        let frame = self.root_frame(&[value, self.slots[self.buffer_slot].value]);
+        let outcome = self.perform_rooted(kind, slot, &frame);
+        self.drop_frame(frame);
+        outcome
+    }
+    fn perform_rooted(&mut self, kind: WriteKind, slot: usize, frame: &RootFrame) -> std::result::Result<(), Fault> {
+        let reported = |vm: &mut Vm, value: Value, operation: &str, place: Value| {
+            vm.notify_watchers_at(slot, value, operation, Some(place)).map_err(Fault::Error)
+        };
+        match kind {
+            WriteKind::Set => unreachable!("`perform_write' makes it"),
+            WriteKind::Bound => {
+                self.notify_watchers(slot, self.rooted(frame, 0), "let").map_err(Fault::Error)?;
+                self.assign_variable(slot, self.rooted(frame, 0)).map_err(Fault::Error)
+            }
+            WriteKind::SetDefault => {
+                reported(self, self.rooted(frame, 0), "set", Value::NIL)?;
+                // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
+                let Some(fwd) = self.native_forwarding(slot) else {
+                    self.slots[slot].value = self.rooted(frame, 0);
+                    return Ok(());
+                };
+                // A global variable's set_internal reports again.
+                if self.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
+                    reported(self, self.rooted(frame, 0), "set", Value::NIL)?;
+                }
+                self.set_forwarded_default(slot, fwd, self.rooted(frame, 0), crate::forwarded::SetFlag::Set)
+            }
+            WriteKind::Alias => {
+                // eval.c:713: NEW's watchers see the alias before it is made.
+                reported(self, self.rooted(frame, 0), "defvaralias", Value::NIL)?;
+                prim::alias_now(self, slot, self.rooted(frame, 0))
+            }
+            WriteKind::Report => reported(self, self.rooted(frame, 0), "makunbound", self.rooted(frame, 1)),
+            WriteKind::ClearLocal => {
+                reported(self, Value::NIL, "makunbound", self.rooted(frame, 1))?;
+                prim::clear_local_slot(self, slot, self.rooted(frame, 1))
+            }
+            WriteKind::Defalias => {
+                let symbol = Value::reference(slot + 1, 7);
+                let (hook, rest) = self.cons_pair(self.rooted(frame, 0)).map_err(Fault::Error)?;
+                let (definition, _) = self.cons_pair(rest).map_err(Fault::Error)?;
+                self.call_lisp_at_write(hook, &[symbol, definition]).map_err(Fault::Error)?;
+                // Read back: the hook may have collected.
+                let property = self.intern("function-documentation");
+                let (_, rest) = self.cons_pair(self.rooted(frame, 0)).map_err(Fault::Error)?;
+                let (_, documentation) = self.cons_pair(rest).map_err(Fault::Error)?;
+                if documentation == Value::NIL { return Ok(()); }
+                self.put_symbol_property(symbol, property, documentation).map(|_| ()).map_err(Fault::Error)
+            }
+            WriteKind::StoreLocal => {
+                reported(self, self.rooted(frame, 0), "makunbound", self.rooted(frame, 1))?;
+                self.assign_variable(slot, self.rooted(frame, 0)).map_err(Fault::Error)
+            }
+        }
+    }
     pub(crate) fn variable_trapped(&self, base: usize) -> bool {
         !self.trapped.is_empty() && self.trapped.contains(&base)
     }
@@ -37,9 +235,9 @@ impl Vm {
         // A watcher may collect only for a writer that rooted its own frame
         // (an engine write, `threaded::watched_write'); any other native
         // writer may keep Values in locals, so it holds collection.
-        let _unwind = self.unwind_mark();
         // GNU untraps the variable while its watchers run (no recursion),
-        // and traps it again as they end; a panic out of them, at the mark.
+        // and traps it again as they end; a panic out of them, by whatever
+        // catches it (`Vm::catching`).
         self.trapped.remove(&base);
         self.retrap.push(base);
         let held = usize::from(!self.rooted_write);

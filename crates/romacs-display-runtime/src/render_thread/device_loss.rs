@@ -166,5 +166,4 @@ impl DeviceLossDetector {
 }
 
 #[cfg(test)]
-#[path = "device_loss/tests/device_loss_test.rs"]
 mod tests;

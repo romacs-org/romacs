@@ -41,5 +41,4 @@ impl WindowChromePolicy {
 }
 
 #[cfg(test)]
-#[path = "window_chrome/tests/window_chrome_test.rs"]
 mod tests;

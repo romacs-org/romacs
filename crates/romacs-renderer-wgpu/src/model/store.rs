@@ -28,18 +28,18 @@ use super::readiness::{Readiness, WindowKey};
 use super::scene::ModelScene;
 
 /// Pointer travel (logical px) before a press becomes an orbit.
-pub const ORBIT_THRESHOLD: f64 = 4.0;
+pub(crate) const ORBIT_THRESHOLD: f64 = 4.0;
 /// Quiet time after the last wheel input of a burst before its `View` is
 /// reported.
 pub const WHEEL_QUIET: Duration = Duration::from_millis(150);
 /// A pick not answered by then is dropped with `Error{req: None}`.
-pub const PICK_TIMEOUT: Duration = Duration::from_millis(500);
+pub(crate) const PICK_TIMEOUT: Duration = Duration::from_millis(500);
 /// Poll interval while a load or a pick is outstanding.
-pub const POLL_INTERVAL: Duration = Duration::from_millis(16);
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(16);
 /// Most vertices over every live model's retained scene (design §4.3).
-pub const MAX_LIVE_VERTICES: u64 = 8_000_000;
+pub(crate) const MAX_LIVE_VERTICES: u64 = 8_000_000;
 /// Most triangles over every live model's retained scene (design §4.3).
-pub const MAX_LIVE_TRIANGLES: u64 = 8_000_000;
+pub(crate) const MAX_LIVE_TRIANGLES: u64 = 8_000_000;
 
 /// The GPU operations the store needs. Each `Err` leaves the model's GPU
 /// state as it was before the call.
@@ -1221,7 +1221,7 @@ fn scene_geometry(scene: &ModelScene) -> (u64, u64) {
 
 /// Map a GPU pick to the Lisp-facing hit: per-mesh face and the point in
 /// original coordinates.
-pub fn resolve_pick(scene: &ModelScene, raw: RawPick) -> Option<ModelHit> {
+pub(crate) fn resolve_pick(scene: &ModelScene, raw: RawPick) -> Option<ModelHit> {
     let (global, barycentric) = raw.hit?;
     let (mesh, face) = scene.locate(global)?;
     let point = scene.point_on(mesh, face, barycentric)?;
@@ -1254,7 +1254,7 @@ fn target_error(scene: &ModelScene, target: &ModelTarget) -> Option<String> {
 
 /// Resolve a (validated) highlight into what the GPU paints. A target
 /// suppresses the selection entirely (canvas-3d `render.py:155`).
-pub fn gpu_highlight(
+pub(crate) fn gpu_highlight(
     scene: &ModelScene,
     target: Option<&ModelTarget>,
     selected: Option<u16>,
@@ -1292,7 +1292,7 @@ pub fn gpu_highlight(
 /// Resolve (validated) coloured layers into what the GPU paints, in
 /// order: a later layer wins where layers overlap. A point whose face
 /// has no position paints nothing, as with a single target.
-pub fn gpu_layers(scene: &ModelScene, layers: &[ModelHighlightLayer]) -> GpuHighlight {
+pub(crate) fn gpu_layers(scene: &ModelScene, layers: &[ModelHighlightLayer]) -> GpuHighlight {
     let layers = layers
         .iter()
         .filter_map(|layer| {
@@ -1328,5 +1328,4 @@ pub fn gpu_layers(scene: &ModelScene, layers: &[ModelHighlightLayer]) -> GpuHigh
 }
 
 #[cfg(test)]
-#[path = "store/tests.rs"]
 mod tests;

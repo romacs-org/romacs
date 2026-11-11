@@ -562,6 +562,17 @@ Only for labels and defaults; opening the scene validates it."
            (json-parse-string (with-temp-buffer (insert-file-contents file) (buffer-string))
                               :object-type 'alist :array-type 'list)))))
 
+(defun gnosis-model-managed-scenes ()
+  "Return (RESOURCE . MANIFEST) for every managed scene, by directory name.
+Manifests are read for labels only; opening a scene validates it."
+  (let ((root (gnosis-assets-root)))
+    (and (file-directory-p root)
+         (delq nil (mapcar (lambda (name)
+                             (let ((resource (concat name "/scene.json")))
+                               (when-let* ((manifest (gnosis-model--manifest resource)))
+                                 (cons resource manifest))))
+                           (directory-files root nil "\\`[0-9a-f]\\{64\\}\\'"))))))
+
 (defun gnosis-model--scene-resources ()
   "Return (LABEL . RESOURCE) for each scene used by model themata."
   (let (resources)
@@ -1121,33 +1132,55 @@ the centre of the bounding box."
               (setq farthest (max farthest (+ (* x x) (* y y) (* z z)))))))
         (* scale (sqrt farthest))))))
 
+(defun gnosis-model--hits (scene geometry hit &optional points)
+  "Return (DISTANCE . TARGET) for every target of SCENE containing HIT.
+An object contains every hit on its mesh, a region the hits on its
+faces, and a point those within its tolerance.  GEOMETRY is the
+validated triangle alist; POINTS optionally supplies verified point
+target coordinates instead."
+  (let ((mesh (plist-get hit :mesh))
+        (point (plist-get hit :point))
+        (face (plist-get hit :face)))
+    (cl-loop for target in (gnosis-model--targets scene)
+             for distance = (and (equal mesh (alist-get 'mesh target))
+                                 (pcase (alist-get 'kind target)
+                                   ("object" 0)
+                                   ("region" (and (member face (alist-get 'faces target)) 0))
+                                   ("point"
+                                    (when point
+                                      (let ((d (gnosis-model--distance
+                                                point
+                                                (if points (cdr (assoc (alist-get 'id target) points))
+                                                  (gnosis-model--point target (cdr (assoc mesh geometry)))))))
+                                        (and (<= d (alist-get 'tolerance target)) d))))))
+             when distance collect (cons distance target))))
+
+(defun gnosis-model--nearest (hits)
+  "Return the ID of the nearest of HITS, ties by ID, or nil."
+  (cdar (sort (mapcar (lambda (hit) (cons (car hit) (alist-get 'id (cdr hit)))) hits)
+              (lambda (a b) (if (= (car a) (car b)) (string< (cdr a) (cdr b))
+                              (< (car a) (car b)))))))
+
 (defun gnosis-model--candidate (scene geometry expected hit &optional points)
   "Resolve HIT against SCENE GEOMETRY using EXPECTED target kind, not grading.
 POINTS optionally supplies verified target coordinates instead of GEOMETRY."
-  (let* ((kind (alist-get 'kind (gnosis-model-target scene expected)))
-         (mesh (plist-get hit :mesh))
-         (point (plist-get hit :point))
-         (face (plist-get hit :face))
-         (scored
-          (cl-loop for target in (gnosis-model--targets scene)
-                   when (and (equal kind (alist-get 'kind target))
-                             (equal mesh (alist-get 'mesh target)))
-                   append
-                   (let ((distance
-                          (pcase kind
-                            ("object" 0)
-                            ("region" (when (member face (alist-get 'faces target)) 0))
-                            ("point"
-                             (when point
-                               (let ((d (gnosis-model--distance
-                                         point
-                                         (if points (cdr (assoc (alist-get 'id target) points))
-                                           (gnosis-model--point target (cdr (assoc mesh geometry)))))))
-                                 (when (<= d (alist-get 'tolerance target)) d)))))))
-                     (when distance (list (cons distance (alist-get 'id target))))))))
-    (cdar (sort scored (lambda (a b)
-                         (if (= (car a) (car b)) (string< (cdr a) (cdr b))
-                           (< (car a) (car b))))))))
+  (let ((kind (alist-get 'kind (gnosis-model-target scene expected))))
+    (gnosis-model--nearest
+     (seq-filter (lambda (hit) (equal kind (alist-get 'kind (cdr hit))))
+                 (gnosis-model--hits scene geometry hit points)))))
+
+(defun gnosis-model-hit-targets (scene hit points)
+  "Return the targets of SCENE containing surface HIT, most specific first:
+points, nearest first, then regions, then whole objects.  POINTS are
+verified point coordinates (`gnosis-model-resolve').  An observation of
+where a pick landed, never an answer."
+  (let ((rank (lambda (hit) (list (pcase (alist-get 'kind (cdr hit)) ("point" 0) ("region" 1) (_ 2))
+                                  (car hit)))))
+    (mapcar #'cdr (sort (gnosis-model--hits scene nil hit points)
+                        (lambda (a b)
+                          (let ((a (funcall rank a)) (b (funcall rank b)))
+                            (or (< (car a) (car b))
+                                (and (= (car a) (car b)) (< (cadr a) (cadr b))))))))))
 
 (defun gnosis-model-selection (fields)
   "Return current owned surface selection resolved against FIELDS.

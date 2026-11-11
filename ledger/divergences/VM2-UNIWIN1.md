@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-UNIWIN1 | A window showing a unibyte buffer | GNU's iterator reads a unibyte buffer's bytes directly: a byte above 127 shows as an octal escape, and overlays and text properties apply as in any buffer | A unibyte buffer (`ByteBuffer`) holds bytes, not the text every display path reads, so display reads a mirror (`bytes.rs` `Mirror`): `Text` with each byte one character, positions equal to the buffer's, built once a window shows the buffer and edited with it after. Motion, scrolling, edits and escapes match pinned GNU (`crates/romacs-vm/tests/unibyte_window.el`, real keys in `raw_bytes_parity_live.py` `literal`) | Its overlays live in the mirror, which making one builds, and follow `set-buffer-multibyte` either way (`crates/romacs-vm/tests/unibyte_overlays.rs`, `literal-search`). **Package-observable** limits: text properties on its bytes do not reach display, so `face` shows nothing; a key measured +1 ms at 1 MB and +25 ms at 8 MB over an empty buffer | Hand text properties to the mirror | <!-- symbols: find-file-literally, set-buffer-multibyte -->

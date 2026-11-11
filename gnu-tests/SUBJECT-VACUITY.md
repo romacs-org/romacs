@@ -30,7 +30,7 @@ or historical budget entry for those two is moved by this implementation.
    --output RUN_DIR/VACUITY-VERDICT.json` verifies the original full manifest,
    replays raw outputs, checks exact recipe inventory and probe text, then writes
    the portable receipt and `RUN_DIR/MEMBER-EVIDENCE.json`. RUN_DIR must be outside
-   the measured source. `scripts/gate` performs these steps for its built adapter.
+   the measured source. `tools/gate` performs these steps for its built adapter.
 3. Do not commit either generated file. Set `ROMACS_VACUITY_RECEIPT` to the run's
    receipt when measuring outside the gate; the member path is its sibling, or
    can be set explicitly with `ROMACS_MEMBER_EVIDENCE`. Both must share a directory.

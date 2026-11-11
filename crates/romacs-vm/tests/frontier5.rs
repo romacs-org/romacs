@@ -211,11 +211,19 @@ fn propertize_unrepresentable_keys_are_refused_not_merged() {
 
 /// Every primh pin in the five corpora names a `/DIVERGENCES.md` row, with
 /// the same id and class, and nothing else is in the ledger.
+/// The divergence ledger, one file per divergence, read as one text.
+fn divergences() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ledger/divergences");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+    paths.sort();
+    paths.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect::<Vec<_>>().join("\n")
+}
+
 #[test]
 fn frontier5_pins_are_exactly_the_ledger() {
     let ledger: serde_json::Value = serde_json::from_str(include_str!("../tools/primh/frontier5-ledger.json")).unwrap();
     let ledger = ledger["pins"].as_object().unwrap();
-    let divergences = include_str!("../../../DIVERGENCES.md");
+    let divergences = divergences();
     let mut pinned = std::collections::BTreeMap::new();
     for evidence in [
         include_str!("../tools/primh/evidence/make-vector.json"),
@@ -234,6 +242,6 @@ fn frontier5_pins_are_exactly_the_ledger() {
     assert_eq!(pinned, ledgered, "pins and ledger differ");
     for (id, v) in ledger {
         let row = v["row"].as_str().unwrap();
-        assert!(divergences.contains(&format!("\n| {row} |")), "{id}: ledger row {row} is not in DIVERGENCES.md");
+        assert!(divergences.contains(&format!("\n| {row} |")), "{id}: ledger row {row} is not in ledger/divergences");
     }
 }

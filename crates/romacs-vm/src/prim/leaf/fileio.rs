@@ -54,7 +54,7 @@ impl Leaf<'_> {
 
     pub fn fileio_set_modtime(&mut self, state: crate::forwarded::VisitedModtime) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.per_buffer.1 = state,
             data::Object::ByteBuffer(b) => b.per_buffer.1 = state,
             _ => unreachable!(),
@@ -266,7 +266,7 @@ impl Leaf<'_> {
     /// `insert_before_point`'s edit of buffer INDEX: the characters
     /// inserted and their position.
     fn insert_raw_before_point(&mut self, index: usize, bytes: &[u8], multibyte: bool) -> std::result::Result<(usize, i64), Fault> {
-        Ok(match &mut self.vm.objects[index] {
+        Ok(match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(t) => {
                 let internal;
                 let bytes = if multibyte || bytes.is_ascii() { bytes } else {
@@ -298,7 +298,7 @@ impl Leaf<'_> {
         let map = s.properties.to_map();
         if map.is_empty() { return Ok(()) }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let data::Object::Buffer(t) = &mut self.vm.objects[index] else { return Ok(()) };
+        let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { return Ok(()) };
         let at = t.point.0;
         // to_map gives each byte's properties; put them back as runs.
         let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<String, Value>)> = vec![];
@@ -363,7 +363,7 @@ impl Leaf<'_> {
             }
             _ => return Ok(()),
         };
-        self.vm.objects[index] = replacement;
+        *self.vm.objects.entry_mut(index) = replacement;
         Ok(())
     }
 
@@ -372,7 +372,7 @@ impl Leaf<'_> {
     /// nor undo (decide_coding_unwind takes them back).
     pub fn fileio_fill_raw(&mut self, bytes: &[u8]) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let data::Object::ByteBuffer(b) = &mut self.vm.objects[index] else {
+        let data::Object::ByteBuffer(b) = self.vm.objects.entry_mut(index) else {
             return Err(Fault::Error("unibyte buffer required".into()));
         };
         // Its markers stay at BEG, as insert_from_gap_1 leaves them.
@@ -388,7 +388,7 @@ impl Leaf<'_> {
     /// multibyte gives back its internal bytes, as GNU's gap does.
     pub fn fileio_take_raw(&mut self) -> std::result::Result<Vec<u8>, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::ByteBuffer(b) => {
                 let (state, bytes) = (b.state.clone(), b.bytes.clone());
                 b.restriction = ByteOffset(0)..ByteOffset(bytes.len());
@@ -398,7 +398,7 @@ impl Leaf<'_> {
             }
             data::Object::Buffer(_) => {
                 let marks = self.vm.family_record(index);
-                let data::Object::Buffer(t) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
+                let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { unreachable!("text buffer") };
                 let (modification, bytes) = (*t.state.modification, t.bytes().to_vec());
                 t.widen();
                 let edited = t.replace(ByteOffset(0)..ByteOffset(bytes.len()), &[]);

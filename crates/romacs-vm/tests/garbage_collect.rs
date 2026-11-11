@@ -74,12 +74,13 @@ fn garbage_collect_obeys_existing_inhibition() {
     eval(&mut vm, "(add-variable-watcher 'gi-v (lambda (&rest _) (setq gi-r (garbage-collect))))");
     eval(&mut vm, "(defmacro gi-m () (list 'quote (garbage-collect)))");
     let before = vm.heap_stats().collections;
-    assert_eq!(eval(&mut vm, "(progn (set 'gi-v 1) gi-r)"), "nil", "GC_INHIBITED_RESULT");
     eval(&mut vm, "(defun gi-f () (gi-m))");
     assert_eq!(eval(&mut vm, "(gi-f)"), "nil", "GC_INHIBITED_RESULT");
     assert_eq!(vm.heap_stats().collections, before, "GC_INHIBITED_COUNT");
-    // The same watcher collects from a compiled `setq', whose engine suspends.
+    // The same watcher collects from a compiled `setq', whose engine suspends,
+    // and from `set', whose write waits for its engine's drain (VM2-WATCH1).
     assert_ne!(eval(&mut vm, "(progn (setq gi-v 2) gi-r)"), "nil", "GC_WATCHED_SETQ");
+    assert_ne!(eval(&mut vm, "(progn (setq gi-r nil) (set 'gi-v 3) gi-r)"), "nil", "GC_WATCHED_SET");
 }
 
 fn churn(vm: &mut Vm, conses: u32) -> u64 {
@@ -471,6 +472,66 @@ fn a_collection_due_in_a_nested_protected_body_is_finished_soon() {
     assert_eq!(value, "(t t t)", "the finalizer and the hook ran within the loop");
 }
 
+/// The automatic collections since the last call: how far past its trigger
+/// the latest of them began, in objects (`romacs--take-collections').
+const LATEST_LATE: &str = "(let ((late 0)) (dolist (r (cdr (romacs--take-collections)) late) \
+    (when (eq (car r) 'automatic) (setq late (max late (nth 7 r))))))";
+
+/// Every way a primitive returns asks for a poll once allocation has passed
+/// another step, whatever it allocated: a loop of a few big calls collects
+/// inside the loop, at a back-jump, not first at the request's end. Forty
+/// iterations stay far below one budget period of ticks. A collection then
+/// begins past its trigger, each call passing it midway, but at most one
+/// call's allocation and one poll step (16,384 conses) past it.
+#[test]
+fn big_primitive_allocation_collects_inside_the_loop() {
+    let mut missed = Vec::new();
+    let mut late = Vec::new();
+    for (path, body) in [
+        ("leaf", "(make-list 100000 nil)"),
+        ("generated, under apply", "(apply #'make-list 100000 '(nil))"),
+        ("legacy", "(copy-sequence na-long)"),
+        ("reader", "(read-from-string na-text)"),
+        // Not this path's alone: the cleanup's entry collects too, until step
+        // 2b leaves it to the request (lisp-speed 13.4).
+        ("under unwind-protect", "(unwind-protect (make-list 100000 nil) nil)"),
+        ("bool vectors", "(make-bool-vector 4000000 nil)"),
+    ] {
+        // A VM of its own, settled: no request left over from the setup.
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_stress(0);
+        vm.set_collection_floor(1);
+        vm.eval_source("(progn (defvar na-long (make-list 100000 1)) \
+            (defvar na-text (format \"(%s)\" (mapconcat #'number-to-string na-long \" \"))) (garbage-collect) t)").unwrap();
+        vm.eval_source("(romacs--take-collections)").unwrap();
+        let source = format!("(let ((g gcs-done)) (dotimes (_ 40) {body}) (- gcs-done g))");
+        let collected: i64 = vm.eval_source(&source).unwrap().display().unwrap().parse().unwrap();
+        if collected == 0 { missed.push(path); }
+        let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+        if !(1.0..=117_384.0).contains(&latest) { late.push((path, latest)); }
+    }
+    assert!(missed.is_empty(), "no collection inside the loop: {missed:?}");
+    assert!(late.is_empty(), "collections began at no excess or too far past their trigger: {late:?}");
+}
+
+/// Compiled code's own allocation tests nothing: a loop of inline conses
+/// is bounded by the budget's poll, so a collection begins at most one
+/// budget period (10,000 ticks, one cons each here) past its trigger.
+#[test]
+fn inline_allocation_waits_at_most_one_budget_period() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_collection_floor(1);
+    vm.eval_source("(progn (garbage-collect) (romacs--take-collections))").unwrap();
+    let collected = vm.eval_source("(let ((g gcs-done) (l nil)) (dotimes (i 300000) (setq l (cons i l))) (- gcs-done g))")
+        .unwrap().display().unwrap();
+    assert_ne!(collected, "0", "the loop collected");
+    let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+    assert!((1.0..=10_500.0).contains(&latest), "a collection began {latest} objects past its trigger");
+}
+
 /// A protected form run again and again from native code (`Vm::execute'),
 /// with no back-jump or call to poll at: the cleanup's entry collects,
 /// however the cleanup ends, and a doomed finalizer runs at the execution's
@@ -809,4 +870,35 @@ fn a_churn_of_bignums_collects() {
                                 (> gcs-done before))")
         .unwrap().display().unwrap();
     assert_eq!(out, "t");
+}
+
+/// A record says when its collection ended and what it left live, the second
+/// without a walk: what is held shows in it, and it stays in step with the walk's
+/// count of objects and below its bytes.
+#[test]
+fn a_collections_record_reads_its_time_and_what_it_left_live() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let collected = |vm: &mut Vm, form: &str| -> (f64, usize, usize) {
+        let out = vm.eval_source(&format!("(progn {form} (romacs--take-collections) (garbage-collect)
+                                             (let ((r (car (cdr (romacs--take-collections)))))
+                                               (format \"%f %d %d\" (nth 4 r) (nth 5 r) (nth 6 r))))"))
+            .unwrap().display().unwrap();
+        let out: String = serde_json::from_str(&out).unwrap();
+        let words: Vec<&str> = out.split(' ').collect();
+        (words[0].parse().unwrap(), words[1].parse().unwrap(), words[2].parse().unwrap())
+    };
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let (at, objects, bytes) = collected(&mut vm, "");
+    assert!((at - now()).abs() < 60.0, "{at}");
+    // The walk comes a little after the record, past what the form allocated.
+    let stats = vm.heap_stats();
+    assert!(objects.abs_diff(stats.live_objects) < 1000, "{objects} {}", stats.live_objects);
+    assert!(bytes <= stats.live_bytes, "{bytes} {}", stats.live_bytes);
+    let (_, _, with_string) = collected(&mut vm, "(setq held (make-string 8000000 ?x))");
+    assert!(with_string - bytes >= 7_900_000, "{bytes} {with_string}");
+    let (_, _, with_vector) = collected(&mut vm, "(setq held (make-vector 2000000 nil))");
+    assert!(with_vector + 8_000_000 - with_string >= 15_900_000, "{with_string} {with_vector}");
+    let (_, with_list, _) = collected(&mut vm, "(setq held (make-list 1000000 nil))");
+    assert!(with_list - objects >= 1_000_000, "{objects} {with_list}");
 }

@@ -19,9 +19,37 @@ pub fn new_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
     wgpu::Instance::new(descriptor)
 }
 
+/// The `RADV_PERFTEST` this process should run under, when that is not
+/// CURRENT, the one it was started with: CURRENT and `nosam`.
+///
+/// Mesa's RADV gives every Vulkan command buffer two small buffers the CPU
+/// writes, and puts them in the VRAM the CPU can see while *this process*
+/// uses less than half of it ("SAM"). On a card whose CPU-visible VRAM is
+/// 256 MB (no resizable BAR), a few Vulkan programs each within their own
+/// half fill it between them. A buffer made after that lives in system
+/// memory, and the kernel tries to move it into visible VRAM on every
+/// command submission that names it, fails, and tries again on the next:
+/// milliseconds in `amdgpu_cs_ioctl` a frame, on the thread that draws.
+/// `nosam` asks for system memory for those buffers to begin with, where
+/// nothing moves them. Other drivers do not read the variable.
+///
+/// A value that already says `nosam` or `sam` is the user's choice and
+/// stands; options are separated by commas, spaces or newlines, as Mesa's
+/// `parse_debug_string` reads them. The driver reads the variable when an
+/// instance is made, so the caller sets it before the first one.
+#[must_use]
+pub fn radv_perftest(current: Option<&str>) -> Option<String> {
+    let current = current.unwrap_or_default();
+    let mut options = current.split([',', ' ', '\n']).filter(|option| !option.is_empty());
+    if options.clone().any(|option| matches!(option, "nosam" | "sam")) {
+        return None;
+    }
+    Some(if options.next().is_some() { format!("{current},nosam") } else { "nosam".to_owned() })
+}
+
 /// The power preference `ROMACS_GPU` asks for: `low` or `integrated` prefer
 /// an integrated GPU, anything else (or nothing) a discrete one.
-pub fn power_preference() -> wgpu::PowerPreference {
+pub(crate) fn power_preference() -> wgpu::PowerPreference {
     match std::env::var("ROMACS_GPU").as_deref() {
         Ok("low" | "integrated") => wgpu::PowerPreference::LowPower,
         Ok("high" | "discrete") | Err(_) => wgpu::PowerPreference::HighPerformance,
@@ -135,7 +163,7 @@ mod linux {
     use wgpu::hal::api::Vulkan;
 
     pub(super) fn supports_dma_buf_extensions(adapter: &wgpu::Adapter) -> bool {
-        if !cfg!(any(feature = "video", feature = "webview")) {
+        if !cfg!(feature = "video") {
             return false;
         }
         // SAFETY: the guard is used only for immutable capability inspection
@@ -261,6 +289,18 @@ mod tests {
                    [DeviceType::DiscreteGpu, DeviceType::IntegratedGpu, DeviceType::VirtualGpu, DeviceType::Cpu]);
         assert_eq!(ranked(PowerPreference::LowPower),
                    [DeviceType::IntegratedGpu, DeviceType::DiscreteGpu, DeviceType::VirtualGpu, DeviceType::Cpu]);
+    }
+
+    #[test]
+    fn radv_keeps_command_buffers_out_of_visible_vram_unless_the_user_chose() {
+        assert_eq!(radv_perftest(None).as_deref(), Some("nosam"));
+        assert_eq!(radv_perftest(Some("")).as_deref(), Some("nosam"));
+        assert_eq!(radv_perftest(Some("gpl, nocache")).as_deref(), Some("gpl, nocache,nosam"), "the user's other options stand as written");
+        assert_eq!(radv_perftest(Some(" , ")).as_deref(), Some("nosam"));
+        for chosen in ["nosam", "sam", "gpl,sam", "nosam,gpl", "sam pswave32,cswave32", "gpl nosam", "sam\npswave32", "gpl\nnosam"] {
+            assert_eq!(radv_perftest(Some(chosen)), None, "{chosen}");
+        }
+        assert_eq!(radv_perftest(Some("nosamples")).as_deref(), Some("nosamples,nosam"), "an option is its whole name");
     }
 
     /// Making instances on many threads at once crashed the Vulkan loader on

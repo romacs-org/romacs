@@ -204,7 +204,7 @@ impl Vm {
                     match graph.marks.get(&key) {
                         None => {
                             graph.marks.insert(key, CircleMark::Once);
-                            pending.extend(node.lock().unwrap().slots.iter().rev().cloned());
+                            pending.extend(node.lock().unwrap().slots().iter().rev().cloned());
                         }
                         Some(CircleMark::Once) => {
                             self.print_number_index += 1;
@@ -326,9 +326,9 @@ impl Vm {
     fn print_sub_char_table_body(&self, node: &char_table::CharTableNodeHandle, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
         let slots = {
             let node = node.lock().unwrap();
-            let mut slots = vec![char_table::CharTableSlot::Value(Value::integer(node.depth as i64)?),
-                char_table::CharTableSlot::Value(Value::integer(node.min_char as i64)?)];
-            slots.extend(node.slots.iter().cloned());
+            let mut slots = vec![char_table::CharTableSlot::Value(Value::integer(node.depth() as i64)?),
+                char_table::CharTableSlot::Value(Value::integer(node.min_char() as i64)?)];
+            slots.extend(node.slots().iter().cloned());
             slots
         };
         self.print_char_table_slots("#^^", &slots, quoted, options, depth)

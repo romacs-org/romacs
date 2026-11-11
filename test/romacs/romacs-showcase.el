@@ -1,7 +1,6 @@
 ;;; romacs-showcase.el --- GPU Feature Showcase Demo -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
-(require 'romacs-webkit nil t)
 (require 'romacs-video nil t)
 
 (defvar showcase--log-file "/tmp/romacs-showcase.log"
@@ -192,8 +191,8 @@ a complete frame of glyphs over a crossbeam channel.
 
 Window transitions cross-fade. Scroll effects warp and curl.
 Child frames float with rounded corners and 3D shadows.
-Inline video plays at native resolution. WebKit views render
-the entire web, composited seamlessly into your editing surface.
+Inline video plays at native resolution, composited seamlessly
+into your editing surface.
 
 All of this happens while Emacs Lisp runs undisturbed on the
 main thread, blissfully unaware that the pixels it commands
@@ -309,13 +308,10 @@ The future of text editing is here.  It's called Romacs.
   (showcase--cancel-timers)
   (showcase--cleanup-child-frames)
   (delete-other-windows)
-  ;; Stop all video pipelines and close webkit views (release fds)
+  ;; Stop all video pipelines (release fds)
   (when (fboundp 'romacs-video-stop-all)
     (let ((inhibit-message t))
       (ignore-errors (romacs-video-stop-all))))
-  (when (fboundp 'romacs-webkit-close-all)
-    (let ((inhibit-message t))
-      (ignore-errors (romacs-webkit-close-all))))
   ;; Restore every renderer-defined default, then turn off the one shader
   ;; whose Rust default is intentionally enabled.
   (romacs-effects-apply '((cursor-color-cycle :enabled nil))))
@@ -1009,7 +1005,7 @@ The future of text editing is here.  It's called Romacs.
         (text-scale-decrease 3)))))
 
 (defun showcase--section-media ()
-  "Demonstrate inline image, video, and WebKit \x2014 all in the main buffer."
+  "Demonstrate inline image and video \x2014 both in the main buffer."
   (showcase--log ">>> SECTION 8: Inline Media START")
   (showcase--reset-all-effects)
   (let ((buf (showcase--get-buffer "*Showcase-Media*")))
@@ -1069,42 +1065,7 @@ The future of text editing is here.  It's called Romacs.
         (insert "[no video 2]"))
       (insert "\n")
 
-      (goto-char (point-min))))
-
-  ;; After 3s: inline WebKit browsers
-  (showcase--schedule 3.0
-    (lambda ()
-      (showcase--log "  media: showing inline WebKit browsers")
-      (message "Inline Media: WebKit Browsers")
-      (let ((buf (get-buffer "*Showcase-Media*")))
-        (when buf
-          (switch-to-buffer buf)
-          (let ((inhibit-read-only t))
-            (goto-char (point-max))
-            (insert "\n")
-            (insert (propertize "WebKit: " 'face '(:foreground "gold" :weight bold)))
-            (let ((wk-w (max 400 (/ (* (frame-pixel-width) 43) 100)))
-                  (wk-h (max 300 (/ (* (frame-pixel-height) 50) 100))))
-              ;; WebKit 1: Romacs GitHub
-              (condition-case nil
-                  (progn
-                    (romacs-webkit-init)
-                    (romacs-webkit-insert
-                     "https://git.thanosapollo.org/romacs"
-                     wk-w wk-h t))
-                (error (insert "[webkit 1 error]")))
-              (insert "  ")
-              ;; WebKit 2: Google
-              (condition-case nil
-                  (romacs-webkit-insert
-                   "https://www.google.com"
-                   wk-w wk-h t)
-                (error (insert "[webkit 2 error]"))))
-            (insert "\n")
-            ;; Scroll to make WebKit visible
-            (goto-char (point-max))
-            (recenter -2)
-            (redisplay t)))))))
+      (goto-char (point-min)))))
 
 (defun showcase--section-child-frames ()
   "Demonstrate child frames with 3D shadows, borders, and transparency."
@@ -1198,34 +1159,6 @@ The future of text editing is here.  It's called Romacs.
               (select-frame f 'norecord))
             (when (buffer-live-p (get-buffer "*showcase-cf-doc*"))
               (set-buffer "*showcase-cf-doc*"))))
-        (raise-frame f))))
-
-  ;; Child frame 4: WebKit browser (after 5s)
-  (showcase--schedule 5.0
-    (lambda ()
-      (showcase--log "  child-frames: showing WebKit child frame")
-      (let ((f (showcase--make-child "cf-web" 150 100 82 30
-                                     '((alpha-background . 100)))))
-        (save-current-buffer
-          (unwind-protect
-              (progn
-                (select-frame f 'norecord)
-                (condition-case err
-                    (progn
-                      (showcase--log "  child-frames: calling romacs-webkit-init")
-                      (romacs-webkit-init)
-                      (showcase--log "  child-frames: calling romacs-webkit-insert")
-                      (romacs-webkit-insert
-                       "https://git.thanosapollo.org/romacs"
-                       750 420 t)
-                      (showcase--log "  child-frames: webkit inserted OK"))
-                  (error
-                   (showcase--log "  child-frames: webkit ERROR: %S" err)
-                   (insert "[webkit error]"))))
-            (when (frame-live-p f)
-              (select-frame f 'norecord))
-            (when (buffer-live-p (get-buffer "*showcase-cf-web*"))
-              (set-buffer "*showcase-cf-web*"))))
         (raise-frame f)))))
 
 (defun showcase--section-retro ()
@@ -1248,7 +1181,7 @@ The future of text editing is here.  It's called Romacs.
   ;; Simulate typing
   (showcase--log "  retro: starting typing simulation")
   (let ((retro-buf (get-buffer "*Showcase-Retro*"))
-        (text "> GPU render pipeline...\n> Glyph cache loaded.\n> WebKit online.\n> 60 fps locked.\n> Systems go.\n")
+        (text "> GPU render pipeline...\n> Glyph cache loaded.\n> 60 fps locked.\n> Systems go.\n")
         (delay 0.2))
     (dotimes (i (length text))
       (let ((ch (aref text i)))
