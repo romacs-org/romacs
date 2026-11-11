@@ -69,7 +69,7 @@ impl Vm {
         while let Some(Object::CharTable(t)) = self.object_if(table) {
             if tables.len() > 64 { break; }
             tables.push(t.view());
-            table = t.parent;
+            table = t.parent();
         }
         WidthRule { tab, tables, ctl_arrow }
     }

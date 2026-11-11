@@ -22,9 +22,9 @@
 # Do not warn about trailing whitespace with these files.
 *.bat whitespace=cr-at-eol
 admin/charsets/mapfiles/PTCP154 whitespace=cr-at-eol
-test/manual/etags/c-src/dostorture.c whitespace=cr-at-eol
-test/manual/etags/cp-src/c.C whitespace=cr-at-eol
-test/manual/etags/html-src/algrthms.html whitespace=cr-at-eol
+gnu-tests/test/manual/etags/c-src/dostorture.c whitespace=cr-at-eol
+gnu-tests/test/manual/etags/cp-src/c.C whitespace=cr-at-eol
+gnu-tests/test/manual/etags/html-src/algrthms.html whitespace=cr-at-eol
 
 # Preserve Lisp source bytes on both check-in and checkout.  Generated
 # Unicode tables can contain encoded CRLF bytes that are not line endings.
@@ -45,7 +45,7 @@ leim/MISC-DIC/pinyin.map -diff
 leim/MISC-DIC/ziranma.cin -diff
 leim/SKK-DIC/SKK-JISYO.L -diff
 src/msdos.c -diff
-test/lisp/gnus/mm-decode-resources/win1252-multipart.bin -diff
+gnu-tests/test/lisp/gnus/mm-decode-resources/win1252-multipart.bin -diff
 
 # Some files should not be treated as text when diffing or merging.
 *.bmp binary
@@ -127,8 +127,5 @@ lib-src/rcs2log diff=shell
 # whitespace.
 java/INSTALL -whitespace
 
-DIVERGENCES.json merge=romacs-derived
-PRIMITIVES.json merge=romacs-derived
-crates/romacs-introspect-live/data/registry.json merge=romacs-derived
-crates/romacs-introspect/data/registry.json merge=romacs-derived
 rlisp/romacs-bundled-autoloads.el merge=romacs-derived
+SMELL-FLOORS.json merge=romacs-floors

@@ -31,8 +31,8 @@ non-unit defaults 100, 113, 97, 120; `gnu/redisplay.eld` records C-effective,
 C-realized and Lisp-query heights separately. Regeneration:
 
 ```sh
-# GNU at the pin only: scripts/gnu_oracle.py refuses anything else (R228).
-"$(python3 scripts/gnu_oracle.py path)" -Q --batch -l crates/romacs-face/tests/gnu/redisplay.el > "${TMPDIR:-/tmp}/redisplay.eld"
+# GNU at the pin only: tools/lib/gnu_oracle.py refuses anything else (R228).
+"$(python3 tools/lib/gnu_oracle.py path)" -Q --batch -l crates/romacs-face/tests/gnu/redisplay.el > "${TMPDIR:-/tmp}/redisplay.eld"
 # Check exit status directly, then review the diff before replacing the fixture.
 ```
 

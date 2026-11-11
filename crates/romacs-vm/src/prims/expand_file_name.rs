@@ -215,7 +215,7 @@ fn decode_file(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fau
     let last = cx.intern("last-coding-system-used");
     let recorded = cx.variable_value(last)?.unwrap_or(Value::NIL);
     let decoded = cx.coding_convert_string(name, coding, Value::TRUE, Value::NIL, false)?;
-    cx.variable_set(last, recorded)?;
+    cx.store_variable(last, recorded)?;
     Ok(decoded)
 }
 

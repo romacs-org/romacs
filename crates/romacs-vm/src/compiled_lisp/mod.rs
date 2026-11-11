@@ -257,6 +257,9 @@ pub(crate) struct Compiled {
     pub(crate) artifact: PathBuf,
     artifact_data: store::Artifact,
 }
+// SAFETY: a compiled file's path, bytes and names: it holds no heap Value, and a
+// unit's Values come to be only when it is installed.
+unsafe impl crate::brand::Plain for Compiled {}
 
 impl Compiled {
     pub(crate) fn units(&self) -> impl Iterator<Item = (usize, usize, usize, usize)> + '_ {

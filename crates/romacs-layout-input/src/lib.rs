@@ -13,7 +13,7 @@ romacs_snapshot::snapshot_enum!(FontSelectionAttribute {
     FontSelectionAttribute::Weight => (),
     FontSelectionAttribute::Slant => (),
 });
-pub const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
+pub(crate) const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
     FontSelectionAttribute::Width, FontSelectionAttribute::Height,
     FontSelectionAttribute::Weight, FontSelectionAttribute::Slant,
 ];
@@ -184,7 +184,7 @@ impl FrameSnapshot {
 }
 
 /// Whether window lists A and B lay out alike (`WindowSnapshot::lays_out_like').
-pub fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
+pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
 }
 
@@ -615,11 +615,11 @@ pub const STATUS_BAR_PAD: f32 = 12.0;
 
 /// The least room between the centred zone and a side zone; a side that
 /// would come closer pushes the centre away (modeline.md §14.2).
-pub const STATUS_BAR_ZONE_GAP: f32 = 24.0;
+pub(crate) const STATUS_BAR_ZONE_GAP: f32 = 24.0;
 
 impl StatusBarSnapshot {
     /// Where each character goes (`BandMarks::places'), inside the bar's
-    /// padding. The painter (layout2) and `romacs-status-bar-string' (the
+    /// padding. The painter (romacs-layout) and `romacs-status-bar-string' (the
     /// VM) both place by this.
     pub fn places(&self, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
         self.marks.places(&self.text, self.width as f32, STATUS_BAR_PAD, advances)
@@ -760,10 +760,14 @@ romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 /// cache, at BODY_X and BODY_Y in the slot (its margins and relief).
 /// RELIEF is `:relief' (raised when positive), its colors from
 /// RELIEF_BACKGROUND (0xRRGGBB), else the face's background.
+/// A `(surface :id ID ...)` specification is laid out the same way, IMAGE
+/// 0 and SURFACE its native surface (a model): the renderer composites
+/// that surface in the slot.  SURFACE is 0 for an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InlineImage {
     pub byte: usize,
     pub image: u32,
+    pub surface: u32,
     pub width: i64,
     pub ascent: i64,
     pub descent: i64,
@@ -774,7 +778,7 @@ pub struct InlineImage {
     pub relief: i64,
     pub relief_background: Option<u32>,
 }
-romacs_snapshot::snapshot_struct!(InlineImage { byte, image, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
+romacs_snapshot::snapshot_struct!(InlineImage { byte, image, surface, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
 
 /// A stretch's width before it depends on where it is laid out, in pixels
 /// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,

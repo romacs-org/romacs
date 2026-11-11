@@ -58,20 +58,30 @@ pub(super) struct Batch {
 }
 
 impl Batch {
-    pub fn push_rects(&mut self, pipe: Pipe, scissor: Scissor, quads: Vec<RoundedRectVertex>) {
+    pub(crate) fn push_rects(
+        &mut self,
+        pipe: Pipe,
+        scissor: Scissor,
+        quads: Vec<RoundedRectVertex>,
+    ) {
         let start = self.rects.len() as u32;
         self.rects.extend(quads);
         self.push(pipe, scissor, start..self.rects.len() as u32);
     }
 
-    pub fn push_glyphs(&mut self, entry: AnyAtlasEntry, scissor: Scissor, quad: [GlyphVertex; 6]) {
+    pub(crate) fn push_glyphs(
+        &mut self,
+        entry: AnyAtlasEntry,
+        scissor: Scissor,
+        quad: [GlyphVertex; 6],
+    ) {
         let start = self.glyphs.len() as u32;
         self.glyphs.extend(quad);
         self.push(Pipe::Glyph(entry), scissor, start..self.glyphs.len() as u32);
     }
 
     /// Record the indices appended to `fill_indices` since `start`.
-    pub fn push_fill(&mut self, scissor: Scissor, start: u32) {
+    pub(crate) fn push_fill(&mut self, scissor: Scissor, start: u32) {
         self.push(Pipe::Fill, scissor, start..self.fill_indices.len() as u32);
     }
 

@@ -199,10 +199,10 @@ impl AnimatedVisual for AnimationPlan {
         let mut next: Option<f64> = None;
         for rule in &self.rules {
             let timeline = &rule.timeline;
-            let dur = timeline.dur.as_secs_f64();
-            if !(dur > 0.0) {
+            if timeline.dur.is_zero() {
                 continue;
             }
+            let dur = timeline.dur.as_secs_f64();
             let begin = timeline.begin.as_secs_f64();
             let end = match Self::rule_active_duration(rule) {
                 Some(active) => begin + active.as_secs_f64(),

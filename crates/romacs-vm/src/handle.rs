@@ -155,7 +155,7 @@ impl Fixed {
     /// no `Fixed` may name one.
     pub(crate) fn image(value: Value) -> Self {
         debug_assert!(
-            Vm::image_value(value) && crate::frozen::region_of(value.payload() as usize) == 0,
+            Vm::image_value(value) && value.index_if(value.tag()).is_some_and(|at| crate::frozen::region_of(at) == 0),
             "Fixed::image requires an executable-image reference"
         );
         Self(value)
@@ -213,7 +213,7 @@ impl Vm {
         self.allocation.compact = true;
         self.collect(&mut []);
     }
-    /// The command loop's idle collection: as `collect_garbage', but
+    /// The command loop's idle collection: as `collect_garbage`, but
     /// abandoned, with nothing collected or counted, if the host has a key
     /// press queued while it is still marking, which changes nothing but
     /// caches: the key waits for no collection that has not begun moving
@@ -233,7 +233,7 @@ impl Vm {
     }
     /// Execute a live zero-argument function. Invalid or retired IDs return an
     /// `"invalid function"` error; IDs returned by `compile` remain live. Its
-    /// end is a request's (`finish_request'): a collection due runs, then what
+    /// end is a request's (`finish_request`): a collection due runs, then what
     /// collections left pending (VM2-GC-FINALIZER).
     pub fn execute(&mut self, function: usize) -> Result<Local<'_>> {
         let outcome = self.execute_raw(function);
@@ -354,11 +354,12 @@ impl Vm {
     pub(crate) fn collect(&mut self, roots: &mut [Value]) {
         self.collect_until_key(roots, false);
     }
-    /// Collect, or with UNTIL_KEY stop while marking once the host has a key
+    /// Collect, or with `until_key` stop while marking once the host has a key
     /// press queued, leaving the heap as it was: whether it collected.
     pub(crate) fn collect_until_key(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
+        let late = self.collection_late();
         let last = std::mem::take(&mut self.gc_times);
         let collected = self.collect_rooted(roots, until_key);
         if !collected {
@@ -370,11 +371,21 @@ impl Vm {
             if until_key {
                 crate::gc_mark::trim_after_graves(self.gc_stress.threads);
             }
-            let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
-            self.count_collection(elapsed);
-            self.note_collection(elapsed, until_key);
+            let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            self.count_collection(elapsed.unwrap_or(0));
+            self.note_collection(elapsed, until_key, late);
         }
         self.profile_collection_end();
+        collected
+    }
+    /// `collect_marked', and, when one is due, a mark twin's check of what it
+    /// freed (`twin.rs'): forked from the state the collection starts from.
+    fn collect_twinned(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        let twin = crate::twin::fork_marks(self, roots);
+        let collected = self.collect_marked(roots, until_key);
+        if let Some(twin) = twin && collected {
+            crate::twin::check(self, twin);
+        }
         collected
     }
     fn collect_rooted(&mut self, roots: &mut [Value], until_key: bool) -> bool {
@@ -384,11 +395,11 @@ impl Vm {
             slots.iter().filter_map(Weak::upgrade).collect()
         };
         if live.is_empty() {
-            return self.collect_marked(roots, until_key);
+            return self.collect_twinned(roots, until_key);
         }
         let mut all = roots.to_vec();
         all.extend(live.iter().map(|s| Value(s.load(Ordering::Relaxed))));
-        if !self.collect_marked(&mut all, until_key) {
+        if !self.collect_twinned(&mut all, until_key) {
             return false;
         }
         roots.copy_from_slice(&all[..roots.len()]);
@@ -544,32 +555,36 @@ mod tests {
             vm.display(taken).unwrap().split_whitespace().map(str::to_owned).collect::<Vec<_>>().join(" ")
         };
         take(&mut vm);
-        // Durations vary: only the record's shape is compared.
-        let shape = |text: String| text.split(' ').enumerate().map(|(i, w)| if i % 4 == 2 { "MS".to_owned() } else { w.to_owned() }).collect::<Vec<_>>().join(" ");
+        // Durations, times and sizes vary: only the record's shape is compared.
+        let shape = |text: String| {
+            let words: Vec<&str> = text.split(' ').collect();
+            let [dropped, kind, _ms, met, command, _at, _objects, _bytes, _late] = words[..] else { panic!("{text}") };
+            format!("{dropped} {kind} MS {met} {command} T OBJECTS BYTES LATE))")
+        };
         vm.collect_garbage();
-        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil T OBJECTS BYTES LATE))");
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil T OBJECTS BYTES LATE))");
         // The key arrives after the last point the collection gives way.
         vm.set_host_input(Some(Box::new(KeyAfter(2))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil T OBJECTS BYTES LATE))");
         vm.set_host_input(None);
         vm.eval_source_raw("(setq real-this-command 'forward-char)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char"))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char" T OBJECTS BYTES LATE))"#);
         // The loop's tail has cleared the running command.
         vm.eval_source_raw("(setq real-this-command nil real-last-command 'next-line)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line"))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line" T OBJECTS BYTES LATE))"#);
         // Idle again: the command has ended, whatever the variable holds.
         vm.idle_since = Some(crate::host::monotonic());
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil))");
+        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil T OBJECTS BYTES LATE))");
         vm.set_host_input(None);
         for _ in 0..crate::gc::COLLECTION_RECORDS + 44 {
             vm.collect(&mut []);

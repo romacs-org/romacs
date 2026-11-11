@@ -3,20 +3,16 @@
 #[cfg(test)]
 use super::ModeLineFadeEntry;
 use super::{
-    ClickHaloEntry, EdgeGlowEntry, EdgeSnapEntry, LineAnimEntry, ScrollMomentumEntry,
-    ScrollSpacingEntry, ScrollVelocityFadeEntry, SonarPingEntry, TextFadeEntry, WindowFadeEntry,
+    ClickHaloEntry, LineAnimEntry, ScrollMomentumEntry, ScrollSpacingEntry,
+    ScrollVelocityFadeEntry, TextFadeEntry, WindowFadeEntry,
 };
+#[cfg(test)]
+use super::{EdgeGlowEntry, EdgeSnapEntry, SonarPingEntry};
 use super::{RendererFrameEffects, WgpuRenderer};
 use romacs_display_protocol::frame_time::{EventTime, observe_platform_now};
 use romacs_display_protocol::types::{Color, Rect};
 
 impl WgpuRenderer {
-    /// Update inactive window dim config
-    pub fn set_inactive_dim_config(&mut self, enabled: bool, opacity: f32) {
-        self.effects.inactive_dim.enabled = enabled;
-        self.effects.inactive_dim.opacity = opacity;
-    }
-
     /// Slide the rows an edit displaced back from where they used to be.
     ///
     /// `first_moved_y` is the top of the displaced run and `pixels` is how far it
@@ -88,49 +84,6 @@ impl WgpuRenderer {
         offset
     }
 
-    /// Trigger a cursor wake animation
-    pub fn trigger_cursor_wake(&mut self, now: std::time::Instant) {
-        self.primary_frame_effects_mut().trigger_cursor_wake(now);
-    }
-
-    /// Trigger edge snap indicator
-    pub fn trigger_edge_snap(
-        &mut self,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-    ) {
-        let duration_ms = self.effects.edge_snap.duration_ms;
-        self.primary_frame_effects_mut().trigger_edge_snap(
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            now,
-            duration_ms,
-        );
-    }
-
-    /// Update typing heat map config
-    pub fn set_typing_heatmap(
-        &mut self,
-        enabled: bool,
-        color: (f32, f32, f32),
-        fade_ms: u32,
-        opacity: f32,
-    ) {
-        self.effects.typing_heatmap.enabled = enabled;
-        self.effects.typing_heatmap.color = color;
-        self.effects.typing_heatmap.fade_ms = fade_ms;
-        self.effects.typing_heatmap.opacity = opacity;
-        if !enabled {
-            self.fx.typing_heatmap.entries.clear();
-            self.fx.typing_heatmap.prev_cursor = None;
-        }
-    }
-
     /// Trigger click halo at position
     pub fn trigger_click_halo(&mut self, x: f32, y: f32, now: std::time::Instant) {
         let duration_ms = self.effects.click_halo.duration_ms;
@@ -167,11 +120,6 @@ impl WgpuRenderer {
         });
     }
 
-    /// Trigger resize padding animation
-    pub fn trigger_resize_padding(&mut self, now: std::time::Instant) {
-        self.primary_frame_effects_mut().trigger_resize_padding(now);
-    }
-
     /// Get current resize padding amount (eases from max to 0)
     pub(super) fn resize_padding_amount(&self) -> f32 {
         if let Some(started) = self.fx.resize_padding.started {
@@ -186,57 +134,6 @@ impl WgpuRenderer {
         } else {
             0.0
         }
-    }
-
-    /// Trigger a cursor error pulse
-    pub fn trigger_cursor_error_pulse(&mut self, now: std::time::Instant) {
-        self.primary_frame_effects_mut()
-            .trigger_cursor_error_pulse(now);
-    }
-
-    pub fn trigger_transient_click_halo(
-        &self,
-        effects: &mut RendererFrameEffects,
-        x: f32,
-        y: f32,
-        now: std::time::Instant,
-    ) {
-        effects.trigger_click_halo(x, y, now, self.effects.click_halo.duration_ms);
-    }
-
-    pub fn trigger_transient_edge_snap(
-        &self,
-        effects: &mut RendererFrameEffects,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-    ) {
-        effects.trigger_edge_snap(
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            now,
-            self.effects.edge_snap.duration_ms,
-        );
-    }
-
-    pub fn trigger_transient_cursor_error_pulse(
-        &self,
-        effects: &mut RendererFrameEffects,
-        now: std::time::Instant,
-    ) {
-        effects.trigger_cursor_error_pulse(now);
-    }
-
-    pub fn trigger_transient_cursor_wake(
-        &self,
-        effects: &mut RendererFrameEffects,
-        now: std::time::Instant,
-    ) {
-        effects.trigger_cursor_wake(now);
     }
 
     pub fn trigger_transient_resize_padding(
@@ -345,78 +242,6 @@ impl WgpuRenderer {
         });
     }
 
-    /// Update matrix rain config
-    pub fn set_matrix_rain(
-        &mut self,
-        enabled: bool,
-        color: (f32, f32, f32),
-        column_count: u32,
-        speed: f32,
-        opacity: f32,
-    ) {
-        self.effects.matrix_rain.enabled = enabled;
-        self.effects.matrix_rain.color = color;
-        self.effects.matrix_rain.column_count = column_count;
-        self.effects.matrix_rain.speed = speed;
-        self.effects.matrix_rain.opacity = opacity;
-        if !enabled {
-            self.fx.matrix_rain.columns.clear();
-        }
-    }
-
-    /// Update frost border config
-    pub fn set_frost_border_effect(
-        &mut self,
-        enabled: bool,
-        color: (f32, f32, f32),
-        width: f32,
-        opacity: f32,
-    ) {
-        self.effects.frost_border.enabled = enabled;
-        self.effects.frost_border.color = color;
-        self.effects.frost_border.width = width;
-        self.effects.frost_border.opacity = opacity;
-    }
-
-    /// Trigger edge glow for a window (at_top = beginning-of-buffer)
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    pub fn trigger_edge_glow(
-        &mut self,
-        window_id: i64,
-        bounds: Rect,
-        at_top: bool,
-        now: std::time::Instant,
-    ) {
-        self.fx
-            .edge_glow
-            .entries
-            .retain(|e| e.window_id != window_id || e.at_top != at_top);
-        self.fx.edge_glow.entries.push(EdgeGlowEntry {
-            window_id,
-            bounds,
-            at_top,
-            started: EventTime::from_observed_instant(now),
-            duration: std::time::Duration::from_millis(self.effects.edge_glow.fade_ms as u64),
-        });
-    }
-
-    /// Trigger a sonar ping at cursor position
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    pub fn trigger_sonar_ping(&mut self, cx: f32, cy: f32, now: std::time::Instant) {
-        self.fx.sonar_ping.entries.push(SonarPingEntry {
-            cx,
-            cy,
-            started: EventTime::from_observed_instant(now),
-            duration: std::time::Duration::from_millis(
-                self.effects.cursor_sonar_ping.duration_ms as u64,
-            ),
-        });
-    }
-
     /// Get the mode-line transition alpha for a glyph at (x, y)
     pub(super) fn mode_line_fade_alpha(&self, gx: f32, gy: f32) -> f32 {
         if !self.effects.mode_line_transition.enabled || self.fx.mode_line_fade.active.is_empty() {
@@ -509,16 +334,6 @@ impl WgpuRenderer {
         });
     }
 
-    /// Record a new cursor position for the trail
-    pub fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        if !self.effects.cursor_trail_fade.enabled {
-            return;
-        }
-        let length = self.effects.cursor_trail_fade.length;
-        self.primary_frame_effects_mut()
-            .record_cursor_trail(x, y, w, h, length);
-    }
-
     /// Update idle dim alpha
     pub fn set_idle_dim_alpha(&mut self, alpha: f32) {
         self.fx.dim.idle_alpha = alpha;
@@ -580,18 +395,6 @@ impl WgpuRenderer {
             self.primary_frame_effects_mut().spawn_ripple(cx, cy);
         }
     }
-
-    /// Update visible whitespace config
-    pub fn set_show_whitespace_config(&mut self, enabled: bool, color: (f32, f32, f32, f32)) {
-        self.effects.show_whitespace.enabled = enabled;
-        self.effects.show_whitespace.color = color;
-    }
-
-    /// Update line highlight config
-    pub fn set_line_highlight_config(&mut self, enabled: bool, color: (f32, f32, f32, f32)) {
-        self.effects.line_highlight.enabled = enabled;
-        self.effects.line_highlight.color = color;
-    }
 }
 
 struct RendererFrameEffectsRef<'a> {
@@ -611,49 +414,6 @@ impl RendererFrameEffectsRef<'_> {
         });
     }
 
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_edge_snap(
-        &mut self,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-        duration_ms: u32,
-    ) {
-        self.renderer.fx.edge_snap.snaps.push(EdgeSnapEntry {
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            started: EventTime::from_observed_instant(now),
-            duration: std::time::Duration::from_millis(duration_ms as u64),
-        });
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_cursor_error_pulse(&mut self, now: std::time::Instant) {
-        self.renderer.fx.error_pulse.started = Some(EventTime::from_observed_instant(now));
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_cursor_wake(&mut self, now: std::time::Instant) {
-        self.renderer.fx.cursor_wake.started = Some(EventTime::from_observed_instant(now));
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_resize_padding(&mut self, now: std::time::Instant) {
-        self.renderer.fx.resize_padding.started = Some(EventTime::from_observed_instant(now));
-    }
-
     fn spawn_ripple(&mut self, cx: f32, cy: f32) {
         self.renderer
             .fx
@@ -662,24 +422,7 @@ impl RendererFrameEffectsRef<'_> {
             // TRIGGER SIGNATURE: should take the keypress's `EventTime`.
             .push((cx, cy, observe_platform_now()));
     }
-
-    fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32, length: usize) {
-        let trail = &mut self.renderer.fx.cursor_trail;
-        let dist = ((x - trail.last_pos.0).powi(2) + (y - trail.last_pos.1).powi(2)).sqrt();
-        if dist < 2.0 {
-            return;
-        }
-        trail
-            .positions
-            // TRIGGER SIGNATURE: should take the cursor move's `EventTime`.
-            .push((x, y, w, h, observe_platform_now()));
-        trail.last_pos = (x, y);
-        while trail.positions.len() > length {
-            trail.positions.remove(0);
-        }
-    }
 }
 
 #[cfg(test)]
-#[path = "effects_state/tests/effects_state_test.rs"]
 mod tests;

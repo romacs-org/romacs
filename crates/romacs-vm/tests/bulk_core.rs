@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const CORPUS: &str = include_str!("../tools/primh/bulk/core.corpus.json");
 const LEDGER: &str = include_str!("../tools/primh/bulk/core.ledger.json");
-const DIVERGENCES: &str = include_str!("../../../DIVERGENCES.md");
 /// Fewer successful GNU answers than this for one primitive is a corpus that
 /// mostly proves the primitive signals, which proves little (bulk.py report).
 const MIN_OK_PER_PRIMITIVE: usize = 20;
@@ -52,8 +51,16 @@ fn validate(ev: &Value) {
     }
 }
 
+/// The divergence ledger, one file per divergence, read as one text.
+fn divergences() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ledger/divergences");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+    paths.sort();
+    paths.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect::<Vec<_>>().join("\n")
+}
+
 fn ledger_rows() -> BTreeSet<String> {
-    DIVERGENCES
+    divergences()
         .lines()
         .filter_map(|l| l.strip_prefix("| "))
         .filter_map(|l| l.split(' ').next())
@@ -73,7 +80,7 @@ fn replay(ev: &Value, pins: &serde_json::Map<String, Value>) -> Vec<String> {
         }
         let row = pin["divergence"].as_str().unwrap_or("");
         if !known.contains(row) {
-            bad.push(format!("PIN WITHOUT LEDGER ROW: {id} names {row:?}, absent from DIVERGENCES.md"));
+            bad.push(format!("PIN WITHOUT LEDGER ROW: {id} names {row:?}, absent from ledger/divergences"));
         }
     }
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);

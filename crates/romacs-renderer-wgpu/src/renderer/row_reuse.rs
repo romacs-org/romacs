@@ -356,7 +356,7 @@ impl RowReuseCache {
 
 /// Per-frame text-row reuse counters (reset each frame).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RowReuseStats {
+pub(crate) struct RowReuseStats {
     /// Rows tessellated from scratch (including bailed rows).
     pub rows_tessellated: usize,
     /// Rows spliced verbatim from the cache.
@@ -644,5 +644,4 @@ pub(super) fn scale_is_power_of_two(scale: f32) -> bool {
 }
 
 #[cfg(test)]
-#[path = "row_reuse/tests/row_reuse_test.rs"]
 mod tests;

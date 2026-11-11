@@ -239,7 +239,7 @@ impl Vm {
     pub(super) fn apply_undo_edits(&mut self, edits: Vec<UndoEdit>) {
         for edit in edits {
             match edit {
-                UndoEdit::Cdr(i, next) => self.conses[i].1 = next,
+                UndoEdit::Cdr(i, next) => self.conses.set_cdr(i, next),
                 UndoEdit::List(buffer, list) => self.set_undo_list_of(buffer, list),
                 UndoEdit::Compacted(buffer) => self.note_undo_compacted(Value::reference(buffer + 1, 0)),
                 UndoEdit::Offer => self.undo_offers_due = true,
@@ -345,7 +345,7 @@ impl Vm {
         if answer == Value::NIL && list != Value::TRUE {
             let limits = UndoLimits { offers: false, ..self.undo_limits_in(buffer)? };
             match self.undo_cut(list, limits) {
-                UndoCut::After(i) => self.conses[i].1 = Value::NIL,
+                UndoCut::After(i) => self.conses.set_cdr(i, Value::NIL),
                 UndoCut::Clear => self.set_undo_list_of(index, Value::NIL),
                 UndoCut::Keep | UndoCut::Offer => {}
             }
@@ -440,7 +440,7 @@ impl Vm {
             && start.integer_value().is_some()
             && end.integer_value() == Some(beg)
         {
-            self.conses[elt.index(3)?].1 = Value::integer(beg + length)?;
+            self.conses.set_cdr(elt.index(3)?, Value::integer(beg + length)?);
             return Ok(());
         }
         let entry = self.alloc_cons(Value::integer(beg)?, Value::integer(beg + length)?);

@@ -165,45 +165,6 @@ impl RenderApp {
         self.flush_model_events();
     }
 
-    /// Lisp asked to show, hide or iconify window `emacs_frame_id`.
-    ///
-    /// Hidden and iconified frames show no model (design §6.2), and the
-    /// window leaves at once on the request itself. Whether it then stays
-    /// out depends on `platform_reports_hiding`: whether the window system
-    /// can tell us the window's visibility (winit's `is_visible` or
-    /// `is_minimized` answers). Where it can (X11, macOS, Windows), the
-    /// window stays out until it is shown, exposed or focused again. Where
-    /// it cannot (Wayland: no `Occluded`, `set_visible` is a no-op, and a
-    /// compositor may ignore the minimize request), a window still on
-    /// screen would otherwise stay out forever; it rejoins at its next
-    /// successful presentation instead. A minimized window whose compositor
-    /// withholds frame callbacks presents nothing more and stays out; one
-    /// that keeps presenting is counted at the revision it presents, so
-    /// the fence still never claims pixels it did not present.
-    pub(super) fn note_models_visibility(
-        &mut self,
-        emacs_frame_id: u64,
-        visibility: crate::thread_comm::WindowVisibility,
-        platform_reports_hiding: bool,
-    ) {
-        match visibility {
-            crate::thread_comm::WindowVisibility::Visible => {
-                self.note_models_window_shown(emacs_frame_id);
-            }
-            crate::thread_comm::WindowVisibility::Iconified
-            | crate::thread_comm::WindowVisibility::Invisible => {
-                // Even where the hiding cannot be confirmed, the request
-                // ends a wheel gesture over the window's models.
-                self.model_wheel.reset();
-                if platform_reports_hiding {
-                    self.note_models_window_hidden(emacs_frame_id);
-                } else {
-                    self.note_models_window_gone(emacs_frame_id);
-                }
-            }
-        }
-    }
-
     /// Window `emacs_frame_id` is shown again: its next presentation
     /// rejoins the showing sets.
     pub(super) fn note_models_window_shown(&mut self, emacs_frame_id: u64) {
@@ -214,14 +175,14 @@ impl RenderApp {
     /// (a settling `View`, then `Readiness{current: nil}`) goes out on the
     /// ordered input channel now, ahead of any later key.
     pub(super) fn note_models_renderer_lost(&mut self) {
-        self.comms.capabilities.set_model_renderer_live(false);
+        self.comms.model_renderer.store(false, std::sync::atomic::Ordering::Release);
         self.models.renderer_lost();
         self.flush_model_events();
     }
 
     /// A renderer is live: publish it and upload what it lacks.
     pub(super) fn note_models_renderer_ready(&mut self) {
-        self.comms.capabilities.set_model_renderer_live(true);
+        self.comms.model_renderer.store(true, std::sync::atomic::Ordering::Release);
         self.service_models(romacs_display_protocol::frame_time::observe_platform_now());
     }
 
@@ -254,18 +215,13 @@ impl RenderApp {
         self.flush_model_events();
     }
 
-    /// Free surface `id` if it is a model; answers whether it was.
-    pub(super) fn handle_model_free(&mut self, id: u32) -> bool {
-        if !self.models.contains(id) {
-            return false;
-        }
+    /// Free model `id`; nothing when no model has that id.
+    pub(super) fn handle_model_free(&mut self, id: u32) {
         let mut models = std::mem::take(&mut self.models);
         models.free(id, self.model_host());
         self.models = models;
-        true
     }
 }
 
 #[cfg(test)]
-#[path = "models/tests.rs"]
 mod tests;

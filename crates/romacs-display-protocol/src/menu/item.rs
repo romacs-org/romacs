@@ -55,16 +55,4 @@ impl super::PopupMenuItem {
             }
         }
     }
-
-    /// Native GUI activation is narrower than navigation: submenu headers
-    /// can receive focus but only command leaves return an action.
-    pub fn actionable(&self) -> bool {
-        matches!(
-            self.kind,
-            MenuItemKind::Command {
-                availability: MenuAvailability::Enabled,
-                ..
-            }
-        )
-    }
 }

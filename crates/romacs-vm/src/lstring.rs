@@ -172,10 +172,10 @@ mod tests {
                 Some((code, n)),
                 "roundtrip {code:#x}"
             );
-            let m = romacs_regex_engine::emacs_char::char_string(code, &mut engine);
+            let m = romacs_regex::emacs_char::char_string(code, &mut engine);
             assert_eq!(&ours[..n], &engine[..m], "encoder disagreement {code:#x}");
             assert_eq!(
-                romacs_regex_engine::emacs_char::string_char(&ours[..n]),
+                romacs_regex::emacs_char::string_char(&ours[..n]),
                 (code, n),
                 "decoder disagreement {code:#x}"
             );

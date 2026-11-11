@@ -4,9 +4,6 @@ use crate::geometry::{DeviceScale, LogicalPixels};
 use crate::types::{Color, FaceId};
 use bitflags::bitflags;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use std::ffi::CStr;
-use std::os::raw::c_char;
-use std::os::raw::c_int;
 use strum::{EnumString, IntoStaticStr};
 
 /// The realized face table a frame presentation carries, keyed by face id.
@@ -234,6 +231,7 @@ impl BoxRunMembership {
 }
 
 impl BoxVerticalEdges {
+    #[cfg(test)]
     /// Stable compact representation for retained-row identity.
     pub(crate) const fn hash_code(self) -> u8 {
         match self {
@@ -455,7 +453,7 @@ impl BoxBorderStyle {
     TryFromPrimitive,
 )]
 #[strum(serialize_all = "kebab-case")]
-pub enum BasicFaceId {
+pub(crate) enum BasicFaceId {
     Default = 0,
     ModeLineActive = 1,
     ModeLineInactive = 2,
@@ -480,10 +478,11 @@ pub enum BasicFaceId {
 
 impl BasicFaceId {
     /// One past the last basic face.  Dynamic face IDs start here.
-    pub const SENTINEL: u32 = 20;
+    pub(crate) const SENTINEL: u32 = 20;
 
+    #[cfg(test)]
     /// Look up a basic face by its canonical name.
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         name.parse().ok()
     }
 
@@ -716,13 +715,15 @@ impl Face {
         }
     }
 
+    #[cfg(test)]
     /// Check if face is bold
-    pub fn is_bold(&self) -> bool {
+    pub(crate) fn is_bold(&self) -> bool {
         self.attributes.contains(FaceAttributes::BOLD) || self.font_weight >= 700
     }
 
+    #[cfg(test)]
     /// Check if face is italic
-    pub fn is_italic(&self) -> bool {
+    pub(crate) fn is_italic(&self) -> bool {
         self.attributes.contains(FaceAttributes::ITALIC)
     }
 
@@ -731,212 +732,10 @@ impl Face {
         self.underline_style != UnderlineStyle::None
     }
 
+    #[cfg(test)]
     /// Get the underline color (foreground if not explicitly set)
-    pub fn get_underline_color(&self) -> Color {
+    pub(crate) fn get_underline_color(&self) -> Color {
         self.underline_color.unwrap_or(self.foreground)
-    }
-
-    /// Create a Pango font description string
-    pub fn to_pango_font_description(&self) -> String {
-        let mut desc = self.font_family.clone();
-
-        if self.is_italic() {
-            desc.push_str(" Italic");
-        }
-
-        if self.is_bold() {
-            desc.push_str(" Bold");
-        }
-
-        desc.push_str(&format!(" {}", self.font_size as i32));
-        desc
-    }
-}
-
-/// FFI-safe face data struct, populated by C's `fill_face_data()`.
-///
-/// This is the canonical bridge type between C (Emacs face system) and Rust.
-/// Layout must match the C `struct FaceDataFFI` in `romacsterm.c`.
-#[repr(C)]
-#[derive(Debug, Clone, Default)]
-pub struct FaceDataFFI {
-    /// Face ID
-    pub face_id: u32,
-    /// Foreground color (sRGB pixel: 0x00RRGGBB)
-    pub fg: u32,
-    /// Background color (sRGB pixel: 0x00RRGGBB)
-    pub bg: u32,
-    /// Font family name (null-terminated C string, valid for duration of layout)
-    pub font_family: *const c_char,
-    /// Font weight (CSS scale: 400=normal, 700=bold)
-    pub font_weight: c_int,
-    /// Italic flag
-    pub italic: c_int,
-    /// Font pixel size
-    pub font_size: c_int,
-    /// Underline style (0=none, 1=single, 2=double, 3=wave, 4=dotted, 5=dashed)
-    pub underline_style: c_int,
-    /// Underline color (sRGB pixel)
-    pub underline_color: u32,
-    /// Strike-through (0=none, 1=enabled)
-    pub strike_through: c_int,
-    /// Strike-through color
-    pub strike_through_color: u32,
-    /// Overline (0=none, 1=enabled)
-    pub overline: c_int,
-    /// Overline color
-    pub overline_color: u32,
-    /// Box type (0=none, 1=line, 2=raised, 3=sunken)
-    pub box_type: c_int,
-    /// Box color
-    pub box_color: u32,
-    /// Box line width
-    pub box_line_width: c_int,
-    /// Box corner radius (0 = sharp corners)
-    pub box_corner_radius: c_int,
-    /// Fancy border style (0=solid, 1=rainbow, 2=animated-rainbow, 3=gradient,
-    /// 4=glow, 5=neon, 6=dashed, 7=comet, 8=iridescent, 9=fire, 10=heartbeat)
-    pub box_border_style: c_int,
-    /// Animation speed multiplier (100 = 1.0x)
-    pub box_border_speed: c_int,
-    /// Secondary box color (sRGB pixel: 0x00RRGGBB)
-    pub box_color2: u32,
-    /// Signed box horizontal (top/bottom) line width.
-    /// `>0`: box adds height (borders drawn outside text area).
-    /// `<0`: box drawn within text area (no extra height).
-    pub box_h_line_width: c_int,
-    /// Extend: face bg extends to end of visual line (0=no, 1=yes)
-    pub extend: c_int,
-    /// Per-face font character width (0.0 = use window default)
-    pub font_char_width: f32,
-    /// Per-face font ascent (0.0 = use window default)
-    pub font_ascent: f32,
-    /// Per-face space width (for tab stop calculations with proportional fonts)
-    pub font_space_width: f32,
-    /// Whether the face's font is monospace (1=monospace, 0=proportional)
-    pub font_is_monospace: c_int,
-    /// Stipple bitmap ID (0 = none, positive = 1-based bitmap index)
-    pub stipple: c_int,
-    /// Overstrike flag (1 = simulate bold by drawing twice at x and x+1)
-    pub overstrike: c_int,
-    /// Font descent in pixels (FONT_DESCENT)
-    pub font_descent: c_int,
-    /// Underline position below baseline (font->underline_position, >=1)
-    pub underline_position: c_int,
-    /// Underline thickness in pixels (font->underline_thickness, >=1)
-    pub underline_thickness: c_int,
-    /// Absolute path to resolved font file (from Fontconfig), or NULL.
-    pub font_file_path: *const c_char,
-}
-
-// Safety: FaceDataFFI contains raw pointers that are only valid during
-// the FFI call. The to_face() method copies all data into owned types.
-unsafe impl Send for FaceDataFFI {}
-unsafe impl Sync for FaceDataFFI {}
-
-impl FaceDataFFI {
-    /// Convert FFI face data to the Rust `Face` type.
-    ///
-    /// # Safety
-    /// Caller must ensure `font_family` and `font_file_path` pointers
-    /// (if non-null) point to valid, null-terminated C strings.
-    pub unsafe fn to_face(&self) -> Face {
-        let font_family = if !self.font_family.is_null() {
-            unsafe { CStr::from_ptr(self.font_family) }
-                .to_str()
-                .unwrap_or("monospace")
-                .to_string()
-        } else {
-            "monospace".to_string()
-        };
-
-        let font_file_path = if !self.font_file_path.is_null() {
-            unsafe { CStr::from_ptr(self.font_file_path) }
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-        } else {
-            None
-        };
-
-        let underline_style_code = u8::try_from(self.underline_style).unwrap_or(0);
-        let underline_style =
-            UnderlineStyle::from_gnu_code(underline_style_code).unwrap_or_default();
-        let has_underline = underline_style != UnderlineStyle::None;
-        let strike_through = self.strike_through > 0;
-        let overline = self.overline > 0;
-        let font_weight = self.font_weight.max(0) as u16;
-
-        let mut attrs = FaceAttributes::empty();
-        if font_weight >= 700 {
-            attrs |= FaceAttributes::BOLD;
-        }
-        if self.italic != 0 {
-            attrs |= FaceAttributes::ITALIC;
-        }
-        if has_underline {
-            attrs |= FaceAttributes::UNDERLINE;
-        }
-        if strike_through {
-            attrs |= FaceAttributes::STRIKE_THROUGH;
-        }
-        if overline {
-            attrs |= FaceAttributes::OVERLINE;
-        }
-        let box_type =
-            BoxType::from_gnu_code(u8::try_from(self.box_type).unwrap_or(0)).unwrap_or_default();
-        if !matches!(box_type, BoxType::None) {
-            attrs |= FaceAttributes::BOX;
-        }
-
-        Face {
-            // FFI edge: wrap the raw C-side face id into the typed FaceId here.
-            id: FaceId::new(self.face_id),
-            foreground: Color::from_pixel(self.fg),
-            background: Color::from_pixel(self.bg),
-            // A raw FFI pixel never went through `tty-color-desc`, so it has no
-            // terminal colour to carry.
-            terminal_foreground: None,
-            terminal_background: None,
-            use_default_foreground: false,
-            use_default_background: false,
-            underline_color: has_underline.then(|| Color::from_pixel(self.underline_color)),
-            terminal_underline_color: None,
-            overline_color: overline.then(|| Color::from_pixel(self.overline_color)),
-            strike_through_color: strike_through
-                .then(|| Color::from_pixel(self.strike_through_color)),
-            box_color: (box_type != BoxType::None).then(|| Color::from_pixel(self.box_color)),
-            font_family,
-            font_size: self.font_size.max(0) as f32,
-            font_weight,
-            attributes: attrs,
-            underline_style,
-            box_type,
-            box_line_width: BoxLineWidth::from_gnu(self.box_line_width),
-            box_vertical_line_width: None,
-            box_corner_radius: self.box_corner_radius,
-            // FFI edge: decode the raw C style code; unknown codes fall back
-            // to the solid border rather than propagating garbage.
-            box_border_style: BoxBorderStyle::from_gnu_code(self.box_border_style.max(0) as u32)
-                .unwrap_or_default(),
-            box_border_speed: self.box_border_speed as f32 / 100.0,
-            box_color2: (self.box_color2 != 0).then(|| Color::from_pixel(self.box_color2)),
-            font_file_path,
-            font_ascent: self.font_ascent as i32,
-            font_descent: self.font_descent,
-            underline_position: self.underline_position.max(1),
-            underline_placement: UnderlinePosition::FontMetric {
-                offset_from_baseline: self.underline_position.max(1),
-            },
-            underline_thickness: self.underline_thickness.max(1),
-            background_gradient: None,
-            lisp_name: None,
-            default_resolved_font_id: None,
-            // The legacy FFI face path does not carry a realized stipple; the
-            // typed layout-engine path (`render_face`) is the only producer.
-            stipple: None,
-        }
     }
 }
 
@@ -956,8 +755,9 @@ impl FaceCache {
         self.faces.iter().find(|f| f.id == id)
     }
 
+    #[cfg(test)]
     /// Get or create a face by ID
-    pub fn get_or_create(&mut self, id: FaceId) -> &Face {
+    pub(crate) fn get_or_create(&mut self, id: FaceId) -> &Face {
         // Check if exists
         if self.get(id).is_some() {
             return self.get(id).unwrap();
@@ -979,12 +779,12 @@ impl FaceCache {
         id
     }
 
+    #[cfg(test)]
     /// Get default face (ID 0)
-    pub fn default_face(&self) -> Option<&Face> {
+    pub(crate) fn default_face(&self) -> Option<&Face> {
         self.get(FaceId::new(0))
     }
 }
 
 #[cfg(test)]
-#[path = "face/tests/face_test.rs"]
 mod tests;

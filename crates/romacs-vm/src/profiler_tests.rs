@@ -2,6 +2,7 @@
 //! the log's backtrace vectors and special entries, `function-equal' and
 //! the hash test profiler.el defines over it.
 use crate::Vm;
+use std::sync::atomic::Ordering;
 
 fn eval(vm: &mut Vm, source: &str) -> String {
     let value = vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}"));
@@ -60,18 +61,23 @@ fn cpu_log_records_the_running_backtrace() {
 }
 
 /// Samples a collection takes are GNU's [Automatic\ GC nil] entry; a full
-/// log evicts its least counted half into [Discarded\ Samples nil].
+/// log evicts its least counted half into [Discarded\ Samples nil]. A sample
+/// lands in a collection by chance, so rounds run until one has: this shows
+/// that a sampler can see a collection, not that it sees each one, and
+/// `a_collections_ticks_are_its_entry` counts what it charges.
 #[test]
 fn special_entries_for_collection_and_eviction() {
     let mut vm = Vm::new();
     let source = r#"
       (progn
         (defalias 'pt-gc (lambda () (let ((end (+ (float-time) 0.3))) (while (< (float-time) end) (make-list 20000 nil) (garbage-collect)))))
-        (profiler-cpu-start 1000000)
-        (pt-gc)
-        (profiler-cpu-stop)
-        (let ((gc nil))
-          (maphash (lambda (k v) (when (equal k (vector (intern "Automatic GC") nil)) (setq gc v))) (profiler-cpu-log))
+        (let ((gc nil) (deadline (+ (float-time) 60)))
+          (profiler-cpu-start 1000000)
+          ;; A log taken while the profiler runs restarts it.
+          (while (and (not gc) (< (float-time) deadline))
+            (pt-gc)
+            (maphash (lambda (k v) (when (equal k (vector (intern "Automatic GC") nil)) (setq gc v))) (profiler-cpu-log)))
+          (profiler-cpu-stop)
           (natnump gc)))"#;
     assert_eq!(eval(&mut vm, source), "t");
     let source = r#"
@@ -89,6 +95,36 @@ fn special_entries_for_collection_and_eviction() {
                    (profiler-memory-log))
           (list (<= n 3) (natnump discarded))))"#;
     assert_eq!(eval(&mut vm, source), "(t t)");
+}
+
+/// The ticks taken inside a collection are its entry, and those before it
+/// are charged to what ran, with the sampler's timing out of it: a sample an
+/// hour keeps it from adding any, and the ticks are set by hand.
+#[test]
+fn a_collections_ticks_are_its_entry() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    eval(&mut vm, "(profiler-cpu-start 3600000000000)");
+    // A log read while the profiler runs restarts it, with new ticks.
+    let ticks = |vm: &Vm| vm.profiler.cpu.as_ref().expect("the profiler runs").ticks.clone();
+    let log = r#"
+      (let ((gc 0) (others 0))
+        (maphash (lambda (k v)
+                   (if (equal k (vector (intern "Automatic GC") nil))
+                       (setq gc v)
+                     (setq others (+ others v))))
+                 (profiler-cpu-log))
+        (list gc others))"#;
+    ticks(&vm).store(2, Ordering::Relaxed);
+    vm.profile_collection_begin();
+    ticks(&vm).fetch_add(3, Ordering::Relaxed);
+    vm.profile_collection_end();
+    assert_eq!(eval(&mut vm, log), "(3 2)");
+    // The collector itself: what came before it is not its own.
+    ticks(&vm).store(2, Ordering::Relaxed);
+    vm.collect(&mut []);
+    assert_eq!(eval(&mut vm, log), "(0 2)");
+    eval(&mut vm, "(profiler-cpu-stop)");
 }
 
 /// Ffunction_equal: one function, or closures of one code; profiler.el's

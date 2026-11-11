@@ -8,7 +8,7 @@
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
   "cases_sha256": "eb63babde73db8d168c18ce02e8bddc21608b3f3156e6dd6aa85f325cefc0eeb",
-  "recorder_sha256": "0e80af8b705a7ded46abb7de916a85b1081460f4c4300c0a0bbbb944f3f895d3",
+  "recorder_sha256": "f8e0c769e73b9a29f45bca46cfaae97f911056ba14d22e47137a89f56347c813",
   "cases": [
     {
       "id": "logand-0",

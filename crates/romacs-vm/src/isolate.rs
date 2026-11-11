@@ -384,10 +384,7 @@ pub(crate) fn job_memory_exit() -> ! {
     if let Some(socket) = parent_socket() {
         let _ = send_report(socket.as_fd(), &report_frame(Kind::Memory, 0, &[]), None);
     }
-    // SAFETY: `_exit' takes only a status; it ends the process at once, and
-    // nothing of this process (destructor, atexit handler, other thread) runs
-    // after it. No safe std call exits without running atexit handlers.
-    unsafe { libc::_exit(JOB_MEMORY_EXIT) }
+    crate::host::exit_at_once(JOB_MEMORY_EXIT)
 }
 
 /// A child PID was spawned by this process: a worker reports it with a
@@ -501,7 +498,7 @@ impl Vm {
     /// the signal-handler stack, above the job's handler. Whatever removes that
     /// entry ends the claim with no code of its own: the handler's normal exit
     /// or landing (truncation to its mark), its engine's end, a caught panic
-    /// (`UnwindMark'). O(1).
+    /// (`Vm::catching`). O(1).
     pub(crate) fn isolate_claim(&self) -> Option<u64> {
         let (index, generation) = self.isolates.claim?;
         matches!(self.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)

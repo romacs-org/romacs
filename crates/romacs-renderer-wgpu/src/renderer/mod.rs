@@ -15,8 +15,6 @@ use super::image_cache::ImageCache;
 use super::vertex::{CoverageGlyphVertex, GlyphVertex, RectVertex, RoundedRectVertex};
 #[cfg(feature = "video")]
 use super::video_cache::VideoCache;
-#[cfg(all(feature = "webview", target_os = "linux"))]
-use super::webview_cache::WgpuWebViewCache;
 
 mod box_tessellation;
 mod child_frames;
@@ -32,11 +30,10 @@ mod deform;
 mod draw;
 mod dynamic_buffer;
 mod frame_submission;
-pub use draw::DrawContext;
 mod paint;
 mod panes;
 mod target;
-pub use target::{NativeContentPlacement, NativePlacementError, RenderTarget, SnapshotRegion};
+pub use target::{NativeContentPlacement, RenderTarget, SnapshotRegion};
 mod effect_common;
 mod effects_state;
 mod frame_pass;
@@ -45,7 +42,8 @@ pub use full_frame_texture::FullFrameTexture;
 mod fx_state;
 mod glyphs;
 mod gpu_budget;
-pub use gpu_budget::{BudgetExceeded, GpuBudget, GpuBudgetOwner, UnpooledTexture};
+pub(crate) use gpu_budget::GpuBudget;
+pub use gpu_budget::{BudgetExceeded, GpuBudgetOwner, UnpooledTexture};
 mod layer_backgrounds;
 mod layout_pass;
 pub use layout_pass::{PaneBlit, PaneSource};
@@ -62,11 +60,9 @@ mod row_reuse;
 mod scene_placements;
 mod scissor;
 mod snapshot_pool;
-pub use snapshot_pool::{
-    SnapshotId, SnapshotLease, SnapshotPool, SnapshotResources, SnapshotSize, texture_bytes,
-};
+pub(crate) use snapshot_pool::{SnapshotPool, SnapshotResources};
+pub use snapshot_pool::{SnapshotLease, SnapshotSize, texture_bytes};
 mod stats;
-mod tooltip;
 mod transitions;
 mod ui_overlays;
 mod window_effects;
@@ -74,7 +70,7 @@ mod window_effects;
 pub use fx_state::RendererFrameEffects;
 pub(crate) use fx_state::*;
 pub(crate) use resources::*;
-pub use row_reuse::{FrameRowDamage, RowDamageInfo, RowReuseStats, WindowRowDamage};
+pub use row_reuse::FrameRowDamage;
 pub use stats::*;
 
 #[cfg(feature = "video")]
@@ -200,7 +196,6 @@ pub struct WgpuRenderer {
     pub(super) pipelines: Pipelines,
     /// Stencil texture/view for child frame rounded-corner clipping
     pub(super) stencil: StencilTargets,
-    pub(super) glyph_bind_group_layout: wgpu::BindGroupLayout,
     draw_parameters: draw::DrawParameterCache,
     submissions: frame_submission::FrameSubmissions,
     /// Texture/media caches
@@ -734,8 +729,6 @@ impl WgpuRenderer {
         video_cache.set_gpu_timing_status(gpu_frame_timer.status());
 
         // Create the WebView texture cache.
-        #[cfg(all(feature = "webview", target_os = "linux"))]
-        let webview_cache = WgpuWebViewCache::new(&device);
 
         // Create shader-surface cache
         let shader_surface_cache = crate::shader_surface_cache::ShaderSurfaceCache::new(&device);
@@ -1179,15 +1172,12 @@ impl WgpuRenderer {
                 stencil_write: stencil_write_pipeline,
             },
             stencil,
-            glyph_bind_group_layout,
             draw_parameters: draw::DrawParameterCache::new(bind_group_layout),
             submissions: Default::default(),
             caches: RenderCaches {
                 image: image_cache,
                 #[cfg(feature = "video")]
                 video: video_cache,
-                #[cfg(all(feature = "webview", target_os = "linux"))]
-                webview: webview_cache,
                 surface: shader_surface_cache,
             },
             #[cfg(feature = "video")]
@@ -1321,11 +1311,6 @@ impl WgpuRenderer {
         self.frame_seq = self.frame_seq.wrapping_add(1);
     }
 
-    /// Get the glyph bind group layout for creating glyph bind groups
-    pub fn glyph_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.glyph_bind_group_layout
-    }
-
     /// Render a scene to the configured surface.
     pub fn render(&mut self, scene: &Scene) {
         let surface = match &self.surface {
@@ -1359,7 +1344,7 @@ impl WgpuRenderer {
     }
 
     /// Render a scene to a texture view.
-    pub fn render_to_view(&self, view: &wgpu::TextureView, scene: &Scene) {
+    pub(crate) fn render_to_view(&self, view: &wgpu::TextureView, scene: &Scene) {
         // Collect all rectangles to render
         let mut vertices: Vec<RectVertex> = Vec::new();
 
@@ -2001,16 +1986,6 @@ impl WgpuRenderer {
         &self.caches.image
     }
 
-    /// Get the image bind group layout (for creating bind groups for offscreen textures)
-    pub fn image_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        self.caches.image.bind_group_layout()
-    }
-
-    /// Get the image sampler (for creating bind groups for offscreen textures)
-    pub fn image_sampler(&self) -> &wgpu::Sampler {
-        self.caches.image.sampler()
-    }
-
     fn parameters(&self, size: [f32; 2], time: f32) -> draw::DrawParameters {
         self.parameters_with_alpha(size, time, 1.0)
     }
@@ -2052,11 +2027,6 @@ impl WgpuRenderer {
             ],
             time,
         )
-    }
-
-    /// Get the image pipeline (needed for blit and scroll slide)
-    pub fn image_pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.pipelines.image
     }
 
     /// Lease a full-frame texture from the snapshot pool.

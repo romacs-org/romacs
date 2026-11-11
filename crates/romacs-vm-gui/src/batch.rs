@@ -59,9 +59,12 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
     let (quick, args) = command_line_options(args, quick);
     configure_compiled_lisp(store.as_deref(), false);
     super::spawn_evaluator(move || -> Result<(), String> {
+        // A flight recording or replay (ROMACS_FLIGHT) covers the boot too.
+        romacs_vm::flight::start_from_environment()?;
         let mut vm = boot(store, false)?;
         vm.set_session_host(Some(Box::new(|code| {
             use std::io::Write;
+            romacs_vm::flight::finish();
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
             std::process::exit(code)
@@ -244,8 +247,11 @@ pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
 /// A builder prunes the store, builds the world and exits here.
 fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
-    let Some(world) = world(store, &dir) else { return chain(&dir) };
-    match world.launch::<()>(|| builder_args(&world), wait, || {}) {
+    // The store's checks, locks and use stamps are the launcher's, outside
+    // a flight recording (romacs_vm::flight::without).
+    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, || {}), world)));
+    let Some((launched, world)) = launched else { return chain(&dir) };
+    match launched {
         Launch::Restored { vm, .. } => {
             let mut vm = *vm;
             vm.world_reinit();

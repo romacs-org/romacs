@@ -140,10 +140,17 @@ impl Seen<'_> {
 }
 
 impl RawTable<data::Object> {
-    /// Object I, as `Seen'. SAFETY: as `RawTable::get'.
-    unsafe fn seen(&self, i: usize) -> Seen<'_> {
+    /// Object I, as `Seen`. Private to this file, whose every call is in a mark
+    /// or the scan for the dead. The mutator is stopped, so the only writer of
+    /// an object is a `&mut` visitor holding a `Handed` for it, and an object is
+    /// handed over only after its one claim, by the worker that claimed it and
+    /// has called this for it already. So a call here and a `Handed` never meet
+    /// on one entry: a vector or record is read only through shared views (its
+    /// `VectorPart`s go to whichever worker adopts them) and is never handed to
+    /// a `&mut` visitor, and the scan for the dead runs after the mark.
+    fn seen(&self, i: usize) -> Seen<'_> {
         use data::Object::*;
-        // SAFETY: as the caller's; only plain data is read below.
+        // SAFETY: as above, no `Handed` exists for I, and only plain data is read below.
         match unsafe { self.get_unsync(i) } {
             Free => Seen::Free,
             Float(_) => Seen::Float,
@@ -155,6 +162,26 @@ impl RawTable<data::Object> {
             Buffer(_) | ByteBuffer(_) => Seen::Buffer,
             _ => Seen::Other,
         }
+    }
+}
+
+/// A Value a worker claimed and handed over, on the thread it was handed to.
+/// `Marking::round` alone makes one, for the hand-over it just took.
+pub(super) struct Handed<'m> {
+    objects: &'m RawTable<data::Object>,
+    value: Value,
+}
+
+impl<'m> Handed<'m> {
+    pub(super) fn value(&self) -> Value {
+        self.value
+    }
+    /// The object it names, for the `&mut` visitors. Taking the hand-over gives
+    /// it up, so there is one of these at a time.
+    pub(super) fn object(self) -> &'m mut data::Object {
+        // SAFETY: claimed by the worker that handed it over, which reads it no
+        // more, and each object is handed over once.
+        unsafe { self.objects.get_mut(self.value.index_if(0).expect("an object handed over") - 1) }
     }
 }
 
@@ -214,7 +241,7 @@ impl Vm {
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, caches: &self.caches, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
-            stacks: std::iter::once(self.stack.as_slice()).chain(self.suspended_stacks.iter().map(Vec::as_slice)).collect(),
+            stacks: self.register_roots(),
             in_obarray, local_binding, code_marks,
         }
     }
@@ -500,20 +527,12 @@ impl Marking {
             }
             Work::Registers(stack, range) => {
                 let units = range.len();
-                // A stack is sized for the widest function there is, so it is
-                // mostly NIL: a block of them is passed over by a test that
-                // vectorizes.
-                for block in view.stacks[stack][range].chunks(64) {
-                    if block.iter().fold(false, |any, &v| any | (v != Value::NIL)) {
-                        w.stack.extend(block.iter().copied().filter(keep));
-                    }
-                }
+                w.stack.extend(view.stacks[stack][range].iter().copied().filter(keep));
                 units
             }
             Work::VectorPart(i, range) => {
                 let units = range.len();
-                // SAFETY: claimed, and nothing writes it during a mark.
-                if let Seen::Values(values, _) = unsafe { self.objects.seen(i) } {
+                if let Seen::Values(values, _) = self.objects.seen(i) {
                     w.stack.extend(values[range].iter().copied().filter(keep));
                 }
                 units
@@ -559,7 +578,7 @@ impl Marking {
     /// Trace all there is, the coordinator's part, running SERIAL on each
     /// entry handed to it, and asking KEY after each POLL units of its work.
     /// False when KEY said to stop, nothing being held but what W keeps.
-    pub(super) fn round(&self, view: &MarkView<'_>, w: &mut Worker, poll: usize, serial: &mut dyn FnMut(Value, &mut Vec<Value>), key: &mut dyn FnMut() -> bool) -> bool {
+    pub(super) fn round(&self, view: &MarkView<'_>, w: &mut Worker, poll: usize, serial: &mut dyn FnMut(Handed<'_>, &mut Vec<Value>), key: &mut dyn FnMut() -> bool) -> bool {
         let slice = if self.n > 1 { CHUNK } else { poll };
         let (mut done, mut waits) = (0, 0);
         loop {
@@ -567,7 +586,7 @@ impl Marking {
             #[cfg(test)]
             if let Some(hook) = self.after_take.lock().unwrap().take() { hook(self); }
             let handed = !batch.is_empty();
-            for v in batch { serial(v, &mut w.stack); }
+            for value in batch { serial(Handed { objects: &self.objects, value }, &mut w.stack); }
             let worked = if !w.stack.is_empty() || !w.code.is_empty() {
                 let left = self.drain(view, w, slice);
                 self.hand_over(w);
@@ -612,8 +631,7 @@ impl Marking {
         let dead = Mutex::new(Vec::new());
         self.share_out(own, len.div_ceil(RANGE), |_, i| {
             let mut found = Vec::new();
-            // SAFETY: a dead entry is no one's, and nothing writes the heap now.
-            self.objects.dead_in(i * RANGE..((i + 1) * RANGE).min(len), |i| !unsafe { self.objects.seen(i) }.buried(), &mut found);
+            self.objects.dead_in(i * RANGE..((i + 1) * RANGE).min(len), |i| !self.objects.seen(i).buried(), &mut found);
             if !found.is_empty() { dead.lock().unwrap().append(&mut found); }
         });
         dead.into_inner().unwrap()
@@ -725,8 +743,7 @@ impl Marking {
                         if self.verify && self.objects.is_free(i) { self.refuse_stale("object", i); }
                         continue;
                     }
-                    // SAFETY: a claimed entry is this thread's.
-                    match unsafe { self.objects.seen(i) } {
+                    match self.objects.seen(i) {
                         Seen::Values(values, spare) => {
                             w.census.vectors += 1;
                             w.census.vector_slots += values.len();
@@ -921,7 +938,7 @@ mod tests {
             marking.hand_over(&mut worker);
         }));
         let mut seen = Vec::new();
-        assert!(marking.round(&view, &mut own, usize::MAX, &mut |v, _| seen.push(v), &mut || false));
+        assert!(marking.round(&view, &mut own, usize::MAX, &mut |handed, _| seen.push(handed.value()), &mut || false));
         assert_eq!(seen, [first, second], "every entry handed over reached the coordinator");
     }
 

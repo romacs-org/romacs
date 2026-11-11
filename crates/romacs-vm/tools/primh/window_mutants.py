@@ -14,7 +14,7 @@ ROOT = Path.cwd()
 W = "crates/romacs-vm/src/window.rs"
 PW = "crates/romacs-vm/src/prims/window.rs"
 R = "crates/romacs-vm/src/prims/rounding.rs"
-PT = "crates/romacs-vm/tests/primh_window.rs"
+PT = "crates/romacs-vm/tests/primh.rs"
 GT = "crates/romacs-vm/tests/window_prims.rs"
 
 
@@ -49,33 +49,33 @@ MUTANTS = [
     ("new-normal-not-cleared", W, "        self.get_mut(w)?.new_normal = size;\n        Ok(size)", "        if size != Value::NIL { self.get_mut(w)?.new_normal = size; }\n        Ok(size)",
      "window_prims", "new_normal_slot_retains_its_object_across_collection", FREED, "objects live only through the window"),
     ("top-child-is-left-child", PW, "    cx.windows().first_child(window, false)", "    cx.windows().first_child(window, true)",
-     "primh_window", "primh_window_top_child", CHECK, "window-top-child"),
+     "primh", "primh_window_top_child", CHECK, "window-top-child"),
     ("use-time-not-bumped", W, "            self.window_state.select_count += 1;\n            let count = self.window_state.select_count;", "            let count = self.window_state.select_count;",
-     "primh_window", "primh_window_use_time", CHECK, "window-use-time"),
+     "primh", "primh_window_use_time", CHECK, "window-use-time"),
     ("new-total-add-ignored", W, "        let total = if add == Value::NIL {", "        let total = if true {",
-     "primh_window", "primh_set_window_new_total", CHECK, "set-window-new-total"),
+     "primh", "primh_set_window_new_total", CHECK, "set-window-new-total"),
     ("explicit-window-all-frames", W, "        } else {\n            Value::NIL\n        };", "        } else {\n            all_frames\n        };",
-     "primh_window", "primh_next_window", CHECK, "next-window"),
+     "primh", "primh_next_window", CHECK, "next-window"),
     ("explicit-window-all-frames/list", W, "        } else {\n            Value::NIL\n        };", "        } else {\n            all_frames\n        };",
-     "primh_window", "primh_window_list_1", CHECK, "window-list-1"),
+     "primh", "primh_window_list_1", CHECK, "window-list-1"),
     ("delete-keeps-own-normal", W, "            s.normal_cols = cols;\n            s.normal_lines = lines;", "            let _ = (cols, lines, s);",
-     "primh_window", "primh_window_normal_size", CHECK, "window-normal-size"),
+     "primh", "primh_window_normal_size", CHECK, "window-normal-size"),
     ("scroll-hook-gets-decoded-window", PW, "    let (_, buffer, start) = cx.windows().scroll_functions_call(window)?;", "    let (window, buffer, start) = cx.windows().scroll_functions_call(window)?;",
-     "primh_window", "primh_run_window_scroll_functions", CHECK, "run-window-scroll-functions"),
+     "primh", "primh_run_window_scroll_functions", CHECK, "run-window-scroll-functions"),
     ("mode-line-none-ignored", W, "            && parameter != none\n", "            && (parameter != none || true)\n",
-     "primh_window", "primh_window_mode_line_height", CHECK, "window-mode-line-height"),
+     "primh", "primh_window_mode_line_height", CHECK, "window-mode-line-height"),
     ("minibuffer-error-straight-quote", W, "Can’t expand minibuffer to full frame", "Can't expand minibuffer to full frame",
-     "primh_window", "primh_delete_other_windows_internal", CHECK, "delete-other-windows-internal"),
+     "primh", "primh_delete_other_windows_internal", CHECK, "delete-other-windows-internal"),
     ("round-ties-away", R, "x.round_ties_even()", "x.round()",
-     "primh_window", "primh_round", CHECK, "round"),
+     "primh", "primh_round", CHECK, "round"),
     ("round-exact-tie-always-up", R, "            std::cmp::Ordering::Equal => !r_zero && q & 1 == 1,", "            std::cmp::Ordering::Equal => !r_zero,",
-     "primh_window", "primh_round", CHECK, "round"),
+     "primh", "primh_round", CHECK, "round"),
     ("ceiling-fixnum-ignores-sign", R, "Mode::Ceiling => q + i128::from(r != 0 && (n < 0) == (d < 0)),", "Mode::Ceiling => q + i128::from(r != 0),",
-     "primh_window", "primh_ceiling", CHECK, "ceiling"),
+     "primh", "primh_ceiling", CHECK, "ceiling"),
     ("ceiling-float-truncates", R, "if mode == Mode::Round { x.round_ties_even() } else { x.ceil() }", "if mode == Mode::Round { x.round_ties_even() } else { x.trunc() }",
-     "primh_window", "primh_ceiling", CHECK, "ceiling"),
+     "primh", "primh_ceiling", CHECK, "ceiling"),
     ("live-check-is-valid-check", W, "    pub(crate) fn window_use_time(&mut self, window: Value) -> Out {\n        let w = self.live(window)?;", "    pub(crate) fn window_use_time(&mut self, window: Value) -> Out {\n        let w = self.valid(window)?;",
-     "primh_window", "primh_window_use_time", CHECK, "window-use-time"),
+     "primh", "primh_window_use_time", CHECK, "window-use-time"),
 ]
 
 only = set(sys.argv[1:])

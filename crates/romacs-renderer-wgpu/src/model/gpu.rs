@@ -16,9 +16,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use super::scene::{ModelScene, face_normal};
 
 /// Format of the resolved texture the composite samples.
-pub const MODEL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+pub(crate) const MODEL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Largest physical edge of a model texture (design §4.4).
-pub const MAX_MODEL_EDGE_PX: u32 = 2048;
+pub(crate) const MAX_MODEL_EDGE_PX: u32 = 2048;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const PICK_IDS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Uint;
 const SAMPLES: u32 = 4;
@@ -34,7 +34,7 @@ pub use romacs_display_protocol::model::ModelView;
 /// Per-axis clip scale: zoom * 0.8, with the longer axis shrunk so the unit
 /// sphere fits the shorter one. `width` and `height` are the *logical* size,
 /// so a capped or rounded physical target frames the model as its glyph does.
-pub fn clip_scale(view: &ModelView, width: u32, height: u32) -> [f32; 2] {
+pub(crate) fn clip_scale(view: &ModelView, width: u32, height: u32) -> [f32; 2] {
     let (w, h) = (width.max(1) as f64, height.max(1) as f64);
     let s = view.zoom * 0.8;
     if w >= h {
@@ -47,7 +47,7 @@ pub fn clip_scale(view: &ModelView, width: u32, height: u32) -> [f32; 2] {
 /// Physical target size for a `width` x `height` logical model at `scale`:
 /// one common factor brings the longer edge within `max_edge`, so the
 /// texture keeps the logical aspect ratio it is composited into.
-pub fn model_target_px(width: u32, height: u32, scale: f32, max_edge: u32) -> (u32, u32) {
+pub(crate) fn model_target_px(width: u32, height: u32, scale: f32, max_edge: u32) -> (u32, u32) {
     let scale = if scale.is_finite() && scale > 0.0 {
         scale as f64
     } else {
@@ -60,7 +60,7 @@ pub fn model_target_px(width: u32, height: u32, scale: f32, max_edge: u32) -> (u
 }
 
 /// Highlight layers one draw paints at most (the uniform's layer array).
-pub const MAX_GPU_LAYERS: usize = romacs_display_protocol::model::MODEL_MAX_HIGHLIGHT_LAYERS;
+pub(crate) const MAX_GPU_LAYERS: usize = romacs_display_protocol::model::MODEL_MAX_HIGHLIGHT_LAYERS;
 /// Faces per region-mark word: each face has a 4-bit layer number.
 const MARKS_PER_WORD: usize = 8;
 // `model.wgsl` sizes its layer array as 8 (`MAX_LAYERS`), and a 4-bit
@@ -71,7 +71,7 @@ const _: () = assert!(MAX_GPU_LAYERS == 8 && MAX_GPU_LAYERS < 16);
 /// positions 16 B·V, indices 12 B·T, face records 16 B·T, region marks
 /// ⌈T/8⌉·4 B (4 bits per face), the two camera uniforms, the 1x1 pick
 /// targets and staging.
-pub fn geometry_bytes(vertices: u64, triangles: u64) -> u64 {
+pub(crate) fn geometry_bytes(vertices: u64, triangles: u64) -> u64 {
     16 * vertices
         + 12 * triangles
         + 16 * triangles
@@ -83,7 +83,7 @@ pub fn geometry_bytes(vertices: u64, triangles: u64) -> u64 {
 
 /// GPU bytes of `width_px` x `height_px` render targets: resolved colour
 /// 4 B, MSAA colour 16 B and MSAA depth 16 B per pixel.
-pub fn target_bytes(width_px: u32, height_px: u32) -> u64 {
+pub(crate) fn target_bytes(width_px: u32, height_px: u32) -> u64 {
     let px = width_px as u64 * height_px as u64;
     px * (4 + 4 * SAMPLES as u64 + 4 * SAMPLES as u64)
 }
@@ -270,7 +270,7 @@ const PICK_MAP_FAILED: u8 = 3;
 
 /// Render targets created by [`ModelGpu::stage_targets`] and not yet
 /// committed.
-pub struct StagedTargets(Targets);
+pub(crate) struct StagedTargets(Targets);
 
 impl StagedTargets {
     /// The resolved colour texture and its view (for the composite).
@@ -280,7 +280,7 @@ impl StagedTargets {
 }
 
 /// One uploaded model with its render and pick targets.
-pub struct ModelGpu {
+pub(crate) struct ModelGpu {
     pipeline: wgpu::RenderPipeline,
     pick_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -300,6 +300,7 @@ pub struct ModelGpu {
     targets: Targets,
     pick: PickTargets,
     /// Geometry and fixed-resource bytes ([`geometry_bytes`]).
+    #[cfg(test)]
     pub geometry_bytes: u64,
 }
 
@@ -638,6 +639,7 @@ impl ModelGpu {
                 pick_request: None,
                 targets: Targets::new(device, size_px),
                 pick: PickTargets::new(device),
+                #[cfg(test)]
                 geometry_bytes: geometry_bytes(positions.len() as u64, faces.len() as u64),
             }
         })
@@ -653,6 +655,7 @@ impl ModelGpu {
         (self.targets.texture.clone(), self.targets.view.clone())
     }
 
+    #[cfg(test)]
     /// Replace the render targets with `size_px` ones. The old targets stay
     /// until the new ones exist, so a failure leaves the model as it was.
     pub fn resize(&mut self, device: &wgpu::Device, size_px: (u32, u32)) -> Result<(), String> {
@@ -664,7 +667,7 @@ impl ModelGpu {
     /// Create `size_px` render targets without installing them, so a caller
     /// can prepare everything else that depends on them (the composite bind
     /// group) before committing any owner.
-    pub fn stage_targets(
+    pub(crate) fn stage_targets(
         device: &wgpu::Device,
         size_px: (u32, u32),
     ) -> Result<StagedTargets, String> {
@@ -675,7 +678,7 @@ impl ModelGpu {
     }
 
     /// Install staged targets; the old ones are dropped. Infallible.
-    pub fn commit_targets(&mut self, staged: StagedTargets) {
+    pub(crate) fn commit_targets(&mut self, staged: StagedTargets) {
         self.targets = staged.0;
     }
 
@@ -790,7 +793,7 @@ impl ModelGpu {
 
     /// Start a pick of `request`'s texel. One pick at a time: the staging
     /// buffer is reused only after its mapping has returned.
-    pub fn pick_start(
+    pub(crate) fn pick_start(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -893,7 +896,7 @@ impl ModelGpu {
     }
 
     /// Advance the outstanding pick without blocking.
-    pub fn pick_poll(&mut self, device: &wgpu::Device) -> PickPoll {
+    pub(crate) fn pick_poll(&mut self, device: &wgpu::Device) -> PickPoll {
         match self.pick.state.load(Ordering::Acquire) {
             PICK_IDLE => return PickPoll::Idle,
             PICK_MAPPING => {
@@ -1002,5 +1005,4 @@ fn clear_color(background: [f32; 4]) -> wgpu::Color {
 }
 
 #[cfg(test)]
-#[path = "gpu/tests.rs"]
 mod tests;

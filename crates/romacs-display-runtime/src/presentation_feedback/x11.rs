@@ -3,7 +3,6 @@
 use romacs_display_protocol::{
     PresentationId,
     frame_time::{EventTime, observe_platform_now},
-    input_latency::{self, InputToken, PlatformTimestamp, PresentationObservation},
 };
 use romacs_renderer_wgpu::native_presentation::SwapchainTiming;
 use std::{
@@ -34,12 +33,7 @@ pub(super) struct Observer {
 impl Observer {
     pub(super) fn new() -> Self {
         Self {
-            path: std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("ROMACS_INPUT_LATENCY_FILE")
-                        .map(|p| PathBuf::from(p).with_extension("receipt"))
-                }),
+            path: std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").map(PathBuf::from),
             sessions: HashMap::new(),
             next_serial: 0,
             latest_written: 0,
@@ -55,16 +49,15 @@ impl Observer {
         layout: PresentationId,
         size: (u32, u32),
         scale: f64,
-        projected: &[InputToken],
     ) {
         if self.path.is_none() || (!self.sessions.contains_key(&frame) && self.sessions.len() >= 16)
         {
             return;
         }
-        // SAFETY: render-thread ownership keeps this surface configured on the
-        // supplied renderer device; generations change on every configure.
         let session = self.sessions.entry(frame).or_insert_with(|| Session {
             generation,
+            // SAFETY: render-thread ownership keeps this surface configured on
+            // the supplied renderer device; generations change on every configure.
             timing: unsafe { SwapchainTiming::new(device, surface, generation) },
             pending: VecDeque::new(),
         });
@@ -76,6 +69,8 @@ impl Observer {
         {
             *session = Session {
                 generation,
+                // SAFETY: as above; the surface was reconfigured, so the new
+                // generation names its current configuration.
                 timing: unsafe { SwapchainTiming::new(device, surface, generation) },
                 pending: VecDeque::new(),
             };
@@ -86,6 +81,8 @@ impl Observer {
         let Some(serial) = self.next_serial.checked_add(1) else {
             return;
         };
+        // SAFETY: TIMING matches this surface and generation (checked above), and
+        // the render thread holds the surface configured while it requests.
         if session.pending.len() >= 256 || !unsafe { timing.request(surface, generation, serial) } {
             return;
         }
@@ -97,7 +94,6 @@ impl Observer {
             scale,
             requested: observe_platform_now(),
         });
-        input_latency::projected_requested(projected, frame, serial);
     }
 
     pub(super) fn deadline(&mut self, now: EventTime) -> Option<EventTime> {
@@ -120,11 +116,11 @@ impl Observer {
         let Some(path) = &self.path else {
             return;
         };
-        // SAFETY: the caller borrows each current surface from the renderer
-        // owning device; reconfiguration cannot run during this dispatch.
         self.sessions.retain(|&frame, session| {
             let Some((surface, generation)) = surface(frame) else { return false; };
             let Some(timing) = &mut session.timing else { return true; };
+            // SAFETY: the caller borrows each current surface from the renderer
+            // owning DEVICE; reconfiguration cannot run during this dispatch.
             let Some(observations) = (unsafe { timing.poll(device, surface, generation) }) else {
                 session.timing = None;
                 session.pending.clear();
@@ -133,14 +129,12 @@ impl Observer {
             for observation in observations {
                 let Some(index) = session.pending.iter().position(|pending| pending.serial == observation.present_id) else { continue; };
                 let pending = session.pending.remove(index).unwrap();
-                let time = PlatformTimestamp { clock_id: libc::CLOCK_MONOTONIC as u32, nanoseconds: observation.monotonic_ns };
-                let kind = PresentationObservation::FirstPixelOutput { uncertainty_ns: observation.uncertainty_ns };
-                input_latency::projected_observed(frame, pending.serial, time, kind);
-                input_latency::observed(pending.layout, time, kind);
+                let clock_id = libc::CLOCK_MONOTONIC as u32;
+                let nanoseconds = observation.monotonic_ns;
                 if pending.serial <= self.latest_written { continue; }
                 let receipt = format!("(:submission {} :frame {} :presentation {} :width {} :height {} :scale {} :outcome presented :observation native-first-pixel-output :uncertainty-ns {} :clock-id {} :seconds {} :nanoseconds {})\n",
                     pending.serial, frame, pending.layout.get(), pending.size.0, pending.size.1, pending.scale,
-                    observation.uncertainty_ns, time.clock_id, time.nanoseconds / 1_000_000_000, time.nanoseconds % 1_000_000_000);
+                    observation.uncertainty_ns, clock_id, nanoseconds / 1_000_000_000, nanoseconds % 1_000_000_000);
                 let temporary = path.with_extension("pending");
                 match std::fs::write(&temporary, receipt).and_then(|()| std::fs::rename(&temporary, path)) {
                     Ok(()) => self.latest_written = pending.serial,

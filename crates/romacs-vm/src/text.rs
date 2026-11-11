@@ -98,8 +98,10 @@ pub struct TextBody {
     /// The tree-sitter parsers of this text (GNU's base buffer
     /// `ts_parser_list'), whose trees every change edits.
     pub(crate) treesit: crate::treesit::Registry,
+    /// The parse-state summaries of this text, which every change edits.
+    pub(crate) syntax: std::cell::RefCell<crate::syntax_index::SyntaxIndex>,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -343,6 +345,7 @@ impl Text {
                 #[cfg(test)]
                 property_edit_visits: 0,
                 treesit: Default::default(),
+                syntax: Default::default(),
             }),
             restriction: ByteOffset(0)..ByteOffset(s.len()),
             state: Default::default(),
@@ -592,12 +595,14 @@ impl TextBody {
     /// `Text::append_utf8`'s edit of the body: S, of CHARS characters,
     /// after its end.
     fn append_body(&mut self, s: &str, chars: usize) {
+        self.sync_syntax_properties();
         let end = self.bytes_len;
         self.invalidate_reads_for(end..end, s);
         self.search.replace(end..end, || Cow::Borrowed(s.as_bytes()));
         if self.tail.len() + s.len() > 1024 {
             self.flush_tail();
         }
+        self.syntax.get_mut().edit(self.chars_len, self.chars_len, chars);
         self.tail.push_str(s);
         self.tail_chars += chars;
         self.bytes_len += s.len();
@@ -608,6 +613,7 @@ impl TextBody {
     /// characters changed, deleted and inserted.
     fn replace_body(&mut self, r: &Range<ByteOffset>, s: &str, local: &[u32]) -> usize {
         self.flush_tail();
+        self.sync_syntax_properties();
         raw_splice(&mut self.raw, r.start.0..r.end.0, s.len(), local);
         self.search.replace(r.start.0..r.end.0, || internal_of(s, local));
         // The edit API already validated UTF-8 boundaries; use the rope's native
@@ -637,24 +643,42 @@ impl TextBody {
             self.rope.insert(start.0, s);
         }
         self.bytes_len = self.rope.len_bytes();
+        let inserted = self.rope.len_chars() + end.0 - start.0 - self.chars_len;
+        self.syntax.get_mut().edit(start.0, end.0, inserted);
         self.chars_len = self.rope.len_chars();
         self.is_ascii = self.bytes_len == self.chars_len;
-        end.0 - start.0 + s.chars().count()
+        end.0 - start.0 + inserted
     }
     /// `Text::rewrite_unanchored`'s edit of the body.
     fn rewrite_body(&mut self, r: Range<ByteOffset>, replacement: &str, local: &[u32]) {
         self.flush_tail();
+        self.sync_syntax_properties();
         raw_splice(&mut self.raw, r.start.0..r.end.0, replacement.len(), local);
         self.search.replace(r.start.0..r.end.0, || internal_of(replacement, local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, replacement);
         self.properties.resize_character(r, replacement.len());
+        self.syntax.get_mut().edit(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, replacement);
         self.bytes_len = self.rope.len_bytes();
         self.chars_len = self.rope.len_chars();
         self.is_ascii = self.bytes_len == self.chars_len;
+    }
+    /// Give the parse-state summaries the `syntax-table' property changes
+    /// made since they last read them, while the byte ranges still mean
+    /// what they did.
+    pub(crate) fn sync_syntax_properties(&mut self) {
+        let changes = self.properties.take_syntax_changes();
+        if changes.all {
+            self.syntax.get_mut().forget();
+        }
+        for range in changes.ranges {
+            let char_of = |byte: usize| self.char_of_byte(ByteOffset(byte.min(self.bytes_len))).map_or(self.chars_len, |c| c.0);
+            let (start, end) = (char_of(range.start), char_of(range.end));
+            self.syntax.get_mut().touch(start, end);
+        }
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.properties.visit_values(visit);
@@ -1232,11 +1256,13 @@ impl TextBody {
         let (replacement, local) = internal_to_rope(replacement)?;
         if replacement.len() != r.end.0 - r.start.0 { return Err("overwrite length differs".into()); }
         self.flush_tail();
+        self.sync_syntax_properties();
         raw_splice(&mut self.raw, r.start.0..r.end.0, replacement.len(), &local);
         self.search.replace(r.start.0..r.end.0, || internal_of(&replacement, &local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, &replacement);
+        self.syntax.get_mut().edit(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, &replacement);
         self.chars_len = self.rope.len_chars();
@@ -1779,6 +1805,11 @@ mod tests {
     #[test]
     fn invalidation() {
         contract::edit_invalidation(make)
+    }
+    #[test]
+    #[should_panic(expected = "char-to-byte at 3")]
+    fn the_contract_catches_a_stale_coordinate() {
+        contract::edits(|bytes, mode| contract::Stale::new(make(bytes, mode)))
     }
     #[test]
     fn rejected() {

@@ -1781,19 +1781,10 @@ pub(super) fn emit_header_shadow(ctx: &EffectCtx) -> Vec<RectVertex> {
                 if !row_role.is_chrome() {
                     continue;
                 }
-                let gx = match g {
-                    FrameGlyph::Char { x, .. } => *x,
-                    FrameGlyph::Stretch { x, .. } => *x,
-                    _ => continue,
-                };
-                let gy = match g {
-                    FrameGlyph::Char { y, .. } => *y,
-                    FrameGlyph::Stretch { y, .. } => *y,
-                    _ => continue,
-                };
-                let gh = match g {
-                    FrameGlyph::Char { height, .. } => *height,
-                    FrameGlyph::Stretch { height, .. } => *height,
+                let (gx, gy, gh) = match g {
+                    FrameGlyph::Char { x, y, height, .. } | FrameGlyph::Stretch { x, y, height, .. } => {
+                        (*x, *y, *height)
+                    }
                     _ => continue,
                 };
                 if gx >= b.x && gx < b.x + b.width && (gy - b.y).abs() < 2.0 {
@@ -2478,5 +2469,4 @@ pub(super) fn emit_window_switch_fade(
 // ===========================================================================
 
 #[cfg(test)]
-#[path = "window_effects/tests/window_effects_test.rs"]
 mod tests;

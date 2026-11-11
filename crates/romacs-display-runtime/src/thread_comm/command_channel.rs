@@ -9,12 +9,15 @@
 mod tests;
 
 use super::{LifecycleCommand, RenderCommand};
-use crossbeam_channel::{
-    Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError, bounded,
-};
+use crossbeam_channel::{SendError, Sender, TryRecvError, TrySendError, bounded};
+#[cfg(test)]
+use crossbeam_channel::Receiver;
+#[cfg(test)]
+use crossbeam_channel::{RecvError, RecvTimeoutError};
+#[cfg(test)]
+use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::time::{Duration, Instant};
 
 struct Pending {
     queue: VecDeque<RenderCommand>,
@@ -27,18 +30,19 @@ struct Shared {
     capacity: usize,
 }
 #[derive(Clone)]
-pub struct CommandSender {
+pub(crate) struct CommandSender {
     shared: Arc<Shared>,
     wake: Arc<Sender<()>>,
 }
-pub struct CommandReceiver {
+pub(crate) struct CommandReceiver {
     shared: Arc<Shared>,
     wake: Weak<Sender<()>>,
+    #[cfg(test)]
     available: Receiver<()>,
 }
 
 /// Create a finite transport. The wake channel carries no command payloads.
-pub fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
+pub(crate) fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
     assert!(capacity > 0);
     let shared = Arc::new(Shared {
         pending: Mutex::new(Pending {
@@ -50,6 +54,9 @@ pub fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
         capacity,
     });
     let (wake, available) = bounded(1);
+    // Only tests wait on the wake channel; production polls the queue.
+    #[cfg(not(test))]
+    drop(available);
     let wake = Arc::new(wake);
     (
         CommandSender {
@@ -59,6 +66,7 @@ pub fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
         CommandReceiver {
             shared,
             wake: Arc::downgrade(&wake),
+            #[cfg(test)]
             available,
         },
     )
@@ -66,6 +74,12 @@ pub fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
 
 impl CommandSender {
     pub fn try_send(&self, command: RenderCommand) -> Result<(), TrySendError<RenderCommand>> {
+        self.try_send_within(command, self.shared.capacity)
+    }
+    /// As `try_send`, but `Full` once LIMIT commands wait: a producer that
+    /// must leave the rest of the channel to others.
+    #[expect(clippy::result_large_err, reason = "a refused command comes back to its sender whole, as try_send's does")]
+    pub fn try_send_within(&self, command: RenderCommand, limit: usize) -> Result<(), TrySendError<RenderCommand>> {
         let mut pending = self.shared.pending.lock().unwrap();
         if !pending.receiver_alive {
             return Err(TrySendError::Disconnected(command));
@@ -74,12 +88,12 @@ impl CommandSender {
             // Cancellation is one coalescing bit, independent of FIFO capacity.
             pending.shutdown = true;
         } else {
-            if pending.queue.len() == self.shared.capacity {
+            if pending.queue.len() >= limit.min(self.shared.capacity) {
                 return Err(TrySendError::Full(command));
             }
             pending.queue.push_back(command);
         }
-        // Publish and notify under the same lock, as in the frame mailbox.
+        // Publish and notify under the same lock.
         let _ = self.wake.try_send(());
         Ok(())
     }
@@ -96,10 +110,8 @@ impl CommandSender {
             }
         }
     }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         let pending = self.shared.pending.lock().unwrap();
         pending.queue.len() + usize::from(pending.shutdown)
@@ -175,6 +187,7 @@ impl CommandReceiver {
         let pending = self.shared.pending.lock().unwrap();
         pending.shutdown || pending.queue.iter().any(|command| startup_command(command, daemon))
     }
+    #[cfg(test)]
     pub fn recv(&self) -> Result<RenderCommand, RecvError> {
         loop {
             match self.try_recv() {
@@ -186,6 +199,7 @@ impl CommandReceiver {
             let _ = self.available.recv();
         }
     }
+    #[cfg(test)]
     pub fn recv_timeout(&self, timeout: Duration) -> Result<RenderCommand, RecvTimeoutError> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -203,6 +217,7 @@ impl CommandReceiver {
             }
         }
     }
+    #[cfg(test)]
     pub fn try_iter(&self) -> impl Iterator<Item = RenderCommand> + '_ {
         std::iter::from_fn(|| self.try_recv().ok())
     }
@@ -213,6 +228,7 @@ impl CommandReceiver {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    #[cfg(test)]
     pub(crate) fn available(&self) -> &Receiver<()> {
         &self.available
     }

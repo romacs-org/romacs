@@ -242,7 +242,7 @@ fn this_single_command_raw_keys(cx) {
 defsubr! { name = "clear-this-command-keys", gnu = "keyboard.c:12329", effect = Global,
 fn clear_this_command_keys(cx; optional keep_record: Value) {
     let symbol = cx.intern(COMMAND_KEYS);
-    cx.variable_set(symbol, Value::NIL)?;
+    cx.store_variable(symbol, Value::NIL)?;
     if keep_record == Value::NIL {
         cx.clear_recent_keys();
     }
@@ -267,9 +267,9 @@ fn set_this_command_keys(cx, keys: Value) {
     }
     let vector = cx.vector_from(std::mem::take(&mut events));
     let symbol = cx.intern(COMMAND_KEYS);
-    cx.variable_set(symbol, vector)?;
+    cx.store_variable(symbol, vector)?;
     let start = cx.intern(SINGLE_KEY_START);
-    cx.variable_set(start, Value::integer(0).unwrap())?;
+    cx.store_variable(start, Value::integer(0).unwrap())?;
     Ok(Value::NIL)
 }}
 
@@ -539,6 +539,14 @@ fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
 // (rlisp/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
 // quit at its next safepoint, as by C-g, unless it ended first. GENERATION
 // names the call; nil disarms.
+// What a quit from C-g left pending when it interrupted a macro's
+// expansion, taken at the form's reach or at the end of the body that was
+// compiling (lib.rs `expansion_failed'): the escape deferred under ID is
+// raised here, once, if it still waits; otherwise nil. With ID nil every
+// one that waits is dropped, as at a worker's job's end.
+defsubr! { name = "romacs--take-deferred-escape", gnu = "romacs:keyboard", effect = Global,
+fn take_deferred_escape(cx, id: Value) { cx.take_deferred_escape(id) }}
+
 defsubr! { name = "romacs--call-deadline", gnu = "romacs:keyboard", effect = Global,
 fn call_deadline(cx, generation: Value; optional milliseconds: Value) { cx.call_deadline(generation, milliseconds) }}
 

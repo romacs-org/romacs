@@ -59,7 +59,7 @@ fn collected(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 }
 
 // The collections since the last call, for the usage log: (DROPPED RECORD...),
-// each RECORD (KIND MS MET COMMAND), MS a float (`Vm::take_collections').
+// each RECORD (KIND MS MET COMMAND T OBJECTS BYTES LATE) (`Vm::take_collections`).
 defsubr! { name = "romacs--take-collections", gnu = "alloc.c:6004", effect = Global,
 fn take_collections(cx) {
     Ok(cx.take_collections())
@@ -72,6 +72,17 @@ fn take_collections(cx) {
 defsubr! { name = "romacs--gc-phases", gnu = "alloc.c:6004", effect = Global,
 fn gc_phases(cx) {
     Ok(cx.gc_phases())
+}}
+
+// Every suspended engine's activations, oldest first: ((ENGINE KIND FUNCTION
+// FILE START)...), KIND `function`, `continuation` (a primitive's) or `running`
+// (the one each engine was in), FUNCTION its code's number (nil in a
+// continuation, which runs no function's code), FILE and START where
+// its registers are. The engine that calls this is not suspended, so it sees
+// those beneath it.
+defsubr! { name = "romacs--suspended-activations", gnu = "eval.c:4079", effect = Global,
+fn suspended_activations(cx) {
+    Ok(cx.suspended_activations())
 }}
 
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,

@@ -113,7 +113,7 @@ impl Vm {
     }
     /// The local keymap of the buffer at INDEX, text or unibyte.
     pub(crate) fn local_keymap(&mut self, index: usize) -> &mut Value {
-        match &mut self.objects[index] {
+        match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => &mut buffer.local_keymap,
             Object::ByteBuffer(buffer) => &mut buffer.local_keymap,
             _ => unreachable!("buffer_index names a buffer"),

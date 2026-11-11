@@ -1307,7 +1307,8 @@ impl Vm {
                 let mut table = crate::char_table::CharTable::new(purpose);
                 table.initialize(spec.extras.len(), init).expect("small char-table");
                 for (slot, &extra) in spec.extras.iter().enumerate() {
-                    table.extras[slot] = self.materialize(extra);
+                    let extra = self.materialize(extra);
+                    table.set_extra(slot, extra);
                 }
                 for &(from, to, value) in spec.ranges {
                     let value = self.materialize(value);
@@ -1366,7 +1367,7 @@ impl Vm {
         }
     }
     fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
-        match self.objects.get_mut(buffer)? {
+        match self.objects.get_entry_mut(buffer)? {
             data::Object::Buffer(b) => Some(&mut b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&mut b.per_buffer),
             _ => None,

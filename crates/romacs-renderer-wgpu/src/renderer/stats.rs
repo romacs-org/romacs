@@ -49,7 +49,7 @@ impl GlyphRenderStats {
         Self::default()
     }
 
-    pub fn log_if_enabled(&self) {
+    pub(crate) fn log_if_enabled(&self) {
         if !stats_enabled() {
             return;
         }
@@ -133,7 +133,7 @@ impl GlyphRenderStats {
     }
 }
 
-pub fn stats_enabled() -> bool {
+pub(crate) fn stats_enabled() -> bool {
     static ENABLED: AtomicBool = AtomicBool::new(false);
     static INITIALIZED: AtomicBool = AtomicBool::new(false);
     if !INITIALIZED.load(Ordering::Relaxed) {

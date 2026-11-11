@@ -1,6 +1,6 @@
 # Opt-in only: Cargo has no stable profile-scoped rustflags. Do NOT put these
 # in config.toml's build/target tables: that would also change gate binaries.
-# scripts/dev-loop loads this file explicitly for focused test builds.
+# tools/dev-loop loads this file explicitly for focused test builds.
 # Use Rust's bundled LLD. Mold 3.0.0 was slower in the measured VM2 edit loop.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]

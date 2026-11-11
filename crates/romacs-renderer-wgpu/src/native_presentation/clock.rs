@@ -1,6 +1,6 @@
 //! A bounded-error conversion from a swapchain clock to CLOCK_MONOTONIC.
 #[derive(Clone, Copy, Debug)]
-pub struct Calibration {
+pub(crate) struct Calibration {
     pub monotonic: u64,
     pub local: u64,
     pub uncertainty_ns: u64,

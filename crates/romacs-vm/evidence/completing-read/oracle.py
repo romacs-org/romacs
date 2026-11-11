@@ -8,7 +8,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "tools/lib"))
 import gnu_oracle
 
 identity = gnu_oracle.require()

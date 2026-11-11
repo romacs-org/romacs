@@ -12,11 +12,16 @@
   (require 'romacs-agent)
   (require 'romacs-agent-ui))
 
+;; Codex's app-server driver is persistent: a per-turn harness is a test
+;; harness's.
+(romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"
+                             :config-default "~/.perturn")
+
 (defmacro romacs-agent-select-tests--with (fields &rest body)
   "BODY with `session', of FIELDS, recorded in a private directory."
   (declare (indent 1))
   `(let* ((dir (make-temp-file "romacs-select-" t))
-          (session (romacs-agent--make ,@fields :id "s" :harness 'claude :provider "claude" :dir dir
+          (session (romacs-agent--make ,@fields :driver-state (list :initialized t :ready t) :id "s" :harness 'claude :provider "claude" :dir dir
                                        :host-socket (expand-file-name "none.sock" dir))))
      (unwind-protect
          (progn (romacs-agent--manifest session nil) ,@body)
@@ -49,7 +54,7 @@
 (ert-deftest romacs-agent-select-holds-messages-until-confirmed ()
   (romacs-agent-select-tests--with (:options '(:model "a") :state 'idle :caught-up t)
     (let ((written nil) (sent nil) (romacs-agent-select-timeout 3600))
-      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object) (push object written)))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object &optional _journal) (push object written)))
                 ((symbol-function 'romacs-agent--harness-live-p) (lambda (_session) t))
                 ((symbol-function 'romacs-agent--harness-free-p) (lambda (_session) t))
                 ((symbol-function 'romacs-agent--input) (lambda (_session text &rest _) (push text sent)))
@@ -239,7 +244,7 @@
 (ert-deftest romacs-agent-select-free-harness ()
   (cl-flet ((free (state &optional per-turn live)
               (romacs-agent-select-tests--with (:state state :caught-up t
-                                                       :harness (if per-turn 'codex 'claude))
+                                                       :harness (if per-turn 'perturn 'claude))
                 (cl-letf (((symbol-function 'process-live-p) (lambda (_process) live)))
                   (romacs-agent--harness-free-p session)))))
     (should-not (free 'running nil t))
@@ -252,6 +257,43 @@
     (should (free 'idle t nil))
     ;; No supervisor left to hear from.
     (should (free 'detached))))
+
+;; The chat's effort command and its entry in the actions menu.
+(ert-deftest romacs-agent-select-chat-effort ()
+  (romacs-agent-select-tests--with (:options '(:model "a" :effort "low") :state 'idle)
+    (let ((romacs-agent-providers '(("claude")))
+          (romacs-agent-models '((claude ("a" :efforts ("low" "high")) ("b" :efforts ("max")))))
+          (asked nil))
+      (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore))
+       (with-temp-buffer
+        (setq romacs-agent-ui--session session)
+        (should (equal (romacs-agent-ui--effort-label) "Effort: low"))
+        ;; The efforts of the model it runs, what runs offered first.
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (prompt table &rest _)
+                     (push (list prompt (all-completions "" table)) asked) "high"))
+                  ((symbol-function 'romacs-agent--note) #'ignore))
+          (call-interactively #'romacs-agent-chat-effort))
+        (should (string-match-p "Effort.*low" (car (car asked))))
+        (should (equal (cadr (car asked)) '("low" "high")))
+        ;; No harness runs: in effect at once, the model kept.
+        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high")))
+        (should (equal (romacs-agent-ui--effort-label) "Effort: high"))
+        ;; One armed behind a turn shows what is to come.
+        (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
+        (should (equal (romacs-agent-ui--effort-label) "Effort: high → max"))
+        ;; Each level in its own face; one unknown in the common one.
+        (let ((label (romacs-agent-ui--effort-label)))
+          (should (eq (get-text-property 8 'face label) 'romacs-agent-effort-high))
+          (should (eq (get-text-property (1- (length label)) 'face label) 'romacs-agent-effort-max)))
+        (should (eq (get-text-property 0 'face (romacs-agent-ui--effort "bespoke")) 'romacs-agent-effort))
+        (should (eq (get-text-property 0 'face (romacs-agent-ui--effort nil)) 'romacs-agent-effort-default))
+        (should (equal (romacs-agent--efforts session) '("max")))
+        ;; A model with no efforts says so.
+        (setf (romacs-agent-pending-selection session) nil
+              (romacs-agent-options session) '(:model "c"))
+        (let ((romacs-agent-models '((claude ("c" :efforts nil)))))
+          (should-error (call-interactively #'romacs-agent-chat-effort) :type 'user-error)))))))
 
 (provide 'romacs-agent-select-tests)
 ;;; romacs-agent-select-tests.el ends here

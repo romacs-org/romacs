@@ -5,19 +5,6 @@ use super::state::emacs_pixels_from_window_size;
 use crate::thread_comm::InputEvent;
 use winit::{dpi::PhysicalSize, window::WindowId};
 
-/// A request is not a completion. In particular, winit's immediate result may
-/// be the old size if the platform rejected the request, and need not produce
-/// a later event. Never substitute the requested dimensions for this result.
-#[must_use]
-pub(super) enum ResizeRequestOutcome {
-    Applied {
-        window: WindowId,
-        size: PhysicalSize<u32>,
-    },
-    AwaitingConfigure,
-    PendingRealization,
-}
-
 impl RenderApp {
     /// Some backends deliver scale changes without a resize event. Once the
     /// callback has returned, sample the final native size before rendering or
@@ -44,15 +31,6 @@ impl RenderApp {
             .collect();
         for window in windows {
             self.complete_pending_scale_change(window);
-        }
-    }
-
-    pub(super) fn complete_resize_request(&mut self, outcome: ResizeRequestOutcome) {
-        match outcome {
-            ResizeRequestOutcome::Applied { window, size } => {
-                self.apply_native_surface_resize(window, size);
-            }
-            ResizeRequestOutcome::AwaitingConfigure | ResizeRequestOutcome::PendingRealization => {}
         }
     }
 

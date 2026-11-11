@@ -230,34 +230,6 @@ fn occluding_a_lagging_second_window_releases_the_fence() {
     assert_eq!(delivered(&emacs), ["R{true,2,1}"]);
 }
 
-/// `make-frame-invisible` / `iconify-frame` hide the native window
-/// without any window-system occlusion event. Where the platform reports
-/// the window's visibility (X11, macOS, Windows), the frame leaves at once,
-/// keeps out while hidden, and rejoins by presenting once shown.
-#[test]
-fn hiding_or_iconifying_a_frame_leaves_until_shown_and_presented() {
-    use crate::thread_comm::WindowVisibility;
-    let (mut app, emacs) = app_with_channel();
-    let mut host = FakeHost::default();
-    with_ready_model(&mut app, &mut host);
-    present(&mut app, A);
-    present(&mut app, B);
-    assert_eq!(delivered(&emacs), ["ready", "R{true,1,0}"]);
-    for visibility in [WindowVisibility::Invisible, WindowVisibility::Iconified] {
-        app.note_models_visibility(A, visibility, true);
-        app.note_models_visibility(B, visibility, true);
-        assert_eq!(delivered(&emacs), ["R{false,1,0}"]);
-        present(&mut app, A);
-        assert!(delivered(&emacs).is_empty(), "a hidden frame rejoined");
-        app.note_models_visibility(A, WindowVisibility::Visible, true);
-        assert!(delivered(&emacs).is_empty());
-        present(&mut app, A);
-        assert_eq!(delivered(&emacs), ["R{true,1,0}"]);
-        app.note_models_visibility(B, WindowVisibility::Visible, true);
-        present(&mut app, B);
-    }
-}
-
 // ----------------------------------------------------------------------
 // Review MUST 5/6: the presented picture, root and child, full and
 // retained, decides membership and pick provenance.
@@ -573,7 +545,7 @@ fn renderer_loss_reaches_the_input_channel_before_a_later_key() {
                     id: MODEL,
                     event: ModelEvent::Readiness { current: false, .. }
                 },
-                InputEvent::Key { .. } | InputEvent::Observed { .. } | InputEvent::Tracked { .. }
+                InputEvent::Key { .. } | InputEvent::Tracked { .. }
             ]
         ),
         "R{{nil}} must precede the later key, got {after:?}"
@@ -582,49 +554,6 @@ fn renderer_loss_reaches_the_input_channel_before_a_later_key() {
 
 // ----------------------------------------------------------------------
 // Round 2.
-
-/// Pre-review MUST 1: a model freed while loading leaves the store empty;
-/// `service_models` still drains its load result, so the loop stops its
-/// 16 ms poll and the parsed scene is not kept in the channel.
-#[test]
-fn a_model_freed_while_loading_stops_the_poll_once_its_result_arrives() {
-    let (mut app, emacs) = app_with_channel();
-    let dir = std::env::temp_dir().join(format!(
-        "romacs-model-runtime-freed-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("quad.obj");
-    std::fs::write(
-        &path,
-        b"v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\nf 1 2 3 4\n",
-    )
-    .unwrap();
-    app.handle_model_create(
-        MODEL,
-        vec![ModelMeshSpec { path, sha256: None }],
-        ModelView::default(),
-        [0.0, 0.0, 0.0, 1.0],
-        (64, 32),
-    );
-    assert!(app.handle_model_free(MODEL));
-    assert!(app.models.is_empty());
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while app.model_deadline(Instant::now()).is_some() {
-        assert!(
-            Instant::now() < deadline,
-            "an empty store still polls: the freed load was never drained"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-        app.service_models(romacs_display_protocol::frame_time::observe_platform_now());
-    }
-    assert!(!app.models.has_pending_loads());
-    assert!(
-        delivered(&emacs).is_empty(),
-        "a freed model reports nothing"
-    );
-}
 
 /// Display-lane open item: touchpad input too small to complete a notch
 /// still extends the burst it belongs to; the burst settles a quiet
@@ -687,44 +616,6 @@ fn a_raster_built_while_the_model_loads_is_rebuilt_once_the_model_is_drawable() 
         delivered(&emacs).is_empty(),
         "A still shows the model at rev 1"
     );
-}
-
-/// OPUS-REVIEW SHOULD 1: on Wayland neither hiding nor minimizing can be
-/// observed (winit's `is_visible`/`is_minimized` answer `None`, and no
-/// `Occluded` is sent), and a compositor may ignore the request outright.
-/// Such a request leaves at once, but the window rejoins at its next
-/// presentation instead of staying out until a focus or exposure event
-/// that may never come.
-#[test]
-fn a_hide_the_platform_cannot_confirm_leaves_only_until_the_next_presentation() {
-    use crate::thread_comm::WindowVisibility;
-    let (mut app, emacs) = app_with_channel();
-    let mut host = FakeHost::default();
-    with_ready_model(&mut app, &mut host);
-    present(&mut app, A);
-    assert_eq!(delivered(&emacs), ["ready", "R{true,1,0}"]);
-    for visibility in [WindowVisibility::Invisible, WindowVisibility::Iconified] {
-        app.note_models_visibility(A, visibility, false);
-        assert_eq!(delivered(&emacs), ["R{false,1,0}"], "{visibility:?}");
-        // The compositor ignored it: the window still presents.
-        present(&mut app, A);
-        assert_eq!(delivered(&emacs), ["R{true,1,0}"], "{visibility:?}");
-    }
-    // The command handler: with no native window to ask, nothing confirms
-    // the hiding either.
-    app.handle_window(crate::thread_comm::WindowCommand::SetWindowVisibility {
-        frame: crate::thread_comm::FrameRef::Frame(A),
-        visibility: WindowVisibility::Invisible,
-    });
-    assert_eq!(delivered(&emacs), ["R{false,1,0}"]);
-    present(&mut app, A);
-    assert_eq!(delivered(&emacs), ["R{true,1,0}"]);
-    // Where the platform does report hiding, the window stays out until
-    // shown, as before.
-    app.note_models_visibility(A, WindowVisibility::Iconified, true);
-    assert_eq!(delivered(&emacs), ["R{false,1,0}"]);
-    present(&mut app, A);
-    assert!(delivered(&emacs).is_empty());
 }
 
 /// SOL-REVIEW-2 SHOULD 3: a fraction left over a model does not join a
@@ -983,43 +874,46 @@ fn older_pictures_are_forgotten_with_the_device_and_the_window() {
     );
 }
 
-// SOL-REVIEW-3 SHOULD 2: hiding or occluding the window ends a wheel
-// gesture, without an intervening leave, focus or non-model wheel event.
+// ----------------------------------------------------------------------
+// The evaluator's commands reach the store; liveness reaches the evaluator.
+
+/// `ModelCreate` starts a load, `ModelUpdate` answers on the input channel,
+/// and `ModelFree` frees the model; a second free is nothing.
 #[test]
-fn a_wheel_remainder_does_not_survive_hiding_or_occluding_the_window() {
-    use crate::thread_comm::WindowVisibility;
-    use winit::event::{DeviceId, TouchPhase};
-    let (mut app, _emacs) = app_with_channel();
-    let mut host = FakeHost::default();
-    with_ready_model(&mut app, &mut host);
-    present(&mut app, A);
-    let pad = Some(DeviceId::from_raw(1));
-    let t0 = Instant::now();
-    let ms = |n: u64| t0 + Duration::from_millis(n);
-    let wheel = |app: &mut RenderApp, y, phase, at| {
-        app.model_wheel.notches(pad, MODEL, pixels(y), phase, at)
-    };
-    // 0.6 notch left over the model; A is occluded and exposed again.
-    assert_eq!(wheel(&mut app, 30.0, TouchPhase::Started, ms(0)), 0);
-    app.handle_window_occluded(A, true);
-    app.handle_window_occluded(A, false);
-    assert_eq!(
-        wheel(&mut app, 30.0, TouchPhase::Moved, ms(5)),
-        0,
-        "the remainder survived occlusion"
+fn model_commands_create_update_and_free_a_model() {
+    use crate::thread_comm::AssetCommand;
+    let (mut app, emacs) = app_with_channel();
+    let path = std::env::temp_dir().join(format!("romacs-model-command-{}.obj", std::process::id()));
+    std::fs::write(&path, b"v -1 -1 0\nv 1 -1 0\nv 1 1 0\nf 1 2 3\n").unwrap();
+    app.handle_asset(AssetCommand::ModelCreate {
+        id: MODEL,
+        meshes: vec![ModelMeshSpec { path, sha256: None }],
+        view: ModelView::default(),
+        background: [0.0, 0.0, 0.0, 1.0],
+        width: 64,
+        height: 32,
+    });
+    assert!(app.models.contains(MODEL));
+    app.handle_asset(AssetCommand::ModelUpdate { id: MODEL, req: 1, change: yaw(0.5) });
+    assert!(
+        model_events(&emacs).iter().any(|e| matches!(e, InputEvent::Model { id: MODEL, .. })),
+        "the update is answered on the input channel"
     );
-    let mut t = 10;
-    for platform_reports_hiding in [true, false] {
-        for hidden in [WindowVisibility::Invisible, WindowVisibility::Iconified] {
-            assert_eq!(wheel(&mut app, 30.0, TouchPhase::Started, ms(t)), 0);
-            app.note_models_visibility(A, hidden, platform_reports_hiding);
-            app.note_models_visibility(A, WindowVisibility::Visible, platform_reports_hiding);
-            assert_eq!(
-                wheel(&mut app, 30.0, TouchPhase::Moved, ms(t + 5)),
-                0,
-                "the remainder survived {hidden:?} (reported: {platform_reports_hiding})"
-            );
-            t += 10;
-        }
-    }
+    app.handle_asset(AssetCommand::ModelFree { id: MODEL });
+    assert!(!app.models.contains(MODEL));
+    app.handle_asset(AssetCommand::ModelFree { id: MODEL });
+    assert!(!app.models.contains(MODEL));
+}
+
+/// The evaluator sees the renderer go and come back
+/// (`romacs-model-available-p`).
+#[test]
+fn renderer_liveness_reaches_the_evaluator() {
+    use std::sync::atomic::Ordering;
+    let (mut app, emacs) = app_with_channel();
+    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    app.note_models_renderer_ready();
+    assert!(emacs.model_renderer.load(Ordering::Acquire));
+    app.note_models_renderer_lost();
+    assert!(!emacs.model_renderer.load(Ordering::Acquire));
 }

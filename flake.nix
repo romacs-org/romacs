@@ -20,11 +20,6 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    # WPE WebKit keeps its own pinned nixpkgs because its Cachix artifacts are
-    # built against that revision. Following our nixpkgs would force an
-    # expensive source rebuild.
-    nix-wpe-webkit.url = "github:eval-exec/nix-wpe-webkit";
   };
 
   outputs =
@@ -52,11 +47,9 @@
   nixConfig = {
     extra-substituters = [
       "https://eval-exec.cachix.org"
-      "https://nix-wpe-webkit.cachix.org"
     ];
     extra-trusted-public-keys = [
       "eval-exec.cachix.org-1:xvopUI7X7+Vt1gaSsWJ0PQFPP66vs8v5iIaz6boxf64="
-      "nix-wpe-webkit.cachix.org-1:ItCjHkz1Y5QcwqI9cTGNWHzcox4EqcXqKvOygxpwYHE="
     ];
   };
 }

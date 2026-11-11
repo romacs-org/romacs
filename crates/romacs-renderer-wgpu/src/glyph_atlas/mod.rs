@@ -7,9 +7,8 @@ mod bitmap_fonts;
 pub mod pages;
 pub mod types;
 
-pub use types::{
-    AnyAtlasEntry, GlyphAtlasError, GlyphAtlasHandle, GlyphMaterialKind, SubpixelRequest,
-};
+pub use types::SubpixelRequest;
+pub(crate) use types::{AnyAtlasEntry, GlyphAtlasError, GlyphAtlasHandle, GlyphMaterialKind};
 
 use romacs_display_protocol::FrameFaceMap;
 use romacs_display_protocol::types::FaceId;
@@ -40,7 +39,7 @@ use swash::zeno::{Angle, Format, Transform, Vector};
 /// the atlas keys on [`GlyphIdentity`] (via [`GlyphKey::identity`]), which
 /// excludes `face_id`. See [`GlyphIdentity`] for why.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct GlyphKey {
+pub(crate) struct GlyphKey {
     /// Character code
     pub charcode: u32,
     /// Face ID that requested this glyph. Carried for `key_uses_default_font_metrics`
@@ -80,7 +79,7 @@ pub struct GlyphKey {
 /// [`GlyphKey::identity`] to populate it -- there is no hand-written `Hash`/`Eq`
 /// to silently fall out of sync.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct GlyphIdentity {
+pub(crate) struct GlyphIdentity {
     pub charcode: u32,
     pub font_size_bits: u32,
     pub font_identity: u64,
@@ -120,7 +119,7 @@ impl GlyphKey {
 /// this is not the cache key; the atlas keys on [`ComposedGlyphIdentity`] (via
 /// [`ComposedGlyphKey::identity`]).
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ComposedGlyphKey {
+pub(crate) struct ComposedGlyphKey {
     /// The full text of the composed grapheme cluster
     pub text: Box<str>,
     /// Face ID that requested this glyph; not part of the atlas identity.
@@ -140,7 +139,7 @@ pub struct ComposedGlyphKey {
 /// The atlas cache identity of a composed glyph. Excludes `face_id` for the same
 /// reason as [`GlyphIdentity`]; derives `Hash`/`Eq` for the same safety property.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ComposedGlyphIdentity {
+pub(crate) struct ComposedGlyphIdentity {
     pub text: Box<str>,
     pub font_size_bits: u32,
     pub font_identity: u64,
@@ -177,9 +176,11 @@ impl ComposedGlyphKey {
 
 /// Stable identity of one layout-published composed-glyph stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ResolvedGlyphStreamIdentity(u64);
+pub(crate) struct ResolvedGlyphStreamIdentity(u64);
 
-pub fn resolved_glyph_stream_identity(glyphs: &[ResolvedGlyph]) -> ResolvedGlyphStreamIdentity {
+pub(crate) fn resolved_glyph_stream_identity(
+    glyphs: &[ResolvedGlyph],
+) -> ResolvedGlyphStreamIdentity {
     let mut hasher = DefaultHasher::new();
     glyphs.len().hash(&mut hasher);
     for glyph in glyphs {
@@ -321,7 +322,7 @@ struct CachedComposedGlyphKey {
 }
 
 /// Result of rasterizing a glyph or text sequence.
-pub struct RasterizeResult {
+pub(crate) struct RasterizeResult {
     /// Width in pixels
     pub width: u32,
     /// Height in pixels
@@ -345,7 +346,7 @@ pub struct RasterizeResult {
 /// An enum makes invalid states such as “both color and subpixel”
 /// unrepresentable at the layout/render boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GlyphPixelKind {
+pub(crate) enum GlyphPixelKind {
     AlphaMask,
     ColorRgba,
     SubpixelRgba,
@@ -1623,7 +1624,7 @@ impl WgpuGlyphAtlas {
     /// reused for DIFFERENT realized faces across frames, so entries must
     /// not outlive the render pass that installed them. `frame_fonts` is
     /// keyed by identity-stable ids and persists.
-    pub fn begin_frame_fonts(&mut self) {
+    pub(crate) fn begin_frame_fonts(&mut self) {
         self.frame_char_fonts.clear();
         self.frame_shaped_clusters.clear();
         self.frame_font_bindings_identity = FrameFontBindingsIdentity::default();
@@ -1781,7 +1782,7 @@ impl WgpuGlyphAtlas {
     /// Stable raster identity for a visible character. Layout's exact
     /// font/glyph answer participates directly, so row reuse and atlas lookup
     /// cannot hit a mask produced for an older fallback binding.
-    pub fn glyph_font_identity_for_char(&self, face: Option<&Face>, c: char) -> u64 {
+    pub(crate) fn glyph_font_identity_for_char(&self, face: Option<&Face>, c: char) -> u64 {
         let mut hasher = DefaultHasher::new();
         glyph_font_identity(face).hash(&mut hasher);
         if let Some(face) = face
@@ -1804,7 +1805,7 @@ impl WgpuGlyphAtlas {
         hasher.finish()
     }
 
-    pub fn glyph_stream_identity_for_composed(
+    pub(crate) fn glyph_stream_identity_for_composed(
         &self,
         face: Option<&Face>,
         text: &str,
@@ -2075,7 +2076,7 @@ impl WgpuGlyphAtlas {
 
     /// Monotonic generation that advances whenever any atlas UVs may have
     /// been invalidated (page eviction/reset, atlas clear).
-    pub fn eviction_generation(&self) -> u64 {
+    pub(crate) fn eviction_generation(&self) -> u64 {
         self.eviction_generation
     }
 
@@ -2083,7 +2084,7 @@ impl WgpuGlyphAtlas {
     /// frame. Returns false when the entry's page was evicted/reset since the
     /// entry was created — its UVs are stale and any cached vertices built
     /// from it must be re-tessellated.
-    pub fn revalidate_and_pin(&mut self, entry: AnyAtlasEntry) -> bool {
+    pub(crate) fn revalidate_and_pin(&mut self, entry: AnyAtlasEntry) -> bool {
         self.pin_entry_page(entry).is_ok()
     }
 
@@ -2261,7 +2262,7 @@ impl WgpuGlyphAtlas {
     }
 
     /// Get the default line height
-    pub fn default_line_height(&self) -> f32 {
+    pub(crate) fn default_line_height(&self) -> f32 {
         self.default_line_height
     }
 
@@ -2276,13 +2277,13 @@ impl WgpuGlyphAtlas {
     /// Get the default font's ascent (logical pixels).
     /// Measured from the first rasterized face_id=0 glyph.
     /// Falls back to `font_size * 0.8` until a glyph is rasterized.
-    pub fn default_font_ascent(&self) -> f32 {
+    pub(crate) fn default_font_ascent(&self) -> f32 {
         self.cached_font_ascent
             .unwrap_or(self.default_font_size * 0.8)
     }
 
     /// Set font metrics
-    pub fn set_metrics(&mut self, font_size: f32, line_height: f32) {
+    pub(crate) fn set_metrics(&mut self, font_size: f32, line_height: f32) {
         if (self.default_font_size - font_size).abs() > 0.1
             || (self.default_line_height - line_height).abs() > 0.1
         {
@@ -2315,7 +2316,7 @@ impl WgpuGlyphAtlas {
     /// Page pins are released only when `pin_epoch` changes. Passes that
     /// share one queue submission share an epoch, so a later pass cannot
     /// evict and rewrite a page an earlier, still unsubmitted pass samples.
-    pub fn advance_generation(&mut self, pin_epoch: u64) {
+    pub(crate) fn advance_generation(&mut self, pin_epoch: u64) {
         self.generation = self.generation.wrapping_add(1);
         self.frame_number = self.frame_number.wrapping_add(1);
         self.cache_hits_this_frame = 0;
@@ -2332,7 +2333,7 @@ impl WgpuGlyphAtlas {
         }
     }
 
-    pub fn subpixel_enabled(&self) -> bool {
+    pub(crate) fn subpixel_enabled(&self) -> bool {
         self.subpixel_order.allows_horizontal_subpixel()
     }
 
@@ -2764,7 +2765,7 @@ impl WgpuGlyphAtlas {
         Ok(())
     }
 
-    pub fn get_or_create_atlas(
+    pub(crate) fn get_or_create_atlas(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -3031,7 +3032,7 @@ impl WgpuGlyphAtlas {
         Ok(handles)
     }
 
-    pub fn atlas_bind_group(
+    pub(crate) fn atlas_bind_group(
         &self,
         entry: AnyAtlasEntry,
     ) -> Result<&wgpu::BindGroup, GlyphAtlasError> {
@@ -3105,10 +3106,6 @@ impl WgpuGlyphAtlas {
         }
     }
 
-    pub fn atlas_page_counts(&self) -> (usize, usize, usize) {
-        self.atlas_pages.page_counts()
-    }
-
     /// Bytes every resident atlas page occupies on the GPU.
     ///
     /// This is the render thread's largest single per-window GPU consumer —
@@ -3145,7 +3142,6 @@ fn effective_font_size(face_size: Option<f32>, default_font_size: f32) -> f32 {
 }
 
 #[cfg(test)]
-#[path = "tests/glyph_atlas_test.rs"]
 mod tests;
 
 mod menu;

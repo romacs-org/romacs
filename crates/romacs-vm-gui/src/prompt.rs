@@ -66,7 +66,7 @@ impl Shared {
 pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
-    pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub engine: Rc<RefCell<romacs_layout::LayoutEngine>>,
     pub images: crate::fonts::residency::Shared,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
     /// The process descriptors the next wait also watches.
@@ -78,9 +78,11 @@ pub struct GuiHost {
 /// with the event itself.
 fn classify(event: &InputEvent) -> Option<HostEvent> {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => classify(event),
+        InputEvent::Tracked { event, .. } => classify(event),
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
         &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
+        // The read runs it as a special event (`romacs-model').
+        InputEvent::Model { id, event } => Some(HostEvent::Model { id: *id, event: event.clone() }),
         &InputEvent::WindowResize { width, height, .. } if width > 0 && height > 0 => {
             Some(HostEvent::Resize { width, height })
         }
@@ -92,12 +94,25 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
     }
 }
 
+/// Whether EVENT is a special event a read runs and never returns
+/// (focus, a native model's): GNU's `input-pending-p` leaves them out
+/// (`readable_events` with `READABLE_EVENTS_FILTER_EVENTS`), so they neither
+/// end `sit-for` nor throw out of `while-no-input`.
+fn special(event: &InputEvent) -> bool {
+    match event {
+        InputEvent::Tracked { event, .. } => special(event),
+        InputEvent::WindowFocus { .. } | InputEvent::Model { .. } => true,
+        _ => false,
+    }
+}
+
 /// What SHARED records of an event a prompt read: the frame closing, or its size.
 fn note(shared: &mut Shared, event: &HostEvent) {
     match *event {
         HostEvent::Closed => shared.closed = true,
         HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_) => {}
+        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_)
+        | HostEvent::Model { .. } => {}
     }
 }
 
@@ -255,7 +270,7 @@ impl HostInput for GuiHost {
         self.drain();
         let shared = self.shared.borrow();
         // A closed frame is not repainted.
-        shared.closed || !shared.pending.is_empty()
+        shared.closed || shared.pending.iter().any(|event| !special(event))
     }
 
     fn key_pending(&mut self) -> bool {
@@ -366,6 +381,15 @@ mod tests {
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
     }
 
+    /// A queued special event is not input: only an event a read returns is.
+    #[test]
+    fn special_events_are_not_pending_input() {
+        let model = InputEvent::Model { id: 3, event: romacs_display_protocol::model::ModelEvent::Readiness { current: true, rev: 1, req: 0 } };
+        let focus = InputEvent::WindowFocus { focused: true, emacs_frame_id: 0 };
+        assert!(special(&model) && special(&focus));
+        assert!(!special(&InputEvent::WindowClose { emacs_frame_id: 0 }));
+    }
+
     /// A read that first gets an event a prompt ignores (a key release)
     /// goes on watching its processes: output that arrives next ends the
     /// read at once, not at its time limit.
@@ -400,5 +424,13 @@ mod tests {
             let event = InputEvent::WindowFocus { focused, emacs_frame_id: 0 };
             assert_eq!(classify(&event), Some(HostEvent::Focus(focused)));
         }
+    }
+
+    /// A native model's event during a Lisp read reaches the read, which
+    /// runs it as the special event `romacs-model`, instead of being dropped.
+    #[test]
+    fn model_events_reach_a_lisp_read() {
+        let event = romacs_display_protocol::model::ModelEvent::Readiness { current: true, rev: 2, req: 1 };
+        assert_eq!(classify(&InputEvent::Model { id: 3, event: event.clone() }), Some(HostEvent::Model { id: 3, event }));
     }
 }

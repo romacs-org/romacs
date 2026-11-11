@@ -62,7 +62,7 @@ impl Leaf<'_> {
         if !noundo && !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified() {
             self.vm.record_first_change().map_err(Fault::Error)?;
         }
-        let state = match &mut self.vm.objects[index] {
+        let state = match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => &mut b.state,
             data::Object::ByteBuffer(b) => &mut b.state,
             _ => unreachable!(),
@@ -82,7 +82,7 @@ impl Leaf<'_> {
         let text = &encoded[..width];
         for &at in hits {
             if !noundo { self.vm.record_change(index, at).map_err(Fault::Error)?; }
-            match &mut self.vm.objects[index] {
+            match self.vm.objects.entry_mut(index) {
                 data::Object::Buffer(b) => {
                     let byte = b.byte_of_char(CharOffset((at - 1) as usize)).map_err(Fault::Error)?;
                     b.overwrite(byte..ByteOffset(byte.0 + text.len()), text).map_err(Fault::Error)?;

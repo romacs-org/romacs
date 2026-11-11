@@ -34,11 +34,23 @@
 ;;       loops' total, their redisplays' total and the longest of the two
 ;;       together, written with the counts.  A redisplay is charged to its
 ;;       command at the next command's start, or at a write after it ran.
-;;   {"kind":"collection","collection":K,"pause_ms":MS,"met":M,"command":C}
+;;   {"kind":"gaps","bounds_ms":[1,2,4,...,32768],"counts":[N0,N1,...]}
+;;       how long the session waited from a command's end (its last
+;;       `post-command-hook' function) to the next command's start, as
+;;       counts in buckets that double: N0 gaps under 1 ms, N1 under 2 ms,
+;;       and the last 32 s or more; written with the counts, when any.
+;;       The idle windows a background task (a checkpoint, a fork) has.
+;;   {"kind":"collection","collection":K,"pause_ms":MS,"t":T,"live_objects":O,"live_bytes_est":B,"late_objects":L,"met":M,"command":C}
 ;;       a garbage collection MS long, a float read to the microsecond, K
 ;;       `idle' (the idle pass's or a
 ;;       prompt's), `explicit' (`garbage-collect') or `automatic', written
-;;       with the counts.  M, when there is one, says who waited at most
+;;       with the counts.  T is when it ended, as `float-time' reads; O and B
+;;       what it left live in the private heap, B an estimate that does not
+;;       walk and leaves out buffers' text and hash tables.  L is how far
+;;       past its automatic trigger it began, in objects at the collector's
+;;       charge (a float, as the trigger is): the allocation between falling
+;;       due and the poll that took it.  M, when there is
+;;       one, says who waited at most
 ;;       MS: "command", C being the command it ran in or at the end of;
 ;;       "key", a key press queued as it ended; or "redisplay", in a
 ;;       prompt's redisplay, where no key can be seen and any pressed waits.
@@ -125,6 +137,18 @@ second at most, for a kind whose record has had none.")
   "The commands running, innermost first: [DEPTH START MODE] for each,
 its `recursion-depth', its start by `float-time' and its major mode.")
 
+(defconst romacs-usage-log--gap-bounds [1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768]
+  "The gap histogram's bucket bounds, in milliseconds: a gap under a bound
+counts in its bucket, one at least the last in the bucket after it.")
+
+(defvar romacs-usage-log--gaps (make-vector 17 0)
+  "Gaps between commands since the last write, by bucket
+(`romacs-usage-log--gap-bounds').")
+
+(defvar romacs-usage-log--idle-since nil
+  "When the last command's loop ended, by `float-time', until the next
+command starts.")
+
 (defvar romacs-usage-log--timer nil)
 
 (defun romacs-usage-log--name (command)
@@ -135,9 +159,19 @@ its `recursion-depth', its start by `float-time' and its major mode.")
   "Queue PLIST's line."
   (push (json-serialize plist) romacs-usage-log--pending))
 
+(defun romacs-usage-log--gap (ms)
+  "Count a gap of MS milliseconds between two commands."
+  (let ((bounds romacs-usage-log--gap-bounds) (bucket 0))
+    (while (and (< bucket (length bounds)) (>= ms (aref bounds bucket)))
+      (setq bucket (1+ bucket)))
+    (aset romacs-usage-log--gaps bucket (1+ (aref romacs-usage-log--gaps bucket)))))
+
 (defun romacs-usage-log--pre-command ()
   ;; A backtrace belongs to the command whose signal took it.
   (setq romacs-usage-log--capture nil)
+  (when romacs-usage-log--idle-since
+    (romacs-usage-log--gap (* 1000 (- (float-time) romacs-usage-log--idle-since)))
+    (setq romacs-usage-log--idle-since nil))
   (romacs-usage-log--charge)
   (push (vector (recursion-depth) (float-time) major-mode) romacs-usage-log--open))
 
@@ -150,7 +184,8 @@ it, and mark the host's redisplay for it."
     ;; no redisplay ran for it.
     (romacs-usage-log--charge)
     (aset settling 2 (* 1000 (- (float-time) (aref settling 2))))
-    (setq romacs-usage-log--redisplayed settling)
+    (setq romacs-usage-log--redisplayed settling
+          romacs-usage-log--idle-since (float-time))
     (when (fboundp 'romacs--redisplay-since-mark) (romacs--redisplay-since-mark t))))
 
 (defun romacs-usage-log--charge (&optional waiting)
@@ -275,7 +310,9 @@ The first of its kind carries the backtrace its signal left, if one was taken."
       (nconc
        (mapcar (lambda (record)
                  (let ((met (nth 2 record)) (command (nth 3 record)))
-                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record))
+                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record)
+                                                 :t (nth 4 record) :live_objects (nth 5 record) :live_bytes_est (nth 6 record))
+                                           (and (nth 7 record) (list :late_objects (nth 7 record)))
                                            (and met (list :met (symbol-name met)))
                                            (and command (list :command command))))))
                (cdr taken))
@@ -308,6 +345,11 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                          counts)))
                romacs-usage-log--slow)
       (clrhash romacs-usage-log--slow)
+      (when (> (apply #'+ (append romacs-usage-log--gaps nil)) 0)
+        (push (json-serialize (list :kind "gaps" :bounds_ms romacs-usage-log--gap-bounds
+                                    :counts (copy-sequence romacs-usage-log--gaps)))
+              counts)
+        (fillarray romacs-usage-log--gaps 0))
       (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts) (romacs-usage-log--collections))))
         (setq romacs-usage-log--pending nil)
         (when lines (romacs-usage-log--append lines))))))
@@ -363,7 +405,9 @@ The first of its kind carries the backtrace its signal left, if one was taken."
   (remove-hook 'kill-emacs-hook #'romacs-usage-log--kill)
   (remove-function command-error-function #'romacs-usage-log--command-error)
   (when (eq signal-hook-function #'romacs-usage-log--signal) (setq signal-hook-function nil))
-  (setq romacs-usage-log--settling nil romacs-usage-log--redisplayed nil)
+  (setq romacs-usage-log--settling nil romacs-usage-log--redisplayed nil
+        romacs-usage-log--idle-since nil)
+  (fillarray romacs-usage-log--gaps 0)
   (clrhash romacs-usage-log--slow)
   (when romacs-usage-log--timer (cancel-timer romacs-usage-log--timer))
   (setq romacs-usage-log--timer nil))

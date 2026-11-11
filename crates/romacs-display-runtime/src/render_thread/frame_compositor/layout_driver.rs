@@ -158,10 +158,9 @@ impl LayoutDriver {
         if self
             .planned_sample(frame, grid)
             .is_none_or(|sample| sample.motion.finished())
+            && let Self::Animating { outgoing, .. } = self
         {
-            if let Self::Animating { outgoing, .. } = self {
-                *outgoing = OutgoingPicture::Pinned(None);
-            }
+            *outgoing = OutgoingPicture::Pinned(None);
         }
     }
 
@@ -319,5 +318,4 @@ impl LayoutDriver {
 }
 
 #[cfg(test)]
-#[path = "layout_driver/tests/layout_driver_test.rs"]
 mod tests;

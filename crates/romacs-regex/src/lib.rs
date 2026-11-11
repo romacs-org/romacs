@@ -1,191 +1,85 @@
-//! Unwired literal search kernel. Offsets are zero-based GNU internal bytes.
-//! Inputs must be valid GNU text; search bounds are character boundaries.
-mod cache;
-mod hay;
-mod literal;
+//! GNU Emacs regular expressions, without an evaluator.
+//!
+//! The matcher (`engine`, a translation of GNU `regex-emacs.c`) compiles a
+//! pattern given as internal-representation bytes and runs it over a byte
+//! slice of internal-representation text.  Everything it needs to know about
+//! its host goes through plain-Rust traits:
+//!
+//! - [`SyntaxLookup`]: syntax classes (per character and, for `syntax-table`
+//!   text properties, per position), categories, word boundaries, and the
+//!   identities/ticks host caches are keyed by;
+//! - [`CaseTable`]: a case-canon table, wrapped in a [`CaseTranslation`];
+//! - [`EmacsText`]: a pattern's bytes and multibyteness;
+//! - [`host::set_quit_probe`]: the per-thread `C-g` poll.
+//!
+//! No Lisp value crosses these traits, so nothing the engine retains can be a
+//! stale handle into a moving heap.
+//!
+//! ## Linear time
+//!
+//! GNU's backtracker is exponential on patterns that can match the same text
+//! many ways (`\(a*\)*`), and trying candidates one by one makes a failing
+//! scan quadratic even when each attempt is linear.  The engine therefore
+//! carries a linear-time Pike VM (`engine/linear.rs`) that reproduces the
+//! backtracker's leftmost-first answer and registers: it takes over a
+//! candidate whose backtracking turns catastrophic, and the rest of a forward
+//! search whose candidates cost more than the text justifies.  Patterns it
+//! cannot run (backreferences, interval counters, `??`, nullable non-greedy
+//! loops, POSIX) stay on the backtracker, decided at compile time.  The one
+//! observable difference is recorded in `GNU-DIVERGENCES.md` (RX1).
+//!
+//! ## The API is the seam
+//!
+//! The public surface is deliberately engine-agnostic: compile
+//! ([`regex_compile_lisp_with_translation`] and friends) to an opaque
+//! [`CompiledPattern`], then [`re_search`] / [`re_match`] for
+//! [`MatchRegisters`] (per-group byte spans).  Nothing here exposes the
+//! backtracker's opcode buffer, failure stack, fastmap, or pattern layout, so
+//! a different matcher can replace `engine` behind these signatures without
+//! changing a caller.  The crate's own tests reach the internals from
+//! inside it.
+
+// Every unsafe block says why it holds (the unsafe census keeps the count).
+#![deny(clippy::undocumented_unsafe_blocks)]
+// The API seal, checked by doctests.
+#![doc = r#"
+## The seal
+
+The compiled-pattern layout is not reachable:
+
+```compile_fail,E0616
+let pattern = romacs_regex::regex_compile("a", false, false).unwrap();
+let _ = pattern.fastmap_accurate;
+```
+"#]
+
+pub mod case_table;
+pub mod emacs_char;
+mod engine;
+pub mod host;
+pub mod syntax_class;
 #[cfg(test)]
-mod model_tests;
-mod rank;
-pub use cache::{Cache, CacheCensus, KeyRef, Kind};
-use hay::{Hay, One, Two};
-use literal::Literal;
+mod test_utils;
+mod tls_scope;
 
-/// Search the full supplied region with call-local canonicalization, without
-/// enumerating equivalences or copying the subject. Pattern conversion and KMP
-/// take O(m + n) work and O(m) storage; offsets are logical subject bytes.
-/// Only encountered pattern/subject characters are passed to `canon`.
-pub fn translated_literal(
-    pat: &[u8],
-    pattern_multibyte: bool,
-    h: &Haystack<'_>,
-    backward: bool,
-    canon: impl FnMut(u32) -> u32,
-    st: &mut Stats,
-) -> Option<(usize, usize)> {
-    if h.s2.is_empty() {
-        literal::translated(
-            pat,
-            pattern_multibyte,
-            &One(h.s1),
-            h.multibyte,
-            backward,
-            canon,
-            st,
-        )
-    } else {
-        literal::translated(
-            pat,
-            pattern_multibyte,
-            &Two(h.s1, h.s2),
-            h.multibyte,
-            backward,
-            canon,
-            st,
-        )
-    }
-}
+pub use case_table::{CaseTable, EmacsStr, EmacsText, emacs_downcase_compat};
+pub use syntax_class::{
+    SyntaxClass, standard_syntax_class_for_char, standard_syntax_class_for_code,
+};
 
-/// A consistent canonicalization table and circular equivalence lists.
-/// Every `eqv_next` cycle must return to its starting character.
-pub trait CaseTable {
-    fn canon(&self, c: u32) -> u32;
-    fn eqv_next(&self, c: u32) -> u32;
-}
-/// Match-time environment; syntax operations are added with the regexp VM.
-pub trait SyntaxAt {
-    fn interrupted(&self) -> bool {
-        false
-    }
-}
-impl SyntaxAt for () {}
-/// The accessible region. The storage seam may split a character.
-pub struct Haystack<'a> {
-    pub s1: &'a [u8],
-    pub s2: &'a [u8],
-    pub multibyte: bool,
-    pub point: Option<usize>,
-}
-impl Haystack<'_> {
-    pub fn len(&self) -> usize {
-        self.s1.len() + self.s2.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct Regs {
-    pub start: Vec<isize>,
-    pub end: Vec<isize>,
-}
-/// Deterministic work, accumulated across calls. Exact literals never run a VM.
-/// `candidates` counts verifications; `verify_bytes` counts compared subject bytes.
-/// `window_bytes` counts copied seam bytes, not scanned bytes.
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct Stats {
-    pub compiles: u64,
-    pub hits: u64,
-    pub candidates: u64,
-    pub steps: u64,
-    pub pushes: u64,
-    pub max_live: u64,
-    pub verify_bytes: u64,
-    pub window_bytes: u64,
-    pub memo_engaged: u64,
-    pub memo_inserts: u64,
-    pub memo_pruned: u64,
-}
-#[derive(Debug)]
-pub struct RegexError;
-#[derive(Debug, PartialEq, Eq)]
-pub enum Fail {
-    Overflow,
-    Interrupted,
-}
-/// Owned compiled searcher. Neither bounds, point nor direction are retained.
-pub struct Regex {
-    literal: Literal,
-    multibyte: bool,
-}
-impl Regex {
-    /// Inline body plus all owned allocation-request bytes. Excludes allocator
-    /// size-class rounding/metadata and any surrounding `Rc` control block.
-    pub fn owned_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + self.literal.heap_bytes()
-    }
-
-    pub fn literal(pat: &[u8], pm: bool, tm: bool, case: Option<&dyn CaseTable>) -> Self {
-        Self {
-            literal: Literal::new(pat, pm, tm, case),
-            multibyte: tm,
-        }
-    }
-    pub fn nsub(&self) -> usize {
-        0
-    }
-    /// Search inclusive candidate starts, with matches ending no later than stop.
-    /// Failure leaves match registers untouched. Direction is the sign of range.
-    #[allow(clippy::too_many_arguments)]
-    pub fn search(
-        &self,
-        h: &Haystack,
-        start: usize,
-        range: isize,
-        stop: usize,
-        _env: &impl SyntaxAt,
-        regs: &mut Regs,
-        st: &mut Stats,
-    ) -> Result<Option<usize>, Fail> {
-        assert!(start <= h.len() && stop <= h.len());
-        debug_assert_eq!(h.multibyte, self.multibyte);
-        let end = start.saturating_add_signed(range).min(h.len());
-        let (lo, hi) = if range < 0 {
-            (end, start)
-        } else {
-            (start, end)
-        };
-        let found = if h.s2.is_empty() {
-            self.run(&One(h.s1), lo, hi, stop, range < 0, st)
-        } else {
-            self.run(&Two(h.s1, h.s2), lo, hi, stop, range < 0, st)
-        };
-        if let Some((a, b)) = found {
-            regs.start.clear();
-            regs.start.push(a as isize);
-            regs.end.clear();
-            regs.end.push(b as isize);
-        }
-        Ok(found.map(|(a, _)| a))
-    }
-    fn run(
-        &self,
-        h: &impl Hay,
-        lo: usize,
-        hi: usize,
-        stop: usize,
-        back: bool,
-        st: &mut Stats,
-    ) -> Option<(usize, usize)> {
-        debug_assert!(
-            !self.multibyte
-                || [lo, hi, stop]
-                    .iter()
-                    .all(|&p| p == h.len() || romacs_chars::char_head_p(h.byte(p)))
-        );
-        self.literal
-            .search(h, lo, hi, stop, back, self.multibyte, st)
-    }
-    /// Return the matched byte length, not the ending offset.
-    pub fn matches(
-        &self,
-        h: &Haystack,
-        at: usize,
-        stop: usize,
-        env: &impl SyntaxAt,
-        regs: &mut Regs,
-        st: &mut Stats,
-    ) -> Result<Option<usize>, Fail> {
-        self.search(h, at, 0, stop, env, regs, st)
-            .map(|p| p.map(|_| regs.end[0] as usize - at))
-    }
-}
+// Compile.
+pub use engine::compile::{
+    RegexCompileError, regex_compile, regex_compile_lisp, regex_compile_lisp_with_translation,
+};
+pub use engine::pattern::{CompiledPattern, MatchRegisters};
+// Match.
+pub use engine::matcher::fail::{MATCHER_OVERFLOW_MESSAGE, take_matcher_overflow};
+pub use engine::matcher::re_match;
+pub use engine::optimize::pattern_max_match_chars;
+pub use engine::search::re_search;
+// Host boundary: syntax and case.
+pub use engine::class::{char_class_bit, char_in_classes};
+pub use engine::syntax::{
+    DefaultSyntaxLookup, LookupClassKey, SyntaxCacheKey, SyntaxLookup, default_char_has_category,
+};
+pub use engine::translate::{AsciiPreimage, CaseTranslation};

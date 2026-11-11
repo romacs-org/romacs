@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-LAZY3 | `interpreted-function-p` of preloaded functions | `Finterpreted_function_p` (`src/data.c:541`) is t iff the object is a closure whose code slot is a cons: any function from `.el` source (eagerly expanded or not), never a subr or byte-code. In a dumped GNU the preloaded functions are byte-compiled, so `(interpreted-function-p (symbol-function 'add-hook))` => nil there and t only in `bootstrap-emacs` | VM2 has no byte-code: every closure it builds from Lisp source answers t, every primitive nil (oracle rows: `car` nil, `nil` nil, `(lambda (x) x)` t, arity `(1 . 1)`). It does NOT report whether a body is still unexpanded, and neither does GNU's | **Package-observable** for preloaded (subr.el, files.el, ...) functions, which answer t where a dumped GNU answers nil; `loadup.el:181` therefore takes its bootstrap-emacs branch and requires gv. `compiled-function-p`/`byte-code-function-p` are not implemented | <!-- symbols: interpreted-function-p, compiled-function-p, byte-code-function-p -->

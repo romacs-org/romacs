@@ -194,7 +194,8 @@ impl Vm {
                 let old = self.annotation_variable("kill-ring");
                 let values = self.list_values(old)?;
                 let ring = if n == 2 && self.stack[start + 1] != Value::NIL && old != Value::NIL {
-                    self.cons_mut(old)?.0 = string;
+                    let at = self.writable_cons(old)?;
+                    self.conses.set_car(at, string);
                     old
                 } else {
                     let max =
@@ -209,7 +210,8 @@ impl Vm {
                         for _ in 1..max {
                             tail = self.cons_pair(tail)?.1;
                         }
-                        self.cons_mut(tail)?.1 = Value::NIL;
+                        let at = self.writable_cons(tail)?;
+                        self.conses.set_cdr(at, Value::NIL);
                     }
                     ring
                 };
@@ -375,7 +377,7 @@ impl Vm {
                     vec![]
                 };
                 let index = self.buffer_index()?;
-                let Object::Buffer(t) = &mut self.objects[index] else {
+                let Object::Buffer(t) = self.objects.entry_mut(index) else {
                     return Err("text buffer required".into());
                 };
                 let offset = |v: Value| -> Result<CharOffset> {
@@ -447,7 +449,7 @@ impl Vm {
                     Some(YANK_EXCLUDED.iter().map(|v| (*v).to_owned()).collect())
                 };
                 let index = self.buffer_index()?;
-                let Object::Buffer(t) = &mut self.objects[index] else {
+                let Object::Buffer(t) = self.objects.entry_mut(index) else {
                     return Err("text buffer required".into());
                 };
                 let offset = |v: Value| -> Result<CharOffset> {
@@ -643,7 +645,7 @@ impl Vm {
         let right = if at < end { owned(t.properties.properties_at(at)) } else { vec![] };
         let inherited = self.annotation_inherited(left, right, same_run)?;
         self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
-        let Object::Buffer(t) = &mut self.objects[index] else {
+        let Object::Buffer(t) = self.objects.entry_mut(index) else {
             unreachable!()
         };
         let end = t.point;
@@ -663,7 +665,7 @@ impl Vm {
         let right: Vec<(String, Value)> = if at.0 < end { pairs(at.0) } else { vec![] };
         let inherited = self.annotation_inherited(left, right, same_run)?;
         self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
-        let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+        let Object::ByteBuffer(b) = self.objects.entry_mut(index) else { unreachable!("unibyte buffer") };
         if !inherited.is_empty() {
             for p in at.0..b.point.0 {
                 let values = b.properties.entry(ByteOffset(p)).or_default();
@@ -817,7 +819,7 @@ impl Vm {
                         immutable = true;
                         break;
                     }
-                    self.conses[rest.index(3).expect("private cons")].0 = value;
+                    self.conses.set_car(rest.index(3).expect("private cons"), value);
                     return Ok(value);
                 }
                 prev = Some(rest);
@@ -838,7 +840,7 @@ impl Vm {
                     let cell = self.list_value(&[key, value]);
                     match prev {
                         None => self.slots[owner].plist = cell,
-                        Some(prev) => self.conses[prev.index(3).expect("private cons")].1 = cell,
+                        Some(prev) => self.conses.set_cdr(prev.index(3).expect("private cons"), cell),
                     }
                     return Ok(value);
                 }

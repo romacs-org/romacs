@@ -16,7 +16,7 @@ use winit::{
 
 /// Evaluator-selected dimensions in Emacs pixels. No font handle crosses threads.
 #[derive(Clone, Copy, Debug)]
-pub struct InitialWindowSize {
+pub(crate) struct InitialWindowSize {
     pub width: u32,
     pub height: u32,
 }
@@ -33,17 +33,17 @@ impl InitialWindowSize {
 
 /// Consuming preparation reply. Success, failure and unwind all wake the native
 /// loop after publishing their outcome; an idle loop never needs a polling timer.
-pub struct InitialWindowReply {
+pub(crate) struct InitialWindowReply {
     sender: Option<Sender<Result<InitialWindowSize, String>>>,
     proxy: EventLoopProxy,
 }
 
-pub struct InitialWindowReceiver(Receiver<Result<InitialWindowSize, String>>);
+pub(crate) struct InitialWindowReceiver(Receiver<Result<InitialWindowSize, String>>);
 
 /// Retain on the evaluator stack until it exits. While surfaces are unavailable,
 /// the native loop must distinguish prepared geometry from a departed evaluator.
 #[must_use = "retain on the evaluator stack until GUI evaluation ends"]
-pub struct InitialWindowLifetime {
+pub(crate) struct InitialWindowLifetime {
     _reply: InitialWindowReply,
 }
 
@@ -64,10 +64,6 @@ impl InitialWindowReply {
         self.sender.as_ref().unwrap().send(Ok(size)).ok()?;
         self.proxy.wake_up();
         Some(InitialWindowLifetime { _reply: self })
-    }
-
-    pub fn failed(mut self, error: String) {
-        let _ = self.sender.take().unwrap().send(Err(error));
     }
 }
 
@@ -136,29 +132,7 @@ pub(super) struct StartingApp {
     ended: Rc<std::cell::Cell<Option<super::RenderShutdownReason>>>,
 }
 
-impl StartingApp {
-    pub(super) fn retained() -> Self {
-        Self {
-            phase: Phase::Stopped,
-            can_create_surfaces: false,
-            outcome: Default::default(),
-            evaluator: None,
-            retained: true,
-            ended: Default::default(),
-        }
-    }
-    pub(super) fn install(&mut self, receiver: InitialWindowReceiver, app: RenderApp) {
-        self.retire();
-        self.phase = Phase::Preparing {
-            initial: InitialWindow::Waiting(receiver),
-            app: Box::new(app),
-        };
-    }
-    pub(super) fn retire(&mut self) {
-        self.evaluator = None;
-        self.phase = Phase::Stopped;
-    }
-}
+impl StartingApp {}
 
 /// Keep APP's shutdown cause for the loop's exit.
 fn note_end(ended: &std::cell::Cell<Option<super::RenderShutdownReason>>, app: &RenderApp) {

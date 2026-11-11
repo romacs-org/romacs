@@ -1,0 +1,13 @@
+[package]
+name = "romacs-brand"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rooting as a type: the permission to reach a collection point, and the plain data that may cross one"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# Compile-fail proofs of the rules (tests/compile_fail.rs).
+trybuild = "1.0"

@@ -14,9 +14,6 @@ rustc-hash.workspace = true
 fontdb.workspace = true
 ttf-parser.workspace = true
 
-# Vulkan for DMA-BUF import (Linux WebView integration)
-ash.workspace = true
-
 # Winit + wgpu backend (always enabled)
 winit.workspace = true
 wgpu.workspace = true
@@ -58,7 +55,6 @@ romacs-renderer-wgpu.workspace = true
 romacs-scene.workspace = true
 kurbo.workspace = true
 romacs-video = { workspace = true, optional = true }
-romacs-webview.workspace = true
 
 [dev-dependencies]
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
@@ -66,31 +62,11 @@ romacs-infra.workspace = true
 png.workspace = true
 
 [features]
-gui-test-hooks = []
-default = ["core-free"]
-core-free = []
 # Cross-platform native GPU-resident video
 video = [
     "dep:romacs-video",
     "romacs-renderer-wgpu/video",
 ]
-video-dmabuf = [
-    "video",
-    "romacs-renderer-wgpu/video-dmabuf",
-]
-# Cross-platform embedded WebView integration
-webview = [
-    "romacs-webview/webview",
-    "romacs-renderer-wgpu/webview",
-]
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2.workspace = true
-objc2-foundation.workspace = true
-objc2-app-kit = { workspace = true, features = ["objc2-core-foundation"] }
-
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-clipboard.workspace = true
 x11-dl.workspace = true
@@ -98,10 +74,6 @@ rustix.workspace = true
 wayland-backend.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
-
-[[example]]
-name = "core_free_paint"
-required-features = ["core-free"]
 
 [lints]
 workspace = true

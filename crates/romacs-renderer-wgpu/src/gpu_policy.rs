@@ -21,7 +21,7 @@ pub fn new_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
 
 /// The power preference `ROMACS_GPU` asks for: `low` or `integrated` prefer
 /// an integrated GPU, anything else (or nothing) a discrete one.
-pub fn power_preference() -> wgpu::PowerPreference {
+pub(crate) fn power_preference() -> wgpu::PowerPreference {
     match std::env::var("ROMACS_GPU").as_deref() {
         Ok("low" | "integrated") => wgpu::PowerPreference::LowPower,
         Ok("high" | "discrete") | Err(_) => wgpu::PowerPreference::HighPerformance,
@@ -135,7 +135,7 @@ mod linux {
     use wgpu::hal::api::Vulkan;
 
     pub(super) fn supports_dma_buf_extensions(adapter: &wgpu::Adapter) -> bool {
-        if !cfg!(any(feature = "video", feature = "webview")) {
+        if !cfg!(feature = "video") {
             return false;
         }
         // SAFETY: the guard is used only for immutable capability inspection

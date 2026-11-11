@@ -4,7 +4,6 @@
   rustToolchain,
   source,
   version,
-  wpeWebkit,
 }:
 let
   inherit (pkgs) lib;
@@ -14,13 +13,13 @@ let
     name = "romacs-cargo-source";
     filter = craneLib.filterCargoSources;
   };
-  # VM2 has no legacy video/webview feature forwarding or dump pipeline.
+  # VM2 has no legacy video feature forwarding or dump pipeline.
   productionCapabilities = {
     cargoFeatures = [ ];
     videoBackend = "none";
   };
   dependencies = import ./dependencies.nix {
-    inherit lib pkgs wpeWebkit;
+    inherit lib pkgs;
   };
   cargoPackages = [
     "-p"
@@ -74,27 +73,7 @@ let
       "--set-default"
       "GST_PLUGIN_SCANNER_1_0"
       gstreamerRuntime.pluginScanner
-    ]
-    ++
-      lib.optionals (pkgs.stdenv.hostPlatform.isLinux && builtins.elem "webview" productionCapabilities.cargoFeatures)
-        [
-          "--set-default"
-          "WPE_BACKEND_LIBRARY"
-          "${pkgs.libwpe-fdo}/lib/libWPEBackend-fdo-1.0.so"
-          "--set-default"
-          "GIO_MODULE_DIR"
-          "${pkgs.glib-networking}/lib/gio/modules"
-          "--set-default"
-          "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"
-          "1"
-          "--set-default"
-          "WEBKIT_USE_SINGLE_WEB_PROCESS"
-          "1"
-          "--prefix"
-          "PATH"
-          ":"
-          "${wpeWebkit}/libexec/wpe-webkit-2.0"
-        ];
+    ];
   # makeWrapper arguments, as shell words interpolated into postInstall.
   # They configure the editor process itself: its private library path,
   # runtime root, drivers and plugins.
@@ -189,7 +168,7 @@ craneLib.buildPackage (
         "$out/share/info" \
         "$out/share/man"
       ${lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-        bash scripts/install-linux-desktop-assets.sh "$out"
+        bash tools/install-linux-desktop-assets.sh "$out"
       ''}
 
       # Keep VM2's native CLI name; the desktop command launches the GUI.
@@ -203,7 +182,7 @@ craneLib.buildPackage (
       # Refuse to produce a package whose runtime Lisp is not the source's:
       # every gnu-lisp/, rlisp/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
-      bash scripts/check-installed-runtime.sh "$out" .
+      bash tools/check-installed-runtime.sh "$out" .
     '';
 
     passthru = {

@@ -1,34 +1,25 @@
 [workspace]
 members = [
+    "crates/romacs-brand",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-layout-input",
-    "crates/romacs-layout2",
+    "crates/romacs-layout",
     "crates/romacs-vm-gui",
     "crates/romacs-grammars",
     "tests/coordinate-contract",
-    "tests/retired-vm-contract",
-    "crates/romacs-chars",
     "crates/romacs-logo",
-    "crates/romacs-text",
-    "crates/romacs-props",
     "crates/romacs-regex",
-    "crates/romacs-regex-engine",
     "crates/romacs-mcp",
-    "crates/romacs-terminfo",
     "crates/romacs-allocator",
-    "crates/romacs-diagnostics",
     "crates/romacs-display-protocol",
     "crates/romacs-display-runtime",
     "crates/romacs-face",
-    "crates/romacs-introspect",
-    "crates/romacs-introspect-live",
     "crates/romacs-font",
     "crates/romacs-font-materializer",
     "crates/romacs-gui-oracle",
     "crates/romacs-gui-tests",
     "crates/romacs-parity-reference",
-    "crates/romacs-perf",
     "crates/romacs-attach",
     "crates/romacs-imaging",
     "crates/romacs-renderer-wgpu",
@@ -37,16 +28,11 @@ members = [
     "crates/romacs-infra",
     "crates/romacs-video",
     "crates/romacs-video-model",
-    "crates/romacs-webview",
-    "crates/romacs-gnudiff",
-    "crates/romacs-host-abi",
-    "crates/xtask",
     "gnu-tests/runner",
 ]
 default-members = [
     "crates/romacs-vm",
     "crates/romacs-vm-gui",
-    "crates/xtask",
 ]
 resolver = "2"
 
@@ -67,8 +53,8 @@ repository = "https://git.thanosapollo.org/romacs"
 
 # Lints every package inherits with `[lints] workspace = true`. Every unsafe
 # operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
-# carries its own SAFETY justification. tools/unsafe_census.py (run by
-# scripts/check-derived) fails when a package neither denies this nor is
+# carries its own SAFETY justification. tools/lib/unsafe_census.py (run by
+# tools/check-derived) fails when a package neither denies this nor is
 # listed as pending in UNSAFE-FLOORS.json. Clippy's
 # undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
 # here: existing code would fail it.
@@ -76,12 +62,8 @@ repository = "https://git.thanosapollo.org/romacs"
 unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.dependencies]
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
 # Internal crates
-romacs-terminfo = { path = "crates/romacs-terminfo" }
 romacs-allocator = { path = "crates/romacs-allocator" }
-romacs-host-abi = { path = "crates/romacs-host-abi" }
-romacs-display-runtime = { path = "crates/romacs-display-runtime", default-features = false }
 romacs-display-protocol = { path = "crates/romacs-display-protocol", default-features = false }
 romacs-logo = { path = "crates/romacs-logo" }
 romacs-face = { path = "crates/romacs-face" }
@@ -90,61 +72,30 @@ romacs-font-materializer = { path = "crates/romacs-font-materializer" }
 romacs-test-fonts = { path = "crates/romacs-test-fonts" }
 romacs-video = { path = "crates/romacs-video", default-features = false }
 romacs-video-model = { path = "crates/romacs-video-model" }
-romacs-webview = { path = "crates/romacs-webview", default-features = false }
-romacs-attach = { path = "crates/romacs-attach" }
 romacs-imaging = { path = "crates/romacs-imaging" }
 romacs-renderer-wgpu = { path = "crates/romacs-renderer-wgpu", default-features = false }
 romacs-scene = { path = "crates/romacs-scene" }
-romacs-diagnostics = { path = "crates/romacs-diagnostics", default-features = false }
-romacs-perf = { path = "crates/romacs-perf", default-features = false }
 romacs-infra = { path = "crates/romacs-infra" }
-romacs-gui-tests = { path = "crates/romacs-gui-tests" }
-
-# Native build glue
-glib = "0.22"
-
 
 # Logging / tracing
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
-tracing-log = "0.2"
-tracing-appender = "0.2"
 tracing-test = "0.2.6"
-vergen-gitcl = { version = "10.0.3", default-features = false, features = ["cargo", "rustc"] }
 
 # Concurrency & threading
 crossbeam-channel = "0.5"
 crossbeam-deque = "0.8"
-rayon = "1"
-signal-hook = "0.4"
 
 # FFI / system
 libc = "0.2"
-errno = "0.3"
-# The X11 keysym registry as data: naming a function key is GNU's
-# `XKeysymToString` tier of `modify_event_symbol`, and this is that table
-# without an X11 or xkbcommon dependency, so it works on every platform.
-keysymdefs = "0.2"
 rustix = { version = "1", features = ["event", "fs"] }
-inotify = "0.11"
-fs4 = { version = "1", features = ["sync"] }
-sysinfo = "0.39"
 
 # Crypto
-aes = "0.9.1"
-cbc = { version = "0.2.1", features = ["alloc", "block-padding"] }
-sha1 = "0.11"
 sha2 = "0.11"
-hmac = "0.13"
-md-5 = "0.11"
 getrandom = "0.4"
 base64 = "0.22"
-x509-parser = "0.18"
 
 # Misc
-# Rust-native regexp dialect for patterns defined inside Rust. Lisp-visible
-# patterns must go through `romacs_core::emacs_core::regex` instead.
-native-regex = { package = "regex", version = "1" }
 # Direct dep for the regex-emacs multi-literal SIMD prefilter
 # (`util::prefilter::Prefilter` — memchr/Teddy/Aho-Corasick auto-select).
 # Only the literal-prefilter machinery is needed, so skip the heavy
@@ -152,44 +103,27 @@ native-regex = { package = "regex", version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["std", "perf-literal"] }
 memchr = "2"
 rustc-hash = "2"
-hashbrown = "0.17"
 num_enum = "0.7.6"
 enum_dispatch = "0.3.13"
 enumset = "1.1.14"
 enum-map = "3.1.0"
-typed-index-collections = "3.5"
 strum = { version = "0.28", features = ["derive"] }
-unicode_names2 = "3.1.0"
 unicode-script = "0.5"
 unicode-general-category = "1.1.0"
 stacker = "0.1"
-dns-lookup = "4"
-hostname = "0.4"
-network-interface = "2"
-libloading = "0.9"
-tree-sitter = "0.27.0"
 tree-sitter-language = "0.1.7"
 fontconfig = "0.11.0"
 yeslogic-fontconfig-sys = "6.0.0"
 x11-dl = "2.21"
 core-foundation = "0.10.1"
-core-text = "22.0.0"
-dwrote = { version = "0.11.5", default-features = false }
-winapi = { version = "0.3", features = ["dwrite"] }
-wio = "0.2.2"
-sys-locale = "0.3.2"
 serde = { version = "1", features = ["derive", "rc"] }
 nutype = { version = "0.8", features = ["serde"] }
 serde_json = "1"
 toml = "1.1"
-clap = { version = "4.5", features = ["derive"] }
-command-group = "5.0"
-linux-perf-data = { version = "0.13", default-features = false }
 thiserror = "2.0"
 once_cell = "1.19"
 cfg-if = "1.0"
 bitflags = { version = "2.0", features = ["serde"] }
-enumflags2 = "0.7"
 bytemuck = { version = "1.18", features = ["derive"] }
 memmap2 = "0.9"
 image = "0.25"
@@ -217,28 +151,9 @@ imagesize = "0.15"
 # either side of `BANDING_MIN_PIXELS`.
 jpeg-encoder = "0.7"
 allsorts = "0.17.0"
-encoding_rs = "0.8"
 
 # Compression
 flate2 = "1"
-tar = "0.4"
-ureq = "3"
-
-# Parsing
-quick-xml = "0.41"
-tl = "0.7"
-htmlize = { version = "1.1", default-features = false, features = ["unescape"] }
-
-# Database
-rusqlite = { version = "0.40" }
-
-# Arbitrary precision integers (bignum support).
-# Uses malachite, a pure-Rust bignum library derived from GMP/FLINT
-# algorithms. This avoids C library compilation issues on Windows CI.
-malachite = "0.9"
-
-# Fast integer to-decimal formatting (used by the JSON serializer).
-itoa = "1.0"
 
 # GPU / windowing
 # The fork revision and branch are documented in [patch.crates-io].
@@ -248,49 +163,13 @@ winit = "=0.31.0-beta.3"
 wgpu = { version = "30", features = ["glsl"] }
 # Keep this on the same major version as wgpu: the DMA-BUF importer passes
 # wgpu-hal types through wgpu's public HAL interop API.
-# Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types;
-# `cargo xtask check-dependency-coherence` prevents Cargo updates from resolving
-# the two crates onto incompatible Windows binding versions.
+# Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types,
+# so a Cargo update must keep the two on compatible Windows binding versions.
 wgpu-hal = { version = "30", features = ["vulkan"] }
 # Shader-surface WGSL/GLSL validation on the Lisp thread (same version wgpu embeds)
 naga = { version = "30", features = ["wgsl-in", "glsl-in"] }
 raw-window-handle = "0.6"
 
-# macOS-only: native WKWebView inline backend (`romacs-webview`).
-# Versions track the objc2 0.6 generation winit already pulls in, so the
-# dependency graph keeps a single objc2 major.
-objc2 = "0.6"
-winreg = "0.56"
-block2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSView", "NSResponder", "NSWindow"] }
-objc2-foundation = { version = "0.3", features = [
-    "NSData",
-    "NSError",
-    "NSGeometry",
-    "NSJSONSerialization",
-    "NSKeyValueObserving",
-    "NSObjCRuntime",
-    "NSUUID",
-    "NSString",
-    "NSURL",
-    "NSURLRequest",
-    "NSValue",
-] }
-objc2-web-kit = { version = "0.3", features = [
-    "block2",
-    "WKContentWorld",
-    "WKFrameInfo",
-    "WKNavigation",
-    "WKNavigationDelegate",
-    "WKPreferences",
-    "WKScriptMessage",
-    "WKScriptMessageHandler",
-    "WKUserContentController",
-    "WKUserScript",
-    "WKWebView",
-    "WKWebViewConfiguration",
-    "WKWebsiteDataStore",
-] }
 wayland-backend = { version = "0.3.15", features = ["client_system", "dlopen"] }
 wayland-client = { version = "0.31.14", features = ["system", "dlopen"] }
 wayland-protocols = { version = "0.32.12", features = ["client", "staging"] }
@@ -325,46 +204,13 @@ gstreamer-video = "0.25"
 gstreamer-app = "0.25"
 gstreamer-allocators = "0.25"
 gstreamer-pbutils = "0.25"
-objc2-av-foundation = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-core-text = "0.3.2"
-objc2-core-media = "0.3.2"
-objc2-core-video = "0.3.2"
-objc2-metal = "0.3.2"
-windows = "0.62.2"
-windows-core = "0.62.2"
-webview2-com = "0.39.1"
-url = "2"
 
-# Terminal support
-parking_lot = "0.12"
-portable-pty = "0.9"
 smallvec = "1.13"
 static_assertions = "1.1"
-
-# Build dependencies
-which = "7.0"
-bindgen = "0.72"
-pkg-config = "0.3"
-regex = "1.12"
-
-# OS pipe
-os_pipe = "1.2.3"
-
-# I/O multiplexing (epoll/kqueue/wepoll)
-polling = "3"
-socket2 = { version = "0.6", features = ["all"] }
-
-# TLS
-webpki-roots = "1.0"
-
-# Windows
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse"] }
 
 # Dev / test
 proptest = "1.6"
 tempfile = "3.27.0"
-wait-timeout = "0.2"
 
 [profile.release]
 lto = true
@@ -433,8 +279,7 @@ opt-level = 3
 # Optimized build driven by a PGO profile. Same codegen settings as release,
 # but cargo gives it its own target/release-pgo directory, so a PGO build never
 # replaces an ordinary release binary (or invalidates its pdump fingerprint).
-# The profile data itself is supplied by RUSTFLAGS, which xtask sets --
-# see `cargo xtask fresh-build --profile release-pgo`.
+# The profile data itself is supplied by RUSTFLAGS (-Cprofile-use=FILE).
 [profile.release-pgo]
 inherits = "release"
 lto = true
@@ -467,14 +312,14 @@ codegen-units = 1
 # the link-time work that only shipped binaries need. Fat LTO with one codegen
 # unit made each romacs-core test binary a 30+ minute single-threaded build;
 # here codegen spreads over every job and an edit rebuilds incrementally.
-# Used by scripts/gate; never for shipped artifacts.
+# Used by tools/gate; never for shipped artifacts.
 [profile.gate]
 inherits = "release"
 lto = "off"
 codegen-units = 256
 incremental = true
 
-# Cheap correctness feedback only; scripts/dev-loop selects a bounded subset.
+# Cheap correctness feedback only; tools/dev-loop selects a bounded subset.
 # Compute-heavy parity/ratchet/performance and GUI suites stay on profile.gate.
 [profile.dev-fast]
 inherits = "test"

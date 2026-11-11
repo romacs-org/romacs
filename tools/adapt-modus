@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""Adapt modus-themes.el into rlisp/romacs-theme-modus.el: the Modus
+theming machinery (helper faces, the five live style options, the common
+mappings, the vivendi core palette Rum derives from, the face table and the
+theme variables, the style helpers and the palette generator) under Romacs's
+names, as data and code romacs-theme.el builds its themes with.  Romacs offers
+no Modus palette: of Modus's cores it takes only that one.
+
+The output is generated once and committed; a newer Modus is a deliberate
+regeneration.  Forms are taken whole, by name, from the source; symbols are
+renamed by fixed rules (RENAMES and `rename'), and the five style options'
+defaults become the reference session's values (DEFAULTS).
+
+usage: adapt-modus [--source FILE] [--repo DIR] [--check]
+
+--source  modus-themes.el (default: crates/romacs-face/tests/gnu/inputs/
+          modus-themes.el, the copy the GNU oracle runs too)
+--check   write nothing; exit 1 if the output would change
+"""
+import argparse
+import hashlib
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = 'rlisp/romacs-theme-modus.el'
+
+# Public names: what users and themes write.
+RENAMES = {
+    'modus-themes-italic-constructs': 'romacs-theme-italic-constructs',
+    'modus-themes-bold-constructs': 'romacs-theme-bold-constructs',
+    'modus-themes-mixed-fonts': 'romacs-theme-mixed-fonts',
+    'modus-themes-variable-pitch-ui': 'romacs-theme-variable-pitch-ui',
+    'modus-themes-headings': 'romacs-theme-headings',
+    'modus-themes-common-palette-user': 'romacs-theme-common-palette-user',
+    'modus-themes-common-palette-overrides': 'romacs-theme-common-palette-overrides',
+    'modus-themes-with-colors': 'romacs-theme-with-colors',
+    'modus-themes-generate-palette': 'romacs-theme-modus-generate-palette',
+    'modus-themes-faces': 'romacs-theme-modus-faces',
+    'modus-themes-custom-variables': 'romacs-theme-modus-custom-variables',
+}
+# Helper faces keep their role under Romacs's prefix.
+HELPER_FACES = ('bold', 'slant', 'fixed-pitch', 'ui-variable-pitch', 'reset-soft', 'button')
+
+# The reference session's style values (themes.md §13.5 S5, §13.7).
+DEFAULTS = {
+    'modus-themes-italic-constructs': 'nil',
+    'modus-themes-bold-constructs': 'nil',
+    'modus-themes-mixed-fonts': 'nil',
+    'modus-themes-variable-pitch-ui': 'nil',
+    'modus-themes-headings': ("'((1 . (ultrabold 1.35)) (2 . (semibold 1.2)) (agenda-date . (1.2))\n"
+                              "    (agenda-structure . (variable-pitch light 1.8)) (t . (1.15)))"),
+}
+
+DEFINERS = ('defun', 'defmacro', 'defconst', 'defvar', 'defcustom', 'defface', 'defsubst')
+# Referenced but not taken: Modus's own theme declaration, loading,
+# registration and commands (romacs-theme.el defines themes), and options
+# Romacs does not carry (5.3.0's obsolete prompts/completions among them).
+EXCLUDE = {
+    'modus-themes-theme', 'modus-themes-declare', 'modus-themes-register', 'modus-themes-load-theme',
+    'modus-themes-activate', 'modus-themes-get-current-theme', 'modus-themes-get-theme-palette',
+    'modus-themes--get-theme-palette-subr', 'modus-themes-get-color-value', 'modus-themes-registered-items',
+    'modus-themes--activated-themes', 'modus-themes-disable-other-themes', 'modus-themes-to-toggle',
+    'modus-themes-to-rotate', 'modus-themes-after-load-theme-hook', 'modus-themes-prompts',
+    'modus-themes-completions', 'modus-themes-with-properties', 'modus-themes-declare-themes',
+    'modus-themes--declared-p', 'modus-themes-get-all-known-themes', 'modus-themes--modus-theme-p',
+    'modus-themes--disable-themes', 'modus-themes--get-color-schemes', 'modus-themes-sort',
+    'modus-themes-known-p', 'modus-themes--belongs-to-family-p', 'modus-themes--background-p',
+    'modus-themes-operandi-palette', 'modus-themes-operandi-tinted-palette', 'modus-themes-vivendi-tinted-palette',
+    'modus-themes-preset-overrides-faint', 'modus-themes-preset-overrides-intense',
+    'modus-themes-preset-overrides-cooler', 'modus-themes-preset-overrides-warmer',
+    'modus-themes-operandi-deuteranopia-palette', 'modus-themes-operandi-tritanopia-palette',
+    'modus-themes-vivendi-deuteranopia-palette', 'modus-themes-vivendi-tritanopia-palette',
+    # Named in docstrings only.
+    'modus-themes-items', 'modus-themes-faces-deuteranopia', 'modus-themes-faces-tritanopia',
+}
+
+# The colours the face table and theme variables write literally, as names:
+# a theme with roles of its own sets them, romacs-theme.el's
+# `romacs-theme--modus-constants' keeps Modus's values for the rest.
+TABLE_LITERALS = {'"gray50"': ',fg-table-dim', '"#595959"': ',term-dim', '"#a6a6a6"': ',term-light'}
+
+
+def active_mode_line(form):
+    """The face table FORM with the active window's line `mode-line' itself, so
+    a buffer's remapping of `mode-line' (`face-remap-add-relative') reaches it."""
+    form, found = re.subn(r"`\(mode-line-active\n.*?\(t :underline ,border-mode-line-active\)\)\)",
+                          ";; The active window's line is `mode-line' itself, so a buffer's\n"
+                          "    ;; remapping of `mode-line' (`face-remap-add-relative') reaches it.\n"
+                          "    `(mode-line-active ((,c :inherit mode-line)))", form, count=1, flags=re.S)
+    if not found:
+        raise SystemExit('modus-themes-faces: mode-line-active moved')
+    return form
+
+
+def required_core(form):
+    """The generator FORM with the core a caller names: Modus infers one of
+    the cores Romacs does not take."""
+    form, inferred = re.subn(r'\(core \(or core-palette\n.*?palette\)\)\)\)\n',
+                             '(core (or core-palette (error "A core palette is required")))\n', form, flags=re.S)
+    form, documented = re.subn(r'With optional CORE-PALETTE use it.*?(?=With optional MAPPINGS)',
+                               'CORE-PALETTE fills in any of the remaining entries.\n\n', form, flags=re.S)
+    if not (inferred and documented):
+        raise SystemExit('modus-themes-generate-palette: the core inference moved')
+    return form.replace('like `modus-themes-operandi-palette\'', 'like `modus-themes-vivendi-palette\'')
+
+
+# The forms taken, by (head, name); the order is the output's.
+KEEP = [
+    ('custom-declare-face-loop', None),  # (dotimes (n 9) (custom-declare-face ... heading ...))
+    *[('defface', f'modus-themes-{f}') for f in HELPER_FACES],
+    *[('defcustom', name) for name in DEFAULTS],
+    ('defcustom', 'modus-themes-common-palette-user'),
+    ('defcustom', 'modus-themes-common-palette-overrides'),
+    ('defconst', 'modus-themes-common-palette-mappings'),
+    ('defconst', 'modus-themes-vivendi-palette'),
+    ('defun', 'modus-themes-retrieve-palette-value'),
+    ('defun', 'modus-themes--bold-weight'),
+    ('defun', 'modus-themes--slant'),
+    ('defun', 'modus-themes--fixed-pitch'),
+    ('defun', 'modus-themes--variable-pitch-ui'),
+    ('defun', 'modus-themes--heading'),
+    ('defun', 'modus-themes--box'),
+    ('defconst', 'modus-themes-faces'),
+    ('defconst', 'modus-themes-custom-variables'),
+    ('defun', 'modus-themes-generate-palette'),
+]
+
+
+def top_level_forms(text):
+    """(start, end) of each top-level form of TEXT, Elisp-aware."""
+    forms, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == ';':
+            i = text.find('\n', i)
+            i = n if i < 0 else i + 1
+        elif c == '(':
+            j = form_end(text, i)
+            forms.append((i, j))
+            i = j
+        else:
+            i += 1
+    return forms
+
+
+def form_end(text, i):
+    """The index past the sexp starting at TEXT[I] == '('."""
+    depth, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == ';':
+            i = text.find('\n', i)
+            if i < 0:
+                return n
+        elif c == '"':
+            i += 1
+            while text[i] != '"':
+                i += 2 if text[i] == '\\' else 1
+        elif c == '?':
+            i += 2 if i + 1 < n and text[i + 1] == '\\' else 1
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    raise SystemExit('unbalanced form')
+
+
+def head_and_name(form):
+    m = re.match(r'\((\S+)\s+\'?(\S+)', form)
+    if not m:
+        return None, None
+    head, name = m.group(1), m.group(2)
+    if head == 'dotimes' and 'custom-declare-face' in form and 'heading' in form:
+        return 'custom-declare-face-loop', None
+    return head, name
+
+
+def element_span(form, index):
+    """(start, end) in FORM of its INDEXth element (0 = the head)."""
+    i, k = 1, -1
+    while True:
+        while form[i] in ' \t\n':
+            i += 1
+        k += 1
+        start = i
+        if form[i] == '(':
+            i = form_end(form, i)
+        elif form[i] == '\'' and form[i + 1] == '(':
+            i = form_end(form, i + 1)
+        elif form[i] == '"':
+            i += 1
+            while form[i] != '"':
+                i += 2 if form[i] == '\\' else 1
+            i += 1
+        else:
+            while form[i] not in ' \t\n()':
+                i += 1
+        if k == index:
+            return start, i
+
+
+def rename(text):
+    def one(m):
+        sym = m.group(0)
+        if sym in RENAMES:
+            return RENAMES[sym]
+        rest = sym[len('modus-themes-'):]
+        if rest in HELPER_FACES or re.fullmatch(r'heading-%?d?\d*', rest) or rest.startswith('heading-'):
+            return 'romacs-theme-' + rest
+        return 'romacs-theme-modus-' + rest
+    text = re.sub(r'modus-themes-[A-Za-z0-9*%-]+', one, text)
+    # The heading loop builds its names with format.
+    return text.replace('"modus-themes-heading-%d"', '"romacs-theme-heading-%d"')
+
+
+def adapt(source):
+    text = source.read_text()
+    version = re.search(r'^;; Version: (\S+)', text, re.M).group(1)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    by_key, position = {}, {}
+    for start, end in top_level_forms(text):
+        form = text[start:end]
+        key = head_and_name(form)
+        if key not in by_key:
+            by_key[key], position[key] = form, start
+    defs = {name: key for key in by_key if (name := key[1]) and key[0] in DEFINERS}
+    keys = list(KEEP)
+    # Every definition a kept form refers to comes too, transitively, unless
+    # it is theme loading or a command, which Romacs does its own way.
+    i = 0
+    while i < len(keys):
+        form = by_key.get(keys[i])
+        if form is None:
+            raise SystemExit(f'{source}: no {keys[i][0]} {keys[i][1]}')
+        for sym in sorted(set(re.findall(r'modus-themes-[A-Za-z0-9-]*[A-Za-z0-9]', form))):
+            key = defs.get(sym)
+            if key and key not in keys and sym not in EXCLUDE:
+                keys.append(key)
+        i += 1
+    out = []
+    # In the source's order, which defines what a form uses before it.
+    for key in sorted(keys, key=position.get):
+        form = by_key[key]
+        if key[0] == 'defcustom' and key[1] in DEFAULTS:
+            s, e = element_span(form, 2)
+            form = form[:s] + DEFAULTS[key[1]] + form[e:]
+        # Custom groups first: `modus-themes-faces' names both a group and
+        # the face table, which go to different names.
+        form = form.replace(":group 'modus-themes-faces", ":group 'romacs-theme-faces")
+        form = re.sub(r":group 'modus-themes\b(?!-)", ":group 'romacs-theme", form)
+        if key[1] == 'modus-themes-generate-palette':
+            form = required_core(form)
+        if key[1] in ('modus-themes-faces', 'modus-themes-custom-variables'):
+            for literal, name in TABLE_LITERALS.items():
+                form = form.replace(literal, name)
+        if key[1] == 'modus-themes-faces':
+            form = active_mode_line(form)
+        out.append(rename(form))
+    header = f''';;; romacs-theme-modus.el --- The Modus theming machinery, for Romacs's themes  -*- lexical-binding: t -*-
+
+;; Copyright (C) 2019-2026  Free Software Foundation, Inc.
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+;; Adapted from modus-themes.el {version} by Protesilaos Stavrou
+;; (https://github.com/protesilaos/modus-themes), sha256 {digest}.
+;; Generated by tools/adapt-modus; regenerate there, do not edit.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+;; Modus's three layers under Romacs's names: named colours (the core
+;; palettes), the semantic mappings faces reference, and the face table,
+;; with the style helpers and options it reads and the palette generator
+;; derivative themes start from.  rlisp/romacs-theme.el resolves a theme's
+;; palette and builds its faces from these.  Only Modus 5.3.0's live
+;; options are here: its prompts and completions options are obsolete
+;; and unread upstream.
+
+;;; Code:
+
+(eval-when-compile (require 'cl-lib))
+(require 'color)
+
+(defgroup romacs-theme-faces nil
+  "The faces Romacs's themes build their faces on."
+  :group 'faces)
+
+'''
+    body = '\n\n'.join(out)
+    footer = '\n\n(provide \'romacs-theme-modus)\n;;; romacs-theme-modus.el ends here\n'
+    return header + body + footer
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--source', type=Path, default=ROOT / 'crates/romacs-face/tests/gnu/inputs/modus-themes.el')
+    ap.add_argument('--repo', type=Path, default=ROOT)
+    ap.add_argument('--check', action='store_true')
+    args = ap.parse_args()
+    text = adapt(args.source)
+    out = args.repo / OUT
+    if args.check:
+        same = out.exists() and out.read_text() == text
+        print('up to date' if same else f'drift: {OUT}')
+        return 0 if same else 1
+    out.write_text(text)
+    print(f'{OUT}: {len(text.splitlines())} lines')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

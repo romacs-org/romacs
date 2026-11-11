@@ -1,5 +1,5 @@
 use super::RenderApp;
-use super::frame_windows::{FrameLifecycle, NativeTextInputPolicy, apply_option_key_policy};
+use super::frame_windows::{FrameLifecycle, NativeTextInputPolicy};
 use super::state::{
     RenderGpuContext, effective_window_scale_factor, window_size_from_emacs_pixels,
 };
@@ -7,24 +7,6 @@ use crate::thread_comm::InputEvent;
 use romacs_display_protocol::frame_time::EventTime;
 use std::sync::Arc;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-
-/// Native popup mutation capability. Only this lifecycle module can construct
-/// one in production; input handlers cannot turn an ActiveEventLoop into a
-/// popup commit. Shutdown/device loss use explicit terminal teardown instead.
-pub(crate) struct PopupCommit<'a> {
-    event_loop: &'a dyn ActiveEventLoop,
-}
-
-impl<'a> PopupCommit<'a> {
-    pub(crate) fn event_loop(&self) -> &'a dyn ActiveEventLoop {
-        self.event_loop
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_native_test(event_loop: &'a dyn ActiveEventLoop) -> Self {
-        Self { event_loop }
-    }
-}
 
 impl RenderApp {
     fn collect_monitor_snapshot(
@@ -163,7 +145,6 @@ impl RenderApp {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());
-                    apply_option_key_policy(window.as_ref(), self.frame_windows.option_as_alt);
 
                     if self.clipboard.is_err() {
                         self.clipboard = crate::clipboard::ClipboardService::for_display(
@@ -266,13 +247,12 @@ impl RenderApp {
             event_loop.exit();
             return;
         }
-        if self.gpu.is_none() {
-            if self.process_startup_commands() {
+        if self.gpu.is_none()
+            && self.process_startup_commands() {
                 self.handle_exiting();
                 event_loop.exit();
                 return;
             }
-        }
         if let Some(pending) = self.gpu_startup.take() {
             match pending.poll(&event_loop.create_proxy()) {
                 Ok(super::gpu_startup::GpuPoll::Pending(pending)) => {
@@ -303,10 +283,7 @@ impl RenderApp {
                 event_loop.exit();
                 return;
             }
-            self.comms.tooltip_context.invalidate();
-            self.tooltips.shutdown();
-            self.menus.cancel();
-            self.menus.shutdown();
+            self.menu_bar.close();
             let recovered = self.recover_from_device_loss(event_loop);
             // A rebuild can take a while: observe again.
             let now = romacs_display_protocol::frame_time::observe_platform_now();
@@ -372,52 +349,15 @@ impl RenderApp {
             return;
         }
 
-        let popup_commit = PopupCommit { event_loop };
-        // Close popup descendants before their owner frame's native/GPU state.
         if self
-            .tooltips
+            .menu_bar
             .owner()
             .is_some_and(|id| self.frame_windows.destroy_pending(id))
         {
-            self.tooltips.hide();
+            self.menu_bar.close();
         }
-        if self
-            .menus
-            .owner()
-            .is_some_and(|id| self.frame_windows.destroy_pending(id))
-        {
-            self.menus.cancel();
-        }
-        self.tooltips.commit_retirements(&popup_commit);
-        self.menus.commit_retirements(&popup_commit);
 
         if let Some(gpu) = &self.gpu {
-            if let Some(renderer) = &self.renderer {
-                if let Err(error) = self.tooltips.sync(
-                    now.into_instant(),
-                    &popup_commit,
-                    &gpu.instance,
-                    &gpu.adapter,
-                    &gpu.device,
-                    &gpu.queue,
-                    renderer.surface_format(),
-                ) {
-                    tracing::error!(%error, "native tooltip presentation failed");
-                    self.tooltips.shutdown();
-                }
-                if let Err(error) = self.menus.sync(
-                    &popup_commit,
-                    &gpu.instance,
-                    &gpu.adapter,
-                    &gpu.device,
-                    &gpu.queue,
-                    renderer.surface_format(),
-                ) {
-                    tracing::error!(%error, "native menu presentation failed");
-                    self.menus.cancel();
-                    self.menus.commit_retirements(&popup_commit);
-                }
-            }
             self.frame_windows.process_creates(
                 event_loop,
                 &self.comms,
@@ -432,25 +372,11 @@ impl RenderApp {
             self.note_models_window_destroyed(*frame_id);
         }
         if self
-            .tooltips
+            .menu_bar
             .owner()
             .is_some_and(|owner| destroyed.contains(&owner))
         {
-            self.tooltips.hide();
-        }
-        if self
-            .menus
-            .owner()
-            .is_some_and(|owner| destroyed.contains(&owner))
-        {
-            self.menus.cancel();
-        }
-        while let Some(index) = self.menus.take_result() {
-            self.comms
-                .send_input(crate::thread_comm::InputEvent::MenuSelection {
-                    index: index.index(),
-                    token: Some(index.token),
-                });
+            self.menu_bar.close();
         }
         if let Some(renderer) = self.renderer.as_mut() {
             for frame_id in destroyed {
@@ -458,10 +384,8 @@ impl RenderApp {
             }
         }
 
-        self.poll_frame();
+        self.refresh_frame_state();
         self.synchronize_toolbar_resources();
-        #[cfg(feature = "webview")]
-        self.synchronize_webview_presentations();
 
         // Frame ingestion is the ownership edge for image textures. Publish
         // the newest accepted/queued presentation fence before decode uploads,
@@ -477,8 +401,6 @@ impl RenderApp {
         // frame ingestion so visibility routing sees the newest accepted
         // root/child presentation.
         self.process_video_frames(now);
-
-        self.pump_glib();
 
         self.frame_windows.tick_top_level_cursor_animations(now);
 
@@ -508,11 +430,6 @@ impl RenderApp {
         }
         self.frame_windows.mark_active_top_level_visuals_dirty();
 
-        #[cfg(feature = "webview")]
-        if self.has_webkit_needing_redraw() {
-            self.frame_windows.mark_top_level_dirty();
-        }
-
         // Stage 2 of the frame scheduling plan: legacy activity latches are
         // reconciled into the persistent frame coordinator, which owns
         // one-shot redraw requests (coalesced per window) and the loop's
@@ -521,11 +438,6 @@ impl RenderApp {
         // immediately on its first frame after idle.
         self.draw_fresh_scene(now);
         self.declare_frame_demands(now);
-        // Publish per-window active demand for diagnostics (plan:
-        // Observability). Runs only on loop wakes that already reconcile
-        // demand: a fully idle loop publishes nothing and is never woken by
-        // the counters.
-        super::frame_stats::publish_window_demand(self.frame_coordinator.window_demand());
         // Service the schedule before arming the wait. A deadline that has
         // come due is work, not a timeout: GNU's timer_check runs every ripe
         // timer and only then yields the pselect wait
@@ -584,15 +496,9 @@ impl RenderApp {
         if let Some(animation) = self.service_text_animations(now.into_instant()) {
             deadline = Some(deadline.map_or(animation, |d| d.min(animation)));
         }
-        if let Some(tooltip_deadline) = self.tooltips.deadline() {
-            deadline = Some(deadline.map_or(tooltip_deadline, |d| d.min(tooltip_deadline)));
-        }
         if let Some(busy) = self.busy_toast.deadline(now) {
             let busy = busy.into_instant();
             deadline = Some(deadline.map_or(busy, |d| d.min(busy)));
-        }
-        if let Some(tooltip_deadline) = self.menus.tooltip_deadline() {
-            deadline = Some(deadline.map_or(tooltip_deadline, |d| d.min(tooltip_deadline)));
         }
         match deadline {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
@@ -667,9 +573,8 @@ impl RenderApp {
             damage: Damage::FullLayer,
         };
 
-        // WebKit and shader-surface signals remain process-wide. Video is
+        // Shader-surface signals remain process-wide. Video is
         // presentation-indexed below and never wakes unrelated windows.
-        let webkit_active = self.has_webkit_needing_redraw();
         let surfaces_active = self.has_active_shader_surfaces();
         let frame_shader_installed = self
             .renderer
@@ -829,7 +734,6 @@ impl RenderApp {
             };
 
             for (active, reason, rate) in [
-                (webkit_active, DemandReason::Webkit, max_rate),
                 (surfaces_active, DemandReason::ShaderSurface, surface_rate),
             ] {
                 if active {
@@ -986,7 +890,7 @@ impl RenderApp {
     /// renderer will color-cycle. `None` represents no visible cycle work;
     /// otherwise the fastest enabled profile wins and is display-capped.
     pub(super) fn cursor_color_cycle_cadence(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
     ) -> Option<std::num::NonZeroU16> {
@@ -1010,7 +914,7 @@ impl RenderApp {
     /// frame coordinator: lifecycle code does not reconstruct the cadence,
     /// invalidation, or diagnostic reason independently.
     pub(super) fn cursor_color_cycle_demand(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         window_focused: bool,
@@ -1041,7 +945,7 @@ impl RenderApp {
     pub(super) fn reconcile_cursor_color_cycle_demand(
         coordinator: &mut super::frame_sched::FrameCoordinator,
         id: super::frame_sched::NativeWindowId,
-        frame: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        frame: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         now: EventTime,
@@ -1112,8 +1016,6 @@ impl RenderApp {
         // OwnedDisplayHandle until its backend instances have been destroyed.
         self.cancel_gpu_startup();
         self.startup_commands.clear();
-        self.menus.shutdown();
-        self.tooltips.shutdown();
         // Explicitly drop wgpu resources while the Wayland connection is still alive.
         // Without this, RenderApp's implicit drop happens AFTER the event loop's
         // Wayland display is torn down, causing SEGV in eglTerminate → dri2_teardown_wayland.
@@ -1139,18 +1041,8 @@ impl RenderApp {
             Err("display is shutting down".to_owned()),
         ));
 
-        // Drop the renderer first. Its WebView retirement queue waits for each
-        // exact GPU copy submission and releases the corresponding remote WPE
-        // lease. The WPE reactor must still be alive to consume those release
-        // commands and acknowledge the native buffers.
         drop(self.renderer.take());
         self.note_models_renderer_lost();
-        // Now no renderer-owned browser frame can refer back to WPE; stop the
-        // WebKit views and their reactor-local EGL/GObject state.
-        #[cfg(feature = "webview")]
-        {
-            self.webview_system = None;
-        }
         // Drop adopted primary state (surface holds wl_surface proxy if on Wayland)
         drop(self.frame_windows.take_primary_window());
         // Drop multi-window state (secondary surfaces)

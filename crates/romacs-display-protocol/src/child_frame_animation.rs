@@ -200,19 +200,19 @@ impl Default for ChildFrameAnimationsConfig {
 /// A layer appearing: 140ms ease-out cubic with an 8px slide from its
 /// anchored edge.
 #[must_use]
-pub fn default_child_frame_open() -> ChildFrameAnimation {
+pub(crate) fn default_child_frame_open() -> ChildFrameAnimation {
     ChildFrameAnimation::easing(140, TransitionEasing::EaseOutCubic, 8.0)
 }
 
 /// A layer going away: a 90ms fade.
 #[must_use]
-pub fn default_child_frame_close() -> ChildFrameAnimation {
+pub(crate) fn default_child_frame_close() -> ChildFrameAnimation {
     ChildFrameAnimation::easing(90, TransitionEasing::EaseOutCubic, 0.0)
 }
 
 /// Drift toward a new anchor: a critically damped spring, **off**.
 #[must_use]
-pub fn default_child_frame_movement() -> ChildFrameAnimation {
+pub(crate) fn default_child_frame_movement() -> ChildFrameAnimation {
     ChildFrameAnimation {
         enabled: false,
         ..ChildFrameAnimation::spring(1.0, 800)
@@ -223,13 +223,13 @@ pub fn default_child_frame_movement() -> ChildFrameAnimation {
 /// rect tweens over 80ms from the old to the new, the new content placed
 /// where it settles and clipped to the rect, so no picture is stretched.
 #[must_use]
-pub fn default_child_frame_resize() -> ChildFrameAnimation {
+pub(crate) fn default_child_frame_resize() -> ChildFrameAnimation {
     ChildFrameAnimation::easing(80, TransitionEasing::EaseOutCubic, 0.0)
 }
 
 /// A layer's selection highlight gliding between rows: 60ms.
 #[must_use]
-pub fn default_child_frame_selection() -> ChildFrameAnimation {
+pub(crate) fn default_child_frame_selection() -> ChildFrameAnimation {
     ChildFrameAnimation::easing(60, TransitionEasing::EaseOutCubic, 0.0)
 }
 
@@ -293,7 +293,6 @@ pub struct SelectionBand {
 }
 
 #[cfg(test)]
-#[path = "child_frame_animation/tests/child_frame_animation_test.rs"]
 mod tests;
 
 crate::effect_schema!(ChildFrameAnimation {

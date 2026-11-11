@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Source mutants of the keywordp body; each must fail the primh replay
-assertion of tests/primh_data_kw.rs. Restores the source afterwards.
+assertion of tests/primh.rs. Restores the source afterwards.
 
 Run from an owned checkout with the prepared project environment:
   python3 crates/romacs-vm/tools/primh/logs/keywordp/mutants.py
@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path.cwd()
 SRC = ROOT / "crates/romacs-vm/src/prims/data_kw.rs"
 LOGS = ROOT / "crates/romacs-vm/tools/primh/logs/keywordp"
-TEST = "primh_data_kw"
+TEST = "primh"
 MUTANTS = [
     # (name, old, new)
     ("ignores-colon",
@@ -34,7 +34,7 @@ MUTANTS = [
 
 def run(log):
     with open(log, "w") as out:
-        p = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", TEST],
+        p = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", TEST, "--", "primh_keywordp", "--exact"],
                            stdout=out, stderr=subprocess.STDOUT)
     return p.returncode, log.read_text()
 

@@ -6,9 +6,10 @@
 ;;; Commentary:
 
 ;; Romacs extension (experimental): OBJ scenes drawn natively by the GPU
-;; renderer inside an ordinary buffer.  A MODEL is a shader-surface handle
-;; (opaque, GC-managed); it is shown by a `(surface :id MODEL ...)' display
-;; spec and loaded asynchronously.
+;; renderer inside an ordinary buffer.  A MODEL is an opaque handle owning
+;; one native surface: collecting the handle frees the surface (a
+;; finalizer), as does `romacs-model-destroy'.  It is shown by a
+;; `(surface :id ID ...)' display spec and loaded asynchronously.
 ;;
 ;;   (setq m (romacs-model-create
 ;;            :meshes '(("humerus" "/data/humerus.obj" SHA256-OR-NIL) ...)
@@ -34,25 +35,28 @@
 ;;
 ;; Left-dragging a model orbits it and a click picks; the wheel zooms.
 ;; Mesh IDs never reach the renderer: they are mapped to indices here.
+;;
+;; The renderer's events arrive as special events `(romacs-model ID TYPE
+;; PLIST)', which `special-event-map' runs at once, inside a read too
+;; (`romacs-model--handle-event').
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'color)
 
-(declare-function romacs-model--available-p "model/mod.rs" ())
-(declare-function romacs-model--create "model/mod.rs"
+(declare-function romacs-model--available-p "prims/model.rs" ())
+(declare-function romacs-model--create "prims/model.rs"
                   (meshes view background width height))
-(declare-function romacs-model--id "model/mod.rs" (handle))
-(declare-function romacs-model--set-view "model/mod.rs"
-                  (handle req yaw pitch zoom))
-(declare-function romacs-model--set-highlight "model/mod.rs"
-                  (handle req target selected))
-(declare-function romacs-model--set-highlight-layers "model/mod.rs"
-                  (handle req layers))
-(declare-function romacs-model--resize "model/mod.rs" (handle req width height))
-(declare-function romacs-model--freeze "model/mod.rs" (handle req))
-(declare-function romacs-surface-destroy "shader_surface/mod.rs" (id))
+(declare-function romacs-model--set-view "prims/model.rs"
+                  (id req yaw pitch zoom))
+(declare-function romacs-model--set-highlight "prims/model.rs"
+                  (id req target selected))
+(declare-function romacs-model--set-highlight-layers "prims/model.rs"
+                  (id req layers))
+(declare-function romacs-model--resize "prims/model.rs" (id req width height))
+(declare-function romacs-model--freeze "prims/model.rs" (id req))
+(declare-function romacs-surface-destroy "prims/model.rs" (id))
 
 (defgroup romacs-model nil
   "Native 3D model views."
@@ -102,10 +106,20 @@ state: never call user code, wait or read input.")
   pending-view
   frozen)
 
+(cl-defstruct (romacs-model--handle
+               (:constructor romacs-model--handle-create (id finalizer))
+               (:copier nil))
+  "A model handle: its native surface ID, freed by FINALIZER when the
+handle is collected."
+  id finalizer)
+
 (defvar romacs-model--registry (make-hash-table :test 'eq :weakness 'key)
   "MODEL handle -> `romacs-model--entry'.
 Weak in the key, so an unreferenced model is collected even when
 its callback closes over it; collection frees its GPU objects.")
+
+(defvar romacs-model--by-id (make-hash-table :test 'eql :weakness 'value)
+  "Surface id -> live MODEL handle, for events, which name ids.")
 
 (defun romacs-model--entry (model)
   "Return MODEL's registry entry, or signal."
@@ -114,12 +128,11 @@ its callback closes over it; collection frees its GPU objects.")
 
 (defun romacs-model--find (id)
   "Return the live MODEL handle whose surface id is ID, or nil."
-  (catch 'found
-    (maphash (lambda (model entry)
-               (when (eql (romacs-model--entry-id entry) id)
-                 (throw 'found model)))
-             romacs-model--registry)
-    nil))
+  (gethash id romacs-model--by-id))
+
+(defun romacs-model--id (model)
+  "Return MODEL's surface id."
+  (romacs-model--handle-id model))
 
 (defun romacs-model--mesh-index (entry mesh-id)
   "Return ENTRY's renderer index of MESH-ID, or signal."
@@ -183,12 +196,16 @@ renderer."
       (error "Model :meshes must be ((ID PATH [SHA256]) ...)"))
     (when (/= (length ids) (length (delete-dups (copy-sequence ids))))
       (error "Model mesh IDs must be unique"))
-    (let* ((model (romacs-model--create
-                   (mapcar (lambda (mesh) (list (nth 1 mesh) (nth 2 mesh)))
-                           meshes)
-                   view
-                   (romacs-model--background (plist-get plist :background))
-                   width height)))
+    (let* ((id (romacs-model--create
+                (mapcar (lambda (mesh) (list (nth 1 mesh) (nth 2 mesh)))
+                        meshes)
+                view
+                (append (romacs-model--background (plist-get plist :background)) nil)
+                width height))
+           ;; The finalizer names the id only, so it never keeps the handle.
+           (model (romacs-model--handle-create
+                   id (make-finalizer (lambda () (romacs-surface-destroy id))))))
+      (puthash id model romacs-model--by-id)
       (puthash model
                (romacs-model--entry-create
                 :id (romacs-model--id model)
@@ -233,7 +250,8 @@ The angles are kept wrapped into 0..360.  Return the request number."
          (pitch (romacs-model--wrap-angle pitch))
          (req (romacs-model--request
                model (lambda (req)
-                       (romacs-model--set-view model req yaw pitch zoom)))))
+                       (romacs-model--set-view (romacs-model--id model)
+                                               req yaw pitch zoom)))))
     (setf (romacs-model--entry-view entry) (list yaw pitch zoom)
           (romacs-model--entry-pending-view entry) req)
     req))
@@ -316,12 +334,12 @@ change what a click picks."
                                         (romacs-model--layer entry layer))
                                       layers)))
                   (lambda (req)
-                    (romacs-model--set-highlight-layers model req layers))))
+                    (romacs-model--set-highlight-layers (romacs-model--id model) req layers))))
             (let ((target (romacs-model--target entry (plist-get plist :target)))
                   (selected (let ((id (plist-get plist :selected)))
                               (and id (romacs-model--mesh-index entry id)))))
               (lambda (req)
-                (romacs-model--set-highlight model req target selected))))))
+                (romacs-model--set-highlight (romacs-model--id model) req target selected))))))
     (romacs-model--request model send)))
 
 (defun romacs-model-resize (model width height)
@@ -331,7 +349,7 @@ Return the request number.  The glyph inserted by
 returns to the previous size if the renderer refuses the request."
   (let ((req (romacs-model--request
               model (lambda (req)
-                      (romacs-model--resize model req width height))))
+                      (romacs-model--resize (romacs-model--id model) req width height))))
         (entry (romacs-model--entry model)))
     (setf (romacs-model--entry-resizes entry)
           (nconc (romacs-model--entry-resizes entry)
@@ -374,7 +392,7 @@ The glyph shows the newest resize still pending, else the accepted size."
 Irreversible; `romacs-model-destroy' still works.  Return the
 request number."
   (prog1 (romacs-model--request
-          model (lambda (req) (romacs-model--freeze model req)))
+          model (lambda (req) (romacs-model--freeze (romacs-model--id model) req)))
     (setf (romacs-model--entry-frozen (romacs-model--entry model)) t)))
 
 ;;;; Queries
@@ -422,27 +440,46 @@ interaction, renderer loss, loading, frozen and destroyed models."
   "Free MODEL's renderer resources now.  Idempotent."
   (let ((entry (romacs-model--entry model)))
     (unless (eq (car (romacs-model--entry-status entry)) 'destroyed)
+      (romacs-model--unattach model (romacs-model--entry-buffer entry))
       (setf (romacs-model--entry-status entry) (list 'destroyed)
             (romacs-model--entry-buffer entry) nil)
-      (romacs-surface-destroy model)))
+      (remhash (romacs-model--id model) romacs-model--by-id)
+      (romacs-surface-destroy (romacs-model--id model))))
   nil)
+
+(defvar-local romacs-model--attached nil
+  "The models attached to this buffer, a table of model to t, so killing
+it finds them without a scan of every model.  A model leaves it when it
+moves to another buffer or is destroyed.")
+(put 'romacs-model--attached 'permanent-local t)
+
+(defun romacs-model--attach (model)
+  "Note MODEL as attached to the current buffer."
+  (puthash model t (or romacs-model--attached
+                       (setq romacs-model--attached (make-hash-table :test #'eq)))))
+
+(defun romacs-model--unattach (model buffer)
+  "MODEL is no longer attached to BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when romacs-model--attached (remhash model romacs-model--attached)))))
 
 (defun romacs-model--kill-buffer ()
   "Destroy the models attached to the current buffer."
-  (let ((buffer (current-buffer)) doomed)
-    (maphash (lambda (model entry)
-               (when (eq (romacs-model--entry-buffer entry) buffer)
-                 (push model doomed)))
-             romacs-model--registry)
-    (mapc #'romacs-model-destroy doomed)))
+  (when romacs-model--attached
+    (let ((buffer (current-buffer)) (doomed (hash-table-keys romacs-model--attached)))
+      (clrhash romacs-model--attached)
+      (dolist (model doomed)
+        (when (eq (romacs-model--entry-buffer (romacs-model--entry model)) buffer)
+          (romacs-model-destroy model))))))
 
 ;;;; Events
 
 (defvar romacs-model--event nil
   "Serial number of the model event whose hooks run now, or nil.
-The evaluator binds it around both hooks, so `romacs-model--note'
-can tag the callback it queues with its event and
-`romacs-model--dispatch' run only the current event's callbacks.")
+`romacs-model--handle-event' binds it around both hooks, so
+`romacs-model--note' can tag the callback it queues with its event
+and `romacs-model--dispatch' run only the current event's callbacks.")
 
 (defvar romacs-model--queue nil
   "Callbacks (SERIAL ID TYPE PLIST) waiting to run, oldest first.
@@ -525,6 +562,45 @@ event is delivered, once every member has handled this one."
                (cdr (pop romacs-model--queue)))))))
 
 (add-hook 'romacs-model-event-functions #'romacs-model--dispatch)
+
+(defvar romacs-model--serial 0 "Serial number of the latest model event.")
+
+(defvar romacs-model--undelivered nil
+  "Model events (SERIAL ID TYPE PLIST) whose event functions wait to run.")
+
+(defvar romacs-model--delivering nil
+  "Non-nil while `romacs-model-event-functions' runs for an event.")
+
+(defun romacs-model--run-member (function id type plist)
+  "Call event FUNCTION with ID TYPE PLIST, logging its error; return nil."
+  (condition-case err
+      (funcall function id type plist)
+    (error (message "romacs-model: event function %S failed: %S" function err)))
+  nil)
+
+(defun romacs-model--handle-event (event)
+  "Deliver the native model EVENT, (romacs-model ID TYPE PLIST).
+Bound in `special-event-map', so it runs as the event arrives, inside
+a read too.  `romacs-model--state-functions' run at once; the event
+functions run in order and never nested: an event arriving while they
+run (inside a callback's `sit-for') waits until they finish."
+  (interactive "e")
+  (pcase-let ((`(,_ ,id ,type ,plist) event))
+    (let ((serial (setq romacs-model--serial (1+ romacs-model--serial))))
+      (let ((romacs-model--event serial))
+        (run-hook-with-args 'romacs-model--state-functions id type plist))
+      (setq romacs-model--undelivered
+            (nconc romacs-model--undelivered (list (list serial id type plist))))
+      (unless romacs-model--delivering
+        (let ((romacs-model--delivering t))
+          (while romacs-model--undelivered
+            (pcase-let ((`(,serial ,id ,type ,plist) (pop romacs-model--undelivered)))
+              (let ((romacs-model--event serial))
+                (run-hook-wrapped 'romacs-model-event-functions
+                                  #'romacs-model--run-member id type plist)))))))))
+
+(put 'romacs-model--handle-event 'completion-predicate #'ignore)
+(define-key special-event-map [romacs-model] #'romacs-model--handle-event)
 
 (defun romacs-model--pick-current-p (model entry plist)
   "Return non-nil if pick PLIST names the picture MODEL holds as current.
@@ -687,7 +763,7 @@ Bound on `down-mouse-1' over a model so the press never starts
 
 (defun romacs-model--display-spec (model entry)
   "Return MODEL's display spec at the size recorded in ENTRY."
-  (list 'surface :id model
+  (list 'surface :id (romacs-model--id model)
         :width (romacs-model--entry-width entry)
         :height (romacs-model--entry-height entry)))
 
@@ -727,6 +803,7 @@ glyph, and the camera keys no longer find MODEL in that buffer."
                                  '(display nil keymap nil romacs-model nil)))))
     (when (buffer-live-p old)
       (with-current-buffer old
+        (when romacs-model--attached (remhash model romacs-model--attached))
         (when (eq romacs-model--buffer-model model)
           (setq romacs-model--buffer-model nil))))
     (setf (romacs-model--entry-buffer entry) nil)))
@@ -757,7 +834,8 @@ and killing that buffer destroys MODEL.  PLIST keys:
                         'romacs-model model
                         'rear-nonsticky t))
     (unless (eq (romacs-model--entry-buffer entry) (current-buffer))
-      (romacs-model--detach model entry))
+      (romacs-model--detach model entry)
+      (romacs-model--attach model))
     (setf (romacs-model--entry-buffer entry) (current-buffer))
     (add-hook 'kill-buffer-hook #'romacs-model--kill-buffer nil t)
     nil))

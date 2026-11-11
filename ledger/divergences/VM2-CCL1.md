@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-CCL1 | CCL programs | ccl.c registers compiled CCL programs (`register-ccl-program`, ccl.c:2245, with resolve_symbol_ccl_program) and runs them (`ccl-execute`, `ccl-execute-on-string`, CCL-based coding systems); `define-ccl-program` (ccl.el) compiles and registers at load time | Registration is GNU's (`crates/romacs-vm/src/prims/ccl.rs`, `tests/ccl_registry.rs`): the same indices, `ccl-program-idx` properties, symbol resolution and refusals, the table held in a VM-internal symbol. The CCL interpreter is not implemented: `ccl-execute` and `ccl-execute-on-string` are void, and coding systems of type `ccl` are refused by the decoder (VM2-FILEIO1). CCL is charset-era machinery; its one in-tree runtime user is obsolete `pgg-parse.el`'s CRC-24 | **Package-observable:** files defining CCL programs load as in GNU; running one signals `void-function` | <!-- symbols: register-ccl-program, define-ccl-program, ccl-execute, ccl-execute-on-string -->

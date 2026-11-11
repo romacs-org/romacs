@@ -1,0 +1,113 @@
+{
+ "about": "Pinned upstream test assets. tools/fetch-test-fixtures downloads and verifies them into ROMACS_TEST_FONTS_DIR (default ~/.cache/romacs-test-fonts); tests only read them. Licences: each file is its upstream project's, unmodified.",
+ "archives": [
+  {
+   "url": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+   "sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+   "file": "spleen-2.2.0.tar.gz"
+  },
+  {
+   "url": "https://github.com/Yikai-Liao/LxgwWenKaiNerdFont/releases/download/v1.522/lxgw-wenkai-nerd-1.522.tar.gz",
+   "sha256": "a09a5f9b31ba87f7da06fef1b8174934c9db57c3c50e0c830f0572f19ef9972f",
+   "file": "lxgw-wenkai-nerd-1.522.tar.gz"
+  },
+  {
+   "url": "https://github.com/yuru7/PlemolJP/releases/download/v3.1.0/PlemolJP_NF_v3.1.0.zip",
+   "sha256": "015142b7ce4fb497ea6eb14567c435b69450eb5028fb7d29c032d1ffb3854abb",
+   "file": "PlemolJP_NF_v3.1.0.zip"
+  }
+ ],
+ "fixtures": [
+  {
+   "file": "spleen-2.2.0/spleen-8x16.bdf",
+   "sha256": "4a3d97ee61a8c86a7525d8c723cb8a14081f395cd2feb4227ba5e3baf0629bae",
+   "archive": "spleen-2.2.0.tar.gz",
+   "member": "spleen-2.2.0/spleen-8x16.bdf"
+  },
+  {
+   "file": "spleen-2.2.0/spleen-8x16.pcf",
+   "sha256": "b469833f073927a92ac4ba0f75863a6b04d234d5af7d81a637857697620d5314",
+   "archive": "spleen-2.2.0.tar.gz",
+   "member": "spleen-2.2.0/spleen-8x16.pcf"
+  },
+  {
+   "file": "spleen-2.2.0/spleen-8x16.otb",
+   "sha256": "73784c46ffb7ff31adcee06923f839e02170fb0132a30323f1be1036b8f1da67",
+   "archive": "spleen-2.2.0.tar.gz",
+   "member": "spleen-2.2.0/spleen-8x16.otb"
+  },
+  {
+   "file": "spleen-2.2.0/spleen-8x16.woff",
+   "sha256": "5ca783bd09fec9856fae0e142a1d0fac5542c2508e0c35859b39c42113a503b2",
+   "archive": "spleen-2.2.0.tar.gz",
+   "member": "spleen-2.2.0/spleen-8x16.woff"
+  },
+  {
+   "file": "spleen-2.2.0/spleen-8x16.woff2",
+   "sha256": "7062d0818b46b713b08ee78e457a3e78659a2b8d3107f609676cef4e5d38aa2c",
+   "archive": "spleen-2.2.0.tar.gz",
+   "member": "spleen-2.2.0/spleen-8x16.woff2"
+  },
+  {
+   "file": "spleen-2.2.0/spleen-8x16.pcf.gz",
+   "gzip_of": "spleen-2.2.0/spleen-8x16.pcf"
+  },
+  {
+   "file": "w3c-roundtrip-collection-order-001.woff2",
+   "sha256": "7a246412785b588a43acf9cddaab0a36674f8581bd328a6107e9761e38713058",
+   "url": "https://raw.githubusercontent.com/w3c/woff2-compiled-tests/1fd8cd583645618f4df36c65a297479840ad5510/Decoder/Tests/xhtml1/roundtrip-collection-order-001.woff2"
+  },
+  {
+   "file": "noto-color-emoji-2.051.ttf",
+   "sha256": "72a635cb3d2f3524c51620cdde406b217204e8a6a06c6a096ff8ed4b5fd6e27b",
+   "url": "https://raw.githubusercontent.com/googlefonts/noto-emoji/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts/NotoColorEmoji.ttf"
+  },
+  {
+   "file": "noto-color-emoji-colrv1.ttf",
+   "sha256": "4d82a18d8d95f60ba883ce242bbadbf84a576e987745dd7ba38d71c67cff2d73",
+   "url": "https://raw.githubusercontent.com/google/fonts/142c8963e7606b510c93a644c82a4c4cdeae6ef9/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf"
+  },
+  {
+   "file": "nabla.ttf",
+   "sha256": "e45cec60eb2099b4b4ffee8ebe005d1d3060771071ede1caeeeb12e37a2c00ae",
+   "url": "https://raw.githubusercontent.com/google/fonts/34a2c3daeeb2715576af0786ae4e9dc6c7d8ca2a/ofl/nabla/Nabla%5BEDPT,EHLT%5D.ttf"
+  },
+  {
+   "file": "MPLUS1Code-Thin.ttf",
+   "sha256": "730c24ad92d46ef913d92dd2ffcd41a535609604b8213d8326292d2664ffd107",
+   "url": "https://raw.githubusercontent.com/coz-m/MPLUS_FONTS/9e2b62ba986047127eb0a73b3ca70d75a50114bd/fonts/MPLUS1Code/ttf/MPLUS1Code-Thin.ttf"
+  },
+  {
+   "file": "SymbolsNerdFontMono-Regular-v3.4.0.ttf",
+   "sha256": "f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60",
+   "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
+  },
+  {
+   "file": "JetBrainsMonoNerdFont-Regular-v3.4.0.ttf",
+   "sha256": "0ec29a68b539ece7078fc714cebff0c0accb2f4948f8f7963d9f5e86633b12d9",
+   "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/patched-fonts/JetBrainsMono/Ligatures/Regular/JetBrainsMonoNerdFont-Regular.ttf"
+  },
+  {
+   "file": "NotoSansMono-wdth-wght.ttf",
+   "sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+   "url": "https://raw.githubusercontent.com/google/fonts/097bc1b8c04c3224087c2ae95f7a923859b778cf/ofl/notosansmono/NotoSansMono%5Bwdth,wght%5D.ttf"
+  },
+  {
+   "file": "lxgw-wenkai-nerd-1.522/LXGWWenKaiNerdFont-Regular.ttf",
+   "sha256": "5d07bc2b306b8fb8da5eb47dc9394e93ab63cd945bba305b9605e3c442408b1a",
+   "archive": "lxgw-wenkai-nerd-1.522.tar.gz",
+   "member": "lxgw-wenkai-nerd-1.522/LXGWWenKaiNerdFont-Regular.ttf"
+  },
+  {
+   "file": "PlemolJPConsoleNF-Regular-v3.1.0.ttf",
+   "sha256": "0dadabb6766f13e31787d26d73467dd613a777e509a8214bc898333299dd4be4",
+   "archive": "PlemolJP_NF_v3.1.0.zip",
+   "member": "PlemolJP_NF_v3.1.0/PlemolJPConsole_NF/PlemolJPConsoleNF-Regular.ttf"
+  },
+  {
+   "file": "nyan-mode-nyan.xpm",
+   "sha256": "d80164170278176347b1c01abc70c552ca2fcb655e279bea9f369206eb2d415e",
+   "url": "https://raw.githubusercontent.com/TeMPOraL/nyan-mode/09904af23adb839c6a9c1175349a1fb67f5b4370/img/nyan.xpm"
+  }
+ ]
+}

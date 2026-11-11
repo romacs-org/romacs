@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-MD4 | translated match positions outside the fixnum range | Pinned GNU `search.c:3062` stores translated machine-word positions, then `make_fixnum`/`XSETFASTINT` narrows them when read. After `(set-match-data '(0 1))`, translating by `2305843009213693951` then `1` makes both `(match-data t)` and `(list (match-beginning 0) (match-end 0))` return `(-2305843009213693952 -2305843009213693951)`. | VM2 preserves the translated machine-word positions but its checked integer constructor makes both readbacks signal `(arith-error)`. Live `match-data--translate/0043` and `/0044` are pinned `SIGNAL-VS-VALUE`; ordinary fixnum-range positions and signed-end clamping agree. | **Package-observable integer materialization boundary**, not full match-register fidelity. VM2-MD2 binary marker representation and VM2-MD3 negative-end extraction remain unchanged. | <!-- symbols: match-data--translate, match-data, match-beginning, match-end -->

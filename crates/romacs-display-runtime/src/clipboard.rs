@@ -1,7 +1,6 @@
 use crate::thread_comm::{ClipboardCommand, ClipboardSelection};
 use arboard::Clipboard;
 use crossbeam_channel::{Receiver, Sender};
-use romacs_display_protocol::SelectionOwner;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use winit::event_loop::OwnedDisplayHandle;
@@ -24,8 +23,6 @@ trait ClipboardBackend: Send {
     -> Result<(), String>;
 
     fn text(&mut self, selection: ClipboardSelection) -> Result<text_policy::TextRead, String>;
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String>;
 }
 
 enum ServiceCommand {
@@ -200,17 +197,6 @@ fn execute_command(backend: &mut dyn ClipboardBackend, command: ClipboardCommand
                 tracing::debug!("clipboard get reply receiver was dropped");
             }
         }
-        ClipboardCommand::GetOwnership {
-            selection, reply, ..
-        } => {
-            let result = backend.owner(selection);
-            if let Err(err) = &result {
-                tracing::warn!(?selection, "clipboard ownership query failed: {err}");
-            }
-            if reply.send(result).is_err() {
-                tracing::debug!("clipboard ownership reply receiver was dropped");
-            }
-        }
     }
 }
 
@@ -222,78 +208,17 @@ pub(crate) fn reject_command(command: ClipboardCommand, error: String) {
         ClipboardCommand::GetText { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ClipboardCommand::GetOwnership { reply, .. } => {
-            let _ = reply.send(Err(error));
-        }
-    }
-}
-
-/// Process-local stand-in for a selection the platform clipboard does not
-/// expose.
-///
-/// GNU Emacs never rejects PRIMARY on a non-X platform.  Its w32 port keeps
-/// PRIMARY as a Lisp property (lisp/term/w32-win.el:364-367, :417-451), so
-/// another process cannot take it.  This typed state reproduces that contract
-/// for Romacs on every platform whose native clipboard API lacks PRIMARY.
-///
-/// Ledgered macOS divergence: GNU NS maps PRIMARY to a named NSPasteboard
-/// (`src/nsselect.m:56,397-466,494-547`) and observes foreign takeover through
-/// pasteboard change counts.  Arboard exposes only the conventional system
-/// pasteboard, so Romacs deliberately uses the process-local w32 model rather
-/// than aliasing PRIMARY to CLIPBOARD.  Consequently `OtherProcess` cannot
-/// arise for this state.  `ns-sent-selection-hooks` is also not run.
-#[cfg(not(target_os = "linux"))]
-#[derive(Debug, Default, PartialEq, Eq)]
-enum PrivateSelection {
-    /// Nobody owns the selection: `ns-get-selection` returns nil.
-    #[default]
-    Vacant,
-    /// This process owns the selection with the given text.
-    Owned(String),
-}
-
-#[cfg(not(target_os = "linux"))]
-impl PrivateSelection {
-    /// Own the selection with `text`, or disown it with `None`.
-    fn store(&mut self, text: Option<&str>) {
-        *self = match text {
-            Some(text) => Self::Owned(text.to_owned()),
-            None => Self::Vacant,
-        };
-    }
-
-    /// The stored text, or the absence a vacant selection reports; going
-    /// through the policy keeps every "no owner" answer one vocabulary.
-    fn load(&self) -> text_policy::TextRead {
-        match self {
-            Self::Owned(text) => text_policy::TextRead::Text(text.clone()),
-            Self::Vacant => text_policy::TextAbsence::NoSelection.into(),
-        }
-    }
-
-    fn owner(&self) -> SelectionOwner {
-        match self {
-            Self::Owned(_) => SelectionOwner::ThisProcess,
-            Self::Vacant => SelectionOwner::None,
-        }
     }
 }
 
 struct ArboardClipboard {
     clipboard: Clipboard,
-    /// PRIMARY on platforms whose clipboard API has no such selection.
-    #[cfg(not(target_os = "linux"))]
-    primary: PrivateSelection,
 }
 
 impl ArboardClipboard {
     fn new() -> Result<Self, String> {
         Clipboard::new()
-            .map(|clipboard| Self {
-                clipboard,
-                #[cfg(not(target_os = "linux"))]
-                primary: PrivateSelection::default(),
-            })
+            .map(|clipboard| Self { clipboard })
             .map_err(|err| format!("failed to initialize the system clipboard: {err}"))
     }
 
@@ -322,7 +247,6 @@ impl ClipboardBackend for ArboardClipboard {
             target_os = "linux" => {
                 let selection = match selection {
                     ClipboardSelection::Clipboard => LinuxClipboardKind::Clipboard,
-                    ClipboardSelection::Primary => LinuxClipboardKind::Primary,
                 };
                 match text {
                     Some(text) => self
@@ -355,7 +279,6 @@ impl ClipboardBackend for ArboardClipboard {
             target_os = "linux" => {
                 let selection = match selection {
                     ClipboardSelection::Clipboard => LinuxClipboardKind::Clipboard,
-                    ClipboardSelection::Primary => LinuxClipboardKind::Primary,
                 };
                 Self::text_result(self.clipboard.get().clipboard(selection).text())
             }
@@ -364,21 +287,6 @@ impl ClipboardBackend for ArboardClipboard {
                     ClipboardSelection::Clipboard => Self::text_result(self.clipboard.get_text()),
                     ClipboardSelection::Primary => Ok(self.primary.load()),
                 }
-            }
-        }
-    }
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        std::cfg_select! {
-            target_os = "linux" => {
-                let _ = selection;
-                Ok(SelectionOwner::Unknown)
-            }
-            _ => {
-                Ok(match selection {
-                    ClipboardSelection::Clipboard => SelectionOwner::Unknown,
-                    ClipboardSelection::Primary => self.primary.owner(),
-                })
             }
         }
     }
@@ -460,7 +368,6 @@ impl ClipboardBackend for WaylandClipboard {
         };
         match selection {
             ClipboardSelection::Clipboard => self.clipboard.store(text.to_owned()),
-            ClipboardSelection::Primary => self.clipboard.store_primary(text.to_owned()),
         }
         // smithay-clipboard queues ownership requests to its protocol worker;
         // success here means accepted by that API, not compositor confirmation.
@@ -474,13 +381,8 @@ impl ClipboardBackend for WaylandClipboard {
         // fallback is `text_policy::wayland_read`'s business.
         let native = match selection {
             ClipboardSelection::Clipboard => self.clipboard.load(),
-            ClipboardSelection::Primary => self.clipboard.load_primary(),
         };
         text_policy::wayland_read(selection, native, || self.data_control_text())
-    }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
     }
 }
 

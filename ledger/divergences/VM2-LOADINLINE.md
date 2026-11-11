@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-LOADINLINE | `defsubst` and `define-inline` in compiled loads | A compiled caller inlines the body bytecomp recorded, and keeps it after the callee is redefined; a defsubst loaded as source is inlined from its interpreted closure's body; a callee defined by `defalias` to a non-lambda is not inlined. | A compiled caller inlines by calling a frozen copy of the definition in force when it was compiled, and keeps it after a redefinition, as GNU. A defsubst whose definition was loaded as source (a `no-byte-compile` file) is called, not inlined: VM2 cannot read a compiled closure's source back. A `defalias` to a non-lambda records `(NAME . t)` and later calls are not inlined, as bytecomp.el does. The compile log lists calls not inlined (`not-inlined`). | Calls to a source-loaded defsubst behave as calls; only a later redefinition of that defsubst reaches them, as with any function. | <!-- symbols: defsubst, define-inline, defalias -->
