@@ -154,7 +154,7 @@ fn font_selection_fixture_uses_matrix_cases_with_labels_and_probe_text() {
 
 #[test]
 fn linux_x11_plan_sets_backend_and_readback_environment() {
-    let scenario = GuiScenario::new("startup-smoke", "test/romacs/romacs-face-test.el");
+    let scenario = GuiScenario::new("startup-smoke", "test/romacs/manual/romacs-face-test.el");
     let plan = GuiTestPlan::new(
         GuiBackend::LinuxX11,
         PathBuf::from("/repo"),
@@ -169,7 +169,7 @@ fn linux_x11_plan_sets_backend_and_readback_environment() {
     assert!(
         command
             .args
-            .contains(&"test/romacs/romacs-face-test.el".into())
+            .contains(&"test/romacs/manual/romacs-face-test.el".into())
     );
     assert_eq!(command.env_value("WINIT_UNIX_BACKEND"), Some("x11"));
     assert_eq!(
@@ -374,7 +374,7 @@ fn x11_session_owns_authenticated_tcp_display_below_artifact_root() {
 
 #[test]
 fn test_plan_injects_display_session_environment() {
-    let scenario = GuiScenario::new("startup-smoke", "test/romacs/romacs-face-test.el");
+    let scenario = GuiScenario::new("startup-smoke", "test/romacs/manual/romacs-face-test.el");
     let plan = GuiTestPlan::new(
         GuiBackend::LinuxWayland,
         PathBuf::from("/repo"),
@@ -398,7 +398,7 @@ fn test_plan_injects_display_session_environment() {
 
 #[test]
 fn test_plan_can_override_program_path() {
-    let scenario = GuiScenario::new("startup-smoke", "test/romacs/romacs-face-test.el");
+    let scenario = GuiScenario::new("startup-smoke", "test/romacs/manual/romacs-face-test.el");
     let plan = GuiTestPlan::new(
         GuiBackend::LinuxWayland,
         PathBuf::from("/repo"),
@@ -437,7 +437,7 @@ fn test_plan_materializes_json_manifest_artifact() {
     let artifacts = GuiArtifactSet::new(&artifact_root, GuiBackend::LinuxWayland, "startup-smoke");
     let _ = std::fs::remove_file(&artifacts.json);
 
-    let scenario = GuiScenario::new("startup-smoke", "test/romacs/romacs-face-test.el");
+    let scenario = GuiScenario::new("startup-smoke", "test/romacs/manual/romacs-face-test.el");
     let plan = GuiTestPlan::new(
         GuiBackend::LinuxWayland,
         &workspace_root,
@@ -472,7 +472,7 @@ fn run_with_runner_writes_ai_readable_result_artifacts() {
         GuiBackend::LinuxWayland,
         &workspace_root,
         &artifact_root,
-        GuiScenario::new("runner-success", "test/romacs/romacs-face-test.el"),
+        GuiScenario::new("runner-success", "test/romacs/manual/romacs-face-test.el"),
     );
     let mut runner = FakeRunner {
         output: GuiCommandOutput {
@@ -519,7 +519,7 @@ fn run_with_runner_reports_missing_png_as_failed_text_result() {
         GuiBackend::LinuxWayland,
         &workspace_root,
         &artifact_root,
-        GuiScenario::new("runner-no-png", "test/romacs/romacs-face-test.el"),
+        GuiScenario::new("runner-no-png", "test/romacs/manual/romacs-face-test.el"),
     );
     let mut runner = FakeRunner {
         output: GuiCommandOutput {
@@ -565,7 +565,7 @@ fn run_with_runner_treats_timeout_after_png_as_successful_capture() {
         GuiBackend::LinuxWayland,
         &workspace_root,
         &artifact_root,
-        GuiScenario::new("runner-timeout-png", "test/romacs/romacs-face-test.el"),
+        GuiScenario::new("runner-timeout-png", "test/romacs/manual/romacs-face-test.el"),
     );
     let mut runner = FakeRunner {
         output: GuiCommandOutput {
@@ -608,7 +608,7 @@ fn run_with_runner_includes_fixture_visible_text_snapshot() {
         GuiBackend::LinuxWayland,
         &workspace_root,
         &artifact_root,
-        GuiScenario::new("runner-gui-state", "test/romacs/romacs-face-test.el"),
+        GuiScenario::new("runner-gui-state", "test/romacs/manual/romacs-face-test.el"),
     );
     let mut runner = FakeRunner {
         output: GuiCommandOutput {
@@ -651,7 +651,7 @@ fn run_with_runner_records_frame_snapshot_artifacts() {
         GuiBackend::LinuxWayland,
         &workspace_root,
         &artifact_root,
-        GuiScenario::new("runner-snap", "test/romacs/romacs-face-test.el"),
+        GuiScenario::new("runner-snap", "test/romacs/manual/romacs-face-test.el"),
     );
     let mut runner = FakeRunner {
         output: GuiCommandOutput {

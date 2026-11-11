@@ -2,7 +2,7 @@
 
 ;; Verify that child frames can render inline images and videos
 ;; via the shared render_frame_content() path.
-;; Usage: emacs -Q -l test/romacs/child-frame-media-test.el
+;; Usage: emacs -Q -l test/romacs/manual/child-frame-media-test.el
 
 ;;; Code:
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test vertico-posframe child frame rendering
-# Usage: ./test/romacs/run-vertico-posframe-test.sh
+# Usage: ./test/romacs/manual/run-vertico-posframe-test.sh
 #
 # Installs vertico + posframe + vertico-posframe from MELPA,
 # then exercises completion UI with xdotool.
@@ -15,7 +15,7 @@ echo "=== Vertico-Posframe Child Frame Test ==="
 echo "Starting Romacs (will install packages on first run)..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/vertico-posframe-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/vertico-posframe-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

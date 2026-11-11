@@ -1,7 +1,7 @@
 ;;; romacs-rounded-box-test.el --- Test rounded corner box rendering -*- lexical-binding: t -*-
 
 ;; Test the :corner-radius box attribute for romacs GPU renderer.
-;; Usage: ./target/release/romacs -Q -l test/romacs/romacs-rounded-box-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/romacs-rounded-box-test.el
 
 ;;; Commentary:
 

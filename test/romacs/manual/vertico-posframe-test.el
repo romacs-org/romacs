@@ -1,7 +1,7 @@
 ;;; vertico-posframe-test.el --- Test vertico-posframe with child frames -*- lexical-binding: t -*-
 
 ;; Test vertico-posframe rendering on romacs GPU child frame backend.
-;; Usage: ./target/release/romacs -Q -l test/romacs/vertico-posframe-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/vertico-posframe-test.el
 ;;
 ;; This installs vertico, posframe, and vertico-posframe from MELPA,
 ;; then exercises the completion UI with various commands.

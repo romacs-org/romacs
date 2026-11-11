@@ -2,7 +2,7 @@
 
 ;; Test overlay rendering in the romacs GPU renderer: faces, strings,
 ;; display properties, invisibility, priorities, and interactive toggling.
-;; Usage: ./target/release/romacs -Q -l test/romacs/overlay-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/overlay-test.el
 
 ;;; Code:
 

@@ -3,7 +3,7 @@
 ;; Test whitespace-mode rendering, tab display, trailing whitespace,
 ;; special whitespace characters, and related display features in the
 ;; romacs GPU renderer.
-;; Usage: ./target/release/romacs -Q -l test/romacs/whitespace-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/whitespace-test.el
 
 ;;; Code:
 

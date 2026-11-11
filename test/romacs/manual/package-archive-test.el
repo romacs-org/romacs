@@ -5,7 +5,7 @@
 ;; use the Tsinghua mirror and attempts to download archive contents
 ;; from gnu, nongnu, and melpa.
 ;;
-;; Usage: ./target/release/romacs -Q -l test/romacs/package-archive-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/package-archive-test.el
 
 ;;; Code:
 

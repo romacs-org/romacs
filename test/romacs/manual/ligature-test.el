@@ -2,7 +2,7 @@
 
 ;; Test whether programming font ligatures render correctly in romacs.
 ;; Uses JetBrains Mono which has extensive ligature support.
-;; Usage: ./target/release/romacs -Q -l test/romacs/ligature-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/ligature-test.el
 ;;
 ;; Common ligature sequences in programming fonts:
 ;;   ->  =>  !=  ==  ===  >=  <=  <>  |>  <|  >>  <<

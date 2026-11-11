@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test inline image and video in one buffer
-# Usage: ./test/romacs/run-inline-media-test.sh
+# Usage: ./test/romacs/manual/run-inline-media-test.sh
 
 set -e
 
@@ -32,8 +32,8 @@ fi
 echo "Media files:"
 if [ -f ~/Pictures/559-4K.jpg ]; then
     echo -e "  ${GREEN}Image: ~/Pictures/559-4K.jpg${NC}"
-elif [ -f test/data/image/black.jpg ]; then
-    echo -e "  ${GREEN}Image: test/data/image/black.jpg${NC}"
+elif [ -f test/gnu/test/data/image/black.jpg ]; then
+    echo -e "  ${GREEN}Image: test/gnu/test/data/image/black.jpg${NC}"
 else
     echo -e "  ${YELLOW}Image: [not found - will be skipped]${NC}"
 fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test word-wrap rendering across different modes and configurations
-# Usage: ./test/romacs/run-word-wrap-test.sh
+# Usage: ./test/romacs/manual/run-word-wrap-test.sh
 #
 # What this tests:
 # - Word wrap with truncate-lines off
@@ -23,7 +23,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/word-wrap-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/word-wrap-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

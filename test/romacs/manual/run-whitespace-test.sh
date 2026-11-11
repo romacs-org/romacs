@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test whitespace visualization rendering
-# Usage: ./test/romacs/run-whitespace-test.sh
+# Usage: ./test/romacs/manual/run-whitespace-test.sh
 
 set -e
 
@@ -13,7 +13,7 @@ echo "=== Whitespace Rendering Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/whitespace-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/whitespace-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

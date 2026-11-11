@@ -4,7 +4,7 @@
 ;; Covers: display strings, space specs, alignment, raise, height scaling,
 ;; before/after-string overlays, overlay faces, invisible text, images,
 ;; and combinations of the above.
-;; Usage: ./target/release/romacs -Q -l test/romacs/display-properties-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/display-properties-test.el
 
 ;;; Code:
 

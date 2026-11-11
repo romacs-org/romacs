@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test selective display, outline mode, and code folding rendering
-# Usage: ./test/romacs/run-selective-display-test.sh
+# Usage: ./test/romacs/manual/run-selective-display-test.sh
 
 set -e
 
@@ -13,7 +13,7 @@ echo "=== Selective Display / Folding Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/selective-display-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/selective-display-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

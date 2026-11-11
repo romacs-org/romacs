@@ -1,7 +1,7 @@
 ;;; cursor-height-test.el --- Reproduce cursor bug with mixed-height faces -*- lexical-binding: t -*-
 
 ;; Reproduce: cursor on 'aa' (height 1.0) vs 'bb' (height 2.0) on same line.
-;; Usage: ./target/release/romacs -Q -l test/romacs/cursor-height-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/cursor-height-test.el
 
 ;;; Code:
 

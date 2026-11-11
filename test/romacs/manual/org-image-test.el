@@ -24,7 +24,7 @@
   (org-image-test--log "=== Org Image Preview Test ===")
 
   ;; Find a test image
-  (let ((test-image (or (let ((gnu (expand-file-name "test/data/image/black.jpg"
+  (let ((test-image (or (let ((gnu (expand-file-name "test/gnu/test/data/image/black.jpg"
                                                      (or (getenv "EMACS_SOURCE_DIR")
                                                          (file-name-directory
                                                           (or load-file-name buffer-file-name

@@ -3,7 +3,7 @@
 ;; Test regex search and match highlighting, useful for verifying the Rust
 ;; regex engine integration in romacs.  Each section inserts sample text,
 ;; searches with a regex pattern, and highlights matches with colored overlays.
-;; Usage: ./target/release/romacs -Q -l test/romacs/regex-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/regex-test.el
 
 ;;; Code:
 

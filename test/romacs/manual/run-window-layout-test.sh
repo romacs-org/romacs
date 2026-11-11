@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test window layout rendering (splits, borders, dividers, fringes, margins)
-# Usage: ./test/romacs/run-window-layout-test.sh
+# Usage: ./test/romacs/manual/run-window-layout-test.sh
 #
 # What this tests:
 # - Horizontal and vertical window splits
@@ -24,7 +24,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/window-layout-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/window-layout-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

@@ -1,7 +1,7 @@
 ;;; buffer-face-mode-bold-test.el --- Repro for bold + buffer-face-mode -*- lexical-binding: t; -*-
 
 ;; Usage:
-;;   RUST_LOG=trace ./target/release/romacs -Q -l test/romacs/buffer-face-mode-bold-test.el
+;;   RUST_LOG=trace ./target/release/romacs -Q -l test/romacs/manual/buffer-face-mode-bold-test.el
 ;;
 ;; This test creates explicit bold text, then enables `buffer-face-mode'
 ;; (with `variable-pitch') and logs face state before/after toggling.

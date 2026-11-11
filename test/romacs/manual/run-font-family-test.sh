@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the font family spacing test
-# Usage: ./test/romacs/run-font-family-test.sh
+# Usage: ./test/romacs/manual/run-font-family-test.sh
 #
 # This opens a buffer showing bold/italic text in many font families.
 # Check that character spacing is identical for normal, bold, and italic.

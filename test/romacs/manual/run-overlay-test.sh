@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test overlay rendering (before/after-strings, face overlays, priority, etc.)
-# Usage: ./test/romacs/run-overlay-test.sh
+# Usage: ./test/romacs/manual/run-overlay-test.sh
 #
 # What this tests:
 # - Overlay before-string and after-string rendering
@@ -23,7 +23,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/overlay-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/overlay-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

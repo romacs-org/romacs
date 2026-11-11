@@ -47,7 +47,9 @@ frozen snapshots.
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
 | GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
-| Romacs's Lisp test suites and benchmarks | `test/` (`make check`) |
+| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`tools/test-elisp`), `manual/` (GUI scripts run by hand) |
+| Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
+| Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
 | Decisions checks enforce | `ledger/`: pins, smell and unsafe floors, censuses, the parity ratchet, `divergences/` |
 | Where Romacs differs from GNU, and why | `ledger/divergences/<ID>.md` |

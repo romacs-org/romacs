@@ -1,7 +1,7 @@
 ;;; which-key-posframe-test.el --- Test which-key-posframe with child frames -*- lexical-binding: t -*-
 
 ;; Test which-key-posframe rendering on romacs GPU child frame backend.
-;; Usage: ./target/release/romacs -Q -l test/romacs/which-key-posframe-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/which-key-posframe-test.el
 ;;
 ;; Installs which-key, posframe, and which-key-posframe from MELPA,
 ;; then exercises the keybinding popup UI with various prefix keys.

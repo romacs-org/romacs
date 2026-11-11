@@ -2,7 +2,7 @@
 
 ;; Test child frame GPU overlay compositing: creation, positioning,
 ;; z-order, mouse routing, cursor animation, styling, and cleanup.
-;; Usage: emacs -Q -l test/romacs/child-frame-test.el
+;; Usage: emacs -Q -l test/romacs/manual/child-frame-test.el
 
 ;;; Code:
 

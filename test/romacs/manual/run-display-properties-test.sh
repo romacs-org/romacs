@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test display properties rendering (display strings, spaces, align-to, images, etc.)
-# Usage: ./test/romacs/run-display-properties-test.sh
+# Usage: ./test/romacs/manual/run-display-properties-test.sh
 #
 # What this tests:
 # - Display property rendering (string, space, align-to, image, raise)
@@ -23,7 +23,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/display-properties-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/display-properties-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

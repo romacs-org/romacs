@@ -5,8 +5,8 @@
 ;; - Video (via romacs-video-insert)
 
 ;;; Commentary:
-;; Run with: ./test/romacs/run-inline-media-test.sh
-;; Or manually: DISPLAY=:0 ./target/release/romacs -Q -l test/romacs/inline-media-test.el
+;; Run with: ./test/romacs/manual/run-inline-media-test.sh
+;; Or manually: DISPLAY=:0 ./target/release/romacs -Q -l test/romacs/manual/inline-media-test.el
 
 ;;; Code:
 
@@ -15,7 +15,7 @@
 (defvar inline-media-test-image-path
   (or (let ((home-pic (expand-file-name "~/Pictures/559-4K.jpg")))
         (and (file-exists-p home-pic) home-pic))
-      (let ((test-pic (expand-file-name "test/data/image/black.jpg")))
+      (let ((test-pic (expand-file-name "test/gnu/test/data/image/black.jpg")))
         (and (file-exists-p test-pic) test-pic))
       nil)
   "Path to test image, or nil if not found.")

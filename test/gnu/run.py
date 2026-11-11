@@ -571,13 +571,20 @@ def made_source_directory() -> pathlib.Path:
     """GNU's `source-directory' for a test: the repository's top-level entries,
     which hold crates/romacs-vm/src/prims as Romacs's own source-directory
     must, and nextstep/, the image fixture GNU's tree has at its top and this
-    one keeps under test/gnu/.  Links in a scratch directory, made once per
-    run and removed at exit."""
+    one keeps under test/gnu/.  Its test/ holds the repository's test/
+    entries and test/data/image, the images GNU's tests read there, from
+    the suite's own test/data/.  Links in a scratch directory, made once
+    per run and removed at exit."""
     scratch = pathlib.Path(tempfile.mkdtemp(prefix='gnu-source-'))
     atexit.register(shutil.rmtree, scratch, True)
     for entry in ROOT.iterdir():
-        (scratch / entry.name).symlink_to(entry)
+        if entry.name != 'test':
+            (scratch / entry.name).symlink_to(entry)
     (scratch / 'nextstep').symlink_to(HERE / 'nextstep')
+    (scratch / 'test/data').mkdir(parents=True)
+    for entry in (ROOT / 'test').iterdir():
+        (scratch / 'test' / entry.name).symlink_to(entry)
+    (scratch / 'test/data/image').symlink_to(TESTS / 'data/image')
     return scratch
 
 

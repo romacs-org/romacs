@@ -3,7 +3,7 @@
 ;; Test word wrap, line truncation, and horizontal scrolling in the
 ;; romacs GPU renderer.  Creates multiple windows showing different
 ;; wrapping modes simultaneously.
-;; Usage: ./target/release/romacs -Q -l test/romacs/word-wrap-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/word-wrap-test.el
 
 ;;; Code:
 

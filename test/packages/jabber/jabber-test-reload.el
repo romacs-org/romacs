@@ -313,7 +313,7 @@
       (setq jabber-db-path nil)
       (require 'jabber)
       (require 'jabber-omemo-trust)
-      (load-file ,(expand-file-name "test/lisp/jabber/jabber-reload.el"
+      (load-file ,(expand-file-name "test/packages/jabber/jabber-reload.el"
                                    jabber-test-reload--root))
       (let* ((symbols '(jabber-bookmarks-mode-map jabber-omemo-trust-mode-map
                         jabber-common-keymap jabber-global-keymap
@@ -354,7 +354,7 @@
    `(progn
       (setq jabber-db-path nil)
       (require 'jabber-chat-commands)
-      (load-file ,(expand-file-name "test/lisp/jabber/jabber-reload.el"
+      (load-file ,(expand-file-name "test/packages/jabber/jabber-reload.el"
                                    jabber-test-reload--root))
       (let ((map jabber-chat-operations-menu-map))
         (dolist (binding (list #'ignore nil "xy"
@@ -439,7 +439,7 @@
    `(progn
       (setq jabber-db-path nil)
       (require 'jabber-omemo-trust)
-      (load-file ,(expand-file-name "test/lisp/jabber/jabber-reload.el"
+      (load-file ,(expand-file-name "test/packages/jabber/jabber-reload.el"
                                    jabber-test-reload--root))
       (save-window-excursion
         (with-temp-buffer
@@ -835,7 +835,7 @@
       (require 'jabber-omemo-trust)
       (require 'jabber-ahc)
       (require 'jabber-vcard)
-      (load-file ,(expand-file-name "test/lisp/jabber/jabber-reload.el"
+      (load-file ,(expand-file-name "test/packages/jabber/jabber-reload.el"
                                    jabber-test-reload--root))
       (let* ((cases '((jabber-ahc-command-list-map . jabber-ahc)
                       (jabber-bookmarks-edit-map . jabber-bookmarks)

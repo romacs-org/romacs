@@ -4,7 +4,7 @@
 ;; properties, and code folding interactions with the romacs GPU renderer.
 ;; Verifies that hidden text, ellipsis indicators, line numbers, and cursor
 ;; navigation all render correctly through folded regions.
-;; Usage: ./target/release/romacs -Q -l test/romacs/selective-display-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/selective-display-test.el
 
 ;;; Code:
 

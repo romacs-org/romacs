@@ -3,7 +3,7 @@
 ;; Test window splitting, dividers, multi-window rendering, mode-lines,
 ;; header-lines, tab-lines, and window configuration cycling in the
 ;; romacs GPU renderer.
-;; Usage: ./target/release/romacs -Q -l test/romacs/window-layout-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/window-layout-test.el
 
 ;;; Code:
 

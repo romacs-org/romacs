@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test ligature rendering (programming ligatures, font shaping)
-# Usage: ./test/romacs/run-ligature-test.sh
+# Usage: ./test/romacs/manual/run-ligature-test.sh
 #
 # What this tests:
 # - Programming ligature rendering (e.g., ->, =>, !=, <=, >=)
@@ -21,7 +21,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/ligature-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/ligature-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

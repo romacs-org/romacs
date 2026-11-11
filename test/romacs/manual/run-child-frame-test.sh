@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test child frame GPU overlay compositing using xdotool
-# Usage: ./test/romacs/run-child-frame-test.sh
+# Usage: ./test/romacs/manual/run-child-frame-test.sh
 #
 # What this tests:
 # 1. Basic child frame creation and positioning
@@ -23,7 +23,7 @@ echo "=== Child Frame Test Suite ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/child-frame-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/child-frame-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

@@ -2,7 +2,7 @@
 
 ;; Test child-frame lifecycle animation: open fade/slide, close fade/slide,
 ;; slowdown observation, and the off master switch.
-;; Usage: emacs -Q -l test/romacs/child-frame-animation-test.el
+;; Usage: emacs -Q -l test/romacs/manual/child-frame-animation-test.el
 ;;
 ;; Tests 1-4 are visually driven; the messages log what to watch for.
 ;; `romacs-child-frame-animations-slowdown' stretches everything to

@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 DISPLAY_ENV="${DISPLAY:-:0}"
-ORACLE_ELISP="test/romacs/romacs-oracle-parity.el"
+ORACLE_ELISP="test/romacs/manual/romacs-oracle-parity.el"
 OFFICIAL_EMACS="${OFFICIAL_EMACS:-/nix/store/hql3zwz5b4ywd2qwx8jssp4dyb7nx4cb-emacs-30.2/bin/emacs}"
 ROMACS_BIN="${ROMACS_BIN:-./target/release/romacs}"
 OUT_DIR="${ORACLE_OUT_DIR:-/tmp/romacs-oracle-parity}"

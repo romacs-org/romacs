@@ -1,7 +1,7 @@
 ;;; bold-overlap-test.el --- Repro for bold face text overlap -*- lexical-binding: t; -*-
 
 ;; Usage:
-;;   RUST_LOG=debug ./target/release/romacs -Q -l test/romacs/bold-overlap-test.el
+;;   RUST_LOG=debug ./target/release/romacs -Q -l test/romacs/manual/bold-overlap-test.el
 ;;
 ;; Reproduces the corfu-current bold overlap issue:
 ;; - corfu-default (normal weight) renders fine

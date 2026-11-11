@@ -19,7 +19,7 @@
 ;; Unlike its siblings in this directory this needs no display -- it is pure
 ;; mode-selection logic, so it runs in batch and asserts:
 ;;
-;;   ./target/release/romacs -Q --batch -l test/romacs/video-auto-mode-test.el
+;;   ./target/release/romacs -Q --batch -l test/romacs/manual/video-auto-mode-test.el
 ;;
 ;; Exit status is 0 when every check passes, 1 otherwise.
 

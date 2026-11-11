@@ -4,8 +4,8 @@
 ;; using the GPU path (GdkTexture/GSK TextureNode).
 
 ;;; Commentary:
-;; Run with: ./test/romacs/run-gpu-image-test.sh
-;; Or manually: DISPLAY=:0 ./target/release/romacs -Q -l test/romacs/romacs-gpu-image-test.el
+;; Run with: ./test/romacs/manual/run-gpu-image-test.sh
+;; Or manually: DISPLAY=:0 ./target/release/romacs -Q -l test/romacs/manual/romacs-gpu-image-test.el
 ;;
 ;; Romacs automatically uses GPU rendering for images when native
 ;; image libraries (libpng, libjpeg, etc.) aren't available.
@@ -22,7 +22,7 @@
 (defvar romacs-gpu-test-image-path
   (or (let ((home-pic (expand-file-name "~/Pictures/559-4K.jpg")))
         (and (file-exists-p home-pic) home-pic))
-      (expand-file-name "test/data/image/black.jpg"
+      (expand-file-name "test/gnu/test/data/image/black.jpg"
                         (or (getenv "EMACS_SOURCE_DIR")
                             default-directory)))
   "Path to test image.")

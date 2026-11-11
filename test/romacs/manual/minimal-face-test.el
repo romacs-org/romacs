@@ -1,5 +1,5 @@
 ;;; minimal-face-test.el --- Minimal face test -*- lexical-binding: t -*-
-;; Usage: ./target/release/romacs -Q -l test/romacs/minimal-face-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/minimal-face-test.el
 
 (let ((buf (get-buffer-create "*Face Test*")))
   (switch-to-buffer buf)

@@ -56,7 +56,7 @@ Each line is prefixed with a relative timestamp from showcase start."
   (seq-find #'file-exists-p
             (list (expand-file-name "~/Pictures/559-4K.jpg")
                   (expand-file-name "~/Pictures/4k_image_1.jpg")
-                  (expand-file-name "test/data/image/black.jpg")))
+                  (expand-file-name "test/gnu/test/data/image/black.jpg")))
   "Path to a test image, or nil.")
 
 (defvar showcase--video-path

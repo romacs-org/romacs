@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test rounded box face rendering (box borders with rounded corners)
-# Usage: ./test/romacs/run-rounded-box-test.sh
+# Usage: ./test/romacs/manual/run-rounded-box-test.sh
 #
 # What this tests:
 # - Rounded box face border rendering
@@ -21,7 +21,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/romacs-rounded-box-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/romacs-rounded-box-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

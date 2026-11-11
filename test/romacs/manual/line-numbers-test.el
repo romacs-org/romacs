@@ -3,7 +3,7 @@
 ;; Test line number display modes in the romacs GPU renderer.
 ;; Exercises absolute, relative, visual modes, width settings,
 ;; custom faces, text-scale-adjust, invisible text, and alignment.
-;; Usage: ./target/release/romacs -Q -l test/romacs/line-numbers-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/line-numbers-test.el
 
 ;;; Code:
 

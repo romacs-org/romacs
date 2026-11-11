@@ -1,7 +1,7 @@
 ;;; cursor-effects-preview-test.el --- Preview Romacs cursor effects -*- lexical-binding: t -*-
 
 ;; Run with:
-;;   ./target/release/romacs -Q -l test/romacs/cursor-effects-preview-test.el
+;;   ./target/release/romacs -Q -l test/romacs/manual/cursor-effects-preview-test.el
 
 (require 'cl-lib)
 

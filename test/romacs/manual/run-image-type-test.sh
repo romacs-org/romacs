@@ -5,8 +5,8 @@
 #   test.png  test.jpg  test.gif  test.tiff  test.webp  test.svg
 #
 # Usage:
-#   ./test/romacs/run-image-type-test.sh          # headless (Xvfb)
-#   DISPLAY=:0 ./test/romacs/run-image-type-test.sh  # real display
+#   ./test/romacs/manual/run-image-type-test.sh          # headless (Xvfb)
+#   DISPLAY=:0 ./test/romacs/manual/run-image-type-test.sh  # real display
 
 set -e
 

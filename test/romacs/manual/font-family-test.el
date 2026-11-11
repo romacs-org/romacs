@@ -5,7 +5,7 @@
 ;; faces that may fall back to proportional fonts when bold/italic
 ;; variants are unavailable.
 ;;
-;; Usage: emacs -Q -l test/romacs/font-family-test.el
+;; Usage: emacs -Q -l test/romacs/manual/font-family-test.el
 ;;
 ;; What to check:
 ;; - All "reference" lines should have identical character spacing

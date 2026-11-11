@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test text-scale-adjust rendering (per-window font scaling, variable-height faces)
-# Usage: ./test/romacs/run-text-scale-test.sh
+# Usage: ./test/romacs/manual/run-text-scale-test.sh
 #
 # What this tests:
 # - text-scale-adjust (C-x C-+ / C-x C--) per-window scaling
@@ -24,7 +24,7 @@ echo "=== $TEST_NAME Test ==="
 echo "Starting Romacs..."
 
 RUST_LOG=romacs_display=debug DISPLAY=:0 ./target/release/romacs -Q \
-    -l test/romacs/text-scale-test.el >"$LOG" 2>&1 &
+    -l test/romacs/manual/text-scale-test.el >"$LOG" 2>&1 &
 EMACS_PID=$!
 
 echo "Romacs PID: $EMACS_PID"

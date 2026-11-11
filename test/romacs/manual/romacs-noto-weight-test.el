@@ -1,7 +1,7 @@
 ;;; romacs-noto-weight-test.el --- Noto Sans Mono bold vs extra-bold test -*- lexical-binding: t -*-
 
 ;; Usage:
-;;   emacs -Q -l test/romacs/romacs-noto-weight-test.el
+;;   emacs -Q -l test/romacs/manual/romacs-noto-weight-test.el
 
 ;;; Commentary:
 

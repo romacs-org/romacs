@@ -2,7 +2,7 @@
 
 ;; Usage:
 ;;   ROMACS_ORACLE_SCENARIO=hello ROMACS_ORACLE_LABEL=romacs \
-;;     ./target/release/romacs -Q -l test/romacs/romacs-oracle-parity.el
+;;     ./target/release/romacs -Q -l test/romacs/manual/romacs-oracle-parity.el
 
 ;;; Code:
 

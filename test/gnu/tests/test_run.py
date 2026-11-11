@@ -84,7 +84,10 @@ class SourceDirectory(unittest.TestCase):
         source = run.source_directory()
         self.assertTrue((source / 'crates/romacs-vm/src/prims').is_dir())
         self.assertTrue((source / 'nextstep/GNUstep/Emacs.base/Resources/emacs.tiff').is_file())
-        self.assertTrue((source / 'test/data').is_dir())
+        image = source / 'test/data/image/black.jpg'
+        self.assertTrue(image.is_file())
+        self.assertEqual(image.resolve(), run.TESTS / 'data/image/black.jpg')
+        self.assertTrue((source / 'test/gnu/run.py').is_file())
         self.assertIs(run.source_directory(), source)
 
     def test_a_test_file_is_named_from_the_suite_or_the_repository(self):

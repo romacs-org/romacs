@@ -1,7 +1,7 @@
 ;;; color-spec-invalid-hex.el --- Invalid hex color regression tests -*- lexical-binding: t; -*-
 
 ;; Run with GNU Emacs or Romacs:
-;;   --batch -Q -l test/romacs/color-spec-invalid-hex.el
+;;   --batch -Q -l test/romacs/manual/color-spec-invalid-hex.el
 ;;   -f ert-run-tests-batch-and-exit
 
 (require 'ert)

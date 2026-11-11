@@ -4,7 +4,7 @@
 ;; fancy rounded-box border styles.
 ;;
 ;; Usage:
-;;   M-x eval-buffer  or  (load "test/romacs/test-fancy-box-borders.el")
+;;   M-x eval-buffer  or  (load "test/romacs/manual/test-fancy-box-borders.el")
 ;;
 ;; :box plist keys:
 ;;   :line-width N       — border thickness (pixels)

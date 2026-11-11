@@ -3,7 +3,7 @@
 ;; Test text-scale-adjust, variable-height face rendering, cursor sizing,
 ;; line-number scaling, word-wrap with mixed heights, face inheritance,
 ;; and mode-line custom face heights in the romacs GPU renderer.
-;; Usage: ./target/release/romacs -Q -l test/romacs/text-scale-test.el
+;; Usage: ./target/release/romacs -Q -l test/romacs/manual/text-scale-test.el
 
 ;;; Code:
 
