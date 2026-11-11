@@ -256,10 +256,13 @@ class ClippyTreeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.base)
         self.addCleanup(shutil.rmtree, self.home)
 
-    def tree(self, checkout, record=None):
+    def tree(self, checkout, device=None):
         tree = smells.clippy_tree(self.base, checkout)
         tree.mkdir()
-        (tree / smells.OWNER).write_text(str(checkout.resolve()) if record is None else record)
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        smells.record_owner(tree, checkout)
+        if device is not None:
+            (tree / smells.DEVICE).write_text(str(device))
         return tree
 
     def prune(self):
@@ -278,14 +281,21 @@ class ClippyTreeTest(unittest.TestCase):
         self.assertEqual(self.prune(), sorted(p.name for p in kept))
 
     def test_a_recorded_path_is_read_exactly(self):
-        live = self.home / 'live\n'
-        live.mkdir()
-        tree = self.tree(live)
-        self.assertEqual(self.prune(), [tree.name])
+        for name in ('live\n', 'cr\r', 'crlf\r\n'):
+            checkout = self.home / name
+            checkout.mkdir()
+            tree = self.tree(checkout)
+            self.assertEqual(smells.owner(tree)[0], str(checkout.resolve()))
+            self.assertEqual(self.prune(), [tree.name])
+            checkout.rmdir()
+            self.assertEqual(self.prune(), [])
 
     def test_a_checkout_whose_disk_is_away_is_kept(self):
-        tree = self.tree(self.home / 'unmounted/repo')
-        self.assertEqual(self.prune(), [tree.name])
+        mount = self.home / 'mnt'
+        tree = self.tree(mount / 'repo', device=smells.os.stat(self.home).st_dev + 1)
+        self.assertEqual(self.prune(), [tree.name], 'the mount point is left, on another device')
+        shutil.rmtree(mount)
+        self.assertEqual(self.prune(), [tree.name], 'no mount point at all')
 
     def test_a_directory_not_named_for_its_recorded_checkout_is_kept(self):
         foreign = self.base / 'archive'

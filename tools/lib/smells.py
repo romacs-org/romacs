@@ -178,9 +178,11 @@ def lint_census(root, lines):
     return counts
 
 
-# The file in a checkout's clippy tree that names the checkout: the tree
-# lives as long as that path does.
+# The files in a checkout's clippy tree that name the checkout and the
+# device of the directory holding it: the tree lives as long as that path
+# does on that device.
 OWNER = 'checkout'
+DEVICE = 'device'
 
 
 def clippy_tree(base, root):
@@ -189,23 +191,35 @@ def clippy_tree(base, root):
 
 
 def owner(tree):
-    """The checkout TREE records, exactly as written, or None."""
+    """(the checkout TREE records, exactly as written, and the device of the
+    directory that held it), or None."""
     try:
-        return (tree / OWNER).read_text()
-    except OSError:
+        return (tree / OWNER).read_bytes().decode(), int((tree / DEVICE).read_text())
+    except (OSError, ValueError, UnicodeDecodeError):
         return None
+
+
+def record_owner(tree, root):
+    """Write ROOT's path and its directory's device into TREE."""
+    path = Path(root).resolve()
+    (tree / OWNER).write_bytes(str(path).encode())
+    (tree / DEVICE).write_text(str(os.stat(path.parent).st_dev))
 
 
 def orphan(tree):
     """Whether TREE, a clippy tree, outlived its checkout: it is a real
     directory named for the checkout it records, that checkout is gone, and
-    the directory that held it is still there (a removed worktree, not an
-    unmounted disk).  A tree without its owner file (made before trees named
-    their checkout) is left to the idle sweep."""
-    path = owner(tree)
-    return (path is not None and not tree.is_symlink() and tree.is_dir()
-            and tree == clippy_tree(tree.parent, path)
-            and not Path(path).exists() and Path(path).parent.is_dir())
+    the directory that held it is still there on the device it was on (a
+    removed worktree; an unmounted disk leaves its mount point on another
+    device, or no directory at all).  A tree without its owner files (made
+    before trees named their checkout) is left to the idle sweep."""
+    recorded = owner(tree)
+    if recorded is None or tree.is_symlink() or not tree.is_dir():
+        return False
+    path, device = recorded
+    parent = Path(path).parent
+    return (tree == clippy_tree(tree.parent, path) and not Path(path).exists()
+            and parent.is_dir() and os.stat(parent).st_dev == device)
 
 
 def tree_lock(base, tree_name):
@@ -247,7 +261,7 @@ def run_clippy(root):
         with tree_lock(tree.parent, tree.name) as held:
             fcntl.flock(held, fcntl.LOCK_EX)    # `prune` removes no tree in use
             tree.mkdir(exist_ok=True)
-            (tree / OWNER).write_text(str(Path(root).resolve()))
+            record_owner(tree, root)
             env['CARGO_TARGET_DIR'] = str(tree)
             done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
     else:
