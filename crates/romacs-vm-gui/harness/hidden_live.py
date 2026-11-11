@@ -81,8 +81,10 @@ def chord(env, modifier, key):
 
 
 def drawn_prompts(text):
-    """Prompt paints the renderer drew before the prompt went on."""
-    return text.count('"diagnostic":"prompt-paint","drawn":true')
+    """Prompt paints the renderer drew: those drawn at once, and those a
+    read later saw drawn (prompt.rs `settle_drawn'); the prompt never waits
+    for drawing."""
+    return text.count('"diagnostic":"prompt-paint","drawn":true') + text.count('"diagnostic":"prompt-drawn"')
 
 
 def grab(env, path):
