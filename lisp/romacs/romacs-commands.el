@@ -1,8 +1,9 @@
 ;;; romacs-commands.el --- M-x over the kept command set  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Portions Copyright (C) 1985-2026 Free Software Foundation, Inc.,
-;; from simple.el's `read-extended-command-1', kept as the GPL requires.
+;; Copyright (C) 1985-1987, 1993-2026 Free Software Foundation, Inc.
+;; Adapted from GNU simple.el: `read-extended-command-1', kept as the GPL
+;; requires.
 
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 

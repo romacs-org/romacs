@@ -85,6 +85,13 @@ class LispLayoutTests(unittest.TestCase):
                     for notice in notices:
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU custom.el', source)
+                elif file == ROOT / 'lisp/romacs/romacs-commands.el':
+                    # Derives simple.el's read-extended-command-1.
+                    notices = re.findall(copyright_pattern, (ROOT / 'lisp/gnu/simple.el').read_text())
+                    self.assertTrue(notices, 'GNU_SIMPLE_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU simple.el', source)
                 elif file == ROOT / 'lisp/romacs/romacs-keymap.el':
                     # Derived from GNU src/keymap.c and src/keyboard.c, outside lisp/gnu/.
                     self.assertIn(';; Copyright (C) 1985-1988, 1993-1995, 1998-2026 Free Software', source)
