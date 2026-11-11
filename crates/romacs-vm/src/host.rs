@@ -733,25 +733,24 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// It is found once, the first time it is asked for, and is the session's
 /// from then on: a target directory cleaned or a variable changed under a
 /// running session moves nothing and ends nothing. A build that records what
-/// it read looks again, so that what the answer rests on is in its record;
-/// the answer stays the session's.
+/// it reads has the session's tree in its record, read again as it is now:
+/// the variable that may have chosen it and its generation. A tree that has
+/// stopped being this executable's refuses that build; the session goes on.
 pub fn runtime_root() -> PathBuf {
     static FOUND: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    if let Some(root) = FOUND.get() {
-        if building() {
-            let _ = located_runtime();
-        }
-        return root.clone();
-    }
-    match located_runtime() {
-        Ok(root) => FOUND.get_or_init(|| root).clone(),
-        Err(why) => {
-            eprintln!("romacs: no usable runtime tree: {why}\n  \
-                       Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
-                       or name one in a file `{RUNTIME_RECORD}' beside the executable.");
-            std::process::exit(2)
+    let root = FOUND.get_or_init(|| located_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    }));
+    if building() {
+        let _ = getenv("ROMACS_RUNTIME_ROOT");
+        if let Err(why) = runtime_tree(root) {
+            refuse("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
+    root.clone()
 }
 
 /// [`runtime_root`], or why there is none.
@@ -765,7 +764,7 @@ pub fn located_runtime() -> Result<PathBuf, String> {
         (root.to_path_buf(), "the executable's own directory")
     } else if let Some(root) = exe.as_deref().and_then(recorded_root) {
         (root, "named beside the executable")
-    } else if exe.as_deref().is_some_and(in_build_target) {
+    } else if exe.as_deref().is_some_and(|exe| in_build_target(exe, &build_root())) {
         (build_root(), "the tree this executable was built in")
     } else {
         let exe = exe.map_or_else(|| "this executable".to_owned(), |exe| exe.display().to_string());
@@ -792,20 +791,22 @@ fn recorded_root(exe: &Path) -> Option<PathBuf> {
     Some(canonicalize(&tree).unwrap_or(tree))
 }
 
-/// Whether EXE sits where Cargo put it: in its `deps` or `examples`
-/// directory of a profile directory (beside `.fingerprint` and `build`), or
-/// in the profile directory itself as the second name Cargo gives a finished
-/// binary there (a hard link to its file in `deps`). A copy, even one put
-/// into another build's target directory, has one name only: it has left its
-/// build, and the tree compiled into it is no longer its own to assume.
-fn in_build_target(exe: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
+/// The file in a Cargo profile directory (`target/PROFILE`) that lists the
+/// trees built into it, one a line: this crate's build script adds its own.
+pub const BUILD_TREES: &str = "romacs-build-trees";
+
+/// Whether EXE is in a Cargo profile directory (or its `deps` or `examples`)
+/// that TREE was built into, by that directory's own list. An executable
+/// carried into another build's target directory finds a list without its
+/// tree, and one carried anywhere else finds none: it has left its build,
+/// and the tree compiled into it is no longer its own to assume.
+fn in_build_target(exe: &Path, tree: &Path) -> bool {
     let Some(dir) = exe.parent() else { return false };
-    let (profile, linked) = match dir.file_name().and_then(OsStr::to_str) {
-        Some("deps" | "examples") => (dir.parent().unwrap_or(dir), true),
-        _ => (dir, metadata(exe).is_ok_and(|meta| meta.nlink() >= 2)),
+    let profile = match dir.file_name().and_then(OsStr::to_str) {
+        Some("deps" | "examples") => dir.parent().unwrap_or(dir),
+        _ => dir,
     };
-    linked && probe(Probe::IsDir, profile.join(".fingerprint")) && probe(Probe::IsDir, profile.join("build"))
+    read_to_string(profile.join(BUILD_TREES)).is_ok_and(|built| built.lines().any(|line| Path::new(line) == tree))
 }
 
 /// Whether ROOT is a runtime tree of this executable's generation, or why not.
@@ -3395,25 +3396,25 @@ mod tests {
         assert_eq!(recorded_root(&exe), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
-    /// Only an executable still in Cargo's target directory may assume the
-    /// tree it was built in; this test's own executable is one.
+    /// Only an executable in a target directory its tree was built into may
+    /// assume that tree; this test's own executable is one. The directory's
+    /// list decides, not its shape: another build's target, and any other
+    /// directory, give it nothing to assume.
     #[test]
-    fn only_an_executable_in_its_target_directory_assumes_its_build_tree() {
-        assert!(in_build_target(&std::env::current_exe().unwrap()));
+    fn only_an_executable_in_a_target_its_tree_built_into_assumes_that_tree() {
+        let tree = build_root();
+        assert!(in_build_target(&std::env::current_exe().unwrap(), &tree));
         let dir = std::env::temp_dir().join(format!("romacs-runtime-target-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("gate/deps")).unwrap();
-        assert!(!in_build_target(&dir.join("gate/romacs-vm-gui")), "a bare directory is no target");
-        std::fs::create_dir_all(dir.join("gate/.fingerprint")).unwrap();
-        std::fs::create_dir_all(dir.join("gate/build")).unwrap();
-        assert!(in_build_target(&dir.join("gate/deps/some_test-0123456789abcdef")));
-        assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui")));
-        // Cargo's finished binary is a second name of its file in deps; a copy dropped into the
-        // same place is not, whichever build's target directory it lands in.
-        std::fs::write(dir.join("gate/deps/romacs_vm_gui-0123456789abcdef"), "").unwrap();
-        std::fs::hard_link(dir.join("gate/deps/romacs_vm_gui-0123456789abcdef"), dir.join("gate/romacs-vm-gui")).unwrap();
-        assert!(in_build_target(&dir.join("gate/romacs-vm-gui")));
-        std::fs::write(dir.join("gate/copied-in"), "").unwrap();
-        assert!(!in_build_target(&dir.join("gate/copied-in")));
+        for sub in ["gate/deps", "gate/examples", "gate/.fingerprint", "gate/build"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let places = ["gate/romacs-vm-gui", "gate/deps/some_test-0123456789abcdef", "gate/examples/demo"];
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "a target's shape is no list");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), "/another/checkout\n").unwrap();
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "another build's target");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), format!("/another/checkout\n{}\n", tree.display())).unwrap();
+        assert!(places.iter().all(|place| in_build_target(&dir.join(place), &tree)));
+        assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui"), &tree));
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// A tree is the executable's own only with its generation: a directory
