@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_manifest import _source, begin_run, finish_run, verify_manifest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 GNU_REV = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SHA = 'a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8'
 # These are exact source slices, checked before execution, not verdicts.

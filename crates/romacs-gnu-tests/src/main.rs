@@ -308,7 +308,7 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     } else {
         eval(
             vm,
-            include_str!("../../harness/romacs-real-ert-reporter.el"),
+            include_str!("../../../test/gnu/harness/romacs-real-ert-reporter.el"),
         )
         .map(shown)
     };

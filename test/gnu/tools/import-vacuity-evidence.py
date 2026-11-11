@@ -18,7 +18,7 @@ import sys
 from audit_manifest import verify_manifest, require_result, NAME as MANIFEST_NAME
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
+ROOT = HERE.parents[2]
 GNU_REV = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SHA = 'a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8'
 CASE_KEYS = ('file', 'test', 'mutation', 'engine')

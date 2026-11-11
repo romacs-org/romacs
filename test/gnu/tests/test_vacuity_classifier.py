@@ -189,7 +189,7 @@ class BindingTests(unittest.TestCase):
             binding.verify_receipt(metadata, path)
     def test_repeat_record_preserves_only_identical_input_provenance(self):
         import copy
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/lib'))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools/lib'))
         import parity_ratchet as ratchet
         old = {'payload': [1, 2], 'provenance': {'commit': 'abc', 'tree': 'def',
                'gnu_ert_sha256': '123', 'census_sha256': '456', 'repeat_runs_identical': 2,
@@ -213,7 +213,7 @@ class BindingTests(unittest.TestCase):
         import hashlib
         import os
         from unittest.mock import patch
-        root = Path(__file__).resolve().parents[2]
+        root = Path(__file__).resolve().parents[3]
         original = receipt_fixture()
         manifest = json.loads(original['manifest'])
         with tempfile.TemporaryDirectory() as directory:

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from test_vacuity_classifier import receipt_fixture, captured_receipt_fixture
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'test/gnu/tools'))
 import member_evidence
 import vacuity_binding as binding

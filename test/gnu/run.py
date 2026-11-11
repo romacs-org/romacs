@@ -37,8 +37,10 @@ stale; 4 infrastructure failure (build, extraction).
 from __future__ import annotations
 
 import argparse
+import atexit
 import collections
 import concurrent.futures
+import functools
 import fnmatch
 import hashlib
 import json
@@ -55,7 +57,7 @@ import time
 import tomllib
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parent
+ROOT = HERE.parents[1]
 TESTS = HERE / 'test'
 PIN_FILE = ROOT / 'ledger/gnu-tests-pin.json'
 LEDGER = ROOT / 'ledger/gnu-test-exclusions.toml'
@@ -554,8 +556,23 @@ def load_member_evidence(path: pathlib.Path | None = None) -> dict:
         raise Refusal(3, f'subject evidence refused: {error}') from error
 
 
+@functools.cache
+def source_directory() -> pathlib.Path:
+    """GNU's `source-directory' for a test: the repository's top-level entries,
+    which hold crates/romacs-vm/src/prims as Romacs's own source-directory
+    must, and nextstep/, the image fixture GNU's tree has at its top and this
+    one keeps under test/gnu/.  Links in a scratch directory, made once per
+    run and removed at exit."""
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix='gnu-source-'))
+    atexit.register(shutil.rmtree, scratch, True)
+    for entry in ROOT.iterdir():
+        (scratch / entry.name).symlink_to(entry)
+    (scratch / 'nextstep').symlink_to(HERE / 'nextstep')
+    return scratch
+
+
 def lane_files() -> set[str]:
-    skip = {'baseline', 'out', 'test', '__pycache__'}
+    skip = {'baseline', 'out', 'test', 'nextstep', '__pycache__'}
     return {str(p.relative_to(HERE)) for p in HERE.rglob('*')
             if not skip.intersection(p.relative_to(HERE).parts)}
 
@@ -665,7 +682,7 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
         env = dict(os.environ, HOME=str(scratch), EMACS_TEST_DIRECTORY=str(RUN_TESTS),
-                   ROMACS_SOURCE_DIRECTORY=str(ROOT))
+                   ROMACS_SOURCE_DIRECTORY=str(source_directory()))
         proc = subprocess.Popen(cmd, cwd=(RUN_TESTS / rel).parent, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, errors='replace')
         lines: queue.Queue = queue.Queue()
@@ -1126,7 +1143,7 @@ def cmd_scoreboard(args) -> int:
                         cmd += ['--preload', str(path)]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                           text=True, errors='replace',
-                                          env=dict(gnu_env(home), ROMACS_SOURCE_DIRECTORY=str(ROOT)),
+                                          env=dict(gnu_env(home), ROMACS_SOURCE_DIRECTORY=str(source_directory())),
                                           timeout=args.setup_timeout, cwd=target.parent)
                     logs.append(proc.stdout)
                     report = parse_report(proc.stdout, proc.returncode)

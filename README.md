@@ -50,7 +50,7 @@ curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
 ## Where things are
 
 `crates/` is the Rust, `lisp/` the Lisp (`lisp/gnu/` GNU's, pinned; `lisp/romacs/`
-Romacs's own and the bundled packages), `test/` and `test/gnu/` the test suites,
+Romacs's own and the bundled packages), `test/` the test suites (GNU's in `test/gnu/`),
 `tools/` the scripts, `etc/` and `assets/` runtime data, and `ledger/` the pins and
 floors we hold ourselves to. [ARCHITECTURE.md](ARCHITECTURE.md) says where to look
 for anything else.

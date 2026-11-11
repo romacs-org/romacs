@@ -1398,7 +1398,7 @@ def cmd_record(args) -> int:
 # running the ratchet without someone saying so.
 GATE_TESTS = {
     'crates/romacs-gnu-tests/tests/candidate_ratchet.rs':
-        '446697cc777e43bbaf3899b9dddb6e350a54776c8edae25c696daf0cdd7caba6',
+        'acf39d25ecd84cca5062beec6c26e1a87f34b5fe7fb29c44711f8954b4234ba2',
     'crates/romacs-gnu-tests/tests/parity_ratchet.rs':
         '0d0510b28388df37f84b5d18d9af80b7aa7d7e4e1d58fb71647d13d402b123d0',
     'crates/romacs-vm/tests/parity_ratchet.rs':

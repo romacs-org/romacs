@@ -197,7 +197,7 @@ fn strict_prerequisite_failure_stops_both_harnesses() {
 #[test]
 fn ordinary_load_defers_registration_body_until_execution() {
     let f = Fixture::new();
-    let harness = include_str!("../../harness/romacs-mini-ert.el");
+    let harness = include_str!("../../../test/gnu/harness/romacs-mini-ert.el");
     let definition = "(defmacro timing-explode () (error \"BODY-MACRO-EXPANDED\"))";
     let registration = "(ert-deftest timing-deferred () (timing-explode))";
     // This ordinary-load control uses the miniature harness, not GNU ERT.

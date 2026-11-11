@@ -105,7 +105,7 @@ def main(argv=None):
                         default=Path(tempfile.gettempdir()) / 'ert-scoreboard-evidence')
     args = parser.parse_args(argv)
     here = Path(__file__).resolve().parent
-    checkout = here.parents[1]
+    checkout = here.parents[2]
     evidence = args.evidence_dir.resolve()
     if evidence == checkout or checkout in evidence.parents:
         parser.error('evidence must be outside the source checkout')

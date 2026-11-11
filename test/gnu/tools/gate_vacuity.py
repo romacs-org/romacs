@@ -13,7 +13,7 @@ import time
 
 from audit_manifest import _source
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def main():

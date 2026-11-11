@@ -26,7 +26,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import run  # noqa: E402
 
-FIXTURES = HERE.parent / 'runner' / 'tests' / 'fixtures'
+FIXTURES = HERE.parents[2] / 'crates/romacs-gnu-tests/tests/fixtures'
 BIN = os.environ.get('ROMACS_GNU_ERT')
 
 

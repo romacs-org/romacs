@@ -46,7 +46,7 @@ frozen snapshots.
 | What a session loads, in order | `lisp/romacs/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
-| GNU's test suite, pinned, and its runner | `test/gnu/` (pin and exclusions in `ledger/`) |
+| GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
 | Romacs's Lisp test suites and benchmarks | `test/` (`make check`) |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
 | Decisions checks enforce | `ledger/`: pins, smell and unsafe floors, censuses, the parity ratchet, `divergences/` |
