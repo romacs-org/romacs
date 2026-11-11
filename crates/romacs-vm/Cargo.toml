@@ -67,7 +67,7 @@ world-test-hooks = []
 [dev-dependencies]
 # This crate with its test hooks, for its own tests.
 romacs-vm = { path = ".", features = ["world-test-hooks"] }
-romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
+romacs-coordinate-contract = { path = "../romacs-coordinate-contract" }
 # For tests that must drive the REAL producer chain: VM to frame_snapshot to
 # layout_frame to display_apply_layout to (window-end). A dev-dependency keeps
 # this out of the shipped graph. Without it such a test can only live outside
