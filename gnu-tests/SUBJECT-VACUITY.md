@@ -36,7 +36,7 @@ or historical budget entry for those two is moved by this implementation.
    can be set explicitly with `ROMACS_MEMBER_EVIDENCE`. Both must share a directory.
    The portable receipt retains the original manifest and every sealed
    probe/stdout/stderr, and checks hashes and recomputed verdicts on every load.
-   It binds every tracked path, mode and byte except `parity-ratchet.json`.
+   It binds every tracked path, mode and byte except `ledger/parity-ratchet.json`.
    `member-evidence-policy.json` preserves the historical classifications as an
    explicit source input, not fresh measurements. Only the disputed subject is
    generated from the fresh receipt. Every source change invalidates the receipt.
