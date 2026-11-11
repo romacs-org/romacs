@@ -430,7 +430,7 @@
 ;; Mirrors the Gnosis themata dashboard (gnosis 49ff111: gnosis-sqlite.el
 ;; decoding, gnosis-dashboard.el entry formatting/refresh/printer and
 ;; gnosis-tl.el bulk rendering) over the synthetic database written by
-;; bench/gnosis-fixture.py (CORE_BENCH_GNOSIS_DB, 90K themata, ~2.3M tags).
+;; test/bench/gnosis-fixture.py (CORE_BENCH_GNOSIS_DB, 90K themata, ~2.3M tags).
 ;; Inputs of sub-rows are prepared outside timing; all databases are opened
 ;; read-only.
 
