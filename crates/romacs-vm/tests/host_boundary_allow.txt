@@ -29,13 +29,13 @@ crates/romacs-vm/src/display.rs Vm::snapshot_region delayed-variable 5af6effd re
 crates/romacs-vm/src/forwarded.rs C_VARIABLES delayed-variable ca2ef8db declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs FILEIO_SPECIALS delayed-variable a025ca05 declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs Vm::let_shadows_buffer_binding dynamic:saved fe1b7178 reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/gc.rs MarkedSet::lap Instant::now 874999f4 a collection's phase clock (`romacs--gc-phases'), running only once `host::collection_clock' started it, which no builder does, its heap being the image
+crates/romacs-vm/src/gc.rs Lap::lap Instant::now 874999f4 a collection's phase clock (`romacs--gc-phases'), running only once `host::collection_clock' started it, which no builder does, its heap being the image
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var 04436429 the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var 2ffb6a42 the collector's thread count for a test (ROMACS_GC_WORKERS): what a collection leaves is the same at any count; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var_os dcc9561a the collector's in-place stress mode (ROMACS_GC_INPLACE): stress collections free in place instead of moving; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var_os e39018d4 the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Vm::collect_marked dynamic:saved fc951f2c collector: marks the saved values
-crates/romacs-vm/src/gc.rs Vm::mark_only dynamic:saved 0ec599fe collector: forwards the saved values
+crates/romacs-vm/src/gc.rs Vm::mark_heap dynamic:saved 0ec599fe collector: forwards the saved values
 crates/romacs-vm/src/gc_check.rs Vm::reference_walk dynamic:saved 0ec599fe verify's reference marker: the saved values are roots it reads again
 crates/romacs-vm/src/hash.rs Vm::declaration_hash_remove dynamic:saved d852e224 reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs ImageBuilder::publish File::open d0500ab5 the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)

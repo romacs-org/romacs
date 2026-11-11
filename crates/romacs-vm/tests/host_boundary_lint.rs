@@ -378,7 +378,7 @@ fn outline(v: &Views) -> Outline {
                 let body: Vec<Tok> = toks[open + 1..close].iter().map(|t| t.1).collect();
                 let words: Vec<&str> = body.iter().map(|&t| word(t)).collect();
                 if is_cfg_test(&body, &words) {
-                    let end = if inner { v.code.len() } else { item_end(&toks, close + 1, v.code.len()) };
+                    let end = if inner { v.code.len() } else { item_end(&toks, close + 1, v.code.len(), !starts_item(&toks, close + 1, &word)) };
                     out.tests.push((at, end));
                     i = toks.iter().position(|t| t.0 >= end).unwrap_or(toks.len());
                     continue;
@@ -447,9 +447,24 @@ fn matching(toks: &[(usize, Tok)], open: usize) -> usize {
     toks.len() - 1
 }
 
-/// The byte just past the item that starts at token `from`: its closing
-/// brace, or a `;` outside every bracket.
-fn item_end(toks: &[(usize, Tok)], from: usize, len: usize) -> usize {
+/// Whether the tokens at `from` start an item, not a field, a variant, an
+/// argument, a match arm, a statement or an expression.
+fn starts_item<'a>(toks: &[(usize, Tok)], mut from: usize, word: &dyn Fn(Tok) -> &'a str) -> bool {
+    let punct = |j: usize, b: u8| toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b));
+    while punct(from, b'#') { from = matching(toks, from + 1) + 1; }
+    if toks.get(from).is_some_and(|t| word(t.1) == "pub") {
+        from += 1;
+        if punct(from, b'(') { from = matching(toks, from) + 1; }
+    }
+    toks.get(from).is_some_and(|t| matches!(word(t.1), "fn" | "mod" | "use" | "impl" | "struct" | "enum" | "union" | "const"
+        | "static" | "type" | "trait" | "unsafe" | "async" | "extern" | "default" | "macro_rules"))
+}
+
+/// The byte just past what starts at token `from`: its closing brace, or a
+/// `;` outside every bracket. It ends before a bracket that closes one opened
+/// ahead of it, and, as a MEMBER of a list (a field, a variant, an argument,
+/// a match arm), after a `,` outside every bracket.
+fn item_end(toks: &[(usize, Tok)], from: usize, len: usize, member: bool) -> usize {
     let mut depth = 0;
     let mut j = from;
     while j < toks.len() {
@@ -459,12 +474,14 @@ fn item_end(toks: &[(usize, Tok)], from: usize, len: usize) -> usize {
                 continue;
             }
             Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Tok::Punct(b')' | b']' | b'}') if depth == 0 => return toks[j].0,
             Tok::Punct(b')' | b']') => depth -= 1,
             Tok::Punct(b'}') => {
                 depth -= 1;
                 if depth == 0 { return toks[j].0 + 1; }
             }
             Tok::Punct(b';') if depth == 0 => return toks[j].0 + 1,
+            Tok::Punct(b',') if member && depth == 0 => return toks[j].0 + 1,
             _ => (),
         }
         j += 1;
@@ -500,7 +517,7 @@ fn items(code: &[u8], toks: &[(usize, Tok)]) -> Vec<Item> {
     }).collect();
     (0..toks.len()).filter_map(|i| {
         let name = item_name(code, &words, toks, i)?;
-        Some(Item { from: toks[i].0, to: item_end(toks, i, code.len()), name })
+        Some(Item { from: toks[i].0, to: item_end(toks, i, code.len(), false), name })
     }).collect()
 }
 
