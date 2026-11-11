@@ -678,6 +678,22 @@ impl<T> Table<T> {
         self.generation += 1;
         self.barrier = Barrier::default();
     }
+    /// A minor's start: every old entry is marked, as reached already, but
+    /// those it must read again, which are returned unmarked for the mark to
+    /// claim: the ones stored into since the last collection, and the ones
+    /// WHOLE asks for whatever their colour. What is left unmarked is the
+    /// young, and what the mark then leaves unmarked is the young dead.
+    pub(crate) fn mark_old(&mut self, whole: impl Fn(&T) -> bool) -> Vec<usize> {
+        if self.marking {
+            self.clear_marks();
+        }
+        let mut again = Vec::new();
+        for (i, (color, entry)) in self.colors.iter_mut().zip(&self.entries).enumerate() {
+            if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
+            if *color & DIRTY != 0 || whole(entry) { again.push(i); } else { *color |= MARK; }
+        }
+        again
+    }
     /// Every entry in use becomes old, as a sweep would leave it, and the log
     /// is empty: what a world image holds, whose every entry is old to the
     /// process that restores it.
@@ -699,7 +715,6 @@ impl<T> Table<T> {
     }
     /// The keys and values put into old strong hash tables since the last
     /// collection.
-    #[cfg(test)]
     pub(crate) fn logged(&self) -> &[Value] {
         &self.barrier.values
     }
@@ -708,8 +723,12 @@ impl<T> Table<T> {
     pub(crate) fn dirty_old(&self) -> impl Iterator<Item = usize> + '_ {
         self.colors.iter().enumerate().filter(|&(_, &color)| color & (OLD | DIRTY) == (OLD | DIRTY)).map(|(i, _)| i)
     }
-    /// Whether the log overflowed since the last collection, and is void.
+    /// The log overflows, as a native loop of puts with no poll makes it.
     #[cfg(test)]
+    pub(crate) fn lose_the_log(&mut self) {
+        self.barrier.lost = true;
+    }
+    /// Whether the log overflowed since the last collection, and is void.
     pub(crate) fn log_lost(&self) -> bool {
         self.barrier.lost
     }
