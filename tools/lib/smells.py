@@ -61,9 +61,14 @@ and what either added. `tools/derived setup` installs that as git's merge
 driver for the file, so a merge needs no hand; where the driver is not
 installed and git reports a conflict, `resolve` writes the same merge.
 
+With ROMACS_CLIPPY_TARGET_DIR set, clippy builds each checkout in its own
+tree there and writes the checkout's path into the tree's `checkout` file;
+`prune` removes the trees whose checkout no longer exists.
+
 usage: smells.py check [--base REV | --absolute] [--root ROOT] [--clippy-json FILE]
        smells.py report|lower|resolve [--root ROOT] [--clippy-json FILE]
        smells.py merge BASE OURS THEIRS   (the merge driver: the result replaces OURS)
+       smells.py prune   (removes the clippy trees under $ROMACS_CLIPPY_TARGET_DIR whose checkout is gone)
        smells.py report --floors   (counts in the floors file's format)
 """
 import argparse
@@ -72,6 +77,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -172,6 +178,24 @@ def lint_census(root, lines):
     return counts
 
 
+# The file in a checkout's clippy tree that names the checkout: the tree
+# lives as long as that path does.
+OWNER = 'checkout'
+
+
+def clippy_tree(base, root):
+    """ROOT's clippy target under BASE: one per checkout, named by its path."""
+    return Path(base) / hashlib.sha1(str(Path(root).resolve()).encode()).hexdigest()[:12]
+
+
+def orphans(base):
+    """The clippy trees under BASE whose checkout no longer exists. A tree
+    without its owner file (made before trees named their checkout) is left
+    to the idle sweep."""
+    return sorted(tree for tree in Path(base).glob('*/')
+                  if (tree / OWNER).is_file() and not Path((tree / OWNER).read_text().strip()).exists())
+
+
 def run_clippy(root):
     """Cargo's JSON message lines for the workspace's warnings.
 
@@ -182,8 +206,10 @@ def run_clippy(root):
     would compile against each other's sources."""
     env = dict(os.environ)
     if env.get('ROMACS_CLIPPY_TARGET_DIR'):
-        checkout = hashlib.sha1(str(Path(root).resolve()).encode()).hexdigest()[:12]
-        env['CARGO_TARGET_DIR'] = str(Path(env['ROMACS_CLIPPY_TARGET_DIR']) / checkout)
+        tree = clippy_tree(env['ROMACS_CLIPPY_TARGET_DIR'], root)
+        tree.mkdir(parents=True, exist_ok=True)
+        (tree / OWNER).write_text(str(Path(root).resolve()))
+        env['CARGO_TARGET_DIR'] = str(tree)
     done = subprocess.run(CLIPPY, cwd=root, stdout=subprocess.PIPE, text=True, env=env)
     if done.returncode:
         raise ValueError(f'`{" ".join(CLIPPY)}` failed with {done.returncode}; a failed build counts nothing')
@@ -529,7 +555,7 @@ def report(root, floors, now, top=12):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve', 'merge'])
+    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve', 'merge', 'prune'])
     parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS')
     parser.add_argument('--root', default='.')
     parser.add_argument('--clippy-json', help="cargo clippy's JSON messages, instead of running it")
@@ -539,6 +565,12 @@ def main():
     parser.add_argument('--absolute', action='store_true', help='check: hold the tree to the floors file instead')
     args = parser.parse_args()
     path = Path(args.root) / FLOORS
+    if args.command == 'prune':
+        base = os.environ.get('ROMACS_CLIPPY_TARGET_DIR')
+        for tree in orphans(base) if base else []:
+            shutil.rmtree(tree)
+            print(f'smells: removed {tree}, whose checkout is gone')
+        return 0
     if args.command == 'merge':
         if len(args.files) != 3:
             parser.error('merge takes BASE OURS THEIRS')

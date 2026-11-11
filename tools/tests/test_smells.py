@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """tools/lib/smells.py: what counts as each smell, the lint census's dedup and
 attribution, and the floors ratchet in both directions."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -244,6 +246,40 @@ def counts(lint=3, allows=2, legacy=5, root=('crates', 'tools'), generated=('Car
 def rise(what, have, had, over=1):
     return (f"{what}: {have}, above the {had} of its merge-base"
             f"; remove {over}, or set its floor in ledger/smell-floors.json {over} above the merge-base's")
+
+
+class ClippyTreeTest(unittest.TestCase):
+    """A checkout's clippy tree names its checkout, and goes when the checkout does."""
+
+    def test_a_tree_whose_checkout_is_gone_is_pruned(self):
+        base, live, gone = (Path(tempfile.mkdtemp()) for _ in range(3))
+        self.addCleanup(shutil.rmtree, base)
+        self.addCleanup(shutil.rmtree, live)
+        legacy = base / 'legacy'
+        legacy.mkdir()
+        for checkout in (live, gone):
+            tree = smells.clippy_tree(base, checkout)
+            tree.mkdir()
+            (tree / smells.OWNER).write_text(str(checkout.resolve()))
+        shutil.rmtree(gone)
+        self.assertEqual(smells.orphans(base), [smells.clippy_tree(base, gone)])
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(base)}), \
+                mock.patch.object(sys, 'argv', ['smells.py', 'prune']), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(smells.main(), 0)
+        self.assertEqual(sorted(p.name for p in base.iterdir()),
+                         sorted([legacy.name, smells.clippy_tree(base, live).name]))
+
+    def test_running_clippy_records_the_checkout(self):
+        base, checkout = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, base)
+        self.addCleanup(shutil.rmtree, checkout)
+        done = subprocess.CompletedProcess([], 0, stdout='')
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(base)}), \
+                mock.patch.object(smells.subprocess, 'run', return_value=done) as run:
+            smells.run_clippy(checkout)
+        tree = smells.clippy_tree(base, checkout)
+        self.assertEqual((tree / smells.OWNER).read_text(), str(checkout.resolve()))
+        self.assertEqual(run.call_args.kwargs['env']['CARGO_TARGET_DIR'], str(tree))
 
 
 class MergeBaseTest(unittest.TestCase):
