@@ -1,4 +1,4 @@
-//! Native 3D models drawn by the GPU renderer (rlisp/romacs-model.el,
+//! Native 3D models drawn by the GPU renderer (lisp/romacs/romacs-model.el,
 //! prim/leaf/model.rs). Each model is an integer surface id that Lisp's
 //! handle owns; its events come back as `(romacs-model ID TYPE PLIST)`
 //! special events.

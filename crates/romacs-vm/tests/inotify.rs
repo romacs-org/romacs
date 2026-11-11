@@ -1,4 +1,4 @@
-//! GNU inotify.c from Lisp (rlisp/vm/inotify.el, prims/inotify.rs): watch
+//! GNU inotify.c from Lisp (lisp/romacs/vm/inotify.el, prims/inotify.rs): watch
 //! descriptors shared by one file's watches and told apart by id, aspect
 //! and descriptor errors, events read by batch `read-event' (create,
 //! a rename's moved-from and moved-to with one cookie, delete, and the
@@ -101,7 +101,7 @@ fn insert_special_event_matches_gnu() {
 #[test]
 fn batch_read_ends_when_a_timer_removes_the_last_watch() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("romacs-inotify-timer-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let got = vm.eval_source(&format!(r#"(let ((w (inotify-add-watch {:?} 'create #'ignore)))

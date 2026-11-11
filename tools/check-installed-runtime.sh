@@ -22,7 +22,7 @@ src=${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 share=$out/share/romacs
 status=0
 
-for dir in gnu-lisp rlisp etc assets/fonts; do
+for dir in lisp/gnu lisp/romacs etc assets/fonts; do
     if [ ! -d "$src/$dir" ]; then
         echo "check-installed-runtime: source has no $dir/ under $src" >&2
         status=1; continue

@@ -162,7 +162,7 @@ scheme's own, under `romacs-style-overrides'."
 ;; not a face: it is the default background.
 
 (defconst romacs-chrome-builtin-accent "#d48a20"
-  "The built-in palette's accent (rlisp/romacs-startup.el), Omarchy Rum's:
+  "The built-in palette's accent (lisp/romacs/romacs-startup.el), Omarchy Rum's:
 the focus edge, glow and match colour while no theme is enabled.")
 
 (defun romacs-chrome-mix (amount)

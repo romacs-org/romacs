@@ -126,10 +126,10 @@ get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 get-display-property	needed	lane A (editing, windows, frames, minibuffer readers, display)
 get-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 get-unused-iso-final-char	absent	no shipped Lisp calls it and it is no command
-gfile-add-watch	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
-gfile-monitor-name	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
-gfile-rm-watch	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
-gfile-valid-p	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
+gfile-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-monitor-name	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
 gnutls-asynchronous-parameters	absent	no shipped Lisp calls it and it is no command
 gnutls-ciphers	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 gnutls-digests	absent	no shipped Lisp calls it and it is no command
@@ -185,9 +185,9 @@ internal-set-lisp-face-attribute-from-resource	needed	lane A (editing, windows, 
 internal-stack-stats	absent	no shipped Lisp calls it and it is no command
 iso-charset	absent	no shipped Lisp calls it and it is no command
 kill-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
-kqueue-add-watch	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
-kqueue-rm-watch	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
-kqueue-valid-p	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)
+kqueue-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+kqueue-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+kqueue-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
 lcms-cam02-ucs	absent	Little CMS colour management: not linked
 lcms-cie-de2000	absent	Little CMS colour management: not linked
 lcms-jab->jch	absent	Little CMS colour management: not linked

@@ -38,7 +38,7 @@
 ;; there.
 ;;
 ;; `romacs-animate-statistics' reports the evaluator time FRAME-FNs take.
-;; rlisp/romacs-landing.el, the *Romacs* landing, is the first client.
+;; lisp/romacs/romacs-landing.el, the *Romacs* landing, is the first client.
 
 ;;; Code:
 

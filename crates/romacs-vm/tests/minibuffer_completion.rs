@@ -165,7 +165,7 @@ fn minibuffer_completion_matches_gnu() {
     let dir = fixture(&scratch);
     let expected = gnu_results(&root, &dir, &home);
     assert_eq!(expected.len(), CASES.len());
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     vm.eval_source(&format!("(progn {PRELUDE} (defvar DIR {dir:?}))")).unwrap();
     let mut failures = vec![];
     for (case, gnu) in CASES.iter().zip(&expected) {

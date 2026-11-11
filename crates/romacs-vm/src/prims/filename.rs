@@ -167,7 +167,7 @@ fn all_completions_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]
 // Ffile_name_completion: the longest common prefix of the completions of FILE
 // in DIRECTORY, t for a sole exact match, nil for none. The scan is here;
 // file_name_completion's loop over the matches, which calls PREDICATE with
-// `default-directory' bound to DIRECTORY, is Lisp (rlisp/vm/dired.el).
+// `default-directory' bound to DIRECTORY, is Lisp (lisp/romacs/vm/dired.el).
 defsubr! { name = "file-name-completion", gnu = "dired.c:451", effect = Global,
 fn file_name_completion(cx, file: Value, directory: Value; optional predicate: Value) -> Step {
     completion_expanding(cx, directory, completion_expanded, vec![file, predicate])
@@ -207,7 +207,7 @@ fn completion_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> 
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: completion_loop, saved: args })
 }
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/dired.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/dired.el");
 const COMPLETION_LOOP: &str = "romacs--file-name-completion";
 
 fn completion_loop(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {

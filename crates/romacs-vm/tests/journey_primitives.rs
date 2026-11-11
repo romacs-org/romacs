@@ -14,7 +14,7 @@ fn romacs() -> Vm {
     let mut vm = Vm::new();
     vm.eval_source("(setq noninteractive t)").unwrap();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
+    let lisp = root.join("lisp/gnu");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
@@ -23,10 +23,10 @@ fn romacs() -> Vm {
     let mut paths = vec![lisp.clone()];
     paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
     if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("rlisp"));
+    paths.push(root.join("lisp/romacs"));
     vm.set_load_path(&paths).unwrap();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
     vm
 }
 
@@ -338,7 +338,7 @@ fn gnu_c_commands_have_gnu_interactive_forms() {
     let names: Vec<String> = String::from_utf8(output.stdout).unwrap().lines().map(str::to_owned).collect();
     assert!(names.len() > 90, "GNU lists its C commands");
     let mut vm = romacs();
-    // `signal-process' is Lisp in rlisp/vm/subprocess.el, without GNU's spec yet.
+    // `signal-process' is Lisp in lisp/romacs/vm/subprocess.el, without GNU's spec yet.
     let defined: Vec<String> = names.into_iter().filter(|name| name != "signal-process" && vm
         .eval_source(&format!("(fboundp '{name})")).and_then(|v| v.display()).as_deref() == Ok("t")).collect();
     let forms: Vec<String> = defined.iter().map(|name| format!("(interactive-form '{name})")).collect();

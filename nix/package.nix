@@ -142,7 +142,7 @@ craneLib.buildPackage (
       install -m 0755 target/release/romacs-mcp "$out/bin/romacs-mcp"
 
       mkdir -p "$out/share/romacs"
-      cp -r gnu-lisp rlisp "$out/share/romacs/"
+      cp -r lisp/gnu lisp/romacs "$out/share/romacs/"
       cp -r etc "$out/share/romacs/"
       mkdir -p "$out/share/romacs/assets"
       cp -r assets/fonts "$out/share/romacs/assets/"
@@ -180,7 +180,7 @@ craneLib.buildPackage (
         ${lib.concatStringsSep " \\\n        " wrapArgs}
 
       # Refuse to produce a package whose runtime Lisp is not the source's:
-      # every gnu-lisp/, rlisp/ and etc/ file byte-identical, and the
+      # every lisp/gnu/, lisp/romacs/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
       bash tools/check-installed-runtime.sh "$out" .
     '';

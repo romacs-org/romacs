@@ -64,7 +64,7 @@ def runtime(root, romacs):
     directory = root / 'runtime'
     directory.mkdir()
     (directory / 'romacs-vm-gui').symlink_to(romacs)
-    for name in ('gnu-lisp', 'rlisp', 'etc'):
+    for name in ('lisp/gnu', 'lisp/romacs', 'etc'):
         (directory / name).symlink_to(parity_live.ROOT / name)
     return directory
 
@@ -79,7 +79,7 @@ def start(args, base, name):
         directory = runtime(root, args.romacs)
         (home / args.launcher_runtime).parent.mkdir(parents=True, exist_ok=True)
         (home / args.launcher_runtime).symlink_to(directory)
-        env.update(ROMACS_RUNTIME_ROOT=str(directory), ROMACS_LISP_DIR=str(directory / 'gnu-lisp'))
+        env.update(ROMACS_RUNTIME_ROOT=str(directory), ROMACS_LISP_DIR=str(directory / 'lisp/gnu'))
         argv = [args.launcher]
     else:
         env['ROMACS_USAGE_LOG'] = str(root / 'usage.jsonl')

@@ -102,7 +102,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
     CVariable { name: "window-system", gnu: "dispnew.c:7522", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
-    // DEFVAR_KBOARD; read_char applies it (rlisp/vm/keyboard.el).
+    // DEFVAR_KBOARD; read_char applies it (lisp/romacs/vm/keyboard.el).
     CVariable { name: "keyboard-translate-table", gnu: "keyboard.c:13980", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it as initialization begins; org-persist reads it.
     CVariable { name: "before-init-time", gnu: "emacs.c:3587", kind: Kind::Lisp(Init::Nil) },
@@ -395,7 +395,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "tool-bar-mode", gnu: "frame.c:7545", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
     // What the command loop evaluates when a throw returns it to top level
-    // (rlisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
+    // (lisp/romacs/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
     CVariable { name: "top-level", gnu: "keyboard.c:13974", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-style", gnu: "xdisp.c:38992", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "toolkit-theme", gnu: "frame.c:7896", kind: Kind::Lisp(Init::Nil) },
@@ -427,7 +427,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // Run at the end of a collection (`romacs--run-finalizers').
     CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
     // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
-    // the command loop's run it (rlisp/vm/keyboard.el, echo.rs).
+    // the command loop's run it (lisp/romacs/vm/keyboard.el, echo.rs).
     CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "visible-bell", gnu: "dispnew.c:7496", kind: Kind::Bool(false) },
     CVariable { name: "visible-cursor", gnu: "term.c:5347", kind: Kind::Bool(true) },
@@ -633,7 +633,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // appends `face minibuffer-prompt' from Lisp).
     CVariable { name: "unread-command-events", gnu: "keyboard.c:13776", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "executing-kbd-macro", gnu: "macros.c:435", kind: Kind::Lisp(Init::Nil) },
-    // The command loop's Lisp half (rlisp/vm/keyboard.el) advances it per
+    // The command loop's Lisp half (lisp/romacs/vm/keyboard.el) advances it per
     // event read from the macro (keyboard.c read_char).
     CVariable { name: "executing-kbd-macro-index", gnu: "macros.c:439", kind: Kind::Int(0) },
     // Counted by the same Lisp half; repeat.el compares num-input-keys.
@@ -667,7 +667,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     // Chain: cus-start.el (preloaded) signals for a missing built-in.
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // self-insert-command (rlisp/vm/prelude.el) reads both.
+    // self-insert-command (lisp/romacs/vm/prelude.el) reads both.
     CVariable { name: "auto-fill-function", gnu: "buffer.c:5433", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // simple.el's delete-backward-char and self-insert paths read it.
     CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Choice(&["nil", "overwrite-mode-textual", "overwrite-mode-binary"])) } },

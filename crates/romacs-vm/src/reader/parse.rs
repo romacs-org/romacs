@@ -1007,12 +1007,12 @@ mod tests {
         }
     }
 
-    /// Every Lisp half a leaf primitive installs (`rlisp/vm/`) reads without
+    /// Every Lisp half a leaf primitive installs (`lisp/romacs/vm/`) reads without
     /// the permission, as its primitive reads it at its first call: no
     /// `\N{NAME}` by name in them.
     #[test]
     fn the_leaves_lisp_halves_read_without_lisp() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/vm");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/vm");
         let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path())
             .filter(|p| p.extension().is_some_and(|e| e == "el")).collect();
         files.sort();

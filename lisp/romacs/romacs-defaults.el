@@ -82,7 +82,7 @@
     ;; counted from point, the current line by its own number.
     (display-line-numbers-type 'relative)
     ;; Key hints in a panel over the frame, which resizes no window
-    ;; (rlisp/romacs-popup.el), where the window system has layers.
+    ;; (lisp/romacs/romacs-popup.el), where the window system has layers.
     ,@(and (fboundp 'romacs-popup-which-key-show)
            '((which-key-popup-type 'custom)
              (which-key-custom-show-popup-function #'romacs-popup-which-key-show)

@@ -20,7 +20,7 @@ fn cookieless_non_utf8_sources_decode_as_gnu_detects() {
     ];
     for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
     for (name, _) in files {

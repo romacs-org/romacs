@@ -40,7 +40,7 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; starts with *Messages*, which `kill-buffer' and `other-buffer' may
         ;; fall back on; normal-top-level (startup.el:736) puts it in
         ;; `messages-buffer-mode' with *scratch*'s directory.  Romacs's log
-        ;; (rlisp/vm/message.el) otherwise creates it at the first message.
+        ;; (lisp/romacs/vm/message.el) otherwise creates it at the first message.
         (let ((dir default-directory))
           (with-current-buffer (get-buffer-create messages-buffer-name)
             (messages-buffer-mode)
@@ -234,7 +234,7 @@ As `fancy-startup-screen' sets up *GNU Emacs* (startup.el:2269), it
 starts in `command-line-default-directory' and takes GNU's
 `splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
 \(`exit-splash-screen') kills it.  It is the animated logo
-\(rlisp/romacs-landing.el), whose keys (SPC, Home) come first, and
+\(lisp/romacs/romacs-landing.el), whose keys (SPC, Home) come first, and
 nothing else; without the logo, one title line."
   (or (get-buffer name)
       (with-current-buffer (get-buffer-create name)

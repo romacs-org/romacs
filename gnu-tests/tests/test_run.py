@@ -43,7 +43,7 @@ class LoadPath(unittest.TestCase):
     """load_path() reproduces GNU's installed load-path (lisp/subdirs.el)."""
 
     def tree(self, root, relatives):
-        lisp = root / 'gnu-lisp'
+        lisp = root / 'lisp/gnu'
         for relative in relatives:
             (lisp / relative).parent.mkdir(parents=True, exist_ok=True)
             (lisp / relative).write_text(';; fixture\n')
@@ -74,9 +74,9 @@ class LoadPath(unittest.TestCase):
     def test_missing_directories_are_not_added(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'gnu-lisp/textmodes').mkdir(parents=True)
+            (root / 'lisp/gnu/textmodes').mkdir(parents=True)
             with patch.object(run, 'ROOT', root):
-                self.assertEqual(run.load_path(), [str(root / 'gnu-lisp'), str(root / 'gnu-lisp/textmodes')])
+                self.assertEqual(run.load_path(), [str(root / 'lisp/gnu'), str(root / 'lisp/gnu/textmodes')])
 
 
 class Classification(unittest.TestCase):
@@ -591,13 +591,13 @@ class EndToEnd(unittest.TestCase):
         assert BIN is not None
         with tempfile.TemporaryDirectory(prefix='gts-owner-path-') as tmp:
             root = pathlib.Path(tmp)
-            lisp = root / 'gnu-lisp'
+            lisp = root / 'lisp/gnu'
             for relative in ['emacs-lisp/debug.el', 'cedet/semantic/debug.el',
                              'textmodes/extra-owner.el']:
                 destination = lisp / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 source = 'emacs-lisp/debug.el' if relative.endswith('extra-owner.el') else relative
-                shutil.copyfile(run.ROOT / 'gnu-lisp' / source, destination)
+                shutil.copyfile(run.ROOT / 'lisp/gnu' / source, destination)
             plan = root / 'plan.json'
             plan.write_text(json.dumps({'file': 'owner-resolution', 'forms': []}))
             command = [BIN, '--harness', str(run.HARNESS), '--plan', str(plan)]

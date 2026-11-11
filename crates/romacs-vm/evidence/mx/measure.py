@@ -31,10 +31,10 @@ phase = args.phase
 binary = Path(os.environ.get('CENSUS_BIN', str(_PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'lanes/mx-target/gate/romacs-vm-census')))
 chain = census.bootstrap_chain(ROOT)
 opts = [a for link in chain for a in (('--preload-form', link) if isinstance(link, str) else ('--preload', str(link)))]
-paths = [str(ROOT / 'gnu-lisp'), str(ROOT / 'gnu-lisp/emacs-lisp'), str(ROOT / 'gnu-lisp/international')]
+paths = [str(ROOT / 'lisp/gnu'), str(ROOT / 'lisp/gnu/emacs-lisp'), str(ROOT / 'lisp/gnu/international')]
 
 def run(name):
-    command = [str(binary), *opts, '--', str(ROOT / 'gnu-lisp' / (name + '.el')), *paths]
+    command = [str(binary), *opts, '--', str(ROOT / 'lisp/gnu' / (name + '.el')), *paths]
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=180)
     (OUT / f'{phase}-{name}.jsonl').write_text(result.stdout)
     (OUT / f'{phase}-{name}.stderr').write_text(result.stderr)

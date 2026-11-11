@@ -91,7 +91,7 @@ romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, alloc
 pub(crate) const COLLECTION_RECORDS: usize = 256;
 
 /// A finished collection, for a real pause to name itself in the usage log
-/// (rlisp/romacs-usage-log.el). MS bounds what a key or command waited.
+/// (lisp/romacs/romacs-usage-log.el). MS bounds what a key or command waited.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CollectionRecord {
     /// The idle pass's or a prompt's: it gave way to no key while marking.

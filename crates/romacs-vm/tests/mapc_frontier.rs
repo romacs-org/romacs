@@ -11,11 +11,11 @@ fn mapc_bootstrap_frontiers() {
     for target in ["cl-lib.el", "ert.el"] {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
-        vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()]).unwrap();
+        vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()]).unwrap();
         for file in ["emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el", "emacs-lisp/backquote.el", "subr.el", "keymap.el", "emacs-lisp/pcase.el", "emacs-lisp/gv.el"] {
-            vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
+            vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
         }
-        let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp").join(target)).map(|_| ());
+        let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp").join(target)).map(|_| ());
         eprintln!("{target}: {result:?}");
         let report = vm.load_report();
         let steps = report["steps"].as_array().unwrap();

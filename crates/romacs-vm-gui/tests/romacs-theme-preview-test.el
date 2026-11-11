@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; rlisp/romacs-custom.el's preview in a `--loadup' session, which starts in
+;; lisp/romacs/romacs-custom.el's preview in a `--loadup' session, which starts in
 ;; the stock theme.  The keys of a real selection:
 ;; harness/theme_preview_live.py.
 

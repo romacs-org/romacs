@@ -3,7 +3,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Modus's table (rlisp/romacs-theme-modus.el) reads about 330 names: named
+;; Modus's table (lisp/romacs/romacs-theme-modus.el) reads about 330 names: named
 ;; colours and semantic mappings.  This file gives a theme all of them from
 ;; its own palette, with no Modus colour among them: every name is a rule
 ;; in the language of `romacs-theme-rules', so one reader resolves Romacs's
