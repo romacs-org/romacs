@@ -44,9 +44,6 @@ use crate::{Value, Vm};
 
 /// The tables a mark colours, in `MarkedSet`'s order.
 const TABLES: [&str; 4] = ["conses", "closures", "cells", "objects"];
-/// table.rs's colours of an entry no object holds.
-const FREE: u8 = 0;
-const QUARANTINED: u8 = 4;
 /// The exit status of a process whose twin disagreed with its collector.
 const DIVERGED: i32 = 97;
 /// How long a collection waits for its twin's report: a bound for a child
@@ -98,7 +95,7 @@ pub(crate) fn fork_marks(vm: &mut Vm, roots: &[Value]) -> Option<Pending> {
 /// Fork a child that runs WORK on its copy of VM and sends what it returns,
 /// or why it failed, as its report.
 fn spawn(vm: &mut Vm, collection: u64, work: impl FnOnce(&mut Vm) -> Result<Vec<u8>, String>) -> Option<Pending> {
-    let allocated = colours(vm).map(|colours| colours.into_iter().map(holds).collect());
+    let allocated = held(vm);
     let (read, write) = crate::host::pipe().ok()?;
     match crate::host::fork_threaded() {
         Ok(0) => {
@@ -110,9 +107,9 @@ fn spawn(vm: &mut Vm, collection: u64, work: impl FnOnce(&mut Vm) -> Result<Vec<
     }
 }
 
-/// Each table's colours, in `TABLES`' order.
-fn colours(vm: &Vm) -> [Vec<u8>; 4] {
-    [vm.conses.colors(), vm.closures.colors(), vm.cells.colors(), vm.objects.colors()]
+/// Whether each entry of each table holds an object, in `TABLES`' order.
+fn held(vm: &Vm) -> [Vec<bool>; 4] {
+    [vm.conses.held(), vm.closures.held(), vm.cells.held(), vm.objects.held()]
 }
 
 /// Each table's marks, in `TABLES`' order.
@@ -334,11 +331,6 @@ fn verdict(report: &[u8], allocated: &[Vec<bool>; 4], survived: &[Vec<bool>; 4],
     Ok(agreed)
 }
 
-/// Whether an entry of colour C holds an object.
-fn holds(c: u8) -> bool {
-    c != FREE && c != QUARANTINED
-}
-
 /// PENDING's report, read until its child closes its end, and the child
 /// reaped: the report and the child's wait status. Past DEADLINE there is no
 /// report, and the child is left for `Pending`'s drop to end and reap.
@@ -371,7 +363,7 @@ fn collect_report(pending: &mut Pending, deadline: Duration) -> Result<(Vec<u8>,
 /// Its child is gone, reaped, whatever the answer.
 fn settle(vm: &Vm, mut pending: Pending, deadline: Duration) -> Result<Agreed, String> {
     let (report, status) = collect_report(&mut pending, deadline)?;
-    let survived = colours(vm).map(|colours| colours.into_iter().map(holds).collect());
+    let survived = held(vm);
     verdict(&report, &pending.allocated, &survived, |i| object_kind(vm, i))
         .map_err(|what| if report.is_empty() { format!("{what} from the twin's child (wait status {status})") } else { what })
 }
