@@ -84,18 +84,22 @@ pub(crate) enum UndoEdit {
 }
 
 /// `truncate_undo_list`'s walk down a list: what it has passed, and its size.
-struct UndoScan<'a> {
+struct UndoScan<'a, 'k> {
     vm: &'a Vm,
     size: i64,
     prev: Option<usize>,
     next: Value,
     /// How many more conses: a circular list comes to an end.
     fuel: usize,
+    /// A mark's look for a key press, every `UNDO_KEY_POLL` conses; and
+    /// whether it found one, which ends the scan with nothing decided.
+    key: Option<&'k mut dyn FnMut() -> bool>,
+    stopped: bool,
 }
 
-impl<'a> UndoScan<'a> {
-    fn new(vm: &'a Vm, list: Value) -> Self {
-        Self { vm, size: 0, prev: None, next: list, fuel: vm.conses.len() }
+impl<'a, 'k> UndoScan<'a, 'k> {
+    fn new(vm: &'a Vm, list: Value, key: Option<&'k mut dyn FnMut() -> bool>) -> Self {
+        Self { vm, size: 0, prev: None, next: list, fuel: vm.conses.len(), key, stopped: false }
     }
     /// The entry at NEXT, while there is a cons there to look at.
     fn entry(&self) -> Option<Value> {
@@ -108,6 +112,9 @@ impl<'a> UndoScan<'a> {
         self.prev = Some(i);
         self.next = cdr;
         self.fuel -= 1;
+        if self.fuel.is_multiple_of(UNDO_KEY_POLL) && self.key.as_mut().is_some_and(|key| key()) {
+            (self.stopped, self.fuel) = (true, 0);
+        }
     }
     /// Past a leading boundary and the first record.
     fn first_record(mut self) -> Self {
@@ -132,6 +139,9 @@ pub(super) struct UndoDecided {
     pub(super) edits: Vec<UndoEdit>,
 }
 
+/// A key press ended a scan: the mark is given up, and nothing was decided.
+struct KeyPressed;
+
 /// Conses of an undo list a walk passes between its looks for a key press.
 const UNDO_KEY_POLL: usize = 4096;
 
@@ -154,24 +164,27 @@ impl Vm {
         2 * CONS_BYTES + text.map_or(0, |text| STRING_BYTES - 1 + i64::try_from(text.chars).unwrap_or(0))
     }
 
-    /// `truncate_undo_list`'s decision on LIST under LIMITS.
-    fn undo_cut(&self, list: Value, limits: UndoLimits) -> UndoCut {
-        let mut scan = UndoScan::new(self, list).first_record();
+    /// `truncate_undo_list`'s decision on LIST under LIMITS; none when KEY, a
+    /// mark's look for a key press, ended the scan.
+    fn undo_cut(&self, list: Value, limits: UndoLimits, key: Option<&mut dyn FnMut() -> bool>) -> Option<UndoCut> {
+        let mut scan = UndoScan::new(self, list, key).first_record();
+        if scan.stopped { return None; }
         if limits.offers && limits.outer.is_some_and(|outer| outer < scan.size) {
-            return UndoCut::Offer;
+            return Some(UndoCut::Offer);
         }
         let mut boundary = scan.entry().and(scan.prev);
         while let Some(entry) = scan.entry() {
             // Past the higher limit the cut comes before this record; past
             // the lower one, after it.
             if entry == Value::NIL {
-                if scan.size > limits.strong { return UndoCut::at(boundary); }
+                if scan.size > limits.strong { return Some(UndoCut::at(boundary)); }
                 boundary = scan.prev;
-                if scan.size > limits.limit { return UndoCut::at(boundary); }
+                if scan.size > limits.limit { return Some(UndoCut::at(boundary)); }
             }
             scan.pass();
         }
-        if scan.dotted() { UndoCut::at(boundary) } else { UndoCut::Keep }
+        if scan.stopped { return None; }
+        Some(if scan.dotted() { UndoCut::at(boundary) } else { UndoCut::Keep })
     }
 
     /// Whether ENTRY is (MARKER . ADJUSTMENT) with a marker the mark has not
@@ -196,26 +209,29 @@ impl Vm {
         let mut lists = Vec::new();
         for buffer in owners {
             if key() { return false; }
-            lists.extend(self.undo_decide(buffer, view, &mut decided.cuts, &mut decided.edits));
+            let Ok(list) = self.undo_decide(buffer, view, decided, key) else { return false };
+            lists.extend(list);
         }
         for (buffer, list) in lists {
-            if !self.undo_walk(buffer, list, marking, pending, decided, key) { return false; }
+            if key() || !self.undo_walk(buffer, list, marking, pending, decided, key) { return false; }
         }
         true
     }
 
     /// `compact_buffer` on BUFFER: its cut, if it changed since the last, into
-    /// EDITS and CUTS; its list if any of it stays.
-    fn undo_decide(&self, buffer: usize, view: &UndoView, cuts: &mut HashSet<usize>, edits: &mut Vec<UndoEdit>) -> Option<(usize, Value)> {
+    /// DECIDED; its list if any of it stays. An error, with nothing decided
+    /// for this buffer, when KEY ended its scan.
+    fn undo_decide(&self, buffer: usize, view: &UndoView, decided: &mut UndoDecided, key: &mut dyn FnMut() -> bool) -> std::result::Result<Option<(usize, Value)>, KeyPressed> {
+        let UndoDecided { cuts, edits } = decided;
         let list = self.own_undo_list(buffer);
-        let state = self.buffer_state(Value::reference(buffer + 1, 0)).ok()?;
+        let Ok(state) = self.buffer_state(Value::reference(buffer + 1, 0)) else { return Ok(None) };
         let changed = state.compact != state.modiff;
         if list == Value::TRUE {
             if changed { edits.push(UndoEdit::Compacted(buffer)); }
-            return None;
+            return Ok(None);
         }
-        if !changed { return Some((buffer, list)); }
-        let cut = self.undo_cut(list, view.of(buffer));
+        if !changed { return Ok(Some((buffer, list))); }
+        let cut = self.undo_cut(list, view.of(buffer), Some(key)).ok_or(KeyPressed)?;
         edits.push(if matches!(cut, UndoCut::Offer) { UndoEdit::Offer } else { UndoEdit::Compacted(buffer) });
         match cut {
             UndoCut::Keep | UndoCut::Offer => {}
@@ -225,10 +241,10 @@ impl Vm {
             }
             UndoCut::Clear => {
                 edits.push(UndoEdit::List(buffer, Value::NIL));
-                return None;
+                return Ok(None);
             }
         }
-        Some((buffer, list))
+        Ok(Some((buffer, list)))
     }
 
     /// `compact_undo_list` on BUFFER's LIST, as far as CUTS, and the marking that
@@ -335,18 +351,29 @@ impl Vm {
         Ok(limits)
     }
 
-    /// What `undo-outer-limit-function` is to be asked since a collection last
-    /// noted any: ((BUFFER . SIZE)...), each live buffer changed since it was
-    /// last compacted whose first record is past the limit. Nil at once when
-    /// no collection noted any.
-    pub(crate) fn take_undo_offer(&mut self, again: bool) -> Result<Value> {
+    /// What `undo-outer-limit-function` is to be asked next: (BUFFER . SIZE),
+    /// the first live buffer not in ASKED, the list of those a run has asked
+    /// about already, that changed since it was last compacted and whose
+    /// first record is past the limit, as things stand now. Nil when there
+    /// is none, and at once, with ASKED nil, when no collection has noted any
+    /// since the last run.
+    pub(crate) fn take_undo_offer(&mut self, asked: Value) -> Result<Value> {
         // The first of a run takes the collection's note with it, so that a
-        // quit leaves the rest to the next collection; the run's later ones
-        // (AGAIN) look whatever the note says.
-        if !std::mem::take(&mut self.undo_offers_due) && !again { return Ok(Value::NIL); }
+        // quit leaves the rest to the next collection; the run's later ones,
+        // which have asked about some, look whatever the note says.
+        if !std::mem::take(&mut self.undo_offers_due) && asked == Value::NIL { return Ok(Value::NIL); }
+        let mut excluded = Vec::new();
+        let mut rest = asked;
+        while let Some((_, buffer, next)) = self.plain_cons(rest) {
+            excluded.push(buffer);
+            rest = next;
+        }
         // Looked for afresh each time: what the function did about one buffer,
         // or what happened while it asked, may have changed another's list.
+        // One asked about already is not asked again in this run, whatever
+        // has happened to its list since.
         for buffer in self.buffer_order() {
+            if excluded.contains(&buffer) { continue; }
             let Some(size) = self.undo_offer_size(buffer)? else { continue };
             return Ok(self.alloc_cons(buffer, Value::integer(size)?));
         }
@@ -361,7 +388,7 @@ impl Vm {
         let list = self.own_undo_list(index);
         if state.compact == state.modiff || indirect || list == Value::TRUE { return Ok(None); }
         let limits = self.undo_limits_in(buffer)?;
-        let size = UndoScan::new(self, list).first_record().size;
+        let size = UndoScan::new(self, list, None).first_record().size;
         Ok((limits.offers && limits.outer.is_some_and(|outer| outer < size)).then_some(size))
     }
 
@@ -373,10 +400,10 @@ impl Vm {
         let list = self.undo_list_of(index);
         if answer == Value::NIL && list != Value::TRUE {
             let limits = UndoLimits { offers: false, ..self.undo_limits_in(buffer)? };
-            match self.undo_cut(list, limits) {
-                UndoCut::After(i) => self.conses.set_cdr(i, Value::NIL),
-                UndoCut::Clear => self.set_undo_list_of(index, Value::NIL),
-                UndoCut::Keep | UndoCut::Offer => {}
+            match self.undo_cut(list, limits, None) {
+                Some(UndoCut::After(i)) => self.conses.set_cdr(i, Value::NIL),
+                Some(UndoCut::Clear) => self.set_undo_list_of(index, Value::NIL),
+                Some(UndoCut::Keep | UndoCut::Offer) | None => {}
             }
         }
         self.note_undo_compacted(buffer);
@@ -571,5 +598,31 @@ impl Vm {
         };
         self.command_point = (point, Value::reference(buffer + 1, 0));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A truncation scan looks for a key press as it goes, every
+    /// `UNDO_KEY_POLL` conses, and one that arrives ends it with nothing
+    /// decided: a first record of any length does not hold a key up.
+    #[test]
+    fn a_key_press_ends_the_scan_of_one_long_record() {
+        let mut vm = Vm::new();
+        let mut list = Value::NIL;
+        for _ in 0..3 * UNDO_KEY_POLL {
+            let entry = vm.alloc_cons(Value::integer(1).unwrap(), Value::integer(2).unwrap());
+            list = vm.alloc_cons(entry, list);
+        }
+        let limits = UndoLimits { limit: i64::MAX, strong: i64::MAX, outer: None, offers: false };
+        let mut looks = 0;
+        assert!(matches!(vm.undo_cut(list, limits, Some(&mut || { looks += 1; false })), Some(UndoCut::Keep)));
+        assert!(looks >= 3, "{looks} looks over a record of three polls' length");
+        let mut looks = 0;
+        assert!(vm.undo_cut(list, limits, Some(&mut || { looks += 1; looks == 2 })).is_none(), "ended by the second look");
+        assert_eq!(looks, 2);
+        assert!(matches!(vm.undo_cut(list, limits, None), Some(UndoCut::Keep)), "and with no key to look for it runs to its end");
     }
 }

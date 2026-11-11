@@ -895,7 +895,8 @@ buffer current.  A nil answer truncates the list as without the function; any
 other leaves it to the function, and so does an error, logged to *Messages*.
 A quit leaves this buffer and the rest to the next collection."
   (unless romacs--undo-offering
-    (let ((offer (romacs--take-undo-offer)))
+    (let ((offer (romacs--take-undo-offer))
+          (asked nil))
       (when offer
         (let ((romacs--undo-offering t)
               (match-data (match-data)))
@@ -903,8 +904,11 @@ A quit leaves this buffer and the rest to the next collection."
             (unwind-protect
                 ;; One at a time, each looked for afresh: the function, or
                 ;; whatever ran while it asked, may have changed another
-                ;; buffer's list since the collection.
+                ;; buffer's list since the collection.  A buffer is asked
+                ;; about once in a run: one the function has put past the
+                ;; limit again since is the next collection's.
                 (while offer
+                  (setq asked (cons (car offer) asked))
                   (set-buffer (car offer))
                   (romacs--answer-undo-offer
                    (car offer)
@@ -913,7 +917,7 @@ A quit leaves this buffer and the rest to the next collection."
                      (error (let ((inhibit-message t))
                               (message "undo-outer-limit-function failed: %S" err))
                             t)))
-                  (setq offer (romacs--take-undo-offer t)))
+                  (setq offer (romacs--take-undo-offer asked)))
               (set-match-data match-data t))))))))
 
 (defvar romacs--post-gc-owned nil

@@ -7,4 +7,5 @@
 Two consequences of asking afterwards. Each buffer is asked about as it stands when its turn comes, so one the
 function already dealt with while answering for another is not asked about. And a function that signals leaves the
 list as it is and the buffer counted as looked at: it is asked again once the buffer changes, where GNU asks at the
-next collection.
+next collection. A run asks about a buffer once: one the function puts past the limit again while it
+answers for another waits for the next collection.

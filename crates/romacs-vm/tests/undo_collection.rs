@@ -204,6 +204,46 @@ impl HostInput for KeyQueued {
     }
 }
 
+/// A host whose key press arrives at its AT-th look, counting the looks.
+struct KeyAt {
+    at: usize,
+    looks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl HostInput for KeyAt {
+    fn input_pending(&mut self) -> bool { false }
+    fn key_pending(&mut self) -> bool {
+        self.looks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1 >= self.at
+    }
+    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<WindowEnd>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
+        Err("no events".into())
+    }
+}
+
+/// A key press that arrives while the undo round is at work ends the mark:
+/// the round looks for one between buffers, as it decides and again as it
+/// walks. With 1,500 buffers that is 3,000 looks; the rest of this small
+/// heap's mark makes a few dozen, so a press at the 2,500th look is seen
+/// only by a round that looks in both.
+#[test]
+fn a_key_press_during_the_undo_round_ends_the_mark() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_threads(1);
+    vm.eval_source("(let ((i 0)) \
+        (while (< i 1500) \
+          (with-current-buffer (get-buffer-create (format \"undo-%d\" i)) \
+            (buffer-enable-undo) (insert \"x\") \
+            (setq buffer-undo-list (list '(1 . 2) nil '(3 . 4)))) \
+          (setq i (1+ i))))").unwrap();
+    let looks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    vm.set_host_input(Some(Box::new(KeyAt { at: 2500, looks: looks.clone() })));
+    assert!(!vm.collect_garbage_until_key(), "the press was seen, and the mark given up");
+    vm.set_host_input(None);
+    let seen = looks.load(std::sync::atomic::Ordering::Relaxed);
+    assert!((2500..3200).contains(&seen), "{seen} looks: in the round, not after it");
+}
+
 #[test]
 fn an_abandoned_mark_leaves_the_lists_as_they_were() {
     for (threads, moving) in modes() {
@@ -278,6 +318,34 @@ fn a_list_the_function_emptied_while_asked_about_another_is_not_offered() {
     vm.eval_source("(garbage-collect)").unwrap();
     vm.eval_source("(garbage-collect)").unwrap();
     assert_eq!(shown(&mut vm, "(length undo-test-asked)"), "1");
+}
+
+/// A run asks about each buffer once, and about every one: a function that,
+/// asked about one buffer, puts the others past the limit again, those it
+/// has already answered for among them, neither keeps the run going nor
+/// hides a buffer not yet asked about behind one that was.
+#[test]
+fn a_run_asks_about_each_buffer_once() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(ORACLE_SETUP).unwrap();
+    vm.eval_source("(fset 'undo-test-over (lambda (name) \
+          (with-current-buffer (get-buffer-create name) \
+            (buffer-enable-undo) \
+            (let ((buffer-undo-list t)) (insert \"x\")) \
+            (setq buffer-undo-list (list (cons \"abcdefghij\" 1) nil '(1 . 2) nil '(3 . 4))) nil)))").unwrap();
+    vm.eval_source("(setq undo-limit 10 undo-strong-limit 20 undo-outer-limit 40 undo-test-asked 0 \
+        undo-outer-limit-function (lambda (_) \
+          (setq undo-test-asked (1+ undo-test-asked)) \
+          (if (< undo-test-asked 10) \
+              (let ((here (buffer-name)) (names '(\"undo\" \"other\" \"third\"))) \
+                (while names \
+                  (if (equal (car names) here) nil (undo-test-over (car names))) \
+                  (setq names (cdr names))))) \
+          t))").unwrap();
+    vm.eval_source("(progn (undo-test-over \"undo\") (undo-test-over \"other\") (undo-test-over \"third\"))").unwrap();
+    vm.eval_source("(garbage-collect)").unwrap();
+    assert_eq!(shown(&mut vm, "undo-test-asked"), "3");
 }
 
 /// A collection nobody asked for runs `undo-outer-limit-function` at a later

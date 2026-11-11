@@ -1080,18 +1080,6 @@ impl Vm {
             assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
         }
     }
-    /// Every Value the buffer at objects entry I holds, its undo list
-    /// included, whatever a mark would pass over: what a mark twin's bound
-    /// roots for each buffer it reaches.
-    pub(crate) fn buffer_values(&mut self, i: usize) -> Vec<Value> {
-        let mut values = Vec::new();
-        match &mut self.objects.collector_entries_mut()[i] {
-            data::Object::Buffer(buffer) => buffer.visit_values(&mut |v| values.push(*v)),
-            data::Object::ByteBuffer(buffer) => buffer.visit_values(&mut |v| values.push(*v)),
-            _ => {}
-        }
-        values
-    }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
         let dead: Vec<usize> = self.obarray_symbol_names.keys().copied().filter(|slot| !live.contains(slot)).collect();

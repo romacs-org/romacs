@@ -7,7 +7,7 @@
 //! forks a child from the state it starts from. In the child, after the
 //! caches a collection drops are dropped (rule M1):
 //! - **the twin's mark:** the collector's own mark (`Vm::mark_only`) with
-//!   every weak entry kept (M2), and, to a fixpoint, every marker and overlay
+//!   every weak entry kept and every undo list whole (M2), and, to a fixpoint, every marker and overlay
 //!   anchored in a buffer it reached and every private symbol with a local
 //!   binding there (M8: what a table walk can hand Lisp is live). Everything
 //!   the reference marker reaches must be in it (`check_reachable`, a floor),
@@ -177,10 +177,13 @@ fn child_marks(vm: &mut Vm, roots: &[Value]) -> Result<Vec<u8>, String> {
 /// TWIN, the twin's marks, must be exactly the closure the collection's own
 /// mark finds from ROOTED (the roots and the M8 extras) when every entry of
 /// each weak table the closure reaches is a root too: keeping weak entries
-/// (M2) is all that may add to that mark. The closure is found from the
-/// collection's own marks alone, each adding the entries of the weak tables
-/// it reached first, so no mark of TWIN's vouches for itself. Leaves the
-/// tables marked with the closure; its marks, one per level of weak tables.
+/// (M2) is all that may add to that mark. A buffer's undo list is weak to
+/// the collection's own mark in the same way, and is a root here with them.
+/// The closure is found from the collection's own marks alone, each adding
+/// the entries of the weak tables and the undo lists of the buffers it
+/// reached first, so no mark of TWIN's vouches for itself. Leaves the tables
+/// marked with the closure; its marks, one per level of weak tables and
+/// buffers.
 fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, String> {
     let mut roots = rooted.to_vec();
     let mut promoted = std::collections::HashSet::new();
@@ -211,7 +214,7 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
         }
         for i in buffers {
             promoted.insert(i);
-            roots.extend(vm.buffer_values(i));
+            roots.push(vm.own_undo_list(i));
         }
     };
     for t in 0..4 {
