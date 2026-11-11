@@ -3820,7 +3820,6 @@ version = "0.0.20"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
- "libc",
  "romacs-display-protocol",
  "romacs-display-runtime",
  "romacs-face",
@@ -3834,6 +3833,7 @@ dependencies = [
  "romacs-snapshot",
  "romacs-test-fonts",
  "romacs-vm",
+ "rustix",
  "serde_json",
  "tracing",
  "tracing-subscriber",

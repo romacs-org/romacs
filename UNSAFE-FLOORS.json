@@ -5,7 +5,7 @@
     "romacs-attach": {"sites": 2, "undocumented": 0},
     "romacs-brand": {"sites": 5, "undocumented": 0},
     "romacs-display-protocol": {"sites": 1, "undocumented": 0},
-    "romacs-display-runtime": {"sites": 20, "undocumented": 0},
+    "romacs-display-runtime": {"sites": 19, "undocumented": 0},
     "romacs-font": {"sites": 31, "undocumented": 0},
     "romacs-font-materializer": {"sites": 2, "undocumented": 0},
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
@@ -15,7 +15,7 @@
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
     "romacs-video": {"sites": 28, "undocumented": 0},
     "romacs-vm": {"sites": 851, "undocumented": 486},
-    "romacs-vm-gui": {"sites": 11, "undocumented": 2}
+    "romacs-vm-gui": {"sites": 9, "undocumented": 1}
   },
   "unsafe_op_in_unsafe_fn_pending": {
 
