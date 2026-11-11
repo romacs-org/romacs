@@ -123,6 +123,9 @@
   (should (eq (car (nth 2 (romacs-compile-passes-tests--pre
                            '(progn (defvaralias 'pass-a 'load-path) (mapcar (lambda (pass-a) pass-a) l)))))
               'mapcar))
+  (should (eq (car (nth 2 (romacs-compile-passes-tests--pre
+                           '(progn (defvaralias 'pass-alias 'pass-b) (mapcar (lambda (pass-b) pass-b) l)))))
+              'mapcar))
   ;; A declaration in an enclosing form being expanded (the store test
   ;; covers one an `eval-when-compile' inherits).
   (let ((macroexp--dynvars (cons 'pass-e (bound-and-true-p macroexp--dynvars))))

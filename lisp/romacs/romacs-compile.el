@@ -381,11 +381,14 @@ A larger or circular form stops the count there."
 
 (defun romacs-compile--declares-p (form symbol)
   "Whether FORM is a declaration that makes SYMBOL special.
-`defvar' and `defconst' of it, and `defvaralias' and
-`custom-declare-variable' of it quoted."
+`defvar' and `defconst' of it, `custom-declare-variable' of it quoted,
+and `defvaralias' with it quoted as either the alias or the base: an
+alias makes both special."
   (pcase form
     (`(,(or 'defvar 'defconst) ,(pred (eq symbol)) . ,_) t)
-    (`(,(or 'defvaralias 'custom-declare-variable) (quote ,(pred (eq symbol))) . ,_) t)))
+    (`(custom-declare-variable (quote ,(pred (eq symbol))) . ,_) t)
+    (`(defvaralias (quote ,(pred (eq symbol))) . ,_) t)
+    (`(defvaralias ,_ (quote ,(pred (eq symbol))) . ,_) t)))
 
 (defun romacs-compile--special-p (symbol)
   "Whether a `let' of SYMBOL here could bind it dynamically.
