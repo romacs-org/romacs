@@ -1020,6 +1020,7 @@ fn paint(
     let submit_start = Instant::now();
     images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
     sender.submit_scene(frame, children, shown.animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
     if wait != Wait::No { activate(sender, presentation, pending)?; }
@@ -1156,6 +1157,7 @@ fn paint_prompt(
     });
     images.borrow_mut().publish(sender, std::iter::once(&glyphs).chain(&children))?;
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
@@ -1231,7 +1233,8 @@ fn evaluate(
             // Only a closed render thread refuses, and then nothing paints.
             let _ = visual_sender.set_visual_config(config.clone());
         })
-        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false)))));
+        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false))
+        .with_models(sender.clone()))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1464,6 +1467,22 @@ fn evaluate(
                 // there and then.
                 if live && let Some(click) = tab_bar_click(&previous, &event).or_else(|| status_bar_click(&previous, &event)) {
                     if let Err(error) = vm.eval_source(&click) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
+                    continue;
+                }
+                // A native model's event runs its special-event binding
+                // (rlisp/romacs-model.el), then the frame repaints.
+                // Its callbacks may read input: they get the keys queued
+                // ahead, as a command does.
+                if live && let InputEvent::Model { id, event } = &event {
+                    let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    vm.enter_busy();
+                    let (result, closed) = lent.run(&host, |_| vm.run_model_event(*id, event));
+                    vm.leave_busy();
+                    if let Err(error) = result { echo::show(&mut vm, &error)?; }
+                    if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
+                    }
                     live_presentation.changed();
                     continue;
                 }

@@ -53,9 +53,24 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent-codex" '("romacs-agent--codex-"))
 
 
+;;; Generated autoloads from romacs-agent-diff.el
+
+(register-definition-prefixes "romacs-agent-diff" '("romacs-agent-"))
+
+
+;;; Generated autoloads from romacs-agent-gate.el
+
+(register-definition-prefixes "romacs-agent-gate" '("romacs-agent-gate"))
+
+
 ;;; Generated autoloads from romacs-agent-gnosis.el
 
 (register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
+
+
+;;; Generated autoloads from romacs-agent-handoff.el
+
+(register-definition-prefixes "romacs-agent-handoff" '("romacs-agent-handoff"))
 
 
 ;;; Generated autoloads from romacs-agent-history.el
@@ -67,9 +82,19 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
 
 
+;;; Generated autoloads from romacs-agent-idle.el
+
+(register-definition-prefixes "romacs-agent-idle" '("romacs-agent-idle-"))
+
+
 ;;; Generated autoloads from romacs-agent-images.el
 
 (register-definition-prefixes "romacs-agent-images" '("romacs-agent-images-"))
+
+
+;;; Generated autoloads from romacs-agent-rollback.el
+
+(register-definition-prefixes "romacs-agent-rollback" '("romacs-agent-"))
 
 
 ;;; Generated autoloads from romacs-agent-t3.el
@@ -103,6 +128,11 @@ only sessions whose chat is open.
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
+
+
+;;; Generated autoloads from romacs-agent-worktree.el
+
+(register-definition-prefixes "romacs-agent-worktree" '("romacs-agent-worktree-"))
 
 
 ;;; Generated autoloads from romacs-animate.el
@@ -370,11 +400,6 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
 
 
-;;; Generated autoloads from romacs-keeper.el
-
-(register-definition-prefixes "romacs-keeper" '("romacs-"))
-
-
 ;;; Generated autoloads from romacs-key-hint.el
 
 (register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))
@@ -625,39 +650,6 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-term.el
 
 (register-definition-prefixes "romacs-term" '("kill-ring" "romacs-term"))
-
-
-;;; Generated autoloads from romacs-term-keep.el
-
-(autoload 'romacs-term-keep-open "romacs-term-keep"
-"Start SHELL in DIRECTORY as the current buffer's terminal; its session.
-With a keeper the terminal's helper process is the keeper's child and
-outlives this session; `romacs-term-handle' names it.
-
-(fn SHELL DIRECTORY)")
-(autoload 'romacs-term--restart-blocker "romacs-term-keep"
-"Why the current terminal buffer cannot be handed to the next build, or nil.
-A terminal's helper process speaks the version it was started with for
-as long as the terminal lives.  A restart into a build that cannot read
-it would leave the terminal running and out of reach, so it is refused
-here, while this session still serves it.")
-(with-eval-after-load 'warm-restart (add-hook 'warm-restart-blocker-functions #'romacs-term--restart-blocker))
-(autoload 'romacs-term-desktop-restore "romacs-term-keep"
-"The terminal buffer NAME of MISC, attached again to its running terminal.
-
-(fn FILE NAME MISC)")
-(autoload 'romacs-term-adopt-orphans "romacs-term-keep"
-"Bring back the terminals a session that is gone left running.
-A session that crashed, or was killed, leaves its terminals in its
-keeper with their programs running.  Each comes back in a buffer of the
-name it had.  Return those buffers.  Does nothing when no keeper runs
-for this session." t)
-(defun romacs-term--adopt-at-startup nil
-"Once started, bring back terminals a gone session left." (unless noninteractive (run-at-time 0 nil (lambda nil (ignore-errors (romacs-term-adopt-orphans))))))
-(add-hook 'after-init-hook #'romacs-term--adopt-at-startup)
-(with-eval-after-load 'desktop (add-to-list 'desktop-buffer-mode-handlers '(romacs-term-mode . romacs-term-desktop-restore)))
-(setq romacs-term-open-function #'romacs-term-keep-open)
-(register-definition-prefixes "romacs-term-keep" '("romacs-term-"))
 
 
 ;;; Generated autoloads from romacs-test.el
@@ -951,6 +943,11 @@ abstention, cancellation and retry never accept a scheduled or practice grade.
 
 (fn ID)")
 (register-definition-prefixes "gnosis-agent-eval" '("gnosis-agent-eval-"))
+
+
+;;; Generated autoloads from gnosis-agent-model.el
+
+(register-definition-prefixes "gnosis-agent-model" '("gnosis-agent-model-"))
 
 
 ;;; Generated autoloads from gnosis-agent-review.el
@@ -1387,9 +1384,24 @@ model themata, or import a new one; q finishes.
 (register-definition-prefixes "gnosis-model-backend-canvas" '("gnosis-model-backend-canvas"))
 
 
+;;; Generated autoloads from gnosis-model-backend-romacs.el
+
+(register-definition-prefixes "gnosis-model-backend-romacs" '("gnosis-model-backend-romacs"))
+
+
 ;;; Generated autoloads from gnosis-model-camera.el
 
 (register-definition-prefixes "gnosis-model-camera" '("gnosis-model-camera-"))
+
+
+;;; Generated autoloads from gnosis-model-explore.el
+
+(autoload 'gnosis-model-explore "gnosis-model-explore"
+"Study model scene RESOURCE: orbit, zoom and click its structures.
+Interactively, choose a managed scene.
+
+(fn RESOURCE)" t)
+(register-definition-prefixes "gnosis-model-explore" '("gnosis-model-explore-"))
 
 
 ;;; Generated autoloads from gnosis-monkeytype.el

@@ -472,6 +472,66 @@ fn a_collection_due_in_a_nested_protected_body_is_finished_soon() {
     assert_eq!(value, "(t t t)", "the finalizer and the hook ran within the loop");
 }
 
+/// The automatic collections since the last call: how far past its trigger
+/// the latest of them began, in objects (`romacs--take-collections').
+const LATEST_LATE: &str = "(let ((late 0)) (dolist (r (cdr (romacs--take-collections)) late) \
+    (when (eq (car r) 'automatic) (setq late (max late (nth 7 r))))))";
+
+/// Every way a primitive returns asks for a poll once allocation has passed
+/// another step, whatever it allocated: a loop of a few big calls collects
+/// inside the loop, at a back-jump, not first at the request's end. Forty
+/// iterations stay far below one budget period of ticks. A collection then
+/// begins past its trigger, each call passing it midway, but at most one
+/// call's allocation and one poll step (16,384 conses) past it.
+#[test]
+fn big_primitive_allocation_collects_inside_the_loop() {
+    let mut missed = Vec::new();
+    let mut late = Vec::new();
+    for (path, body) in [
+        ("leaf", "(make-list 100000 nil)"),
+        ("generated, under apply", "(apply #'make-list 100000 '(nil))"),
+        ("legacy", "(copy-sequence na-long)"),
+        ("reader", "(read-from-string na-text)"),
+        // Not this path's alone: the cleanup's entry collects too, until step
+        // 2b leaves it to the request (lisp-speed 13.4).
+        ("under unwind-protect", "(unwind-protect (make-list 100000 nil) nil)"),
+        ("bool vectors", "(make-bool-vector 4000000 nil)"),
+    ] {
+        // A VM of its own, settled: no request left over from the setup.
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_stress(0);
+        vm.set_collection_floor(1);
+        vm.eval_source("(progn (defvar na-long (make-list 100000 1)) \
+            (defvar na-text (format \"(%s)\" (mapconcat #'number-to-string na-long \" \"))) (garbage-collect) t)").unwrap();
+        vm.eval_source("(romacs--take-collections)").unwrap();
+        let source = format!("(let ((g gcs-done)) (dotimes (_ 40) {body}) (- gcs-done g))");
+        let collected: i64 = vm.eval_source(&source).unwrap().display().unwrap().parse().unwrap();
+        if collected == 0 { missed.push(path); }
+        let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+        if !(1.0..=117_384.0).contains(&latest) { late.push((path, latest)); }
+    }
+    assert!(missed.is_empty(), "no collection inside the loop: {missed:?}");
+    assert!(late.is_empty(), "collections began at no excess or too far past their trigger: {late:?}");
+}
+
+/// Compiled code's own allocation tests nothing: a loop of inline conses
+/// is bounded by the budget's poll, so a collection begins at most one
+/// budget period (10,000 ticks, one cons each here) past its trigger.
+#[test]
+fn inline_allocation_waits_at_most_one_budget_period() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_collection_floor(1);
+    vm.eval_source("(progn (garbage-collect) (romacs--take-collections))").unwrap();
+    let collected = vm.eval_source("(let ((g gcs-done) (l nil)) (dotimes (i 300000) (setq l (cons i l))) (- gcs-done g))")
+        .unwrap().display().unwrap();
+    assert_ne!(collected, "0", "the loop collected");
+    let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+    assert!((1.0..=10_500.0).contains(&latest), "a collection began {latest} objects past its trigger");
+}
+
 /// A protected form run again and again from native code (`Vm::execute'),
 /// with no back-jump or call to poll at: the cleanup's entry collects,
 /// however the cleanup ends, and a doomed finalizer runs at the execution's

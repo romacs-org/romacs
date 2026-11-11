@@ -1,0 +1,21 @@
+error[E0277]: the trait bound `romacs_brand::Gc<'_, 'b>: romacs_brand::Plain` is not satisfied
+ --> tests/rooting/fail/without_gc_permission_argument.rs:7:5
+  |
+7 |     without_gc(e, gc, |mut m, gc| collect(&mut m, gc));
+  |     ^^^^^^^^^^ the trait `romacs_brand::Plain` is not implemented for `romacs_brand::Gc<'_, 'b>`
+  |
+  = help: the following other types implement trait `romacs_brand::Plain`:
+            &T
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            Arc<T>
+            Box<T>
+            Option<T>
+          and $N others
+note: required by a bound in `romacs_brand::without_gc`
+ --> src/lib.rs
+  |
+  | pub fn without_gc<E, A: Plain, N: Plain>(e: &mut E, a: A, body: for<'m, 'b> fn(Mx<'m, 'b, E>, A) -> N) -> N {
+  |                         ^^^^^ required by this bound in `without_gc`

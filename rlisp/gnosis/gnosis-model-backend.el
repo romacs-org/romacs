@@ -28,9 +28,10 @@
 
 (defcustom gnosis-model-backend 'auto
   "Choose the model renderer.
-Auto prefers an available native Neomacs renderer, otherwise canvas-3d.
+Auto prefers Romacs's native GPU model view while it is available,
+otherwise the optional canvas-3d renderer when one is configured.
 Forcing a backend refuses unavailable rendering rather than falling back."
-  :type '(choice (const auto) (const canvas-3d) (const neomacs-3d))
+  :type '(choice (const auto) (const romacs) (const canvas-3d))
   :group 'gnosis)
 
 (defvar-local gnosis-model-backend--implementation nil
@@ -39,29 +40,23 @@ Forcing a backend refuses unavailable rendering rather than falling back."
 (defvar-local gnosis-model-backend-selection-hook nil
   "Hook receiving an owner-qualified surface selection, without submitting.")
 
-(defconst gnosis-model-backend--directory
-  (file-name-directory (or load-file-name buffer-file-name))
-  "Directory used to discover bundled optional backends.")
-
-(declare-function neomacs-model-available-p "neomacs-model" ())
-(defvar gnosis-neomacs-3d-backend)
+(defvar gnosis-model-backend-romacs)
+(declare-function gnosis-model-backend-romacs-unavailable-reason "gnosis-model-backend-romacs" ())
+(declare-function gnosis-model--renderer-directory "gnosis-model" ())
 
 (defun gnosis-model-backend--choose ()
   "Return the requested available backend's dispatch plist."
-  (if (or (eq gnosis-model-backend 'neomacs-3d)
-          (and (eq gnosis-model-backend 'auto)
-               (require 'neomacs-model nil t)
-               (fboundp 'neomacs-model-available-p)
-               (neomacs-model-available-p)))
-      (let ((load-path (cons (expand-file-name "../optional/neomacs-3d"
-                                               gnosis-model-backend--directory)
-                             load-path)))
-        (unless (and (require 'neomacs-model nil t)
-                     (neomacs-model-available-p)
-                     (require 'gnosis-neomacs-3d nil t))
-          (user-error "Native Neomacs model renderer is unavailable"))
-        gnosis-neomacs-3d-backend)
-    gnosis-model-backend-canvas))
+  (require 'gnosis-model-backend-romacs)
+  (let ((native (gnosis-model-backend-romacs-unavailable-reason)))
+    (pcase gnosis-model-backend
+      ('romacs
+       (when native (user-error "Native model renderer unavailable: %s" native))
+       gnosis-model-backend-romacs)
+      ('canvas-3d gnosis-model-backend-canvas)
+      (_ (cond ((not native) gnosis-model-backend-romacs)
+               ((gnosis-model--renderer-directory) gnosis-model-backend-canvas)
+               (t (user-error "The 3D model display is off in Romacs: %s; text cards still work"
+                              native)))))))
 
 (defun gnosis-model-backend-open (path view size inline target)
   "Open PATH at VIEW with SIZE, INLINE and display TARGET."

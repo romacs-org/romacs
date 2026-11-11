@@ -12,7 +12,9 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
-pub(crate) use lend::{bind_from, call_frame, compile_form, eval_form, eval_text, expand_form, read_next, run_function, toplevel, unbind_to, unwind_to, write_from};
+pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_form, eval_text, expand_form, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
+#[cfg(test)]
+pub(crate) use lend::test_requests::collect_now;
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
 use lend::{Nested, Orch, Pc, Write};
@@ -1859,7 +1861,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     engine.vm.execution_fatal = engine.fatal_image_failure;
     engine.vm.rooted_write = rooted_write;
     // Aftermath it left pending is polled for soon by the engine it returns to.
-    engine.vm.collect_poll |= engine.vm.aftermath_pending();
+    if engine.vm.aftermath_pending() { engine.vm.request_poll(); }
     engine.vm.running_engines -= 1;
     match engine.error {
         Some(error) => Err(error),
@@ -2331,7 +2333,7 @@ unsafe fn poll_resume(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Val
         // Due but held (a nested engine): the request stays for the engine
         // that may collect.
         let collect = if e.vm.collection_due() { e.vm.may_collect(1) } else {
-            e.vm.collect_poll = false;
+            e.vm.settle_poll();
             false
         };
         orchestrate(e, (Pc::new(pc), collect), polled, continue_at)
@@ -2771,11 +2773,11 @@ fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
     // A native target of `apply` has read its spread.
     e.spread_end = 0;
-    // Native code made big payloads: poll, and collect if due, soon. The
-    // request stays until a poll settles it; an engine that may not collect
-    // (nested, or held) leaves it to the one it returns to, polling at its
-    // own pace meanwhile.
-    if e.vm.collect_poll && e.vm.may_collect(1) { e.budget = 0; }
+    // Native code allocated another step, or a poll was asked for: poll, and
+    // collect if due, at the next tick. The request stays until a poll
+    // settles it; an engine that may not collect (nested, or held) leaves it
+    // to the one it returns to, polling at its own pace meanwhile.
+    if e.vm.poll_requested() && e.vm.may_collect(1) { e.budget = 0; }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
@@ -3773,15 +3775,18 @@ unsafe fn generated_step(
     unsafe {
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
-        // The reader runs Lisp: a lend, which the dispatch makes.
-        if matches!(prim::name(target), Some("read" | "read-from-string")) {
+        // A reading primitive runs Lisp: a lend, which the dispatch makes.
+        if matches!(prim::generated(target), Some(prim::PrimDesc { body: prim::Body::Reader(_), .. })) {
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             return Continue::Read(Box::new((Pc::new(pc), Imm::new(e.vm, target).expect("a primitive"), base + start, argc)));
         }
         let step = e.vm.call_generated(target, base + start, argc);
-        // A region attached under id pressure (`frozen.rs`), or big payloads
-        // made (`Vm::collect_poll'): poll, and collect if due, soon.
-        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) { e.budget = 0; }
+        // A region attached under id pressure (`frozen.rs`): poll, and
+        // collect, soon. A poll the call asked for (`Vm::poll_requested') is
+        // `leave_native''s, which every way out of the step reaches: its
+        // value, a collection, an escape (`route_escape'), or a call step's
+        // last continuation.
+        if e.vm.region_collect { e.budget = 0; }
         take_step(e, r, pc, step)
     }
 }
@@ -3799,7 +3804,8 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
         std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
     });
     lend::read(&mut m, gc.by_ref(), (target, start, argc), (pc, saved_depth), |e, (pc, saved_depth), step| {
-        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) { e.budget = 0; }
+        // As at a generated call's return: a requested poll is `take_step''s.
+        if e.vm.region_collect { e.budget = 0; }
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Vec::new);
@@ -4454,7 +4460,7 @@ unsafe fn leaf_call(
         if value == Value::UNBOUND && en.leaf_fault.is_some() {
             return leaf_failed(e, r, pc, target, start, argc);
         }
-        if en.vm.region_collect || (en.vm.collect_poll && en.vm.may_collect(1)) {
+        if en.vm.region_collect || (en.vm.poll_requested() && en.vm.may_collect(1)) {
             en.budget = 0;
         }
         *r.add((*pc).a) = value;

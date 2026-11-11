@@ -132,11 +132,50 @@ pub(crate) type Next = std::result::Result<Step, Fault>;
 pub(crate) enum Body {
     Leaf(LeafBody),
     Call(fn(&mut Leaf<'_>, &[Value]) -> Next),
-    /// A leaf that runs Lisp while it reads: its caller publishes the
-    /// engine's roots first (`generated_step').
-    Reader(LeafBody),
+    /// A primitive that reads, and so may call Lisp: orchestration over the
+    /// VM under its engine's permission (`threaded_lend::read`).
+    Reader(ReaderBody),
 }
 pub(crate) type LeafBody = fn(&mut Leaf<'_>, &[Value]) -> Out;
+/// A reading primitive's body: its outcome goes to the call's frame, and it
+/// returns whether it signalled.
+pub(crate) type ReaderBody = for<'r, 'm, 'b, 'g> fn(ReadCall<'r, 'm, 'b, 'g>) -> bool;
+/// A reading primitive's call (`Body::Reader`): orchestration over the VM
+/// under GC, its engine's permission. Its ARGC arguments stay in the engine's
+/// registers from START (`code_suspended` keeps them in place), and its
+/// outcome goes to OUT, a frame of three (`land`).
+pub(crate) struct ReadCall<'r, 'm, 'b, 'g> {
+    pub m: &'r mut crate::brand::Mx<'m, 'b, Vm>,
+    pub gc: crate::brand::Gc<'g, 'b>,
+    pub start: usize,
+    pub argc: usize,
+    pub out: &'r crate::gc::RootFrame,
+}
+/// A reading primitive's OUTCOME, written where its caller reads it: the value
+/// first in OUT, or a signal's condition and data after it. The condition
+/// stays nil when the escape waits in `propagated_escape`. Whether it signalled.
+pub(crate) fn land(vm: &mut Vm, out: &crate::gc::RootFrame, outcome: Out) -> bool {
+    match outcome {
+        Ok(value) => {
+            vm.set_rooted(out, 0, value);
+            false
+        }
+        Err(fault) => {
+            if let Some((condition, data)) = vm.step_fault(fault) {
+                vm.set_rooted(out, 1, condition);
+                vm.set_rooted(out, 2, data);
+            }
+            true
+        }
+    }
+}
+/// The reading primitive at INDEX's body (`Body::Reader`).
+pub(crate) fn reader_body(index: usize) -> ReaderBody {
+    match descriptor(index) {
+        Some(Descriptor::Generated(PrimDesc { body: Body::Reader(f), .. })) => *f,
+        _ => unreachable!("a reading primitive (`generated_step`)"),
+    }
+}
 
 pub(crate) struct PrimDesc {
     pub name: &'static str,
@@ -153,7 +192,7 @@ pub(crate) struct PrimDesc {
 /// the `vm` field is private even to `prims::*` (a child of `prim` would
 /// otherwise see `prim`'s private fields): a leaf body cannot name `Vm`, so it
 /// cannot call `collect`, `execute` or `load`. Proven by compile-fail probe.
-pub(crate) use leaf::graphics::ImageEnv;
+pub(crate) use leaf::graphics::{IMAGE_ERROR_LOG, ImageEnv};
 mod leaf {
     use super::super::*;
     use super::Fault;
@@ -572,7 +611,7 @@ mod leaf {
         /// Owned word flags from the current syntax table, ignoring text
         /// syntax properties as GNU's string case conversion does.
         pub(crate) fn casing_word_flags(&mut self, codes: &[u32], defaults: &[u8]) -> std::result::Result<Vec<bool>, Fault> {
-            use romacs_regex_engine::SyntaxClass;
+            use romacs_regex::SyntaxClass;
             let symbols = if let Some(&slot) = self.vm.names.get("case-symbols-as-words") {
                 let value = self.vm.variable_value(slot).map_err(Fault::Error)?;
                 value != Value::NIL && value != Value::UNBOUND
@@ -886,7 +925,8 @@ mod leaf {
             }
             Ok(value)
         }
-        pub fn read_from_string(&mut self, string: Value, start: Value, end: Value) -> std::result::Result<Value, Fault> {
+        /// `read-from-string`'s START and END over STRING, as character indexes.
+        pub(crate) fn read_range(&mut self, string: Value, start: Value, end: Value) -> std::result::Result<(usize, usize), Fault> {
             let len = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?.len() as i64;
             let index = |v: Value, default| {
                 if v == Value::NIL { Ok(default) }
@@ -899,36 +939,48 @@ mod leaf {
             if a < 0 || b < a || b > len {
                 return Err(Fault::Range3(string, start, end));
             }
-            let read = self.vm.read_lisp_string(string, a as usize, b as usize).map_err(|(message, signal)| {
+            Ok((a as usize, b as usize))
+        }
+        /// What `read-from-string` returns for READ, begun at character
+        /// START: (OBJECT . POSITION).
+        pub(crate) fn string_read(&mut self, read: crate::reader::Read, start: usize) -> std::result::Result<Value, Fault> {
+            let (value, end) = read.map_err(|(message, signal)| {
                 if let Some((condition, data)) = signal { Fault::Signal(condition, data) }
                 else if message.starts_with("end-of-file") { Fault::EndOfFile }
                 else { Fault::ReadSyntax(message) }
             })?.map(|(value, _, end)| (value, end)).ok_or(Fault::EndOfFile)?;
-            let position = Value::integer(a + read.1 as i64).map_err(Fault::Error)?;
-            Ok(self.cons(read.0, position))
+            let position = Value::integer((start + end) as i64).map_err(Fault::Error)?;
+            Ok(self.cons(value, position))
         }
-        pub fn read(&mut self, mut stream: Value) -> std::result::Result<Value, Fault> {
-            if stream == Value::NIL {
+        /// `read-from-string' with no permission, so calling no Lisp: no
+        /// `\N{NAME}' by name. For leaves reading Romacs's own constant Lisp.
+        pub fn read_from_string(&mut self, string: Value, start: Value, end: Value) -> std::result::Result<Value, Fault> {
+            let (a, b) = self.read_range(string, start, end)?;
+            let read = self.vm.read_string_unlent(string, a, b);
+            self.string_read(read, a)
+        }
+        /// `read`'s STREAM: itself, or `standard-input`'s value for nil.
+        pub(crate) fn read_stream(&mut self, stream: Value) -> std::result::Result<Value, Fault> {
+            let stream = if stream == Value::NIL {
                 let symbol = self.intern("standard-input");
-                stream = self.variable_value(symbol)?.unwrap_or(Value::TRUE);
-            }
+                self.variable_value(symbol)?.unwrap_or(Value::TRUE)
+            } else { stream };
             if stream == Value::TRUE {
                 return Err(self.read_error("Reader interactive stdin is not wired"));
             }
-            let root = self.vm.external_roots.len();
-            self.vm.external_roots.push(stream);
-            let result=self.vm.read_lisp_stream(stream);
-            let stream = self.vm.external_roots[root];
-            self.vm.external_roots.truncate(root);
-            let result=result.map_err(|(message,signal)|{
-                if let Some((condition,data))=signal {Fault::Signal(condition,data)}
-                else if message.starts_with("end-of-file") {self.read_eof(stream)}
-                else if message.starts_with("Reader ") || message.contains("stream is not wired") {self.read_error(&message)}
-                else {Fault::ReadSyntax(message)}
+            Ok(stream)
+        }
+        /// What `read` returns for READ from STREAM.
+        pub(crate) fn stream_read(&mut self, read: crate::reader::Read, stream: Value) -> std::result::Result<Value, Fault> {
+            let result = read.map_err(|(message, signal)| {
+                if let Some((condition, data)) = signal { Fault::Signal(condition, data) }
+                else if message.starts_with("end-of-file") { self.read_eof(stream) }
+                else if message.starts_with("Reader ") || message.contains("stream is not wired") { self.read_error(&message) }
+                else { Fault::ReadSyntax(message) }
             })?;
             match result {
-                Some((value,_,_))=>Ok(value),
-                None=>Err(self.read_eof(stream)),
+                Some((value, _, _)) => Ok(value),
+                None => Err(self.read_eof(stream)),
             }
         }
         fn read_error(&mut self, message: &str) -> Fault {
@@ -1819,6 +1871,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod model;
     mod effects;
     mod clipboard;
     mod keyboard;
@@ -1991,9 +2044,24 @@ macro_rules! defsubr {
      fn $id:ident ($($params:tt)*) -> Step $body:block) => {
         $crate::prim::defsubr!(@emit $name, $gnu, $eff, Call, Next, $id, ($($params)*), $body);
     };
+    // A reading primitive: the header gives its arity, and its arguments
+    // stay in the engine's registers (`ReadCall`), for its leaves to read.
     (name = $name:literal, gnu = $gnu:literal, effect = $eff:ident,
-     fn $id:ident ($($params:tt)*) -> Reader $body:block) => {
-        $crate::prim::defsubr!(@emit $name, $gnu, $eff, Reader, Out, $id, ($($params)*), $body);
+     fn $id:ident ($cx:ident $(, $arg:ident : $ty:ty)* $(; optional $($opt:ident : $oty:ty),+)? $(,)?) -> Reader $body:block) => {
+        pub(crate) fn $id($cx: $crate::prim::ReadCall<'_, '_, '_, '_>) -> bool $body
+        #[allow(non_snake_case)]
+        pub(crate) mod $id {
+            pub(crate) const DESC: $crate::prim::PrimDesc = $crate::prim::PrimDesc {
+                name: $name,
+                min: [stringify!($cx), $(stringify!($arg)),*].len() - 1,
+                max: Some([stringify!($cx), $(stringify!($arg),)* $($(stringify!($opt)),+)?].len() - 1),
+                effect: $crate::prim::Effect::$eff,
+                gnu: $gnu,
+                file: file!(),
+                line: line!(),
+                body: $crate::prim::Body::Reader(super::$id),
+            };
+        }
     };
     (name = $name:literal, gnu = $gnu:literal, effect = $eff:ident,
      fn $id:ident ($($params:tt)*) $body:block) => {
@@ -2279,10 +2347,7 @@ impl Vm {
         argc: usize,
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
         let d = generated(target).expect("generated primitive");
-        if argc < d.min || d.max.is_some_and(|m| argc > m) {
-            let n = Value::integer(argc as i64).unwrap();
-            return Err(Some(self.condition("wrong-number-of-arguments", &[target, n])));
-        }
+        self.arity_check(d, target, argc)?;
         // Copied off the register stack, which the body may widen; on the
         // native stack for the common argument counts.
         let mut small = [Value::NIL; 8];
@@ -2294,21 +2359,31 @@ impl Vm {
             heap = self.stack[start..start + argc].to_vec();
             &heap
         };
-        let run = |vm: &mut Vm| {
+        let step = no_collection(self, |vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
-                Body::Leaf(f) | Body::Reader(f) => f(&mut cx, args).map(Step::Done),
+                Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
                 Body::Call(f) => f(&mut cx, args),
+                Body::Reader(_) => unreachable!("a reading primitive is lent from its engine (`read_body`)"),
             }
-        };
-        // The reader owns explicit roots and the engine publishes its suspended
-        // values before entering it. Unlike ordinary leaves it can call Lisp.
-        let step = if matches!(d.body, Body::Reader(_)) {
-            run(self)
-        } else {
-            no_collection(self, run)
-        };
+        });
         step.map_err(|fault| self.step_fault(fault))
+    }
+    /// The arity error D, the generated primitive TARGET, raises for ARGC
+    /// arguments, if it does.
+    fn arity_check(&mut self, d: &PrimDesc, target: Value, argc: usize) -> std::result::Result<(), Option<(Value, Value)>> {
+        if argc < d.min || d.max.is_some_and(|m| argc > m) {
+            let n = Value::integer(argc as i64).unwrap();
+            return Err(Some(self.condition("wrong-number-of-arguments", &[target, n])));
+        }
+        Ok(())
+    }
+    /// The reading primitive TARGET's index, for `reader_body`, once ARGC
+    /// arguments pass its arity.
+    pub(crate) fn reading_primitive(&mut self, target: Value, argc: usize) -> std::result::Result<usize, Option<(Value, Value)>> {
+        let d = generated(target).expect("generated primitive");
+        self.arity_check(d, target, argc)?;
+        Ok(target.index_if(6).expect("a subr"))
     }
     /// F on the ARGC values at ARGS, with no activation or `Step': the value,
     /// or UNBOUND with FAULT set. Copied off the register stack as
@@ -2549,7 +2624,8 @@ mod tests {
     ) -> std::result::Result<Value, Fault> {
         let mut cx = Leaf::new(vm);
         match d.body {
-            Body::Leaf(f) | Body::Reader(f) => f(&mut cx, args),
+            Body::Leaf(f) => f(&mut cx, args),
+            Body::Reader(_) => unreachable!("the arity fixtures declare no reading primitive"),
             Body::Call(f) => match f(&mut cx, args)? {
                 Step::Done(v) => Ok(v),
                 Step::Call { .. } | Step::Handle { .. } | Step::Collect | Step::CollectIdle | Step::Safepoint => panic!("expected immediate test result"),

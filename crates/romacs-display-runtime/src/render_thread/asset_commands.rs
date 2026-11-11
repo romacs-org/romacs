@@ -63,6 +63,15 @@ impl RenderApp {
                 }
                 self.publish_image_cache_usage();
             }
+            // Models load on their own thread and need no renderer until
+            // upload.
+            AssetCommand::ModelCreate { id, meshes, view, background, width, height } => {
+                self.handle_model_create(id, meshes, view, background, (width, height));
+            }
+            AssetCommand::ModelUpdate { id, req, change } => {
+                self.handle_model_update(id, req, change);
+            }
+            AssetCommand::ModelFree { id } => self.handle_model_free(id),
             AssetCommand::DebugSimulateDeviceLoss => {
                 tracing::warn!(
                     "simulating wgpu device loss (debug): rebuilding GPU state on the next pass"

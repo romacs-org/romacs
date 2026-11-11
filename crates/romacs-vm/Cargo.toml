@@ -13,7 +13,7 @@ romacs-record = { path = "../romacs-record" }
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }
-romacs-regex-engine = { path = "../romacs-regex-engine" }
+romacs-regex = { path = "../romacs-regex" }
 romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-allocator.workspace = true
 romacs-logo = { path = "../romacs-logo" }

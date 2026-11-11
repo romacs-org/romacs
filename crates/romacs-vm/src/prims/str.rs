@@ -128,7 +128,7 @@ fn char_equal(cx, first: Value, second: Value) {
         None => false,
     };
     let equal = if first == second { true } else if fold {
-        let table = romacs_regex_engine::CaseTranslation::standard();
+        let table = romacs_regex::CaseTranslation::standard();
         table.translate(first) == table.translate(second)
     } else { false };
     Ok(if equal { Value::TRUE } else { Value::NIL })

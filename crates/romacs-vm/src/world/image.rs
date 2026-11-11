@@ -30,6 +30,7 @@ impl Vm {
             ("signal_handlers", self.signal_handlers.is_empty()),
             ("propagated_escape", self.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
+            ("host_wait", self.host_wait.is_none()),
             ("layout_host", self.layout_host.is_none()),
             ("display", self.display.is_none()),
             // Restored as the renderer's default, which the options in the

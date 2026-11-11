@@ -3539,10 +3539,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-gnudiff"
-version = "0.0.20"
-
-[[package]]
 name = "romacs-grammars"
 version = "0.0.20"
 dependencies = [
@@ -3675,7 +3671,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-regex-engine"
+name = "romacs-regex"
 version = "0.0.20"
 dependencies = [
  "libc",
@@ -3816,7 +3812,7 @@ dependencies = [
  "romacs-layout-input",
  "romacs-logo",
  "romacs-record",
- "romacs-regex-engine",
+ "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
  "ropey",
