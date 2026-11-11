@@ -17,8 +17,8 @@
 #     docstring), with `gnu_source_sha256` of exactly those lines, re-checked
 #     against the GNU mirror on every run; and says in `verified_by` how the
 #     DIVERGENCES.md row was checked against that code.
-# The DIVERGENCES.md ledger is NOT trustworthy by itself (reference/
-# LEDGER-AUDIT.md: about half its rows unverified or wrong on the GNU side).
+# The DIVERGENCES.md ledger is NOT trustworthy by itself (an audit against
+# GNU's src/*.c found about half its rows unverified or wrong on the GNU side).
 # A row citing an id listed in SUSPECT-DIVERGENCES.toml, or whose citation
 # could not be re-checked, is filed as `excluded-unverified-row`: debt, never
 # a divergence and never parity evidence.
