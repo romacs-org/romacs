@@ -14,10 +14,9 @@
 # GNU's dump fingerprint identifies the executable/dump pair; the digests bind
 # the pair to the deliberately built mirror revision below.
 #
-# The legacy oracle harness is retired. Its mixed-vintage inline expectations
-# are preserved only in reference/gnu-legacy-oracle-corpus.tar.gz; this current
-# pin does NOT attest that every archived expectation came from this build.
-# See reference/gnu-legacy-oracle-README.md for provenance and source format.
+# The legacy oracle harness is retired, and its mixed-vintage inline
+# expectations are no longer in the tree; this pin does NOT attest that any of
+# them came from this build.
 #
 # RE-BASELINING.  A rebuild of the GNU mirror is its own change with its own
 # re-baselining, never a side effect of a session.  To re-pin, run
