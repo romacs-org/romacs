@@ -58,15 +58,15 @@ impl Client {
     /// No keeper there; a keeper of another framing, with both hashes; or
     /// no keeper-class version in common, by name.
     pub fn connect(path: &Path, classes: Vec<ClassRange>) -> Result<Self, String> {
-        let socket = UnixStream::connect(path).map_err(|e| format!("no keeper at {}: {e}", path.display()))?;
+        let socket = crate::address::connect(path).map_err(|e| format!("no keeper answers: {e}"))?;
         socket.set_read_timeout(Some(PATIENCE)).map_err(|e| e.to_string())?;
         let mut wire = Vec::new();
         Hello { epoch: 0, pid: std::process::id(), classes: classes.clone() }.record().encode_into(&mut wire);
-        channel::send_all(&socket, &wire, &[]).map_err(|e| format!("the keeper at {} hung up: {e}", path.display()))?;
+        channel::send_all(&socket, &wire, &[]).map_err(|e| format!("the keeper hung up: {e}"))?;
         let mut client = Self { socket, decoder: Decoder::default(), fds: VecDeque::new(), seq: 0, path: path.into(),
                                 keeper: Hello { epoch: 0, pid: 0, classes: Vec::new() }, classes: Vec::new(), events: VecDeque::new() };
         let first = client.record()?;
-        client.keeper = Hello::read(&first).map_err(|e| format!("the keeper at {}: {e}", path.display()))?;
+        client.keeper = Hello::read(&first).map_err(|e| format!("the keeper's greeting: {e}"))?;
         client.classes = classes.into_iter().map(|ours| { let agreed = hello::agree(&ours, &client.keeper.classes); (ours, agreed) }).collect();
         client.version(proto::CLASS)?;
         Ok(client)

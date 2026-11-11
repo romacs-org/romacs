@@ -66,6 +66,7 @@
 //! [`spawn`] is a library. A process that keeps no children (`--batch`, a
 //! test, a worker VM) calls it in process and uses no keeper.
 
+pub mod address;
 pub mod client;
 pub mod exec;
 pub mod proto;

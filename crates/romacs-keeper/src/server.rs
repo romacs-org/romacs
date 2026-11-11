@@ -568,7 +568,7 @@ impl Keeper {
 /// The system's refusal to bind or listen.
 pub fn fresh(path: &std::path::Path) -> io::Result<Table> {
     let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)?;
+    let listener = crate::address::bind(path)?;
     let mut entropy = [0u8; 8];
     // SAFETY: getrandom fills the eight-byte buffer it is given.
     unsafe { libc::getrandom(entropy.as_mut_ptr().cast(), 8, 0) };

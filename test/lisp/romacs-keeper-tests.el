@@ -250,5 +250,43 @@
       (ignore-errors (when (romacs-keeper-attached-p) (romacs-keeper-shutdown)))
       (delete-directory dir t))))
 
+;; romacs#122: a runtime directory deeper than a socket address holds.
+(ert-deftest keeper-attaches-through-a-socket-deeper-than-an-address ()
+  (let* ((top (make-temp-file "rk" t))
+         (temporary-file-directory
+          (file-name-as-directory (expand-file-name (concat (make-string 60 ?d) "/" (make-string 60 ?e)) top))))
+    (make-directory temporary-file-directory t)
+    (unwind-protect
+        (romacs-keeper-test--with
+          (should (> (string-bytes socket) 107))
+          (should (romacs-keeper-attached-p))
+          (let ((row (romacs-keeper-spawn "test" 1 '("/bin/sh" "-c" "echo deep")
+                                          :environment '("PATH=/usr/bin:/bin"))))
+            (should (equal (romacs-keeper-test--drain (plist-get row :handle)) "deep\n"))))
+      (delete-directory top t))))
+
+(defvar romacs-server-name)
+(defvar romacs-term-open-function)
+
+;; A session meant to keep its terminals that cannot reach a keeper says
+;; so, naming the socket and the cause, and starts no terminal without one.
+(ert-deftest keeper-a-failed-attach-is-loud-and-starts-no-terminal ()
+  (unless (fboundp 'romacs-select-buffer) (load "romacs-buffer-switch" nil t))
+  (require 'romacs-term)
+  (require 'romacs-term-keep)
+  (let* ((romacs-server-name (format "rk-unreachable-%d-%d" (emacs-pid) (random 100000)))
+         (socket (romacs-keeper-socket))
+         (romacs-keeper-enabled t)
+         (romacs-keeper-use-systemd nil)
+         (romacs-keeper-program (expand-file-name "no-such-keeper" temporary-file-directory))
+         (failed (should-error (romacs-keeper-attach) :type 'romacs-keeper-unreachable)))
+    (should (equal (error-message-string failed)
+                   (format "Cannot attach to this session's keeper: %s, No keeper executable at %s"
+                           socket romacs-keeper-program)))
+    (should-not (romacs-keeper-attached-p))
+    (should (eq romacs-term-open-function #'romacs-term-keep-open))
+    (should-error (romacs-term "/bin/sh") :type 'romacs-keeper-unreachable)
+    (should-not (get-buffer "*romacs-term*"))))
+
 (provide (quote romacs-keeper-tests))
 ;;; romacs-keeper-tests.el ends here

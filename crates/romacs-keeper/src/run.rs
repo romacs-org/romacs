@@ -19,16 +19,9 @@ use crate::server::{fresh, Build, Keeper};
 use crate::table::Table;
 
 /// Where the keeper of session NAME listens, under the runtime directory.
-///
-/// # Errors
-/// A path too long for a socket address, named.
-pub fn socket_path(runtime: &Path, name: &str) -> Result<PathBuf, String> {
-    let path = runtime.join("romacs").join(name).join("keeper.sock");
-    if path.as_os_str().len() > 107 {
-        return Err(format!("keeper socket path {} is over 107 bytes", path.display()));
-    }
-    Ok(path)
-}
+/// Any depth will do: [`crate::address`] binds and connects to it.
+#[must_use]
+pub fn socket_path(runtime: &Path, name: &str) -> PathBuf { runtime.join("romacs").join(name).join("keeper.sock") }
 
 /// Take the lock that makes this the one keeper of SOCKET; `None` when
 /// another holds it. The table keeps the descriptor, across an exec too.
