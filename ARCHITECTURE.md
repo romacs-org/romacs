@@ -56,9 +56,9 @@ frozen snapshots.
 
 ## Invariants
 
-- `romacs-vm` reaches the display only through `romacs-display-protocol` and
-  the host traits; it depends on no renderer, layout, font, video or webview
-  crate.
+- `romacs-vm` reaches the display only through `romacs-display-protocol`,
+  the snapshot types of `romacs-layout-input` and the host traits; it depends
+  on no renderer, layout engine, font, video or webview crate.
 - `romacs-display-protocol`, `romacs-layout-input`, `romacs-layout`,
   `romacs-face`, `romacs-font` and `romacs-regex` hold no evaluator and are
   tested without a VM.
