@@ -20,7 +20,7 @@ impl romacs_vm::DisplayHost for Pgtk {
 /// A window-system frame of 1216x876 pixels and 10x25 cells, with GNU's Lisp.
 pub fn gnu_session() -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     vm.set_frame_geometry(1216, 876, 25, 10).unwrap();
     vm.set_display_host(Some(Box::new(Pgtk)));
     assert!(vm.open_display());

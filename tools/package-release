@@ -8,7 +8,7 @@
 #
 #   bin/romacs-vm-gui  bin/romacs-mcp  bin/romacs-agent-host
 #   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
-#   share/romacs/{gnu-lisp,rlisp,etc,assets/fonts}  share/applications  share/icons
+#   share/romacs/{lisp/gnu,lisp/romacs,etc,assets/fonts}  share/applications  share/icons
 #
 # The binary finds share/romacs beside its bin/ (host::runtime_root), so the
 # tree works wherever it is unpacked. tools/ci/smoke-release checks the
@@ -41,7 +41,7 @@ exec "$(dirname "$(readlink -f "$0")")/romacs-vm-gui" --loadup "$@"
 EOF
 chmod 0755 "$stage/bin/romacs"
 mkdir -p "$stage/share/romacs"
-cp -r "$repo/gnu-lisp" "$repo/rlisp" "$repo/etc" "$stage/share/romacs/"
+cp -r "$repo/lisp/gnu" "$repo/lisp/romacs" "$repo/etc" "$stage/share/romacs/"
 mkdir -p "$stage/share/romacs/assets"
 cp -r "$repo/assets/fonts" "$stage/share/romacs/assets/"
 bash "$repo/tools/install-linux-desktop-assets.sh" "$stage"

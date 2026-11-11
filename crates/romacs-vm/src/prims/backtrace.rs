@@ -61,12 +61,12 @@ fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) -> Step 
     cx.backtrace_debug(level, flag, base).map(Step::Done)
 }}
 // Every frame with its locals in one walk, for `backtrace-get-frames`
-// (rlisp/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
+// (lisp/romacs/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
 defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
 fn backtrace_frames_and_locals(cx; optional base: Value) -> Step {
     cx.backtrace_frames_and_locals(base).map(Step::Done)
 }}
-// The two halves of `backtrace-eval' (rlisp/vm/prelude.el): GNU's
+// The two halves of `backtrace-eval' (lisp/romacs/vm/prelude.el): GNU's
 // specpdl_unrewind to a frame's entry, and back.
 defsubr! { name = "romacs--backtrace-unrewind", gnu = "eval.c:4236", effect = Global,
 fn backtrace_unrewind(cx, nframes: Value; optional base: Value) {

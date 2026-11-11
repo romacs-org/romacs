@@ -2,7 +2,7 @@
 """The *Romacs* landing's animation in a native --loadup session, forced on.
 
 The landing's logo is a text animation the render thread draws over the
-evaluator's frames (rlisp/romacs-animate.el, render_thread/text_animations.rs).
+evaluator's frames (lisp/romacs/romacs-animate.el, render_thread/text_animations.rs).
 A software rasterizer draws none, so every other harness sees a still frame;
 this one sets ROMACS_LAYER_ANIMATION=1 to run the path a GPU runs.
 

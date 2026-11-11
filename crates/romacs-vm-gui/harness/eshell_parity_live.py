@@ -45,7 +45,7 @@ def init_source(engine, root, debug):
     defaults, which GNU takes as gnosis_parity_live.py's GNU does."""
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
                  '(setq scroll-conservatively 101)\n'
-                 f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
+                 f'(load {lisp_string(str(ROOT / "lisp/romacs/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     variables = ' '.join(PROBE_VARIABLES)
     return f''';; -*- lexical-binding: t -*-
 {gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)

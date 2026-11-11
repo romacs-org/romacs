@@ -7,7 +7,7 @@
 
 ;; `project-find-file' and `project-find-regexp' as GNU defines them, with
 ;; the slow part, `project-files' and `xref-matches-in-files', run in a
-;; worker isolate of this session's own world (rlisp/vm/isolate.el) when
+;; worker isolate of this session's own world (lisp/romacs/vm/isolate.el) when
 ;; one stands ready.  The command returns to the command loop at once; when
 ;; the worker's frozen result arrives at a wait point the command continues
 ;; exactly where GNU's would be: the completion prompt, or the xref buffer.
@@ -17,7 +17,7 @@
 ;; meanwhile run their commands instead of waiting.
 ;;
 ;; A worker is used only when it is already prepared and idle, or is the
-;; child of a zygote already preparing (rlisp/vm/isolate.el), which forks
+;; child of a zygote already preparing (lisp/romacs/vm/isolate.el), which forks
 ;; it once ready: a worker's boot (the world's adoption and the libraries'
 ;; loading) costs about as much as the job, so a command that would have to
 ;; start one runs GNU's definition instead, and warms a worker for the next

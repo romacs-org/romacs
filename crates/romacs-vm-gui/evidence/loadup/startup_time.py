@@ -15,7 +15,7 @@ import jlib  # noqa: E402
 
 binary, out = sys.argv[1], Path(sys.argv[2])
 reps = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-FLAGS = {'default': '', 'loadup': '--loadup', 'gnu-lisp': '--gnu-lisp'}
+FLAGS = {'default': '', 'loadup': '--loadup', 'lisp/gnu': '--gnu-lisp'}
 results = {}
 for rep in range(reps):
     for mode, flag in FLAGS.items():
@@ -23,7 +23,7 @@ for rep in range(reps):
         stdout = d / 'stdout.jsonl'
         if stdout.exists(): stdout.unlink()
         before = {c['pid'] for c in jlib.clients()}
-        envs = f'ROMACS_LISP_DIR={jlib.ROOT}/gnu-lisp ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=14'
+        envs = f'ROMACS_LISP_DIR={jlib.ROOT}/lisp/gnu ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=14'
         cmd = f'env -u RUST_MIN_STACK -u LD_LIBRARY_PATH {envs} {binary} {flag} >{stdout} 2>{d / "stderr.log"}'
         t0 = time.monotonic()
         jlib.hy('eval', f'hl.exec_cmd({json.dumps("sh -c " + json.dumps(cmd))}, {{workspace="2 silent"}})')

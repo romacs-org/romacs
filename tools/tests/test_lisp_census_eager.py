@@ -59,7 +59,7 @@ class EagerArtifactTests(unittest.TestCase):
     def test_freshness_check_requires_matching_flag(self):
         with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettempdir()) / '')) as tmp:
             root = Path(tmp)
-            (root / 'gnu-lisp').mkdir()
+            (root / 'lisp/gnu').mkdir()
             artifact = root / 'measurement.json'
             data = {'mode': 'warm', 'oracle_inventory': {}, 'input_sha256': 'same', 'scope': 'whole_tree', 'files': [], 'gnu_version': 'GNU test'}
             with patch.object(census, 'ROOT', root), patch.object(census, 'oracle_inventory', return_value={}), patch.object(census, 'fingerprint', return_value='same'), patch.object(census, 'gnu_oracle_binary', return_value='/unit-test-gnu'), patch.object(census.subprocess, 'check_output', return_value='GNU test\n'), contextlib.redirect_stdout(io.StringIO()):

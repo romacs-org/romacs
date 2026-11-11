@@ -6,7 +6,7 @@
 ;;; Commentary:
 
 ;; A large visited buffer is fontified ahead of redisplay in a worker
-;; isolate (rlisp/vm/isolate.el) from a snapshot of its text: the worker
+;; isolate (lisp/romacs/vm/isolate.el) from a snapshot of its text: the worker
 ;; runs the buffer's major mode on its own copy, turns on Font Lock and
 ;; calls `jit-lock-function' over it chunk by chunk, as this session's
 ;; redisplay would, starting where the window's text ends.  It

@@ -275,7 +275,7 @@ Custom delayed, gets its record's position as `variable-documentation'."
 ;; preloaded files are in.  Romacs does not run command-line in this
 ;; bootstrap, so it takes this one step itself, in batch.  A session that
 ;; starts in another context evaluates the same list again in its own
-;; (rlisp/romacs-gui-loadup.el).
+;; (lisp/romacs/romacs-gui-loadup.el).
 (defvar romacs-loadup-delayed-init-variables
   (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
   "The preloaded variables whose standard value depends on the runtime, in load order.
@@ -372,7 +372,7 @@ and `after-init-time' its clock."
         ;; startup.el normal-top-level (startup.el:585-592), before
         ;; command-line: the per-user directory, which
         ;; `locate-user-emacs-file' and the delayed standard values build on.
-        ;; A GUI session then names its own (rlisp/romacs-gui-loadup.el).
+        ;; A GUI session then names its own (lisp/romacs/romacs-gui-loadup.el).
         (setq startup--xdg-config-home-emacs
               (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
                 (if xdg-config-home
@@ -381,7 +381,7 @@ and `after-init-time' its clock."
         (setq user-emacs-directory
               (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
         ;; The frame init_display made; a window session has none
-        ;; (rlisp/romacs-gui-loadup.el).
+        ;; (lisp/romacs/romacs-gui-loadup.el).
         (setq terminal-frame (selected-frame))
         (romacs--startup-environment)
         (let ((user-emacs-directory-warning nil))
@@ -393,7 +393,7 @@ and `after-init-time' its clock."
 (defvar romacs-startup-function #'romacs-batch-startup
   "The per-process startup steps this session took last.
 A session that takes its own after the chain's sets it to them
-\(rlisp/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
+\(lisp/romacs/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
 (romacs-batch-startup)
 ;; startup.el normal-top-level (startup.el:843): the initial frame's faces
 ;; for its background mode and display type.  It reads no per-process fact

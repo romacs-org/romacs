@@ -1,4 +1,4 @@
-"""tools/adapt-modus: the committed rlisp/romacs-theme-modus.el is its
+"""tools/adapt-modus: the committed lisp/romacs/romacs-theme-modus.el is its
 output for the committed modus-themes.el copy."""
 from pathlib import Path
 import subprocess

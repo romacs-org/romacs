@@ -311,7 +311,7 @@ fn lossage_size(cx; optional arg: Value) {
 }}
 
 // The count of keymap changes, which keymap.c keeps implicitly as the
-// validity of its where_is_cache: `where-is-internal' (rlisp/vm/prelude.el)
+// validity of its where_is_cache: `where-is-internal' (lisp/romacs/vm/prelude.el)
 // rebuilds its reverse map when this moves.
 defsubr! { name = "romacs--keymap-generation", gnu = "keymap.c:2505", effect = Reads,
 fn romacs_keymap_generation(cx) {
