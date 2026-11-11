@@ -20,7 +20,8 @@ def pinned_fixture(test, repo):
     binary.parent.mkdir(parents=True, exist_ok=True)
     binary.write_text('fixture ' + FIXTURE_PIN)
     binary.chmod(0o755)
-    (repo / 'parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
+    (repo / 'ledger').mkdir(exist_ok=True)
+    (repo / 'ledger/parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
     test.enterContext(mock.patch.dict(os.environ, {'GNU_ORACLE_ROOT': str(root)}))
     return binary
 
@@ -447,13 +448,13 @@ class OracleResolution(unittest.TestCase):
             os.chdir(previous)
 
     def test_missing_reference_refuses_with_restoration_action(self):
-        (self.root / 'parity-reference.toml').unlink()
-        with self.assertRaisesRegex(SystemExit, 'cannot read parity-reference.toml.*restore'):
+        (self.root / 'ledger/parity-reference.toml').unlink()
+        with self.assertRaisesRegex(SystemExit, 'cannot read ledger/parity-reference.toml.*restore'):
             gate._pinned_oracle(self.root)
 
     def test_missing_or_malformed_commit_refuses_with_restoration_action(self):
         for text in ('other = 1\n', 'mirror_commit = "not-a-revision"\n'):
-            (self.root / 'parity-reference.toml').write_text(text)
+            (self.root / 'ledger/parity-reference.toml').write_text(text)
             with self.assertRaisesRegex(SystemExit, 'no valid mirror_commit.*restore'):
                 gate._pinned_oracle(self.root)
 
@@ -469,7 +470,7 @@ class OracleResolution(unittest.TestCase):
 
     def test_reference_read_failure_is_actionable(self):
         with mock.patch.object(pathlib.Path, 'read_text', side_effect=PermissionError('denied')):
-            with self.assertRaisesRegex(SystemExit, 'cannot read parity-reference.toml.*denied.*restore'):
+            with self.assertRaisesRegex(SystemExit, 'cannot read ledger/parity-reference.toml.*denied.*restore'):
                 gate._pinned_oracle(self.root)
 
     def test_invalid_override_refuses_before_admission(self):
@@ -842,7 +843,7 @@ class Receipts(unittest.TestCase):
     def test_queued_pin_change_cannot_change_frozen_oracle(self):
         pin = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
         other = '1' * 40
-        ref = self.wt / 'parity-reference.toml'
+        ref = self.wt / 'ledger/parity-reference.toml'
         ref.write_text(f'mirror_commit = "{pin}"\n')
         oracle_root = self.root / 'oracle-root'
         for revision in (pin, other):
@@ -858,12 +859,12 @@ class Receipts(unittest.TestCase):
              mock.patch.object(gate, 'ORACLE', None):
             self.assertEqual(self.submit(), 0)
             receipt = json.loads((self.run_dir / 'receipt.json').read_text())
-            self.assertIn(pin, self.git('show', receipt['tree'] + ':parity-reference.toml').decode())
+            self.assertIn(pin, self.git('show', receipt['tree'] + ':ledger/parity-reference.toml').decode())
             self.assertEqual(receipt['oracle_sha'], gate.digest(oracle_root / pin / 'bin/emacs'),
                              'frozen tree A was certified with mutable worktree oracle B')
 
     def test_queued_reference_deletion_keeps_frozen_oracle(self):
-        self.after_submission = lambda: (self.wt / 'parity-reference.toml').unlink()
+        self.after_submission = lambda: (self.wt / 'ledger/parity-reference.toml').unlink()
         try:
             result = self.submit()
         except SystemExit as error:
@@ -885,7 +886,7 @@ class Receipts(unittest.TestCase):
         self.assertEqual(self.reuse('--oracle', str(self.oracle)), 0)
 
     def test_explicit_override_wins_without_a_submitted_reference(self):
-        (self.wt / 'parity-reference.toml').unlink()
+        (self.wt / 'ledger/parity-reference.toml').unlink()
         override = self.root / 'explicit-oracle'
         override.write_text('different diagnostic oracle')
         override.chmod(0o755)
@@ -909,7 +910,7 @@ class Receipts(unittest.TestCase):
     def test_copied_gate_in_fresh_interpreter_resolves_extracted_tree(self):
         self.assertEqual(self.submit(), 0)
         receipt = json.loads((self.run_dir / 'receipt.json').read_text())
-        ref = self.wt / 'parity-reference.toml'
+        ref = self.wt / 'ledger/parity-reference.toml'
         ref.unlink()
         copied = self.run_dir / 'gate'
         help_run = subprocess.run([gate.sys.executable, str(copied), '--help'],
@@ -925,7 +926,7 @@ g.update(HOME=root, CACHE=root / 'cache', RUNNER=sys.argv[1])
 g['environment_identity'] = lambda *a: ('fixture', {}, {})
 def build(src, run_dir, expr, threads, run, t0, suites, repeat=1):
     assert not (src / '.git').exists(), 'test must execute a git-less mirror'
-    assert (src / 'parity-reference.toml').is_file(), 'frozen reference missing from mirror'
+    assert (src / 'ledger/parity-reference.toml').is_file(), 'frozen reference missing from mirror'
     suites.update({'vm2': ['fixture']})
     (run_dir / 'vm2.jsonl').write_text('{"type":"test","event":"ok","name":"fixture"}\n')
     return []

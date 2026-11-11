@@ -2,7 +2,7 @@ use romacs_vm::Vm;
 
 #[test]
 fn unrelated_handlers_allow_local_operations() {
-    let cases: serde_json::Value = serde_json::from_str(include_str!("../../../evidence/handler-local/cases.json")).unwrap();
+    let cases: serde_json::Value = serde_json::from_str(include_str!("fixtures/handler-local/cases.json")).unwrap();
     let root = std::env::temp_dir().join(format!("romacs-handler-local-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let directory = serde_json::to_string(&format!("{}/", root.display())).unwrap();
