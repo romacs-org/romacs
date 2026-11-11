@@ -189,35 +189,73 @@ on.  A VM without the process prelude runs no timers."
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
-(defun romacs--batch-input-may-come-p ()
-  "Non-nil while something could still queue input for a batch read.
-That is a live file notification watch, a one-shot timer or a live
-process, whose callbacks may set `unread-command-events'.  A repeating
-timer alone does not count: a wait only it could end may never end."
+(defvar romacs-batch-read-horizon 1.0
+  "Seconds a batch read with nothing queued waits for a timer to queue input.
+With no live process or file watch, the read ends in end of input once
+no timer or idle timer is due within this many seconds, or once it has
+waited this long since the last one went quiet: batch GNU would block
+for the terminal forever.")
+
+(defun romacs--batch-live-p ()
+  "Non-nil while a file watch or a live process could still queue input."
   (or (and (fboundp 'romacs--file-notify-watching-p) (romacs--file-notify-watching-p))
-      ;; Slot 4 of a timer is its repeat delay (timer.el `timer--repeat-delay'),
-      ;; read directly: a bare VM has not loaded timer.el.
-      (and (boundp 'timer-list)
-           (catch 'found
-             (dolist (timer timer-list) (unless (aref timer 4) (throw 'found t)))))
       (and (fboundp 'process-list)
            (catch 'found
              (dolist (process (process-list))
-               (when (process-live-p process) (throw 'found t)))))))
+               ;; `process-live-p' is subr.el's: a bare VM has not loaded it.
+               (when (memq (process-status process) '(run stop open listen connect))
+                 (throw 'found t)))))))
+
+(defun romacs--batch-input-soon-p ()
+  "Non-nil while something could queue input for a batch read soon.
+That is a live file watch or process, or a timer or idle timer due within
+`romacs-batch-read-horizon'.  Idle timers count once Emacs is idle."
+  (or (romacs--batch-live-p)
+      (let ((delay (romacs--timer-delay)))
+        (and delay (<= delay romacs-batch-read-horizon)))))
+
+(defun romacs--batch-wait-p (seconds)
+  "Whether a batch read with nothing queued waits, for SECONDS or input.
+With SECONDS it does.  Without, it starts idling first, as GNU's
+read_char does before it blocks for input, and waits if input may come
+soon (`romacs--batch-input-soon-p')."
+  (or seconds
+      (progn (romacs--timer-start-idle)
+             (or (romacs--batch-input-soon-p)
+                 (progn (romacs--timer-stop-idle) nil)))))
 
 (defun romacs--read-batch-wait (seconds)
-  "kbd_buffer_get_event's wait with no terminal to read: run timers,
-process output and file notification events until SECONDS pass, input is
-requeued, or, without SECONDS, nothing could queue any more input
-\(`romacs--batch-input-may-come-p')."
-  (let ((end (and seconds (+ (float-time) seconds))) (waiting t))
-    (while waiting
-      (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
-      (let ((left (and end (- end (float-time)))))
-        (if (or (romacs--unread-p) (and left (<= left 0))
-                (and (null end) (not (romacs--batch-input-may-come-p))))
-            (setq waiting nil)
-          (romacs--wait-reading-process-output (or left 'forever) nil 0 t))))))
+  "kbd_buffer_get_event's wait with no terminal to read: run timers, idle
+timers, process output and file notification events until input is
+requeued, or SECONDS pass, or, without SECONDS, until no input may come
+soon: none queued within `romacs-batch-read-horizon' of the last live
+process or watch, and no timer due within it.  It waits in short slices,
+so it sees a process end or a sentinel queue a key."
+  (let* ((start (float-time))
+         (end (and seconds (+ start seconds)))
+         (deadline (+ start romacs-batch-read-horizon))
+         (waiting t))
+    (unwind-protect
+        (while waiting
+          (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
+          (let ((now (float-time)))
+            (when (romacs--batch-live-p) (setq deadline (+ now romacs-batch-read-horizon)))
+            (if (or (romacs--unread-p)
+                    (if end (>= now end)
+                      (or (> now deadline) (not (romacs--batch-input-soon-p)))))
+                (setq waiting nil)
+              (romacs--wait-reading-process-output
+               (if end (min 0.1 (- end now)) 0.1) nil 0 t))))
+      (unless seconds (romacs--timer-stop-idle)))))
+
+(defun romacs--batch-end-of-input ()
+  "Signal end of input as a batch read does with nothing left to read.
+Batch GNU blocks for the terminal here.  With no input left, VM2 leaves
+the innermost recursive edit or minibuffer instead, so a command loop
+that reports errors cannot spin on this one."
+  (if (> (recursion-depth) 0)
+      (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin"))))
+    (signal 'end-of-file '("Error reading from stdin"))))
 
 (defun romacs--host-event (seconds display)
   "`romacs--read-host-event', whose `quit' is one of two.  A C-g that quit the
@@ -462,22 +500,17 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
      ;; goes on, as read_char's do.
      ((setq c (romacs--take-user-signal))
       (when (romacs--special-event c) (setq c nil again t)))
-     ((and (fboundp 'romacs--wait-reading-process-output)
-           (or seconds (romacs--batch-input-may-come-p)))
+     ((and (fboundp 'romacs--wait-reading-process-output) (romacs--batch-wait-p seconds))
       ;; Batch GNU waits here, in kbd_buffer_get_event: timers, process
       ;; output and file notification events run until SECONDS pass or,
-      ;; without SECONDS, for as long as one of them could still queue
-      ;; input.  Input a timer or filter requeued is read next; once
-      ;; nothing could, end of input comes as below.
+      ;; without SECONDS, for as long as one of them could queue input
+      ;; (`romacs--read-batch-wait').  Input a timer or filter requeued is
+      ;; read next.
       (romacs--read-batch-wait seconds)
-      (when (or (romacs--unread-p) (null seconds)) (setq again t)))
+      (cond ((romacs--unread-p) (setq again t))
+            ((null seconds) (romacs--batch-end-of-input))))
      (seconds)
-     ;; Batch GNU blocks for the terminal here. With no input left, VM2
-     ;; leaves the innermost recursive edit or minibuffer instead, so a
-     ;; command loop that reports errors cannot spin on this one.
-     ((> (recursion-depth) 0)
-      (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
-     (t (signal 'end-of-file '("Error reading from stdin"))))
+     (t (romacs--batch-end-of-input)))
     ;; reread_for_input_method, for a printable one-byte character.
     (when (and input-method-function (not post) (null prev-event)
                (integerp c) (>= c 32) (< c 256) (/= c 127))
