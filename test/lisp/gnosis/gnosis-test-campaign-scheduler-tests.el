@@ -54,7 +54,7 @@
     (should (eq (alist-get 'enable_short_term oracle) t))
     ;; The JSON generator widens the upstream f32 parameter values to f64.
     (should (equal (alist-get 'parameters oracle)
-                   (mapcar #'gnosis-fsrs--f32 gnosis-fsrs-default-parameters)))
+                   (mapcar #'gnosis-test-fsrs--f32 gnosis-fsrs-default-parameters)))
     (mapc #'gnosis-test-fsrs--validate-case cases)
     ;; Pin every input, including both outcomes at and just below S_MAX.
     ;; Removing or duplicating a high-stability case must not silently pass.

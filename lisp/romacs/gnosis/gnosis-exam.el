@@ -98,7 +98,7 @@ less than BASE."
 
 (defun gnosis-exam--calendar-interval (stability retention)
   "Return the scheduler's calendar interval for STABILITY at RETENTION."
-  (max 1 (round (gnosis-fsrs--interval stability retention))))
+  (max 1 (round (gnosis-fsrs-interval stability retention))))
 
 (defun gnosis-exam-retention (base stability days-left target &optional ramp-days)
   "Return exam retention for a review DAYS-LEFT before an exam, or nil.
@@ -142,7 +142,7 @@ Empty INCLUDE selects every thema; any EXCLUDE tag removes it."
   "Return predicted recall on EXAM-DAY from STABILITY and LAST-REVIEW-DAY.
 Return nil when memory state is unknown."
   (when (and stability last-review-day)
-    (gnosis-fsrs--retrievability
+    (gnosis-fsrs-retrievability
      (max 0 (gnosis-exam-days-until last-review-day exam-day)) stability)))
 
 (defun gnosis-exam-coverage (rows today exam-day target)
