@@ -22,6 +22,8 @@ import sys
 import tempfile
 import time
 
+from live_oracle import stop
+
 HARNESS = Path(__file__).resolve().parent
 ROOT = HARNESS.parents[2]
 PROBE = HARNESS / 'parity_probe.el'
@@ -156,16 +158,6 @@ def wait(predicate, timeout, what, process=None, interval=.05):
             raise RuntimeError(f'{what}: process exited {process.returncode}')
         time.sleep(interval)
     raise TimeoutError(f'timed out after {timeout}s waiting for {what}')
-
-
-def stop(process):
-    if process is not None and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
 
 
 def ptraceable():
