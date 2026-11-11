@@ -1515,11 +1515,14 @@ Optional VALIDATE checks caller ownership before selection and replacement.
 
 (autoload 'gnosis-scheduler-drift "gnosis-scheduler"
 "Return the reviews in DB that today's FSRS schedules differently.
-Replay every reviewed thema and list (THEMA-ID . DRIFT) for each with
-drift, DRIFT as `gnosis-scheduler-replay' reports it.  Nothing is
-written.
+Replay every reviewed thema from its recorded results and list
+(THEMA-ID . DRIFT) for each with drift, DRIFT as
+`gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
+one whose history does not replay.  The collection is read in two
+queries and each review recomputed once; nothing is written.
+Interactively, report the count.
 
-(fn &optional DB)")
+(fn &optional DB)" t)
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
 "Select user-wide desired RETENTION for future accepted reviews.
 Append an immutable configuration snapshot.  Existing due dates and events
