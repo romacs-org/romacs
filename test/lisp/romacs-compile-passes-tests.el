@@ -99,7 +99,13 @@
   ;; A pure call whose value is a hash table is left to run.
   (should (equal (romacs-compile-passes-tests--pre '(json-parse-string "{}"))
                  '(json-parse-string "{}")))
-  (should (equal (romacs-compile-passes-tests--pre '(take 2 '(a b c))) ''(a b))))
+  (should (equal (romacs-compile-passes-tests--pre '(take 2 '(a b c))) ''(a b)))
+  ;; A string whose properties hold such a value is left to run too.
+  (put 'romacs-compile-passes-tests--propertized 'pure t)
+  (defalias 'romacs-compile-passes-tests--propertized
+    (lambda () (propertize "x" 'payload (make-hash-table))))
+  (should (equal (romacs-compile-passes-tests--pre '(romacs-compile-passes-tests--propertized))
+                 '(romacs-compile-passes-tests--propertized))))
 
 (ert-deftest romacs-compile-maps-in-place-only-a-lexical-parameter ()
   ;; A defvar anywhere in the form, or earlier in the file, would make the
@@ -108,7 +114,19 @@
     (should (eq (car (nth 2 (romacs-compile-passes-tests--pre form))) 'mapcar)))
   (let ((byte-compile-bound-variables (cons 'pass-y byte-compile-bound-variables)))
     (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (pass-y) pass-y) l))) 'mapcar)))
-  (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (load-path) load-path) l))) 'mapcar)))
+  (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (load-path) load-path) l))) 'mapcar))
+  ;; A defconst, a defvaralias, and a defvar in an enclosing form whose
+  ;; eval-when-compile preprocesses the mapping on its own.
+  (should (eq (car (nth 2 (romacs-compile-passes-tests--pre
+                           '(progn (defconst pass-c 1) (mapcar (lambda (pass-c) pass-c) l)))))
+              'mapcar))
+  (should (eq (car (nth 2 (romacs-compile-passes-tests--pre
+                           '(progn (defvaralias 'pass-a 'load-path) (mapcar (lambda (pass-a) pass-a) l)))))
+              'mapcar))
+  ;; A declaration in an enclosing form being expanded (the store test
+  ;; covers one an `eval-when-compile' inherits).
+  (let ((macroexp--dynvars (cons 'pass-e (bound-and-true-p macroexp--dynvars))))
+    (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (pass-e) pass-e) l))) 'mapcar))))
 
 (ert-deftest romacs-compile-maps-in-place-within-a-budget ()
   ;; Circular quoted data in the body ends the count, and keeps the call.

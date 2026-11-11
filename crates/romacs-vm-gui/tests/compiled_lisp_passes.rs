@@ -17,6 +17,7 @@ const PASSES: &str = r#";;; -*- lexical-binding: t -*-
   (condition-case e (t-pass-map '(1 . 2)) (error (car e)))
   (let ((c (list 1))) (setcdr c c) (condition-case e (t-pass-map c) (error (car e))))))
 (defun t-pass-circular (xs) (mapcar (lambda (_) '#1=(a . #1#)) xs))
+(defun t-pass-enclosed () (let () (defvar t-pass-e) (eval-when-compile (mapcar (lambda (t-pass-e) (boundp 't-pass-e)) '(1)))))
 (defun t-pass-nested (x) (mapcar (lambda (x) (mapcar (lambda (x) (mapcar (lambda (x) (mapcar (lambda (x) (list x)) (list x))) (list x))) (list x))) (list x)))
 (provide 't-pass)
 "#;
@@ -29,7 +30,7 @@ fn session(root: &Path, compiled: bool) -> String {
     }
     let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
         .args(["-Q", "--batch", "-L"]).arg(root.join("lib"))
-        .args(["--eval", "(progn (require 't-pass) (prin1 (list (t-pass-fold) (t-pass-table) (t-pass-mapc '(1 2 3)) (t-pass-special) (t-pass-shapes) (eq (car (t-pass-circular '(1))) (cdr (car (t-pass-circular '(1))))) (t-pass-nested 7))))"])
+        .args(["--eval", "(progn (require 't-pass) (prin1 (list (t-pass-fold) (t-pass-table) (t-pass-mapc '(1 2 3)) (t-pass-special) (t-pass-shapes) (eq (car (t-pass-circular '(1))) (cdr (car (t-pass-circular '(1))))) (t-pass-nested 7) (t-pass-enclosed))))"])
         .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &home).env("XDG_CONFIG_HOME", home.join("config"))
         .env("XDG_CACHE_HOME", home.join("cache")).env("TMPDIR", home.join("tmp")).env("LANG", "C.UTF-8")
         .env("ROMACS_COMPILED_LISP", if compiled { "on" } else { "off" }).env("ROMACS_COMPILED_LISP_STORE", root.join("store"))
@@ -48,7 +49,7 @@ fn a_file_compiled_with_the_passes_answers_as_its_source() {
     // A sibling `.elc`: GNU would load compiled code, so Romacs does.
     std::fs::write(root.join("lib/t-pass.elc"), "").unwrap();
     let source = session(&root, false);
-    assert_eq!(source, "((\"abcdef\" \"foo\" (a b)) t 6 (nil) ((10 20) (10 20) (970 980) wrong-type-argument circular-list) t (((((7))))))");
+    assert_eq!(source, "((\"abcdef\" \"foo\" (a b)) t 6 (nil) ((10 20) (10 20) (970 980) wrong-type-argument circular-list) t (((((7))))) (nil))");
     assert_eq!(session(&root, true), source);
     // The file was compiled into the store, not refused and read as source.
     let artifacts = std::fs::read_dir(root.join("store")).unwrap().flatten()

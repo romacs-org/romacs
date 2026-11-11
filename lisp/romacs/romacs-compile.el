@@ -184,13 +184,15 @@ holds before the form being compiled: they come first here too."
   "Compile FORM into a unit, with the specials declared so far."
   (push (cons form byte-compile-bound-variables) romacs-compile--emitted))
 
-(defvar romacs-compile--form nil
-  "The top-level form being preprocessed, expanded.")
+(defvar romacs-compile--forms nil
+  "The forms being preprocessed, expanded, innermost first: a form an
+`eval-when-compile' preprocesses lies inside the one that holds it.")
 
 (defun romacs-compile--preprocess (form)
   "`byte-compile-preprocess' for the walk: FORM fully expanded."
-  (let ((romacs-compile--form (macroexpand-all form byte-compile-macro-environment)))
-    (romacs-compile--inline romacs-compile--form)))
+  (let ((romacs-compile--forms (cons (macroexpand-all form byte-compile-macro-environment)
+                                     romacs-compile--forms)))
+    (romacs-compile--inline (car romacs-compile--forms))))
 
 (defun romacs-compile--declare (name)
   "`byte-compile--declare-var': NAME is special for the rest of the file."
@@ -349,15 +351,16 @@ redefined or advised `mapcar' is called with.")
 
 (defun romacs-compile--storable-p (value)
   "Whether VALUE is a constant the compiled store holds as itself.
-Numbers, interned symbols, strings and bool-vectors, and lists and
-vectors of those, at most `romacs-compile--budget' of them: no hash
+Numbers, interned symbols, strings without text properties and
+bool-vectors, and lists and vectors of those, at most `romacs-compile--budget' of them: no hash
 table, marker, buffer or other object of the session, and no cycle."
   (let ((budget romacs-compile--budget) (pending (list value)) (ok t))
     (while (and ok pending)
       (let ((v (pop pending)))
         (setq budget (1- budget))
         (cond ((< budget 0) (setq ok nil))
-              ((or (numberp v) (stringp v) (bool-vector-p v)
+              ((and (stringp v) (null (text-properties-at 0 v)) (null (next-property-change 0 v))))
+              ((or (numberp v) (bool-vector-p v)
                    (and (symbolp v) (eq v (intern-soft (symbol-name v))))))
               ((consp v) (push (car v) pending) (push (cdr v) pending))
               ((vectorp v) (setq pending (append v pending)))
@@ -376,22 +379,32 @@ A larger or circular form stops the count there."
           (setq next (cdr next)))))
     count))
 
+(defun romacs-compile--declares-p (form symbol)
+  "Whether FORM is a declaration that makes SYMBOL special.
+`defvar' and `defconst' of it, and `defvaralias' and
+`custom-declare-variable' of it quoted."
+  (pcase form
+    (`(,(or 'defvar 'defconst) ,(pred (eq symbol)) . ,_) t)
+    (`(,(or 'defvaralias 'custom-declare-variable) (quote ,(pred (eq symbol))) . ,_) t)))
+
 (defun romacs-compile--special-p (symbol)
-  "Whether a `let' of SYMBOL in this form could bind it dynamically.
-Special globally, declared special earlier in the file, or declared by
-a `defvar' anywhere in the top-level form."
+  "Whether a `let' of SYMBOL here could bind it dynamically.
+Special globally, declared special earlier in the file or by an
+enclosing form being expanded (`macroexp--dynvars'), or declared
+anywhere in the forms being preprocessed (`romacs-compile--declares-p')."
   (or (special-variable-p symbol)
       (memq symbol byte-compile-bound-variables)
-      (let ((pending (list romacs-compile--form)) (found nil) (budget 100000))
+      (and (boundp 'macroexp--dynvars) (memq symbol macroexp--dynvars))
+      (let ((pending (copy-sequence romacs-compile--forms)) (found nil) (budget 100000))
         (while (and pending (not found) (> budget 0))
           (let ((next (pop pending)))
             (while (and (consp next) (not found) (> budget 0))
               (setq budget (1- budget))
-              (if (and (eq (car next) 'defvar) (consp (cdr next)) (eq (cadr next) symbol))
+              (if (romacs-compile--declares-p next symbol)
                   (setq found t))
               (push (car next) pending)
               (setq next (cdr next)))))
-        ;; A form too large to search is taken to declare it.
+        ;; Forms too large to search are taken to declare it.
         (or found (<= budget 0)))))
 
 (defun romacs-compile--mapping-p (form)
