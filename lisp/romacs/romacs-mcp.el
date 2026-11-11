@@ -767,8 +767,12 @@ must not act as if its answer were delivered."
                (romacs-mcp--unqueue request))
       (when-let* ((entry (gethash (cons peer target) romacs-mcp--deferred-index)))
         (setf (plist-get (car entry) :cancelled) t))
-      ;; A subscription it gave up on: the client listens anew.
-      (romacs-mcp--cancel peer target))
+      ;; A subscription it gave up on: the client listens anew.  The held
+      ;; subscriptions alone: a scan of the queue per withdrawal is quadratic.
+      (dolist (listen romacs-mcp--subscriptions)
+        (when (and (eq peer (plist-get listen :peer))
+                   (equal target (gethash "id" (plist-get listen :message) :absent)))
+          (setf (plist-get listen :cancelled) t))))
     (romacs-mcp--send (list :peer peer :generation romacs-mcp--generation :cancelled nil)
                       (romacs-mcp--object "jsonrpc" "2.0" "id" id
                                           "result" (romacs-mcp--object "cancelled" (if request t :false))))))
