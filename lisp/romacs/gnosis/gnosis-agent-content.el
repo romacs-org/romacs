@@ -485,7 +485,7 @@ CARD is a plist of `gnosis-agent-content--card-keys'."
            (choice (member type gnosis-agent-content--choice-types))
            (choices (gnosis-agent-content--texts (plist-get card :choices) "choices"))
            (hints (gnosis-agent-content--texts (plist-get card :hints) "hints"))
-           (tags (gnosis-agent-content--texts (plist-get card :tags) "tags"))
+           (tags (delete-dups (gnosis-agent-content--texts (plist-get card :tags) "tags")))
            (aliases (gnosis-agent-content--texts (plist-get card :aliases) "aliases"))
            ;; A cloze may mark its blanks inline instead, with no answer.
            (answer (gnosis-agent-content--texts (plist-get card :answer) "answer"
@@ -498,7 +498,7 @@ CARD is a plist of `gnosis-agent-content--card-keys'."
           (user-error "%s must be a string" (substring (symbol-name key) 1))))
       (unless (or (null (plist-get card :key))
                   (and (stringp (plist-get card :key))
-                       (not (string-empty-p (plist-get card :key)))))
+                       (not (string-empty-p (string-trim (plist-get card :key))))))
         (user-error "key must be a nonempty string"))
       (if choice
           (when hints (user-error "%s takes choices, not hints" type))
@@ -525,8 +525,9 @@ only retags it finds it."
   "Return a table of each of GUIDS that DB's themata hold to their IDs."
   (let ((found (make-hash-table :test #'equal)))
     (when guids
+      ;; Raw text, as Anki import stores its identities in this column.
       (pcase-dolist (`(,id ,guid)
-                     (gnosis-sqlite-select
+                     (sqlite-select
                       db (format "SELECT id, source_guid FROM themata WHERE source_guid IN (%s)
                                   ORDER BY id"
                                  (mapconcat (lambda (_) "?") guids ","))
@@ -552,30 +553,88 @@ A card repeating an earlier card's identity is an error."
                                             earlier))
              (puthash guid index seen)
              (list index guid thema nil)))
-       (error (list index nil nil (error-message-string err)))))))
+       (error (list index (and (consp card) (plistp card) (stringp (plist-get card :key))
+                               (concat "agent:key:" (plist-get card :key)))
+                    nil (error-message-string err)))))))
 
-(defun gnosis-agent-content--result (entry existing dry-run)
-  "Return ENTRY's result, saving its thema unless EXISTING holds it.
+(defun gnosis-agent-content--draft-themata (ids)
+  "Return themata IDS as the editor reads its draft of them back."
+  (with-temp-buffer
+    (delay-mode-hooks (org-mode))
+    (gnosis-export--insert-themata ids)
+    (gnosis-export-parse-themata)))
+
+(defun gnosis-agent-content--kept (id)
+  "Return what the editor shows and saves of thema ID.
+An absent hint reads as an empty one: Gnosis stores either for none."
+  (pcase-let ((`(,type ,question ,hints ,answer ,aliases ,rubric)
+               (car (gnosis-select '[type keimenon hypothesis answer accepted-aliases rubric]
+                                   'themata `(= id ,id)))))
+    (list type question (mapcar (lambda (hint) (or hint "")) hints) answer aliases rubric
+          (gnosis-get 'parathema 'extras `(= id ,id))
+          (sort (gnosis-select 'tag 'thema-tag `(= thema-id ,id) t) #'string<)
+          (sort (gnosis-select 'dest 'thema-links `(= source ,id) t) #'string<))))
+
+(defun gnosis-agent-content--resave (id thema before)
+  "Save THEMA, the editor's reading of ID, and return why it lost BEFORE, or nil."
+  (let ((saved (gnosis-save-thema thema)))
+    (cond (saved (format "the editor could not save it again: %s"
+                         (replace-regexp-in-string "\\`Line [^ ]* (id:[^)]*): " "" saved)))
+          ((not (equal before (gnosis-agent-content--kept id)))
+           "the editor would change it on saving"))))
+
+(defun gnosis-agent-content--editor-losses (ids)
+  "Return (ID . WHY) for each of IDS that would not survive the editor.
+Write their draft as the editor opens it, read it back and save each, as
+reopening and saving them would, and require what it keeps unchanged.
+One draft holds them all; only when it does not read back whole is each
+thema drafted alone, to say which."
+  (let* ((before (mapcar (lambda (id) (cons id (gnosis-agent-content--kept id))) ids))
+         (themata (and ids (condition-case nil (gnosis-agent-content--draft-themata ids)
+                             (error nil)))))
+    (delq nil
+          (if (or (null ids) (and themata (= (length themata) (length ids))))
+              (mapcar (lambda (thema)
+                        (let ((id (string-to-number (car thema))))
+                          (when-let* ((why (gnosis-agent-content--resave
+                                            id thema (alist-get id before))))
+                            (cons id why))))
+                      themata)
+            (mapcar (lambda (id)
+                      (condition-case err
+                          (let ((alone (gnosis-agent-content--draft-themata (list id))))
+                            (if (/= (length alone) 1)
+                                (cons id "the editor would read it as several themata")
+                              (when-let* ((why (gnosis-agent-content--resave
+                                                id (car alone) (alist-get id before))))
+                                (cons id why))))
+                        (error (cons id (format "the editor could not read it back: %s"
+                                                (error-message-string err))))))
+                    ids)))))
+
+(defun gnosis-agent-content--result (db entry existing dry-run)
+  "Return ENTRY's result in DB, saving its thema unless EXISTING holds it.
 ENTRY is (INDEX GUID THEMA ERROR); DRY-RUN names what a save is."
   (pcase-let* ((`(,index ,guid ,thema ,error) entry)
-               (card (list :index index :key (and guid (string-remove-prefix "agent:key:" guid))))
+               (key (and guid (string-prefix-p "agent:key:" guid)
+                         (string-remove-prefix "agent:key:" guid)))
+               (card (list :index index :key key))
                (ids (and thema (gethash guid existing))))
-    (when (and guid (string-prefix-p "agent:hash:" guid))
-      (setq card (plist-put card :key nil)))
     (cond
      (error (append card (list :status "invalid" :error error)))
      (ids (append card (list :status "exists" :ids (vconcat ids))))
      (t
       (let ((saved (gnosis-save-thema thema t)))
-        (if (stringp saved)
-            (append card (list :status "invalid"
-                               :error (replace-regexp-in-string
-                                       "\\`Line [^ ]* (id:[^)]*): " "" saved)))
+        (cond
+         ((stringp saved)
+          (append card (list :status "invalid"
+                             :error (replace-regexp-in-string
+                                     "\\`Line [^ ]* (id:[^)]*): " "" saved))))
+         (t
           (dolist (id saved)
-            (gnosis-sqlite-execute
-             (gnosis--ensure-db) "UPDATE themata SET source_guid = ? WHERE id = ?" (list guid id)))
+            (sqlite-execute db "UPDATE themata SET source_guid = ? WHERE id = ?" (list guid id)))
           (append card (list :status (if dry-run "would-create" "created")
-                             :ids (vconcat (mapcar #'number-to-string (sort saved #'<)))))))))))
+                             :ids (vconcat (mapcar #'number-to-string (sort saved #'<))))))))))))
 
 (cl-defun gnosis-agent-content-create (cards &key dry-run)
   "Create themata from CARDS, a vector of card records, all or none.
@@ -588,8 +647,10 @@ so each type's own rules apply; a double, or a cloze marking its blanks
 inline, makes several themata.
 
 The key, or a hash of the card's content (all but its tags) when none
-is given, makes creation idempotent: a card whose key
-is already stored is reported `exists' with its IDs, not made again.
+is given, makes creation idempotent: a card whose key is already stored
+is reported `exists' with its IDs, not made again.  A key names one card
+across every call.  A card whose text the editor could not open and save
+again unchanged is invalid.
 Every card is checked in one transaction, rolled back when any card is
 invalid or for DRY-RUN, so nothing is then written.  It is refused
 inside another transaction, which could not roll back alone.
@@ -614,8 +675,24 @@ written.  KEY is the card's own key, or nil."
                          db (delq nil (mapcar (lambda (entry) (and (nth 2 entry) (nth 1 entry)))
                                               prepared)))))
           (setq results (mapcar (lambda (entry)
-                                  (gnosis-agent-content--result entry existing dry-run))
-                                prepared)))
+                                  (gnosis-agent-content--result db entry existing dry-run))
+                                prepared))
+          ;; Every new thema must open and save again in the editor.
+          (let ((losses (gnosis-agent-content--editor-losses
+                         (mapcan (lambda (r)
+                                      (and (member (plist-get r :status) '("created" "would-create"))
+                                           (mapcar #'string-to-number (plist-get r :ids))))
+                                    results))))
+            (when losses
+              (setq results
+                    (mapcar (lambda (r)
+                              (if-let* ((why (seq-some (lambda (id)
+                                                         (alist-get (string-to-number id) losses))
+                                                       (plist-get r :ids))))
+                                  (list :index (plist-get r :index) :key (plist-get r :key)
+                                        :status "invalid" :error (concat "Its text cannot be kept: " why))
+                                r))
+                            results)))))
         (when (or dry-run
                   (seq-some (lambda (r) (equal (plist-get r :status) "invalid")) results))
           (throw 'gnosis-agent-content--undo nil))

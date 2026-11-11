@@ -84,15 +84,27 @@
                      (mapcar (lambda (card) (plist-get card :ids)) (plist-get again :cards))))
       ;; Without a key, content the learner sees or is graded on tells
       ;; cards apart; tags alone do not.
-      (let ((rubric (gnosis-agent-content-create
-                     (vector (list :type "agent-eval" :question "Why does ice float?"
-                                   :answer ["It is less dense than liquid water."]
-                                   :rubric "Mentions hydrogen bonds"))))
-            (retag (gnosis-agent-content-create
-                    (vector (list :type "basic" :question "Capital of Greece?" :answer ["Athens"]
-                                  :tags ["places"] :aliases ["Athina"])))))
-        (should (equal '("created") (gnosis-test-cards--statuses rubric)))
-        (should (equal '("exists") (gnosis-test-cards--statuses retag))))
+      (let ((base (list :type "agent-eval" :question "Why is the sky blue?"
+                        :answer ["Rayleigh scattering"] :rubric "Names scattering")))
+        (should (equal '("created") (gnosis-test-cards--statuses
+                                     (gnosis-agent-content-create (vector base)))))
+        (dolist (change '((:rubric "Names scattering and wavelength")
+                          (:parathema "Short wavelengths scatter more.")))
+          (should (equal '("created")
+                         (gnosis-test-cards--statuses
+                          (gnosis-agent-content-create
+                           (vector (append change (copy-sequence base)))))))))
+      ;; Aliases are a basic card's; agent-eval takes none.
+      (let ((base (list :type "basic" :question "Gas giant?" :answer ["Jupiter"])))
+        (dolist (card (list base (append '(:aliases ["Zeus"]) base)))
+          (should (equal '("created")
+                         (gnosis-test-cards--statuses
+                          (gnosis-agent-content-create (vector card)))))))
+      (should (equal '("exists")
+                     (gnosis-test-cards--statuses
+                      (gnosis-agent-content-create
+                       (vector (list :type "basic" :question "Capital of Greece?" :answer ["Athens"]
+                                     :tags ["places"] :aliases ["Athina"]))))))
       ;; An explicit key holds even when the content changes.
       (let ((changed (gnosis-agent-content-create
                       (vector (list :type "agent-eval" :question "Why does ice float on water?"
@@ -138,15 +150,18 @@
                      (list :type "basic" :question "Keyed" :answer ["A"] :key 5)
                      (list :type "basic" :question "Fine?" :answer ["Yes"])
                      nil
-                     (list :type "image-region" :question "Q" :hints ["r"] :answer ["t"]))))
+                     (list :type "image-region" :question "Q" :hints ["r"] :answer ["t"])
+                     (list :type "basic" :question "Spaced" :answer ["A"] :key "  ")
+                     (list :type "basic" :question "Bad key kept" :answer [] :key "mine"))))
            (cards (plist-get result :cards)))
       (should (eq :false (plist-get result :written)))
       (should (= 0 (gnosis-test-cards--count)))
       (should (equal '("would-create" "invalid" "invalid" "invalid" "invalid" "invalid"
                        "invalid" "invalid" "would-create" "invalid" "invalid" "invalid"
-                       "invalid" "invalid" "invalid")
+                       "invalid" "invalid" "invalid" "invalid" "invalid")
                      (gnosis-test-cards--statuses result)))
-      (should (equal (number-sequence 0 14)
+      (should (equal "mine" (plist-get (aref cards 16) :key)))
+      (should (equal (number-sequence 0 16)
                      (mapcar (lambda (card) (plist-get card :index)) cards)))
       ;; The type's own message, without the editor's line prefix.
       (should (equal "Answer must be a single item, member of hypothesis."
@@ -156,8 +171,35 @@
                       (6 . "question must be a nonempty string") (7 . "must be an object")
                       (9 . "key repeats card 8") (10 . "Org cannot preserve tag")
                       (11 . "key must be a nonempty string") (12 . "content repeats card 0")
-                      (13 . "Card is empty") (14 . "model cards: gnosis_model_card_preview")))
+                      (13 . "Card is empty") (14 . "model cards: gnosis_model_card_preview")
+                      (15 . "key must be a nonempty string")))
         (should (string-match-p (cdr case) (plist-get (aref cards (car case)) :error)))))))
+
+(ert-deftest gnosis-test-cards-must-survive-the-editor ()
+  "A card is made only if the editor can open it and save it unchanged.
+Text the editor's draft would split or misread is that card's error,
+and the batch is not written; repeated tags are kept once."
+  (gnosis-test-with-db
+    (let* ((result (gnosis-agent-content-create
+                    (vector (list :type "basic" :question "Two points?"
+                                  :answer ["First point\n- Second point"])
+                            (list :type "basic" :question "Intro\n** First point\nmore"
+                                  :answer ["A"])
+                            (list :type "basic" :question "Fine" :answer ["A"]))))
+           (cards (plist-get result :cards)))
+      (should (eq :false (plist-get result :written)))
+      (should (= 0 (gnosis-test-cards--count)))
+      (should (equal '("invalid" "invalid" "would-create") (gnosis-test-cards--statuses result)))
+      (dotimes (i 2)
+        (should (string-prefix-p "Its text cannot be kept: " (plist-get (aref cards i) :error)))))
+    (let* ((result (gnosis-agent-content-create
+                    (vector (list :type "basic" :question "Tags twice" :answer ["A"]
+                                  :tags ["bio" "bio"]))))
+           (id (string-to-number (aref (plist-get (aref (plist-get result :cards) 0) :ids) 0))))
+      (should (equal '("created") (gnosis-test-cards--statuses result)))
+      (should (equal '("bio") (gnosis-select 'tag 'thema-tag `(= thema-id ,id) t)))
+      ;; What was made opens in the editor and reads back as it was saved.
+      (should (= 1 (length (gnosis-agent-content--draft-themata (list id))))))))
 
 (ert-deftest gnosis-test-cards-mixed-batches ()
   "New cards beside existing ones are written; any invalid card stops all."
@@ -232,6 +274,14 @@ Return the reply's decoded payload and whether it is an error."
         (should-not error)
         (should (equal '("exists" "exists") (gnosis-test-cards--statuses result)))
         (should (= 2 (gnosis-test-cards--count))))
+      ;; An invalid card is the tool's ordinary result, not an error.
+      (pcase-let ((`(,error ,result)
+                   (gnosis-test-cards--call
+                    "{\"name\": \"gnosis_cards_create\", \"arguments\": {\"cards\": [
+                      {\"type\": \"basic\", \"question\": \"Q\", \"answer\": []}]}}")))
+        (should-not error)
+        (should (eq :false (plist-get result :written)))
+        (should (equal '("invalid") (gnosis-test-cards--statuses result))))
       ;; Cards that are not an array are the protocol's invalid-params
       ;; error, raised before the tool runs; an empty array is the tool's.
       (should (equal '(romacs-mcp-protocol-error -32602 "Wrong argument type: cards" nil)
