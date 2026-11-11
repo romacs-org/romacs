@@ -1301,8 +1301,9 @@ impl Vm {
             }
         }
         // A call cache whose target died is stale: its symbol's function
-        // changed since it was filled, or the cell would hold the target
-        // live. It is emptied now, while the marks are whole, so that no
+        // changed since it was filled, or the symbol itself, in an obarray
+        // of its own, is dead; else the cell would hold the target live. It
+        // is emptied now, while the marks are whole, so that no
         // cache names a freed entry once this collection is over: the next
         // may cut that entry off its table, or compact and rewrite every
         // reference it keeps.
@@ -1805,10 +1806,6 @@ mod tests {
         assert_eq!(deferral(f64::NAN), 0.0);
     }
 
-    /// A call site's cache keeps no closure alive: once its symbol is
-    /// redefined, what the old closure captured is garbage, though a site
-    /// that has not run since was the last to name it; and a collection
-    /// that compacts copes as one that frees in place does.
     /// A cache left stale by a collection that frees in place names nothing
     /// by the time a later one compacts: the old callee, the last closure
     /// made, is cut off its table's tail by the first.
@@ -1841,6 +1838,10 @@ mod tests {
         assert!(vm.eval_source_raw("(cache-caller)").is_err(), "a keymap is no function to call with no event");
     }
 
+    /// A call site's cache keeps no closure alive: once its symbol is
+    /// redefined, what the old closure captured is garbage, though a site
+    /// that has not run since was the last to name it; and a collection
+    /// that compacts copes as one that frees in place does.
     #[test]
     fn a_stale_call_cache_keeps_nothing_alive() {
         for moving in [false, true] {
