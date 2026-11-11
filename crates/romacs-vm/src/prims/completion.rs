@@ -36,7 +36,8 @@ fn romacs_command_symbols(cx) {
 }}
 defsubr! { name = "romacs-command-epoch", gnu = "romacs:commands", effect = Reads,
 fn romacs_command_epoch(cx) {
-    Value::integer(cx.command_set_epoch() as i64).map_err(Fault::Error)
+    let epoch = i64::try_from(cx.command_set_epoch()).map_err(|_| Fault::Error("command epoch overflow".into()))?;
+    Value::integer(epoch).map_err(Fault::Error)
 }}
 
 fn number(n: usize) -> Value {

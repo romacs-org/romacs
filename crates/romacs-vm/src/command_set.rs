@@ -1,12 +1,12 @@
-//! The interned symbols `commandp' may accept, kept as definitions change,
+//! The interned symbols `commandp` may accept, kept as definitions change,
 //! so M-x filters them rather than every symbol on each key
 //! (lisp/romacs/romacs-commands.el).
 //!
-//! Writes only mark what changed; `romacs-command-symbols' brings the set
+//! Writes only mark what changed; `romacs-command-symbols` brings the set
 //! up to date when asked, judging the marked slots and, as an alias's
 //! verdict follows its target, every alias. The set holds each symbol
-//! `commandp' accepts and each OClosure, whose interactive form only Lisp
-//! computes: a superset its callers still filter with `commandp'.
+//! `commandp` accepts and each `OClosure`, whose interactive form only Lisp
+//! computes: a superset its callers still filter with `commandp`.
 
 #[derive(Default)]
 pub(crate) struct CommandSet {
@@ -47,8 +47,8 @@ impl CommandSet {
         }
     }
 
-    /// SLOT's plist was written: its symbol's `completion-predicate',
-    /// `command-modes' or obsolescence may have changed.
+    /// SLOT's plist was written: its symbol's `completion-predicate`,
+    /// `command-modes` or obsolescence may have changed.
     pub(crate) fn plist_written(&mut self, slot: usize) {
         if self.contains(slot) {
             self.epoch += 1;
@@ -63,7 +63,7 @@ impl CommandSet {
         self.member.get(slot).copied().unwrap_or(false)
     }
 
-    /// What to judge now; the set counts as up to date once each is `set'.
+    /// What to judge now; the set counts as up to date once each is `set`.
     pub(crate) fn take_stale(&mut self) -> Stale {
         if !self.built {
             self.built = true;

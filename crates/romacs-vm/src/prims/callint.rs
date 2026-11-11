@@ -795,15 +795,15 @@ fn command_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(if value == Value::NIL { Value::NIL } else { Value::TRUE }))
 }
 
-/// What `commandp' answers without running Lisp.
+/// What `commandp` answers without running Lisp.
 pub(crate) enum Verdict {
     Known(bool),
-    /// An OClosure, whose interactive form the generic `interactive-form'
+    /// An `OClosure`, whose interactive form the generic `interactive-form`
     /// computes (eval.c:2330-2345).
     Ask(Value),
 }
 
-/// `commandp' of FUNCTION up to its one Lisp call: a caller that walks
+/// `commandp` of FUNCTION up to its one Lisp call: a caller that walks
 /// many candidates loops on it rather than nesting a continuation each.
 pub(crate) fn command_verdict(
     cx: &mut Leaf<'_>, function: Value, for_call: Value,

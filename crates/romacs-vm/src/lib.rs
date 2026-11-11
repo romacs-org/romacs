@@ -1634,7 +1634,7 @@ pub struct Vm {
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
     completion_walks: u64,
-    /// The symbols M-x lists (command_set.rs).
+    /// The symbols M-x lists (`command_set.rs`).
     command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,

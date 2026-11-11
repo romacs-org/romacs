@@ -90,7 +90,7 @@ fn interactive_form_follows_aliases_with_an_empty_cons_arena() {
     assert!(vm.conses.len() <= 2, "the fixture empties the cons arena");
 }
 
-/// `all-completions' with `commandp' judges each candidate in its loop: a
+/// `all-completions` with `commandp` judges each candidate in its loop: a
 /// walk over many symbols keeps one native frame, as GNU's does.
 #[test]
 fn commandp_walks_many_symbols_at_one_depth() {
@@ -107,7 +107,7 @@ fn commandp_walks_many_symbols_at_one_depth() {
 }
 
 /// The command set follows every write that changes a verdict: a definition,
-/// an alias's target, `fmakunbound' and `unintern'.
+/// an alias's target, `fmakunbound` and `unintern`.
 #[test]
 fn command_symbols_follow_definitions() {
     let mut vm = Vm::new();

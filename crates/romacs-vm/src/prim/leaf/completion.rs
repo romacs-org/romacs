@@ -350,7 +350,7 @@ impl Leaf<'_> {
         Ok(())
     }
     /// Whether strings A and B begin with the same LENGTH characters, as
-    /// `string_compare::codes' reads them (a unibyte byte above 127 a raw
+    /// `string_compare::codes` reads them (a unibyte byte above 127 a raw
     /// byte): compared in place, up to the first difference.
     pub(crate) fn completion_same_prefix(&self, a: Value, b: Value, length: usize) -> std::result::Result<bool, Fault> {
         let a = self.vm.str_view(a).ok_or(Fault::Wrong("stringp", a))?;
@@ -368,8 +368,8 @@ impl Leaf<'_> {
         Ok(a.chars().map(code(a.multibyte)).take(length).eq(b.chars().map(code(b.multibyte)).take(length)))
     }
 
-    /// The interned, defined symbols whose `commandp' verdict the command
-    /// set must judge now (command_set.rs): every one on its first ask,
+    /// The interned, defined symbols whose `commandp` verdict the command
+    /// set must judge now (`command_set.rs`): every one on its first ask,
     /// else those whose definition or interning changed, and every alias.
     /// Each other changed slot leaves the set here.
     pub(crate) fn command_set_stale(&mut self) -> Vec<(usize, Value)> {
