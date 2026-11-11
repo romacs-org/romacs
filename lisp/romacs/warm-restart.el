@@ -1247,17 +1247,18 @@ restarts."
 
 (defun warm-restart--target (target)
   "The restart command and environment for TARGET: a build directory (its
-romacs-vm-gui with its own runtime) or a binary (its runtime its own)."
+romacs-vm-gui with its own runtime) or a binary (its runtime its own).
+A build finds its Lisp in its runtime root itself, so an older or newer
+layout of that tree restarts as well."
   (let ((target (expand-file-name target)))
     (cond ((file-directory-p target)
            (let ((binary (expand-file-name "romacs-vm-gui" target)))
-             (dolist (path (list binary (expand-file-name "lisp/gnu" target) (expand-file-name "lisp/romacs" target)))
+             (dolist (path (list binary (expand-file-name "etc" target)))
                (unless (file-exists-p path) (user-error "Not a build directory: %s has no %s" target
                                                        (file-name-nondirectory path))))
              (unless (file-executable-p binary) (user-error "%s is not executable" binary))
              (list (cons binary (warm-restart--launch-flags (cdr (warm-restart--argv))))
-                   (concat "ROMACS_RUNTIME_ROOT=" target)
-                   (concat "ROMACS_LISP_DIR=" (expand-file-name "lisp/gnu" target)))))
+                   (concat "ROMACS_RUNTIME_ROOT=" target))))
           ((file-executable-p target)
            (list (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))))
           (t (user-error "No build at %s" target)))))

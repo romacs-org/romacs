@@ -17,7 +17,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// `--batch RLISP_DIRECTORY [--init-file FILE]' runs the forms on stdin
+/// `--batch ROMACS_LISP_DIRECTORY [--init-file FILE]' runs the forms on stdin
 /// over Romacs's own Lisp; any other `--batch' command line is GNU's
 /// ([`run_emacs`]). QUICK is a `-Q' before `--batch', STORE a
 /// `--world-store' before it.
@@ -160,7 +160,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
-    if let Some(parent) = dir.parent() { runtime.push(parent.join("lisp/romacs")); }
+    if let Some(root) = super::startup::runtime_of(&dir) { runtime.push(root.join("lisp/romacs")); }
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
     let recipe = recipe_in(&dir, |name| environment.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()));

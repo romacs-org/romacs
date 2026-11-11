@@ -518,7 +518,7 @@ class Provenance(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = pathlib.Path(tmp.name)
-        (root / 'lisp/gnu').mkdir()
+        (root / 'lisp/gnu').mkdir(parents=True)
         (root / 'lisp/gnu' / 'a.el').write_text('(a)')
         before = pr.input_fingerprint(root)
         os.utime(root / 'lisp/gnu' / 'a.el', (1, 1))

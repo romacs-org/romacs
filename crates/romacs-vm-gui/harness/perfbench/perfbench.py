@@ -264,7 +264,7 @@ BY_NAME_ONLY = ('init', 'apps')
 # one ERT file it grew past 80 GB of memory and swap until the kernel stepped
 # in.  Romacs reserves a large arena and is not limited this way.
 NEOMACS_MEMORY = 8 << 30
-INSTALL_TREES = ('lisp/gnu', 'lisp/romacs', 'etc')  # what an installation ships beside its binary
+INSTALL_TREES = ('lisp', 'etc')  # what an installation ships beside its binary
 LISP_JOBS = 8  # compile processes at a time, staging an installation
 
 

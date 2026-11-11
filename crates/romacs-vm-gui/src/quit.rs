@@ -16,8 +16,8 @@ impl InputInterrupt for QuitHook {
     fn interrupt(&self, event: &InputEvent) -> bool {
         is_quit_char(event) && self.0.interrupt()
     }
-    fn busy_span(&self) -> Option<u32> {
-        self.0.busy_span()
+    fn busy_for(&self) -> Option<std::time::Duration> {
+        self.0.busy_for()
     }
 }
 

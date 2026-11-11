@@ -62,7 +62,7 @@ Romacs loads no native modules."
   :group 'jabber)
 
 (defcustom jabber-omemo-module-directory
-  (expand-file-name "../../libexec/romacs/"
+  (expand-file-name "../../../libexec/romacs/"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Directory containing the optional jabber-omemo-core native module."
   :type 'directory
