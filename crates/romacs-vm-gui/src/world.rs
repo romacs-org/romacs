@@ -423,7 +423,7 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
 /// `batch::boot`, which measures none).
 pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = vec![dir.to_owned()];
-    roots.extend(dir.parent().map(|parent| parent.join("lisp/romacs")));
+    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/romacs")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {

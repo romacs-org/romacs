@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """A first session as an executable ladder, measured on the real GUI.
 
-    ladder.py OUT_DIR [--mode default|lisp/gnu|loadup] [--binary PATH]
+    ladder.py OUT_DIR [--mode default|gnu-only|loadup] [--binary PATH]
 
-Modes are launch flags of the binary under test: default (no flag), lisp/gnu
+Modes are launch flags of the binary under test: default (no flag), gnu-only
 (--gnu-lisp, loadup.el alone) and loadup (--loadup, loadup.el + stand-ins).
 The default is VM2's own workspace with no GNU Lisp.
 
@@ -30,7 +30,7 @@ ROOT = HERE.parents[3]
 FIXTURE = HERE / 'fixture' / 'notes.org'
 ap = argparse.ArgumentParser()
 ap.add_argument('out')
-ap.add_argument('--mode', default='default', choices=['default', 'lisp/gnu', 'loadup'])
+ap.add_argument('--mode', default='default', choices=['default', 'gnu-only', 'loadup'])
 ap.add_argument('--binary', default=str(ROOT / 'target/release/romacs-vm-gui'))
 args = ap.parse_args()
 OUT = Path(args.out).resolve() / args.mode
@@ -134,7 +134,7 @@ def main():
             for gui, gnu in actions:
                 n0 = len(g.replies())
                 if gui == 'RESET':
-                    if args.mode == 'lisp/gnu':
+                    if args.mode == 'gnu-only':
                         next(oi); obs.append({'action': 'RESET', 'skipped': 'no evaluator under --gnu-lisp', 'rows': [], 'replies': [], 'points': [], 'cursors': []}); continue
                     g.text(RESET_FORM); g.chord('C-x C-e')
                 else:
@@ -145,7 +145,7 @@ def main():
             g.shot(rung)
             rec['rungs'].append({'rung': rung, 'obs': obs})
             (OUT / 'record.json').write_text(json.dumps(rec, indent=1, ensure_ascii=False))
-        if args.mode != 'lisp/gnu':
+        if args.mode != 'gnu-only':
             n0 = len(g.replies())
             g.chord('M->'); g.text(PROBE); g.chord('C-x C-e')
             rec['probe'] = observe(g, 'probe', n0)

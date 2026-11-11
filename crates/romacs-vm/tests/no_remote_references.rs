@@ -129,7 +129,7 @@ const FIELDS: &[(&str, Class)] = &[
     // Not roots: the collector dooms those it does not reach.
     ("finalizers", Cache),
     ("doomed_finalizers", Root),
-    ("post_gc_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
+    ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),

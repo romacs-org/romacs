@@ -107,6 +107,10 @@ impl Backtrace {
         calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)).filter(|slot| only.is_empty() || only.binary_search(slot).is_ok()));
         *counter
     }
+    /// Every call entered so far, observed or not.
+    pub fn calls_entered(&self) -> usize {
+        self.observed.as_ref().map_or(self.next_token, |(counter, _)| *counter)
+    }
     /// Whether calls are being observed (`observe`).
     pub fn observing(&self) -> bool {
         self.observed.is_some()

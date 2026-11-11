@@ -594,25 +594,25 @@ fn a_due_quit_ends_an_entry_before_its_first_instruction() {
 /// stays quittable, as GNU's is) and marks it waiting only while it blocks.
 #[test]
 fn a_read_is_waiting_only_while_it_blocks() {
-    struct Watching(Arc<QuitSignal>, Vec<(&'static str, bool)>, Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>);
+    struct Watching(Arc<QuitSignal>, Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>);
     impl HostInput for Watching {
         fn input_pending(&mut self) -> bool { false }
         fn redisplay(&mut self, _: HostFrame) -> Result<Vec<WindowEnd>, String> {
-            self.2.lock().unwrap().push(("redisplay", self.0.busy_span().is_some()));
+            self.1.lock().unwrap().push(("redisplay", self.0.busy_for().is_some()));
             Ok(Vec::new())
         }
         fn next_event(&mut self, _: Option<Duration>) -> Result<HostEvent, String> {
-            self.2.lock().unwrap().push(("wait", self.0.busy_span().is_some()));
+            self.1.lock().unwrap().push(("wait", self.0.busy_for().is_some()));
             Ok(HostEvent::Key(CommandEvent::Character(120)))
         }
     }
     let (mut vm, signal) = busy_vm();
     vm.set_frame_geometry(800, 600, 20, 10).unwrap();
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    vm.set_host_input(Some(Box::new(Watching(signal.clone(), Vec::new(), seen.clone()))));
+    vm.set_host_input(Some(Box::new(Watching(signal.clone(), seen.clone()))));
     assert_eq!(eval(&mut vm, "(read-event)"), "120");
     assert_eq!(*seen.lock().unwrap(), [("redisplay", true), ("wait", false)]);
-    assert!(signal.busy_span().is_some(), "busy again after the read");
+    assert!(signal.busy_for().is_some(), "busy again after the read");
 }
 
 /// Text long enough that one motion over it outlasts the press.

@@ -110,6 +110,8 @@
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 ;; SCRAM's key derivation natively (VM2-SCRAM1).
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
+;; Gnus's shipped data is in `data-directory' (VM2-ETC1).
+(with-eval-after-load 'nnheader (require 'romacs-nnheader))
 (load "simple.el" nil t t)
 ;; The region is drawn natively (`snapshot_region'): no overlay for it.
 (setq redisplay-highlight-region-function #'romacs--native-region)
@@ -127,6 +129,8 @@
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 ;; SCRAM's key derivation natively (VM2-SCRAM1).
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
+;; Gnus's shipped data is in `data-directory' (VM2-ETC1).
+(with-eval-after-load 'nnheader (require 'romacs-nnheader))
 ;; package.el and package-vc.el install; their long work runs in a worker VM
 ;; in a session (romacs-package.el).  GNU's own test suite, which
 ;; `EMACS_TEST_DIRECTORY' marks, tests them as they are.
