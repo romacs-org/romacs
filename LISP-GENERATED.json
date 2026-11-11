@@ -1,6 +1,6 @@
 {
   "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
-  "provenance": "Generated support, not GNU Git blobs. Every file outside the unidata-romacs group is byte-for-byte the pinned GNU build's own installed output (share/emacs/32.0.50/lisp at gnu_commit, gunzipped where installed compressed; tools/build-gnu-oracle.sh builds it); the unidata-romacs group is that output passed through tools/lib/romacs_unidata.py. SHA-256 values attest these bytes. GNU generator/rule and input references below were traced at gnu_commit; eucjp-ms's generator reads an external glibc charmap. subdirs.el is build-aux/update-subdirs output for the pinned lisp/ directories in the C locale (the bytes crates/romacs-vm-gui/src/loadup.rs update_subdirs_writes_what_gnus_script_writes records). Earlier retained snapshots predated the pinned sources: tramp-loaddefs.el autoloaded a predicate tramp-cmds.el no longer defines, loaddefs.el, cus-load.el and finder-inf.el lacked newer GNU files and also listed Romacs's own rlisp/ files (whose autoloads tools/lib/bundled_autoloads.py now generates), and the tit quail tables came from another GNU's conversion, which the pinned binary does not reproduce.",
+  "provenance": "Generated support, not GNU Git blobs. Every file outside the unidata-romacs group is byte-for-byte the pinned GNU build's own installed output (share/emacs/32.0.50/lisp at gnu_commit, gunzipped where installed compressed; tools/build-gnu-oracle.sh builds it); the unidata-romacs group is that output passed through tools/lib/romacs_unidata.py. SHA-256 values attest these bytes. GNU generator/rule and input references below were traced at gnu_commit; eucjp-ms's generator reads an external glibc charmap. subdirs.el is build-aux/update-subdirs output for the pinned lisp/ directories in the C locale (the bytes crates/romacs-vm-gui/src/loadup.rs update_subdirs_writes_what_gnus_script_writes records). Earlier retained snapshots predated the pinned sources: tramp-loaddefs.el autoloaded a predicate tramp-cmds.el no longer defines, loaddefs.el, cus-load.el and finder-inf.el lacked newer GNU files and also listed Romacs's own lisp/romacs/ files (whose autoloads tools/lib/bundled_autoloads.py now generates), and the tit quail tables came from another GNU's conversion, which the pinned binary does not reproduce.",
   "sources": {
     "autoloads": {
       "paths": [
@@ -176,412 +176,412 @@
         "admin/unidata/confusables.txt",
         "admin/unidata/IdnaMappingTable.txt"
       ],
-      "recipe": "The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in rlisp/romacs-unidata.el by tools/lib/romacs_unidata.py (DIVERGENCES.md VM2-UNIDATA1)."
+      "recipe": "The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in lisp/romacs/romacs-unidata.el by tools/lib/romacs_unidata.py (DIVERGENCES.md VM2-UNIDATA1)."
     }
   },
   "files": [
     [
-      "gnu-lisp/calc/calc-loaddefs.el",
+      "lisp/gnu/calc/calc-loaddefs.el",
       "10c47765495c35f6cd063a661bd81562549ababda06310261dead94f4a436bca",
       "autoloads"
     ],
     [
-      "gnu-lisp/calendar/cal-loaddefs.el",
+      "lisp/gnu/calendar/cal-loaddefs.el",
       "145ab9c898db9c238e50d62519aa7b28d5f94bc637cdee2ed4d6d9ef4662add3",
       "autoloads"
     ],
     [
-      "gnu-lisp/calendar/diary-loaddefs.el",
+      "lisp/gnu/calendar/diary-loaddefs.el",
       "c84f4544897cd8c7f1d1e3dfa54aaca860ec63db2dde06d8aa63a2430856d336",
       "autoloads"
     ],
     [
-      "gnu-lisp/calendar/holiday-loaddefs.el",
+      "lisp/gnu/calendar/holiday-loaddefs.el",
       "0cf89cb3d1daa99719b36787d99853353751f5483044cd03249d59d15659fa34",
       "autoloads"
     ],
     [
-      "gnu-lisp/cedet/ede/loaddefs.el",
+      "lisp/gnu/cedet/ede/loaddefs.el",
       "70fe3e389c8106c101fcb8fb76e0f211867c3be34a2ffccc7335d132226bb75f",
       "autoloads"
     ],
     [
-      "gnu-lisp/cedet/semantic/bovine/c-by.el",
+      "lisp/gnu/cedet/semantic/bovine/c-by.el",
       "d4143d47fe1af99470f7ec8f3af2b90ad808c1e04cad1853ff4a3ae2bc6b4464",
       "bovine"
     ],
     [
-      "gnu-lisp/cedet/semantic/bovine/make-by.el",
+      "lisp/gnu/cedet/semantic/bovine/make-by.el",
       "16ddde7a126d250d989635c67775c9187c94c837daf7db7ac131183d1b1c52bc",
       "bovine"
     ],
     [
-      "gnu-lisp/cedet/semantic/bovine/scm-by.el",
+      "lisp/gnu/cedet/semantic/bovine/scm-by.el",
       "ed3c87561911ad81945f5a06a09f84b948bd7abec235c3191b96c5174a9bf33e",
       "bovine"
     ],
     [
-      "gnu-lisp/cedet/semantic/grammar-wy.el",
+      "lisp/gnu/cedet/semantic/grammar-wy.el",
       "fea6a0f458501773723156d4b39f959edde973f410b4fb14e1f823b5fc4c455d",
       "wisent"
     ],
     [
-      "gnu-lisp/cedet/semantic/loaddefs.el",
+      "lisp/gnu/cedet/semantic/loaddefs.el",
       "debd9910fad8f905c02b81cdd5824ed3fa3d276ee51bf3be7224dc437ac17cf9",
       "autoloads"
     ],
     [
-      "gnu-lisp/cedet/semantic/wisent/javat-wy.el",
+      "lisp/gnu/cedet/semantic/wisent/javat-wy.el",
       "f0f2ef970f73a25911f50b33c01c7cadd04b4276b6f89dabc653da8d25d9c964",
       "wisent"
     ],
     [
-      "gnu-lisp/cedet/semantic/wisent/js-wy.el",
+      "lisp/gnu/cedet/semantic/wisent/js-wy.el",
       "ef4a0e5a14cc018f677a158a08f905e5b38646030f72b33f17efe3c4192f6708",
       "wisent"
     ],
     [
-      "gnu-lisp/cedet/semantic/wisent/python-wy.el",
+      "lisp/gnu/cedet/semantic/wisent/python-wy.el",
       "7d734d99eeb7200aa744daf7bececbe3e6eb2b3b108ecacf13796de5024a2953",
       "wisent"
     ],
     [
-      "gnu-lisp/cedet/srecode/loaddefs.el",
+      "lisp/gnu/cedet/srecode/loaddefs.el",
       "4e84ce4859ae835b620e192eddbdc2c887c480f5702d798d083ddf25052d5bcd",
       "autoloads"
     ],
     [
-      "gnu-lisp/cedet/srecode/srt-wy.el",
+      "lisp/gnu/cedet/srecode/srt-wy.el",
       "df5bf3f67fdcaadd8c78a3f56bcc70a3658a5db70e71dcd9e1a8610e95f451fe",
       "wisent"
     ],
     [
-      "gnu-lisp/cus-load.el",
+      "lisp/gnu/cus-load.el",
       "de5de89ae80ac4edd7a08c816e8636ef5a4ab6f516f7a5a6242c2198d97155e1",
       "custom"
     ],
     [
-      "gnu-lisp/dired-loaddefs.el",
+      "lisp/gnu/dired-loaddefs.el",
       "4fb774e2f4f7f32baf9f2dd4f564bfc89e7e1d3a574b2d741c7fce6b8cd8f8bb",
       "autoloads"
     ],
     [
-      "gnu-lisp/emacs-lisp/cl-loaddefs.el",
+      "lisp/gnu/emacs-lisp/cl-loaddefs.el",
       "fedb9a1496121bff88513b3f31e531599b11603a87c1faaac78a3abc8b47a7e2",
       "autoloads"
     ],
     [
-      "gnu-lisp/erc/erc-loaddefs.el",
+      "lisp/gnu/erc/erc-loaddefs.el",
       "5c4e4d29068a7dc2f64a4b3660daf4c4693d654975ec34c4b93d8f1c6240b9be",
       "autoloads"
     ],
     [
-      "gnu-lisp/eshell/esh-module-loaddefs.el",
+      "lisp/gnu/eshell/esh-module-loaddefs.el",
       "38d72016099eb0488d59afbae8f9b333300fb9bc02af6a08c10dcbbc4887d56d",
       "autoloads"
     ],
     [
-      "gnu-lisp/finder-inf.el",
+      "lisp/gnu/finder-inf.el",
       "189df76ac25402b1c373a00ee094be7223acaa75e8cc72cb44f24d86b40cbaee",
       "finder"
     ],
     [
-      "gnu-lisp/ibuffer-loaddefs.el",
+      "lisp/gnu/ibuffer-loaddefs.el",
       "a1e5a2fa15705cd55356dded2c41c660e52bd5b8fbe7ac0a87184fb703e716f1",
       "autoloads"
     ],
     [
-      "gnu-lisp/international/charprop.el",
+      "lisp/gnu/international/charprop.el",
       "5c85fb835bf2529ae700f250a62ad91a4ddacb0bd71768c8e5c7431a50f686e9",
       "unidata"
     ],
     [
-      "gnu-lisp/international/charscript.el",
+      "lisp/gnu/international/charscript.el",
       "6eb7f1fa7607382c19420992d6caff509af438d15ded08ed0ffb92dd672cc610",
       "blocks"
     ],
     [
-      "gnu-lisp/international/cp51932.el",
+      "lisp/gnu/international/cp51932.el",
       "c913b1f3a0855e6b675fb705f117d9221a52dd720537733bacd5bc68ad31b13f",
       "cp51932"
     ],
     [
-      "gnu-lisp/international/emoji-labels.el",
+      "lisp/gnu/international/emoji-labels.el",
       "8e402be1aa06690e6ee3eecba70ea7d7e2318a5d3cbeed70c80eb07f6a366fce",
       "emoji-labels"
     ],
     [
-      "gnu-lisp/international/emoji-zwj.el",
+      "lisp/gnu/international/emoji-zwj.el",
       "88c0036015bdf387d39467757581cfc59786d833103d44bbede733f2af9324bc",
       "emoji-zwj"
     ],
     [
-      "gnu-lisp/international/eucjp-ms.el",
+      "lisp/gnu/international/eucjp-ms.el",
       "2595ae699785b5e502469316bb6fd8f6a9d05bcbe0c570a2457704805488cb73",
       "eucjp-ms"
     ],
     [
-      "gnu-lisp/international/idna-mapping.el",
+      "lisp/gnu/international/idna-mapping.el",
       "852e83845c094bce39f4efb92d8d521658f5d44954097016dd9e7d505b407d97",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-bidi.el",
+      "lisp/gnu/international/uni-bidi.el",
       "8a8e74d2d88b6a8b46ac384b8e51fbe38ac83c31d094ec4244912dc301aaf0ec",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-brackets.el",
+      "lisp/gnu/international/uni-brackets.el",
       "845a32633fb824e5ad6b115a81238785a5eb01d2a17ad43c720d0ab5f1a8df23",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-category.el",
+      "lisp/gnu/international/uni-category.el",
       "03401dd3a4674935598d156ba0aec4df3c98da0a57352586103fc35e8e8c0fe2",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-combining.el",
+      "lisp/gnu/international/uni-combining.el",
       "189ce90bc796da0386b201a5046b6d1439208fbbaa8d3efe3ebe685139d67ef7",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-comment.el",
+      "lisp/gnu/international/uni-comment.el",
       "ee68949333cb7a43ccebfad63af4161d8312603bce2a7934167b59665dcc3b2e",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-confusable.el",
+      "lisp/gnu/international/uni-confusable.el",
       "8119531a95465082156dcf28f5f6e94757d70a6391e842775c058b8103e729e8",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-decimal.el",
+      "lisp/gnu/international/uni-decimal.el",
       "129f3857a19bfc5e1180bcc8984c3dafd209e1779d0cec5064bb9b3bb893d58b",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-decomposition.el",
+      "lisp/gnu/international/uni-decomposition.el",
       "d23b33d70999288b1adf47735a2a0cbd513d3ed31d264fa3be1b7510aca511d1",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-digit.el",
+      "lisp/gnu/international/uni-digit.el",
       "9e6d14a24c8e1d9c9f1c39b165324030d4d271442ba294037403c31052b3d4a0",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-lowercase.el",
+      "lisp/gnu/international/uni-lowercase.el",
       "fbd5ff7011bf2fd5291e8e77ef4a9940e698c6afb94a6a57a90373d72db3ebae",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-mirrored.el",
+      "lisp/gnu/international/uni-mirrored.el",
       "bd86e6f6e72f1bf737a1dcc0cc962290bb6332f3feeab914f6010e0c60ae9c11",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-name.el",
+      "lisp/gnu/international/uni-name.el",
       "668c36affea3395c12dc4fe8314d5370e43d4379cd2647f42e6025f894c4bb9d",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-numeric.el",
+      "lisp/gnu/international/uni-numeric.el",
       "b30e32231ce9549d6bd2ee75095d0ecb79948eb84a05137a1451567590ad1d8b",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-old-name.el",
+      "lisp/gnu/international/uni-old-name.el",
       "8dcfdba15d0226338b9f380b0d8621ee27aec38894fe35ea99f7a072b731826e",
       "unidata-romacs"
     ],
     [
-      "gnu-lisp/international/uni-scripts.el",
+      "lisp/gnu/international/uni-scripts.el",
       "c3ff3ec9abc1be5805ccf53456b9ddb7f4985353e3063c4c48ed68ebe34e9f6c",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-special-lowercase.el",
+      "lisp/gnu/international/uni-special-lowercase.el",
       "45ab2bf9ace5562a5dcbc3f95d384d30187f4f9b799cbb2908cd8e35f9276403",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-special-titlecase.el",
+      "lisp/gnu/international/uni-special-titlecase.el",
       "f1cc53829811e93c2026604ab2712036941769b0cb6430bd81de0dd8e219a7dd",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-special-uppercase.el",
+      "lisp/gnu/international/uni-special-uppercase.el",
       "427ce20c0fc824fd4c2f5fc7787189c495ce32d007954fb850597fa5daa334e7",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-titlecase.el",
+      "lisp/gnu/international/uni-titlecase.el",
       "7cc994ec0fc12deba94b152ce5751dc9d8b8281357def70ecdfcd39250138724",
       "unidata"
     ],
     [
-      "gnu-lisp/international/uni-uppercase.el",
+      "lisp/gnu/international/uni-uppercase.el",
       "2808c9b08c29c5aff88badf437dbcf8f1854537dc895b4b423f9b72c06ba0f41",
       "unidata"
     ],
     [
-      "gnu-lisp/language/pinyin.el",
+      "lisp/gnu/language/pinyin.el",
       "71300ee6ba7331bc037d978f12e2d081308d3df6f30c9c8521db7d590138f0c0",
       "pinyin"
     ],
     [
-      "gnu-lisp/leim/leim-list.el",
+      "lisp/gnu/leim/leim-list.el",
       "25acfb448ed779c90e4b96ffb81f3120e66126210afe0aa510607f9e300c19df",
       "leim-list"
     ],
     [
-      "gnu-lisp/leim/quail/4Corner.el",
+      "lisp/gnu/leim/quail/4Corner.el",
       "0573681e5c8524cfd53e30ffd5a46f65074372ddf4bd9b0aa23ee50d7391a306",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/ARRAY30.el",
+      "lisp/gnu/leim/quail/ARRAY30.el",
       "1f374191f74d0709251e4a8187670b08a965d77530376c8e12fc6666709bfad5",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/CCDOSPY.el",
+      "lisp/gnu/leim/quail/CCDOSPY.el",
       "b44588c8837832c24275d9ea20ca6a529d2e0ed694ec8acf52eb4b304c6a1a67",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/CTLau-b5.el",
+      "lisp/gnu/leim/quail/CTLau-b5.el",
       "9fe04a7b50e2138f2001fe6462ab9e10587bc681e1969add690d8186858b5f57",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/CTLau.el",
+      "lisp/gnu/leim/quail/CTLau.el",
       "4850aa3a32092ab8aecf5a096ebc275c2685b41872fff57b85146226a28202b9",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/ECDICT.el",
+      "lisp/gnu/leim/quail/ECDICT.el",
       "6b82493a3a412b3fe4c3ad9c5703b8a34cbe94e6d6d99d309f577b35627842f5",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/ETZY.el",
+      "lisp/gnu/leim/quail/ETZY.el",
       "e8ef13a5c32290003429fb4ea03b72523c0b9b33dd472db955374bea0e1a07d9",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/PY-b5.el",
+      "lisp/gnu/leim/quail/PY-b5.el",
       "6a557a9b5e607b54e57794ffbfff908152430c47c2dd5032b1bba1bf117cfa2c",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/PY.el",
+      "lisp/gnu/leim/quail/PY.el",
       "478e49fac58c60a0075feddaab3e6bfc5d30da63fc5904afbda052478c953a90",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/Punct-b5.el",
+      "lisp/gnu/leim/quail/Punct-b5.el",
       "53be7e82942ce92a43521c50fb5d501238be4317f78560cb5aa0d23c81b6eae9",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/Punct.el",
+      "lisp/gnu/leim/quail/Punct.el",
       "27a250b00e1573440e1ca4110d35865665ce6cbdafb0c765b1434a1fb2115945",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/QJ-b5.el",
+      "lisp/gnu/leim/quail/QJ-b5.el",
       "90fdfe25295831189517a87e1d0e3886dd4b358a4b1d9d657bf1855a77b0e744",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/QJ.el",
+      "lisp/gnu/leim/quail/QJ.el",
       "eaea542fbbd8d0dfbaa8c96a41692c2e30ac03866975b48b918dbbd72c38e1cb",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/SW.el",
+      "lisp/gnu/leim/quail/SW.el",
       "45594cd2adf3768172669951ac9e3f346775dd821c415f54303a4211855f1ce4",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/TONEPY.el",
+      "lisp/gnu/leim/quail/TONEPY.el",
       "5dd18420ca8d66c4969d0c289fa700165b9c9cb8541159e5a60349af7c2a7dde",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/ZIRANMA.el",
+      "lisp/gnu/leim/quail/ZIRANMA.el",
       "7447a1d746af6d1748529feb625df00b3bc489b6e744d68d56ed792a59158b25",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/ZOZY.el",
+      "lisp/gnu/leim/quail/ZOZY.el",
       "b5b9a92e7178ccf595b880ec517a7606de196851c3d4a498338d33cf44b17220",
       "tit"
     ],
     [
-      "gnu-lisp/leim/quail/quick-b5.el",
+      "lisp/gnu/leim/quail/quick-b5.el",
       "4ee0bae106dbf5b1449ef4991567360f03f5d12858b8bbff6acd4b459b06423b",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/quick-cns.el",
+      "lisp/gnu/leim/quail/quick-cns.el",
       "9e130f1eec115195b35947e462fe88a05f526f34db041a58d1a8163d188faaf2",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/tsang-b5.el",
+      "lisp/gnu/leim/quail/tsang-b5.el",
       "e0cb7b5865898f5fdbf6d586895c626e45b654c02a990828ceb9c2799ddb97bf",
       "misc-dic"
     ],
     [
-      "gnu-lisp/leim/quail/tsang-cns.el",
+      "lisp/gnu/leim/quail/tsang-cns.el",
       "0c2989399a468acb0c488edb89ef48dbc705977fca1ce954485617de6c9e6d33",
       "misc-dic"
     ],
     [
-      "gnu-lisp/loaddefs.el",
+      "lisp/gnu/loaddefs.el",
       "15cca5c23760f4f871b2c7239ef5b8b7d28b9642a6376287e46e72eceeb8a637",
       "autoloads"
     ],
     [
-      "gnu-lisp/mh-e/mh-loaddefs.el",
+      "lisp/gnu/mh-e/mh-loaddefs.el",
       "6b3c152056e989d138c8dcb0794fbab38fa0bbfc6875967b9f76464d0fd75c59",
       "autoloads"
     ],
     [
-      "gnu-lisp/net/tramp-loaddefs.el",
+      "lisp/gnu/net/tramp-loaddefs.el",
       "3e524a4e21a44e22c6d772e72ec3ea5234d26d17e76a40baa179bfb45b7c89bd",
       "autoloads"
     ],
     [
-      "gnu-lisp/org/org-loaddefs.el",
+      "lisp/gnu/org/org-loaddefs.el",
       "806a068229d2ed488dde6dedfbf3fd7fdf07f550a0fea011c18aa031d1852ffa",
       "autoloads"
     ],
     [
-      "gnu-lisp/ps-print-loaddefs.el",
+      "lisp/gnu/ps-print-loaddefs.el",
       "d0c6608625b047cd53858facbb6f46c890e830cce19ad5594e0fc58dc79fec73",
       "autoloads"
     ],
     [
-      "gnu-lisp/subdirs.el",
+      "lisp/gnu/subdirs.el",
       "c706f2735d0d95e1b5834cabed47c9815ef07632a8bf1021afa6945081f3cb23",
       "subdirs"
     ],
     [
-      "gnu-lisp/textmodes/reftex-loaddefs.el",
+      "lisp/gnu/textmodes/reftex-loaddefs.el",
       "460424b3a67ee2f455d9293a12c74c106b0a0fef806372e3dbacf3d29cd5bc39",
       "autoloads"
     ],
     [
-      "gnu-lisp/textmodes/texinfo-loaddefs.el",
+      "lisp/gnu/textmodes/texinfo-loaddefs.el",
       "94ec4042d9e8526a2d373fd2afb1eb7ccaf91913e3f3f6861d8a5509a293a034",
       "autoloads"
     ],
     [
-      "gnu-lisp/theme-loaddefs.el",
+      "lisp/gnu/theme-loaddefs.el",
       "a2db1d569c51b5950d0a4552de60bf4ed5ee52a9e91bcedff66f2dd94ca9263c",
       "autoloads"
     ]

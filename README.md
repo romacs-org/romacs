@@ -49,8 +49,8 @@ curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
 
 ## Source layout
 
-`rlisp/` holds Romacs Lisp, `gnu-lisp/` the pinned GNU sources, and
-`rlisp/deps/` temporary third-party dependencies and their replacement plan.
+`lisp/romacs/` holds Romacs Lisp, `lisp/gnu/` the pinned GNU sources, and
+`lisp/romacs/deps/` temporary third-party dependencies and their replacement plan.
 
 ## Build and run
 

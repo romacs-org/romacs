@@ -7,7 +7,7 @@
 ;; The Romacs mark, its red R and blue crescent, over the wordmark, at the
 ;; top of the *Romacs* startup screen, drawn in braille cells (renderer in
 ;; crates/romacs-logo).  Lisp draws a still frame into the buffer
-;; (`romacs--logo-frame') and registers it with rlisp/romacs-animate.el as
+;; (`romacs--logo-frame') and registers it with lisp/romacs/romacs-animate.el as
 ;; a display element in every window of the frame that shows it.  On a GPU
 ;; the display draws the element as a scene over those cells
 ;; (render_thread/page_scenes in romacs-display-runtime): braille dots rain

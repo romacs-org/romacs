@@ -4,7 +4,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Gnosis's agent API v1 (rlisp/gnosis/gnosis-agent*.el) as MCP tools, one
+;; Gnosis's agent API v1 (lisp/romacs/gnosis/gnosis-agent*.el) as MCP tools, one
 ;; per public function, so any agent reviews and authors with the API's own
 ;; invariants: practice is native human answering, nothing here grades,
 ;; and the durable core owns acceptance.  Each tool is an explicit wrapper:

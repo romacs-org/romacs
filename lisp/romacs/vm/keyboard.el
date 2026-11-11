@@ -74,7 +74,7 @@ commands: completed background commands may run their callbacks then.")
 
 (defun romacs--dispatch-background ()
   "Run completed background commands' callbacks while the command loop
-waits for a command's keys outside any minibuffer read (rlisp/vm/process.el
+waits for a command's keys outside any minibuffer read (lisp/romacs/vm/process.el
 runs them between commands, never inside a recursive minibuffer read).
 Non-nil when any ran."
   (when (and romacs--reading-command-keys (= (minibuffer-depth) 0)

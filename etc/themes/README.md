@@ -1,6 +1,6 @@
 # Bundled themes
 
-Romacs themes are palettes (rlisp/romacs-theme.el): each file names a
+Romacs themes are palettes (lisp/romacs/romacs-theme.el): each file names a
 theme's base colours, and every face is derived from them.
 
 - `default-theme.el`: the stock look a session starts in.
@@ -138,4 +138,4 @@ for.  The original Monokai is here as `monokai-classic`.
 
 GNU's bundled colour themes are not shipped; they load from
 `custom-theme-directory` or a package as any other theme.  Modus lends its
-machinery alone (rlisp/romacs-theme-modus.el); Romacs offers no Modus palette.
+machinery alone (lisp/romacs/romacs-theme-modus.el); Romacs offers no Modus palette.

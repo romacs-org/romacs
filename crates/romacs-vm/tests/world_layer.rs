@@ -66,7 +66,7 @@ fn scratch(name: &str) -> PathBuf {
     let unique = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("romacs-world-layer-{}-{unique}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("rlisp")).unwrap();
+    std::fs::create_dir_all(dir.join("lisp/romacs")).unwrap();
     std::fs::create_dir_all(dir.join("lisp")).unwrap();
     for (name, text) in LIBRARIES {
         std::fs::write(dir.join(format!("lisp/{name}.el")), text).unwrap();
@@ -84,12 +84,12 @@ fn plan(dir: &Path, names: &[&str]) -> Plan {
 /// and the trace.
 fn build(name: &str, names: &[&str]) -> (Vm, Vec<(usize, String)>, Json) {
     let dir = scratch(name);
-    std::fs::write(dir.join("rlisp/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan(&dir, names), &[]);
     let trace = host::leave_build().unwrap();
     (vm, refused, trace)
@@ -228,7 +228,7 @@ fn a_declared_library_is_refused_for_a_secret_or_a_connection() {
     std::fs::write(dir.join("lisp/lib-n.el"), "(defvar lib-n-connection (condition-case nil (make-network-process :name \"n\" :host \"127.0.0.1\" :service 9) (error nil)))\n(provide 'lib-n)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-u.el"), "(require 'lib-v)\n(provide 'lib-u)\n").unwrap();
-    std::fs::write(dir.join("rlisp/romacs-loadup-bootstrap.el"),
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"),
                    format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))
 (defun romacs--layer-load-configured (library forms)
   (require library) (mapc (lambda (f) (eval (cdr (car (read-from-string f))) t)) forms))\n")).unwrap();
@@ -245,7 +245,7 @@ fn a_declared_library_is_refused_for_a_secret_or_a_connection() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
@@ -362,7 +362,7 @@ fn a_refused_configuration_carries_into_the_next_build() {
     std::fs::write(dir.join("lisp/lib-s2.el"), "(defvar lib-s2 1)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-t.el"), "(load \"lib-s2\" nil t)\n(provide 'lib-t)\n").unwrap();
     let bare_alias = dir.join("alias/lib-s2").display().to_string();
-    std::fs::write(dir.join("rlisp/romacs-loadup-bootstrap.el"),
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"),
                    format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))\n")).unwrap();
     let declared = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: Vec::new() };
     let after = |name: &str, file: Option<&str>| Entry { kind: Kind::After, name: name.into(), file: file.map(str::to_owned), noerror: true, load_path: 0, declared: true, forms: vec!["(t . 1)".into()] };
@@ -372,7 +372,7 @@ fn a_refused_configuration_carries_into_the_next_build() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[after("lib-v", None), after(&alias, Some(&alias)), after("lib-q", Some("lib-q")),
                                               after(&bare_alias, Some(&bare_alias))]);
     let _ = host::leave_build();

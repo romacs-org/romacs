@@ -5,7 +5,7 @@
 ;;; Commentary:
 ;; --loadup's minibuffer completion is GNU's: `completing-read',
 ;; `read-file-name' and `read-buffer', displayed by `romacs-complete-mode'
-;; (rlisp/romacs-complete.el): the minibuffer and its candidates in a
+;; (lisp/romacs/romacs-complete.el): the minibuffer and its candidates in a
 ;; layer over the frame, so no window or terminal resizes for a prompt
 ;; (DIVERGENCES.md VM2-COMPLETE-DEFAULT).  Without a window system, or
 ;; where that mode is absent (GNU loading this file for a parity harness),
@@ -22,7 +22,7 @@
 ;; through the option's own :set function, as `setopt' does, so a mode
 ;; option such as `fido-vertical-mode' turns its mode on.
 ;;
-;; The `fzf' style (rlisp/romacs-fzf.el) comes first in
+;; The `fzf' style (lisp/romacs/romacs-fzf.el) comes first in
 ;; `completion-styles', before GNU's own default styles, which answer
 ;; where fzf finds nothing (`/u/l/b' by partial completion, a prefix by
 ;; basic); file names and project files try fzf first too.  Fido, which

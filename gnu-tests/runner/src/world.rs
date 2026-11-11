@@ -256,28 +256,28 @@ mod tests {
     #[test]
     fn the_world_holds_the_bootstrap_and_its_tree() {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let tree = paths(&["/r/rlisp/romacs-loadup-bootstrap.el", "/r/gnu-lisp/help-fns.el", "/r/rlisp/romacs-cl-print.el", "/case/setup.el", "/r/rlisp/x.el"]);
+        let tree = paths(&["/r/lisp/romacs/romacs-loadup-bootstrap.el", "/r/lisp/gnu/help-fns.el", "/r/lisp/romacs/romacs-cl-print.el", "/case/setup.el", "/r/lisp/romacs/x.el"]);
         assert_eq!(world_preloads(&tree), 3);
-        assert_eq!(world_preloads(&paths(&["/r/rlisp/x.el"])), 0);
+        assert_eq!(world_preloads(&paths(&["/r/lisp/romacs/x.el"])), 0);
         assert_eq!(world_preloads(&[]), 0);
     }
 
     #[test]
     fn the_world_keys_on_its_trees_load_path_only_before_the_runs_own() {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let preload = paths(&["/r/rlisp/romacs-loadup-bootstrap.el"]);
+        let preload = paths(&["/r/lisp/romacs/romacs-loadup-bootstrap.el"]);
         // run.py's layout: the tree's entries, then the test's directory.
-        assert_eq!(world_load_path(&paths(&["/r/gnu-lisp", "/r/rlisp", "/t/run-1"]), &preload), paths(&["/r/gnu-lisp", "/r/rlisp"]));
+        assert_eq!(world_load_path(&paths(&["/r/lisp/gnu", "/r/lisp/romacs", "/t/run-1"]), &preload), paths(&["/r/lisp/gnu", "/r/lisp/romacs"]));
         // Another layout keys on the whole path, whose order a restore keeps.
-        let before = paths(&["/t/run-1", "/r/gnu-lisp", "/r/rlisp"]);
+        let before = paths(&["/t/run-1", "/r/lisp/gnu", "/r/lisp/romacs"]);
         assert_eq!(world_load_path(&before, &preload), before);
-        let between = paths(&["/r/gnu-lisp", "/t/run-1", "/r/rlisp"]);
+        let between = paths(&["/r/lisp/gnu", "/t/run-1", "/r/lisp/romacs"]);
         assert_eq!(world_load_path(&between, &preload), between);
         // A tree entry given twice: where the run's own go is unclear.
         let twice = paths(&["/r/a", "/r/b", "/r/a", "/t/run-1"]);
         assert_eq!(world_load_path(&twice, &preload), twice);
         // No bootstrap preload, no world tree: the whole path.
-        assert_eq!(world_load_path(&paths(&["/r/gnu-lisp", "/t"]), &[]), paths(&["/r/gnu-lisp", "/t"]));
+        assert_eq!(world_load_path(&paths(&["/r/lisp/gnu", "/t"]), &[]), paths(&["/r/lisp/gnu", "/t"]));
     }
 
     #[test]

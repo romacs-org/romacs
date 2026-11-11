@@ -9,15 +9,15 @@ use super::*;
 include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 
 /// T3 tier: Lisp loops that call Lisp per element, over leaf cursors.
-pub(crate) const PRELUDE: &str = include_str!("../../../../rlisp/vm/prelude.el");
+pub(crate) const PRELUDE: &str = include_str!("../../../../lisp/romacs/vm/prelude.el");
 /// safe_run_hooks, for the prelude and the keyboard half alike.
-pub(crate) const HOOKS_LISP: &str = include_str!("../../../../rlisp/vm/hooks.el");
+pub(crate) const HOOKS_LISP: &str = include_str!("../../../../lisp/romacs/vm/hooks.el");
 /// T3 tier: process.c's waits, filters, sentinels and timers over prims/process.rs.
-pub(crate) const PROCESS_PRELUDE: &str = include_str!("../../../../rlisp/vm/subprocess.el");
+pub(crate) const PROCESS_PRELUDE: &str = include_str!("../../../../lisp/romacs/vm/subprocess.el");
 /// T3 tier: inotify.c's watch list and event dispatch over prims/inotify.rs.
-pub(crate) const INOTIFY_PRELUDE: &str = include_str!("../../../../rlisp/vm/inotify.el");
+pub(crate) const INOTIFY_PRELUDE: &str = include_str!("../../../../lisp/romacs/vm/inotify.el");
 /// T3 tier: isolates' spawning, futures, delivery and the worker's loop over prims/isolate.rs.
-pub(crate) const ISOLATE_PRELUDE: &str = include_str!("../../../../rlisp/vm/isolate.el");
+pub(crate) const ISOLATE_PRELUDE: &str = include_str!("../../../../lisp/romacs/vm/isolate.el");
 
 // Compile-fail probes for the T1 boundary. `tests/primitive_gc_boundary.rs`
 // checks this crate with `--cfg vm2_gc_probe="..."`, which places a fixture

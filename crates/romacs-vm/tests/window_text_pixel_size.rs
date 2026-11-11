@@ -107,7 +107,7 @@ fn oracle(expression: &str) -> String {
 
 fn booted() -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el")
+    gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el")
 }
 
 fn romacs(vm: &mut Vm, expression: &str) -> String {
@@ -161,7 +161,7 @@ fn window_el_fits_a_bottom_side_window_under_the_status_bar() {
 
 #[test]
 fn keymap_popup_window_matches_pinned_gnu() {
-    let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/emacs-lisp/keymap-popup.el");
+    let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/emacs-lisp/keymap-popup.el");
     let journey = format!(r#"(progn (load {:?} nil t) (eval '(keymap-popup-define wtps-test-map "Test popup." :group "Files" "f" ("Find file" ignore) "s" ("Save" ignore) :group "Other" "x" ("Extra" ignore) "l" ("A longer description of a command" ignore)) t) (keymap-popup wtps-test-map) (prog1 (let ((w (cadr (window-list)))) (list (length (window-list)) (window-total-height w) (window-body-height w) (window-text-pixel-size w nil t nil (frame-pixel-height) t) (with-current-buffer (window-buffer w) (buffer-substring-no-properties (point-min) (point-max))))) (keymap-popup-dismiss)))"#, library.canonicalize().unwrap().display().to_string());
     compare(&mut booted(), &journey);
 }

@@ -51,8 +51,8 @@ echo "journey-check: 2/5 VM2 warm: missing primitives, load frontier" >&2
 chain=(emacs-lisp/debug-early emacs-lisp/byte-run emacs-lisp/backquote subr keymap version widget custom
        emacs-lisp/map-ynp international/mule international/mule-conf env format bindings window files
        emacs-lisp/macroexp)
-pre=(); for n in "${chain[@]}"; do pre+=(--preload "$root/gnu-lisp/$n.el"); done
-mapfile -t lp < <(echo "$root/gnu-lisp"; find "$root/gnu-lisp" -mindepth 1 -type d | sort)
+pre=(); for n in "${chain[@]}"; do pre+=(--preload "$root/lisp/gnu/$n.el"); done
+mapfile -t lp < <(echo "$root/lisp/gnu"; find "$root/lisp/gnu" -mindepth 1 -type d | sort)
 python3 - "$out/gnu-primitives.txt" "$out/probe-all.el" <<'EOF'
 import sys
 names = open(sys.argv[1]).read().split()
@@ -85,9 +85,9 @@ tmux kill-session -t "$sess" 2>/dev/null || true
 
 echo "journey-check: 4/5 real GUI on the compositor (takes focus on workspace 2)" >&2
 python3 "$j/ladder.py" "$out" --mode default --binary "$gui"
-python3 "$j/ladder.py" "$out" --mode gnu-lisp --binary "$gui"
+python3 "$j/ladder.py" "$out" --mode lisp/gnu --binary "$gui"
 python3 "$j/ladder.py" "$out" --mode loadup --binary "$gui"
-env -u RUST_MIN_STACK ROMACS_LISP_DIR="$root/gnu-lisp" "$gui" --loadup-report >"$out/loadup.tsv" 2>"$out/loadup.err"
+env -u RUST_MIN_STACK ROMACS_LISP_DIR="$root/lisp/gnu" "$gui" --loadup-report >"$out/loadup.tsv" 2>"$out/loadup.err"
 
 echo "journey-check: 5/5 verdicts" >&2
 python3 "$j/judge.py" "$out" "$out/trace.json" "$out/frontier.json" "$out/vm-missing.txt" \

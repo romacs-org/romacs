@@ -88,7 +88,7 @@ moved it, as GNU's preserve_ptr, and the overlays' hooks found, as
                             (setq tail (cdr tail)))))))))
       ;; An indirect buffer's edit locks its base's file (insdel.c:2160).
       ;; So does any edit of a modified buffer whose base has a local
-      ;; `warm-restart-lock-pending' (rlisp/warm-restart.el), until a lock-file
+      ;; `warm-restart-lock-pending' (lisp/romacs/warm-restart.el), until a lock-file
       ;; returns: a refusal refuses this edit and the next one asks again.
       (let ((base (or (buffer-base-buffer) (current-buffer))))
         (if (and (or (not (buffer-modified-p)) (local-variable-p 'warm-restart-lock-pending base))

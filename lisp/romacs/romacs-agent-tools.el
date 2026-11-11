@@ -948,7 +948,7 @@ last result."
  "romacs_restart_request"
  "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
 and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
-romacs-vm-gui, gnu-lisp and rlisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
+romacs-vm-gui, lisp/gnu and lisp/romacs, e.g. the launcher's current) or a binary; omitted, the session's restart \
 command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
 carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
 to expiry seconds (default 900). A process that would end (a shell) is in the way unless force. After the \

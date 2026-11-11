@@ -3,7 +3,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
-;; rlisp/romacs-model.el's side of the native model events: the special
+;; lisp/romacs/romacs-model.el's side of the native model events: the special
 ;; event `(romacs-model ID TYPE PLIST)' updates state at once, runs the
 ;; callbacks in order and never nested, drops picks of a picture that is
 ;; not current and anything for a destroyed model.  Batch has no renderer,

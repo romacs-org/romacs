@@ -28,7 +28,7 @@ else:
     (D / 'runtime').symlink_to(Path(a.runtime).resolve())
 def runtime_fingerprint(root):
     digest = hashlib.sha256()
-    for directory in ['gnu-lisp', 'rlisp', 'etc', 'admin/unidata']:
+    for directory in ['lisp/gnu', 'lisp/romacs', 'etc', 'admin/unidata']:
         for file in sorted((root / directory).rglob('*')):
             if file.is_file():
                 digest.update(str(file.relative_to(root)).encode() + b'\0')

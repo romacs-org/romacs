@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; Romacs's own interface to agent sessions (romacs-agent.el), in the look of
-;; emacs-hermes's chat (rlisp/hermes, by the same author): its pure
+;; emacs-hermes's chat (lisp/romacs/hermes, by the same author): its pure
 ;; formatting helpers (hermes-chat-format.el: the clock, token counts,
 ;; Markdown) are used as they are; the prompt face, the full-width rule, the
 ;; turn footer, the composer hint and the header's shape are adapted from

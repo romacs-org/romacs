@@ -98,8 +98,8 @@ fn a_missing_explicit_init_file_is_an_error() {
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing-init.el");
     let mut child = Command::new(romacs)
-        .arg("--batch").arg(root.join("rlisp")).arg("--init-file").arg(&missing)
-        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("gnu-lisp"))
+        .arg("--batch").arg(root.join("lisp/romacs")).arg("--init-file").arg(&missing)
+        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("lisp/gnu"))
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
         .spawn().unwrap();
     child.stdin.take().unwrap().write_all(b"(boundp 'user-init-file)").unwrap();
@@ -111,7 +111,7 @@ fn a_missing_explicit_init_file_is_an_error() {
 }
 
 /// A batch program's settings stay out of an init, as a session's do
-/// (rlisp/romacs-saved-settings.el, in the chain): `disable-command' creates no
+/// (lisp/romacs/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.
 #[test]
 fn batch_writers_leave_the_init_alone() {

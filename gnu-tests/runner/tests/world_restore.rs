@@ -50,11 +50,11 @@ fn run_in(tree: &Path, preloads: &[PathBuf], scratch: &Path, store: &Path, dir: 
     fs::write(&reporter, "(princ (format \"SIBLING %s\\n\" wr-sibling-run))\n0\n").unwrap();
     let plan = dir.join("plan.json");
     fs::write(&plan, json!({"file": target, "forms": []}).to_string()).unwrap();
-    let lisp = tree.join("gnu-lisp");
+    let lisp = tree.join("lisp/gnu");
     let mut command = Command::new(env!("CARGO_BIN_EXE_romacs-gnu-ert"));
     command.args(["--harness-kind", "real", "--harness"]).arg(&harness).arg("--plan").arg(&plan)
         .arg("--reporter").arg(&reporter)
-        .arg("--preload").arg(tree.join("rlisp/romacs-loadup-bootstrap.el"));
+        .arg("--preload").arg(tree.join("lisp/romacs/romacs-loadup-bootstrap.el"));
     for preload in preloads {
         command.arg("--preload").arg(preload);
     }
@@ -64,7 +64,7 @@ fn run_in(tree: &Path, preloads: &[PathBuf], scratch: &Path, store: &Path, dir: 
     for subdir in subdirs {
         command.arg("--load-path").arg(subdir);
     }
-    command.arg("--load-path").arg(tree.join("rlisp")).arg("--load-path").arg(&dir).arg("--world-store").arg(store);
+    command.arg("--load-path").arg(tree.join("lisp/romacs")).arg("--load-path").arg(&dir).arg("--world-store").arg(store);
     let output = command.output().unwrap();
     let world = events(&output).into_iter().find(|e| e["event"] == "world").unwrap_or(Value::Null);
     let loaded = output.status.success() && String::from_utf8_lossy(&output.stdout).contains(&format!("SIBLING {name}\n"));
@@ -105,13 +105,13 @@ fn a_batch_world_store_build_restores_for_a_test_elsewhere() {
 fn a_world_whose_preloads_change_load_path_is_not_published() {
     let scratch = scratch("pushing");
     let tree = scratch.join("tree");
-    fs::create_dir_all(tree.join("rlisp")).unwrap();
-    std::os::unix::fs::symlink(root().join("gnu-lisp"), tree.join("gnu-lisp")).unwrap();
-    for entry in fs::read_dir(root().join("rlisp")).unwrap().filter_map(|e| e.ok()) {
-        std::os::unix::fs::symlink(entry.path(), tree.join("rlisp").join(entry.file_name())).unwrap();
+    fs::create_dir_all(tree.join("lisp/romacs")).unwrap();
+    std::os::unix::fs::symlink(root().join("lisp/gnu"), tree.join("lisp/gnu")).unwrap();
+    for entry in fs::read_dir(root().join("lisp/romacs")).unwrap().filter_map(|e| e.ok()) {
+        std::os::unix::fs::symlink(entry.path(), tree.join("lisp/romacs").join(entry.file_name())).unwrap();
     }
-    let push = tree.join("rlisp/wr-push.el");
-    fs::write(&push, format!("(push {:?} load-path)\n", tree.join("gnu-lisp").display().to_string())).unwrap();
+    let push = tree.join("lisp/romacs/wr-push.el");
+    fs::write(&push, format!("(push {:?} load-path)\n", tree.join("lisp/gnu").display().to_string())).unwrap();
     let store = scratch.join("store");
     fs::create_dir_all(&store).unwrap();
     fs::set_permissions(&store, fs::Permissions::from_mode(0o700)).unwrap();

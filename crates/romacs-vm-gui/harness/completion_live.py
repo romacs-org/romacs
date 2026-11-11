@@ -3,9 +3,9 @@
 
 The session launches with no font override, in a work directory holding
 sub/notes.txt.  A private init.el records, when init runs, the completion
-options Romacs's defaults gave it (rlisp/romacs-completion-defaults.el) and
+options Romacs's defaults gave it (lisp/romacs/romacs-completion-defaults.el) and
 defines a probe command that records when it runs.  The defaults display
-GNU's readers with `romacs-complete-mode' (rlisp/romacs-complete.el): real
+GNU's readers with `romacs-complete-mode' (lisp/romacs/romacs-complete.el): real
 keys drive vertico's UI, whose candidates show in the layer that hosts the
 minibuffer, TAB inserts the selected candidate and Return exits with it.
 Every prompt's first command records the root window's height, which must

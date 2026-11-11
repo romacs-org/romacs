@@ -304,7 +304,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     gnu, support = census_population(root)
     files = [root / rel for rel in sorted(gnu | support)]
     if not files:
-        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "gnu-lisp"}')
+        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "lisp/gnu"}')
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='parity-census-') as tmp:
         manifest = pathlib.Path(tmp) / 'manifest.json'
@@ -345,7 +345,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     if reported == 0:
         raise Refusal(EXIT_NOT_MEASURED, f'the census binary reported on none of {len(gnu)} pristine GNU files')
     # Floor members retain their GNU source identities across checkout moves.
-    loaded = sorted('lisp' + r['file'][len('gnu-lisp'):]
+    loaded = sorted('lisp' + r['file'][len('lisp/gnu'):]
                     for r in rows if r['loaded'] and r['file'] in gnu)
 
     def why(r):
@@ -361,7 +361,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
             'unreported': sorted(r['file'] for r in rows if r['forms_evaluated'] is None and r['file'] in gnu),
             'gnu_target_total': len(gnu), 'shared_total': len(gnu),
             'members': {f'census-{mode}': loaded},
-            'verdicts': {('lisp' + r['file'][len('gnu-lisp'):] if r['file'] in gnu else r['file']):
+            'verdicts': {('lisp' + r['file'][len('lisp/gnu'):] if r['file'] in gnu else r['file']):
                          ('loaded' if r['loaded'] else why(r)) for r in rows},
             'chain': chain, 'binary_sha256': digest, 'seconds': round(time.monotonic() - started, 1)}
 
@@ -911,7 +911,7 @@ def measure_unit(root: pathlib.Path, unit: str, gnu_ert: str | None, census: str
 UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
-FINGERPRINTED = ('gnu-lisp', 'rlisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
+FINGERPRINTED = ('lisp/gnu', 'lisp/romacs', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
                  'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'tools/lisp-census',
                  'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
                  'parity-reference.toml',
@@ -1175,10 +1175,10 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'tools', 'parity-reference.toml']
+    measured = ['lisp/gnu', 'lisp/romacs', 'gnu-tests', 'tools', 'parity-reference.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
-    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'gnu-tests/test',
+    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp/gnu', 'lisp/romacs', 'gnu-tests/test',
                                     'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'tools').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored
@@ -1186,7 +1186,7 @@ def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
 
 def python_cache(path: str) -> bool:
     """Only Python's own bytecode cache next to the scripts is harmless;
-    anything ignored under gnu-lisp/ or the GNU import can change a measurement."""
+    anything ignored under lisp/gnu/ or the GNU import can change a measurement."""
     parts = pathlib.PurePosixPath(path.rstrip('/')).parts
     return (parts[:1] == ('tools',) and '__pycache__' in parts
             and (parts[-1] == '__pycache__' or parts[-1].endswith('.pyc')))

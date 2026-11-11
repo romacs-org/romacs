@@ -25,7 +25,7 @@
 ;; Modus's three layers under Romacs's names: named colours (the core
 ;; palettes), the semantic mappings faces reference, and the face table,
 ;; with the style helpers and options it reads and the palette generator
-;; derivative themes start from.  rlisp/romacs-theme.el resolves a theme's
+;; derivative themes start from.  lisp/romacs/romacs-theme.el resolves a theme's
 ;; palette and builds its faces from these.  Only Modus 5.3.0's live
 ;; options are here: its prompts and completions options are obsolete
 ;; and unread upstream.

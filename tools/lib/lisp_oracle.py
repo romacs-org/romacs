@@ -7,10 +7,10 @@
         by exact path, SHA-256 and pinned generator/source references. These
         are snapshots, not pristine Git blobs or a regeneration claim. No
         undeclared .el file (even ignored or without .git), or other non-ignored
-        file in a repository, may exist under gnu-lisp/. A romacs variant of a GNU file
+        file in a repository, may exist under lisp/gnu/. A romacs variant of a GNU file
         may live ONLY in lisp-overlay/, declared in lisp-overlay/MANIFEST.tsv
         and rebased on the pin blob it varies; non-GNU Lisp lives in
-        rlisp/ (external dependencies in rlisp/deps/). Exit 1 on any violation.
+        lisp/romacs/ (external dependencies in lisp/romacs/deps/). Exit 1 on any violation.
 
     lisp_oracle.py populations --rev REV [--out FILE]
         Re-derive the DRIFT/EDIT split of every shared path that differs from
@@ -40,7 +40,7 @@ GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 PIN_FILE = 'LISP-PIN.json'
 GENERATED_FILE = 'LISP-GENERATED.json'
 GNU_SOURCE = os.environ.get('LISP_ORACLE_GNU', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / ''))
-LOCAL_LISP = 'gnu-lisp'
+LOCAL_LISP = 'lisp/gnu'
 
 
 def local_path(upstream_path):
@@ -178,7 +178,7 @@ def check(root, gnu, pin):
                         f'(restore the pin blob; a variant belongs in {OVERLAY}/)')
 
     for p in absent:
-        problems.append(f'ABSENT {p}: GNU ships it at the pin; gnu-lisp/ is GNU\'s whole tree (re-extract it)')
+        problems.append(f'ABSENT {p}: GNU ships it at the pin; lisp/gnu/ is GNU\'s whole tree (re-extract it)')
 
     # LISP-PIN.json records the pin and GNU's own tree id for lisp/; both must
     # agree with GNU's object store, so the record cannot drift from the pin.
@@ -209,7 +209,7 @@ def check(root, gnu, pin):
                     and ((root / p).exists() or (root / p).is_symlink()))
     for p in extras:
         problems.append(f'EXTRA {p}: neither a GNU Git path at the pin nor declared generated support; '
-                        'non-GNU Lisp belongs in rlisp/ (external dependencies in rlisp/deps/)')
+                        'non-GNU Lisp belongs in lisp/romacs/ (external dependencies in lisp/romacs/deps/)')
 
     manifest = {}
     for n, cols in read_tsv(root / OVERLAY / 'MANIFEST.tsv'):
@@ -232,7 +232,7 @@ def check(root, gnu, pin):
             continue
         if gnu_path not in upstream:
             problems.append(f'{OVERLAY}/{rel}: varies no GNU file (lisp/{rel} is not in the pin); '
-                            'romacs-only Lisp belongs in rlisp/')
+                            'romacs-only Lisp belongs in lisp/romacs/')
             continue
         if manifest[rel] != upstream[gnu_path]:
             problems.append(f'STALE {OVERLAY}/{rel}: rebased on {manifest[rel][:12]}, pin has {upstream[gnu_path][:12]}')
@@ -255,7 +255,7 @@ def check(root, gnu, pin):
         if len(problems) > 40:
             print(f'  ... and {len(problems) - 40} more', file=sys.stderr)
         return 1
-    print('lisp_oracle: ok, every shared gnu-lisp/ path is the pin blob; declared generated support bytes verified')
+    print('lisp_oracle: ok, every shared lisp/gnu/ path is the pin blob; declared generated support bytes verified')
     return 0
 
 
