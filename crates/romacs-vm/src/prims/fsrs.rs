@@ -18,7 +18,7 @@ use ::fsrs::{ComputeParametersInput, FSRSItem, FSRSReview, MemoryState, FSRS};
 type Result<T> = std::result::Result<T, Fault>;
 
 /// The range the crate clips the decay weight (w20) to when it builds a
-/// model (fsrs-rs parameter_clipper.rs), which it does not expose.
+/// model (fsrs-rs `parameter_clipper.rs`), which it does not expose.
 const DECAY_CLIP: (f32, f32) = (0.1, 0.8);
 
 // The state after RATING, ELAPSED-DAYS after MEMORY was last reviewed
@@ -34,7 +34,7 @@ fn romacs_fsrs_next_state(cx, parameters: Value, memory: Value, elapsed_days: Va
     let next = model.next_states(memory, retention, elapsed).map_err(|e| failed(&e))?;
     let state = [next.again, next.hard, next.good, next.easy][rating as usize - 1].clone();
     let keys = [":stability", ":difficulty", ":interval"];
-    let values = [state.memory.stability, state.memory.difficulty, state.interval];
+    let values = [state.memory.stability, state.memory.difficulty, finite(state.interval)?];
     Ok(plist(cx, &keys, &values))
 }}
 
@@ -45,7 +45,7 @@ fn romacs_fsrs_interval(cx, parameters: Value, stability: Value, retention: Valu
     let model = model(cx, parameters)?;
     let stability = positive(cx, stability)?;
     let retention = probability(cx, retention)?;
-    Ok(cx.float(f64::from(model.next_interval(Some(stability), retention, 3))))
+    Ok(cx.float(f64::from(finite(model.next_interval(Some(stability), retention, 3))?)))
 }}
 
 // The probability of recalling a card of STABILITY ELAPSED-DAYS after its
@@ -56,11 +56,11 @@ defsubr! { name = "romacs-fsrs-retrievability", gnu = "romacs:fsrs", effect = Pu
 fn romacs_fsrs_retrievability(cx, parameters: Value, stability: Value, elapsed_days: Value) {
     let weights = weights(cx, parameters)?;
     let stability = positive(cx, stability)?;
-    let elapsed = number(cx, elapsed_days)?;
+    let elapsed = single(number(cx, elapsed_days)?);
     if !(elapsed >= 0.0 && elapsed.is_finite()) { return Err(Fault::Wrong("natnump", elapsed_days)); }
     let memory = MemoryState { stability, difficulty: 5.0 };
     let decay = weights[20].clamp(DECAY_CLIP.0, DECAY_CLIP.1);
-    Ok(cx.float(f64::from(::fsrs::current_retrievability(memory, single(elapsed), decay))))
+    Ok(cx.float(f64::from(finite(::fsrs::current_retrievability(memory, elapsed, decay))?)))
 }}
 
 // Weights fitted to REVIEWS by the crate's optimizer, as Anki trains
@@ -172,6 +172,11 @@ fn single(x: f64) -> f32 {
     x as f32
 }
 
+/// X when the crate's arithmetic stayed finite, else an error.
+fn finite(x: f32) -> Result<f32> {
+    if x.is_finite() { Ok(x) } else { Err(Fault::Error("FSRS: result out of range".into())) }
+}
+
 /// A crate refusal as a Lisp error.
 fn failed(error: &::fsrs::FSRSError) -> Fault {
     Fault::Error(format!("FSRS: {error:?}"))
@@ -232,6 +237,9 @@ mod tests {
                                (romacs-fsrs-interval nil 1.0 1.0e-50)
                                (romacs-fsrs-interval nil 1.0 1.0)
                                (romacs-fsrs-interval nil 1.0e-50 0.9)
+                               (romacs-fsrs-interval nil 1.0e100 0.9)
+                               (romacs-fsrs-interval nil 3.0e38 0.01)
+                               (romacs-fsrs-retrievability nil 1.0e-100 0)
                                (romacs-fsrs-next-state nil nil -1 3 0.9)
                                (romacs-fsrs-next-state nil '(1.0 . 11) 1 3 0.9)
                                (romacs-fsrs-next-state nil '(0 . 5) 1 3 0.9)
@@ -240,8 +248,8 @@ mod tests {
                              out)
                  (setq out (cons (condition-case e (eval form t) (error (car e))) out))))");
         assert_eq!(shown, "(wrong-type-argument wrong-type-argument args-out-of-range args-out-of-range \
-                           wrong-type-argument args-out-of-range args-out-of-range args-out-of-range \
-                           error wrong-type-argument)");
+                           wrong-type-argument args-out-of-range error args-out-of-range args-out-of-range \
+                           args-out-of-range args-out-of-range error wrong-type-argument)");
     }
 
     /// Few items keep the defaults; enough fit the initial stabilities.
@@ -303,11 +311,15 @@ mod tests {
                                           0.1666 0.796 1.4835 0.0614 0.2629 1.6483 0.6014 1.8729
                                           0.5425 0.0912 0.0658] 0)
                                [0.02])))
-               (list (< (abs (- 0.8 (romacs-fsrs-retrievability
-                                      w 5.0 (romacs-fsrs-interval w 5.0 0.8))))
-                        1e-4)
-                     (= (romacs-fsrs-retrievability w 5.0 3)
-                        (romacs-fsrs-retrievability (vconcat (substring w 0 20) [0.1]) 5.0 3))))");
-        assert_eq!(shown, "(t t)");
+               (let ((high (vconcat (substring w 0 20) [1.0])))
+                 (list (< (abs (- 0.8 (romacs-fsrs-retrievability
+                                        w 5.0 (romacs-fsrs-interval w 5.0 0.8))))
+                          1e-4)
+                       (= (romacs-fsrs-retrievability w 5.0 3)
+                          (romacs-fsrs-retrievability (vconcat (substring w 0 20) [0.1]) 5.0 3))
+                       (< (abs (- 0.5 (romacs-fsrs-retrievability
+                                        high 5.0 (romacs-fsrs-interval high 5.0 0.5))))
+                          1e-4))))");
+        assert_eq!(shown, "(t t t)");
     }
 }
