@@ -26,7 +26,7 @@ impl SourceOnlyEmacsLisp {
         };
         // cl-lib.el deliberately requires cl-macs/cl-seq when cl-loaddefs is absent.
         // Never remove that generated file from the production GNU tree.
-        for entry in fs::read_dir(root.join("gnu-lisp/emacs-lisp")).unwrap() {
+        for entry in fs::read_dir(root.join("lisp/gnu/emacs-lisp")).unwrap() {
             let entry = entry.unwrap();
             if entry.file_type().unwrap().is_file() && entry.file_name() != "cl-loaddefs.el" {
                 fs::copy(entry.path(), fixture.directory.join(entry.file_name())).unwrap();

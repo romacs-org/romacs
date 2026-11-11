@@ -654,6 +654,11 @@ pub struct WgpuGlyphAtlas {
     /// Face ids already warned about, so the emergency path logs once per
     /// face instead of per glyph.
     unresolved_face_warned: HashSet<FaceId>,
+    /// The face of a glyph asked for with none, the renderer's own text
+    /// (the busy indicator, the FPS readout, the title bar): the default
+    /// face of the last frame that had one. That text draws in a font
+    /// layout resolved, and the render thread never selects one itself.
+    default_face: Option<std::sync::Arc<Face>>,
 }
 
 /// Whether the single-char cmap fast path in [`WgpuGlyphAtlas::rasterize_glyph`]
@@ -754,6 +759,7 @@ impl WgpuGlyphAtlas {
             color_glyph_rasterizer: ColorGlyphRasterizer::new(),
             color_font_ids: FxHashSet::default(),
             unresolved_face_text_total: 0,
+            default_face: None,
             unresolved_face_warned: HashSet::new(),
             cache_hits_this_frame: 0,
             cache_misses_this_frame: 0,
@@ -1645,6 +1651,11 @@ impl WgpuGlyphAtlas {
         shaped_clusters: &ShapedClusterTable,
     ) {
         self.install_resolved_fonts(fonts.values());
+        if let Some(face) = faces.get(&romacs_display_protocol::types::FaceId::of_default())
+            && self.default_face.as_deref() != Some(face)
+        {
+            self.default_face = Some(std::sync::Arc::new(face.clone()));
+        }
         for (face_id, by_char) in char_fonts {
             let entry = self.frame_char_fonts.entry(*face_id).or_default();
             for (ch, glyph) in by_char {
@@ -2039,9 +2050,10 @@ impl WgpuGlyphAtlas {
                 attrs = attrs.style(style);
             }
         } else {
-            // An unstyled renderer-only path has no semantic request to
-            // resolve. Use cosmic's deterministic generic without consulting
-            // any platform catalog.
+            // Faceless text before any frame gave a default face: cosmic's
+            // generic family is a selection over the whole catalog, which
+            // opens every font in it the first time (design §10).
+            self.unresolved_face_text_total += 1;
             attrs = attrs.family(Family::Monospace);
         }
 
@@ -2773,7 +2785,8 @@ impl WgpuGlyphAtlas {
         face: Option<&Face>,
         subpixel: SubpixelRequest,
     ) -> Option<GlyphAtlasHandle> {
-        match self.get_or_create_atlas_result(device, queue, key, face, subpixel) {
+        let default_face = if face.is_none() { self.default_face.clone() } else { None };
+        match self.get_or_create_atlas_result(device, queue, key, face.or(default_face.as_deref()), subpixel) {
             Ok(handle) => Some(handle),
             Err(err) => {
                 if !matches!(err, GlyphAtlasError::Whitespace) {

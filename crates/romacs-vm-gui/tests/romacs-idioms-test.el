@@ -1,8 +1,8 @@
-;;; romacs-idioms-test.el --- rlisp's commands and key hints stay idiomatic -*- lexical-binding: t -*-
+;;; romacs-idioms-test.el --- lisp/romacs's commands and key hints stay idiomatic -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; Two lints over rlisp/romacs-*.el, in a `--loadup' session
+;; Two lints over lisp/romacs/romacs-*.el, in a `--loadup' session
 ;; (gnu_completion.rs `romacs_idioms_tests_pass').  Each checks a property
 ;; it can decide exactly, and says what it does not look at:
 ;;
@@ -129,7 +129,7 @@ SHOWING says FORM is inside a call that shows its arguments."
     found))
 
 (defun romacs-idioms-test--sources ()
-  "rlisp/romacs-*.el."
+  "lisp/romacs/romacs-*.el."
   (directory-files (file-name-directory (locate-library "romacs-term")) t "\\`romacs-.*\\.el\\'"))
 
 ;;;; The lints

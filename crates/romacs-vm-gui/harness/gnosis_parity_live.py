@@ -105,19 +105,19 @@ def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
     # their directories on `load-path' and the same generated autoloads
-    # Romacs's --loadup loads, whose rlisp/ libraries (romacs-video's
-    # find-file-hook) need rlisp/ too.  gnosis and keymap-popup come byte-compiled.
-    bundled = [lisp] + [ROOT / 'rlisp' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
+    # Romacs's --loadup loads, whose lisp/romacs/ libraries (romacs-video's
+    # find-file-hook) need lisp/romacs/ too.  gnosis and keymap-popup come byte-compiled.
+    bundled = [lisp] + [ROOT / 'lisp/romacs' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'
         f' (list {" ".join(lisp_string(str(d)) for d in bundled[1:])})))\n'
-        f'(load {lisp_string(str(ROOT / "rlisp/romacs-bundled-autoloads.el"))} nil t)\n')
+        f'(load {lisp_string(str(ROOT / "lisp/romacs/romacs-bundled-autoloads.el"))} nil t)\n')
     # GNU takes the settings Romacs's --loadup makes before the user's init:
     # its completion defaults (the same file), its scroll-conservatively
     # (romacs-startup.el) and no GUI chrome Romacs lacks.
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
                  '(setq scroll-conservatively 101)\n'
-                 f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
+                 f'(load {lisp_string(str(ROOT / "lisp/romacs/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     return f''';; -*- lexical-binding: t -*-
 {load}{gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 (setq gnosis-dir {lisp_string(str(root / 'gnosis') + '/')})
@@ -156,7 +156,7 @@ def gnosis_tree(engine, base, args):
 def gnu_lisp(base):
     """gnosis and keymap-popup byte-compiled by the pinned GNU, as a GNU
     user runs them; cached by source hash."""
-    sources = sorted((ROOT / 'rlisp/gnosis').glob('*.el')) + [ROOT / 'rlisp/emacs-lisp/keymap-popup.el']
+    sources = sorted((ROOT / 'lisp/romacs/gnosis').glob('*.el')) + [ROOT / 'lisp/romacs/emacs-lisp/keymap-popup.el']
     return lisp_copy(base, 'gnu-gnosis', sources, True)
 
 
@@ -165,7 +165,7 @@ def launch(engine, base, args):
     if engine == 'gnu':
         lisp = gnu_lisp(base)
         return gnu_engine(root, home, env, init_source(engine, root, lisp), lisp, args.timeout, args.tools)
-    return romacs_engine(args.romacs, root, home, env, init_source(engine, root, None), ROOT / 'rlisp/gnosis',
+    return romacs_engine(args.romacs, root, home, env, init_source(engine, root, None), ROOT / 'lisp/romacs/gnosis',
                          args.timeout, args.tools)
 
 

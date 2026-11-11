@@ -11,13 +11,13 @@ fn inline_dependency_frontier() {
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()]).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()]).unwrap();
     for file in ["emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el", "emacs-lisp/backquote.el", "subr.el", "keymap.el", "emacs-lisp/pcase.el", "emacs-lisp/gv.el", "emacs-lisp/inline.el"] {
-        let result = vm.load_file(&root.join("gnu-lisp").join(file)).map(|_| ());
+        let result = vm.load_file(&root.join("lisp/gnu").join(file)).map(|_| ());
         println!("{file}: {result:?}");
         assert!(result.is_ok(), "GNU dependency must load: {file}: {result:?}");
     }
-    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/ert.el")).map(|_| ());
+    let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp/ert.el")).map(|_| ());
     println!("ERT: {result:?}");
     let report = vm.load_report();
     for (name, completed, total, ordinal, line) in [

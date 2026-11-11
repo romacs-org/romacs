@@ -77,7 +77,7 @@ def run(output):
                                          for name in ("state", "cache", "config", "data")})
     env["XDG_RUNTIME_DIR"] = str(root / "run")
     mcp_socket = root / "run/mcp"
-    command = [str(executable), "-Q", "--fg-daemon=native-mcp-regression", "-L", str(repo / "rlisp"),
+    command = [str(executable), "-Q", "--fg-daemon=native-mcp-regression", "-L", str(repo / "lisp/romacs"),
                "--eval", f'(setq server-socket-dir {json.dumps(str(root / "run"))})',
                "--eval", '(progn (require \'romacs-mcp-companion) (romacs-mcp-enable-companion-tools))',
                "--eval", f'(romacs-mcp-start {json.dumps(str(mcp_socket))})']

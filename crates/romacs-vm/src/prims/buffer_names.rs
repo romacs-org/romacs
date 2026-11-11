@@ -123,7 +123,7 @@ fn done_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Val
 
 // Romacs: the buffer list ordered with BUFFERS first, then the others in
 // their order, as one change with one `buffer-list-update-hook': a session
-// image's restore (rlisp/warm-restart.el) puts back a whole order, which
+// image's restore (lisp/romacs/warm-restart.el) puts back a whole order, which
 // `bury-buffer-internal' would rebuild once per buffer.
 defsubr! { name = "romacs--lead-buffer-list", gnu = "romacs:session-image", effect = Global,
 fn lead_buffer_list(cx, buffers: Value) -> Step {

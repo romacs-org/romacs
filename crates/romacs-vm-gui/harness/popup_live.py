@@ -264,7 +264,7 @@ TOASTS_INIT = '''(split-window-right)
           :command (and (symbolp last-command) (symbol-name last-command))))
    nil {state} nil 'quiet))
 (defun popup-live-path () (interactive)
-  (message "Wrote %s" (expand-file-name "Projects/rust/romacs/rlisp/romacs-defaults.el" "~")))
+  (message "Wrote %s" (expand-file-name "Projects/rust/romacs/lisp/romacs/romacs-defaults.el" "~")))
 (global-set-key (kbd "<f5>") #'popup-live-path)
 (add-hook 'post-command-hook (lambda () (run-at-time 0.3 nil #'popup-live--toasts)) 90)
 ;; A toast while the M-x panel shows (a message there shows in the panel's

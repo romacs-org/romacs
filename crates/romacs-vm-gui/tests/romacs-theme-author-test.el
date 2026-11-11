@@ -2,8 +2,8 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; rlisp/romacs-theme.el's author-facing macro and
-;; rlisp/romacs-theme-roles.el, in a `--loadup' session
+;; lisp/romacs/romacs-theme.el's author-facing macro and
+;; lisp/romacs/romacs-theme-roles.el, in a `--loadup' session
 ;; (gnu_completion.rs `romacs_theme_author_tests_pass').
 
 (require 'romacs-theme)

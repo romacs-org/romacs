@@ -5,7 +5,7 @@ mod gnu_ert_vm;
 use gnu_ert_vm::bootstrapped_with;
 
 fn bootstrapped(root: &Path) -> Vm {
-    bootstrapped_with(root, "rlisp/romacs-loadup-bootstrap.el")
+    bootstrapped_with(root, "lisp/romacs/romacs-loadup-bootstrap.el")
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn charset_coding_systems_match_gnu() {
 #[test]
 fn write_region_coding_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-write-coding-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let cases: [(&str, &str); 24] = [
@@ -131,7 +131,7 @@ fn write_region_coding_matches_gnu() {
 #[test]
 fn insert_file_contents_coding_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-insert-coding-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // Only a local buffer-file-coding-system: GNU's startup sets the default
@@ -230,7 +230,7 @@ fn insert_file_contents_coding_matches_gnu() {
 #[test]
 fn insert_file_contents_decodes_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-insert-refuse-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // A cookie-less Latin-1 file reads as in pinned GNU: GNU's walk rejects
@@ -275,7 +275,7 @@ fn insert_file_contents_decodes_as_gnu() {
 #[test]
 fn find_composition_refuses_compositions_it_cannot_build() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     for (form, kind) in [
         ("(find-composition-internal 0 1 \"e\\u0301x\" nil)", "with automatic composition"),
         ("(progn (set-window-buffer nil (get-buffer-create \"rt-c\")) (set-buffer \"rt-c\") (insert \"e\\u0301x\") (find-composition-internal 1 nil nil nil))", "with automatic composition"),
@@ -293,7 +293,7 @@ fn find_composition_refuses_compositions_it_cannot_build() {
 #[test]
 fn write_region_refuses_unsupported_conversion_before_opening() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-write-refuse-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let setup = r#"(defvar rt-pre-called nil) (defalias 'rt-pre-write (lambda (_from _to) (setq rt-pre-called t) (goto-char (point-min)) (insert "PRE"))) (define-coding-system 'rt-pre-utf-8 "Pre." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :pre-write-conversion 'rt-pre-write) (define-coding-system 'rt-tbl-utf-8 "Tbl." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :encode-translation-table (make-translation-table '((?a . ?b))))"#;
@@ -327,7 +327,7 @@ fn write_region_refuses_unsupported_conversion_before_opening() {
 #[test]
 fn save_restriction_unibyte_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let setup = r#"(defmacro rt-ub (&rest body)
   `(with-temp-buffer (set-buffer-multibyte nil) (insert "abcdef") (narrow-to-region 3 5) (goto-char 4)
      (list (condition-case e (progn ,@body) (error (list 'E e))) (point-min) (point-max) (point) (save-restriction (widen) (buffer-string)))))"#;
@@ -371,7 +371,7 @@ fn save_restriction_unibyte_matches_gnu() {
 #[test]
 fn save_excursion_unibyte_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let setup = r#"(defmacro rt-ux (&rest body)
   `(with-temp-buffer (set-buffer-multibyte nil) (insert "ab\351def") (goto-char 4)
      (list (condition-case e (progn ,@body) (error (list 'E e))) (point) (buffer-string))))"#;
@@ -401,7 +401,7 @@ fn save_excursion_unibyte_matches_gnu() {
 #[test]
 fn daily_driver_load_slice_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let scratch = std::env::temp_dir().join(format!("rt-recursive-load-{}.el", std::process::id()));
     std::fs::write(&scratch, ";;; -*- lexical-binding: t -*-\n(defvar rt-n 0)\n(setq rt-n (1+ rt-n))\n(when (< rt-n 10) (load load-file-name nil t t))\n").unwrap();
     let recursive = format!("(list (condition-case e (load {:?} nil t t) (error (list (car e) (cadr e) (length (cddr e))))) rt-n)", scratch.to_str().unwrap());
@@ -849,7 +849,7 @@ fn daily_driver_load_slice_matches_gnu() {
 #[test]
 fn edit_undo_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let expressions = [
         r###"(with-temp-buffer (buffer-enable-undo) (insert "hello") (undo-boundary) (insert " world") (undo-boundary) (goto-char 3) (delete-char 2) (undo-boundary) (put-text-property 1 3 'face 'bold) (undo-boundary) (let ((states (list (buffer-string))) (last-command nil)) (undo) (setq states (cons (buffer-string) states)) (let ((last-command 'undo)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states))) (list (nreverse states) (point) (buffer-modified-p))))"###,
         r###"(with-temp-buffer (buffer-enable-undo) (insert "abcdef") (undo-boundary) (let ((m (copy-marker 3)) (n (copy-marker 4 t))) (delete-region 2 5) (undo-boundary) (primitive-undo 1 (cdr buffer-undo-list)) (list (buffer-string) (marker-position m) (marker-position n) (point))))"###,
@@ -906,7 +906,7 @@ fn edit_undo_matches_gnu() {
 #[test]
 fn process_waits_run_timers_like_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let source = r###"(prin1-to-string
  (progn (setq default-directory (file-name-as-directory (getenv "TMPDIR")))
  (list (let ((x 0)) (run-at-time 0.02 nil (lambda () (setq x 1))) (while (= x 0) (accept-process-output nil 0.01)) x)
@@ -932,7 +932,7 @@ fn process_waits_run_timers_like_gnu() {
 #[test]
 fn timer_order_in_waits_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let source = r###"(prin1-to-string
  (list (let ((log nil))
          (run-at-time 0.03 nil (lambda () (push 'c log)))
@@ -977,7 +977,7 @@ fn timer_order_in_waits_matches_gnu() {
 fn file_names_links_and_copies_match_gnu() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-file-links-{}", std::process::id()));
     const OLD: i64 = 1_000_000_000;
     let fixture = || {
@@ -1121,7 +1121,7 @@ fn file_names_links_and_copies_match_gnu() {
 fn fileio_defuns_match_gnu() {
     use std::os::unix::fs::PermissionsExt;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("fileio-defuns-{}", std::process::id()));
     let clear = || {
         if dir.join("locked").exists() { std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap(); }
@@ -1214,7 +1214,7 @@ fn fileio_defuns_match_gnu() {
 #[test]
 fn file_name_handlers_match_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("fnhandlers-{}", std::process::id()));
     let fixture = || {
         let _ = std::fs::remove_dir_all(&dir);
@@ -1299,7 +1299,7 @@ fn file_name_handlers_match_gnu() {
 #[test]
 fn default_directory_and_expansion_match_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-default-directory-{}", std::process::id()));
     let fixture = || {
         let _ = std::fs::remove_dir_all(&dir);

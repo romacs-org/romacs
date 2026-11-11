@@ -142,7 +142,7 @@ pub struct FrameChrome {
 }
 
 /// The material a frame's layers are drawn in, from its `romacs-style'
-/// parameter (rlisp/romacs-chrome.el); the default is the `flat' style.
+/// parameter (lisp/romacs/romacs-chrome.el); the default is the `flat' style.
 /// LAYER_RADIUS is the corners of a layer that names none, BAND_RADIUS of a
 /// picker's selected row; SHADOW is a layer's (reach, drop, opacity), GLOW
 /// its (reach, opacity), in pixels.
@@ -760,10 +760,14 @@ romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 /// cache, at BODY_X and BODY_Y in the slot (its margins and relief).
 /// RELIEF is `:relief' (raised when positive), its colors from
 /// RELIEF_BACKGROUND (0xRRGGBB), else the face's background.
+/// A `(surface :id ID ...)` specification is laid out the same way, IMAGE
+/// 0 and SURFACE its native surface (a model): the renderer composites
+/// that surface in the slot.  SURFACE is 0 for an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InlineImage {
     pub byte: usize,
     pub image: u32,
+    pub surface: u32,
     pub width: i64,
     pub ascent: i64,
     pub descent: i64,
@@ -774,7 +778,7 @@ pub struct InlineImage {
     pub relief: i64,
     pub relief_background: Option<u32>,
 }
-romacs_snapshot::snapshot_struct!(InlineImage { byte, image, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
+romacs_snapshot::snapshot_struct!(InlineImage { byte, image, surface, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
 
 /// A stretch's width before it depends on where it is laid out, in pixels
 /// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,
