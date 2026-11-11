@@ -1469,8 +1469,10 @@ def mcp_tour(args, base):
                         and friend not in json.dumps(observed['buffers'])
                         and '*tour*' in listed['buffers'] and friend not in listed['buffers']
                         and friend in private['buffers']
-                        # Gnosis's refuse without a session or database (none here).
-                        and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request')
+                        # Gnosis's refuse without a session or database (none here); romacs_task_watch
+                        # without a running unit or a calling task.
+                        and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
+                                                                  'romacs_task_watch')
                                 for n in errors)
                         and task is not None)
         return result

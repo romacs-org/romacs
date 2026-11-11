@@ -2391,4 +2391,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-codex)
 (require 'romacs-agent-ui)
 (require 'romacs-agent-tools)
+(require 'romacs-agent-watch)
 ;;; romacs-agent.el ends here
