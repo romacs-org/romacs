@@ -714,9 +714,16 @@ impl<T> Table<T> {
         self.barrier.lost
     }
     /// Whether entry I survived a collection.
-    #[cfg(test)]
     pub(crate) fn old(&self, i: usize) -> bool {
         self.colors[i] & OLD != 0
+    }
+    /// Whether entry I was stored into since the last collection.
+    pub(crate) fn stored_into(&self, i: usize) -> bool {
+        self.colors[i] & DIRTY != 0
+    }
+    /// Whether each entry is young and unmarked: what a minor's sweep frees.
+    pub(crate) fn young_unmarked(&self) -> impl Iterator<Item = bool> + '_ {
+        self.colors.iter().map(|&color| color & (IN_USE | OLD | MARK) == IN_USE)
     }
     /// Whether each entry holds an object: in use, whatever else its colour says.
     pub(crate) fn held(&self) -> Vec<bool> {
