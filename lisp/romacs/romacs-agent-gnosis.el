@@ -290,8 +290,10 @@ spellings), tags [] (Org tags: letters, digits, _ @ # %), key}. Types: basic, do
 cloze (each answer a blank: a disjoint occurrence in question; or mark blanks inline with no answer), mc-cloze, \
 agent-eval; model cards: gnosis_model_card_preview. Gnosis has no decks: use tags. key (unique to the card \
 across all calls; omit it rather than number cards per call), or when omitted the card's content (all but its \
-tags), makes a retry idempotent: a card already created reports exists with its ids. Text the Gnosis editor could \
-not open and save unchanged (a line starting \"- \" in an answer, an Org heading) makes the card invalid. dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
+tags), makes a retry idempotent: a card already created reports exists with its ids. Outer whitespace is trimmed. \
+Text the Gnosis editor would read as Org structure, so could not keep unchanged (a line starting \"- \", \"+ \" \
+or \"1) \" inside an answer, an Org heading, a table, an unindented #+begin_src block), makes the card invalid; \
+the error names the field and what the editor would keep. Indent a source block two spaces to keep it. dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
 status: created|exists|would-create|invalid, ids?, themata?, error?}]}; with any card invalid nothing is written."
     (list romacs-agent-gnosis--instance '("cards" . "array") '("dry-run" . "boolean")) '("cards")
   (gnosis-agent-content-create (vconcat (mapcar #'romacs-agent-gnosis--data (gethash "cards" arguments)))

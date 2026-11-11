@@ -1395,10 +1395,13 @@ a hash of everything but its tags, is stored with what it made, so a
 retried call reports those cards as =exists= with their IDs instead of
 making them again.  A key names one card across every call, so a key
 reused for another card reports the first.  A retry that changes only a
-card's tags is reported =exists= unchanged.  A card is made only if the
-editor could open it and save it again unchanged; text it would split
-or misread, such as an answer line starting with =- = or an Org heading,
-makes the card invalid.
+card's tags is reported =exists= unchanged.  Outer whitespace in a
+card's text is trimmed.  A card is made only if the editor could open it
+and save it again unchanged; text it reads as Org structure, such as an
+answer line starting with =- =, an Org heading, a table or an unindented
+source block, makes the card invalid, and the error names the field and
+what the editor would keep.  A call that fails this way holds Gnosis for
+longer, since each of its themata is then checked alone.
 
 ** Editing Themata
 

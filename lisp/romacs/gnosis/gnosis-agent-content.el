@@ -466,7 +466,8 @@ Nil means none.  With NONEMPTY, require at least one nonempty string."
     (user-error "%s must be an array of nonempty strings" field))
   (when (and nonempty (zerop (length value)))
     (user-error "%s must hold at least one string" field))
-  (append value nil))
+  ;; Outer whitespace is not content: the editor trims it on reading.
+  (mapcar #'string-trim value))
 
 (defun gnosis-agent-content--card (card)
   "Return CARD as `gnosis-save-thema' takes it, or signal what is wrong.
@@ -505,9 +506,9 @@ CARD is a plist of `gnosis-agent-content--card-keys'."
         (when choices (user-error "%s takes hints, not choices" type)))
       ;; Org tags, so the editor can open the card again.
       (gnosis-tags--check-org tags)
-      (list "NEW" type (plist-get card :question) (if choice choices hints)
-            answer (or (plist-get card :parathema) "") tags nil aliases
-            (plist-get card :rubric)))))
+      (list "NEW" type (string-trim (plist-get card :question)) (if choice choices hints)
+            answer (string-trim (or (plist-get card :parathema) "")) tags nil aliases
+            (and (plist-get card :rubric) (string-trim (plist-get card :rubric)))))))
 
 (defun gnosis-agent-content--card-guid (card thema)
   "Return the stored source identity of CARD, saved as THEMA.
@@ -575,13 +576,25 @@ An absent hint reads as an empty one: Gnosis stores either for none."
           (sort (gnosis-select 'tag 'thema-tag `(= thema-id ,id) t) #'string<)
           (sort (gnosis-select 'dest 'thema-links `(= source ,id) t) #'string<))))
 
+(defconst gnosis-agent-content--kept-fields
+  '("type" "question" "hints or choices" "answer" "aliases" "rubric" "parathema" "tags" "links")
+  "What each element of `gnosis-agent-content--kept' is, as the agent names it.")
+
 (defun gnosis-agent-content--resave (id thema before)
-  "Save THEMA, the editor's reading of ID, and return why it lost BEFORE, or nil."
+  "Save THEMA, the editor's reading of ID, and return why it lost BEFORE, or nil.
+The editor's version is what then stays: it differs from BEFORE at most
+by what the editor treats as the same (an absent hint read as empty)."
   (let ((saved (gnosis-save-thema thema)))
-    (cond (saved (format "the editor could not save it again: %s"
-                         (replace-regexp-in-string "\\`Line [^ ]* (id:[^)]*): " "" saved)))
-          ((not (equal before (gnosis-agent-content--kept id)))
-           "the editor would change it on saving"))))
+    (if saved
+        (format "the editor could not save it again: %s"
+                (replace-regexp-in-string "\\`Line [^ ]* (id:[^)]*): " "" saved))
+      (let ((after (gnosis-agent-content--kept id)))
+        (unless (equal before after)
+          (cl-loop for field in gnosis-agent-content--kept-fields
+                   for old in before for new in after
+                   unless (equal old new)
+                   return (format "the editor reads its %s as Org structure and would keep %S"
+                                  field new)))))))
 
 (defun gnosis-agent-content--editor-losses (ids)
   "Return (ID . WHY) for each of IDS that would not survive the editor.

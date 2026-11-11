@@ -198,8 +198,32 @@ and the batch is not written; repeated tags are kept once."
            (id (string-to-number (aref (plist-get (aref (plist-get result :cards) 0) :ids) 0))))
       (should (equal '("created") (gnosis-test-cards--statuses result)))
       (should (equal '("bio") (gnosis-select 'tag 'thema-tag `(= thema-id ,id) t)))
-      ;; What was made opens in the editor and reads back as it was saved.
-      (should (= 1 (length (gnosis-agent-content--draft-themata (list id))))))))
+      ;; What was made opens in the editor and keeps what was saved.
+      (let ((kept (gnosis-agent-content--kept id)))
+        (should-not (gnosis-agent-content--editor-losses (list id)))
+        (should (equal kept (gnosis-agent-content--kept id)))))
+    ;; Whole-draft path: the draft reads back, one thema would not keep.
+    (let* ((result (gnosis-agent-content-create
+                    (vector (list :type "basic" :question "Fine" :answer ["B"])
+                            (list :type "basic" :question "Split" :answer ["a\n- b"])
+                            (list :type "basic"
+                                  :question "Output?\n#+begin_src python\nprint(1)\n#+end_src"
+                                  :answer ["1"]))))
+           (cards (plist-get result :cards)))
+      (should (equal '("would-create" "invalid" "invalid") (gnosis-test-cards--statuses result)))
+      ;; The error names the field and shows what the editor would keep.
+      (should (string-match-p "reads its question as Org structure" (plist-get (aref cards 2) :error)))
+      (should (string-search "\n  print(1)" (plist-get (aref cards 2) :error))))
+    ;; Outer whitespace is not content.
+    (let ((spaced (gnosis-agent-content-create
+                   (vector (list :type "basic" :question " What is 2+2?\n" :answer ["4 "]
+                                 :parathema " note ")))))
+      (should (equal '("created") (gnosis-test-cards--statuses spaced)))
+      (should (equal '("exists")
+                     (gnosis-test-cards--statuses
+                      (gnosis-agent-content-create
+                       (vector (list :type "basic" :question "What is 2+2?" :answer ["4"]
+                                     :parathema "note")))))))))
 
 (ert-deftest gnosis-test-cards-mixed-batches ()
   "New cards beside existing ones are written; any invalid card stops all."
