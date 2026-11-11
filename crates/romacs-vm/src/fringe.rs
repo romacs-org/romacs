@@ -57,7 +57,7 @@ impl Vm {
     /// bitmaps its buffer's indicators resolve to (in the `fringe' face
     /// unless their own), unless only the widths, which lay rows out, are
     /// WANTED.  Where the frame draws pane chrome (`romacs-pane-chrome',
-    /// rlisp/romacs-chrome.el) the fringes are part of the pane: their
+    /// lisp/romacs/romacs-chrome.el) the fringes are part of the pane: their
     /// background is the window's default face's, whatever the theme gives
     /// `fringe' (VM2-PANE-CHROME); else the `fringe' face's, as GNU's.
     pub(crate) fn window_chrome(&mut self, window: Value, table: &FaceTable, indicators: bool) -> Result<romacs_layout_input::WindowChrome> {

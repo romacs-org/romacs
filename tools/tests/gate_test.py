@@ -293,7 +293,7 @@ class BuildAndRun(unittest.TestCase):
 
     def test_run_environment_drops_a_running_editors_launch_variables(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
-        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/gnu-lisp',
+        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp/gnu',
                       ROMACS_USAGE_LOG='/sessions/ended/usage.jsonl', ROMACS_GUI_FONT='Iosevka',
                       ROMACS_GUI_FONT_SIZE='15')
         with mock.patch.dict(os.environ, editor):

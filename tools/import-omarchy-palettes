@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Make Romacs themes of Omarchy's palettes: one etc/themes/omarchy-NAME-theme.el
-per themes/NAME/colors.toml, the bundled family table in rlisp/romacs-theme.el
+per themes/NAME/colors.toml, the bundled family table in lisp/romacs/romacs-theme.el
 (between its marker comments) and etc/themes/README.md.
 
 Omarchy is not a build input: the files are generated once and committed,
@@ -22,7 +22,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Omarchy colors.toml key -> palette slot (rlisp/romacs-theme.el).
+# Omarchy colors.toml key -> palette slot (lisp/romacs/romacs-theme.el).
 SLOTS = [('accent', 'accent'), ('selection', 'selection'), ('muted', 'muted'),
          ('background', 'bg'), ('dark_background', 'bg-dark'), ('darker_background', 'bg-darker'),
          ('lighter_background', 'bg-alt'), ('foreground', 'fg'), ('dark_foreground', 'fg-dim'),
@@ -94,7 +94,7 @@ def theme_file(name, mode, palette, version):
              '',
              ';;; Commentary:',
              f";; The {title(name)} palette as a Romacs theme: its base colours, from",
-             ";; which rlisp/romacs-theme.el derives every face.",
+             ";; which lisp/romacs/romacs-theme.el derives every face.",
              '',
              ';;; Code:',
              '',
@@ -144,7 +144,7 @@ def with_table(source, table):
 
 def readme(themes, version, ports):
     lines = ['# Bundled themes', '',
-             'Romacs themes are palettes (rlisp/romacs-theme.el): each file names a',
+             'Romacs themes are palettes (lisp/romacs/romacs-theme.el): each file names a',
              "theme's base colours, and every face is derived from them.", '',
              '- `default-theme.el`: the stock look a session starts in.',
              "- `newcomers-presets-theme.el`: GNU's, which sets options rather than colours.",
@@ -179,7 +179,7 @@ def readme(themes, version, ports):
               'for.  The original Monokai is here as `monokai-classic`.', '',
               "GNU's bundled colour themes are not shipped; they load from",
               '`custom-theme-directory` or a package as any other theme.  Modus lends its',
-              'machinery alone (rlisp/romacs-theme-modus.el); Romacs offers no Modus palette.', '']
+              'machinery alone (lisp/romacs/romacs-theme-modus.el); Romacs offers no Modus palette.', '']
     return '\n'.join(lines)
 
 
@@ -211,7 +211,7 @@ def main():
            for name, mode, palette in themes}
     ports = ported(args.repo)
     out[args.repo / 'etc/themes/README.md'] = readme(themes, version, ports)
-    engine = args.repo / 'rlisp/romacs-theme.el'
+    engine = args.repo / 'lisp/romacs/romacs-theme.el'
     out[engine] = with_table(engine.read_text(), family_table(themes, ports))
     stale = {p for p in (args.repo / 'etc/themes').glob('omarchy-*-theme.el')} - set(out)
     changed = [p for p, text in out.items() if not p.exists() or p.read_text() != text] + sorted(stale)

@@ -1871,6 +1871,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod model;
     mod effects;
     mod clipboard;
     mod keyboard;

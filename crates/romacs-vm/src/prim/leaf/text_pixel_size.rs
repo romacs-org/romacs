@@ -253,7 +253,7 @@ impl Leaf<'_> {
             let (begv, zv) = leaf.accessible_positions(buffer)?;
             let specs = leaf.vm.list_values(specs).map_err(Fault::Error)?;
             let mut source = Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?;
-            specs.into_iter().map(|spec| source.band_stretch(spec)).collect()
+            Ok(specs.into_iter().map(|spec| source.band_stretch(spec)).collect())
         })
     }
 

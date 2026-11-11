@@ -7,7 +7,7 @@ fn garbage_collect(_cx) -> Step {
 }}
 
 // The command loop's idle collection in a wait inside Lisp (a prompt's,
-// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics, and
+// lisp/romacs/vm/keyboard.el): as `garbage-collect', without its statistics, and
 // abandoned with nothing collected if a key press arrives while it is still
 // marking. t when it collected.
 defsubr! { name = "romacs--collect-idle", gnu = "keyboard.c:2880", effect = Global,
@@ -59,7 +59,7 @@ fn collected(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 }
 
 // The collections since the last call, for the usage log: (DROPPED RECORD...),
-// each RECORD (KIND MS MET COMMAND T OBJECTS BYTES) (`Vm::take_collections`).
+// each RECORD (KIND MS MET COMMAND T OBJECTS BYTES LATE) (`Vm::take_collections`).
 defsubr! { name = "romacs--take-collections", gnu = "alloc.c:6004", effect = Global,
 fn take_collections(cx) {
     Ok(cx.take_collections())
@@ -92,7 +92,7 @@ fn make_finalizer(cx, function: Value) {
 }}
 
 // The function of the oldest finalizer a collection found unreachable, or
-// nil, for `romacs--run-finalizers' (rlisp/vm/prelude.el).
+// nil, for `romacs--run-finalizers' (lisp/romacs/vm/prelude.el).
 defsubr! { name = "romacs--take-doomed-finalizer", gnu = "alloc.c:3960", effect = Global,
 fn take_doomed_finalizer(cx) {
     Ok(cx.take_doomed_finalizer())

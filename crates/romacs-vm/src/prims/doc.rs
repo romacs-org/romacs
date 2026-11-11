@@ -68,7 +68,7 @@ fn variable_records(bytes: &[u8]) -> Vec<(&[u8], usize)> {
 }
 
 // Internal: the scan half of Snarf-documentation (doc.c:500), which
-// rlisp/romacs-loadup-bootstrap.el finishes in Lisp. FILENAME is in
+// lisp/romacs/romacs-loadup-bootstrap.el finishes in Lisp. FILENAME is in
 // `doc-directory'; the value lists each variable record as (NAME . POSITION).
 defsubr! { name = "romacs--doc-variable-records", gnu = "doc.c:500", effect = Reads,
 fn doc_variable_records(cx, filename: Value) {

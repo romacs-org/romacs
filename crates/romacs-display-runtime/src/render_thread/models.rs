@@ -175,18 +175,51 @@ impl RenderApp {
     /// (a settling `View`, then `Readiness{current: nil}`) goes out on the
     /// ordered input channel now, ahead of any later key.
     pub(super) fn note_models_renderer_lost(&mut self) {
+        self.comms.model_renderer.store(false, std::sync::atomic::Ordering::Release);
         self.models.renderer_lost();
         self.flush_model_events();
     }
 
     /// A renderer is live: publish it and upload what it lacks.
     pub(super) fn note_models_renderer_ready(&mut self) {
+        self.comms.model_renderer.store(true, std::sync::atomic::Ordering::Release);
         self.service_models(romacs_display_protocol::frame_time::observe_platform_now());
     }
 
     /// The next instant the loop must wake for model work.
     pub(super) fn model_deadline(&self, now: Instant) -> Option<Instant> {
         self.models.next_deadline(now)
+    }
+
+    pub(super) fn handle_model_create(
+        &mut self,
+        id: u32,
+        meshes: Vec<romacs_display_protocol::model::ModelMeshSpec>,
+        view: romacs_display_protocol::model::ModelView,
+        background: [f32; 4],
+        logical: (u32, u32),
+    ) {
+        self.models.create(id, meshes, view, background, logical);
+        self.flush_model_events();
+    }
+
+    pub(super) fn handle_model_update(
+        &mut self,
+        id: u32,
+        req: u64,
+        change: romacs_display_protocol::model::ModelChange,
+    ) {
+        let mut models = std::mem::take(&mut self.models);
+        models.update(id, req, change, self.model_host());
+        self.models = models;
+        self.flush_model_events();
+    }
+
+    /// Free model `id`; nothing when no model has that id.
+    pub(super) fn handle_model_free(&mut self, id: u32) {
+        let mut models = std::mem::take(&mut self.models);
+        models.free(id, self.model_host());
+        self.models = models;
     }
 }
 

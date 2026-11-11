@@ -2,12 +2,12 @@
 //! (`prim/leaf/treesit.rs`). Parsing is lazy, at GNU's two forcing calls
 //! (`treesit-parser-root-node', `treesit-parser-changed-regions') and what
 //! reaches them; a parse's notifiers, `#pred?' and function predicates
-//! cross the traced T2 boundary. The Lisp half (rlisp/vm/treesit.el) is
+//! cross the traced T2 boundary. The Lisp half (lisp/romacs/vm/treesit.el) is
 //! installed the first time a primitive needs it.
 use super::*;
 use crate::prim::leaf::treesit::Next as TsNext;
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/treesit.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/treesit.el");
 
 fn flag(b: bool) -> Value {
     if b { Value::TRUE } else { Value::NIL }

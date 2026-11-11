@@ -31,12 +31,12 @@ GRID = (120, 33)  # the root window's body columns and lines in both frames
 # Romacs's interactive defaults off (VM2-OOB-DEFAULTS), in an init that GNU
 # also loads; a -Q session never turns them on.
 ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mode -1))\n"
-# Completion as GNU's engine has it after loading rlisp/romacs-completion-defaults.el,
+# Completion as GNU's engine has it after loading lisp/romacs/romacs-completion-defaults.el,
 # which lacks the fzf style and romacs-complete, set in both engines' inits:
 # Romacs's own defaults complete with fzf (DIVERGENCES.md VM2-FZF-DEFAULT) in
 # romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
 # GNU's completion, displayed by fido-vertical.  Romacs's other interactive
-# defaults (rlisp/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
+# defaults (lisp/romacs/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
 # switch, so both engines edit with GNU's values; Romacs shows GNU's mode
 # line in each window (VM2-MODE-LINE).
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"

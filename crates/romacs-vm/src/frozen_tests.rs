@@ -296,14 +296,14 @@ fn gc_stress_moves_nothing_frozen() {
 #[ignore]
 fn checkpoint_frozen_versus_private_reads() {
     // M1's checkpoint measurement: a project's file listing (ROMACS_CHECKPOINT_DIR,
-    // else gnu-lisp/) frozen and private, under length, a filter and string-match.
+    // else lisp/gnu/) frozen and private, under length, a filter and string-match.
     fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
             let path = entry.path();
             if path.is_dir() { if entry.file_name() != ".git" { walk(&path, out); } } else { out.push(path.display().to_string()); }
         }
     }
-    let root = std::env::var("ROMACS_CHECKPOINT_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../gnu-lisp").into());
+    let root = std::env::var("ROMACS_CHECKPOINT_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/gnu").into());
     let mut files = Vec::new();
     walk(std::path::Path::new(&root), &mut files);
     files.sort();

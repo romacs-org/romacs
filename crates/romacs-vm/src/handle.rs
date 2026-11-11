@@ -221,6 +221,14 @@ impl Vm {
     pub fn collect_garbage_until_key(&mut self) -> bool {
         self.collect_until_key(&mut [], true)
     }
+    /// The calls entered so far: one for every Lisp function called and for
+    /// every primitive called that can itself call Lisp (the backtrace's
+    /// call counter; a leaf primitive enters nothing). It depends on the
+    /// Lisp run alone, not on the host or its load, so the difference
+    /// across a command pins how much Lisp that command runs.
+    pub fn calls_entered(&self) -> usize {
+        self.backtrace.calls_entered()
+    }
     /// Evaluate a UTF-8 source file sequentially in this persistent strand.
     /// This call may mark and compact; the result borrows the VM.
     pub fn eval_source(&mut self, source: &str) -> Result<Local<'_>> {
@@ -359,6 +367,7 @@ impl Vm {
     pub(crate) fn collect_until_key(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
+        let late = self.collection_late();
         let last = std::mem::take(&mut self.gc_times);
         let collected = self.collect_rooted(roots, until_key);
         if !collected {
@@ -372,7 +381,7 @@ impl Vm {
             }
             let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
             self.count_collection(elapsed.unwrap_or(0));
-            self.note_collection(elapsed, until_key);
+            self.note_collection(elapsed, until_key, late);
         }
         self.profile_collection_end();
         collected
@@ -557,33 +566,33 @@ mod tests {
         // Durations, times and sizes vary: only the record's shape is compared.
         let shape = |text: String| {
             let words: Vec<&str> = text.split(' ').collect();
-            let [dropped, kind, _ms, met, command, _at, _objects, _bytes] = words[..] else { panic!("{text}") };
-            format!("{dropped} {kind} MS {met} {command} T OBJECTS BYTES))")
+            let [dropped, kind, _ms, met, command, _at, _objects, _bytes, _late] = words[..] else { panic!("{text}") };
+            format!("{dropped} {kind} MS {met} {command} T OBJECTS BYTES LATE))")
         };
         vm.collect_garbage();
-        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil T OBJECTS BYTES))");
+        assert_eq!(shape(take(&mut vm)), "(0 (explicit MS nil nil T OBJECTS BYTES LATE))");
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil T OBJECTS BYTES))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS nil nil T OBJECTS BYTES LATE))");
         // The key arrives after the last point the collection gives way.
         vm.set_host_input(Some(Box::new(KeyAfter(2))));
         assert!(vm.collect_garbage_until_key());
-        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil T OBJECTS BYTES))");
+        assert_eq!(shape(take(&mut vm)), "(0 (idle MS key nil T OBJECTS BYTES LATE))");
         vm.set_host_input(None);
         vm.eval_source_raw("(setq real-this-command 'forward-char)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char" T OBJECTS BYTES))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "forward-char" T OBJECTS BYTES LATE))"#);
         // The loop's tail has cleared the running command.
         vm.eval_source_raw("(setq real-this-command nil real-last-command 'next-line)").unwrap();
         take(&mut vm);
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line" T OBJECTS BYTES))"#);
+        assert_eq!(shape(take(&mut vm)), r#"(0 (automatic MS command "next-line" T OBJECTS BYTES LATE))"#);
         // Idle again: the command has ended, whatever the variable holds.
         vm.idle_since = Some(crate::host::monotonic());
         vm.set_host_input(Some(Box::new(KeyAfter(usize::MAX))));
         vm.collect(&mut []);
-        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil T OBJECTS BYTES))");
+        assert_eq!(shape(take(&mut vm)), "(0 (automatic MS nil nil T OBJECTS BYTES LATE))");
         vm.set_host_input(None);
         for _ in 0..crate::gc::COLLECTION_RECORDS + 44 {
             vm.collect(&mut []);

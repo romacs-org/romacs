@@ -361,6 +361,25 @@ pub(crate) enum AssetCommand {
     },
     /// Retire an image after its last render presentation releases it.
     ImageRetire { image: ImageId },
+    /// Create native model `id`: OBJ meshes drawn by the renderer's mesh
+    /// pass at `view` on `background` (sRGB RGBA, alpha linear), `width`
+    /// by `height` logical pixels.  It loads on its own thread.
+    ModelCreate {
+        id: u32,
+        meshes: Vec<romacs_display_protocol::model::ModelMeshSpec>,
+        view: romacs_display_protocol::model::ModelView,
+        background: [f32; 4],
+        width: u32,
+        height: u32,
+    },
+    /// Lisp request number `req` for native model `id`.
+    ModelUpdate {
+        id: u32,
+        req: u64,
+        change: romacs_display_protocol::model::ModelChange,
+    },
+    /// Free native model `id` once no presented frame draws it.
+    ModelFree { id: u32 },
     /// Debug-only: latch the device-lost flag so the full device-loss
     /// recovery path (GPU rebuild + `InputEvent::DisplayReset`) runs against
     /// a healthy device. Sent by the hidden `romacs--debug-lose-device`
@@ -445,6 +464,11 @@ pub(crate) enum RenderCommand {
 // queue at the same scale and use backpressure for durable user input below.
 const INPUT_CHANNEL_CAPACITY: usize = 4096;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
+/// The commands Lisp's model requests may keep waiting.  The rest of the
+/// channel is a publication's (at most 16 asset loads and retirements, its
+/// paint, the surface frees after it) and the other producers': a burst of
+/// requests is refused as busy, never a frame.
+pub(crate) const MODEL_REQUEST_ROOM: usize = COMMAND_CHANNEL_CAPACITY / 4;
 
 /// Communication channels between threads
 pub(crate) struct ThreadComms {
@@ -461,6 +485,9 @@ pub(crate) struct ThreadComms {
 
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
+    /// Whether a GPU renderer is live, so a native model can be drawn: the
+    /// render thread sets it, the evaluator reads it.
+    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Images the renderer no longer has though nothing retired them: those
@@ -485,6 +512,7 @@ impl ThreadComms {
             input_rx,
             frame_opacity: Arc::default(),
             lost_images: Arc::default(),
+            model_renderer: Arc::default(),
         }
     }
 
@@ -494,6 +522,7 @@ impl ThreadComms {
             pointer: self.pointer.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
+            model_renderer: Arc::clone(&self.model_renderer),
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
         };
@@ -507,6 +536,7 @@ impl ThreadComms {
             input_stream: Default::default(),
             frame_opacity: self.frame_opacity,
             lost_images: self.lost_images,
+            model_renderer: self.model_renderer,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
         };
@@ -528,6 +558,7 @@ pub(crate) struct EmacsComms {
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
+    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The evaluator's out-of-band quit, as the render thread sees it. GNU
@@ -538,9 +569,9 @@ pub trait InputInterrupt: Send + Sync {
     /// Whether the key EVENT was taken as an interrupt instead of being
     /// queued: true only while the evaluator is busy.
     fn interrupt(&self, event: &InputEvent) -> bool;
-    /// The evaluator's busy span, while it is busy: a new one each time it
-    /// leaves a wait for input.
-    fn busy_span(&self) -> Option<u32>;
+    /// How long the evaluator has been busy, while it is: since it last
+    /// left a wait for input.
+    fn busy_for(&self) -> Option<std::time::Duration>;
 }
 
 /// Render thread communication handle
@@ -557,6 +588,7 @@ pub(crate) struct RenderComms {
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
+    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RenderComms {
@@ -594,19 +626,13 @@ impl RenderComms {
                 }) => position.target_frame_id,
                 _ => return,
             };
-            let mut time = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            // SAFETY: valid out-pointer, POSIX monotonic clock. The
-            // compositor's clock ID must match before subtraction.
-            if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
-                romacs_display_protocol::present_trace::input_received(
-                    frame,
-                    libc::CLOCK_MONOTONIC as u32,
-                    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
-                );
-            }
+            // The compositor's clock ID must match before subtraction.
+            let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+            romacs_display_protocol::present_trace::input_received(
+                frame,
+                libc::CLOCK_MONOTONIC as u32,
+                time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
+            );
         }
     }
 
@@ -661,9 +687,9 @@ impl RenderComms {
         }
     }
 
-    /// The evaluator's busy span, while it is busy (`InputInterrupt').
-    pub(crate) fn evaluator_busy_span(&self) -> Option<u32> {
-        self.input_interrupt.as_ref().and_then(|hook| hook.busy_span())
+    /// How long the evaluator has been busy, while it is (`InputInterrupt`).
+    pub(crate) fn evaluator_busy_for(&self) -> Option<std::time::Duration> {
+        self.input_interrupt.as_ref().and_then(|hook| hook.busy_for())
     }
 
     /// Queue a display input event for the input bridge.

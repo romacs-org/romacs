@@ -25,7 +25,7 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
         .map(|d| format!("{:?}", root.join(d).to_string_lossy())).collect();
     assert!(directories.len() > 3, "{directories:?}");
     let home = std::env::temp_dir().join(format!("romacs-bundled-autoloads-{}/", std::process::id()));
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     vm.eval_source(&format!("(setq load-path (append load-path (list {})) user-emacs-directory {:?})",
         directories.join(" "), home.to_string_lossy())).unwrap();
     vm.load_file(&autoloads).unwrap();
@@ -33,7 +33,7 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
         "(list (if (autoloadp (symbol-function '{name})) (nth 1 (symbol-function '{name})) (functionp '{name}))
                (commandp '{name}) (featurep '{name}) (and (assoc {:?} load-history) t))",
         root.join(file).to_string_lossy()));
-    let commands = [("gnosis-dashboard", "rlisp/gnosis/gnosis-dashboard.el"), ("hermes", "rlisp/hermes/hermes.el")];
+    let commands = [("gnosis-dashboard", "lisp/romacs/gnosis/gnosis-dashboard.el"), ("hermes", "lisp/romacs/hermes/hermes.el")];
     let before: Vec<String> = commands.iter().map(|(name, file)| state(&mut vm, name, file)).collect();
     assert_eq!(before, [r#"("gnosis-dashboard" t nil nil)"#, r#"("hermes" t nil nil)"#], "autoloaded, not loaded");
     // A call first does what `autoload-do-load` does; this loads the file
