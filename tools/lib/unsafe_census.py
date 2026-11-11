@@ -314,6 +314,35 @@ def dump(floors):
             f'  "{PENDING}": {{\n{pending}\n  }}\n}}\n')
 
 
+def merged(base, ours, theirs):
+    """The floors a merge of OURS and THEIRS has, both grown from BASE. The
+    floors are exact (check fails below one as well as above), so each count
+    is BASE plus both sides' changes: two lanes that each removed sites in a
+    crate both count. Where both sides removed the same site the result is
+    low by one and check says so. Pending entries: what either side has."""
+    keys = ('sites', 'undocumented')
+    names = set(base['crates']) | set(ours['crates']) | set(theirs['crates'])
+
+    def count(crate, key):
+        b, o, t = (side['crates'].get(crate, {}).get(key, 0) for side in (base, ours, theirs))
+        return o + t - b
+    crates = {crate: {key: count(crate, key) for key in keys} for crate in sorted(names)}
+    pending = {**theirs.get(PENDING, {}), **ours.get(PENDING, {})}
+    return {**ours, 'crates': {c: f for c, f in crates.items() if f['sites'] > 0}, PENDING: pending}
+
+
+def merge_files(base, ours, theirs):
+    """Git's merge driver for UNSAFE-FLOORS.json (tools/derived setup installs
+    it): write the merge over OURS. 1, leaving OURS, when a side does not
+    parse: git then reports the conflict as it would without a driver."""
+    try:
+        text = dump(merged(*(json.loads(Path(p).read_text()) for p in (base, ours, theirs))))
+    except (OSError, ValueError, KeyError, TypeError):
+        return 1
+    Path(ours).write_text(text)
+    return 0
+
+
 def report(counts):
     header = f'{"crate":32} ' + ' '.join(f'{k:>6}' for k in KINDS) + f' {"sites":>6} {"undoc":>6} {"cover":>6}'
     rows = [header]
@@ -333,9 +362,12 @@ def row(name, tally):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower'])
+    parser.add_argument('command', choices=['check', 'report', 'lower', 'merge'])
+    parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS, as git passes them')
     parser.add_argument('--root', default='.')
     args = parser.parse_args()
+    if args.command == 'merge':
+        return merge_files(*args.files)
     if args.command == 'report':
         print(report(census(args.root)))
         return 0

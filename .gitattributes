@@ -129,3 +129,4 @@ java/INSTALL -whitespace
 
 rlisp/romacs-bundled-autoloads.el merge=romacs-derived
 SMELL-FLOORS.json merge=romacs-floors
+UNSAFE-FLOORS.json merge=romacs-unsafe-floors
