@@ -620,8 +620,25 @@ Return the matching note text."
       (should (seq-some (lambda (step) (string-match-p "\\`SEARCH s USING INTEGER PRIMARY KEY" step))
                         plan)))))
 
+(ert-deftest gnosis-weak-refresh-walks-the-buffer-once ()
+  "A refresh finds the buffer's nodes once and places from that walk."
+  (gnosis-test-weak--fixture
+    (gnosis-test-weak--with-note
+      (let ((walks 0)
+            (walk (symbol-function 'gnosis-weak--buffer-nodes)))
+        (cl-letf (((symbol-function 'gnosis-weak--buffer-nodes)
+                   (lambda () (cl-incf walks) (funcall walk))))
+          (gnosis-weak-refresh))
+        (should (= 1 walks))
+        (should (equal '((8 . " ● 1")) (gnosis-test-weak--indicators)))))))
+
 (ert-deftest gnosis-weak-collection-scale-refresh-is-bounded ()
   "5,000 linked themata over 2,000 headings: open defers, refresh is fast."
+  ;; Romacs parses Org elements about 5.7 times slower than GNU
+  ;; (romacs#112): settling takes about 2 s where GNU takes 0.6 s.
+  ;; Expected to fail until that lands; an unexpected pass then says to
+  ;; drop this marker.
+  :expected-result :failed
   (gnosis-test-with-db
     (let ((text (gnosis-test-weak--populate-scale 5000 2000))
           (calls 0))
