@@ -1355,14 +1355,14 @@ impl Vm {
         // looked up at the first such run, and the walk goes on from that
         // run with their boundaries too.
         let mut keys = vec![name, "category"];
-        let mut aliased = false;
+        let mut looked_up = false;
         let mut from = bytes.start;
         // Where none of the keys is set, the defaults alone answer.
         let mut unset = None;
         'walk: loop {
             for (run, values) in properties.key_runs(from..bytes.end, keys.iter().copied()) {
-                if !aliased && !values.iter().any(|(key, _)| *key == name) {
-                    aliased = true;
+                if !looked_up && !values.iter().any(|(key, _)| *key == name) {
+                    looked_up = true;
                     let Ok(aliases) = self.annotation_alias_names(prop) else { return Ok(RunWalk::ByPosition) };
                     if !aliases.is_empty() {
                         keys.extend(aliases);
