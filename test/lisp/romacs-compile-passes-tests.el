@@ -95,5 +95,33 @@
     (should (eq (car (romacs-compile--preprocess '(mapcar (lambda (x) x) l))) 'mapcar)))
   (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (x) x) l))) 'let*)))
 
+(ert-deftest romacs-compile-folds-only-what-the-store-holds ()
+  ;; A pure call whose value is a hash table is left to run.
+  (should (equal (romacs-compile-passes-tests--pre '(json-parse-string "{}"))
+                 '(json-parse-string "{}")))
+  (should (equal (romacs-compile-passes-tests--pre '(take 2 '(a b c))) ''(a b))))
+
+(ert-deftest romacs-compile-maps-in-place-only-a-lexical-parameter ()
+  ;; A defvar anywhere in the form, or earlier in the file, would make the
+  ;; loop's `let' bind the variable dynamically where the parameter is not.
+  (let ((form '(progn (defvar pass-x) (mapcar (lambda (pass-x) (boundp 'pass-x)) '(1)))))
+    (should (eq (car (nth 2 (romacs-compile-passes-tests--pre form))) 'mapcar)))
+  (let ((byte-compile-bound-variables (cons 'pass-y byte-compile-bound-variables)))
+    (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (pass-y) pass-y) l))) 'mapcar)))
+  (should (eq (car (romacs-compile-passes-tests--pre '(mapcar (lambda (load-path) load-path) l))) 'mapcar)))
+
+(ert-deftest romacs-compile-maps-in-place-within-a-budget ()
+  ;; Circular quoted data in the body ends the count, and keeps the call.
+  (let ((form (list 'mapcar (list 'function (list 'lambda '(x) (list 'quote (let ((c (list 'a))) (setcdr c c) c)))) 'xs)))
+    (should (eq (car (romacs-compile-passes-tests--pre form)) 'mapcar)))
+  ;; Twenty nested mappings stay small: each body is walked once, and a
+  ;; walked body over the budget is not copied.
+  (let ((form 'x))
+    (dotimes (_ 20) (setq form `(mapcar (lambda (x) ,form) (list x))))
+    (setq form `(let ((x 1)) ,form))
+    (let ((pre (romacs-compile-passes-tests--pre form)))
+      (should (< (romacs-compile--size pre) 10000))
+      (should (equal (eval pre t) (eval form t))))))
+
 (provide 'romacs-compile-passes-tests)
 ;;; romacs-compile-passes-tests.el ends here

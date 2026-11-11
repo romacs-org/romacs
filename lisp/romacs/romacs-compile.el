@@ -184,10 +184,13 @@ holds before the form being compiled: they come first here too."
   "Compile FORM into a unit, with the specials declared so far."
   (push (cons form byte-compile-bound-variables) romacs-compile--emitted))
 
+(defvar romacs-compile--form nil
+  "The top-level form being preprocessed, expanded.")
+
 (defun romacs-compile--preprocess (form)
   "`byte-compile-preprocess' for the walk: FORM fully expanded."
-  (romacs-compile--inline
-   (macroexpand-all form byte-compile-macro-environment)))
+  (let ((romacs-compile--form (macroexpand-all form byte-compile-macro-environment)))
+    (romacs-compile--inline romacs-compile--form)))
 
 (defun romacs-compile--declare (name)
   "`byte-compile--declare-var': NAME is special for the rest of the file."
@@ -326,36 +329,77 @@ lambda gets GNU's compiled docstring (bytecomp.el:3115)."
   "FORM, a call whose arguments are walked, evaluated now if it may be.
 `byte-optimize-constant-args' (byte-opt.el): a call of a function GNU
 marks `pure' whose arguments are all constants becomes its value,
-quoted.  A call that signals is left to signal when it runs."
+quoted.  A call that signals is left to signal when it runs, and so is
+one whose value the compiled store cannot hold
+\(`romacs-compile--storable-p')."
   (if (and (symbolp (car form))
            (function-get (car form) 'pure)
            (seq-every-p #'macroexp-const-p (cdr form)))
       (condition-case nil
-          (list 'quote (eval form t))
+          (let ((value (eval form t)))
+            (if (romacs-compile--storable-p value) (list 'quote value) form))
         (error form))
     form))
 
-(defconst romacs-compile--mapping-limit 400
-  "The most conses a lambda's body may have to be made a loop's body.
-The body is compiled twice, as the loop's and as the lambda's that a
+(defconst romacs-compile--budget 400
+  "The most conses or elements a walk of a form or value looks at.
+It bounds a folded constant, and a lambda's body made a loop's body:
+that body is compiled twice, as the loop's and as the lambda's a
 redefined or advised `mapcar' is called with.")
 
+(defun romacs-compile--storable-p (value)
+  "Whether VALUE is a constant the compiled store holds as itself.
+Numbers, interned symbols, strings and bool-vectors, and lists and
+vectors of those, at most `romacs-compile--budget' of them: no hash
+table, marker, buffer or other object of the session, and no cycle."
+  (let ((budget romacs-compile--budget) (pending (list value)) (ok t))
+    (while (and ok pending)
+      (let ((v (pop pending)))
+        (setq budget (1- budget))
+        (cond ((< budget 0) (setq ok nil))
+              ((or (numberp v) (stringp v) (bool-vector-p v)
+                   (and (symbolp v) (eq v (intern-soft (symbol-name v))))))
+              ((consp v) (push (car v) pending) (push (cdr v) pending))
+              ((vectorp v) (setq pending (append v pending)))
+              (t (setq ok nil)))))
+    ok))
+
 (defun romacs-compile--size (form)
-  "How many conses FORM has, counted up to `romacs-compile--mapping-limit'."
+  "How many conses FORM has, counted up to `romacs-compile--budget' and one more.
+A larger or circular form stops the count there."
   (let ((count 0) (pending (list form)))
-    (while (and pending (<= count romacs-compile--mapping-limit))
+    (while (and pending (<= count romacs-compile--budget))
       (let ((next (pop pending)))
-        (while (consp next)
+        (while (and (consp next) (<= count romacs-compile--budget))
           (setq count (1+ count))
           (push (car next) pending)
           (setq next (cdr next)))))
     count))
 
+(defun romacs-compile--special-p (symbol)
+  "Whether a `let' of SYMBOL in this form could bind it dynamically.
+Special globally, declared special earlier in the file, or declared by
+a `defvar' anywhere in the top-level form."
+  (or (special-variable-p symbol)
+      (memq symbol byte-compile-bound-variables)
+      (let ((pending (list romacs-compile--form)) (found nil) (budget 100000))
+        (while (and pending (not found) (> budget 0))
+          (let ((next (pop pending)))
+            (while (and (consp next) (not found) (> budget 0))
+              (setq budget (1- budget))
+              (if (and (eq (car next) 'defvar) (consp (cdr next)) (eq (cadr next) symbol))
+                  (setq found t))
+              (push (car next) pending)
+              (setq next (cdr next)))))
+        ;; A form too large to search is taken to declare it.
+        (or found (<= budget 0)))))
+
 (defun romacs-compile--mapping-p (form)
   "Whether FORM is (mapcar|mapc (function (lambda (ARG) BODY...)) SEQ).
 Only in a `lexical-binding' file, for a lambda of one required argument
-with a body that is not documentation, `interactive' or `declare', and
-not larger than `romacs-compile--mapping-limit'."
+that no declaration makes special (a `let' of it would bind it
+dynamically, the parameter not), with a body that is not documentation,
+`interactive' or `declare'."
   (pcase form
     (`(,(or 'mapcar 'mapc) (function (lambda (,(and arg (pred symbolp))) . ,body)) ,_)
      (and lexical-binding
@@ -363,7 +407,7 @@ not larger than `romacs-compile--mapping-limit'."
           (not (memq arg '(&optional &rest)))
           (not (and (stringp (car body)) (cdr body)))
           (not (memq (car-safe (car body)) '(interactive declare :documentation)))
-          (<= (romacs-compile--size body) romacs-compile--mapping-limit)))))
+          (not (romacs-compile--special-p arg))))))
 
 (defun romacs-compile--mapping (form)
   "FORM, a `romacs-compile--mapping-p' call, as a loop over a list.
@@ -372,26 +416,30 @@ The loop runs while `mapcar' or `mapc' is still its own definition (the
 proper list, and reads as many elements as SEQ had when it began, as the
 function does.  Anything else calls the function with the lambda: an
 advised or redefined one, a vector or string, and a dotted or circular
-list, for which it signals."
+list, for which it signals.  The body is walked once; where the walked
+body is larger than `romacs-compile--budget', the call is kept, so that
+nested mappings cannot multiply."
   (pcase-let* ((`(,fn (function (lambda (,arg) . ,source)) ,seq) form)
                (body (mapcar #'romacs-compile--inline source))
                (seq (romacs-compile--inline seq))
-               (list (make-symbol "list"))
-               (tail (make-symbol "tail"))
-               (count (make-symbol "count"))
-               (results (make-symbol "results"))
-               (step `(let ((,arg (car ,tail))) ,@body))
-               (lambda (romacs-compile--inline `(function (lambda (,arg) ,@source)))))
-    `(let* ((,list ,seq)
-            (,count (and (eq (symbol-function ',fn) (get ',fn 'romacs--definition))
-                         (proper-list-p ,list))))
-       (if ,count
-           (let ((,tail ,list) ,@(if (eq fn 'mapcar) `((,results nil))))
-             (while (and (> ,count 0) (consp ,tail))
-               ,(if (eq fn 'mapcar) `(setq ,results (cons ,step ,results)) step)
-               (setq ,tail (cdr ,tail) ,count (1- ,count)))
-             ,(if (eq fn 'mapcar) `(nreverse ,results) list))
-         (,fn ,lambda ,list)))))
+               (lambda `(function (lambda (,arg) ,@(romacs-compile--docstring (list arg) body)))))
+    (if (> (romacs-compile--size body) romacs-compile--budget)
+        `(,fn ,lambda ,seq)
+      (let ((list (make-symbol "list"))
+            (tail (make-symbol "tail"))
+            (count (make-symbol "count"))
+            (results (make-symbol "results")))
+        `(let* ((,list ,seq)
+                (,count (and (eq (symbol-function ',fn) (get ',fn 'romacs--definition))
+                             (proper-list-p ,list))))
+           (if ,count
+               (let ((,tail ,list) ,@(if (eq fn 'mapcar) `((,results nil))))
+                 (while (and (> ,count 0) (consp ,tail))
+                   ,(let ((step `(let ((,arg (car ,tail))) ,@body)))
+                      (if (eq fn 'mapcar) `(setq ,results (cons ,step ,results)) step))
+                   (setq ,tail (cdr ,tail) ,count (1- ,count)))
+                 ,(if (eq fn 'mapcar) `(nreverse ,results) list))
+             (,fn ,lambda ,list)))))))
 
 (defun romacs-compile--docstring (args body)
   "BODY of a lambda with ARGS, its docstring as bytecomp compiles it.
