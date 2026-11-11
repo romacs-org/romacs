@@ -30,13 +30,13 @@ RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve
 def _pinned_oracle(repo):
     """Resolve the submitted reference; copied gates must pass their extracted root."""
     try:
-        text = (pathlib.Path(repo) / 'parity-reference.toml').read_text()
+        text = (pathlib.Path(repo) / 'ledger/parity-reference.toml').read_text()
     except OSError as error:
-        raise SystemExit(f'gate: cannot read parity-reference.toml in {repo}: {error}; '
+        raise SystemExit(f'gate: cannot read ledger/parity-reference.toml in {repo}: {error}; '
                          'restore the submitted reference before gating')
     pin = re.search(r'^mirror_commit\s*=\s*"([0-9a-f]{40})"', text, re.M)
     if not pin:
-        raise SystemExit('gate: parity-reference.toml has no valid mirror_commit; '
+        raise SystemExit('gate: ledger/parity-reference.toml has no valid mirror_commit; '
                          'restore its 40-character GNU revision before gating')
     root = pathlib.Path(os.environ.get('GNU_ORACLE_ROOT', str(pathlib.Path(os.environ.get('XDG_CACHE_HOME', pathlib.Path.home() / '.cache')) / 'gnu-emacs-pin'))).absolute()
     path = root / pin[1] / 'bin' / 'emacs'
