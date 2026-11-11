@@ -3,7 +3,7 @@
 
 Each session is a fresh private headless labwc and a fresh launch with
 private HOME/XDG/TMPDIR (perkey_live.Session), visiting a text file inside
-a git project of three copies of gnu-lisp/ (about 5,100 files).  Hooks
+a git project of three copies of lisp/gnu/ (about 5,100 files).  Hooks
 logged from Lisp into a file stamp, with `float-time', the start of each
 command (`pre-command-hook'), each command's end (`post-command-hook'),
 the prompt's appearance (`minibuffer-setup-hook') and the xref buffer's
@@ -85,7 +85,7 @@ def stamps(path):
 
 
 def make_project(root, gnu_lisp):
-    """Three copies of gnu-lisp/ and a notes file, committed in one git repository."""
+    """Three copies of lisp/gnu/ and a notes file, committed in one git repository."""
     project = root / 'project'
     for name in ('a', 'b', 'c'):
         shutil.copytree(gnu_lisp, project / name)
@@ -282,8 +282,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--gnu-batch', type=Path, default=os.environ.get('ROMACS_GNU_ORACLE'),
                         help='pinned GNU, run in batch over the project for the job times it blocks for')
-    parser.add_argument('--project', type=Path, help='an existing project; else three copies of gnu-lisp/ are made')
-    parser.add_argument('--gnu-lisp', type=Path, default=Path(__file__).resolve().parents[3] / 'gnu-lisp')
+    parser.add_argument('--project', type=Path, help='an existing project; else three copies of lisp/gnu/ are made')
+    parser.add_argument('--gnu-lisp', type=Path, default=Path(__file__).resolve().parents[3] / 'lisp/gnu')
     parser.add_argument('--keys', type=int, default=12)
     parser.add_argument('--gap', type=float, default=.15)
     parser.add_argument('--sessions', type=int, default=1)

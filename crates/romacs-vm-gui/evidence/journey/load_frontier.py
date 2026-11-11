@@ -32,11 +32,11 @@ FILES = {
     'org/org': ['org-mode'],
     'org/org-cycle': ['org-cycle'],
 }
-lp = [root / 'gnu-lisp'] + sorted(p for p in (root / 'gnu-lisp').rglob('*') if p.is_dir())
-pre = [a for n in CHAIN for a in ('--preload', str(root / 'gnu-lisp' / f'{n}.el'))]
+lp = [root / 'lisp/gnu'] + sorted(p for p in (root / 'lisp/gnu').rglob('*') if p.is_dir())
+pre = [a for n in CHAIN for a in ('--preload', str(root / 'lisp/gnu' / f'{n}.el'))]
 rows = []
 for name, cmds in FILES.items():
-    f = root / 'gnu-lisp' / f'{name}.el'
+    f = root / 'lisp/gnu' / f'{name}.el'
     p = subprocess.run([binary, *pre, '--', str(f), *map(str, lp)], capture_output=True, text=True, timeout=120)
     rep = None
     for line in reversed(p.stdout.splitlines()):
@@ -51,7 +51,7 @@ for name, cmds in FILES.items():
         bad = next((s for s in steps if s.get('status') != 'ok'), None)
         chain = rep.get('chain') or []
         row.update(ok=rep.get('ok'), forms_ok=len(ok),
-                   chain=[(c.get('file', '').split('/gnu-lisp/')[-1], c.get('ok')) if isinstance(c, dict) else c for c in chain][:20],
+                   chain=[(c.get('file', '').split('/lisp/gnu/')[-1], c.get('ok')) if isinstance(c, dict) else c for c in chain][:20],
                    first_failure=None if bad is None else {k: bad.get(k) for k in ('line', 'form', 'index', 'status', 'error') if k in bad},
                    error=(rep.get('error') or '')[:300], diagnostic_condition=rep.get('diagnostic_condition'))
     rows.append(row)

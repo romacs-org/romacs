@@ -582,6 +582,17 @@ fn use_collector_threads() {
 }
 
 fn main() {
+    // The Vulkan driver reads it when the display makes its instance.
+    if let Some(perftest) = romacs_renderer_wgpu::gpu_policy::radv_perftest(std::env::var("RADV_PERFTEST").ok().as_deref()) {
+        // SAFETY: main's first statement, so no thread this program
+        // starts exists yet. Of what runs before main, only the
+        // allocator's constructor can start a thread: it reads its
+        // configuration from the environment on this thread and returns,
+        // and the purge thread it can be asked to start
+        // (`background_thread`) never reads or writes the environment.
+        // So nothing touches it concurrently.
+        unsafe { std::env::set_var("RADV_PERFTEST", perftest) };
+    }
     // A session's every end says why (exit.rs); other modes keep their own.
     let end = match std::panic::catch_unwind(run) {
         Ok(Ok(None)) => return,
@@ -1010,6 +1021,7 @@ fn paint(
     let submit_start = Instant::now();
     images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
     sender.submit_scene(frame, children, shown.animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
     if wait != Wait::No { activate(sender, presentation, pending)?; }
@@ -1146,6 +1158,7 @@ fn paint_prompt(
     });
     images.borrow_mut().publish(sender, std::iter::once(&glyphs).chain(&children))?;
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
+    images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
@@ -1185,7 +1198,7 @@ fn evaluate(
     };
     if let Some(quit) = quit { vm.share_quit_signal(quit); }
     startup::mark_phase("vm");
-    // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
+    // How this VM booted, which its worker isolates repeat (lisp/romacs/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
             let compiled = romacs_vm::compiled_lisp::store_dir()
@@ -1221,7 +1234,8 @@ fn evaluate(
             // Only a closed render thread refuses, and then nothing paints.
             let _ = visual_sender.set_visual_config(config.clone());
         })
-        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false)))));
+        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false))
+        .with_models(sender.clone()))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1261,7 +1275,7 @@ fn evaluate(
         };
         startup::mark_phase("session-lisp");
         if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
-        // This process's command log, from before the init (rlisp/romacs-usage-log.el).
+        // This process's command log, from before the init (lisp/romacs/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
@@ -1278,7 +1292,7 @@ fn evaluate(
                 }
                                 // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
-                // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
+                // configures, and skip the ones the layer made (lisp/romacs/romacs-loadup-bootstrap.el).
                 if worlds.is_some() {
                     vm.record_init_loads();
                     if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
@@ -1339,7 +1353,7 @@ fn evaluate(
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     // A server listens before its first window, which a client asks for
-    // (rlisp/romacs-server.el); one that cannot listen ends here.
+    // (lisp/romacs/romacs-server.el); one that cannot listen ends here.
     if let Some(name) = &serve {
         host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
         vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
@@ -1454,6 +1468,22 @@ fn evaluate(
                 // there and then.
                 if live && let Some(click) = tab_bar_click(&previous, &event).or_else(|| status_bar_click(&previous, &event)) {
                     if let Err(error) = vm.eval_source(&click) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
+                    continue;
+                }
+                // A native model's event runs its special-event binding
+                // (lisp/romacs/romacs-model.el), then the frame repaints.
+                // Its callbacks may read input: they get the keys queued
+                // ahead, as a command does.
+                if live && let InputEvent::Model { id, event } = &event {
+                    let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    vm.enter_busy();
+                    let (result, closed) = lent.run(&host, |_| vm.run_model_event(*id, event));
+                    vm.leave_busy();
+                    if let Err(error) = result { echo::show(&mut vm, &error)?; }
+                    if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
+                    }
                     live_presentation.changed();
                     continue;
                 }
@@ -1727,7 +1757,7 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
     terminate(vm, host, Lent { queue: &mut *lent.queue, live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     // A server's window is a resource of the session: closing it ends the
-    // session only when Lisp says so (rlisp/romacs-server.el).
+    // session only when Lisp says so (lisp/romacs/romacs-server.el).
     if host.borrow().server.is_some() {
         return lent.run(host, |live| {
             live.changed();

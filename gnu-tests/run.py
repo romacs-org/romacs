@@ -85,9 +85,9 @@ ORDERED_BOOTSTRAP_CHAIN = [
     'emacs-lisp/find-func', 'emacs-lisp/pp', 'emacs-lisp/map', 'help-mode',
 ]
 # The gnu-ert regime: GNU's whole preloaded world, as the dumped Emacs the
-# GNU tests assume has it (rlisp/romacs-loadup-bootstrap.el).
-ERT_SOURCE_BOOTSTRAP = ['rlisp/romacs-loadup-bootstrap.el']
-ERT_REPORT_BOOTSTRAP = ['gnu-lisp/help-fns.el', 'rlisp/romacs-cl-print.el']
+# GNU tests assume has it (lisp/romacs/romacs-loadup-bootstrap.el).
+ERT_SOURCE_BOOTSTRAP = ['lisp/romacs/romacs-loadup-bootstrap.el']
+ERT_REPORT_BOOTSTRAP = ['lisp/gnu/help-fns.el', 'lisp/romacs/romacs-cl-print.el']
 
 
 def source_bootstrap_chain(args):
@@ -620,7 +620,7 @@ def load_path() -> list[str]:
     """GNU's installed load-path: the Lisp root, then the immediate
     subdirectories named by its generated subdirs.el (build-aux/update-subdirs):
     reverse name order, obsolete last, term and VCS/backup names omitted."""
-    lisp = ROOT / 'gnu-lisp'
+    lisp = ROOT / 'lisp/gnu'
     names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
                    and p.name not in ('term', 'RCS', 'CVS', 'Old')
                    and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
@@ -655,12 +655,12 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
         if bootstrap == 'ert':
-            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'rlisp')]
+            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'lisp/romacs')]
             for link in ERT_SOURCE_BOOTSTRAP:
                 cmd += ['--preload', str(ROOT / link)]
         else:
             for link in BOOTSTRAP_CHAIN:
-                cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
+                cmd += ['--preload', str(ROOT / 'lisp/gnu' / f'{link}.el')]
         for name in skip:
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
@@ -1091,7 +1091,7 @@ def cmd_scoreboard(args) -> int:
     ledger = load_ledger(LEDGER)
     engine = 'gnu' if args.harness_fidelity else args.engine
     binary = (pathlib.Path(args.bin) if args.bin else build_adapter()) if engine == 'romacs' else None
-    ert = ROOT / 'gnu-lisp' / 'emacs-lisp' / 'ert.el'
+    ert = ROOT / 'lisp/gnu' / 'emacs-lisp' / 'ert.el'
     rows, defects, reports, errors, executions = [], [], {}, {}, {}
     with ScratchTree(), tempfile.TemporaryDirectory(prefix='gts-real-') as tmp:
         scratch = pathlib.Path(tmp)
@@ -1115,14 +1115,14 @@ def cmd_scoreboard(args) -> int:
                            '--plan', plan['path'], '--selector', getattr(args, 'selector', 't')]
                     if getattr(args, 'ert_adapter', 'none') != 'none':
                         cmd += ['--ert-adapter', args.ert_adapter]
-                    for directory in load_path() + [str(ROOT / 'rlisp'), str(target.parent)]:
+                    for directory in load_path() + [str(ROOT / 'lisp/romacs'), str(target.parent)]:
                         cmd += ['--load-path', directory]
                     if getattr(args, 'bootstrap', 'standard') == 'ordered':
                         cmd += ['--measurement-regime', 'retained-bindings-prefix']
                     if getattr(args, 'bootstrap', 'standard') == 'ert':
                         cmd += ['--bootstrap-regime', 'gnu-ert']
                     for link in source_bootstrap_chain(args):
-                        path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'gnu-lisp' / f'{link}.el'
+                        path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'lisp/gnu' / f'{link}.el'
                         cmd += ['--preload', str(path)]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                           text=True, errors='replace',
@@ -1171,7 +1171,7 @@ def cmd_scoreboard(args) -> int:
     summary = {'harness': 'gnu-ert', 'is_gnu_ert': True, 'engine': engine,
                'is_unmodified_gnu_ert': getattr(args, 'ert_adapter', 'none') == 'none',
                'ert_adapter': {'name': getattr(args, 'ert_adapter', 'none'),
-                               'sha256': hashlib.sha256((ROOT / 'rlisp/romacs-ert-batch.el').read_bytes()).hexdigest()
+                               'sha256': hashlib.sha256((ROOT / 'lisp/romacs/romacs-ert-batch.el').read_bytes()).hexdigest()
                                if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else None,
                                'condition_format': 'native-prin1' if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else 'gnu-pp',
                                'automatic_window_isolation': getattr(args, 'ert_adapter', 'none') == 'none'},

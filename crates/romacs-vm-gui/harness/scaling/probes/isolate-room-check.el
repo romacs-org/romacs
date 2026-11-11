@@ -1,6 +1,6 @@
 ;;; isolate-room-check.el --- scaling probe  -*- lexical-binding: t -*-
 
-;; The room check at each pooled dispatch (rlisp/vm/isolate.el): one pass
+;; The room check at each pooled dispatch (lisp/romacs/vm/isolate.el): one pass
 ;; over the isolates.  The waiting queue is bounded by `isolate-queue-limit'.
 (scaling-probe isolate-room-check :n 2000
   :setup (let ((zygote (record 'isolate-zygote nil nil 'ready nil nil nil nil nil nil 0 nil nil 0 nil))

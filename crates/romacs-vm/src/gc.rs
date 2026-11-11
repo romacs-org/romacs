@@ -91,7 +91,7 @@ romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, alloc
 pub(crate) const COLLECTION_RECORDS: usize = 256;
 
 /// A finished collection, for a real pause to name itself in the usage log
-/// (rlisp/romacs-usage-log.el). MS bounds what a key or command waited.
+/// (lisp/romacs/romacs-usage-log.el). MS bounds what a key or command waited.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CollectionRecord {
     /// The idle pass's or a prompt's: it gave way to no key while marking.
@@ -115,8 +115,16 @@ pub(crate) struct CollectionRecord {
     /// `Vm::live_bytes_estimate`.
     pub(crate) objects: usize,
     pub(crate) bytes: usize,
+    /// Objects past the trigger when it began, at the collector's charge
+    /// (`collection_budget`): mostly what allocation ran on between falling
+    /// due and the poll that took it. A trigger that moved down (a lowered
+    /// threshold or percentage, a lifted floor) or a hold that just ended
+    /// gives a large value with a prompt poll, so a consumer sizing a
+    /// nursery from it reads its upper percentiles with that in mind. A
+    /// float, as the trigger is.
+    pub(crate) late: f64,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes, late });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -222,15 +230,20 @@ impl Lap {
 /// siblings, data.rs).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Allocation {
-    /// Bytes the funnels have handed out, ever: the memory profiler's
-    /// meter (profiler.rs), which table growth no longer measures.
+    /// Bytes the funnels have handed out, ever. Two meters read it: the
+    /// memory profiler's (profiler.rs), which table growth no longer
+    /// measures, and the engine's request to poll (`Vm::poll_requested`).
+    /// So every funnel adds what it allocates, whatever its kind.
     pub(crate) allocated: u64,
+    /// Where ALLOCATED next asks the running engine to poll: `POLL_STEP`
+    /// past the last settled request, or 0 to poll now (`Vm::request_poll`).
+    pub(crate) poll_at: u64,
     /// GNU's consing counters, ever (`memory-use-counts').
     pub(crate) consed: Consed,
     /// The next collection compacts (`Vm::collect_compacting').
     pub(crate) compact: bool,
 }
-romacs_snapshot::snapshot_struct!(Allocation { allocated, consed, compact });
+romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact });
 
 /// What the last mark found in the objects table: `garbage-collect's
 /// statistics and the pacing's traced slots, counted once per entry.
@@ -291,6 +304,9 @@ struct NestingMark {
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
 const CONS_BYTES: i64 = 16;
+/// Allocation between the running engine's requests to poll for a
+/// collection (`Vm::poll_requested`).
+const POLL_STEP: u64 = 256 << 10;
 /// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
 /// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
 pub(crate) const MEMORY_FULL: &str = "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs";
@@ -606,6 +622,24 @@ impl Vm {
     pub fn set_gc_moving(&mut self, moving: bool) {
         self.gc_stress.moving = moving;
     }
+    /// Whether the running engine should poll at its next tick: allocation
+    /// passed another `POLL_STEP` since the last settled request, or
+    /// something asked for a poll. A primitive's return tests it, as GNU's
+    /// `maybe_gc` runs at every call; compiled code's own allocation is
+    /// left to the budget's poll.
+    #[inline]
+    pub(crate) fn poll_requested(&self) -> bool {
+        self.allocation.allocated >= self.allocation.poll_at
+    }
+    /// Ask the running engine, or the one it returns to, to poll soon.
+    pub(crate) fn request_poll(&mut self) {
+        self.allocation.poll_at = 0;
+    }
+    /// A poll or a collection settled the request: the next is `POLL_STEP`
+    /// of allocation away.
+    pub(crate) fn settle_poll(&mut self) {
+        self.allocation.poll_at = self.allocation.allocated + POLL_STEP;
+    }
     /// GNU `maybe_garbage_collect' (alloc.c:5740-5809): collect once the
     /// allocation since the last collection reaches `gc-cons-threshold'
     /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, a
@@ -684,11 +718,16 @@ impl Vm {
         let code = self.request_code.since_collection as f64 / self.code_collection_threshold() as f64;
         (allocated / budget).max(code)
     }
+    /// Objects past the automatic trigger now (`CollectionRecord::late`).
+    pub(crate) fn collection_late(&self) -> f64 {
+        let (allocated, budget) = self.collection_budget();
+        (allocated - budget).max(0.0)
+    }
     /// After a collection: no payload charged since, no poll pending, and the
     /// vector slots the live heap keeps, for the proportional rule.
     fn settle_payload(&mut self) {
         self.gc_payload_bytes = 0;
-        self.collect_poll = false;
+        self.settle_poll();
         self.gc_retained_slots = self.gc_census.vector_slots;
         if self.job_budget.is_some() { self.measure_retained_payload(); }
     }
@@ -1038,7 +1077,7 @@ impl Vm {
     /// Keep a finished collection's record, `elapsed_ns` long if a clock timed
     /// it, IDLE as in `collect_until_key`. One look at the host and one at the
     /// command variable, per collection: a key pays nothing.
-    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool) {
+    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool, late: f64) {
         let explicit = std::mem::take(&mut self.collection_log.explicit);
         if self.collection_log.records.len() >= COLLECTION_RECORDS {
             self.collection_log.dropped += 1;
@@ -1052,7 +1091,7 @@ impl Vm {
             .and_then(|_| crate::host::clock().duration_since(std::time::UNIX_EPOCH).ok())
             .map(|since| since.as_secs_f64());
         let (objects, bytes) = (self.private_objects(), self.live_bytes_estimate());
-        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
+        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes, late });
     }
     /// What the tables hold at their entries' own sizes.
     fn table_bytes(&self) -> usize {
@@ -1080,11 +1119,12 @@ impl Vm {
         Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
-    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES), KIND `idle`, `explicit` or
-    /// `automatic`, MS a float, the pause in milliseconds to the microsecond,
+    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES LATE), KIND `idle`, `explicit`
+    /// or `automatic`, MS a float, the pause in milliseconds to the microsecond,
     /// MET `command`, `key`, `redisplay` or nil, COMMAND a string or nil,
     /// T when it ended as `float-time` reads, or nil if nothing timed it,
-    /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk).
+    /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk),
+    /// LATE a float, how far past its trigger it began (`CollectionRecord::late`).
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
         let mut result = Value::NIL;
@@ -1101,7 +1141,9 @@ impl Vm {
             let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
             let at = record.at.map_or(Value::NIL, |at| self.allocate_object(data::Object::Float(at)));
             let size = |n: usize| Value::integer(i64::try_from(n).expect("a heap's size fits i64")).expect("a heap's size fits fixnum");
-            let mut row = self.keymap_cons(size(record.bytes), Value::NIL);
+            let late = self.allocate_object(data::Object::Float(record.late));
+            let mut row = self.keymap_cons(late, Value::NIL);
+            row = self.keymap_cons(size(record.bytes), row);
             row = self.keymap_cons(size(record.objects), row);
             row = self.keymap_cons(at, row);
             row = self.keymap_cons(command, row);
@@ -1938,6 +1980,57 @@ mod tests {
 
     fn conses(vm: &mut Vm, n: i64) -> Vec<Value> {
         (0..n).map(|i| vm.alloc_cons(Value::integer(i).unwrap(), Value::NIL)).collect()
+    }
+
+    /// `Allocation::allocated` is the poll's meter as well as the
+    /// profiler's: every kind of allocation advances it by at least what it
+    /// made, or a primitive that makes only that kind would never ask its
+    /// engine to poll. A compiled unit's load is charged likewise
+    /// (compiled_lisp_tests.rs, `install_charge`).
+    #[test]
+    fn every_allocation_kind_advances_the_allocation_meter() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        let value = size_of::<Value>() as u64;
+        let mut check = |kind: &str, least: u64, allocate: &dyn Fn(&mut Vm)| {
+            let before = vm.allocation.allocated;
+            allocate(&mut vm);
+            let advanced = vm.allocation.allocated - before;
+            assert!(advanced >= least, "{kind} advanced the meter {advanced}, under {least}");
+        };
+        check("cons", 2 * value, &|vm| { vm.alloc_cons(Value::NIL, Value::NIL); });
+        check("cell", value, &|vm| { vm.alloc_cell(Value::NIL); });
+        check("closure", 2 * value, &|vm| {
+            vm.alloc_closure(Closure { function: 0, captures: vec![Value::NIL; 2], metadata: Vec::new(), document: Value::NIL });
+        });
+        check("object", size_of::<data::Object>() as u64, &|vm| { vm.allocate_object(data::Object::Float(1.0)); });
+        check("string payload", 1000, &|vm| { vm.make_lisp_string(vec![b'x'; 1000], false); });
+        check("vector payload", 100 * value, &|vm| { vm.allocate_object(data::Object::Vector(vec![Value::NIL; 100])); });
+        check("bool vector", 1000, &|vm| {
+            vm.allocate_object(data::Object::BoolVector(Box::new(data::BoolVector::new(8000, false).unwrap())));
+        });
+    }
+
+    /// A collection's record says how many objects past its trigger it
+    /// began: none below the trigger, and exactly the excess above it.
+    #[test]
+    fn a_collection_records_how_far_past_its_trigger_it_began() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_collection_floor(100_000);
+        vm.collect(&mut []);
+        // The floor's trigger, as `collection_budget` sets it: twice what the
+        // last collection kept, at least the floor, less what it kept.
+        let budget = u32::try_from(vm.gc_retained.saturating_mul(2).max(100_000) - vm.gc_retained).unwrap();
+        let trigger = |vm: &Vm| vm.collection_budget().1.to_string();
+        assert_eq!(trigger(&vm), budget.to_string(), "the floor sets the trigger");
+        conses(&mut vm, i64::from(budget / 2));
+        vm.collect(&mut []);
+        assert_eq!(trigger(&vm), budget.to_string(), "dead conses leave the trigger where it was");
+        conses(&mut vm, i64::from(budget) + 5_000);
+        vm.collect(&mut []);
+        let late: Vec<String> = vm.collection_log.records.iter().map(|record| record.late.to_string()).collect();
+        assert_eq!(late[late.len() - 2..], ["0", "5000"], "below the trigger, then 5,000 past it: {late:?}");
     }
 
     /// A mark twin's mark (`mark_only') marks what the roots reach, keeps a

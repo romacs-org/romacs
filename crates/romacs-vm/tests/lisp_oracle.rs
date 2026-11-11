@@ -30,7 +30,7 @@ fn text(out: &Output) -> String {
 fn lisp_is_the_gnu_pin_byte_for_byte() {
     let out = guard(&repo(), &[]);
     assert!(out.status.success(), "lisp/ differs from the GNU pin (R221):\n{}", text(&out));
-    assert!(text(&out).contains("every shared gnu-lisp/ path is the pin blob"), "{}", text(&out));
+    assert!(text(&out).contains("every shared lisp/gnu/ path is the pin blob"), "{}", text(&out));
 }
 
 /// A throwaway GNU repository holding two files, and a root that copies them.
@@ -59,9 +59,9 @@ impl Fixture {
         git(&["commit", "-q", "-m", "pin"]);
         let pin = git(&["rev-parse", "HEAD"]).trim().to_owned();
         let root = dir.join("root");
-        std::fs::create_dir_all(root.join("gnu-lisp/sub")).unwrap();
-        std::fs::copy(gnu.join("lisp/a.el"), root.join("gnu-lisp/a.el")).unwrap();
-        std::fs::copy(gnu.join("lisp/sub/b.el"), root.join("gnu-lisp/sub/b.el")).unwrap();
+        std::fs::create_dir_all(root.join("lisp/gnu/sub")).unwrap();
+        std::fs::copy(gnu.join("lisp/a.el"), root.join("lisp/gnu/a.el")).unwrap();
+        std::fs::copy(gnu.join("lisp/sub/b.el"), root.join("lisp/gnu/sub/b.el")).unwrap();
         Fixture { dir, pin }
     }
     fn root(&self) -> PathBuf {
@@ -107,21 +107,21 @@ fn pristine_fixture_passes() {
 #[test]
 fn one_changed_byte_is_refused() {
     let f = Fixture::new("byte");
-    let p = f.root().join("gnu-lisp/sub/b.el");
+    let p = f.root().join("lisp/gnu/sub/b.el");
     let mut bytes = std::fs::read(&p).unwrap();
     let before = bytes.clone();
     let i = bytes.len() - 3;
     bytes[i] ^= 0x01;
     std::fs::write(&p, &bytes).unwrap();
     assert_ne!(std::fs::read(&p).unwrap(), before, "the mutant must actually change the file");
-    refused(&f.check(), "MODIFIED gnu-lisp/sub/b.el");
+    refused(&f.check(), "MODIFIED lisp/gnu/sub/b.el");
 }
 
 #[test]
 fn an_absent_gnu_path_is_refused() {
     let f = Fixture::new("absent");
-    std::fs::remove_file(f.root().join("gnu-lisp/a.el")).unwrap();
-    refused(&f.check(), "ABSENT gnu-lisp/a.el");
+    std::fs::remove_file(f.root().join("lisp/gnu/a.el")).unwrap();
+    refused(&f.check(), "ABSENT lisp/gnu/a.el");
 }
 
 /// With a repository, undeclared Lisp is refused even if ignored; ignored
@@ -141,18 +141,18 @@ fn with_a_repository_extras_and_a_wrong_pin_record_are_refused() {
     let record = |commit: &str, tree: &str| std::fs::write(root.join("LISP-PIN.json"),
         format!("{{\"gnu_commit\": \"{commit}\", \"lisp_tree\": \"{tree}\"}}\n")).unwrap();
     record(&f.pin, &tree);
-    std::fs::write(root.join(".gitignore"), "gnu-lisp/generated.elc\ngnu-lisp/generated.el\n").unwrap();
-    std::fs::write(root.join("gnu-lisp/generated.elc"), "; compiled build product\n").unwrap();
+    std::fs::write(root.join(".gitignore"), "lisp/gnu/generated.elc\nlisp/gnu/generated.el\n").unwrap();
+    std::fs::write(root.join("lisp/gnu/generated.elc"), "; compiled build product\n").unwrap();
     let out = f.check();
     assert!(out.status.success(), "an ignored build product must not count: {}", text(&out));
 
-    std::fs::write(root.join("gnu-lisp/generated.el"), "; undeclared runtime input\n").unwrap();
-    refused(&f.check(), "EXTRA gnu-lisp/generated.el");
-    std::fs::remove_file(root.join("gnu-lisp/generated.el")).unwrap();
+    std::fs::write(root.join("lisp/gnu/generated.el"), "; undeclared runtime input\n").unwrap();
+    refused(&f.check(), "EXTRA lisp/gnu/generated.el");
+    std::fs::remove_file(root.join("lisp/gnu/generated.el")).unwrap();
 
-    std::fs::write(root.join("gnu-lisp/ours.el"), "(provide 'ours)\n").unwrap();
-    refused(&f.check(), "EXTRA gnu-lisp/ours.el");
-    std::fs::remove_file(root.join("gnu-lisp/ours.el")).unwrap();
+    std::fs::write(root.join("lisp/gnu/ours.el"), "(provide 'ours)\n").unwrap();
+    refused(&f.check(), "EXTRA lisp/gnu/ours.el");
+    std::fs::remove_file(root.join("lisp/gnu/ours.el")).unwrap();
 
     record(&f.pin, "0000000000000000000000000000000000000000");
     refused(&f.check(), "LISP-PIN.json: lisp_tree");

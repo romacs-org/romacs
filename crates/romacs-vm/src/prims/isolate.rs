@@ -1,5 +1,5 @@
 //! Isolates' leaf primitives (vm-concurrency design §4): the substrate
-//! rlisp/vm/isolate.el's `isolate-*' API runs on. Not in GNU
+//! lisp/romacs/vm/isolate.el's `isolate-*' API runs on. Not in GNU
 //! (DIVERGENCES.md VM2-ISOLATE). Peer 0 is a worker's parent.
 use super::*;
 

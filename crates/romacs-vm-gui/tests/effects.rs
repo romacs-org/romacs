@@ -1,4 +1,4 @@
-//! The renderer's options (rlisp/romacs-effects.el) on the real --loadup
+//! The renderer's options (lisp/romacs/romacs-effects.el) on the real --loadup
 //! chain with a window system: every way of setting one reaches the
 //! display as a visual configuration, a refused value warns and leaves the
 //! display as it was, and each option starts at the renderer's default.

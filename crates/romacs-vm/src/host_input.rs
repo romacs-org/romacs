@@ -39,7 +39,7 @@ pub struct HostFrame {
 }
 
 /// What the host answers a read with.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum HostEvent {
     /// A complete input event, GNU's encoding (an integer or a symbol name).
     Key(CommandEvent),
@@ -57,6 +57,9 @@ pub enum HostEvent {
     /// The frame gained (true) or lost focus: keyboard.c's FOCUS_IN_EVENT
     /// and FOCUS_OUT_EVENT, read as GNU's special events.
     Focus(bool),
+    /// The renderer's event about native model ID, read as the special
+    /// event `(romacs-model ID TYPE PLIST)` (`display_host/models.rs`).
+    Model { id: u32, event: romacs_display_protocol::model::ModelEvent },
 }
 
 /// The embedder's keyboard, screen, and optional native clipboard.
@@ -143,7 +146,7 @@ impl Vm {
 
     /// redisplay_internal's run_window_change_functions, which every
     /// redisplay's frame snapshot runs first (display.rs): the command
-    /// loop's Lisp half (rlisp/vm/window-change.el) once it is installed.
+    /// loop's Lisp half (lisp/romacs/vm/window-change.el) once it is installed.
     /// Lisp runs only when the windows differ from what the last run saw,
     /// so a redisplay that changed no window enters no Lisp.
     pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
@@ -296,7 +299,7 @@ fn host(vm: &mut Vm) -> &mut dyn HostInput {
 }
 
 /// What a host wait's deadline depends on besides the clock, as
-/// `romacs--wait-state` (`rlisp/vm/keyboard.el`) prints it: empty before the
+/// `romacs--wait-state` (`lisp/romacs/vm/keyboard.el`) prints it: empty before the
 /// Lisp half is installed.
 const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
 /// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
@@ -305,7 +308,7 @@ const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--e
 /// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
 /// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
 /// input is pending, then wait for one event, or nil once SECONDS pass; its
-/// value goes to OUT. Lisp runs timers between reads (`rlisp/vm/keyboard.el`).
+/// value goes to OUT. Lisp runs timers between reads (`lisp/romacs/vm/keyboard.el`).
 /// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
 /// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
 pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
@@ -464,10 +467,10 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
         HostEvent::Resize { width, height } => (Some((width, height)), false),
         // A completed background command ends the wait as a timeout does:
         // Lisp may run its callback between commands
-        // (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
         HostEvent::Background => (None, false),
-        // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // Lisp reads it (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
         event => (None, ended(vm, event)),
     })
@@ -501,6 +504,8 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
             let frame = vm.frame_value_peek();
             vm.list_value(&[kind, frame])
         }
+        // A native model's event: the special event `(romacs-model ID TYPE PLIST)`.
+        HostEvent::Model { id, event } => vm.model_event_value(id, &event),
         HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
         HostEvent::Closed => {
             // Its data tells it from a C-g's (`romacs--host-event').

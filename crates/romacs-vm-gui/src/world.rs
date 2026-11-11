@@ -16,7 +16,7 @@
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
-//! startup steps (rlisp/romacs-gui-loadup.el): those read and write the
+//! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! refuses, so a restored launch takes them itself.
 //!
@@ -423,7 +423,7 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
 /// `batch::boot`, which measures none).
 pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = vec![dir.to_owned()];
-    roots.extend(dir.parent().map(|parent| parent.join("rlisp")));
+    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/romacs")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {

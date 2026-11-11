@@ -22,7 +22,7 @@ import tempfile
 import time
 
 NAME = re.compile(r'(^|/)(test_[^/]*|test-[^/]*|[^/]*_test)\.py$')
-OUTSIDE = ('gnu-lisp/', 'gnu-tests/test/', 'test/')
+OUTSIDE = ('lisp/gnu/', 'gnu-tests/test/', 'test/')
 # Test files another runner owns: path -> the runner that names it.
 ELSEWHERE = {
     **{f'gnu-tests/tests/{name}.py': 'gnu-tests/runner/tests/python_contract.rs'

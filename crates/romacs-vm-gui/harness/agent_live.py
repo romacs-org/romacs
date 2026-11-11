@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent sessions (rlisp/romacs-agent.el, romacs-agent-host, the
+"""Agent sessions (lisp/romacs/romacs-agent.el, romacs-agent-host, the
 reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
@@ -58,7 +58,7 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              by real keys.
   select     a new model or effort in a running session: live between
              turns, armed during one, restarted when refused, carried by
-             Codex's next run, across a server restart.
+             Codex's next turn, across a server restart.
   start_picker  a session started by real keys through the palette of
              instances and models, with an effort; the first session's
              models kept once.
@@ -776,11 +776,11 @@ def delegate(args, base):
         a.idle(parent)
         cancel = json.loads(a.tool_results()[-1][1])
         until(lambda: not Path(f'/proc/{slow_pid}').exists(), 15, 'cancelled child ended')
-        # An interrupt ends the run, journaled: the turn failed, the session
-        # is idle (not detached), and the next message continues its thread.
+        # An interrupt ends the turn: it failed, the session is idle, and the
+        # next message continues its thread.
         stopped = delegate_call({'task': 'slow 30', 'target': {'provider': 'codex'}, 'clientRequestId': 'i1'})
         until(lambda: sum(1 for e in a.codex_runs() if e['prompt'] == 'slow 30') >= 2, 20, 'second slow child running')
-        until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(stopped["taskId"])})) t)') == 't', 20, 'attached')
+        until(lambda: a.eval(f'(plist-get (romacs-agent-driver-state {a.s(stopped["taskId"])}) :turn)') != 'nil', 20, 'turn known')
         a.eval(f'(romacs-agent-interrupt {a.s(stopped["taskId"])})')
         until(lambda: a.state(stopped['taskId']) == 'idle', 15, 'interrupted child idle')
         interrupted = a.eval(f'(romacs-agent-tools--status {a.s(stopped["taskId"])})')
@@ -806,15 +806,14 @@ def delegate(args, base):
                   'codex_home': run['codex_home'], 'argv': run['argv'],
                   'same_request_same_task': again['taskId'] == waited['taskId'],
                   'async_status': asynced['status'], 'wake': wake[:200],
-                  'follow_up_resumed': 'resume' in follow['argv'] and follow['prompt'] == 'say second turn',
+                  'follow_up': follow['prompt'] == 'say second turn', 'turn_options': [run['model'], run['effort']],
                   'cancel': cancel.get('status'), 'cancelled_after_restart': cancelled_after,
                   'interrupted': interrupted, 'expired_wait': expired.get('waitTimedOut'), 'wakes': len(wakes),
                   'cancelled_woke': any(cancelled['taskId'] in w for w in wakes)}
         result['ok'] = (waited['status'] == 'completed' and waited['result'] == 'reviewed'
-                        and run['codex_home'] == str(home) and '-m' in run['argv'] and 'm-test' in run['argv']
-                        and 'model_reasoning_effort="low"' in run['argv']
+                        and run['codex_home'] == str(home) and run['model'] == 'm-test' and run['effort'] == 'low'
                         and result['same_request_same_task'] and asynced['status'] == 'running'
-                        and '[completed]' in wake and 'slow done' in wake and result['follow_up_resumed']
+                        and '[completed]' in wake and 'slow done' in wake and result['follow_up']
                         and cancel.get('status') == 'cancelled' and not result['cancelled_woke']
                         and cancelled_after == '"cancelled"' and interrupted == '"failed"' and expired.get('waitTimedOut')
                         # A wake per child turn end no wait answered, each with its own result: the
@@ -843,7 +842,7 @@ def build_dir(a, commit):
     (d / 'romacs-vm-gui').symlink_to(binary)
     for name in ('romacs-mcp', 'romacs-agent-host'):
         (d / name).symlink_to(binary.with_name(name))
-    for root in ('gnu-lisp', 'rlisp', 'etc'):
+    for root in ('lisp', 'etc'):
         (d / root).symlink_to(runtime / root)
     (d / 'build.json').write_text(json.dumps({'commit': commit}))
     return d
@@ -1017,12 +1016,12 @@ def gnosis(args, base):
                   'applied_tags': applied['items'][0].get('tags'), 'practice': practice.get('status'),
                   'status': status.get('status'), 'cancel_refused': [refused, refusal[:120]], 'sessions': len(sessions['items']),
                   'review_rows': reviews, 'claude': claude, 'malformed': malformed, 'codex': codex,
-                  'codex_argv_model': 'm-luna' in codex_run['argv'], 'tutor': tutor, 'ask_states': asks}
+                  'codex_turn_model': codex_run['model'] == 'm-luna', 'tutor': tutor, 'ask_states': asks}
         result['ok'] = (len(offered) == 20 and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
                         and practice.get('status') in ('pending', 'running') and refused and 'native review' in refusal
                         and reviews == '0' and 'resolved' in claude and 'pass' in claude
                         and 'rejected' in malformed and 'no grade recorded' in malformed
-                        and 'resolved' in codex and result['codex_argv_model'] and 'resolved' in tutor
+                        and 'resolved' in codex and result['codex_turn_model'] and 'resolved' in tutor
                         and all(state in ('ended', 'idle', 'detached') for state in parity_live.read_sexp(asks)))
         return result
     finally:
@@ -1317,7 +1316,7 @@ def environment(args, base):
     a = Agents(args, base, 'ev')
     try:
         a.up()
-        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/gnu-lisp',
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp/gnu',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
                   'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
         parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',
@@ -1909,7 +1908,7 @@ def composer(args, base, real=False):
         good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
         a.keys('-M', 'alt', '>', '-m', 'alt')
         # The queue is the session's: sent though the chat buffer is gone, and
-        # after a Codex turn an interrupt ended (its run exits, no result).
+        # after a Codex turn an interrupt ended (no result).
         a.send(sid, 'slow 30')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
         a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
@@ -1920,7 +1919,8 @@ def composer(args, base, real=False):
                f'(delete-other-windows) (switch-to-buffer (romacs-agent-buffer {a.s(sid)})) (goto-char (point-max)) t)')
         a.codex_instance()
         codex = a.start('slow 30', 'codex')
-        until(lambda: a.state(codex) in ('running', 'starting'), 15, 'a Codex turn')
+        # Interruptible once Codex has named the turn.
+        until(lambda: a.eval(f'(plist-get (romacs-agent-driver-state {a.s(codex)}) :turn)') != 'nil', 15, 'a Codex turn')
         a.eval(f'(progn (romacs-agent-send-later {a.s(codex)} "say queued codex") (romacs-agent-interrupt {a.s(codex)}) t)')
         until(lambda: 'queued codex' in str(a.eval(f'(romacs-agent-reply {a.s(codex)})')), 40, 'the Codex queue after an interrupt')
         steps['queue_survives'] = True
@@ -2061,7 +2061,7 @@ def history(args, base):
     listed under their project, titled by the first typed prompt (injected
     context skipped, Codex's past a long head); opened read-only in the
     chat's look; resumed through the harness's own resume (claude --resume
-    <id> in the instance's directory, codex exec resume <thread>), the
+    <id> in the instance's directory, codex's thread/resume), the
     transcript drawn before the session's own turns and no longer listed as
     history; after a restart both are sessions again.  Nothing is written
     under the configuration directories."""
@@ -2164,7 +2164,7 @@ def history(args, base):
             'home': home, 'views': {k: v[:400] for k, v in views.items()},
             'claude_argv': claude_run[-1]['argv'] if claude_run else None,
             'claude_config_dir': claude_run[-1].get('config_dir') if claude_run else None,
-            'codex_argv': codex_run[-1]['argv'] if codex_run else None,
+            'codex_resumed': codex_run[-1]['resumed'] if codex_run else None,
             'chats': {k: v[:500] for k, v in chats.items()}, 'listed_after': listed, 'after_restart': again,
             'untouched': untouched, 'imported_again': imported_again, 'refused': refused, 'cuts': cuts,
             'twin_sockets': sockets, 'twin_runs': twin_runs, 'twin_failed': twin_failed}
@@ -2177,7 +2177,7 @@ def history(args, base):
             and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
-            and codex_run and codex_run[-1]['argv'][codex_run[-1]['argv'].index('resume') + 1] == tid
+            and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
             and order(chats[cid], '> list the files here', '> say resumed one')
             and order(chats[tid], '> count the lines of a.txt', '> say resumed two')
             and cid not in listed and tid not in listed
@@ -2424,9 +2424,9 @@ def start_picker(args, base):
         until(lambda: any(e.get('argv') and '--model' in e['argv'] for e in a.logged()), 30, 'claude started')
         claude_argv = next(e['argv'] for e in a.logged() if e.get('argv') and '--model' in e['argv'])
         pick(other, 'cod luna', 'low', 'say luna')
-        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'codex ran')
-        codex_argv = next(r['argv'] for r in a.codex_runs() if 'gpt-6-luna' in r['argv'])
-        result.update(claude_argv=claude_argv, codex_argv=codex_argv, rows=rows)
+        until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'codex ran')
+        codex_turn = next(r for r in a.codex_runs() if r['model'] == 'gpt-6-luna')
+        result.update(claude_argv=claude_argv, codex_turn=[codex_turn['model'], codex_turn['effort']], rows=rows)
 
         # One enabled instance: from the directory straight to the prompt.
         a.eval('(progn (setq romacs-agent-providers (list (cons "claude" "~/.claude"))) t)')
@@ -2443,8 +2443,7 @@ def start_picker(args, base):
                         and Path(result['directory'].rstrip('/')).name == other.name
                         and after(claude_argv, '--model') == 'claude-sonnet-5-5'
                         and after(claude_argv, '--effort') == 'high'
-                        and after(codex_argv, '-m') == 'gpt-6-luna'
-                        and 'model_reasoning_effort="low"' in codex_argv
+                        and result['codex_turn'] == ['gpt-6-luna', 'low']
                         and rows[0] == 'Claude · default' and 'Claude · Fake 1' in rows
                         and 'Codex · GPT-6.1 Sol' in rows and 'Prompt' in result['single'])
         return result
@@ -2663,8 +2662,8 @@ def select(args, base):
     requests between turns, armed during one, messages held until each is
     confirmed, a refusal or silence restarting on `--resume' with the new
     words, clearing the effort restarting, a harness dying mid-turn resuming
-    on the selection; Codex's next run carrying it, built after the last
-    retired.  A server restart replays the divider in place and finds an
+    on the selection; Codex's next turn carrying it, once the running one
+    ended.  A server restart replays the divider in place and finds an
     armed selection, which applies at the live turn end only."""
     a = Agents(args, base, 'sl')
     try:
@@ -2789,15 +2788,16 @@ def select(args, base):
         until(lambda: len(starts(dying)) == 2, 15, 'resumed')
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
-        # Codex: the next run's words, built after this run retired.
+        # Codex: its next turn names them, once the running one ended.
         run = a.start('slow 3', 'codex')
         until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
-        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'second run')
-        runs = [r['argv'] for r in a.codex_runs()]
-        result['codex'] = {'first': 'gpt-6-luna' in runs[0], 'second': 'gpt-6-luna' in runs[-1],
-                           'effort': 'model_reasoning_effort="low"' in runs[-1], 'runs': len(runs)}
+        until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
+        runs = a.codex_runs()
+        result['codex'] = {'first': runs[0]['model'] == 'gpt-6-luna', 'second': runs[-1]['model'] == 'gpt-6-luna',
+                           'effort': runs[-1]['effort'] == 'low', 'turns': len(runs),
+                           'one_process': len({r['pid'] for r in runs}) == 1}
 
         live, armed_r, div = result['live'], result['armed'], result['divider']
         result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
@@ -2815,7 +2815,8 @@ def select(args, base):
                         and result['cleared']['requests'] == [] and result['cleared']['first'] == 'high'
                         and result['cleared']['second'] is None and result['cleared']['resume']
                         and result['died']['model'] == 'claude-haiku-5-5'
-                        and not result['codex']['first'] and result['codex']['second'] and result['codex']['effort'])
+                        and not result['codex']['first'] and result['codex']['second'] and result['codex']['effort']
+                        and result['codex']['one_process'])
         return result
     finally:
         a.close()
@@ -2824,8 +2825,8 @@ def select(args, base):
 def select_real(args, base):
     """`select' on the real harnesses: Claude Code (--claude-model) from
     effort low to medium between two turns, both control requests confirmed
-    and the second turn answered; Codex (--codex-model) over two runs, the
-    second carrying the new effort.  Costs money: not a default workflow."""
+    and the second turn answered; Codex (--codex-model) over two turns, the
+    second's turn/start carrying the new effort.  Costs money: not a default workflow."""
     a = Agents(args, base, 'sr')
     try:
         a.up()
@@ -2867,12 +2868,12 @@ def select_real(args, base):
         run = start('codex', args.codex_model, 'low', 'Reply with only the word CHARLIE.', 'CHARLIE')
         a.eval(f'(romacs-agent-select {a.s(run)} {lisp_text(args.codex_model)} "medium")')
         turn(run, 'Reply with only the word DELTA.', 'DELTA')
-        host = json.loads((a.home / '.local/state/romacs/agents' / run / 'host.json').read_text())
-        result['codex'] = {'second': [w for w in host['argv'] if 'model_reasoning_effort' in w]}
+        result['codex'] = {'efforts': [r['in']['params'].get('effort') for r in a.journal(run)
+                                       if isinstance(r.get('in'), dict) and r['in'].get('method') == 'turn/start']}
         c = result['claude']
         result['ok'] = (c['written'] == [{'subtype': 'apply_flag_settings', 'settings': {'effortLevel': 'medium'}}]
                         and c['answers'] == ['success'] and c['runs'] == 1
-                        and result['codex']['second'] == ['model_reasoning_effort="medium"'])
+                        and result['codex']['efforts'] == ['low', 'medium'])
         return result
     finally:
         a.close()

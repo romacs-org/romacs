@@ -866,12 +866,10 @@ impl PresentedHitIndex {
         &self,
         query: PresentedHitQuery,
     ) -> Result<Option<PresentedUnifiedHit>, PresentedHitError> {
-        if query.presentation() != self.presentation {
-            return Err(PresentedHitError::StalePresentation {
-                expected: self.presentation,
-                requested: query.presentation(),
-            });
+        if self.is_empty() && self.pointer_regions.is_empty() {
+            return Ok(None);
         }
+        self.check_presentation(query)?;
         let resolved_semantic = self.resolve(query)?;
         let resize_handle_wins =
             resolved_semantic.is_some_and(|hit| hit.region().kind().resize_axis().is_some());
@@ -965,6 +963,20 @@ impl PresentedHitIndex {
         self.presentation
     }
 
+    /// A query against regions of another presentation is stale. An index
+    /// with no regions answers no hit for any presentation (its callers
+    /// return before asking): a frame whose producer builds none, as
+    /// layout2's, is not stale.
+    fn check_presentation(&self, query: PresentedHitQuery) -> Result<(), PresentedHitError> {
+        if query.presentation() == self.presentation {
+            return Ok(());
+        }
+        Err(PresentedHitError::StalePresentation {
+            expected: self.presentation,
+            requested: query.presentation(),
+        })
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.regions.is_empty()
@@ -977,12 +989,10 @@ impl PresentedHitIndex {
         &self,
         query: PresentedHitQuery,
     ) -> Result<Option<PresentedHit>, PresentedHitError> {
-        if query.presentation() != self.presentation {
-            return Err(PresentedHitError::StalePresentation {
-                expected: self.presentation,
-                requested: query.presentation(),
-            });
+        if self.is_empty() {
+            return Ok(None);
         }
+        self.check_presentation(query)?;
         // No non-finite guard: the query's point is a `LogicalPixels` pair, and
         // `LogicalPixels::new` rejects anything but a finite value, so an
         // infinite or NaN coordinate cannot reach here to be checked for.

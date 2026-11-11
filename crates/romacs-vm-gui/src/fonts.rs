@@ -49,6 +49,8 @@ pub struct Display {
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
     visual_hook: Option<Box<dyn FnMut(&romacs_display_protocol::VisualConfig)>>,
     lose_device_hook: Option<Box<dyn FnMut() -> bool>>,
+    /// The window's render thread, which draws native models.
+    models: Option<std::sync::Arc<romacs_display_runtime::paint_host::PaintSender>>,
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
     /// of each image the VM's cache holds, by id, for the renderer
     /// (residency.rs).
@@ -122,7 +124,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
-                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None, lose_device_hook: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None, lose_device_hook: None, models: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
     }
@@ -207,6 +209,11 @@ impl Display {
     pub fn with_visual_hook(self, hook: impl FnMut(&romacs_display_protocol::VisualConfig) + 'static) -> Self {
         Self { visual_hook: Some(Box::new(hook)), ..self }
     }
+    /// This display, drawing native models on SENDER's render thread.
+    #[must_use]
+    pub fn with_models(self, sender: std::sync::Arc<romacs_display_runtime::paint_host::PaintSender>) -> Self {
+        Self { models: Some(sender), ..self }
+    }
     /// Call HOOK for `romacs--debug-lose-device`: whether the request went.
     pub fn with_lose_device_hook(self, hook: impl FnMut() -> bool + 'static) -> Self {
         Self { lose_device_hook: Some(Box::new(hook)), ..self }
@@ -236,6 +243,12 @@ impl Display {
         let opened = romacs_vm::DisplayHost::open_font(self, &entity, resolved.font.pixel_size.round() as i64)?;
         Some((opened, resolved.glyph.glyph_id.get()))
     }
+}
+
+/// A model command's outcome: a full channel refuses it, so Lisp's request
+/// number stays unissued.
+fn sent(result: Result<bool, String>) -> Result<(), String> {
+    if result? { Ok(()) } else { Err("the renderer is busy; try again".into()) }
 }
 
 fn font_entity(entity: entity::Entity) -> FontEntity {
@@ -398,6 +411,21 @@ impl romacs_vm::DisplayHost for Display {
     }
     fn image_header_size(&mut self, path: &str) -> Option<(u32, u32)> {
         romacs_imaging::image_probe::probe_file_pixels(path)
+    }
+    fn model_available(&self) -> bool {
+        self.models.as_ref().is_some_and(|sender| sender.model_renderer_live())
+    }
+    fn create_model(&mut self, id: u32, model: romacs_vm::ModelCreate) -> Result<(), String> {
+        let sender = self.models.as_ref().ok_or(romacs_vm::NO_MODELS)?;
+        sent(sender.create_model(id, model.meshes, model.view, model.background, model.size))
+    }
+    fn update_model(&mut self, id: u32, req: u64, change: romacs_display_protocol::model::ModelChange) -> Result<(), String> {
+        let sender = self.models.as_ref().ok_or(romacs_vm::NO_MODELS)?;
+        sent(sender.update_model(id, req, change))
+    }
+    fn free_surface(&mut self, id: u32) {
+        // Sent after the next frame, which no longer draws it (residency.rs).
+        self.decoded.borrow_mut().free_surface(id);
     }
     fn release_image(&mut self, id: u64) {
         // Still decoding: its result is dropped when it comes.

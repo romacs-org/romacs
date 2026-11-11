@@ -33,7 +33,7 @@
   "Preserve an old option value set before the neutral module loads."
   (let ((emacs (expand-file-name invocation-name invocation-directory))
         (lisp (expand-file-name
-               "rlisp/gnosis" gnosis-test-logical-day-cutover--root)))
+               "lisp/romacs/gnosis" gnosis-test-logical-day-cutover--root)))
     (with-temp-buffer
       (should
        (= 0
@@ -60,7 +60,7 @@
                     (or "date" "date-diff" "-date-later-p")
                     symbol-end)))
     (dolist (file (directory-files
-                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "lisp/romacs/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (with-temp-buffer
         (insert-file-contents file)
@@ -75,7 +75,7 @@
                  (seq "INSERT" (optional " OR IGNORE") " INTO review"
                       (optional "_log") (any " ("))))))
     (dolist (file (directory-files
-                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "lisp/romacs/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (with-temp-buffer
         (insert-file-contents file)
@@ -88,7 +88,7 @@
                  (seq "'" symbol-start
                       (or "review" "review-log" "activity-log") symbol-end)))))
     (dolist (file (directory-files
-                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "lisp/romacs/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (unless (string= (file-name-nondirectory file) "gnosis-db.el")
         (with-temp-buffer

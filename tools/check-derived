@@ -33,10 +33,11 @@ def main():
     unsafe = subprocess.run([sys.executable, '-B', 'tools/lib/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
     smells = subprocess.run([sys.executable, '-B', 'tools/lib/smells.py', 'check', '--root', str(root)], cwd=root)
     names = subprocess.run([sys.executable, '-B', 'tools/lib/divergence_index.py', '--names'], cwd=root)
-    if tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode or names.returncode:
+    tree = subprocess.run([sys.executable, '-B', 'tools/lib/lisp_tree.py', 'check', str(root)], cwd=root)
+    if tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode or names.returncode or tree.returncode:
         return 1
     print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
-          'the Python unit tests pass; lisp/ and gnu-tests/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors, the smell floors and the divergence file names verified')
+          'the Python unit tests pass; lisp/gnu and gnu-tests/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors, the smell floors, the divergence file names and the Lisp trees\' names verified')
     return 0
 
 

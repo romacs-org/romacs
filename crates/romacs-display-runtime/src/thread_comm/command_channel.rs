@@ -74,6 +74,12 @@ pub(crate) fn command_channel(capacity: usize) -> (CommandSender, CommandReceive
 
 impl CommandSender {
     pub fn try_send(&self, command: RenderCommand) -> Result<(), TrySendError<RenderCommand>> {
+        self.try_send_within(command, self.shared.capacity)
+    }
+    /// As `try_send`, but `Full` once LIMIT commands wait: a producer that
+    /// must leave the rest of the channel to others.
+    #[expect(clippy::result_large_err, reason = "a refused command comes back to its sender whole, as try_send's does")]
+    pub fn try_send_within(&self, command: RenderCommand, limit: usize) -> Result<(), TrySendError<RenderCommand>> {
         let mut pending = self.shared.pending.lock().unwrap();
         if !pending.receiver_alive {
             return Err(TrySendError::Disconnected(command));
@@ -82,7 +88,7 @@ impl CommandSender {
             // Cancellation is one coalescing bit, independent of FIFO capacity.
             pending.shutdown = true;
         } else {
-            if pending.queue.len() == self.shared.capacity {
+            if pending.queue.len() >= limit.min(self.shared.capacity) {
                 return Err(TrySendError::Full(command));
             }
             pending.queue.push_back(command);

@@ -72,10 +72,10 @@ fn class_is_the_closed_p_set() {
     assert_eq!(host::class(Fact::Other, None), Class::K);
     assert_eq!(host::class(Fact::Effect, None), Class::F);
     let site = |file: &str, head: &str| Site { file: file.into(), line: 79, head: head.into() };
-    let baked = site("/x/gnu-lisp/version.el", "(defconst emacs-build-time (if emacs-build-system");
+    let baked = site("/x/lisp/gnu/version.el", "(defconst emacs-build-time (if emacs-build-system");
     assert_eq!(host::class(Fact::Clock, Some(&baked)), Class::B);
     assert_eq!(host::class(Fact::Pid, Some(&baked)), Class::P);
-    assert_eq!(host::class(Fact::Clock, Some(&site("/x/gnu-lisp/version.el", "(defconst emacs-build-number 1"))), Class::P);
+    assert_eq!(host::class(Fact::Clock, Some(&site("/x/lisp/gnu/version.el", "(defconst emacs-build-number 1"))), Class::P);
     assert_eq!(host::class(Fact::Clock, Some(&site("/x/other.el", "(defconst emacs-build-time"))), Class::P);
 }
 
@@ -100,7 +100,7 @@ fn p_reads_outside_startup_refuse_with_their_site() {
 #[test]
 fn startup_reads_p_facts_and_only_the_bootstrap_switches() {
     let dir = scratch("startup");
-    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), "(unwind-protect\n    (progn (romacs--startup-phase t) (setq s1 (getenv-internal \"TMPDIR\")) (setq s2 (emacs-pid)))\n  (romacs--startup-phase nil))\n(setq s3 (getenv-internal \"TERM\"))\n(unwind-protect (romacs--startup-phase t) (romacs--startup-phase nil))\n");
+    let bootstrap = write(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), "(unwind-protect\n    (progn (romacs--startup-phase t) (setq s1 (getenv-internal \"TMPDIR\")) (setq s2 (emacs-pid)))\n  (romacs--startup-phase nil))\n(setq s3 (getenv-internal \"TERM\"))\n(unwind-protect (romacs--startup-phase t) (romacs--startup-phase nil))\n");
     let other = write(&dir.join("other.el"), "(romacs--startup-phase t)\n(setq s4 (getenv-internal \"PATH\"))\n");
     let (_, trace) = build(&[bootstrap, other]);
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().map(|r| (r["what"].as_str().unwrap(), r["allowed"].as_str().unwrap())).collect();
@@ -138,7 +138,7 @@ fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
 #[test]
 fn reseed_forms_restate_their_gnu_sources() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let bootstrap = std::fs::read_to_string(root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    let bootstrap = std::fs::read_to_string(root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
     for (file, source, restated) in [
         ("emacs-lisp/cl-extra.el", "(defvar cl--random-state (cl--make-random-state (cl--random-time)))",
          "(setq cl--random-state (cl--make-random-state (cl--random-time)))"),
@@ -148,7 +148,7 @@ fn reseed_forms_restate_their_gnu_sources() {
          "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
          "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),
     ] {
-        let gnu = std::fs::read_to_string(root.join("gnu-lisp").join(file)).unwrap();
+        let gnu = std::fs::read_to_string(root.join("lisp/gnu").join(file)).unwrap();
         assert!(gnu.contains(source), "{file} no longer has {source}");
         assert!(bootstrap.contains(&format!("\"{file}\"")) && bootstrap.contains(restated), "the re-seed of {file}");
     }

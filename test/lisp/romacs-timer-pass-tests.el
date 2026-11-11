@@ -1,7 +1,7 @@
 ;;; romacs-timer-pass-tests.el --- The timer pass lets pending input go first  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; rlisp/vm/subprocess.el `romacs--timer-check': past
+;; lisp/romacs/vm/subprocess.el `romacs--timer-check': past
 ;; `romacs-timer-pass-budget', with input pending, the ripe timers left
 ;; wait for the next pass, in order.
 
