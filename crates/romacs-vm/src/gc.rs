@@ -1827,6 +1827,20 @@ mod tests {
         assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
     }
 
+    /// The keymaps' late setup rewrites two function cells. A site that
+    /// cached what one named before must see the change, whether or not
+    /// what it cached is still alive: a cache is trusted only under its
+    /// slot's version, so every write of a function cell moves it on.
+    #[test]
+    fn a_function_cell_rewritten_by_keymap_setup_is_not_called_from_a_cache() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(fset 'ESC-prefix (setq cache-kept #'(lambda () 7)))").unwrap();
+        vm.eval_source_raw("(fset 'cache-caller #'(lambda () (ESC-prefix)))").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_ok(), "the closure, while the alias names it");
+        vm.eval_source_raw("(make-keymap)").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_err(), "a keymap is no function to call with no event");
+    }
+
     #[test]
     fn a_stale_call_cache_keeps_nothing_alive() {
         for moving in [false, true] {
