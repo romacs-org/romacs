@@ -1,4 +1,4 @@
-//! Puts the GNU-suite runner's own tests (test/gnu/tests/test_run.py) under
+//! Puts the GNU-suite runner's own tests (`test/gnu/tests/test_run.py`) under
 //! the gate.  Each class runs separately so a red names what broke.  The
 //! adapter under test is the one Cargo just built for this package.
 use std::path::PathBuf;
