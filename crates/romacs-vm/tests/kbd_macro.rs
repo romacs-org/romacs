@@ -317,7 +317,7 @@ const CASES: &[&str] = &[
     ("chinese-py" "ni hao ") ("chinese-py" "ni1hao2") ("german-postfix" "ae ue oe") ("rfc1345" "&a:")))"#,
     // A batch read with nothing queued waits while a timer or a process
     // filter can still queue input, as batch GNU's kbd_buffer_get_event does.
-    r#"(progn (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?a)))) (read-event))"#,
+    r"(progn (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?a)))) (read-event))",
     r#"(let (got)
   (global-set-key "q" (lambda () (interactive) (setq got 'left) (exit-recursive-edit)))
   (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?q))))
@@ -329,10 +329,10 @@ const CASES: &[&str] = &[
     r#"(progn (make-process :name "kt-exit" :command '("sh" "-c" "sleep 0.05")
                        :sentinel (lambda (_p _e) (setq unread-command-events (list ?s))))
        (read-event))"#,
-    r#"(progn (run-with-idle-timer 0.05 nil (lambda () (setq unread-command-events (list ?i))))
-       (read-event))"#,
-    r#"(let ((timer (run-at-time 0.05 0.05 (lambda () (setq unread-command-events (list ?r))))))
-  (prog1 (read-event) (cancel-timer timer)))"#,
+    r"(progn (run-with-idle-timer 0.05 nil (lambda () (setq unread-command-events (list ?i))))
+       (read-event))",
+    r"(let ((timer (run-at-time 0.05 0.05 (lambda () (setq unread-command-events (list ?r))))))
+  (prog1 (read-event) (cancel-timer timer)))",
     r#"(let ((romacs-batch-read-horizon 0.2))
   (make-process :name "kt-late" :command '("sh" "-c" "sleep 0.4; echo x")
                 :filter (lambda (_p _s) (setq unread-command-events (list ?p))))
@@ -373,7 +373,7 @@ fn keyboard_macros_match_gnu() {
 
 /// VM2-KBD1: where batch GNU would block for terminal input forever (no
 /// unread event, no macro input left, no host keyboard, and nothing that
-/// may queue input within `romacs-batch-read-horizon'), VM2 signals
+/// may queue input within `romacs-batch-read-horizon`), VM2 signals
 /// `end-of-file`, from the innermost recursive edit when there is one.
 #[test]
 fn reading_past_the_input_signals_end_of_file() {
