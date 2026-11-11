@@ -80,8 +80,8 @@ Build in a fresh worktree with the pinned Rust toolchain exported in that shell:
 export PATH=/path/to/pinned-rust-1.96.1/bin:$PATH
 unset ROMACS_RUNTIME_ROOT
 cargo build --release -p romacs-vm-gui
-python3 tests/coordinate-contract/measure.py --binary ABS_BINARY --binary-commit BUILD_COMMIT --image ABS_IMAGE --runtime ABS_RUNTIME --output ABS_READINGS
-python3 tests/coordinate-contract/check_performance.py ABS_READINGS --ascii-baseline ABS_BEFORE
+python3 crates/romacs-coordinate-contract/measure.py --binary ABS_BINARY --binary-commit BUILD_COMMIT --image ABS_IMAGE --runtime ABS_RUNTIME --output ABS_READINGS
+python3 crates/romacs-coordinate-contract/check_performance.py ABS_READINGS --ascii-baseline ABS_BEFORE
 ```
 
 The `--runtime` argument above selects the runtime for the **measurement**, not a packaging argument to `fresh-build`. Every measurement must load its built image; fallback source boot invalidates it. Freeze/hash binary+image and retain commit/toolchain/build command in the receipt before comparison.
@@ -94,7 +94,7 @@ The current release program is the inherited VM. These measurements do not claim
 
 ```sh
 cargo test -p romacs-vm --lib text::
-emacs -Q --batch -l tests/coordinate-contract/semantic_contract.el
+emacs -Q --batch -l crates/romacs-coordinate-contract/semantic_contract.el
 ```
 
 The contract is a library; the VM's text runs it (`crates/romacs-vm/src/text.rs`). Among those

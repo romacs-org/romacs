@@ -1,10 +1,10 @@
 # gnu-tests: GNU Emacs's own test suite as romacs's parity specification
 
 `test/` here is GNU Emacs's `test/` directory at the oracle pin
-`45b0f7699df`, imported byte for byte (`PIN.json`), less the GNU files that
-`PIN.json`'s `excluded` drops deliberately (its ChangeLog, README, build files
+`45b0f7699df`, imported byte for byte (`ledger/gnu-tests-pin.json`), less the GNU files that
+`ledger/gnu-tests-pin.json`'s `excluded` drops deliberately (its ChangeLog, README, build files
 and the CI under `infra/`). **Never edit it.** Its content hashes to the git
-tree `test_tree` in `PIN.json`; `run.py verify-pin` recomputes that hash from
+tree `test_tree` in `ledger/gnu-tests-pin.json`; `run.py verify-pin` recomputes that hash from
 the working files (no repository needed) and every run refuses to start, and
 re-checks at the end, if it differs. `run.py verify-pin --gnu GNU` (run by
 `tools/check-derived`) also derives `test_tree` from GNU's own
@@ -68,13 +68,13 @@ target is to load GNU's real ert.el.
 
 Verdict: `passed`, `failed`, `errored`, `skipped`, `not-yet-runnable`.
 Category of every non-pass: `intentional-divergence` and `out-of-scope` (only
-via `EXCLUSIONS.toml`), `not-yet-implemented` (names the missing symbol,
+via `ledger/gnu-test-exclusions.toml`), `not-yet-implemented` (names the missing symbol,
 derived mechanically from the failure), `failing` (everything else), plus the
 neutral `gnu-fails-too` / `gnu-skips-too`.
 
 ## The exclusion ledger
 
-`EXCLUSIONS.toml` is the only way to set a test aside. A row must name one
+`ledger/gnu-test-exclusions.toml` is the only way to set a test aside. A row must name one
 deftest, an existing DIVERGENCES.md id, a symbol that entry covers and that
 the test's source uses, and GNU's behaviour, ours and why it is intentional.
 Any invalid row refuses the whole run before anything is measured; a row whose
@@ -88,7 +88,7 @@ targeted test to fail.
 
 ## The parity ratchet
 
-The suite's passes are floors (`parity-ratchet.json` at the repo root,
+The suite's passes are floors (`ledger/parity-ratchet.json` at the repo root,
 `tools/lib/parity_ratchet.py`): per file, the exact deftests that pass. The gate
 runs the whole suite in four shards (`runner/tests/parity_ratchet.rs`), and
 the WARM and COLD Lisp census beside it (`crates/romacs-vm/tests/
@@ -130,7 +130,7 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
   is `failed`, category `vacuous-pass`. A pass with no audit is
   `unaudited-pass`, also not counted.
 - **Pinned baselines only** (run.py, fail-closed): a baseline whose
-  `gnu.sha256` is not `parity-reference.toml` `executable_sha256` is refused,
+  `gnu.sha256` is not `ledger/parity-reference.toml` `executable_sha256` is refused,
   naming the file and both hashes. Every baseline committed before this
   check was recorded by `/usr/bin/emacs-32.0.50`; re-recording them is a
   separate, deliberate act:

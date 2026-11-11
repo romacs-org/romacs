@@ -348,7 +348,7 @@ divergence = "VM2-FMT1"
 symbol = "format"
 gnu = "GNU parses flags, width and precision in format conversions such as %4s."
 romacs = "VM2 accepts only bare %s %S %d and %% and signals for anything else."
-why = "Fixture row for the runner's own tests; it is never committed to EXCLUSIONS.toml."
+why = "Fixture row for the runner's own tests; it is never committed to ledger/gnu-test-exclusions.toml."
 gnu_source = "src/editfns.c:3611-3653"
 gnu_source_sha256 = "076363ec5358bbcd51f87c205180123b3063a3f38d22b3b057047a1c7a87423f"
 verified_by = "Read editfns.c:3611-3653 at the pin; it parses flags, width and precision."
@@ -364,7 +364,7 @@ divergence = "D001"
 symbol = "aset"
 gnu = "GNU refuses to store a non-ASCII character into a multibyte string slot."
 romacs = "VM2 splices any character into any multibyte string slot, resizing it."
-why = "Fixture row for the runner's own tests; it is never committed to EXCLUSIONS.toml."
+why = "Fixture row for the runner's own tests; it is never committed to ledger/gnu-test-exclusions.toml."
 gnu_source = "src/data.c:2665-2673"
 gnu_source_sha256 = "42a9b2db85756cfa9f8736ec8cc9cab7a7a7b3964aed9993d128a12c3bc25f95"
 verified_by = "Read data.c:2665-2673 at the pin: multibyte aset rejects non-ASCII."
@@ -387,7 +387,7 @@ class Ledger(unittest.TestCase):
         cls.tmp.cleanup()
 
     def ledger(self, text):
-        path = pathlib.Path(self.tmp.name) / 'EXCLUSIONS.toml'
+        path = pathlib.Path(self.tmp.name) / 'gnu-test-exclusions.toml'
         path.write_text(text)
         return path
 
@@ -427,7 +427,7 @@ class Ledger(unittest.TestCase):
 
     def test_a_one_word_justification_is_refused(self):
         self.assertIn('must explain', self.refused(VALID_ROW.replace(
-            'why = "Fixture row for the runner\'s own tests; it is never committed to EXCLUSIONS.toml."',
+            'why = "Fixture row for the runner\'s own tests; it is never committed to ledger/gnu-test-exclusions.toml."',
             'why = "intentional"')))
 
     def test_a_symbol_the_divergence_does_not_cover_is_refused(self):
@@ -495,7 +495,8 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
-            shutil.copy(run.PIN_FILE, root / 'gnu-tests' / 'PIN.json')
+            (root / 'ledger').mkdir()
+            shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             run.verify_pin(root)
             victim = root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.el'
@@ -508,7 +509,8 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
-            shutil.copy(run.PIN_FILE, root / 'gnu-tests' / 'PIN.json')
+            (root / 'ledger').mkdir()
+            shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             (root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.elc').write_text('compiled')
             with self.assertRaises(run.Refusal):
@@ -527,8 +529,9 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
+            (root / 'ledger').mkdir()
             forged = dict(p, test_tree=run.git_tree_id(run.TESTS), excluded=p['excluded'] + ['src/fns-tests.el'])
-            (root / 'gnu-tests' / 'PIN.json').write_text(json.dumps(forged))
+            (root / 'ledger/gnu-tests-pin.json').write_text(json.dumps(forged))
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             with self.assertRaises(run.Refusal):
                 run.verify_pin(root, gnu=run.GNU_MIRROR)

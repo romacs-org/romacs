@@ -13,7 +13,7 @@ import subprocess
 
 from vacuity_classifier import replay
 
-OUTPUTS = frozenset(('parity-ratchet.json',))
+OUTPUTS = frozenset(('ledger/parity-ratchet.json',))
 RECEIPT = 'VACUITY-VERDICT.json'
 MEMBERS = 'MEMBER-EVIDENCE.json'
 POLICY = 'gnu-tests/member-evidence-policy.json'
