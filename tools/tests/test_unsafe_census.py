@@ -183,6 +183,17 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(unsafe_census.merged(base, ours, theirs)['crates'],
                          {'new': {'sites': 3, 'undocumented': 0}, 'vm': {'sites': 9, 'undocumented': 1}})
 
+    def test_pending_entries_merge_three_ways(self):
+        def merge(b, o, t):
+            sides = [{**self.floors(vm=(1, 0)), unsafe_census.PENDING: m} for m in (b, o, t)]
+            return unsafe_census.merged(*sides)[unsafe_census.PENDING]
+        self.assertEqual(merge({'a': 'x'}, {}, {'a': 'x'}), {}, 'a removal on our side stays removed')
+        self.assertEqual(merge({'a': 'x'}, {'a': 'x'}, {}), {}, 'a removal on their side stays removed')
+        self.assertEqual(merge({}, {'a': 'x'}, {'b': 'y'}), {'a': 'x', 'b': 'y'}, 'both additions kept')
+        self.assertEqual(merge({'a': 'x'}, {'a': 'x'}, {'a': 'z'}), {'a': 'z'}, 'one side changed it')
+        with self.assertRaises(ValueError):
+            merge({'a': 'x'}, {'a': 'y'}, {'a': 'z'})
+
     def test_the_driver_writes_ours_and_refuses_what_does_not_parse(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = [Path(tmp) / name for name in ('base', 'ours', 'theirs')]

@@ -319,7 +319,7 @@ def merged(base, ours, theirs):
     floors are exact (check fails below one as well as above), so each count
     is BASE plus both sides' changes: two lanes that each removed sites in a
     crate both count. Where both sides removed the same site the result is
-    low by one and check says so. Pending entries: what either side has."""
+    low by one and check says so. Pending entries merge three ways."""
     keys = ('sites', 'undocumented')
     names = set(base['crates']) | set(ours['crates']) | set(theirs['crates'])
 
@@ -327,8 +327,23 @@ def merged(base, ours, theirs):
         b, o, t = (side['crates'].get(crate, {}).get(key, 0) for side in (base, ours, theirs))
         return o + t - b
     crates = {crate: {key: count(crate, key) for key in keys} for crate in sorted(names)}
-    pending = {**theirs.get(PENDING, {}), **ours.get(PENDING, {})}
-    return {**ours, 'crates': {c: f for c, f in crates.items() if f['sites'] > 0}, PENDING: pending}
+    return {**ours, 'crates': {c: f for c, f in crates.items() if f['sites'] > 0},
+            PENDING: merged_entries(*(side.get(PENDING, {}) for side in (base, ours, theirs)))}
+
+
+def merged_entries(base, ours, theirs):
+    """A three-way merge of two maps grown from BASE: an entry one side
+    changed or removed takes that side's change; both sides changing one
+    entry differently is a conflict (ValueError)."""
+    result = {}
+    for key in sorted(set(base) | set(ours) | set(theirs)):
+        b, o, t = base.get(key), ours.get(key), theirs.get(key)
+        if o != b and t != b and o != t:
+            raise ValueError(f'{key} changed differently on the two sides')
+        value = t if o == b else o
+        if value is not None:
+            result[key] = value
+    return result
 
 
 def merge_files(base, ours, theirs):
