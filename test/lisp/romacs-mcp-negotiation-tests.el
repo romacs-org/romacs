@@ -1,5 +1,6 @@
 ;;; romacs-mcp-negotiation-tests.el --- Legacy MCP negotiation -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'cl-lib)
 (require 'romacs-mcp)
 
 (defvar romacs-mcp-test-negotiation-effect)
@@ -98,6 +99,69 @@
       (should (eq 'ready (process-get peer 'legacy)))
       (should (= 0 (hash-table-count
                     (romacs-mcp--dispatch peer (romacs-mcp--object "method" "ping"))))))))
+
+(ert-deftest romacs-mcp-negotiation-tools-list-changed ()
+  ;; Advertised, and sent once to each initialized peer however many
+  ;; tools a command registers.
+  (romacs-mcp-test-with-peer
+    (let* ((romacs-mcp--peers (list peer))
+           (romacs-mcp-tools (copy-alist romacs-mcp-tools))
+           (romacs-mcp--tools-telling nil)
+           (scheduled 0) (sent nil)
+           (result (romacs-mcp-test-initialize peer "2025-06-18")))
+      (should (eq t (gethash "listChanged" (gethash "tools" (gethash "capabilities" result)))))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf scheduled) nil))
+                ((symbol-function 'romacs-mcp--send)
+                 (lambda (request response) (push (cons (plist-get request :peer) (gethash "method" response)) sent))))
+        ;; Not yet initialized: not told.
+        (romacs-mcp-register-tool "romacs_test_one" "One." (romacs-mcp--schema nil nil) #'ignore)
+        (romacs-mcp--tell-tools-changed)
+        (should-not sent)
+        (romacs-mcp--dispatch peer (romacs-mcp--object "method" "notifications/initialized"))
+        (setq scheduled 0)
+        (romacs-mcp-register-tool "romacs_test_one" "Replaced." (romacs-mcp--schema nil nil) #'ignore)
+        (romacs-mcp-register-tool "romacs_test_two" "Two." (romacs-mcp--schema nil nil) #'ignore)
+        (should (= scheduled 1))
+        (romacs-mcp--tell-tools-changed)
+        (should (equal sent (list (cons peer "notifications/tools/list_changed"))))))))
+
+(ert-deftest romacs-mcp-negotiation-subscriptions-listen ()
+  ;; A stateless client listens for the tool list's changes: acknowledged
+  ;; at once, held open, told with its subscription's id until cancelled.
+  (romacs-mcp-test-with-peer
+    (let* ((romacs-mcp--peers (list peer))
+           (romacs-mcp-tools (copy-alist romacs-mcp-tools))
+           (romacs-mcp--subscriptions nil) (romacs-mcp--tools-telling nil) (sent nil)
+           (meta (romacs-mcp--object "io.modelcontextprotocol/protocolVersion" romacs-mcp--modern
+                                     "io.modelcontextprotocol/clientInfo" (romacs-mcp--object "name" "c" "version" "1")
+                                     "io.modelcontextprotocol/clientCapabilities" (romacs-mcp--object)))
+           (message (romacs-mcp--object "jsonrpc" "2.0" "id" 7 "method" "subscriptions/listen"
+                                        "params" (romacs-mcp--object "_meta" meta "notifications"
+                                                                     (romacs-mcp--object "toolsListChanged" t))))
+           (listen (list :peer peer :generation romacs-mcp--generation :message message :cancelled nil :held nil)))
+      (should (eq t (gethash "listChanged"
+                             (gethash "tools" (gethash "capabilities"
+                                                       (romacs-mcp--dispatch
+                                                        peer (romacs-mcp--object "method" "server/discover"
+                                                                                 "params" (romacs-mcp--object "_meta" meta))))))))
+      (cl-letf (((symbol-function 'run-at-time) #'ignore)
+                ((symbol-function 'romacs-mcp--send)
+                 (lambda (_request response)
+                   (let ((params (gethash "params" response)))
+                     (push (list (gethash "method" response)
+                                 (gethash "io.modelcontextprotocol/subscriptionId" (gethash "_meta" params)))
+                           sent)))))
+        (let ((romacs-mcp--active listen)) (romacs-mcp--dispatch peer message))
+        (should (plist-get listen :held))
+        (should (equal sent '(("notifications/subscriptions/acknowledged" 7))))
+        (romacs-mcp-register-tool "romacs_test_late" "Late." (romacs-mcp--schema nil nil) #'ignore)
+        (romacs-mcp--tell-tools-changed)
+        (should (equal (car sent) '("notifications/tools/list_changed" 7)))
+        ;; Cancelled by the client: told nothing more, and forgotten.
+        (romacs-mcp--cancel peer 7)
+        (romacs-mcp--tell-tools-changed)
+        (should (= (length sent) 2))
+        (should-not romacs-mcp--subscriptions)))))
 
 (ert-deftest romacs-mcp-negotiation-legacy-tool-envelopes-and-fence ()
   (dolist (version '("2025-06-18" "2025-11-25"))
