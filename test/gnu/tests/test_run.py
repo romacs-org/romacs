@@ -79,6 +79,15 @@ class LoadPath(unittest.TestCase):
                 self.assertEqual(run.load_path(), [str(root / 'lisp/gnu'), str(root / 'lisp/gnu/textmodes')])
 
 
+class SourceDirectory(unittest.TestCase):
+    def test_gnu_tests_find_romacs_sources_and_gnus_top_level_fixtures(self):
+        source = run.source_directory()
+        self.assertTrue((source / 'crates/romacs-vm/src/prims').is_dir())
+        self.assertTrue((source / 'nextstep/GNUstep/Emacs.base/Resources/emacs.tiff').is_file())
+        self.assertTrue((source / 'test/data').is_dir())
+        self.assertIs(run.source_directory(), source)
+
+
 class Classification(unittest.TestCase):
     """A verdict is `passed` only when romacs really reproduced GNU."""
 
@@ -494,7 +503,7 @@ class Pin(unittest.TestCase):
     def test_an_edited_import_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'test/gnu').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'test/gnu' / 'test', symlinks=True)
@@ -508,7 +517,7 @@ class Pin(unittest.TestCase):
     def test_a_stray_file_in_the_import_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'test/gnu').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'test/gnu' / 'test', symlinks=True)
@@ -528,7 +537,7 @@ class Pin(unittest.TestCase):
         run.verify_pin(gnu=run.GNU_MIRROR)
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'test/gnu').mkdir()
+            (root / 'test/gnu').mkdir(parents=True)
             (root / 'ledger').mkdir()
             forged = dict(p, test_tree=run.git_tree_id(run.TESTS), excluded=p['excluded'] + ['src/fns-tests.el'])
             (root / 'ledger/gnu-tests-pin.json').write_text(json.dumps(forged))
