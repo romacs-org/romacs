@@ -1826,11 +1826,20 @@ waiting."
        (cl-loop for (key . name) in romacs-agent--option-keys
                 when (gethash name object) append (list key (gethash name object)))))
 
-(defconst romacs-agent--editor-variables
-  '("ROMACS_RUNTIME_ROOT" "ROMACS_LISP_DIR" "ROMACS_USAGE_LOG" "ROMACS_GUI_FONT" "ROMACS_GUI_FONT_SIZE")
-  "The editor's own launch variables: they describe this editor's run (its
-build, its usage log, its font), so no harness or command it runs
-inherits them.")
+(defun romacs-agent--editor-variable-p (name)
+  "Whether NAME is one of the editor's own variables, ROMACS_*: each
+describes this editor's run (its build, sources, usage log, font), so no
+harness or command it runs inherits one.  A rule, not a list: a new
+launch variable is covered as it is added.  Nothing a harness runs reads
+one of the editor's (its relay and supervisor read none)."
+  (string-prefix-p "ROMACS_" name))
+
+(defun romacs-agent--editor-variables ()
+  "The names of the editor's own variables its environment holds now."
+  (cl-loop for entry in process-environment
+           when (and (string-match "\\`\\([^=]+\\)=" entry)
+                     (romacs-agent--editor-variable-p (match-string 1 entry)))
+           collect (match-string 1 entry)))
 
 (defconst romacs-agent-git-variables '("GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE")
   "What points git at another repository than the directory it runs in:
@@ -1847,7 +1856,7 @@ orchestrator's, git's repository pointers, and every harness's own (its configur
 what it sets for the commands it runs): a harness parent's would
 otherwise reach any child, a Claude Code parent's a Codex child too.  A
 session's own configuration variable is given again, by `env'."
-  (delete-dups (append romacs-agent--editor-variables romacs-agent-orchestrator-variables romacs-agent-git-variables
+  (delete-dups (append (romacs-agent--editor-variables) romacs-agent-orchestrator-variables romacs-agent-git-variables
                        (cl-loop for (_ . driver) in romacs-agent--drivers
                                 append (cons (plist-get driver :config-variable) (plist-get driver :scrub))))))
 
@@ -1860,7 +1869,8 @@ under it never changes the editor's."
     (copy-sequence
      (cl-remove-if (lambda (entry)
                      (let ((end (string-search "=" entry)))
-                       (and end (gethash (substring entry 0 end) dropped))))
+                       (and end (or (gethash (substring entry 0 end) dropped)
+                                    (romacs-agent--editor-variable-p (substring entry 0 end))))))
                    process-environment))))
 
 (defun romacs-agent--environment-arguments ()
@@ -1893,8 +1903,10 @@ to it."
     ;; Arguments (paths, a directory) go out as UTF-8, whatever the locale:
     ;; the supervisor reads UTF-8.  The harness gets the editor's
     ;; environment but for the editor's own launch variables.
-    (if (zerop (let ((coding-system-for-write 'utf-8-unix)
-                     (process-environment (romacs-agent--harness-environment)))
+    (if (zerop (let* ((coding-system-for-write 'utf-8-unix)
+                      ;; Named from the editor's environment, before it is cleared.
+                      (dropped (romacs-agent--dropped-variables))
+                      (process-environment (romacs-agent--harness-environment)))
                  (apply #'call-process "systemd-run" nil nil nil
                       (append (list "--user" "--quiet" "--collect" (concat "--unit=" unit)
                                     "--slice=romacs-agents.slice"
@@ -1902,7 +1914,7 @@ to it."
                               (mapcar (lambda (p) (concat "--property=" p)) romacs-agent-unit-properties)
                               ;; Nor from the user manager's own environment.
                               (list (concat "--property=UnsetEnvironment="
-                                            (string-join (romacs-agent--dropped-variables) " ")))
+                                            (string-join dropped " ")))
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
