@@ -40,9 +40,11 @@
 //! rewrite also re-keys `PATH:LINE API REASON` entries, the list's form
 //! until branches forked before this one have merged.
 //!
-//! The list is a set of independent lines, and `.gitattributes` merges it as
-//! their union: two branches conflict on nothing, and this lint reports what
-//! a merge got wrong (an entry twice, or one whose site a side removed).
+//! The list is a set of entries, and `.gitattributes` names a driver that
+//! merges it as one (`tools/lib/host_allow.py`, installed by `tools/derived
+//! setup`): two branches conflict only where they change one entry
+//! differently. Without the driver git merges the text, and conflicts where
+//! they change neighbouring lines.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -447,8 +449,9 @@ fn matching(toks: &[(usize, Tok)], open: usize) -> usize {
     toks.len() - 1
 }
 
-/// Whether the tokens at `from` start an item, not a field, a variant, an
-/// argument, a match arm, a statement or an expression.
+/// Whether the tokens at `from` start an item or a `let`, which end as an
+/// item does, not a field, a variant, an argument, a match arm or an
+/// expression.
 fn starts_item<'a>(toks: &[(usize, Tok)], mut from: usize, word: &dyn Fn(Tok) -> &'a str) -> bool {
     let punct = |j: usize, b: u8| toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b));
     while punct(from, b'#') { from = matching(toks, from + 1) + 1; }
@@ -457,7 +460,7 @@ fn starts_item<'a>(toks: &[(usize, Tok)], mut from: usize, word: &dyn Fn(Tok) ->
         if punct(from, b'(') { from = matching(toks, from) + 1; }
     }
     toks.get(from).is_some_and(|t| matches!(word(t.1), "fn" | "mod" | "use" | "impl" | "struct" | "enum" | "union" | "const"
-        | "static" | "type" | "trait" | "unsafe" | "async" | "extern" | "default" | "macro_rules"))
+        | "static" | "type" | "trait" | "unsafe" | "async" | "extern" | "default" | "macro_rules" | "let"))
 }
 
 /// The byte just past what starts at token `from`: its closing brace, or a
@@ -536,7 +539,7 @@ fn item_name(code: &[u8], words: &[&str], toks: &[(usize, Tok)], i: usize) -> Op
         _ if before == b'#' => None,
         "fn" | "mod" | "trait" | "struct" | "enum" | "type" => word(i + 1),
         "union" if matches!(punct(i + 2), b'{' | b'<') => word(i + 1),
-        "const" if !matches!(before, b'<' | b',' | b'*' | b']') && previous != "raw"
+        "const" if !matches!(before, b'<' | b',' | b'*') && previous != "raw"
             && !matches!(after, "fn" | "unsafe" | "async" | "extern") => word(i + 1),
         "static" if before != b'\'' => word(i + 1 + usize::from(matches!(after, "mut" | "ref"))),
         "macro_rules" if punct(i + 1) == b'!' => word(i + 2).map(|name| name + "!"),
@@ -579,19 +582,20 @@ fn item_path(items: &[Item], at: usize) -> String {
 
 /// The violations of REL for SITES, each an item, an API and a line; SPELT
 /// is each line's tokens. A site is one line of an item that spells an API,
-/// however often. Its mark is the hash of the line's tokens, so no other
-/// line can take its entry, with `#N` on the Nth of identical lines.
+/// however often. Its mark is the hash of the line's tokens (a character
+/// literal is none), so no other line can take its entry, with `#N` on the
+/// Nth of identical lines.
 fn marked(rel: &str, sites: Vec<(String, &'static str, usize)>, spelt: &BTreeMap<usize, Vec<u8>>) -> Vec<Violation> {
-    // FNV-1a, 32 bits.
-    let hash = |line: usize| spelt[&line].iter().fold(0x811c_9dc5_u32, |h, &b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
-    let mut sites: Vec<(String, &'static str, u32, usize)> = sites.into_iter().map(|(item, api, line)| (item, api, hash(line), line)).collect();
+    // FNV-1a, 64 bits: two lines of one item do not share a mark by chance.
+    let hash = |line: usize| spelt[&line].iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    let mut sites: Vec<(String, &'static str, u64, usize)> = sites.into_iter().map(|(item, api, line)| (item, api, hash(line), line)).collect();
     sites.sort();
     sites.dedup();
     let mut out = Vec::new();
     let mut same = 0;
     for (n, (item, api, hash, line)) in sites.iter().enumerate() {
         same = if n > 0 && sites[n - 1].0 == *item && sites[n - 1].1 == *api && sites[n - 1].2 == *hash { same + 1 } else { 1 };
-        let mark = if same == 1 { format!("{hash:08x}") } else { format!("{hash:08x}#{same}") };
+        let mark = if same == 1 { format!("{hash:016x}") } else { format!("{hash:016x}#{same}") };
         out.push(Violation { path: rel.to_owned(), item: item.clone(), api, mark, line: *line });
     }
     out
@@ -921,7 +925,7 @@ fn parse_entries(text: &str) -> Vec<Entry> {
         } else {
             let (item, api, mark) = (word("item"), word("API"), word("mark"));
             let hash = mark.split_once('#').map_or(mark, |(hash, _)| hash);
-            assert!(hash.len() == 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "no mark: {l}");
+            assert!(hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "no mark: {l}");
             (first, Place::Item(item.to_owned(), mark.to_owned()), api)
         };
         assert!(known(api), "unknown API: {l}");
@@ -957,18 +961,34 @@ fn problems(text: &str, found: &[Violation]) -> Vec<String> {
 }
 
 /// The allowlist for FOUND: one entry per violation. A reason is kept from
-/// the entry that covers the site. A site none covers takes, as a guess
-/// marked `pending:`, the reason of an unused entry of its item, else of its
-/// path and API; with none it is `pending`.
+/// the entry that covers the site, unless its item has another count of
+/// lines like it than the list has entries: a `#N` then may name another
+/// line than it did. An entry keyed by a line covers a site only in a list
+/// of such entries, the list before its migration; beside entries keyed by
+/// items its line is of another tree. A site left without takes, as a guess
+/// marked `pending:`, the reason of an unused entry with its path and API:
+/// one with its mark, else of its item, else any. With none it is
+/// `pending`.
 fn bless(mut entries: Vec<Entry>, found: &[Violation]) -> String {
-    let mut reasons: Vec<Option<String>> = found.iter().map(|v| {
-        entries.iter().position(|e| e.covers(v)).map(|at| entries.remove(at).reason)
+    let hash = |mark: &str| mark.split('#').next().unwrap().to_owned();
+    let settled: Vec<bool> = found.iter().map(|v| {
+        let like = (&v.path, &v.item, v.api, hash(&v.mark));
+        let sites = found.iter().filter(|w| (&w.path, &w.item, w.api, hash(&w.mark)) == like).count();
+        let listed = entries.iter().filter(|e| matches!(&e.place, Place::Item(item, mark) if (&e.path, item, e.api.as_str(), hash(mark)) == like)).count();
+        listed == 0 || listed == sites
+    }).collect();
+    let migrated = entries.iter().any(|e| matches!(e.place, Place::Item(..)));
+    let mut reasons: Vec<Option<String>> = found.iter().zip(settled).map(|(v, settled)| {
+        let trusted = |e: &Entry| e.covers(v) && settled && !(migrated && matches!(e.place, Place::Line(_)));
+        let at = entries.iter().position(trusted)?;
+        Some(entries.remove(at).reason)
     }).collect();
     for (v, reason) in found.iter().zip(&mut reasons) {
         if reason.is_none() {
             let beside = |e: &Entry| e.path == v.path && e.api == v.api;
+            let alike = |e: &Entry| beside(e) && matches!(&e.place, Place::Item(_, mark) if *mark == v.mark);
             let within = |e: &Entry| beside(e) && matches!(&e.place, Place::Item(item, _) if *item == v.item);
-            let near = entries.iter().position(within).or_else(|| entries.iter().position(beside));
+            let near = [&alike as &dyn Fn(&Entry) -> bool, &within, &beside].into_iter().find_map(|like| entries.iter().position(like));
             *reason = Some(match near.map(|at| entries.remove(at)) {
                 Some(guess) if !guess.pending() => format!("{PENDING}: {}", guess.reason),
                 Some(guess) if !guess.reason.is_empty() => guess.reason,
@@ -1041,18 +1061,17 @@ fn named(source: &str) -> Vec<(String, &'static str, usize)> {
     out
 }
 
-/// The list the rewrite makes of OLD for SOURCE, each new entry given the
-/// reason `for` and the source text of its line; a guess stays `pending:`.
+/// The list the rewrite makes of OLD for SOURCE, each new or guessed entry
+/// given the reason `for` and the source text of its line.
 fn listed(old: &str, source: &str) -> String {
     let found = sites(source);
-    let text = |l: &str| {
-        let site = found.iter().find(|v| l.contains(&format!(" {} {} {} ", v.item, v.api, v.mark))).unwrap();
-        source.lines().nth(site.line - 1).unwrap().trim().to_owned()
-    };
-    bless(parse_entries(old), &found).lines().map(|l| match l.strip_suffix(" pending") {
-        Some(key) => format!("{key} for {}\n", text(l)),
-        None => format!("{l}\n"),
-    }).collect()
+    let lines: Vec<String> = bless(parse_entries(old), &found).lines().map(|l| {
+        let words: Vec<&str> = l.split(' ').collect();
+        if l.starts_with('#') || !words[4].starts_with(PENDING) { return l.to_owned(); }
+        let site = found.iter().find(|v| (v.item.as_str(), v.api, v.mark.as_str()) == (words[1], words[2], words[3])).unwrap();
+        format!("{} for {}", words[..4].join(" "), source.lines().nth(site.line - 1).unwrap().trim())
+    }).collect();
+    lines.join("\n") + "\n"
 }
 
 /// The reason LIST gives the site of SOURCE whose line holds TEXT.
@@ -1136,6 +1155,15 @@ fn a_removed_site_and_a_new_site_are_reported() {
     assert_eq!(reason(&rewritten, &replaced, "\"b\""), "for std::fs::read(\"b\");");
     assert_eq!(problems(&rewritten, &sites(&replaced)).len(), 1, "{rewritten}");
     assert!(problems(&rewritten, &sites(&replaced))[0].starts_with("  no reason: "));
+    // Of two lines alike with reasons of their own, one goes: the entry
+    // left over is reported, and the rewrite trusts neither reason.
+    let alike = "fn both() {\n    std::fs::read(\"a\");\n    let _ = 1;\n    std::fs::read(\"a\");\n}\n";
+    let both = listed("", alike).replacen("for std", "first, for std", 1);
+    assert_eq!(problems(&both, &sites(alike)), NONE);
+    let one = alike.replacen("    std::fs::read(\"a\");\n", "", 1);
+    assert_eq!(problems(&both, &sites(&one)).len(), 1);
+    assert!(problems(&both, &sites(&one))[0].starts_with("  stale src/lib.rs both std::fs "));
+    assert_eq!(reason(&bless(parse_entries(&both), &sites(&one)), &one, "\"a\""), "pending: first, for std::fs::read(\"a\");");
     let twice = format!("{list}src/lib.rs inner::Disk.for.Tape::load std::fs {d} another reason\n");
     assert_eq!(problems(&twice, &sites(READS)), [format!("  listed twice: src/lib.rs inner::Disk.for.Tape::load std::fs {d} another reason")]);
 }
@@ -1185,6 +1213,20 @@ fn the_rewrite_keys_a_line_entry_by_its_item() {
     let by_line = "src/lib.rs:2 std::fs because\n";
     assert_eq!(problems(by_line, &sites(READS))[0], "  keyed by line: src/lib.rs:2 std::fs because");
     assert_eq!(reason(&bless(parse_entries(by_line), &sites(READS)), READS, "\"a\""), "because");
+    // Beside migrated entries, a line is of a tree before them: the site
+    // now at line 9 is not the one this entry was written for.
+    let list = listed("", READS);
+    let b = list.lines().find(|l| l.ends_with("read(\"b\");")).unwrap();
+    let mixed = format!("src/lib.rs:9 std::fs of another site\n{}", list.replace(&format!("{b}\n"), ""));
+    let rewritten = bless(parse_entries(&mixed), &sites(READS));
+    assert_eq!(reason(&rewritten, READS, "\"d\""), "for std::fs::read(\"d\");");
+    assert_eq!(reason(&rewritten, READS, "\"b\""), "pending: of another site");
+    // An item under a new name: the guess is the entry with the line's mark.
+    let renamed = READS.replace("fn load", "fn fetch");
+    let rewritten = bless(parse_entries(&list), &sites(&renamed));
+    for text in ["\"b\"", "\"C\"", "\"d\""] {
+        assert_eq!(reason(&rewritten, &renamed, text), format!("pending: {}", reason(&list, READS, text)));
+    }
 }
 
 /// Git in DIR, with no configuration but its own.
@@ -1199,10 +1241,10 @@ fn git(dir: &Path, args: &[&str]) -> bool {
 }
 
 /// Two branches change different functions of one file. Each moves the
-/// other's sites down and lists a new site of its own, and the two new
-/// entries sort between the same two of the trunk's. Under the repository's
-/// attributes their lists merge without a conflict, and the merged list is
-/// the merged source's.
+/// other's sites down, changes the line of one of the trunk's two
+/// neighbouring entries, and lists a new site that sorts between them. With
+/// the repository's merge driver their lists merge without a conflict, and
+/// the merged list is the merged source's.
 #[test]
 fn branches_that_edit_different_functions_merge_their_lists() {
     const TRUNK: &str = "\
@@ -1216,9 +1258,10 @@ fn zeta() {
     std::fs::write(\"y\", \"z\");
 }
 ";
-    let attributes: String = std::fs::read_to_string(repository().join(".gitattributes")).unwrap().lines()
+    let root = repository();
+    let attributes: String = std::fs::read_to_string(root.join(".gitattributes")).unwrap().lines()
         .filter(|l| l.starts_with(ALLOW)).map(|l| format!("{l}\n")).collect();
-    assert_eq!(attributes, format!("{ALLOW} merge=union\n"));
+    assert_eq!(attributes, format!("{ALLOW} merge=romacs-host-allow\n"));
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("host-lint-merge-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let (source, list) = (dir.join("src/lib.rs"), dir.join(ALLOW));
@@ -1230,25 +1273,18 @@ fn zeta() {
         std::fs::write(&source, text).unwrap();
         std::fs::write(&list, listed(&old, text)).unwrap();
         assert!(git(&dir, &["add", "."]) && git(&dir, &["commit", "-m", "change"]));
-        std::fs::read_to_string(&list).unwrap()
     };
-    assert!(git(&dir, &["init", "-b", "trunk"]));
-    let trunk = commit(TRUNK);
+    let driver = format!("python3 -B {} merge %O %A %B", root.join("tools/lib/host_allow.py").display());
+    assert!(git(&dir, &["init", "-b", "trunk"]) && git(&dir, &["config", "merge.romacs-host-allow.driver", &driver]));
+    commit(TRUNK);
     assert!(git(&dir, &["checkout", "-b", "left"]));
-    let left = commit(&TRUNK.replace("fn middle() {}\n", "fn gamma() {\n\n\n    std::fs::read(\"g\");\n}\n\nfn middle() {}\n"));
+    commit(&TRUNK.replace("read(\"a\")", "read(\"b\")").replace("fn middle() {}\n", "fn gamma() {\n\n\n    std::fs::read(\"g\");\n}\n\nfn middle() {}\n"));
     assert!(git(&dir, &["checkout", "-b", "right", "trunk"]));
-    let right = commit(&format!("{TRUNK}\nfn delta() {{\n    std::fs::read(\"d\");\n}}\n"));
-    // Each side's list is the trunk's with one line more, at the same place.
-    let grown = |side: &str, item: &str| {
-        let lines: Vec<&str> = side.lines().collect();
-        let at = lines.iter().position(|l| l.contains(item)).unwrap();
-        (at, [&lines[..at], &lines[at + 1..]].concat().join("\n") + "\n")
-    };
-    assert_eq!(grown(&left, " gamma "), (3, trunk.clone()));
-    assert_eq!(grown(&right, " delta "), (3, trunk.clone()));
+    commit(&format!("{}\nfn delta() {{\n    std::fs::read(\"d\");\n}}\n", TRUNK.replace("\"z\"", "\"x\"")));
     assert!(git(&dir, &["merge", "--no-edit", "left"]), "the lists conflict");
-    let merged = std::fs::read_to_string(&list).unwrap();
-    assert_eq!(merged.lines().count(), trunk.lines().count() + 2);
-    assert_eq!(problems(&merged, &sites(&std::fs::read_to_string(&source).unwrap())), NONE);
+    let (merged, both) = (std::fs::read_to_string(&list).unwrap(), std::fs::read_to_string(&source).unwrap());
+    assert_eq!(named(&both).iter().map(|site| site.0.as_str()).collect::<Vec<_>>(), ["alpha", "gamma", "zeta", "delta"]);
+    assert_eq!(merged, listed("", &both));
+    assert_eq!(problems(&merged, &sites(&both)), NONE);
     std::fs::remove_dir_all(&dir).unwrap();
 }
