@@ -153,8 +153,9 @@ def run(args, output, report):
             report['failures'].append(name)
 
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='hidden-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='hidden-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             env, state, work, config = tl.session_env(root, args)
@@ -222,6 +223,7 @@ def run(args, output, report):
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
+        live.remove_root(temporary)
 
 
 def main():
