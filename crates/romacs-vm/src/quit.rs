@@ -20,15 +20,23 @@
 //! thrown to. A third press while one is still pending clears
 //! `inhibit-quit' first, GNU's forced quit for a graphical frame.
 use crate::{Value, Vm, threaded::Escape};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::Duration;
 
-/// The evaluator's half of the host's `C-g': whether it is busy, how many
-/// presses it has not taken, and a count of its busy spans, in one word.
+/// The evaluator's half of the host's `C-g': whether it is busy and how
+/// many presses it has not taken, in one word, and when its busy span
+/// began.
 #[derive(Debug)]
 pub struct QuitSignal {
     word: AtomicU32,
+    /// When the evaluator last became busy, in nanoseconds of [`clock`]:
+    /// written before the word says busy, so a reader that sees it busy
+    /// reads this span's start or a later one's. Only the process that
+    /// wrote it reads it: a host shares its own signal
+    /// (`Vm::share_quit_signal`) before it runs a command.
+    since: AtomicU64,
 }
-romacs_snapshot::snapshot_struct!(QuitSignal { word });
+romacs_snapshot::snapshot_struct!(QuitSignal { word, since });
 
 /// How long a quittable wait blocks between looks at the press count.
 const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
@@ -38,14 +46,20 @@ const BUSY: u32 = 1 << 31;
 /// evaluator's next safepoint while it is busy, and only for that call.
 const DEADLINE: u32 = 1 << 30;
 const PRESSES: u32 = 0xffff;
-const SPAN_ONE: u32 = 1 << 16;
-const SPANS: u32 = !(BUSY | DEADLINE | PRESSES);
+
+/// Nanoseconds of the host's monotonic clock since this process first
+/// asked: a busy span's start, kept as one atomic word.
+fn clock() -> u64 {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let now = crate::host::monotonic();
+    u64::try_from(now.saturating_duration_since(*EPOCH.get_or_init(|| now)).as_nanos()).unwrap_or(u64::MAX)
+}
 
 impl QuitSignal {
     /// A signal for an evaluator that is busy: in batch every evaluation may
     /// quit; a host with a keyboard marks its waits idle.
     pub fn new() -> Self {
-        Self { word: AtomicU32::new(BUSY) }
+        Self { word: AtomicU32::new(BUSY), since: AtomicU64::new(0) }
     }
 
     /// The input thread's `C-g': counted, and true, when the evaluator is
@@ -58,21 +72,26 @@ impl QuitSignal {
 
     /// Mark the evaluator busy (it runs Lisp that may quit) or waiting for
     /// input. Leaving busy takes the presses not yet taken: the wait reads
-    /// them as keys. Returns them.
+    /// them as keys. Returns them. Only the evaluator calls this, so the
+    /// busy bit does not change between the look and the update.
     pub fn set_busy(&self, busy: bool) -> u32 {
-        let previous = self.word.fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| Some(match (busy, word & BUSY != 0) {
-            (true, true) | (false, false) => word,
-            (true, false) => BUSY | (word & SPANS).wrapping_add(SPAN_ONE) & SPANS | (word & (PRESSES | DEADLINE)),
-            (false, true) => word & (SPANS | DEADLINE),
-        })).expect("the update always answers");
+        if busy && !self.busy() {
+            self.since.store(clock(), Ordering::Relaxed);
+        }
+        let previous = self.word.fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+            Some(if busy { word | BUSY } else { word & DEADLINE })
+        }).expect("the update always answers");
         if busy { 0 } else { previous & PRESSES }
     }
 
-    /// Whether the evaluator is busy, and which busy span: a host's busy
-    /// indicator compares spans to tell one long evaluation from several.
-    pub fn busy_span(&self) -> Option<u32> {
-        let word = self.word.load(Ordering::Acquire);
-        (word & BUSY != 0).then_some((word & SPANS) >> 16)
+    /// How long the evaluator has been busy, while it is: since it last
+    /// left a wait for input. A host's busy indicator shows when one
+    /// command has run long, not when many short ones follow each other.
+    pub fn busy_for(&self) -> Option<Duration> {
+        if self.word.load(Ordering::Acquire) & BUSY == 0 {
+            return None;
+        }
+        Some(Duration::from_nanos(clock().saturating_sub(self.since.load(Ordering::Relaxed))))
     }
 
     #[inline(always)]
@@ -405,7 +424,7 @@ mod tests {
         assert!(signal.interrupt() && signal.interrupt());
         assert_eq!(signal.set_busy(false), 2, "presses not taken go to the wait");
         assert!(!signal.interrupt(), "a waiting evaluator reads the key itself");
-        assert_eq!(signal.busy_span(), None);
+        assert_eq!(signal.busy_for(), None);
         signal.set_busy(true);
         assert!(signal.interrupt());
         assert_eq!(signal.take(), 1);
@@ -413,14 +432,21 @@ mod tests {
     }
 
     #[test]
-    fn each_busy_span_is_distinct() {
+    fn a_busy_span_starts_when_the_evaluator_leaves_its_wait() {
         let signal = QuitSignal::new();
-        let first = signal.busy_span().unwrap();
-        signal.set_busy(true);
-        assert_eq!(signal.busy_span(), Some(first), "already busy: the same span");
         signal.set_busy(false);
+        let before = clock();
         signal.set_busy(true);
-        assert_ne!(signal.busy_span(), Some(first));
+        let started = signal.since.load(Ordering::Relaxed);
+        assert!((before..=clock()).contains(&started), "stamped as it became busy");
+        signal.set_busy(true);
+        assert_eq!(signal.since.load(Ordering::Relaxed), started, "already busy: the same span");
+        assert!(signal.busy_for().is_some());
+        signal.set_busy(false);
+        assert_eq!(signal.busy_for(), None, "waiting: not busy at all");
+        let resumed = clock();
+        signal.set_busy(true);
+        assert!(signal.since.load(Ordering::Relaxed) >= resumed, "the next span starts anew");
     }
 
     /// Racing presses against the evaluator leaving busy: each press is

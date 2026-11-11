@@ -80,19 +80,11 @@ unsafe extern "C" {
     fn pidfd_send_signal(fd: i32, signal: i32, info: *const std::ffi::c_void, flags: u32) -> i32;
 }
 
-#[cfg(unix)]
-unsafe extern "C" {
-    fn tcgetpgrp(fd: i32) -> i32;
-}
-
 /// Whether the shell PID's process group is the foreground one of the
 /// terminal MASTER (one ioctl); false where it cannot be read.
 #[cfg(unix)]
 fn shell_has_foreground(master: &std::fs::File, pid: i32) -> bool {
-    use std::os::fd::AsRawFd;
-    // SAFETY: tcgetpgrp takes a descriptor this file owns and no pointers.
-    let group = unsafe { tcgetpgrp(master.as_raw_fd()) };
-    group > 0 && group == pid
+    rustix::termios::tcgetpgrp(master).is_ok_and(|group| group.as_raw_nonzero().get() == pid)
 }
 
 impl Session {

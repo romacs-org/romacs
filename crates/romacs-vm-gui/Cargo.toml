@@ -18,7 +18,7 @@ romacs-imaging.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-display-runtime = { path = "../romacs-display-runtime" }
 serde_json.workspace = true
-libc.workspace = true
+rustix = { workspace = true, features = ["termios", "time"] }
 crossbeam-channel.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
