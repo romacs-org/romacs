@@ -27,6 +27,15 @@ fn a_scan_reports_the_marked_characters_and_the_last_state() {
         (list (romacs--scanner-run scanner-table 0 1 (point-max) nil) (romacs--scanner-run scanner-table 0 1 (point-max) t) \
               (romacs--scanner-run scanner-table 1 4 8 nil) (romacs--scanner-run scanner-table 0 5 5 nil)))"),
         "((1 2 7 9) (1 . 3) (0 7) (0))");
+    // A region that does not hold point: an empty one at the end, and a
+    // suffix, with point at the start; then the whole text with point in
+    // the middle of a large buffer.
+    assert_eq!(eval(&mut vm, "(with-temp-buffer (insert \"a;\\\"b;\\\";c;\\\"d\") (goto-char 1) \
+        (list (romacs--scanner-run scanner-table 0 (point-max) (point-max) nil) (romacs--scanner-run scanner-table 0 7 (point-max) nil)))"),
+        "((0) (1 7 9))");
+    assert_eq!(eval(&mut vm, "(with-temp-buffer (dotimes (_ 4000) (insert \"ab;cd\\n\")) (goto-char 12000) (insert \"x\") (goto-char 3) \
+        (list (cdr (romacs--scanner-run scanner-table 0 1 (point-max) t)) (cdr (romacs--scanner-run scanner-table 0 20000 (point-max) t))))"),
+        "(4000 667)");
 }
 
 #[test]

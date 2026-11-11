@@ -131,6 +131,8 @@ Nil is the first state; a state SCANNER does not have is an error."
 (defun romacs-scanner--walk (table state start end count)
   "Walk TABLE from state number STATE over the text from START to END in Lisp.
 The answer of `romacs--scanner-run', for an engine without it."
+  (if (not (fixnump start)) (signal 'wrong-type-argument (list 'fixnump start)))
+  (if (not (fixnump end)) (signal 'wrong-type-argument (list 'fixnump end)))
   (if (or (< start (point-min)) (> end (point-max)) (> start end))
       (signal 'args-out-of-range (list start end)))
   (let ((position start) (marked nil) (total 0))

@@ -641,8 +641,14 @@ impl Vm {
         };
         let (from, to) = (byte(self, first)?, byte(self, last)?);
         let window = self.regexp_buffer_window(index, from..to);
-        let text = self.regexp_buffer_input(index, window.clone(), base_char);
-        Ok(Some(scan(&text.bytes[from - window.start..to - window.start], multibyte)))
+        // The window's bytes themselves: a search's input also places point
+        // in its window, and a scan's window need not hold point.
+        let bytes = match &self.objects[index] {
+            Object::Buffer(t) => t.search_bytes(window.clone()),
+            Object::ByteBuffer(t) => &t.bytes[window.clone()],
+            _ => unreachable!("buffer_index validates"),
+        };
+        Ok(Some(scan(&bytes[from - window.start..to - window.start], multibyte)))
     }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
