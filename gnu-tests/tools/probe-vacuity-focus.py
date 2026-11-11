@@ -107,6 +107,8 @@ def main():
     build_dir = output.with_name(output.name + '-build')
     build_dir.mkdir(parents=True, exist_ok=False)
     binary = build_dir / 'romacs-gnu-ert'
+    # The executable put here has left its build: say beside it which tree it runs on.
+    (build_dir / 'romacs-runtime-root').write_text(f'{ROOT}\n')
     build_inputs = []
     if args.binary is not None:
         shutil.copy2(args.binary.resolve(strict=True), binary)

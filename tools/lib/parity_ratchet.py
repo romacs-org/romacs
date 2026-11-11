@@ -1303,8 +1303,8 @@ def cmd_record(args) -> int:
     # Freeze both binaries for the WHOLE recording: every run uses these copies
     # and the provenance hashes them, so a concurrent rebuild cannot mix runs.
     frozen = tempfile.TemporaryDirectory(prefix='parity-record-bin-')
-    gnu_ert = str(shutil.copy2(gnu_ert, pathlib.Path(frozen.name) / 'romacs-gnu-ert'))
-    census = str(shutil.copy2(census, pathlib.Path(frozen.name) / 'romacs-vm-census'))
+    gnu_ert = freeze(gnu_ert, pathlib.Path(frozen.name), 'romacs-gnu-ert', root)
+    census = freeze(census, pathlib.Path(frozen.name), 'romacs-vm-census', root)
     frozen_sha = {b: hashlib.sha256(pathlib.Path(b).read_bytes()).hexdigest() for b in (gnu_ert, census)}
     commit_before = git(root, 'rev-parse', 'HEAD').strip()
     files = suite_files(root)
