@@ -125,3 +125,25 @@ fn after_a_test_item() { std::process::id(); } // expect: std::process::id
 
 #[cfg(not(test))]
 fn live_unless_testing() { std::process::id(); } // expect: std::process::id
+
+// A test-only member hides itself and nothing after it.
+struct Counted {
+    seen: usize,
+    #[cfg(test)]
+    pub(crate) visits: Vec<std::fs::File>,
+}
+
+fn after_a_test_field(seen: usize) -> Counted {
+    std::fs::read("a"); // expect: std::fs
+    let counted = Counted { seen, #[cfg(test)] visits: vec![std::fs::File::open("b").unwrap()] };
+    std::fs::read("c"); // expect: std::fs
+    match seen {
+        #[cfg(test)]
+        0 => drop(std::fs::read("d")),
+        _ => drop(std::fs::read("e")), // expect: std::fs
+    }
+    #[cfg(test)]
+    std::fs::read("f");
+    std::fs::read("g"); // expect: std::fs
+    counted
+}
