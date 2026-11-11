@@ -800,6 +800,16 @@ pub const BUILD_TREES: &str = "romacs-build-trees";
 /// carried into another build's target directory finds a list without its
 /// tree, and one carried anywhere else finds none: it has left its build,
 /// and the tree compiled into it is no longer its own to assume.
+///
+/// Decided, not missed: the list says which checkouts built into a
+/// directory, not which directory built this executable. One carried into
+/// a pooled target that also built the same checkout path is taken for that
+/// directory's own, and assumes that same path. Naming the build's directory
+/// in the executable would close that, and would make one tree build a
+/// different executable in every target directory; checks key their results
+/// on the executable, so that was the dearer loss. What a checkout holds
+/// after a build is not this rule's to judge either: Lisp edited under a
+/// build is meant to be picked up.
 fn in_build_target(exe: &Path, tree: &Path) -> bool {
     let Some(dir) = exe.parent() else { return false };
     let profile = match dir.file_name().and_then(OsStr::to_str) {
@@ -3397,13 +3407,13 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// Only an executable in a target directory its tree was built into may
-    /// assume that tree; this test's own executable is one. The directory's
-    /// list decides, not its shape: another build's target, and any other
-    /// directory, give it nothing to assume.
+    /// assume that tree. The directory's list decides, not its shape:
+    /// another build's target, and any other directory, give it nothing to
+    /// assume. (Made-up directories only: this test's own executable may
+    /// have been carried off by an archive, with its tree said outright.)
     #[test]
     fn only_an_executable_in_a_target_its_tree_built_into_assumes_that_tree() {
         let tree = build_root();
-        assert!(in_build_target(&std::env::current_exe().unwrap(), &tree));
         let dir = std::env::temp_dir().join(format!("romacs-runtime-target-{}", std::process::id()));
         for sub in ["gate/deps", "gate/examples", "gate/.fingerprint", "gate/build"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
