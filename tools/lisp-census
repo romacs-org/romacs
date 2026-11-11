@@ -349,7 +349,7 @@ def oracle_inventory():
                             'status': 'missing' if local is None else 'pristine' if local == original else 'modified'})
     entries.sort(key=lambda e: e['file'])
     support = {}
-    if (ROOT / 'LISP-GENERATED.json').is_file():
+    if (ROOT / 'ledger/lisp-generated.json').is_file():
         import importlib.util
         spec = importlib.util.spec_from_file_location('census_lisp_oracle', ROOT / 'tools/lib/lisp_oracle.py')
         assert spec is not None and spec.loader is not None
@@ -490,7 +490,7 @@ def main():
     if args.files and args.output.resolve() in {a.resolve() for a in [*ARTIFACTS.values(), EAGER_ARTIFACT]}:
         ap.error('--files requires a separate --output')
     before = fingerprint()
-    target = Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'target')))
+    target = Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'ledger/parity-reference.toml').is_file()) / 'target')))
     env = os.environ.copy()
     env['CARGO_TARGET_DIR'] = str(target)
     env['TMPDIR'] = str(_PortablePath(_portable_tempfile.gettempdir()) / '')

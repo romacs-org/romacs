@@ -5,7 +5,7 @@
     gnu_oracle.py path             print the oracle's path after the same check
 
 Every GNU answer this project commits is a parity claim against the pin in
-parity-reference.toml (`mirror_commit`). For months the recording binary was
+ledger/parity-reference.toml (`mirror_commit`). For months the recording binary was
 /usr/bin/emacs, built at b28750b822dc, 320 GNU commits older than the pin the
 evidence named. This module removes the two ways that happened:
 
@@ -27,7 +27,7 @@ import tomllib
 
 ENV = "ROMACS_GNU_ORACLE"
 REPO = pathlib.Path(__file__).resolve().parents[2]
-REFERENCE = REPO / "parity-reference.toml"
+REFERENCE = REPO / "ledger/parity-reference.toml"
 PROBE = ("(princ (json-serialize (list (cons 'revision (or emacs-repository-version \"\"))"
          " (cons 'version emacs-version))))")
 
