@@ -127,7 +127,8 @@ only the keys OBJECT has; other keys are refused."
 (defun romacs-agent-gnosis--load ()
   (require 'gnosis-agent)
   (require 'gnosis-agent-content)
-  (require 'gnosis-agent-review))
+  (require 'gnosis-agent-review)
+  (require 'gnosis-agent-model))
 
 (defun romacs-agent-gnosis--session (arguments)
   (let ((id (romacs-agent-gnosis--arg arguments "session-id")))
@@ -307,6 +308,71 @@ gnosis-agent-review-function; native answering owns acceptance; no themata or gr
     (list romacs-agent-gnosis--instance romacs-agent-gnosis--session-property '("question-id" . "string"))
     '("session-id" "question-id")
   (gnosis-agent-review-save-question (romacs-agent-gnosis--session arguments) (gethash "question-id" arguments)))
+
+;;; Model scenes
+
+(defconst romacs-agent-gnosis--viewer-property '("viewer" . "string"))
+
+(romacs-agent-gnosis--tool "gnosis_model_status"
+    "Whether the native 3D model renderer is available (and why not), and the open model viewers."
+    (list romacs-agent-gnosis--instance) nil
+  (gnosis-agent-model-status))
+
+(romacs-agent-gnosis--tool "gnosis_model_scenes"
+    "Managed 3D model scenes: resource, first label, object and target counts, model themata using each."
+    (list romacs-agent-gnosis--instance) nil
+  (gnosis-agent-model-scenes))
+
+(romacs-agent-gnosis--tool "gnosis_model_describe"
+    "Validate a scene resource (HEX64/scene.json) and list its license, source, initial view and targets \
+{id, label, kind object|point|region, mesh}. Targets are scene vocabulary, not any card's answer."
+    (list romacs-agent-gnosis--instance '("resource" . "string")) '("resource")
+  (gnosis-agent-model-describe (gethash "resource" arguments)))
+
+(romacs-agent-gnosis--tool "gnosis_model_show"
+    "Open a native viewer of a scene for the learner: optional view [yaw, pitch, zoom], labels (false hides \
+picked names for an unaided probe), highlight (target ids painted as cues). Returns the viewer state and id. \
+Refused during a native review encounter or without the native renderer."
+    (list romacs-agent-gnosis--instance '("resource" . "string") '("view" . "array") '("labels" . "boolean")
+          '("highlight" . "array"))
+    '("resource")
+  (gnosis-agent-model-show (gethash "resource" arguments)
+                           :view (romacs-agent-gnosis--arg arguments "view")
+                           :labels (gethash "labels" arguments t)
+                           :highlight (romacs-agent-gnosis--arg arguments "highlight")))
+
+(romacs-agent-gnosis--tool "gnosis_model_observe"
+    "A viewer's renderer state, camera and the learner's latest click: an observation (kind \"observation\") \
+with the targets containing it, never a submitted answer or grade. Refused once the viewer is closed or replaced."
+    (list romacs-agent-gnosis--instance romacs-agent-gnosis--viewer-property) '("viewer")
+  (gnosis-agent-model-observe (gethash "viewer" arguments)))
+
+(romacs-agent-gnosis--tool "gnosis_model_close"
+    "Close a model viewer and free its renderer resources."
+    (list romacs-agent-gnosis--instance romacs-agent-gnosis--viewer-property) '("viewer")
+  (gnosis-agent-model-close (gethash "viewer" arguments)))
+
+(romacs-agent-gnosis--tool "gnosis_model_card_preview"
+    "Preview a permanent model thema on an existing scene target; writes nothing. type \"find\" (click the \
+target; optional question, cues, alternates) or \"name\" (name the highlighted target; optional answer). \
+Optional view [yaw, pitch, zoom], tags, parathema. Returns the validated plan and a plan-token."
+    (list romacs-agent-gnosis--instance '("resource" . "string") '("type" . "string") '("target" . "string")
+          '("question" . "string") '("answer" . "string") '("view" . "array") '("cues" . "array")
+          '("alternates" . "array") '("tags" . "array") '("parathema" . "string"))
+    '("resource" "type" "target")
+  (let* ((spec (cl-loop for key in '("resource" "type" "target" "question" "answer" "view"
+                                     "cues" "alternates" "tags" "parathema")
+                        for value = (romacs-agent-gnosis--arg arguments key)
+                        when value append (list (intern (concat ":" key)) value)))
+         (plan (gnosis-agent-model-card-preview spec)))
+    (romacs-agent-gnosis--json (append plan (list :plan-token (romacs-agent-gnosis--token plan))))))
+
+(romacs-agent-gnosis--tool "gnosis_model_card_save"
+    "Save exactly the plan gnosis_model_card_preview returned (its plan-token) as an ordinary new thema, \
+on this explicit request; refused when anything changed or a native encounter runs. Retrying returns the \
+first receipt. No grade or review evidence is written."
+    (list romacs-agent-gnosis--instance '("plan-token" . "string")) '("plan-token")
+  (gnosis-agent-model-card-save (romacs-agent-gnosis--value-of (gethash "plan-token" arguments))))
 
 (provide 'romacs-agent-gnosis)
 ;;; romacs-agent-gnosis.el ends here

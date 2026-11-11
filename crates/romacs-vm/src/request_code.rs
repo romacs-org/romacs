@@ -361,7 +361,7 @@ impl Vm {
                 Err(_) => self.collect(&mut []),
             }
             // A nested request's caller polls soon for what this left.
-            self.collect_poll |= self.eval_depth > 0 && self.aftermath_pending();
+            if self.eval_depth > 0 && self.aftermath_pending() { self.request_poll(); }
         }
         // An embedder's request ends here: a safe point for what collections
         // left pending, its result rooted (VM2-GC-FINALIZER). The run's

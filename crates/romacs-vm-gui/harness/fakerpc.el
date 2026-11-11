@@ -23,8 +23,8 @@
   ;; Whether it goes on with a conversation is its startup's to say.
   (append (romacs-agent--environment-words session) fakerpc-program))
 
-(defun fakerpc--request (session method params)
-  (romacs-mcp--object "jsonrpc" "2.0" "id" (romacs-agent-request-id session) "method" method "params" params))
+(defun fakerpc--request (session method params &optional id)
+  (romacs-mcp--object "jsonrpc" "2.0" "id" (or id (romacs-agent-request-id session)) "method" method "params" params))
 
 (defun fakerpc--next (session)
   "The next startup request, from this run's state."
@@ -38,9 +38,10 @@
           ((not (plist-get state :session-ready)) nil)
           (t :ready))))
 
-(defun fakerpc--input (session text)
+(defun fakerpc--input (session text id)
   (fakerpc--request session "session/prompt"
-                    (romacs-mcp--object "sessionId" (romacs-agent-harness-session session) "prompt" text)))
+                    (romacs-mcp--object "sessionId" (romacs-agent-harness-session session) "prompt" text)
+                    id))
 
 (defun fakerpc--input-events (_session object)
   "The events of a request written to the harness."

@@ -73,7 +73,7 @@
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "  ✓ ⇢ Review it  codex  completed  ↗ thread\n"
                            "  ⇠ child  completed  ↗ thread  all good second line\n")))
-    (should-not (text-property-any (point-min) (point-max) 'romacs-agent-turn t))
+    (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
     (goto-char (point-min))
     (forward-line 1)
@@ -124,7 +124,7 @@
     (let ((text "Delegated task 99999999-2222-4333-8444-555555555555 (x) [completed]:\nhi"))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 1)
       (should (equal (romacs-agent-cards-tests--visible) (concat "> " text "\n")))
-      (should (text-property-any (point-min) (point-max) 'romacs-agent-turn t)))))
+      (should (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil)))))
 
 (ert-deftest romacs-agent-wake-text-reads-back ()
   (romacs-agent-cards-tests--with-chat session
@@ -156,3 +156,60 @@
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
     (should (string-suffix-p "{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
+
+;; Only the essentials shown.
+
+(ert-deftest romacs-agent-thinking-is-folded-to-its-row ()
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh ")
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "it all.")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Answer.")
+    (should (string-prefix-p "∴ thinking\n" (romacs-agent-cards-tests--visible)))
+    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
+    ;; TAB on its row shows it all, on lines of its own; again, folds it.
+    (goto-char (point-min))
+    (romacs-agent-chat-toggle)
+    (should (string-prefix-p "∴ thinking\nWeigh it all.\n" (romacs-agent-cards-tests--visible)))
+    (romacs-agent-chat-toggle)
+    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
+    ;; Ending in a newline, it still leaves the next row its own line.
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Consider.\n")
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id "r1" :name "Read"
+                                    :input (romacs-agent-cards-tests--table "file_path" "/a"))
+    (should (string-match-p "∴ thinking\n.*Read" (romacs-agent-cards-tests--visible)))
+    (should-not (string-match-p "∴ thinking.*Read" (romacs-agent-cards-tests--visible)))
+    ;; A second one is its own fold.
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Again.")
+    (should (= (how-many "∴ thinking" (point-min) (point-max)) 3))))
+
+(ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
+  (romacs-agent-cards-tests--with-chat session
+    (setf (romacs-agent-model session) "claude-opus-5-5" (romacs-agent-permission-mode session) "bypassPermissions"
+          (romacs-agent-options session) '(:effort "high")
+          (romacs-agent-context-used session) 440000 (romacs-agent-context-window session) 1000000
+          (romacs-agent-provider session) "claude")
+    (let ((romacs-agent-glyphs nil) (romacs-agent-default-provider "claude"))
+      (should (equal (substring-no-properties (romacs-agent-ui--header-line))
+                     (concat (romacs-agent-ui--harness-icon 'claude) "  opus-5-5 high  44%%  Running")))
+      ;; A mode other than bypassing approvals is worth a glance.
+      (setf (romacs-agent-permission-mode session) "plan")
+      (should (string-search "  plan  " (romacs-agent-ui--header-line)))
+      ;; Another instance of the harness is named.
+      (setf (romacs-agent-provider session) "claude2")
+      (should (string-search "  claude2  " (romacs-agent-ui--header-line))))))
+
+(ert-deftest romacs-agent-composer-starts-on-its-own-line ()
+  ;; Thinking left open while no turn runs: the composer is not glued to it.
+  (romacs-agent-cards-tests--with-chat session
+    (setq romacs-agent-ui--composer (make-overlay (point-max) (point-max) nil nil nil))
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh it.")
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-ui--composer-update)
+    (should (string-prefix-p "\n" (overlay-get romacs-agent-ui--composer 'before-string)))
+    ;; At a line's start, nothing is added; a running turn adds its rule.
+    (romacs-agent-ui--insert "\n")
+    (romacs-agent-ui--composer-update)
+    (should (equal (overlay-get romacs-agent-ui--composer 'before-string) ""))
+    (setf (romacs-agent-state session) 'running)
+    (romacs-agent-ui--composer-update)
+    (should (string-match-p "Running" (overlay-get romacs-agent-ui--composer 'before-string)))))
