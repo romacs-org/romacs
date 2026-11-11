@@ -196,11 +196,7 @@ impl Vm {
         for op in &function.code {
             let mut op = *op;
             op.visit_values(&mut |v| values.push(*v));
-            match op {
-                Op::Closure(_, child, _) => code.push(child),
-                Op::Direct(_, _, cache, _, _) => values.push(self.caches[cache].target),
-                _ => {}
-            }
+            if let Op::Closure(_, child, _) = op { code.push(child); }
         }
         if let Some(lazy) = &function.lazy { values.push(lazy.body); }
         if let Some(body) = &function.pending {
