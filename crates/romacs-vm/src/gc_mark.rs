@@ -847,11 +847,12 @@ impl Marking {
                 Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _)
                 | Op::BindLate(slot, _) | Op::ReadLate(_, _, slot) | Op::WriteLate(_, _, slot)
                 | Op::Define(slot, _) | Op::DefineMacro(slot, _)
-                | Op::Sealed(_, slot, _, _) => w.stack.extend(symbol(slot)),
+                | Op::Sealed(_, slot, _, _)
+                // A direct call's cache keeps nothing alive: its target is
+                // read only under its slot's version, and then the slot
+                // holds it.
+                | Op::Direct(_, slot, _, _, _) => w.stack.extend(symbol(slot)),
                 Op::Closure(_, child, _) => w.code.push(child),
-                // Its cache keeps nothing alive: a target is read only under
-                // its slot's version, and then the slot holds it.
-                Op::Direct(_, slot, _, _, _) => w.stack.extend(symbol(slot)),
                 _ => {}
             }
         }
