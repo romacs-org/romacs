@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """G1a compositor-only acceptance; JSON replies synchronize, never grade pixels."""
 import argparse
+import contextlib
+import dataclasses
 import json
 import math
 import os
@@ -196,6 +198,115 @@ def judge(oracle: str, spec: Path, capture: Path, report: Path, *, reject: bool)
 # How long a process ending is given before it counts as hung: a loaded
 # host has taken over ten seconds to end a session, a hang takes forever.
 HANG = 120
+
+
+# The environment every live session runs in, besides its own paths.
+SESSION_ENV = {'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman',
+               'WLR_HEADLESS_OUTPUTS': '1', 'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
+# What a gate run sets that a session must keep (its Lisp, world and fonts).
+SESSION_PASSED = ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GATE_FONTCONFIG')
+
+
+@dataclasses.dataclass
+class Session:
+    """A running live session: its private ROOT (HOME, WORK, CONFIG), the
+    ENV its clients use, the binary's PROCESS and its LOG."""
+    root: Path
+    home: Path
+    work: Path
+    config: Path
+    env: dict
+    log: Path
+    process: subprocess.Popen | None = None
+    processes: list = dataclasses.field(default_factory=list)
+
+
+@contextlib.contextmanager
+def session(binary, output, *, prefix, init=None, args=('--loadup', '--trace-scene'), rc_xml=RC_XML,
+            env=None, size='1280x800', tools=None, prepare=None, report=None, log='binary.stderr', compositor_env=None):
+    """One live session, its whole life in order: a private root (HOME,
+    WORK, CONFIG; INIT as the init file), a headless labwc on RC_XML sized
+    SIZE, a held key for the seat's keyboard, BINARY with ARGS run from
+    WORK, logging to OUTPUT/LOG.  PREPARE(session) writes what the session
+    needs before the binary starts.  Yields the Session.  After the body,
+    or whatever it raised: the processes stopped and reaped, REPORT (a dict)
+    written to OUTPUT/report.json with any error the body raised, then the
+    root removed: never while something still writes into it.  An error
+    the body raised is recorded in REPORT, not raised, when REPORT is given;
+    one before the session started is recorded and raised. COMPOSITOR_ENV
+    is labwc's alone (its renderer on a real GPU)."""
+    root, processes = None, []
+    started = False
+    try:
+        root = Path(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get('XDG_RUNTIME_DIR')))
+        root.chmod(0o700)
+        home, work, config = root / 'home', root / 'work', root / 'config'
+        for directory in (home / 'config/romacs', work, config):
+            directory.mkdir(parents=True)
+        if init is not None:
+            (home / 'config/romacs/init.el').write_text(init)
+        (config / 'rc.xml').write_text(rc_xml)
+        # The gate's headless tools (labwc, wlr-randr) sit together.
+        path = ':'.join(filter(None, [tools, os.path.dirname(LABWC) if os.path.isabs(LABWC) else None,
+                                      os.environ.get('PATH', '/usr/bin:/bin')]))
+        live_env = {**SESSION_ENV, 'PATH': path, 'HOME': str(home),
+                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
+                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
+                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root)}
+        live_env.update({key: os.environ[key] for key in SESSION_PASSED if key in os.environ})
+        if 'ROMACS_GATE_FONTCONFIG' in live_env:
+            live_env['FONTCONFIG_FILE'] = live_env['ROMACS_GATE_FONTCONFIG']
+        live_env.update(env or {})
+        log_path = Path(output) / log
+        current = Session(root, home, work, config, live_env, log_path, processes=processes)
+        if prepare is not None:
+            prepare(current)
+        with (Path(output) / 'compositor.log').open('w') as compositor_log, log_path.open('w') as binary_log:
+            processes.append(subprocess.Popen([shutil.which('labwc', path=live_env['PATH']) or LABWC, '-C', str(config)],
+                                              env=live_env | (compositor_env or {}), stdout=compositor_log, stderr=compositor_log))
+            wait_socket = time.monotonic() + 60
+            while not any(p.is_socket() for p in root.glob('wayland-*')):
+                if processes[0].poll() is not None or time.monotonic() > wait_socket:
+                    raise RuntimeError('the private compositor did not start')
+                time.sleep(.02)
+            live_env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
+            subprocess.run([shutil.which('wlr-randr', path=live_env['PATH']) or RANDR, '--output', 'HEADLESS-1',
+                            '--custom-mode', size], env=live_env, check=True, timeout=60)
+            # A held key gives the seat a keyboard before the client maps.
+            processes.append(subprocess.Popen(['wtype', '-s', '86400000', '-k', 'Shift_L'], env=live_env,
+                                              stdout=binary_log, stderr=binary_log))
+            time.sleep(.3)
+            current.process = subprocess.Popen([str(Path(binary).resolve()), *args], env=live_env, cwd=work,
+                                               stdin=subprocess.DEVNULL, stdout=binary_log, stderr=binary_log)
+            processes.append(current.process)
+            started = True
+            yield current
+    except Exception as raised:  # noqa: BLE001 - recorded in the report when there is one
+        if report is not None:
+            report['error'] = repr(raised)
+        # The body's error is the report's; one before the session started
+        # has no body to return to.
+        if report is None or not started:
+            raise
+    finally:
+        # Every process is stopped whatever another's stop raised; the root
+        # goes only once all are reaped, never under one still running.
+        unstopped = []
+        for process in reversed(processes):
+            try:
+                stop(process)
+            except Exception as failed:  # noqa: BLE001 - raised below, after the report
+                unstopped.append(failed)
+        if report is not None and unstopped:
+            report.setdefault('error', repr(unstopped[0]))
+        try:
+            if report is not None:
+                (Path(output) / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        finally:
+            if not unstopped:
+                remove_root(root)
+        if unstopped:
+            raise unstopped[0]
 
 
 def remove_root(path) -> None:
