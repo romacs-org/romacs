@@ -105,11 +105,12 @@ pub fn world_preloads(preload: &[PathBuf]) -> usize {
     preload.iter().take_while(|p| p.starts_with(root)).count()
 }
 
-/// The tree the world's preloads are in: the bootstrap preload's.
+/// The tree the world's preloads are in: the runtime root of the bootstrap
+/// preload, `<root>/lisp/romacs/romacs-loadup-bootstrap.el`.
 fn world_root(preload: &[PathBuf]) -> Option<&Path> {
     preload.first()
         .filter(|p| p.file_name().is_some_and(|n| n == "romacs-loadup-bootstrap.el"))
-        .and_then(|p| p.parent()?.parent())
+        .and_then(|p| p.parent()?.parent()?.parent())
 }
 
 /// The load path the world is built with and keyed on: the run's entries in

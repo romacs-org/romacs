@@ -54,7 +54,7 @@ class Gui:
         self.log = self.out / 'stderr.log'
         self.original = active().get('address')
         before = {c['pid'] for c in clients()}
-        flag = {'default': [], 'lisp/gnu': ['--gnu-lisp'], 'loadup': ['--loadup']}[mode]
+        flag = {'default': [], 'gnu-only': ['--gnu-lisp'], 'loadup': ['--loadup']}[mode]
         args = ['--trace-scene'] + flag + list(extra)
         envs = f'ROMACS_LISP_DIR={ROOT}/lisp/gnu ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=14'
         cmd = (f'env -u RUST_MIN_STACK -u LD_LIBRARY_PATH {envs} {binary} {" ".join(args)} '

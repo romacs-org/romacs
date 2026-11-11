@@ -215,6 +215,7 @@ mod tests {
         let loadup = started.loadup.as_ref().unwrap();
         assert!(loadup.rows.iter().any(|r| r.site.name == "emacs-lisp/backquote"
             && matches!(r.outcome, crate::loadup::Outcome::Complete { .. })), "{}", loadup.table());
+        assert!(loadup.rows.iter().flat_map(|r| &r.nested).any(|n| n.0 == "emacs-lisp/pcase.el"), "{}", loadup.table());
         assert!(started.bindings.is_empty(), "--gnu-lisp installs no stand-ins");
         let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
         // GNU's global-map is subr.el's, not VM2's built-in one.
