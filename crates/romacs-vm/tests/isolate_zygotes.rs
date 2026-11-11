@@ -297,7 +297,7 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                                (error (list (car e) (cdr e) (error-message-string e))))");
     assert!(exhausted(&out), "protected bodies: {out}");
     // A finite job with no back-jump at all, its growth in one protected
-    // body: its cleanup's entry or its end collects, before it replies.
+    // body: its end collects, before it replies.
     let out = eval(&mut vm, "(condition-case e
                                (isolate-await (isolate-spawn '(lambda ()
                                                                 (unwind-protect (progn (setq jb-kept (make-string 40000000 ?x)) 'survived)
