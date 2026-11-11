@@ -286,18 +286,15 @@ changed since. Return fresh records."
 (romacs-agent-gnosis--tool "gnosis_cards_create"
     "Create Gnosis cards (themata), 1 to 500 per call, all or none. Each card {type, question, answer [], \
 choices [] (mcq, mc-cloze), hints [] (other types), parathema, rubric (agent-eval), aliases [] (accepted typed \
-spellings), tags [], key}. Types: basic, double (makes two, reversed), mcq, cloze (each answer a blank: a \
-disjoint occurrence in question), mc-cloze, agent-eval, and the image and model types, whose hints and answer hold \
-their stored resources. Gnosis has no decks: use tags. key (or, when omitted, the card's content) makes a retry \
-idempotent: a card already created reports exists with its ids. dry-run checks and reports without writing. \
-Returns {dry-run, written, cards: [{index, key, status: created|exists|would-create|invalid, ids?, themata?, \
-error?}]}; with any card invalid nothing is written."
+spellings), tags [] (Org tags: letters, digits, _ @ # %), key}. Types: basic, double (makes two, reversed), mcq, \
+cloze (each answer a blank: a disjoint occurrence in question; or mark blanks inline with no answer), mc-cloze, \
+agent-eval; model cards: gnosis_model_card_preview. Gnosis has no decks: use tags. key, or when omitted the \
+card's type, question, hints or choices and answer, makes a retry idempotent: a card already created reports \
+exists with its ids. dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
+status: created|exists|would-create|invalid, ids?, themata?, error?}]}; with any card invalid nothing is written."
     (list romacs-agent-gnosis--instance '("cards" . "array") '("dry-run" . "boolean")) '("cards")
-  (gnosis-agent-content-create
-   (let ((cards (gethash "cards" arguments)))
-     (unless (vectorp cards) (user-error "cards must be an array"))
-     (vconcat (mapcar #'romacs-agent-gnosis--data cards)))
-   :dry-run (eq (gethash "dry-run" arguments) t)))
+  (gnosis-agent-content-create (vconcat (mapcar #'romacs-agent-gnosis--data (gethash "cards" arguments)))
+                               :dry-run (eq (gethash "dry-run" arguments) t)))
 
 (romacs-agent-gnosis--tool "gnosis_review_start_session"
     "Reserve a local tutoring session: questions (at most 128 records {id, type, question, answer [], choices [], \

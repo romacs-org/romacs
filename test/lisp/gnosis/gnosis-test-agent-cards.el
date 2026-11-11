@@ -23,7 +23,8 @@
 
 (defconst gnosis-test-cards--batch
   (vector
-   (list :type "basic" :question "Capital of Greece?" :answer ["Athens"] :tags ["geo"])
+   (list :type "basic" :question "Capital of Greece?" :answer ["Athens"] :tags ["geo"]
+         :aliases ["Athina"])
    (list :type "double" :question "Hund" :answer ["dog"] :tags ["de"])
    (list :type "mcq" :question "Largest planet?" :choices ["Mars" "Jupiter" "Venus"]
          :answer ["Jupiter"] :parathema "A gas giant.")
@@ -31,8 +32,11 @@
          :answer ["100" "sea level"] :tags ["phys" "basics"])
    (list :type "agent-eval" :question "Why does ice float?"
          :answer ["It is less dense than liquid water."]
-         :rubric "Mentions density" :key "ice-float"))
-  "One card of each common text type.")
+         :rubric "Mentions density" :key "ice-float")
+   (list :type "mc-cloze" :question "The heart pumps blood."
+         :choices ["heart" "liver" "lung"] :answer ["heart"])
+   (list :type "cloze" :question "{c1:Penicillin} inhibits {c2:cell wall} synthesis."))
+  "One card of each type, an inline cloze among them.")
 
 (defun gnosis-test-cards--count ()
   "Return how many themata the database holds."
@@ -42,18 +46,20 @@
   "Return each card's status in RESULT."
   (mapcar (lambda (card) (plist-get card :status)) (plist-get result :cards)))
 
-(ert-deftest gnosis-test-cards-create-a-batch-of-every-text-type ()
-  "Create every text type in one call, with tags, and report their IDs."
+(ert-deftest gnosis-test-cards-create-a-batch-of-every-type ()
+  "Create every type in one call, with tags and aliases, and report IDs."
   (gnosis-test-with-db
     (let* ((result (gnosis-agent-content-create gnosis-test-cards--batch))
            (cards (plist-get result :cards)))
       (should (eq t (plist-get result :written)))
       (should (eq :false (plist-get result :dry-run)))
-      (should (equal (make-list 5 "created") (gnosis-test-cards--statuses result)))
-      ;; A double makes two themata, reversed.
-      (should (equal '(1 2 1 1 1)
+      (should (equal (make-list 7 "created") (gnosis-test-cards--statuses result)))
+      ;; A double makes two themata, reversed; an inline cloze one per blank.
+      (should (equal '(1 2 1 1 1 1 2)
                      (mapcar (lambda (card) (length (plist-get card :ids))) cards)))
-      (should (= 6 (gnosis-test-cards--count)))
+      (should (= 9 (gnosis-test-cards--count)))
+      (let ((basic (string-to-number (aref (plist-get (aref cards 0) :ids) 0))))
+        (should (equal '("Athina") (gnosis-get 'accepted-aliases 'themata `(= id ,basic)))))
       (let ((mcq (string-to-number (aref (plist-get (aref cards 2) :ids) 0))))
         (should (equal '("mcq" "Largest planet?" ("Mars" "Jupiter" "Venus") ("Jupiter"))
                        (car (gnosis-select '[type keimenon hypothesis answer]
@@ -62,7 +68,8 @@
         (should (equal '("basics" "phys")
                        (sort (gnosis-select 'tag 'thema-tag `(= thema-id ,cloze) t)
                              #'string<))))
-      (should (equal "ice-float" (plist-get (aref cards 4) :key))))))
+      (should (equal "ice-float" (plist-get (aref cards 4) :key)))
+      (should-not (plist-get (aref cards 0) :key)))))
 
 (ert-deftest gnosis-test-cards-retry-is-idempotent ()
   "A retried call reports the cards it made and makes nothing new."
@@ -70,7 +77,7 @@
     (let* ((first (gnosis-agent-content-create gnosis-test-cards--batch))
            (count (gnosis-test-cards--count))
            (again (gnosis-agent-content-create gnosis-test-cards--batch)))
-      (should (equal (make-list 5 "exists") (gnosis-test-cards--statuses again)))
+      (should (equal (make-list 7 "exists") (gnosis-test-cards--statuses again)))
       (should (eq :false (plist-get again :written)))
       (should (= count (gnosis-test-cards--count)))
       (should (equal (mapcar (lambda (card) (plist-get card :ids)) (plist-get first :cards))
@@ -88,15 +95,18 @@
     (let ((result (gnosis-agent-content-create gnosis-test-cards--batch :dry-run t)))
       (should (eq t (plist-get result :dry-run)))
       (should (eq :false (plist-get result :written)))
-      (should (equal (make-list 5 "would-create") (gnosis-test-cards--statuses result)))
-      (should (equal '(1 2 1 1 1)
+      (should (equal (make-list 7 "would-create") (gnosis-test-cards--statuses result)))
+      (should (equal '(1 2 1 1 1 1 2)
                      (mapcar (lambda (card) (plist-get card :themata))
                              (plist-get result :cards))))
       (should (= 0 (gnosis-test-cards--count)))
       ;; The real call afterwards still creates them.
-      (should (equal (make-list 5 "created")
+      (should (equal (make-list 7 "created")
                      (gnosis-test-cards--statuses
-                      (gnosis-agent-content-create gnosis-test-cards--batch)))))))
+                      (gnosis-agent-content-create gnosis-test-cards--batch))))
+      ;; Not inside another transaction, which could not roll back alone.
+      (should-error (gnosis-sqlite-with-transaction gnosis-db
+                      (gnosis-agent-content-create gnosis-test-cards--batch :dry-run t))))))
 
 (ert-deftest gnosis-test-cards-errors-name-each-card-and-write-nothing ()
   "Every invalid card says why; with any invalid, nothing is written."
@@ -112,20 +122,54 @@
                      (list :type "basic" :question "" :answer ["A"])
                      "not an object"
                      (list :type "basic" :question "Twin" :answer ["A"] :key "k")
-                     (list :type "basic" :question "Other" :answer ["B"] :key "k"))))
+                     (list :type "basic" :question "Other" :answer ["B"] :key "k")
+                     (list :type "basic" :question "Tagged" :answer ["A"] :tags ["spaced-repetition"])
+                     (list :type "basic" :question "Keyed" :answer ["A"] :key 5)
+                     (list :type "basic" :question "Fine?" :answer ["Yes"])
+                     nil
+                     (list :type "image-region" :question "Q" :hints ["r"] :answer ["t"]))))
            (cards (plist-get result :cards)))
       (should (eq :false (plist-get result :written)))
       (should (= 0 (gnosis-test-cards--count)))
       (should (equal '("would-create" "invalid" "invalid" "invalid" "invalid" "invalid"
-                       "invalid" "invalid" "would-create" "invalid")
+                       "invalid" "invalid" "would-create" "invalid" "invalid" "invalid"
+                       "invalid" "invalid" "invalid")
                      (gnosis-test-cards--statuses result)))
-      (should (equal (number-sequence 0 9)
+      (should (equal (number-sequence 0 14)
                      (mapcar (lambda (card) (plist-get card :index)) cards)))
-      (dolist (case '((1 . "member of hypothesis") (2 . "takes hints, not choices")
-                      (3 . "type must be one of") (4 . "Unknown fields: :deck")
-                      (5 . "occurrence") (6 . "question must be a nonempty string")
-                      (7 . "must be an object") (9 . "repeats an earlier card")))
+      ;; The type's own message, without the editor's line prefix.
+      (should (equal "Answer must be a single item, member of hypothesis."
+                     (plist-get (aref cards 1) :error)))
+      (dolist (case '((2 . "takes hints, not choices") (3 . "type must be one of")
+                      (4 . "Unknown fields: :deck") (5 . "occurrence")
+                      (6 . "question must be a nonempty string") (7 . "must be an object")
+                      (9 . "key repeats card 8") (10 . "Org cannot preserve tag")
+                      (11 . "key must be a nonempty string") (12 . "content repeats card 0")
+                      (13 . "Card is empty") (14 . "model cards: gnosis_model_card_preview")))
         (should (string-match-p (cdr case) (plist-get (aref cards (car case)) :error)))))))
+
+(ert-deftest gnosis-test-cards-mixed-batches ()
+  "New cards beside existing ones are written; any invalid card stops all."
+  (gnosis-test-with-db
+    (gnosis-agent-content-create (vector (list :type "basic" :question "Old" :answer ["A"])))
+    (let ((saved nil))
+      (let ((gnosis-save-hook (list (lambda (id) (push id saved)))))
+        (let ((mixed (gnosis-agent-content-create
+                      (vector (list :type "basic" :question "Old" :answer ["A"])
+                              (list :type "basic" :question "New" :answer ["B"])))))
+          (should (eq t (plist-get mixed :written)))
+          (should (equal '("exists" "created") (gnosis-test-cards--statuses mixed)))
+          ;; Views hear of the new thema after commit, not of the old.
+          (should (equal (list (string-to-number
+                                (aref (plist-get (aref (plist-get mixed :cards) 1) :ids) 0)))
+                         saved))))
+      (let ((stopped (gnosis-agent-content-create
+                      (vector (list :type "basic" :question "Old" :answer ["A"])
+                              (list :type "basic" :question "Newer" :answer ["C"])
+                              (list :type "basic" :question "Bad" :answer [])))))
+        (should (eq :false (plist-get stopped :written)))
+        (should (equal '("exists" "would-create" "invalid") (gnosis-test-cards--statuses stopped)))
+        (should (= 2 (gnosis-test-cards--count)))))))
 
 (ert-deftest gnosis-test-cards-refuse-an-empty-or-oversized-call ()
   "A call takes one to the limit of cards."
