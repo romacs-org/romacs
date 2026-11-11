@@ -37,6 +37,7 @@ class DenominatorTests(unittest.TestCase):
             manifest = {'gnu_commit': pin,
                         'sources': {'fixture': {'paths': ['lisp/same.el'], 'recipe': 'fixture'}},
                         'files': [['lisp/gnu/generated.el', hashlib.sha256(b'nil').hexdigest(), 'fixture']]}
+            (root / 'ledger').mkdir()
             (root / 'ledger/lisp-generated.json').write_text(json.dumps(manifest))
             with patch.object(census, 'ROOT', root), patch.object(census, 'GNU_SOURCE', gnu), \
                     patch.object(census, 'GNU_PIN', pin):

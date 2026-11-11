@@ -367,6 +367,7 @@ class BaseCountsTest(unittest.TestCase):
 
     def commit(self, n, floor=9, name='n'):
         (Path(self.repo) / name).write_text(str(n))
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({'rule': 'r', 'long_file_lines': 1500,
                                                                   **counts(lint=floor)}))
         self.git('add', '-A')
@@ -494,6 +495,7 @@ class MergeDriverTest(unittest.TestCase):
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def commit(self, floor, other=1):
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({**floors(), 'lints': {
             'clippy::doc_markdown': floor, 'clippy::other': other}}))
         self.git('add', '-A')

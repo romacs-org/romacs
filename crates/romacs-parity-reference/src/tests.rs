@@ -435,7 +435,7 @@ fn attestor_script() -> PathBuf {
 
 /// Write `manifest` to a file the shell attestor can read, comments and all.
 fn write_manifest(dir: &Path, manifest: &ReferenceManifest) -> PathBuf {
-    let path = dir.join("ledger/parity-reference.toml");
+    let path = dir.join("parity-reference.toml");
     fs::write(
         &path,
         format!(

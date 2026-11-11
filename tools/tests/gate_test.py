@@ -20,6 +20,7 @@ def pinned_fixture(test, repo):
     binary.parent.mkdir(parents=True, exist_ok=True)
     binary.write_text('fixture ' + FIXTURE_PIN)
     binary.chmod(0o755)
+    (repo / 'ledger').mkdir(exist_ok=True)
     (repo / 'ledger/parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
     test.enterContext(mock.patch.dict(os.environ, {'GNU_ORACLE_ROOT': str(root)}))
     return binary

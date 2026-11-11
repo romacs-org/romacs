@@ -83,6 +83,9 @@ import time
 TOOLS = pathlib.Path(__file__).resolve().parent
 DEFAULT_ROOT = TOOLS.parents[1]
 RATCHET_NAME = 'ledger/parity-ratchet.json'
+# Where a revision from before the records moved into ledger/ keeps the
+# ratchet; it goes once no open branch reaches back past the move.
+RATCHET_BEFORE = 'parity-ratchet.json'
 GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SOURCE = pathlib.Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
 CHARACTERISED = ('src/fns-tests.el', 'src/data-tests.el', 'lisp/subr-tests.el')
@@ -1175,7 +1178,8 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['lisp/gnu', 'lisp/romacs', 'gnu-tests', 'tools', 'ledger/parity-reference.toml']
+    measured = ['lisp/gnu', 'lisp/romacs', 'gnu-tests', 'tools', 'ledger/parity-reference.toml',
+                'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
     ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp/gnu', 'lisp/romacs', 'gnu-tests/test',
@@ -1464,12 +1468,13 @@ def lowering_problems(old: dict, new: dict, label: str, merge: bool = False) -> 
 
 
 def ratchet_at(root: pathlib.Path, rev: str) -> dict | None:
-    """The ratchet file at REV, or None when REV has no such file."""
-    p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', f'{rev}:{RATCHET_NAME}'],
-                       capture_output=True, text=True)
-    if p.returncode:
-        return None
-    return json.loads(git(root, 'cat-file', 'blob', p.stdout.strip()))
+    """The ratchet file at REV, at its path then or now, or None when REV has none."""
+    for name in (RATCHET_NAME, RATCHET_BEFORE):
+        p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', f'{rev}:{name}'],
+                           capture_output=True, text=True)
+        if not p.returncode:
+            return json.loads(git(root, 'cat-file', 'blob', p.stdout.strip()))
+    return None
 
 
 def candidate_problems(old: dict, new: dict, label: str) -> list[str]:

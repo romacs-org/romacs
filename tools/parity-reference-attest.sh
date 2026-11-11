@@ -147,7 +147,7 @@ case "$depth" in
 esac
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-manifest="${ROMACS_PARITY_REFERENCE_FILE:-$root/parity-reference.toml}"
+manifest="${ROMACS_PARITY_REFERENCE_FILE:-$root/ledger/parity-reference.toml}"
 
 refuse() {
   echo "parity reference: $*" >&2

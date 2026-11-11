@@ -138,6 +138,7 @@ fn with_a_repository_extras_and_a_wrong_pin_record_are_refused() {
     git(&["init", "-q"]);
     let tree = Command::new("git").arg("-C").arg(f.dir.join("gnu")).args(["rev-parse", "HEAD:lisp"]).output().unwrap();
     let tree = String::from_utf8(tree.stdout).unwrap().trim().to_owned();
+    std::fs::create_dir_all(root.join("ledger")).unwrap();
     let record = |commit: &str, tree: &str| std::fs::write(root.join("ledger/lisp-pin.json"),
         format!("{{\"gnu_commit\": \"{commit}\", \"lisp_tree\": \"{tree}\"}}\n")).unwrap();
     record(&f.pin, &tree);

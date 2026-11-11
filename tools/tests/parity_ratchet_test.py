@@ -73,6 +73,12 @@ def run_report(data, unit, m):
     return status, buf.getvalue()
 
 
+def write_ratchet(root, data):
+    """DATA as ROOT's ratchet file, its directory made."""
+    path = root / pr.RATCHET_NAME
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(data))
+
 class Compare(unittest.TestCase):
     def test_equal_is_pass(self):
         status, out = run_report(ratchet(), 'gnu-files:x', gnu_measurement({'src/fns-tests.el': ['f1', 'f2']}))
@@ -577,14 +583,14 @@ class Verify(unittest.TestCase):
         for rel in pr.GATE_TESTS:  # the gate wiring verify also checks
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(base))
+        write_ratchet(root, base)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'lane')
         for i, version in enumerate(branch):  # recordings committed on the lane
-            (root / pr.RATCHET_NAME).write_text(json.dumps(version))
+            write_ratchet(root, version)
             git('commit', '-q', '--no-gpg-sign', '-am', f'lane {i}')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(head))
+        write_ratchet(root, head)
         return root
 
     def verify(self, root, base=None):
@@ -621,7 +627,7 @@ class Verify(unittest.TestCase):
         subprocess.run(['git', '-C', str(root), 'rm', '-q', pr.RATCHET_NAME], check=True)
         subprocess.run(['git', '-C', str(root), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',
                         '--no-gpg-sign', '-m', 'drop'], check=True, env=dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null'))
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         status, err = self.verify(root)
         self.assertEqual(status, pr.EXIT_LOWER, err)
         self.assertIn('was deleted', err)
@@ -684,17 +690,17 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(master_floor))
+        write_ratchet(root, master_floor)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'the ratchet lands on master')
         git('checkout', '-q', 'lane')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', 'master')
         if merge_floor is not None:  # the merge itself resolves to another file
-            (root / pr.RATCHET_NAME).write_text(json.dumps(merge_floor))
+            write_ratchet(root, merge_floor)
             git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge master forward')
         if after_merge is not None:
-            (root / pr.RATCHET_NAME).write_text(json.dumps(after_merge))
+            write_ratchet(root, after_merge)
             git('commit', '-q', '--no-gpg-sign', '-am', 'a lane commit after the merge')
         return root
 
@@ -716,13 +722,13 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'ratchet on master')
         git('checkout', '-q', '-b', 'lane')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+        write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane raises warm by lisp/c.el')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane silently drops lisp/c.el')
         git('checkout', '-q', 'master')
         (root / 'unrelated').write_text('x')
@@ -747,14 +753,14 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'lane')
         git('checkout', '-q', '-b', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+        write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         git('commit', '-q', '--no-gpg-sign', '-am', 'record improvement')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('commit', '-q', '--no-gpg-sign', '-am', 'drop floor silently')
         git('checkout', '-q', 'lane')
         (root / 'work').write_text('x')
@@ -789,17 +795,17 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(base))
+        write_ratchet(root, base)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(side))
+        write_ratchet(root, side)
         git('commit', '-q', '--no-gpg-sign', '-am', 'side records a cold lowering')
         git('checkout', '-q', '-b', 'lane', 'master')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lane))
+        write_ratchet(root, lane)
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane records a warm lowering')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', '-X', 'ours', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(merged))
+        write_ratchet(root, merged)
         git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge side')
         return root
@@ -856,12 +862,12 @@ class VerifyCandidateMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'side')
         if side_raises:
-            (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+            write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         else:
             (root / 'work').write_text('x')
             git('add', '.')
@@ -870,12 +876,12 @@ class VerifyCandidateMerge(unittest.TestCase):
         lowered = ratchet(warm=('lisp/a.el',))
         lowered['lowerings'] = [{'unit': 'census-warm', 'members': ['lisp/b.el'],
                                  'because': 'lisp/ was replaced by the GNU pin'}]
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        write_ratchet(root, lowered)
         git('commit', '-q', '--no-gpg-sign', '-am', 'master records a lowering')
         base = git('rev-parse', 'HEAD')
         git('checkout', '-q', '-b', 'lane')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', '-X', 'ours', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        write_ratchet(root, lowered)
         git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge side')
         return root, base
@@ -977,6 +983,7 @@ class CensusPopulation(unittest.TestCase):
         self.manifest = {'gnu_commit': self.pin,
                          'sources': {'fixture': {'paths': ['lisp/a.el'], 'recipe': 'fixture generator'}},
                          'files': [[self.support, pr.sha256_file(self.root / self.support), 'fixture']]}
+        (self.root / 'ledger').mkdir(exist_ok=True)
         (self.root / 'ledger/lisp-pin.json').write_text(json.dumps({
             'gnu_commit': self.pin, 'lisp_tree': git('rev-parse', 'HEAD:lisp'),
             'generated_support': 'ledger/lisp-generated.json'}))
