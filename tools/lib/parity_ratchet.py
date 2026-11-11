@@ -1178,7 +1178,7 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['lisp/gnu', 'lisp/romacs', 'test/gnu', 'tools', 'ledger/parity-reference.toml',
+    measured = ['lisp/gnu', 'lisp/romacs', 'test/gnu', 'crates/romacs-gnu-tests', 'tools', 'ledger/parity-reference.toml',
                 'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]

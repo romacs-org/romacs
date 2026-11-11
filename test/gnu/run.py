@@ -291,8 +291,8 @@ def normalize(name: str) -> str:
     p = pathlib.Path(name)
     if p.is_absolute():
         p = p.resolve().relative_to(TESTS)
-    elif p.parts[:2] == ('test/gnu', 'test'):
-        p = pathlib.Path(*p.parts[2:])
+    elif p.parts[:3] == ('test', 'gnu', 'test'):
+        p = pathlib.Path(*p.parts[3:])
     elif p.parts[:1] == ('test',):
         p = pathlib.Path(*p.parts[1:])
     if not (TESTS / p).is_file():
@@ -556,8 +556,18 @@ def load_member_evidence(path: pathlib.Path | None = None) -> dict:
         raise Refusal(3, f'subject evidence refused: {error}') from error
 
 
-@functools.cache
+_SOURCE_LOCK = threading.Lock()
+
+
 def source_directory() -> pathlib.Path:
+    """The one scratch source-directory of this run (`made_source_directory`),
+    made by whichever worker asks first."""
+    with _SOURCE_LOCK:
+        return made_source_directory()
+
+
+@functools.cache
+def made_source_directory() -> pathlib.Path:
     """GNU's `source-directory' for a test: the repository's top-level entries,
     which hold crates/romacs-vm/src/prims as Romacs's own source-directory
     must, and nextstep/, the image fixture GNU's tree has at its top and this

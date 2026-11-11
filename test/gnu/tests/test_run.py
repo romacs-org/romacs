@@ -87,6 +87,11 @@ class SourceDirectory(unittest.TestCase):
         self.assertTrue((source / 'test/data').is_dir())
         self.assertIs(run.source_directory(), source)
 
+    def test_a_test_file_is_named_from_the_suite_or_the_repository(self):
+        for name in ('src/fns-tests.el', 'test/src/fns-tests.el', 'test/gnu/test/src/fns-tests.el',
+                     str(run.TESTS / 'src/fns-tests.el')):
+            self.assertEqual(run.normalize(name), 'src/fns-tests.el', name)
+
 
 class Classification(unittest.TestCase):
     """A verdict is `passed` only when romacs really reproduced GNU."""

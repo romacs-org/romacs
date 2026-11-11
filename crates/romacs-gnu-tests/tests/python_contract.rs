@@ -68,6 +68,11 @@ fn runner_load_path_contract() {
 }
 
 #[test]
+fn runner_source_directory_contract() {
+    python_class("SourceDirectory");
+}
+
+#[test]
 fn runner_honesty_contract() {
     python_class("Honesty");
 }
