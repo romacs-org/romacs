@@ -511,13 +511,15 @@ CARD is a plist of `gnosis-agent-content--card-keys'."
 
 (defun gnosis-agent-content--card-guid (card thema)
   "Return the stored source identity of CARD, saved as THEMA.
-That is its key, or a hash of the content that defines it: its type,
-question, hints or choices, and answer."
+That is its key, or a hash of what the learner is shown and graded on:
+its type, question, hints or choices, answer, parathema, aliases and
+rubric.  Tags organise a card rather than define it, so a retry that
+only retags it finds it."
   (if-let* ((key (plist-get card :key)))
       (concat "agent:key:" key)
     (concat "agent:hash:"
             (secure-hash 'sha256 (gnosis-sqlite--serialize
-                                  (list (nth 1 thema) (nth 2 thema) (nth 3 thema) (nth 4 thema)))))))
+                                  (mapcar (lambda (i) (nth i thema)) '(1 2 3 4 5 8 9)))))))
 
 (defun gnosis-agent-content--existing (db guids)
   "Return a table of each of GUIDS that DB's themata hold to their IDs."
@@ -585,8 +587,8 @@ of `gnosis-agent-content--card-types'), `:question', `:answer' (a vector),
 so each type's own rules apply; a double, or a cloze marking its blanks
 inline, makes several themata.
 
-The key, or a hash of the card's type, question, hints or choices and
-answer when none is given, makes creation idempotent: a card whose key
+The key, or a hash of the card's content (all but its tags) when none
+is given, makes creation idempotent: a card whose key
 is already stored is reported `exists' with its IDs, not made again.
 Every card is checked in one transaction, rolled back when any card is
 invalid or for DRY-RUN, so nothing is then written.  It is refused

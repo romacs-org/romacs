@@ -1391,10 +1391,10 @@ A call is all or none: every card is checked first, and with any card
 invalid nothing is written.  Each card's result says why it is invalid,
 by its position in the call.  With =dry-run= the call reports what each
 card would make and writes nothing.  A card's =key=, or when it has none
-a hash of its type, question, hints or choices and answer, is stored
-with what it made, so a retried call reports those cards as =exists=
-with their IDs instead of making them again.  A retry that changes only
-a card's tags or parathema is therefore reported =exists= unchanged.
+a hash of everything but its tags, is stored with what it made, so a
+retried call reports those cards as =exists= with their IDs instead of
+making them again.  A retry that changes only a card's tags is
+therefore reported =exists= unchanged.
 
 ** Editing Themata
 

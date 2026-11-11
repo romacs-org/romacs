@@ -82,6 +82,17 @@
       (should (= count (gnosis-test-cards--count)))
       (should (equal (mapcar (lambda (card) (plist-get card :ids)) (plist-get first :cards))
                      (mapcar (lambda (card) (plist-get card :ids)) (plist-get again :cards))))
+      ;; Without a key, content the learner sees or is graded on tells
+      ;; cards apart; tags alone do not.
+      (let ((rubric (gnosis-agent-content-create
+                     (vector (list :type "agent-eval" :question "Why does ice float?"
+                                   :answer ["It is less dense than liquid water."]
+                                   :rubric "Mentions hydrogen bonds"))))
+            (retag (gnosis-agent-content-create
+                    (vector (list :type "basic" :question "Capital of Greece?" :answer ["Athens"]
+                                  :tags ["places"] :aliases ["Athina"])))))
+        (should (equal '("created") (gnosis-test-cards--statuses rubric)))
+        (should (equal '("exists") (gnosis-test-cards--statuses retag))))
       ;; An explicit key holds even when the content changes.
       (let ((changed (gnosis-agent-content-create
                       (vector (list :type "agent-eval" :question "Why does ice float on water?"

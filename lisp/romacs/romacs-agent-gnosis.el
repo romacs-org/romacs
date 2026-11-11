@@ -289,7 +289,7 @@ choices [] (mcq, mc-cloze), hints [] (other types), parathema, rubric (agent-eva
 spellings), tags [] (Org tags: letters, digits, _ @ # %), key}. Types: basic, double (makes two, reversed), mcq, \
 cloze (each answer a blank: a disjoint occurrence in question; or mark blanks inline with no answer), mc-cloze, \
 agent-eval; model cards: gnosis_model_card_preview. Gnosis has no decks: use tags. key, or when omitted the \
-card's type, question, hints or choices and answer, makes a retry idempotent: a card already created reports \
+card's content (all but its tags), makes a retry idempotent: a card already created reports \
 exists with its ids. dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
 status: created|exists|would-create|invalid, ids?, themata?, error?}]}; with any card invalid nothing is written."
     (list romacs-agent-gnosis--instance '("cards" . "array") '("dry-run" . "boolean")) '("cards")
