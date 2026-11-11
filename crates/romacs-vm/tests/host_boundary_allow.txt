@@ -34,6 +34,7 @@ crates/romacs-vm/src/gc.rs Stress::from_env std::env::var 2f613a87eb148145 the c
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var e40bb36fae0f6011 the collector's thread count for a test (ROMACS_GC_WORKERS): what a collection leaves is the same at any count; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var_os 0944c68176f21630 the collector's in-place stress mode (ROMACS_GC_INPLACE): stress collections free in place instead of moving; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Stress::from_env std::env::var_os 6bfef7c547c82441 the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs Stress::from_env std::env::var_os 6c151645d2bf57c0 whether automatic collections may be minors (ROMACS_GC_MINOR): a minor frees only what nothing reaches, as a full does; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs Vm::collect_marked dynamic:saved 5cc449ac4d7a6a8c collector: marks the saved values
 crates/romacs-vm/src/gc.rs Vm::mark_heap dynamic:saved 1b478e952d5aca7e collector: forwards the saved values
 crates/romacs-vm/src/gc_check.rs Vm::reference_walk dynamic:saved 1b478e952d5aca7e verify's reference marker: the saved values are roots it reads again

@@ -57,7 +57,7 @@ pub(crate) struct Stress {
     /// (`ROMACS_GC_INPLACE'): free entries are reused at once, so a Value a
     /// native frame kept names something else.
     inplace: bool,
-    /// Automatic collections may be minors (`ROMACS_GC_MINOR' or
+    /// Automatic collections may be minors (`ROMACS_GC_MINOR` or
     /// [`Vm::set_gc_minor`]): off until a minor's pause meets its bar.
     minor: bool,
     /// Faults a test plants in this VM's collections, and no other's.
@@ -251,7 +251,7 @@ pub(crate) struct Allocation {
     /// The next collection compacts (`Vm::collect_compacting').
     pub(crate) compact: bool,
     /// ALLOCATED when the last collection ended: what was handed out since
-    /// is the young, and makes a minor due (`Vm::minor_due').
+    /// is the young, and makes a minor due (`Vm::minor_due`).
     pub(crate) collected_at: u64,
 }
 romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at });
@@ -319,7 +319,7 @@ const CONS_BYTES: i64 = 16;
 /// collection (`Vm::poll_requested`).
 const POLL_STEP: u64 = 256 << 10;
 /// Bytes handed out since the last collection that make a minor due: 256K
-/// objects at a cons's charge. A late poll adds up to `POLL_STEP'.
+/// objects at a cons's charge. A late poll adds up to `POLL_STEP`.
 const MINOR_BYTES: u64 = (256 << 10) * CONS_BYTES as u64;
 /// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
 /// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
@@ -632,7 +632,7 @@ impl Vm {
     pub fn set_gc_verify(&mut self, verify: bool) {
         self.gc_stress.verify = verify;
     }
-    /// Let automatic collections be minors, or not (`ROMACS_GC_MINOR').
+    /// Let automatic collections be minors, or not (`ROMACS_GC_MINOR`).
     pub fn set_gc_minor(&mut self, minor: bool) {
         self.gc_stress.minor = minor;
     }
@@ -671,8 +671,8 @@ impl Vm {
         self.full_due() || self.minor_due()
     }
     /// Whether a minor is due: minors are on, nothing asks this VM to move
-    /// its heap or paces it as a job's child, and MINOR_BYTES were handed
-    /// out since the last collection. `gc-cons-threshold' paces fulls, by
+    /// its heap or paces it as a job's child, and `MINOR_BYTES` were handed
+    /// out since the last collection. `gc-cons-threshold` paces fulls, by
     /// what the heap has grown since the last one, minors or not.
     pub(crate) fn minor_due(&self) -> bool {
         self.gc_stress.minor && !self.will_compact() && self.job_budget.is_none()
@@ -1607,7 +1607,7 @@ impl Vm {
     }
     /// A minor collection: what was made since the last collection and is
     /// no longer reached is freed, and nothing old is read but what may name
-    /// the young. Old entries start marked (`Table::mark_old'), so the mark,
+    /// the young. Old entries start marked (`Table::mark_old`), so the mark,
     /// the weak rounds and the sweep are a full collection's over the young
     /// alone. Read whole, whatever their age: the entries stored into since
     /// the last collection, every buffer and char table, whose shared text
@@ -1964,6 +1964,8 @@ mod tests {
     #[test]
     fn a_stale_call_cache_is_emptied_before_a_later_compaction() {
         let mut vm = Vm::new();
+        // Verify quarantines what it frees, and cuts no tail.
+        vm.set_gc_verify(false);
         vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
         vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
         vm.eval_source_raw("(cache-caller)").unwrap();
@@ -2056,7 +2058,7 @@ mod tests {
 
     /// With minors on, allocation alone brings them: each frees the garbage
     /// made since the last, keeps what a variable still holds, and is
-    /// recorded as a minor. `gc-cons-threshold' paces fulls, and here asks
+    /// recorded as a minor. `gc-cons-threshold` paces fulls, and here asks
     /// for none.
     #[test]
     fn allocation_brings_minors_when_they_are_on() {

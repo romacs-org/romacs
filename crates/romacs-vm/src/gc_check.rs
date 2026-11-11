@@ -98,8 +98,8 @@ impl Vm {
         let tables = [vec![false; self.conses.len()], vec![false; self.closures.len()], vec![false; self.cells.len()], vec![false; self.objects.len()]];
         let mut scratch = Reached { tables, functions: Vec::new(), regions: vec![true; self.regions.len()], symbols: HashSet::default() };
         let mut young = None;
-        for t in 0..4 {
-            for i in (0..reached.tables[t].len()).filter(|&i| reached.tables[t][i]) {
+        for (t, table) in reached.tables.iter().enumerate() {
+            for i in (0..table.len()).filter(|&i| table[i]) {
                 // Its children, as the walk read them: the walk's own first
                 // visit, on a set that has seen nothing.
                 let (mut values, mut code) = (Vec::new(), Vec::new());
