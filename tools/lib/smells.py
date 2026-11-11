@@ -84,6 +84,9 @@ import primitive_index  # noqa: E402
 import unsafe_census  # noqa: E402
 
 FLOORS = Path('ledger/smell-floors.json')
+# Where a merge-base from before the records moved into ledger/ keeps its
+# floors; it goes once no open branch's merge-base predates the move.
+FLOORS_BEFORE = 'SMELL-FLOORS.json'
 CRATE_SMELLS = ('allows', 'todos', 'long_files')
 COUNTED = ('legacy_primitives', 'primitives_outside_prims')
 LISTED = ('root', 'members_outside_crates', 'generated')
@@ -393,7 +396,7 @@ def base_side(root, rev, floors, now=None):
     tree = now and clean_tree(root)
     if tree:
         keep(kept(tree, how), now)
-    was = git(root, 'show', f'{commit}:{FLOORS}')
+    was = git(root, 'show', f'{commit}:{FLOORS}') or git(root, 'show', f'{commit}:{FLOORS_BEFORE}')
     empty = {'crates': {}, 'lints': {}, 'layout': {}}
     return json.loads(was) if was else empty, base_counts(root, commit, floors, how), commit
 

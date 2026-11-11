@@ -387,7 +387,7 @@ class Ledger(unittest.TestCase):
         cls.tmp.cleanup()
 
     def ledger(self, text):
-        path = pathlib.Path(self.tmp.name) / 'ledger/gnu-test-exclusions.toml'
+        path = pathlib.Path(self.tmp.name) / 'gnu-test-exclusions.toml'
         path.write_text(text)
         return path
 
@@ -495,7 +495,8 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
-            shutil.copy(run.PIN_FILE, root / 'gnu-tests' / 'ledger/gnu-tests-pin.json')
+            (root / 'ledger').mkdir()
+            shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             run.verify_pin(root)
             victim = root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.el'
@@ -508,7 +509,8 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
-            shutil.copy(run.PIN_FILE, root / 'gnu-tests' / 'ledger/gnu-tests-pin.json')
+            (root / 'ledger').mkdir()
+            shutil.copy(run.PIN_FILE, root / 'ledger/gnu-tests-pin.json')
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             (root / 'gnu-tests' / 'test' / 'src' / 'fns-tests.elc').write_text('compiled')
             with self.assertRaises(run.Refusal):
@@ -527,8 +529,9 @@ class Pin(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-pin-test-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-tests').mkdir()
+            (root / 'ledger').mkdir()
             forged = dict(p, test_tree=run.git_tree_id(run.TESTS), excluded=p['excluded'] + ['src/fns-tests.el'])
-            (root / 'gnu-tests' / 'ledger/gnu-tests-pin.json').write_text(json.dumps(forged))
+            (root / 'ledger/gnu-tests-pin.json').write_text(json.dumps(forged))
             shutil.copytree(run.TESTS, root / 'gnu-tests' / 'test', symlinks=True)
             with self.assertRaises(run.Refusal):
                 run.verify_pin(root, gnu=run.GNU_MIRROR)

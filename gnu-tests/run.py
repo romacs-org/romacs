@@ -57,8 +57,8 @@ import tomllib
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 TESTS = HERE / 'test'
-PIN_FILE = HERE / 'ledger/gnu-tests-pin.json'
-LEDGER = HERE / 'ledger/gnu-test-exclusions.toml'
+PIN_FILE = ROOT / 'ledger/gnu-tests-pin.json'
+LEDGER = ROOT / 'ledger/gnu-test-exclusions.toml'
 BASELINE = HERE / 'baseline'
 HARNESS = HERE / 'harness' / 'romacs-mini-ert.el'
 # Loaded by the adapter right after HARNESS (mini mode): records every
@@ -207,7 +207,7 @@ def gnu_test_tree(gnu: pathlib.Path, commit: str, patterns: list) -> tuple[str, 
 # The pristine import
 
 def pin(root: pathlib.Path = ROOT) -> dict:
-    return json.loads((root / 'gnu-tests' / 'ledger/gnu-tests-pin.json').read_text())
+    return json.loads((root / 'ledger/gnu-tests-pin.json').read_text())
 
 
 def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> dict:
