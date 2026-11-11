@@ -490,7 +490,32 @@ A recompute today's FSRS refuses is drift too, never a replay failure."
       (setcar (nthcdr 13 row) (gnosis-scheduler--add-days 20260830 interval))
       (should-not (funcall replay (list 0.8 weights)))
       (should (equal '(:stability :raw-interval-days) (funcall replay (list 0.8 nil))))
-      (should (equal '(:raw-interval-days) (funcall replay (list 0.9 weights)))))))
+      (should (equal '(:raw-interval-days) (funcall replay (list 0.9 weights))))
+      ;; Through the database: each configuration row carries its weights
+      ;; and retention, read back as replay's terms.  Thema 3 records the
+      ;; review under its own row; thema 4 the same review under a row
+      ;; storing the defaults, which drifts.
+      (gnosis-sqlite-execute
+       gnosis-db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
+       (list 2 gnosis-fsrs--algorithm gnosis-fsrs--model gnosis-fsrs--implementation
+             0.8 weights))
+      (gnosis-sqlite-execute
+       gnosis-db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
+       (list 3 gnosis-fsrs--algorithm gnosis-fsrs--model gnosis-fsrs--implementation
+             0.8 gnosis-fsrs-default-parameters))
+      (pcase-dolist (`(,thema ,config ,char) '((3 2 ?c) (4 3 ?d)))
+        (gnosis-test-scheduler--seed-state thema)
+        (let ((event (copy-sequence row)))
+          (setcar event (make-string 64 char))
+          (setcar (nthcdr 1 event) thema)
+          (setcar (nthcdr 2 event) config)
+          (gnosis-sqlite-execute
+           gnosis-db "INSERT INTO review_events VALUES
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+           event)))
+      (should (= (plist-get result :stability)
+                 (plist-get (gnosis-scheduler-replay-thema 3 0 gnosis-db) :stability)))
+      (should (equal '(4) (mapcar #'car (gnosis-scheduler-drift gnosis-db)))))))
 
 (ert-deftest gnosis-test-scheduler-reviews-on-under-a-new-implementation ()
   "A state recorded under an earlier implementation of the model reviews on."
