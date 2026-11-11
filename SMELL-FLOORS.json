@@ -222,6 +222,8 @@
     "generated": [
       "Cargo.lock",
       "crates/romacs-vm-gui/tests/fixtures/startup-order-gui.txt",
+      "crates/romacs-vm/loom/ctrace-slot-loom/Cargo.lock",
+      "crates/romacs-vm/loom/p74-cell-loom/Cargo.lock",
       "crates/romacs-vm/src/prims/capitalize-tables.in",
       "crates/romacs-vm/src/prims/mod.rs",
       "crates/romacs-vm/tests/fixtures/format-mode-line-tty.txt",
