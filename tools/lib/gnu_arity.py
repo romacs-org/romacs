@@ -28,7 +28,7 @@ PLATFORM = re.compile(r'^(w32|ns|haiku|android|msdos|dos|pgtk)')
 
 
 def pin(root):
-    return json.loads((root / 'LISP-PIN.json').read_text())['gnu_commit']
+    return json.loads((root / 'ledger/lisp-pin.json').read_text())['gnu_commit']
 
 
 def git(gnu, *args):

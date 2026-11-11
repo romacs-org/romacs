@@ -41,7 +41,7 @@ calls without rewriting recording provenance.
 
 ## Recording and review
 
-Build the reference described by `parity-reference.toml` with
+Build the reference described by `ledger/parity-reference.toml` with
 `tools/build-gnu-oracle.sh`. An intentional new recording uses
 `python3 "$V/varh.py" record --gnu "$ROMACS_GNU_ORACLE" --jobs 8`.
 Inspect every changed answer and its oracle identity. Do not refresh hashes or

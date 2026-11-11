@@ -224,7 +224,6 @@ pub(super) struct MarkView<'a> {
     variable_redirects: &'a [Option<VariableRedirect>],
     functions: &'a [Arc<Function>],
     generated_symbols: &'a HashMap<GeneratedName, usize>,
-    caches: &'a [Cache],
     cell_pairs: &'a HashMap<usize, Value>,
     execution: &'a threaded::Program,
     spare_programs: &'a [threaded::Program],
@@ -239,7 +238,7 @@ impl Vm {
     pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool]) -> MarkView<'a> {
         MarkView {
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
-            generated_symbols: &self.generated_symbols, caches: &self.caches, cell_pairs: &self.cell_pairs,
+            generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
             stacks: self.register_roots(),
             in_obarray, local_binding, code_marks,
@@ -844,16 +843,19 @@ impl Marking {
             op.visit_values(&mut |v| if keep(v) { w.stack.push(*v) });
             // Only a symbol interned in an obarray of its own can die.
             let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
+            // A direct call's cache is not followed: its target is read only
+            // under its slot's version, and then the slot's cell holds it. A
+            // site's lowered entry still names the function it last entered
+            // (`Program::trace_function'), so that function's code, though
+            // not what a closure of it captured, lives until the site runs
+            // again.
             match op {
                 Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _)
                 | Op::BindLate(slot, _) | Op::ReadLate(_, _, slot) | Op::WriteLate(_, _, slot)
                 | Op::Define(slot, _) | Op::DefineMacro(slot, _)
-                | Op::Sealed(_, slot, _, _) => w.stack.extend(symbol(slot)),
+                | Op::Sealed(_, slot, _, _)
+                | Op::Direct(_, slot, _, _, _) => w.stack.extend(symbol(slot)),
                 Op::Closure(_, child, _) => w.code.push(child),
-                Op::Direct(_, slot, cache, _, _) => {
-                    w.stack.extend(symbol(slot));
-                    w.stack.push(view.caches[cache].target);
-                }
                 _ => {}
             }
         }

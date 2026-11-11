@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from leaf_sequences_run import ROOT, LOGS, env
 
-binary = _portable_os.environ.get('ROMACS_VM2_BIN', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'target/debug/romacs-vm'))
+binary = _portable_os.environ.get('ROMACS_VM2_BIN', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'ledger/parity-reference.toml').is_file()) / 'target/debug/romacs-vm'))
 rows = []
 for name in ['mapconcat', 'sort']:
     evidence = json.loads((ROOT / f'crates/romacs-vm/tools/primh/evidence/{name}.json').read_text())
