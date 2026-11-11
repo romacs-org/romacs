@@ -949,12 +949,12 @@ impl Vm {
         };
         Ok(pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
     }
-    fn annotation_base(&self, raw: &[(String, Value)], key: Value) -> Result<Option<Value>> {
+    fn annotation_base(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Option<Value>> {
         let name = self.annotation_symbol_name(key)?;
-        if let Some((_, v)) = raw.iter().find(|(k, _)| k == name) {
+        if let Some((_, v)) = raw.iter().find(|(k, _)| k.as_ref() == name) {
             return Ok(Some(*v));
         }
-        if let Some((_, category)) = raw.iter().find(|(k, _)| k == "category") {
+        if let Some((_, category)) = raw.iter().find(|(k, _)| k.as_ref() == "category") {
             let plist = self.annotation_symbol_plist(*category)?;
             // GNU category nil, unlike directly stored nil, does not mask aliases/defaults.
             return Ok(self
@@ -963,7 +963,23 @@ impl Vm {
         }
         Ok(None)
     }
-    pub(super) fn annotation_resolve(&self, raw: &[(String, Value)], key: Value) -> Result<Value> {
+    /// The names of the properties whose values at a position decide
+    /// [`Self::annotation_resolve`] of KEY there: KEY, `category`, and
+    /// KEY's aliases in `char-property-alias-alist`.
+    pub(super) fn annotation_deciding_keys(&self, key: Value) -> Result<Vec<&str>> {
+        let mut names = vec![self.annotation_symbol_name(key)?, "category"];
+        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
+            let (alias_key, aliases) = self.cons_pair(entry)?;
+            if alias_key == key {
+                for alias in self.list_values(aliases)? {
+                    names.push(self.annotation_symbol_name(alias)?);
+                }
+                break;
+            }
+        }
+        Ok(names)
+    }
+    pub(super) fn annotation_resolve(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }

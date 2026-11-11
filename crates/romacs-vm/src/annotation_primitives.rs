@@ -10,6 +10,15 @@ use crate::{
     overlay_order::SortItem,
     *,
 };
+/// What a walk of the runs that decide a property found.
+enum RunWalk<T> {
+    /// The object's properties are not kept by key, or the property names
+    /// no interned symbol: read by position.
+    ByPosition,
+    /// What the walk's function answered, or None when no run made it
+    /// answer.
+    Walked(Option<T>),
+}
 impl Vm {
     pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
         let index = self.buffer_index()?;
@@ -1297,6 +1306,13 @@ impl Vm {
         if low == high || !intervals {
             return Ok(if (value == Value::NIL) != equal { Value::NIL } else { Value::integer(from).map_err(Fault::Error)? });
         }
+        if let Some(bytes) = self.property_run_bytes(object, from, to) {
+            let found = self.property_value_runs(object, property, bytes, |run, here| ((here == value) == equal).then_some(run.start))?;
+            if let RunWalk::Walked(found) = found {
+                let Some(byte) = found else { return Ok(Value::NIL) };
+                return Value::integer(self.property_query_scalar(object, byte)?).map_err(Fault::Error);
+            }
+        }
         for at in from..to {
             let raw = self.annotation_raw(object, at as usize).map_err(Fault::Error)?;
             if (self.annotation_resolve(&raw, property).map_err(Fault::Error)? == value) == equal {
@@ -1304,6 +1320,50 @@ impl Vm {
             }
         }
         Ok(Value::NIL)
+    }
+
+    /// The bytes of OBJECT's characters FROM to TO, validated positions of
+    /// a string or a multibyte buffer; None for another object.
+    fn property_run_bytes(&self, object: Value, from: i64, to: i64) -> Option<std::ops::Range<ByteOffset>> {
+        let byte = |at: i64| match self.object_if(object)? {
+            Object::String(s) | Object::RawString(s) => s.byte_offset(CharOffset(usize::try_from(at).ok()?)).map(ByteOffset),
+            Object::Buffer(b) => b.byte_of_char(CharOffset(usize::try_from(at - 1).ok()?)).ok(),
+            _ => None,
+        };
+        Some(byte(from)?..byte(to)?)
+    }
+
+    /// OBJECT's text in BYTES as stretches over which textget of PROP is
+    /// one value, in order, until F answers one: what F answered, or None
+    /// when none did.  The stretches are the runs of the properties that
+    /// decide PROP (`annotation_deciding_keys`), so the cost is theirs, not
+    /// the positions' nor every property's.
+    fn property_value_runs<T>(
+        &self,
+        object: Value,
+        prop: Value,
+        bytes: std::ops::Range<ByteOffset>,
+        mut f: impl FnMut(std::ops::Range<ByteOffset>, Value) -> Option<T>,
+    ) -> std::result::Result<RunWalk<T>, crate::prim::Fault> {
+        let properties = match self.object_if(object) {
+            Some(Object::String(s) | Object::RawString(s)) => &s.properties,
+            Some(Object::Buffer(b)) => &b.properties,
+            _ => return Ok(RunWalk::ByPosition),
+        };
+        let Ok(keys) = self.annotation_deciding_keys(prop) else { return Ok(RunWalk::ByPosition) };
+        // Where none of the keys is set, the defaults alone answer.
+        let mut unset = None;
+        for (run, values) in properties.key_runs(bytes, keys) {
+            let here = if let (true, Some(value)) = (values.is_empty(), unset) {
+                value
+            } else {
+                let value = self.annotation_resolve(&values, prop).map_err(crate::prim::Fault::Error)?;
+                if values.is_empty() { unset = Some(value); }
+                value
+            };
+            if let Some(answer) = f(run, here) { return Ok(RunWalk::Walked(Some(answer))); }
+        }
+        Ok(RunWalk::Walked(None))
     }
 
     pub(crate) fn next_single_char_property_change_values(
@@ -1569,6 +1629,19 @@ impl Vm {
         let (pos, bytes, end) = self.property_query_cursor(object, position, false)?;
         let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
         if pos >= end { return none(); }
+        // The runs of the properties that decide PROP, from POSITION to
+        // LIMIT: the first whose value is not POSITION's starts the change.
+        let stop = limit.map_or(end, |l| l.clamp(pos, end));
+        if let Some(run_bytes) = self.property_run_bytes(object, pos, stop) {
+            let mut here = None;
+            let found = self.property_value_runs(object, prop, run_bytes, |run, value| {
+                (*here.get_or_insert(value) != value).then_some(run.start)
+            })?;
+            if let RunWalk::Walked(found) = found {
+                let Some(byte) = found else { return none() };
+                return Value::integer(self.property_query_scalar(object, byte)?).map_err(Fault::Error);
+            }
+        }
         let here = self.property_textget(object, pos, prop)?;
         // The runs after POSITION, one at a time, as GNU walks intervals:
         // the cost is the runs passed, not the object's.

@@ -621,6 +621,28 @@ impl KeyReader<'_> {
         value
     }
 }
+    }
+}
+
+/// The runs of a range seen through a few keys ([`Properties::key_runs`]):
+/// each run's bytes and the values of those keys its characters have.
+pub(crate) struct KeyRuns<'a> {
+    layers: Vec<(&'a str, &'a Tree)>,
+    at: ByteOffset,
+    end: ByteOffset,
+}
+impl<'a> Iterator for KeyRuns<'a> {
+    type Item = (Range<ByteOffset>, Vec<(&'a str, Value)>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let at = self.at;
+        if at >= self.end {
+            return None;
+        }
+        let values = self.layers.iter().filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| (*key, r.value))).collect();
+        self.at = self.layers.iter().fold(self.end, |next, (_, root)| next.min(root.change_after(at, next)));
+        Some((at..self.at, values))
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct Properties {
@@ -694,19 +716,19 @@ impl Properties {
     /// a run ends only where one of KEYS changes, and holds those of KEYS
     /// its characters have.  Costs the runs of KEYS, not of every property.
     pub fn runs_of(&self, range: Range<ByteOffset>, keys: &[String]) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
-        let layers: Vec<(&str, &Tree)> =
-            keys.iter().filter_map(|key| Some((key.as_str(), self.layers.get(key)?.as_deref()?))).collect();
-        let mut runs = Vec::new();
-        let mut at = range.start;
-        while at < range.end {
-            let values = layers
-                .iter()
-                .filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| ((*key).to_owned(), r.value)))
-                .collect();
-            runs.push((at, values));
-            at = layers.iter().fold(range.end, |next, (_, root)| next.min(root.change_after(at, range.end)));
-        }
-        runs
+        self.key_runs(range, keys.iter().map(String::as_str))
+            .map(|(run, values)| (run.start, values.into_iter().map(|(key, value)| (key.to_owned(), value)).collect()))
+            .collect()
+    }
+    /// [`Self::runs_of`], one run at a time: a caller that stops early pays
+    /// for the runs it read.
+    pub fn key_runs<'a, 'k>(&'a self, range: Range<ByteOffset>, keys: impl IntoIterator<Item = &'k str>) -> KeyRuns<'a> {
+        let layers = keys
+            .into_iter()
+            .filter_map(|key| self.layers.get_key_value(key))
+            .filter_map(|(key, root)| Some((key.as_str(), root.as_deref()?)))
+            .collect();
+        KeyRuns { layers, at: range.start, end: range.end }
     }
     /// Whether any text has the property KEY.
     pub fn has_key(&self, key: &str) -> bool {
