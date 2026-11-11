@@ -1513,6 +1513,13 @@ Optional VALIDATE checks caller ownership before selection and replacement.
 
 ;;; Generated autoloads from gnosis-scheduler.el
 
+(autoload 'gnosis-scheduler-drift "gnosis-scheduler"
+"Return the reviews in DB that today's FSRS schedules differently.
+Replay every reviewed thema and list (THEMA-ID . DRIFT) for each with
+drift, DRIFT as `gnosis-scheduler-replay' reports it.  Nothing is
+written.
+
+(fn &optional DB)")
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
 "Select user-wide desired RETENTION for future accepted reviews.
 Append an immutable configuration snapshot.  Existing due dates and events
