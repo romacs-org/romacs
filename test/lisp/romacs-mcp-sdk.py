@@ -75,7 +75,7 @@ def run(output):
     env = {"HOME": str(root/"home"), "XDG_RUNTIME_DIR": str(root/"run"), "TMPDIR": str(root), "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "RUST_LOG": "error"}
     env.update({"XDG_"+name.upper()+"_HOME": str(root/name) for name in ("cache", "config", "state", "data")})
     socket = root/"run/mcp"
-    command = [str(executable), "-Q", "--fg-daemon=native-mcp-sdk", "-L", str(repo/"rlisp"), "--eval", f'(setq server-socket-dir {json.dumps(str(root/"run"))})', "--eval", '(progn (require \'romacs-mcp-companion) (romacs-mcp-enable-companion-tools))', "--eval", f'(romacs-mcp-start {json.dumps(str(socket))})']
+    command = [str(executable), "-Q", "--fg-daemon=native-mcp-sdk", "-L", str(repo/"lisp/romacs"), "--eval", f'(setq server-socket-dir {json.dumps(str(root/"run"))})', "--eval", '(progn (require \'romacs-mcp-companion) (romacs-mcp-enable-companion-tools))', "--eval", f'(romacs-mcp-start {json.dumps(str(socket))})']
     output.mkdir(parents=True, exist_ok=True)
     log = (output/"daemon.log").open("w")
     rows = []

@@ -93,7 +93,7 @@ thousandth a stack mark."
             names))
     (nreverse names)))
 
-;;;; User options (rlisp/romacs-option.el)
+;;;; User options (lisp/romacs/romacs-option.el)
 
 (defun scaling--declare-options (prefix n)
   "Declare N integer options named from PREFIX in one group, and name them."
@@ -197,9 +197,9 @@ comment and string syntax, its summaries made by one parse to the end."
 
 ;;;; Processes and timers
 
-;;;; Input methods (rlisp/vm/keyboard.el `romacs--read-char')
+;;;; Input methods (lisp/romacs/vm/keyboard.el `romacs--read-char')
 
-;;;; Mode line (rlisp/romacs-mode-line.el)
+;;;; Mode line (lisp/romacs/romacs-mode-line.el)
 
 (defvar scaling-mode-line-hook nil)
 
@@ -308,7 +308,7 @@ comment and string syntax, its summaries made by one parse to the end."
         (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
     (romacs-agent-buffer session)))
 
-;;;; Session images (rlisp/warm-restart.el)
+;;;; Session images (lisp/romacs/warm-restart.el)
 
 (defun scaling--session (n)
   "N text buffers, and a private image directory."
@@ -345,7 +345,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (beginning-of-visual-line)
   (window-text-pixel-size nil (line-beginning-position) (point)))
 
-;;;; Jabber: the archive catch-up's collections (rlisp/jabber/jabber-mam.el,
+;;;; Jabber: the archive catch-up's collections (lisp/romacs/jabber/jabber-mam.el,
 ;;;; jabber-mam-sync.el).  A connection here is an FSM symbol with state
 ;;;; data and no transport: the probes count bookkeeping, not traffic.
 
@@ -416,7 +416,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (goto-char (point-min))
   (current-buffer))
 
-;;;; Attachments (rlisp/romacs-attach.el)
+;;;; Attachments (lisp/romacs/romacs-attach.el)
 
 (defun scaling--attach-files (n)
   "N small distinct PNG files in a temporary directory: their names."
@@ -461,7 +461,7 @@ closures over a mutable variable (each a closure and a cell)."
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
 ;; A session no key has reached has no `romacs--idle-collect' (the lazy
-;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; lisp/romacs/vm/keyboard.el) and shows a startup message, so the probe supplies
 ;; the one and clears the other.  A step with no collection after the last ends the session,
 ;; which fails the measure.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.

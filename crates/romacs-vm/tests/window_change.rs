@@ -1,4 +1,4 @@
-//! window.c's window change functions (rlisp/vm/window-change.el, run by
+//! window.c's window change functions (lisp/romacs/vm/window-change.el, run by
 //! each redisplay's frame snapshot). Against pinned GNU, which runs no
 //! redisplay in batch: `run-window-configuration-change-hook' runs each
 //! window's buffer-local functions with that window selected and its
@@ -15,7 +15,7 @@ fn bootstrapped() -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("gnu-lisp");
+    let lisp = root.join("lisp/gnu");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
@@ -23,10 +23,10 @@ fn bootstrapped() -> Vm {
     names.sort();
     let mut paths = vec![lisp.clone()];
     paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("rlisp"));
+    paths.push(root.join("lisp/romacs"));
     vm.set_load_path(&paths).unwrap();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
     vm
 }
 
@@ -53,14 +53,14 @@ fn configuration_change_hook_matches_pinned_gnu() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
     let mut vm = bootstrapped();
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
     assert_eq!(vm.eval_source(CONFIGURATION).unwrap().display().unwrap(), expected);
 }
 
 #[test]
 fn redisplay_runs_window_change_functions() {
     let mut vm = bootstrapped();
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
     let source = r#"(let ((log nil) (a (get-buffer-create "wc-a")) (b (get-buffer-create "wc-b")))
   (delete-other-windows)
   (switch-to-buffer a)
@@ -89,7 +89,7 @@ fn redisplay_runs_window_change_functions() {
 #[test]
 fn frame_snapshots_run_window_change_functions_on_changes() {
     let mut vm = bootstrapped();
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
     vm.eval_source(r#"(progn (delete-other-windows) (switch-to-buffer (get-buffer-create "wc-a")) (setq wc-log nil))"#).unwrap();
     // The first snapshot lays the frame out at its size, a size change.
     vm.frame_snapshot(800, 600).unwrap();

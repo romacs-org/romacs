@@ -232,30 +232,30 @@ fn completion_preserves_native_predicates_names_and_early_results() {
 fn unmodified_gnu_regexp_opt_uses_native_completion() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
-    let paths = ["gnu-lisp", "gnu-lisp/emacs-lisp", "gnu-lisp/progmodes"]
+    let paths = ["lisp/gnu", "lisp/gnu/emacs-lisp", "lisp/gnu/progmodes"]
         .map(|path| format!("{:?}", root.join(path).to_str().unwrap()))
         .join(" ");
     vm.eval_source(&format!("(setq load-path '({paths}))"))
         .unwrap();
     for file in [
-        "rlisp/vm/prelude.el",
-        "gnu-lisp/emacs-lisp/debug-early.el",
-        "gnu-lisp/emacs-lisp/byte-run.el",
-        "gnu-lisp/emacs-lisp/backquote.el",
-        "gnu-lisp/subr.el",
-        "gnu-lisp/keymap.el",
-        "gnu-lisp/emacs-lisp/pcase.el",
-        "gnu-lisp/emacs-lisp/gv.el",
-        "gnu-lisp/emacs-lisp/inline.el",
-        "gnu-lisp/bindings.el",
-        "gnu-lisp/emacs-lisp/easy-mmode.el",
-        "gnu-lisp/emacs-lisp/cl-lib.el",
-        "gnu-lisp/button.el",
-        "gnu-lisp/emacs-lisp/derived.el",
-        "gnu-lisp/obarray.el",
-        "gnu-lisp/emacs-lisp/rx.el",
-        "gnu-lisp/abbrev.el",
-        "gnu-lisp/emacs-lisp/regexp-opt.el",
+        "lisp/romacs/vm/prelude.el",
+        "lisp/gnu/emacs-lisp/debug-early.el",
+        "lisp/gnu/emacs-lisp/byte-run.el",
+        "lisp/gnu/emacs-lisp/backquote.el",
+        "lisp/gnu/subr.el",
+        "lisp/gnu/keymap.el",
+        "lisp/gnu/emacs-lisp/pcase.el",
+        "lisp/gnu/emacs-lisp/gv.el",
+        "lisp/gnu/emacs-lisp/inline.el",
+        "lisp/gnu/bindings.el",
+        "lisp/gnu/emacs-lisp/easy-mmode.el",
+        "lisp/gnu/emacs-lisp/cl-lib.el",
+        "lisp/gnu/button.el",
+        "lisp/gnu/emacs-lisp/derived.el",
+        "lisp/gnu/obarray.el",
+        "lisp/gnu/emacs-lisp/rx.el",
+        "lisp/gnu/abbrev.el",
+        "lisp/gnu/emacs-lisp/regexp-opt.el",
     ] {
         let source = format!("(load {:?} nil t)", root.join(file).to_str().unwrap());
         vm.eval_source(&source)

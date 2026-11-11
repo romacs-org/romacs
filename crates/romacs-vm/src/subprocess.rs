@@ -1,7 +1,7 @@
 //! GNU process.c and callproc.c operating-system mechanics: process objects'
 //! native state, descriptors, spawning, reaping and polling. Nothing here
 //! calls Lisp; the wait loop that runs filters, sentinels and timers is Lisp
-//! (rlisp/vm/subprocess.el) over the leaf primitives in prims/process.rs.
+//! (lisp/romacs/vm/subprocess.el) over the leaf primitives in prims/process.rs.
 use crate::Value;
 use std::collections::BTreeMap;
 use std::io;

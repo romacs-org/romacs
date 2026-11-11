@@ -297,7 +297,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
               (romacs-complete--message (current-message)) (push (funcall glow) r)
               (romacs-layer--note-command-error '(quit))
               (romacs-complete--message \"Saved\") (push (funcall glow) r))
-            (romacs-complete--message (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/rlisp/romacs-defaults.el\" \"~\") \" \" (make-string 120 ?x)))
+            (romacs-complete--message (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/romacs/romacs-defaults.el\" \"~\") \" \" (make-string 120 ?x)))
             (let* ((f (romacs-layer--frame (caar romacs-layer--toasts))) (text (nth 1 (car romacs-layer--toasts))))
               ;; Its outer width, the glass padding included.
               (push (list (<= (frame-pixel-width f) 420)
@@ -324,7 +324,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         // ending in `...' where more follow (pinned GNU 32 batch: the same).
         report.push(printed(&mut vm, "(progn
             (mapcar (lambda (c) (string-to-multibyte (romacs-layer--toast-text (car c) (cadr c))))
-                    (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/rlisp/romacs-defaults.el\" \"~\")) 36)
+                    (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/romacs/romacs-defaults.el\" \"~\")) 36)
                           (list \"Open /tmp/long-directory/test.el or https://example.org/tmp/long-directory/test.el\" 60)
                           (list (concat \"Wrote /tmp/\" (make-string 60 ?a) \".txt\") 40)
                           (list \"abcdefghijk lmnopqrstuv wxyzabcdefg\" 20)
@@ -412,7 +412,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         "(200 7 0)", "(\"cand-06\" (5 5 60 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "((1 t \"second\") nil romacs-layer-toast-error romacs-layer-toast-error nil (t t t t) t)",
-                        "(\"Wrote ~/.../rlisp/romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/.../aaaaaaaaaaa...aaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv ...\" \"line one\\nline two ...\" \"Wrote\\n/.../界界界界界...界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
+                        "(\"Wrote ~/.../romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/.../aaaaaaaaaaa...aaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv ...\" \"line one\\nline two ...\" \"Wrote\\n/.../界界界界界...界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
                         "(\"a      \\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ...\" 8)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal
@@ -573,7 +573,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
         r##"(nil light "#7f7f7f" t)"##]);
 }
 
-/// rlisp/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
+/// lisp/romacs/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
 /// the session starts in the stock theme `default';
 /// defining a theme changes no face; a colour scheme replaces the stock
 /// theme once; disabling it gives GNU's faces.
@@ -626,7 +626,7 @@ fn romacs_theme_author_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
 }
 
-/// rlisp's commands declare where they apply and its key hints come from
+/// lisp/romacs's commands declare where they apply and its key hints come from
 /// bindings (tests/romacs-idioms-test.el).
 #[test]
 fn romacs_idioms_tests_pass() {
@@ -648,7 +648,7 @@ fn theme_lisp_tests_pass(file: &'static str) {
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for file in ["rlisp/romacs-test.el", file] {
+        for file in ["lisp/romacs/romacs-test.el", file] {
             vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         }
         printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")

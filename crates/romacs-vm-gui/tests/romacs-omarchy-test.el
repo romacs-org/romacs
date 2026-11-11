@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; rlisp/romacs-omarchy.el over a fake Omarchy state directory, in a
+;; lisp/romacs/romacs-omarchy.el over a fake Omarchy state directory, in a
 ;; `--loadup' session (gnu_completion.rs `romacs_omarchy_tests_pass').
 ;; These call the follow directly; harness/omarchy_live.py proves the
 ;; watch, the delay and the frame.

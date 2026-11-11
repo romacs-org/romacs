@@ -29,7 +29,7 @@ struct Session { vm: Vm, engine: Rc<RefCell<romacs_layout::LayoutEngine>>, width
 
 fn session() -> Session {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     vm.eval_source("(setq noninteractive nil)").unwrap();
     let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
     // 100 columns of text between fringes a column wide (the probe sets

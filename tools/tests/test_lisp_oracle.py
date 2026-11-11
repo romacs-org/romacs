@@ -32,11 +32,11 @@ class RealPinControls(unittest.TestCase):
         cls.manifest = json.loads((ROOT / ORACLE.GENERATED_FILE).read_text())
         cls.scratch = tempfile.TemporaryDirectory(prefix='lisp-oracle-controls-')
         cls.root = Path(cls.scratch.name)
-        shutil.copytree(ROOT / 'gnu-lisp', cls.root / 'gnu-lisp')
+        shutil.copytree(ROOT / 'lisp/gnu', cls.root / 'lisp/gnu')
         for name in (ORACLE.PIN_FILE, ORACLE.GENERATED_FILE):
             shutil.copyfile(ROOT / name, cls.root / name)
         cls.pristine = ORACLE.local_path(next(p for p in sorted(cls.pinned) if p.endswith('.el')))
-        cls.support = 'gnu-lisp/international/uni-old-name.el'
+        cls.support = 'lisp/gnu/international/uni-old-name.el'
 
     @classmethod
     def tearDownClass(cls):
@@ -97,8 +97,8 @@ class RealPinControls(unittest.TestCase):
             self.refused('MODIFIED SUPPORT ' + self.support)
 
     def test_04_undeclared_extra_refused_without_git(self):
-        with self.changed('gnu-lisp/undeclared-test.el', b'; undeclared\n'):
-            self.refused('EXTRA gnu-lisp/undeclared-test.el')
+        with self.changed('lisp/gnu/undeclared-test.el', b'; undeclared\n'):
+            self.refused('EXTRA lisp/gnu/undeclared-test.el')
 
     def test_05_missing_pinned_input_refused(self):
         with self.changed(self.pristine, None):
@@ -109,8 +109,8 @@ class RealPinControls(unittest.TestCase):
             self.refused('ABSENT SUPPORT ' + self.support)
 
     def test_15_an_excluded_path_must_stay_deleted(self):
-        with self.changed('gnu-lisp/README', b'GNU README\n'):
-            self.refused('EXCLUDED gnu-lisp/README')
+        with self.changed('lisp/gnu/README', b'GNU README\n'):
+            self.refused('EXCLUDED lisp/gnu/README')
 
     def test_16_an_exclusion_that_drops_nothing_is_refused(self):
         record = json.loads((self.root / ORACLE.PIN_FILE).read_text())
@@ -152,13 +152,13 @@ class RealPinControls(unittest.TestCase):
 
     def test_12_local_paths_cannot_be_upstream_source_references(self):
         def local_source(record):
-            record['sources']['autoloads']['paths'] = ['gnu-lisp/Makefile.in']
+            record['sources']['autoloads']['paths'] = ['lisp/gnu/Makefile.in']
         with self.changed_manifest(local_source):
-            self.refused('source gnu-lisp/Makefile.in is not a GNU Git path at the pin')
+            self.refused('source lisp/gnu/Makefile.in is not a GNU Git path at the pin')
 
     def test_13_old_local_support_paths_are_not_runtime_aliases(self):
         def old_local(record):
-            record['files'][0][0] = record['files'][0][0].replace('gnu-lisp/', 'lisp/', 1)
+            record['files'][0][0] = record['files'][0][0].replace('lisp/gnu/', 'lisp/', 1)
         with self.changed_manifest(old_local):
             self.refused('invalid support path lisp/')
 
@@ -186,8 +186,8 @@ class HistoricalPopulations(unittest.TestCase):
                 calls.append((repo, rev, prefix))
                 if repo == 'gnu':
                     return {'lisp/a.el': 'old'}
-                if prefix == 'gnu-lisp':
-                    return {'gnu-lisp/a.el': 'old'} if migrated else {}
+                if prefix == 'lisp/gnu':
+                    return {'lisp/gnu/a.el': 'old'} if migrated else {}
                 return {'lisp/a.el': 'old'}
             output = io.StringIO()
             with self.subTest(migrated=migrated), \
@@ -198,7 +198,7 @@ class HistoricalPopulations(unittest.TestCase):
                     contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(ORACLE.populations('root', 'gnu', 'pin', 'rev', None), 0)
             self.assertIn('lisp/a.el\tDRIFT\told\tpin\tyes', output.getvalue())
-            self.assertNotIn('gnu-lisp/a.el', output.getvalue())
+            self.assertNotIn('lisp/gnu/a.el', output.getvalue())
             self.assertEqual(('root', 'rev', 'lisp') in calls, not migrated)
 
 

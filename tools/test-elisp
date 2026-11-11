@@ -44,10 +44,10 @@ def main():
     selector = quote(args.match) if args.match is not None else ('(quote ' + args.test + ')' if args.test else 't')
     if args.test and not all(c.isalnum() or c in '-_/:.' for c in args.test):
         parser.error('--test must be a test symbol name')
-    source = f'(setq load-path (cons {quote(ROOT / "rlisp")} load-path))\n(require \'romacs-test)\n'
+    source = f'(setq load-path (cons {quote(ROOT / "lisp/romacs")} load-path))\n(require \'romacs-test)\n'
     source += ''.join(f'(load {quote(path)} nil t)\n' for path in files)
     source += f'(let ((summary (romacs-test-run {selector}))) (when (or (> (plist-get summary :failed) 0) (> (plist-get summary :errors) 0)) (error "Selected Elisp tests failed")))\n(princ "{COMPLETE}\\n")\n'
-    command = [str(binary), '--source'] if args.core else [str(binary), '--batch', str(ROOT / 'rlisp')]
+    command = [str(binary), '--source'] if args.core else [str(binary), '--batch', str(ROOT / 'lisp/romacs')]
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix='romacs-elisp-', dir=os.environ.get('TMPDIR')) as temp:
         env = os.environ.copy()
@@ -55,7 +55,7 @@ def main():
             env.pop(key, None)
         env['HOME'] = temp
         env['TMPDIR'] = temp
-        env['ROMACS_LISP_DIR'] = str(ROOT / 'gnu-lisp')
+        env['ROMACS_LISP_DIR'] = str(ROOT / 'lisp/gnu')
         for key in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'):
             directory = Path(temp) / key.lower()
             directory.mkdir()

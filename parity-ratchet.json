@@ -129,17 +129,17 @@
   "warm": {
    "chain": [
     {
-     "file": "gnu-lisp/emacs-lisp/debug-early.el",
+     "file": "lisp/gnu/emacs-lisp/debug-early.el",
      "forms_completed": 6,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/byte-run.el",
+     "file": "lisp/gnu/emacs-lisp/byte-run.el",
      "forms_completed": 56,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/backquote.el",
+     "file": "lisp/gnu/emacs-lisp/backquote.el",
      "forms_completed": 16,
      "loaded": true
     },
@@ -149,62 +149,62 @@
      "loaded": true
     },
     {
-     "file": "gnu-lisp/subr.el",
+     "file": "lisp/gnu/subr.el",
      "forms_completed": 522,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/keymap.el",
+     "file": "lisp/gnu/keymap.el",
      "forms_completed": 25,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/version.el",
+     "file": "lisp/gnu/version.el",
      "forms_completed": 24,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/widget.el",
+     "file": "lisp/gnu/widget.el",
      "forms_completed": 4,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/custom.el",
+     "file": "lisp/gnu/custom.el",
      "forms_completed": 91,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/map-ynp.el",
+     "file": "lisp/gnu/emacs-lisp/map-ynp.el",
      "forms_completed": 8,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/international/mule.el",
+     "file": "lisp/gnu/international/mule.el",
      "forms_completed": 99,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/international/mule-conf.el",
+     "file": "lisp/gnu/international/mule-conf.el",
      "forms_completed": 269,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/env.el",
+     "file": "lisp/gnu/env.el",
      "forms_completed": 11,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/format.el",
+     "file": "lisp/gnu/format.el",
      "forms_completed": 34,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/bindings.el",
+     "file": "lisp/gnu/bindings.el",
      "forms_completed": 363,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/window.el",
+     "file": "lisp/gnu/window.el",
      "forms_completed": 433,
      "loaded": true
     },
@@ -219,12 +219,12 @@
      "loaded": true
     },
     {
-     "file": "gnu-lisp/files.el",
+     "file": "lisp/gnu/files.el",
      "forms_completed": 445,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/macroexp.el",
+     "file": "lisp/gnu/emacs-lisp/macroexp.el",
      "forms_completed": 50,
      "loaded": true
     },
@@ -234,22 +234,22 @@
      "loaded": true
     },
     {
-     "file": "gnu-lisp/cus-face.el",
+     "file": "lisp/gnu/cus-face.el",
      "forms_completed": 9,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/faces.el",
+     "file": "lisp/gnu/faces.el",
      "forms_completed": 222,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/loaddefs.el",
+     "file": "lisp/gnu/loaddefs.el",
      "forms_completed": 5425,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/button.el",
+     "file": "lisp/gnu/button.el",
      "forms_completed": 47,
      "loaded": true
     },
@@ -259,22 +259,22 @@
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/cl-preloaded.el",
+     "file": "lisp/gnu/emacs-lisp/cl-preloaded.el",
      "forms_completed": 99,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/emacs-lisp/oclosure.el",
+     "file": "lisp/gnu/emacs-lisp/oclosure.el",
      "forms_completed": 34,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/obarray.el",
+     "file": "lisp/gnu/obarray.el",
      "forms_completed": 8,
      "loaded": true
     },
     {
-     "file": "gnu-lisp/abbrev.el",
+     "file": "lisp/gnu/abbrev.el",
      "forms_completed": 91,
      "loaded": true
     }

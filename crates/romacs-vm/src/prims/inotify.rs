@@ -1,5 +1,5 @@
 //! GNU inotify.c's system calls (`prim/leaf/inotify.rs`), under the
-//! `inotify-*' functions and the event dispatch of rlisp/vm/inotify.el.
+//! `inotify-*' functions and the event dispatch of lisp/romacs/vm/inotify.el.
 use super::*;
 
 // (romacs--inotify-add-watch FILE MASK): FILE's watch descriptor, an

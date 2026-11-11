@@ -1,5 +1,5 @@
 //! Background compiles: what fills the store ahead of use in an
-//! interactive session (design note §4.8; rlisp/romacs-precompile.el is
+//! interactive session (design note §4.8; lisp/romacs/romacs-precompile.el is
 //! the switch). A host thread owns the work: the files loads read from
 //! source for want of an artifact (`note_miss`), then the files compiled
 //! loads used before, then every file of the installation's Lisp trees, as
