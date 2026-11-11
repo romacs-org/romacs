@@ -214,38 +214,34 @@ That is a live file watch or process, or a timer or idle timer due within
       (let ((delay (romacs--timer-delay)))
         (and delay (<= delay romacs-batch-read-horizon)))))
 
-(defun romacs--batch-wait-p (seconds)
-  "Whether a batch read with nothing queued waits, for SECONDS or input.
-With SECONDS it does.  Without, it starts idling first, as GNU's
-read_char does before it blocks for input, and waits if input may come
-soon (`romacs--batch-input-soon-p')."
-  (or seconds
-      (progn (romacs--timer-start-idle)
-             (or (romacs--batch-input-soon-p)
-                 (progn (romacs--timer-stop-idle) nil)))))
-
 (defun romacs--read-batch-wait (seconds)
   "kbd_buffer_get_event's wait with no terminal to read: run timers, idle
 timers, process output and file notification events until input is
 requeued, or SECONDS pass, or, without SECONDS, until no input may come
 soon: none queued within `romacs-batch-read-horizon' of the last live
-process or watch, and no timer due within it.  It waits in short slices,
-so it sees a process end or a sentinel queue a key."
+process or watch, and no timer due within it.  Without SECONDS it idles
+for the wait, as GNU's read_char does before it blocks.  It waits in
+short slices, so it sees a process end or a sentinel queue a key."
   (let* ((start (float-time))
          (end (and seconds (+ start seconds)))
          (deadline (+ start romacs-batch-read-horizon))
          (waiting t))
     (unwind-protect
-        (while waiting
-          (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
-          (let ((now (float-time)))
-            (when (romacs--batch-live-p) (setq deadline (+ now romacs-batch-read-horizon)))
-            (if (or (romacs--unread-p)
-                    (if end (>= now end)
-                      (or (> now deadline) (not (romacs--batch-input-soon-p)))))
-                (setq waiting nil)
-              (romacs--wait-reading-process-output
-               (if end (min 0.1 (- end now)) 0.1) nil 0 t))))
+        (progn
+          (unless seconds (romacs--timer-start-idle))
+          (while waiting
+            (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
+            (let ((now (float-time)))
+              (when (romacs--batch-live-p) (setq deadline (+ now romacs-batch-read-horizon)))
+              (if (or (romacs--unread-p)
+                      (if end (>= now end)
+                        (or (> now deadline) (not (romacs--batch-input-soon-p)))))
+                  (setq waiting nil)
+                (romacs--wait-reading-process-output
+                 (if end (min 0.1 (- end now)) 0.1) nil 0 t))))
+          ;; A slice may oversleep past the deadline: what fell due runs once
+          ;; more before the read gives up.
+          (unless (or seconds (romacs--unread-p)) (romacs--timer-check)))
       (unless seconds (romacs--timer-stop-idle)))))
 
 (defun romacs--batch-end-of-input ()
@@ -500,7 +496,7 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
      ;; goes on, as read_char's do.
      ((setq c (romacs--take-user-signal))
       (when (romacs--special-event c) (setq c nil again t)))
-     ((and (fboundp 'romacs--wait-reading-process-output) (romacs--batch-wait-p seconds))
+     ((fboundp 'romacs--wait-reading-process-output)
       ;; Batch GNU waits here, in kbd_buffer_get_event: timers, process
       ;; output and file notification events run until SECONDS pass or,
       ;; without SECONDS, for as long as one of them could queue input

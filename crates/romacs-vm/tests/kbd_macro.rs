@@ -333,6 +333,10 @@ const CASES: &[&str] = &[
        (read-event))"#,
     r#"(let ((timer (run-at-time 0.05 0.05 (lambda () (setq unread-command-events (list ?r))))))
   (prog1 (read-event) (cancel-timer timer)))"#,
+    r#"(let ((romacs-batch-read-horizon 0.2))
+  (make-process :name "kt-late" :command '("sh" "-c" "sleep 0.4; echo x")
+                :filter (lambda (_p _s) (setq unread-command-events (list ?p))))
+  (read-event))"#,
 ];
 
 fn gnu_results(root: &Path) -> Vec<String> {
@@ -369,7 +373,7 @@ fn keyboard_macros_match_gnu() {
 
 /// VM2-KBD1: where batch GNU would block for terminal input forever (no
 /// unread event, no macro input left, no host keyboard, and nothing that
-/// could still queue input but a repeating timer), VM2 signals
+/// may queue input within `romacs-batch-read-horizon'), VM2 signals
 /// `end-of-file`, from the innermost recursive edit when there is one.
 #[test]
 fn reading_past_the_input_signals_end_of_file() {
@@ -383,8 +387,9 @@ fn reading_past_the_input_signals_end_of_file() {
         // that ends without queuing, undo's ten-second boundary timer after
         // an edit, a timer an hour away.  A stray entry in the timer list
         // is not a timer.
-        ("(let* ((start (float-time)) (timer (run-at-time 0 0.05 #'ignore)))
-            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 2))
+        ("(let* ((romacs-batch-read-horizon 0.2) (start (float-time))
+                (timer (run-at-time 0 0.05 #'ignore)))
+            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 1))
               (cancel-timer timer)))",
          "(end-of-file t)"),
         ("(let ((start (float-time)))
@@ -393,15 +398,21 @@ fn reading_past_the_input_signals_end_of_file() {
          "(end-of-file t)"),
         ("(let ((start (float-time)))
             (with-current-buffer (get-buffer-create \"kt-undo\") (buffer-enable-undo) (insert \"a\"))
-            (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.5)))",
+            (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.9)))",
          "(end-of-file t)"),
         ("(let* ((start (float-time)) (timer (run-at-time 3600 nil #'ignore)))
-            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.5))
+            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.9))
               (cancel-timer timer)))",
          "(end-of-file t)"),
         ("(let ((timer-list (cons 'not-a-timer timer-list)))
             (condition-case e (read-event) (error (car e))))",
          "end-of-file"),
+        // A read idles only while it waits.
+        ("(list (condition-case e (read-event) (error (car e))) (current-idle-time)
+                (progn (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?k))))
+                       (read-event))
+                (current-idle-time))",
+         "(end-of-file nil 107 nil)"),
         ("(list (read-event nil nil 0.01) (read-char nil nil 0) (read-char-exclusive nil nil 0))", "(nil nil nil)"),
         ("(let (got) (global-set-key \"r\" (lambda () (interactive) (setq got (list (read-event) (read-event)))))
             (list (condition-case e (execute-kbd-macro \"rx\") (error e)) got))",
