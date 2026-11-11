@@ -400,7 +400,8 @@ Replay every reviewed thema from its recorded results and list
 `gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
 one whose history does not replay.  The collection is read in two
 queries and each review recomputed once; nothing is written.
-Interactively, report the count."
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report')."
   (interactive)
   (let* ((db (or db (gnosis--ensure-db)))
          (configs (gnosis-scheduler--configs db))
@@ -511,22 +512,22 @@ config recording that retention, created only when CREATE is non-nil."
         (error "Review precedes retained history, including voids"))
       (let* ((active (gnosis-scheduler--model-config db config))
              (base (car active))
-             ;; Reviews record today's implementation: an active config
-             ;; under an earlier one gives way to its twin under today's.
-             (config (if (cdr active) config
-                       (gnosis-scheduler--retention-config db base create)))
-             (result (gnosis-scheduler--compute-result
-                      event-id thema-id outcome reviewed-at-us review-day
-                      (cons config (cdr state)) base))
-             ;; FSRS stability does not depend on desired retention.
+             (first (gnosis-scheduler--compute-result
+                     event-id thema-id outcome reviewed-at-us review-day
+                     (cons config (cdr state)) base))
+             ;; FSRS stability does not depend on desired retention, so the
+             ;; first pass decides it, whatever configuration it named.
              (exam (gnosis-exam-review-retention
-                    db thema-id review-day base (plist-get result :stability))))
-        (if (null exam)
-            result
-          (gnosis-scheduler--compute-result
-           event-id thema-id outcome reviewed-at-us review-day
-           (cons (gnosis-scheduler--retention-config db exam create) (cdr state))
-           exam))))))
+                    db thema-id review-day base (plist-get first :stability))))
+        (if (and (null exam) (cdr active))
+            first
+          ;; One configuration for the retention used, under today's
+          ;; implementation: found, or made only when CREATE.
+          (let ((retention (or exam base)))
+            (gnosis-scheduler--compute-result
+             event-id thema-id outcome reviewed-at-us review-day
+             (cons (gnosis-scheduler--retention-config db retention create) (cdr state))
+             retention)))))))
 
 (defun gnosis-scheduler-preview-review
     (event-id thema-id outcome reviewed-at-us review-day)
