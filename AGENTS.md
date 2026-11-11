@@ -51,7 +51,9 @@ possible; say so where you do.
   --absolute` holds the trunk to that file at a checkpoint, where `lower`
   records the drops. The file merges by its meaning, each side's raise added:
   `tools/derived setup` installs the merge driver once per repository, and
-  `python3 tools/lib/smells.py resolve` does the same by hand.
+  `python3 tools/lib/smells.py resolve` does the same by hand. The same setup
+  installs the driver that merges the host boundary allow-list entry by
+  entry (`tools/lib/host_allow.py`).
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

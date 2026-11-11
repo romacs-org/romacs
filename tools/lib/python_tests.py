@@ -73,7 +73,12 @@ def oracle_root():
         Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'gnu-emacs-pin')
 
 
-def run(root, path, timeout=300):
+# What a hung test file takes, not what a quiet host does: gate_test.py
+# runs 66 s on an idle host and 279 s at load 90.
+HANG = 1800
+
+
+def run(root, path, timeout=HANG):
     """(PATH, ok, seconds, output tail) for one test file."""
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='pytest-') as private:
