@@ -199,7 +199,7 @@ fn classic_session() -> Vm {
     let mut vm = gnu_session();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     eval(&mut vm, "(defface romacs-layer-glow '((t :foreground \"#d48a20\")) \"\")");
-    vm.load_file(&root.join("rlisp/romacs-chrome.el")).unwrap();
+    vm.load_file(&root.join("lisp/romacs/romacs-chrome.el")).unwrap();
     eval(&mut vm, "(romacs-chrome-apply)");
     assert_eq!(eval(&mut vm, "(list (frame-internal-border-width) (frame-right-divider-width) (window-pixel-width))"), "(6 6 1204)");
     eval(&mut vm, "(romacs-classic-chrome 1)");
@@ -289,7 +289,7 @@ fn classic_chrome_is_todays_geometry() {
 #[test]
 fn a_divider_change_runs_the_size_change_functions() {
     let mut vm = gnu_session();
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
     eval(&mut vm, "(progn (split-window-right) (setq probe-log nil))");
     vm.frame_snapshot(1216, 876).unwrap();
     eval(&mut vm, "(add-hook 'window-size-change-functions (lambda (_) (push 'size probe-log)))");
@@ -352,7 +352,7 @@ fn themed_session() -> Vm {
     let mut vm = gnu_session();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     eval(&mut vm, &format!("(progn (push {:?} load-path) (push {:?} custom-theme-load-path) (require 'romacs-chrome) (romacs-chrome-refresh))",
-                           root.join("rlisp"), root.join("etc/themes")));
+                           root.join("lisp/romacs"), root.join("etc/themes")));
     vm
 }
 

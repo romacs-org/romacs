@@ -1,11 +1,11 @@
 //! GNU window.c `recenter', `scroll-up', `scroll-down' and
 //! `move-to-window-line'. They move by screen lines and set the window's
 //! start, calling `vertical-motion' and Lisp hooks at every step, so they
-//! are Lisp here (rlisp/vm/window-scroll.el), installed by one `Step::Call'
+//! are Lisp here (lisp/romacs/vm/window-scroll.el), installed by one `Step::Call'
 //! of `eval' the first time one runs, as message.rs installs its half.
 use super::*;
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/window-scroll.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/window-scroll.el");
 
 /// Call HELPER of the Lisp half with ARGS, installing the half first;
 /// then, when FOLLOW is a window, move its old point to its point

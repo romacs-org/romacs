@@ -72,7 +72,7 @@ fn the_bar_takes_a_band_above_the_mini_window() {
 #[test]
 fn the_bar_moves_to_the_top() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
     for file in ["romacs-layer.el", "romacs-chrome.el"] { vm.load_file(&root.join(file)).unwrap(); }
     let probe = "(list (window-pixel-top (frame-root-window)) (window-pixel-height (frame-root-window)) (window-body-height) (window-pixel-top (minibuffer-window)) (romacs-chrome-top) (romacs-chrome-bottom))";
     assert_eq!(eval(&mut vm, probe), "(0 826 33 851 0 826)");
@@ -229,7 +229,7 @@ fn no_window_draws_a_band_of_its_own() {
 /// A session whose bar shows Romacs's mode line.
 fn romacs_lines() -> Vm {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -336,7 +336,7 @@ fn a_rename_shows_at_once() {
 #[test]
 fn a_click_after_dashes_reaches_the_shown_element() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/romacs-chrome.el");
     vm.load_file(&root).unwrap();
     eval(&mut vm, "(progn (setq noninteractive nil clicked nil)
         (defvar x-map (let ((m (make-sparse-keymap))) (define-key m [mode-line mouse-1] (lambda () (interactive) (setq clicked 'x))) m))
@@ -384,7 +384,7 @@ impl romacs_vm::LayoutHost for Rows {
 #[test]
 fn a_taller_bar_face_lays_the_frame_out_again_once() {
     let mut vm = session();
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
     vm.set_layout_host(Some(Box::new(Rows)));
     snapshot(&mut vm);
     vm.display_apply_layout(&[]).unwrap();
@@ -408,7 +408,7 @@ fn a_taller_bar_face_lays_the_frame_out_again_once() {
     assert_eq!((shown.y, shown.height), (125 - 25 - 25, 25));
 }
 
-/// `romacs-chrome-bottom' (rlisp/romacs-chrome.el): where a layer anchored
+/// `romacs-chrome-bottom' (lisp/romacs/romacs-chrome.el): where a layer anchored
 /// at the frame's bottom ends, in native pixels: the bar's top, else the
 /// mini-window's (grown too), inside the internal border; with a hosted
 /// minibuffer the frame's bottom, or the top of its layer while that is
@@ -416,7 +416,7 @@ fn a_taller_bar_face_lays_the_frame_out_again_once() {
 #[test]
 fn layers_end_above_the_bar_and_the_minibuffer() {
     let mut vm = gnu_session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/romacs-chrome.el");
     vm.load_file(&root).unwrap();
     let bottom = |vm: &mut Vm, form: &str| eval(vm, form);
     eval(&mut vm, "(modify-frame-parameters nil '((internal-border-width . 6)))");
@@ -455,7 +455,7 @@ fn layers_end_above_the_bar_and_the_minibuffer() {
 #[test]
 fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/romacs-chrome.el");
     vm.load_file(&root).unwrap();
     eval(&mut vm, "(setq noninteractive nil)");
     eval(&mut vm, "(progn (switch-to-buffer \"other\") (switch-to-buffer \"*scratch*\"))");
@@ -493,7 +493,7 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 #[test]
 fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -515,7 +515,7 @@ fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -604,7 +604,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
 #[test]
 fn a_strings_own_marks_reach_the_bar() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -633,7 +633,7 @@ fn the_bar_string_follows_the_painter() {
     vm.frame_snapshot(120, 876).unwrap();
     vm.display_apply_layout(&[]).unwrap();
     let shows = |vm: &mut Vm| { vm.frame_snapshot(120, 876).unwrap(); eval(vm, "(romacs-status-bar-string)") };
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/romacs-chrome.el");
     vm.load_file(&root).unwrap();
     // 120 pixels less 12 of padding at either end: 9 cells of 10.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");

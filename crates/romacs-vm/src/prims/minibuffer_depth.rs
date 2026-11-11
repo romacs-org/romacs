@@ -7,7 +7,7 @@ fn minibuffer_depth(cx) {
 }}
 
 // command_loop_level + minibuf_level, kept by the Lisp halves of the
-// command loop (rlisp/vm/keyboard.el) and the minibuffer.
+// command loop (lisp/romacs/vm/keyboard.el) and the minibuffer.
 defsubr! { name = "recursion-depth", gnu = "keyboard.c:12350", effect = Reads,
 fn recursion_depth(cx) {
     let mut depth = 0;
@@ -19,7 +19,7 @@ fn recursion_depth(cx) {
 }}
 
 // Internal: read_minibuf_unwind's resize of the mini-window once the
-// outermost minibuffer is left (rlisp/vm/minibuf.el), and romacs-complete's
+// outermost minibuffer is left (lisp/romacs/vm/minibuf.el), and romacs-complete's
 // before it places its panel for the minibuffer's wrapped input.
 defsubr! { name = "romacs--resize-mini-window", gnu = "minibuf.c:1197", effect = Global,
 fn resize_mini_window(cx) {

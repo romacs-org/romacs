@@ -1,4 +1,4 @@
-//! Romacs's floating menus (rlisp/romacs-popup.el) on the real --loadup
+//! Romacs's floating menus (lisp/romacs/romacs-popup.el) on the real --loadup
 //! chain with a window system: every kind takes its look and motion from
 //! one table, a key grid lays groups out in bands that fit, which-key's
 //! popup is a `panel', an eval chip a `cursor', and the host fades a

@@ -391,7 +391,7 @@ impl Vm {
         if value == Value::UNBOUND {
             return Ok(None);
         }
-        // Romacs's own segments (rlisp/romacs-mode-line.el) are set, never
+        // Romacs's own segments (lisp/romacs/romacs-mode-line.el) are set, never
         // edited in place: each is converted once while it holds the same
         // object. Any other variable is read as it is now, as GNU does.
         if name.starts_with("romacs-mode-line-") {

@@ -10,7 +10,7 @@ fn zlib_available_p(_cx) { Ok(Value::TRUE) }}
 
 // decompress.c:223. The decompressed bytes go in after the region and the
 // region is then deleted, one change for the hooks (romacs--decompressed in
-// rlisp/vm/insdel.el); point returns to where it was, clipped to the new
+// lisp/romacs/vm/insdel.el); point returns to where it was, clipped to the new
 // end, however the hooks exit. On failure the region stays and the value
 // is nil, or with ALLOW-PARTIAL the decoded part replaces it and the value
 // is the count of unread bytes.

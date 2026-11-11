@@ -5,7 +5,7 @@
 //! compiled-load semantics (`Vm::load_artifact`).
 //!
 //! A compile process is a batch session over the base world that walks
-//! the file by bytecomp's file-compilation rules (rlisp/romacs-compile.el),
+//! the file by bytecomp's file-compilation rules (lisp/romacs/romacs-compile.el),
 //! compiles each form the walk emits with Romacs's compiler, and
 //! publishes the artifact in the store (`store`). Compile-time evaluation
 //! happens there, once per compile. Its host reads are recorded
@@ -168,11 +168,11 @@ const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
 /// PATH is being compiled already up the chain (its compile-time loads
 /// read source, as GNU's would with no `.elc`).
 /// Whether PATH is in the installation's Lisp trees: the configured ones,
-/// else the runtime root's gnu-lisp/ and rlisp/.
+/// else the runtime root's lisp/gnu/ and lisp/romacs/.
 fn installed_lisp(path: &Path) -> bool {
     match config() {
         Some(config) => config.runtime.iter().any(|root| path.starts_with(root)),
-        None => { let root = host::runtime_root(); ["gnu-lisp", "rlisp"].iter().any(|tree| path.starts_with(root.join(tree))) }
+        None => { let root = host::runtime_root(); ["lisp/gnu", "lisp/romacs"].iter().any(|tree| path.starts_with(root.join(tree))) }
     }
 }
 
@@ -343,7 +343,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
 
     /// Whether GNU would load the source file PATH compiled: a file of the
     /// installation's Lisp trees (the configured ones, else the runtime
-    /// root's gnu-lisp/ and rlisp/), or one beside a current `.elc`.  When
+    /// root's lisp/gnu/ and lisp/romacs/), or one beside a current `.elc`.  When
     /// not, GNU's readevalloop interprets it.
     pub(crate) fn gnu_loads_compiled(&self, path: &Path) -> bool {
         installed_lisp(path) || self.current_elc(path)

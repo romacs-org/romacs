@@ -3,7 +3,7 @@ Source: https://git.thanosapollo.org/emacs-jabber/ (src/)
 Version: 0.15.0
 Commit: 466d3c5af4b2216c452f85e165605d6c0128824e
 License: GPL-3.0-or-later (wrapper); ISC (picomemo); Apache-2.0 and MIT (HACL*)
-Local changes: Sources moved out of lisp/. rlisp/jabber builds the module.
+Local changes: Sources moved out of lisp/. lisp/romacs/jabber builds the module.
 
 picomemo upstream: https://github.com/mierenhoop/picomemo
 picomemo version: 1.2.0-5-gb156667

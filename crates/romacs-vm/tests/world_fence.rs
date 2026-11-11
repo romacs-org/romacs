@@ -38,7 +38,7 @@ fn scratch(name: &str) -> PathBuf {
     let unique = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("romacs-world-fence-{}-{unique}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("rlisp")).unwrap();
+    std::fs::create_dir_all(dir.join("lisp/romacs")).unwrap();
     dir
 }
 
@@ -55,7 +55,7 @@ fn run(name: &str, preload: &str, building: bool) -> (Vm, Option<Json>) {
 
 fn run_with(name: &str, bootstrap: &str, preload: &str, building: bool) -> (Vm, Option<Json>) {
     let dir = scratch(name);
-    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), bootstrap);
+    let bootstrap = write(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), bootstrap);
     let preload = write(&dir.join("preload.el"), preload);
     if building {
         host::enter_build(PINNED);
@@ -165,7 +165,7 @@ fn a_let_of_a_watched_root_refuses() {
 #[test]
 fn a_session_startup_supersedes_the_chain_startup() {
     let dir = scratch("session");
-    let session = write(&dir.join("rlisp/romacs-gui-loadup.el"), "\
+    let session = write(&dir.join("lisp/romacs/romacs-gui-loadup.el"), "\
 (unwind-protect
     (progn (romacs--startup-phase t)
            (setq fence-input \"/session/\")
@@ -239,7 +239,7 @@ fn writes_to_startup_inputs_refuse_whatever_they_store() {
 #[test]
 fn an_input_changed_in_place_refuses_at_the_content_check() {
     let dir = scratch("in-place");
-    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), BOOTSTRAP);
+    let bootstrap = write(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP);
     let preload = write(&dir.join("preload.el"), "(setcar (get 'fence-a 'standard-value) \"/y\")\n");
     host::enter_build(PINNED);
     let mut vm = Vm::new();

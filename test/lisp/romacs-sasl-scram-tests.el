@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; The RFC exchanges are GNU's test/lisp/net/sasl-scram-rfc-tests.el; this is
-;; what rlisp/romacs-sasl-scram.el adds to them.
+;; what lisp/romacs/romacs-sasl-scram.el adds to them.
 
 (require 'ert)
 (require 'sasl)

@@ -28,7 +28,7 @@ fn identify(vm: &mut Vm, path: &Path) -> Result<(), String> {
 
 /// A session with an init, even one not written yet, has somewhere to save
 /// settings: name PATH, then load the saved settings, after Romacs's
-/// defaults and before the init (rlisp/romacs-saved-settings.el).
+/// defaults and before the init (lisp/romacs/romacs-saved-settings.el).
 pub fn start_saved_settings(vm: &mut Vm, path: &Path) -> Result<(), String> {
     identify(vm, path)?;
     vm.eval_source("(when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start))")?;

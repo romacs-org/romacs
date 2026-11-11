@@ -64,7 +64,7 @@ fn insert_file_contents_detects_coding_systems_as_gnu() {
         (DECISION, "esc8", "s7-ss2"),
     ];
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = cases.iter()
         .map(|(form, file, priority)| format!("(progn {SYSTEM} {})", form.replace("PRIORITY", priority))
             .replace("FILE", &serde_json::to_string(dir.join(file).to_str().unwrap()).unwrap()))

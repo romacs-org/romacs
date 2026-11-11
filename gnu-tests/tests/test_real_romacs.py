@@ -30,11 +30,11 @@ class RealRomacs(unittest.TestCase):
         plan = self.home / 'plan.json'
         plan.write_text(json.dumps(dict(file=str(target), forms=[])))
         command = [str(self.binary), '--harness-kind', 'real', '--bootstrap-regime', 'gnu-ert',
-                   '--harness', str(run.ROOT / 'gnu-lisp/emacs-lisp/ert.el'),
+                   '--harness', str(run.ROOT / 'lisp/gnu/emacs-lisp/ert.el'),
                    '--plan', str(plan), '--selector', selector, '--ert-adapter', 'romacs-batch']
         for path in run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert', harness='real')):
             command += ['--preload', str(run.ROOT / path)]
-        for directory in run.load_path() + [str(run.ROOT / 'rlisp')]:
+        for directory in run.load_path() + [str(run.ROOT / 'lisp/romacs')]:
             command += ['--load-path', directory]
         return command
 

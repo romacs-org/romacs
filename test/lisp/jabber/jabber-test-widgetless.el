@@ -447,7 +447,7 @@
 
 (ert-deftest jabber-test-source-has-no-widget-editor-dependency ()
   (dolist (file (directory-files
-                 (expand-file-name "rlisp/jabber" jabber-test-widgetless--root)
+                 (expand-file-name "lisp/romacs/jabber" jabber-test-widgetless--root)
                  t "\\.el\\'"))
     (unless (string-suffix-p "/jabber-widget.el" file)
       (with-temp-buffer

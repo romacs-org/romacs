@@ -1,6 +1,6 @@
 ;;; jabber-test-fsm.el --- fsm.el failures without tracing  -*- lexical-binding: t; -*-
 
-;; rlisp/deps/fsm/fsm.el traces nothing by default (`fsm-debug' nil); a
+;; lisp/romacs/deps/fsm/fsm.el traces nothing by default (`fsm-debug' nil); a
 ;; handler's or an enter function's failure is logged all the same.
 
 (require 'ert)
