@@ -1520,7 +1520,8 @@ Replay every reviewed thema from its recorded results and list
 `gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
 one whose history does not replay.  The collection is read in two
 queries and each review recomputed once; nothing is written.
-Interactively, report the count.
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report').
 
 (fn &optional DB)" t)
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
