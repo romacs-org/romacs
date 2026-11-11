@@ -843,14 +843,17 @@ impl Marking {
             op.visit_values(&mut |v| if keep(v) { w.stack.push(*v) });
             // Only a symbol interned in an obarray of its own can die.
             let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
+            // A direct call's cache is not followed: its target is read only
+            // under its slot's version, and then the slot's cell holds it. A
+            // site's lowered entry still names the function it last entered
+            // (`Program::trace_function'), so that function's code, though
+            // not what a closure of it captured, lives until the site runs
+            // again.
             match op {
                 Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _)
                 | Op::BindLate(slot, _) | Op::ReadLate(_, _, slot) | Op::WriteLate(_, _, slot)
                 | Op::Define(slot, _) | Op::DefineMacro(slot, _)
                 | Op::Sealed(_, slot, _, _)
-                // A direct call's cache keeps nothing alive: its target is
-                // read only under its slot's version, and then the slot
-                // holds it.
                 | Op::Direct(_, slot, _, _, _) => w.stack.extend(symbol(slot)),
                 Op::Closure(_, child, _) => w.code.push(child),
                 _ => {}
