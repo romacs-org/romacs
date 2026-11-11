@@ -15,6 +15,15 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
+/// Write VALUE to stderr as one line, in one write. `eprintln!("{}", value)`
+/// hands serde's pieces to unbuffered stderr a syscall apiece: thousands for
+/// a scene dump, which under load held the evaluator for seconds a paint.
+fn diagnostic_line(value: &serde_json::Value) {
+    use std::io::Write;
+    let mut line = serde_json::to_vec(value).unwrap_or_default();
+    line.push(b'\n');
+    let _ = std::io::stderr().lock().write_all(&line);
+}
 
 use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
@@ -974,9 +983,7 @@ fn paint(
         if after <= before || !moved || current.display()? != "\"g1a-gc-witness\"" {
             return Err("forced collector did not preserve the rooted witness".into());
         }
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
+        crate::diagnostic_line(&json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
             "collections_before":before,"collections_after":after,"witness_moved":moved})
         );
     }
@@ -1001,7 +1008,7 @@ fn paint(
             channel(color.b)
         )
     };
-    if diagnostics() { eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
         "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() })); }
@@ -1035,19 +1042,15 @@ fn paint(
     };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
-    if diagnostics() { eprintln!(
-        "{}",
-        json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
     ); }
-    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
-        "{}",
-        json!({"diagnostic":"submitted-scene", "presentation":presentation,
+    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { crate::diagnostic_line(&json!({"diagnostic":"submitted-scene", "presentation":presentation,
         "vscroll_px":snapshot.windows.first().map(|w|w.snapshot.vscroll_px),"glyphs":glyphs})
     ); }
     if tracing() {
-        eprintln!("{}", json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
+        crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
             "layout_ns":layout_ns,"diagnostics_prepare_ns":diagnostics_prepare_ns,"submit_ns":submit_ns,
             "activation_ns":activation_ns,"wait_render_ns":wait_render_ns,
             "activation_and_render_ns":activation_ns + wait_render_ns,
@@ -1061,9 +1064,7 @@ fn paint(
     let layout_apply_ns = apply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
     let mode_line_start = tracing().then(Instant::now);
     for message in vm.take_display_diagnostics() {
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
+        crate::diagnostic_line(&json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
         );
     }
     if tracing() {
@@ -1160,7 +1161,7 @@ fn paint_prompt(
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
-        eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
+        crate::diagnostic_line(&json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
     Ok((count, ends))
 }
@@ -1444,7 +1445,7 @@ fn evaluate(
                 // Each pressed key's enqueue time on CLOCK_MONOTONIC, for
                 // latency to a point outside the editor (terminal_latency_live.py).
                 if let Some(at) = received && matches!(command::unwrap_event(event.clone()), InputEvent::Key { pressed: true, .. }) {
-                    eprintln!("{}", json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
+                    crate::diagnostic_line(&json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
                 }
                 // read_char's timer_stop_idle: Emacs is idle until a key arrives.
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
@@ -1504,7 +1505,7 @@ fn evaluate(
                     let fast_start = Instant::now();
                     let fast = vm.terminal_passthrough_key(&key);
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
+                        crate::diagnostic_line(&json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
                     }
                     match fast {
                         Ok(true) => continue,
@@ -1551,7 +1552,7 @@ fn evaluate(
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
-                    eprintln!("{}",json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
+                    crate::diagnostic_line(&json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
                         "queue_ns":received.map(|t| command_start.duration_since(t).as_nanos()),
                         "command_ns":command_ns,"snapshot_ns":snapshot_ns,
                         "key_to_paint_complete_ns":if live { None } else { received.map(|t| t.elapsed().as_nanos()) },
@@ -1598,11 +1599,11 @@ fn evaluate(
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
-                    if diagnostics() { eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
+                    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
@@ -1651,7 +1652,7 @@ fn evaluate(
                         trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
                     }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-snapshot","presentation":presentation,
                             "units":"ns","snapshot_ns":snapshot_ns}));
                     }
                 } else {
