@@ -85,7 +85,7 @@ tmux kill-session -t "$sess" 2>/dev/null || true
 
 echo "journey-check: 4/5 real GUI on the compositor (takes focus on workspace 2)" >&2
 python3 "$j/ladder.py" "$out" --mode default --binary "$gui"
-python3 "$j/ladder.py" "$out" --mode lisp/gnu --binary "$gui"
+python3 "$j/ladder.py" "$out" --mode gnu-only --binary "$gui"
 python3 "$j/ladder.py" "$out" --mode loadup --binary "$gui"
 env -u RUST_MIN_STACK ROMACS_LISP_DIR="$root/lisp/gnu" "$gui" --loadup-report >"$out/loadup.tsv" 2>"$out/loadup.err"
 

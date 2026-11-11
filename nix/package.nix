@@ -142,7 +142,7 @@ craneLib.buildPackage (
       install -m 0755 target/release/romacs-mcp "$out/bin/romacs-mcp"
 
       mkdir -p "$out/share/romacs"
-      cp -r lisp/gnu lisp/romacs "$out/share/romacs/"
+      cp -r lisp "$out/share/romacs/"
       cp -r etc "$out/share/romacs/"
       mkdir -p "$out/share/romacs/assets"
       cp -r assets/fonts "$out/share/romacs/assets/"

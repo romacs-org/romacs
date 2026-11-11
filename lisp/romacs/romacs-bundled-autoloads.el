@@ -53,9 +53,24 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent-codex" '("romacs-agent--codex-"))
 
 
+;;; Generated autoloads from romacs-agent-diff.el
+
+(register-definition-prefixes "romacs-agent-diff" '("romacs-agent-"))
+
+
+;;; Generated autoloads from romacs-agent-gate.el
+
+(register-definition-prefixes "romacs-agent-gate" '("romacs-agent-gate"))
+
+
 ;;; Generated autoloads from romacs-agent-gnosis.el
 
 (register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
+
+
+;;; Generated autoloads from romacs-agent-handoff.el
+
+(register-definition-prefixes "romacs-agent-handoff" '("romacs-agent-handoff"))
 
 
 ;;; Generated autoloads from romacs-agent-history.el
@@ -67,9 +82,19 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
 
 
+;;; Generated autoloads from romacs-agent-idle.el
+
+(register-definition-prefixes "romacs-agent-idle" '("romacs-agent-idle-"))
+
+
 ;;; Generated autoloads from romacs-agent-images.el
 
 (register-definition-prefixes "romacs-agent-images" '("romacs-agent-images-"))
+
+
+;;; Generated autoloads from romacs-agent-rollback.el
+
+(register-definition-prefixes "romacs-agent-rollback" '("romacs-agent-"))
 
 
 ;;; Generated autoloads from romacs-agent-t3.el
@@ -103,6 +128,11 @@ only sessions whose chat is open.
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
+
+
+;;; Generated autoloads from romacs-agent-worktree.el
+
+(register-definition-prefixes "romacs-agent-worktree" '("romacs-agent-worktree-"))
 
 
 ;;; Generated autoloads from romacs-animate.el
@@ -476,6 +506,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 
 (fn MESHES &rest PLIST)")
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
+
+
+;;; Generated autoloads from romacs-nnheader.el
+
+(register-definition-prefixes "romacs-nnheader" '("romacs-nnheader--find-etc"))
 
 
 ;;; Generated autoloads from romacs-oclosure.el
@@ -915,6 +950,11 @@ abstention, cancellation and retry never accept a scheduled or practice grade.
 (register-definition-prefixes "gnosis-agent-eval" '("gnosis-agent-eval-"))
 
 
+;;; Generated autoloads from gnosis-agent-model.el
+
+(register-definition-prefixes "gnosis-agent-model" '("gnosis-agent-model-"))
+
+
 ;;; Generated autoloads from gnosis-agent-review.el
 
 (autoload 'gnosis-agent-review-bind-provider "gnosis-agent-review"
@@ -1349,9 +1389,24 @@ model themata, or import a new one; q finishes.
 (register-definition-prefixes "gnosis-model-backend-canvas" '("gnosis-model-backend-canvas"))
 
 
+;;; Generated autoloads from gnosis-model-backend-romacs.el
+
+(register-definition-prefixes "gnosis-model-backend-romacs" '("gnosis-model-backend-romacs"))
+
+
 ;;; Generated autoloads from gnosis-model-camera.el
 
 (register-definition-prefixes "gnosis-model-camera" '("gnosis-model-camera-"))
+
+
+;;; Generated autoloads from gnosis-model-explore.el
+
+(autoload 'gnosis-model-explore "gnosis-model-explore"
+"Study model scene RESOURCE: orbit, zoom and click its structures.
+Interactively, choose a managed scene.
+
+(fn RESOURCE)" t)
+(register-definition-prefixes "gnosis-model-explore" '("gnosis-model-explore-"))
 
 
 ;;; Generated autoloads from gnosis-monkeytype.el

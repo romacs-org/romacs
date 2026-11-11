@@ -128,7 +128,7 @@ def generated_support(root, gnu, pin, pinned, required):
         for rel, digest, source in record['files']:
             p = pathlib.PurePosixPath(rel)
             if (str(p) != rel or p.is_absolute() or '..' in p.parts
-                    or p.parts[0] != LOCAL_LISP or p.suffix != '.el'):
+                    or p.parts[:2] != pathlib.PurePosixPath(LOCAL_LISP).parts or p.suffix != '.el'):
                 raise ValueError(f'invalid support path {rel}')
             if rel in pristine_local:
                 raise ValueError(f'{rel}: support must not override a pristine GNU Git path')
