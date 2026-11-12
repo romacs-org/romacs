@@ -34,7 +34,7 @@ Layout (`layout`):
                           listed deliberately.
 
 check holds a tree to its merge-base with BASE (--base, else $ROMACS_BASE,
-else master): a count fails when it is above what the same count measures on
+else beta): a count fails when it is above what the same count measures on
 the merge-base's tree. A change answers for what it adds and for nothing else:
 not for floors lowered since it forked, and not for a rise the floors' slack
 would have hidden. A drop needs no record. The one way to add a smell is to
@@ -615,7 +615,7 @@ def main():
     parser.add_argument('--root', default='.')
     parser.add_argument('--clippy-json', help="cargo clippy's JSON messages, instead of running it")
     parser.add_argument('--floors', action='store_true', help='report: print the counts as a floors file')
-    parser.add_argument('--base', default=os.environ.get('ROMACS_BASE') or 'master',
+    parser.add_argument('--base', default=os.environ.get('ROMACS_BASE') or 'beta',
                         help='check: the trunk whose merge-base the tree is held to')
     parser.add_argument('--absolute', action='store_true', help='check: hold the tree to the floors file instead')
     args = parser.parse_args()
