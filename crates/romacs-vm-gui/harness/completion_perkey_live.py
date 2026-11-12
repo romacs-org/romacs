@@ -159,7 +159,10 @@ def main():
                 kb = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
                                       stdout=log, stderr=log)
                 time.sleep(.3)
-                proc = subprocess.Popen([str(binary), '--loadup', '--trace-latency'], env=env, cwd=work,
+                # The terminal in this process, as these journeys always measured it; a
+                # kept terminal is term_keep_live.py's.  (A host copied alone has no
+                # keeper beside it, and a session meant to use one would refuse.)
+                proc = subprocess.Popen([str(binary), '--loadup', '--eval', '(setq romacs-keeper-enabled nil)', '--trace-latency'], env=env, cwd=work,
                                         stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                 trace = lambda: log_path.read_text(errors='replace')
 

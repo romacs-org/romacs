@@ -125,7 +125,10 @@ def session(binary, regime, keys, delay, timeout, log_path):
                 keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(.3)
-                argv = [str(binary), '-Q'] + (['--loadup'] if regime == 'loadup' else []) + ['--trace-latency', str(original)]
+                # The terminal in this process, as these journeys always measured it; a
+                # kept terminal is term_keep_live.py's.  (A host copied alone has no
+                # keeper beside it, and a session meant to use one would refuse.)
+                argv = [str(binary), '-Q'] + (['--loadup'] if regime == 'loadup' else []) + ['--eval', '(setq romacs-keeper-enabled nil)', '--trace-latency', str(original)]
                 process = subprocess.Popen(argv, env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
                 def trace():

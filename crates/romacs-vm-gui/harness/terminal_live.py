@@ -431,6 +431,10 @@ def main():
                     (home / 'config' / 'romacs').mkdir(parents=True, exist_ok=True)
                     (home / 'config' / 'romacs' / 'init.el').write_text(
                         "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n")
+                # The terminal in this process, as these journeys always measured it; a
+                # kept terminal is term_keep_live.py's.  (A host copied alone has no
+                # keeper beside it, and a session meant to use one would refuse.)
+                flags += ['--eval', '(setq romacs-keeper-enabled nil)']
                 process = subprocess.Popen([str(binary), *flags, '--trace-scene', str(original)], env=env, cwd=work,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
