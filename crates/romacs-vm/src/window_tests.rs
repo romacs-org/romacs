@@ -428,7 +428,10 @@ fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
     // In the other window's buffer: that window, and only when the change shows.
     for (change, windows) in [("(setq o (make-overlay 1 3 other))", 0), ("(overlay-put o 'face 'bold)", 1), ("(overlay-put o 'face 'bold)", 0),
                               ("(move-overlay o 2 4)", 1), ("(move-overlay o 1 3 hidden)", 1), ("(move-overlay o 2 4)", 0),
-                              ("(move-overlay o 1 3 other)", 1), ("(with-current-buffer other (remove-overlays 2 3))", 1),
+                              ("(move-overlay o 1 3 other)", 1),
+                              // To the buffer and range it has: nothing to show anew (a timer's refresh).
+                              ("(move-overlay o 1 3)", 0), ("(move-overlay o 3 1 other)", 0), ("(overlay-put o 'face 'bold)", 0),
+                              ("(with-current-buffer other (remove-overlays 2 3))", 1),
                               ("(delete-overlay o)", 1), ("(delete-overlay o)", 0),
                               ("(overlay-put (make-overlay 1 3 other) 'face 'bold)", 1),
                               ("(with-current-buffer other (delete-all-overlays))", 1), ("(with-current-buffer other (delete-all-overlays))", 0),

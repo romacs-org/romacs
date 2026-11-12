@@ -518,7 +518,8 @@ impl Vm {
                 .any(|&(k, v)| k == Value::reference(slot + 1, 7) && v != Value::NIL)
         });
         // itree_node_set_region reinserts a node whose start moves.
-        let reinserted = o.buffer != buffer || self.overlay_range(v)?.is_none_or(|(old, _)| old != start);
+        let old = if o.buffer == buffer { self.overlay_range(v)? } else { None };
+        let reinserted = old.is_none_or(|(old, _)| old != start);
         if o.buffer == buffer {
             let target = self.overlay_store_mut(buffer)?;
             target.intervals.remove(o.start.unwrap(), &target.anchors);
@@ -551,7 +552,9 @@ impl Vm {
             self.note_referrer(buffer, v.index(0)? - 1);
         }
         if reinserted { self.note_overlay_insertion(buffer, v)?; }
-        self.overlay_changed(v)?;
+        // A move to the buffer and the range it has shows nothing new: its
+        // order among the others stays too.
+        if old != Some((start, end)) { self.overlay_changed(v)?; }
         if evaporates {
             self.evaporate_overlay(v)?;
         }
