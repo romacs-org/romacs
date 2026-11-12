@@ -47,7 +47,7 @@ possible; say so where you do.
   rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
   primitives declared outside `src/prims/` or through lib.rs's own enum. It
   holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
-  `master`): a count above the merge-base's own fails. A drop needs no
+  `beta`): a count above the merge-base's own fails. A drop needs no
   record, and a branch never lowers a floor. Adding a smell takes raising its
   floor in `ledger/smell-floors.json` by as much, and a new top-level entry takes
   listing it there: a deliberate commit with its reason. `smells.py check
