@@ -8,7 +8,8 @@
 //! (`world::default_store`) when that exists, unless ROMACS_WORLD=off. It
 //! holds nothing of its builder's HOME, per-user directory or locale: each
 //! restored session takes the startup steps in its own process
-//! (`romacs-world-restart`), so one world serves every HOME.
+//! (`romacs-world-restart`), so one world serves every HOME and locale of
+//! the same user.
 //!
 //! A session that names no store restores the installation's world first,
 //! `EXECUTABLE.worlds` beside the executable, which its installer built
@@ -327,6 +328,21 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
             diagnose(&serde_json::json!({"installed": store, "reason": reason}));
             None
         }
+    }
+}
+
+/// `--world-build`'s batch half, beside the GUI's world: the batch world
+/// in STORE made usable, unless the installation's serves this executable
+/// already. The GUI's world is what the build is for: a batch world refused
+/// or failed is a warning, and its sessions boot from source.
+pub fn prepare_beside(store: PathBuf) {
+    let installed = super::startup::lisp_root(&super::startup::lisp_dir()).ok()
+        .zip(beside_executable("worlds").filter(|store| store.is_dir()))
+        .is_some_and(|(dir, installed)| World::ready_read_only(&installed, recipe(&dir)));
+    if installed {
+        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "skipped": "the installation's serves"}));
+    } else if let Err(reason) = prepare(store) {
+        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "ok": false, "warning": reason}));
     }
 }
 

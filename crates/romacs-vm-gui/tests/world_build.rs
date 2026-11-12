@@ -2,7 +2,9 @@
 //! session would boot from, made usable with no window, so the user's first
 //! launch and first batch session restore; a second call finds them and
 //! builds nothing. Before `--batch`, it prepares the batch world alone, as
-//! an installer does beside the executable (src/batch.rs).
+//! an installer does beside the executable (src/batch.rs). The batch world
+//! is the GUI's companion: one the installation serves is not built again,
+//! and one that cannot be built is a warning, not a failed build.
 
 fn build(home: &std::path::Path) -> (bool, String) {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
@@ -28,6 +30,19 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
     assert!(ok && said.contains(r#""mode":"prepared""#), "{said}");
     let again: Vec<_> = worlds.iter().map(|w| std::fs::metadata(w).unwrap().modified().unwrap()).collect();
     assert_eq!(again, images, "a world was built again");
+    // The batch world gone, and no builder able to start (the pinned
+    // working directory is a file): the GUI's world stands, the batch
+    // world is a warning, the layer step still runs.
+    for manifest in worlds.iter().map(|w| w.with_extension("json")) {
+        if std::fs::read_to_string(&manifest).unwrap().contains("launch batch") {
+            std::fs::remove_file(manifest.with_extension("rwi")).unwrap();
+            std::fs::remove_file(&manifest).unwrap();
+        }
+    }
+    std::fs::remove_dir(store.join("p/cwd")).unwrap();
+    std::fs::write(store.join("p/cwd"), b"").unwrap();
+    let (ok, said) = build(&home);
+    assert!(ok && said.contains(r#""event":"batch-world","ok":false"#) && said.contains("layer-prepared"), "{said}");
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -99,8 +114,11 @@ fn an_installed_batch_world_serves_any_home() {
     let installed = bin.join("romacs-vm-gui.worlds");
     let command = |home: &std::path::Path, lang: &str| {
         let mut command = std::process::Command::new(&exe);
+        // A world binds the login name and SHELL its chain reads (VM2-BATCH2):
+        // both homes give the same, so the test does not pass by inheritance.
         command.current_dir(home).env("HOME", home).env("LANG", lang).env("XDG_CACHE_HOME", home.join("cache"))
-            .env("USER", "builder").env_remove("XDG_CONFIG_HOME").env_remove("LC_ALL").env_remove("LC_CTYPE")
+            .env("USER", "builder").env("LOGNAME", "builder").env("NAME", "A Builder").env("SHELL", "/bin/sh")
+            .env_remove("XDG_CONFIG_HOME").env_remove("LC_ALL").env_remove("LC_CTYPE")
             .env_remove("LC_MESSAGES").env_remove("LANGUAGE").env_remove("ROMACS_WORLD")
             .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY");
         command
@@ -136,5 +154,14 @@ fn an_installed_batch_world_serves_any_home() {
     assert_eq!(files(&installed), before, "the session wrote in the installation's store");
     let made = b.join("cache/romacs/worlds");
     assert!(!made.exists(), "the session made a store: {:?}", files(&b.join("cache")));
+    // `--world-build` for this executable builds the GUI's world and finds
+    // the installation's batch world: no second one.
+    let c = root.join("home-c");
+    std::fs::create_dir_all(&c).unwrap();
+    let output = command(&c, "C.UTF-8").args(["--loadup", "--world-build"]).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success() && said.contains(r#""skipped""#) && !said.contains(r#""launch":"batch""#), "{said}");
+    let built: Vec<_> = files(&c.join("cache/romacs/worlds")).into_iter().filter(|(path, ..)| path.extension().is_some_and(|x| x == "rwi")).collect();
+    assert_eq!(built.len(), 1, "{built:?}");
     let _ = std::fs::remove_dir_all(&root);
 }

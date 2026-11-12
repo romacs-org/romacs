@@ -394,6 +394,25 @@ impl World {
         Ok(World { store, key, recipe })
     }
 
+    /// Whether RECIPE's world in STORE, a store this process only reads,
+    /// would restore now (`restore_read_only`), writing nothing there.
+    pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
+        World::read_only(store, recipe).is_ok()
+    }
+
+    /// RECIPE's world in STORE, read only, and its image opened, when its
+    /// manifest holds and the image is the one bound.
+    fn read_only(store: &Path, recipe: Vec<String>) -> Result<(World, std::fs::File), Json> {
+        let fail = |e: std::io::Error| json!({"store": e.to_string()});
+        let store = store_path(store).map_err(fail)?;
+        checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
+        let key = world_key(&store, &recipe, false).map_err(fail)?;
+        let world = World { store, key, recipe };
+        let manifest = world.valid_manifest()?;
+        let image = world.checked_image(&manifest, false)?;
+        Ok((world, image))
+    }
+
     /// RECIPE's world restored from STORE, a store this process only reads
     /// (an installation's, which its installer built): when it is usable
     /// now, with nothing made or written there, no lock taken, no use
@@ -410,13 +429,7 @@ impl World {
         if !arena::active() {
             return Err(json!("no arena"));
         }
-        let fail = |e: std::io::Error| json!({"store": e.to_string()});
-        let store = store_path(store).map_err(fail)?;
-        checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
-        let key = world_key(&store, &recipe, false).map_err(fail)?;
-        let world = World { store, key, recipe };
-        let manifest = world.valid_manifest()?;
-        let image = world.checked_image(&manifest, false)?;
+        let (world, image) = World::read_only(store, recipe)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (Box::new(vm), carry))
                 .ok_or_else(|| json!({"image": "made for another key"})),

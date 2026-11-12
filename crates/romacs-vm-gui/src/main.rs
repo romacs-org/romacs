@@ -805,7 +805,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
         let base = world::open(store.clone(), width, height, floor)?;
         world::prepare(&base, width, height, floor)?;
-        batch::prepare(store)?;
+        batch::prepare_beside(store);
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }

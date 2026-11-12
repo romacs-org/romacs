@@ -150,12 +150,15 @@ place_release() {
 }
 
 # Build the worlds, so the first launch and the first batch session
-# restore: the user's, then the installation's batch world beside the
-# binary, which a batch session under any HOME reads.
+# restore: the installation's batch world beside the binary, which a batch
+# session of the same user under any HOME reads, then the GUI's, which
+# finds that batch world and builds no second one. Without the batch
+# world, batch sessions boot from source: a warning, not a failed install.
 build_world() {
     say 'Building the startup images'
+    "$prefix/bin/romacs" --world-store "$prefix/bin/romacs-vm-gui.worlds" --world-build --batch ||
+        warn "the batch startup image was not built; batch sessions start from source."
     "$prefix/bin/romacs" -Q --loadup --world-build
-    "$prefix/bin/romacs" --world-store "$prefix/bin/romacs-vm-gui.worlds" --world-build --batch
 }
 
 # Fill the compiled-Lisp store, so the first session already runs at full
