@@ -9,7 +9,7 @@ pub fn bootstrapped_with(root: &Path, bootstrap: &str) -> Vm {
     // noninteractive, on its 80x25 terminal frame of 1x1 characters.
     vm.eval_source("(setq noninteractive t)").unwrap();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    // GNU's installed load-path (gnu-tests/run.py load_path): the Lisp root,
+    // GNU's installed load-path (test/gnu/run.py load_path): the Lisp root,
     // its subdirectories in reverse name order with obsolete last, then lisp/romacs.
     let lisp = root.join("lisp/gnu");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()

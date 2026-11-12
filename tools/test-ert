@@ -4,7 +4,8 @@
 As GNU's test/Makefile.in runs its own: each test file in a fresh process with
 a private HOME, under SELECTOR, the default leaving out expensive and unstable
 tests.  With neither --module nor --file, every bundled package with suites
-runs.  A suite is a file under test/lisp that defines a test; the rest are
+runs.  A suite is a file under test/packages (the bundled packages') or
+test/romacs/lisp (Romacs's own Lisp's) that defines a test; the rest are
 support files its suites require.
 """
 import argparse
@@ -21,14 +22,14 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'gnu-tests'))
+sys.path.insert(0, str(ROOT / 'test/gnu'))
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
 from bundled_autoloads import directories
 
 SELECTOR_DEFAULT = '(not (or (tag :expensive-test) (tag :unstable)))'
 TIMEOUT_DEFAULT = 600.0
-TESTS = ROOT / 'test/lisp'
+SUITES = (ROOT / 'test/packages', ROOT / 'test/romacs/lisp')
 SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'EMACSLOADPATH',
             'EMACS_TEST_JUNIT_REPORT', 'MAIL', 'MAILDIR', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE')
 EMPTY_SELECTION = 'empty or invalid selection inventory'
@@ -50,10 +51,11 @@ def bundled_names(bases):
 
 
 def packages(bases):
-    """Test directories of bundled code; GNU's own run under gnu-tests."""
+    """Test directories of bundled code; GNU's own run under test/gnu."""
     names = bundled_names(bases)
     gnu = {p.name for p in (ROOT / 'lisp/gnu').iterdir()}
-    return sorted(d for d in TESTS.iterdir() if d.is_dir() and d.name in names and d.name not in gnu)
+    return sorted(d for tests in SUITES for d in tests.iterdir()
+                  if d.is_dir() and d.name in names and d.name not in gnu)
 
 
 def module_suites(module, bases):
@@ -61,13 +63,14 @@ def module_suites(module, bases):
     NAME-tests.el, or PACKAGE-test-REST.el for the library PACKAGE-REST."""
     if module not in bundled_names(bases):
         return []
-    if TESTS / module in packages(bases):
-        return suites_under(TESTS / module)
+    for directory in packages(bases):
+        if directory.name == module:
+            return suites_under(directory)
     patterns = [module + '-tests.el', module + '-*-tests.el']
     package, _, rest = module.partition('-')
     if rest:
         patterns += [f'{package}-test-{rest}.el', f'{package}-test-{rest}-*.el']
-    return sorted({p for pattern in patterns for p in TESTS.rglob(pattern) if is_suite(p)})
+    return sorted({p for tests in SUITES for pattern in patterns for p in tests.rglob(pattern) if is_suite(p)})
 
 
 def all_suites(bases):
@@ -76,7 +79,7 @@ def all_suites(bases):
 
 def driver(path, selector):
     quote = json.dumps(str(path), ensure_ascii=False)
-    reporter = (ROOT / 'gnu-tests/harness/romacs-real-ert-reporter.el').read_text()
+    reporter = (ROOT / 'test/gnu/harness/romacs-real-ert-reporter.el').read_text()
     return (f"(setq load-prefer-newer t)\n(require 'ert)\n(load {quote} nil t t)\n"
             f"(setq ert-scoreboard-selector '{selector})\n(kill-emacs (progn {reporter}))\n")
 

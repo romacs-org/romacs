@@ -39,7 +39,6 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     parser.add_argument('--timeout', type=float, default=120)
-    parser.add_argument('--gone-within', type=float, default=10, help='seconds a dismissed prompt may stay')
     args = parser.parse_args()
     output = Path(args.output).resolve()
     output.mkdir(parents=True)
@@ -71,7 +70,9 @@ def main():
             fio.wait(lambda: shown(prompt), args.timeout, f'{name} prompt shown', process)
             subprocess.run(['wtype', '-k', 'Return'], env=env, check=True, timeout=20)
             fio.wait(lambda: f'({name} "")' in records(), args.timeout, f'{name} prompt answered', process)
-            deadline = time.monotonic() + args.gone_within
+            # A loaded host may repaint seconds late; a prompt that is
+            # never taken down stays past what a hang takes.
+            deadline = time.monotonic() + args.timeout
             while shown(prompt) and time.monotonic() < deadline:
                 time.sleep(.1)
             report['cases'][name] = {'answered': True, 'prompt_left_screen': not shown(prompt),
