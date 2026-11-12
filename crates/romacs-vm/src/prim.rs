@@ -834,7 +834,7 @@ mod leaf {
         pub fn propertized_copy(
             &mut self,
             string: Value,
-            properties: &[(String, Value)],
+            properties: &[(crate::properties::Key, Value)],
         ) -> std::result::Result<Value, Fault> {
             let view = self.string_view(string)?;
             let mut copy = data::LispString::from_bytes(view.bytes, view.multibyte);
@@ -843,7 +843,7 @@ mod leaf {
             }
             let all = coordinates::ByteOffset(0)..coordinates::ByteOffset(copy.bytes().len());
             for (key, value) in properties {
-                copy.properties.put(all.clone(), key, *value);
+                copy.properties.put(all.clone(), *key, *value);
             }
             let object = if copy.is_utf8() {
                 data::Object::String(Box::new(copy))
@@ -858,7 +858,7 @@ mod leaf {
             let multibyte = !text.is_ascii();
             let mut string = data::LispString::from_bytes(text.into_bytes(), multibyte);
             for (range, face) in runs {
-                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), "face", *face);
+                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), crate::properties::Key::FACE, *face);
             }
             self.vm.allocate_object(if string.is_utf8() { data::Object::String(Box::new(string)) } else { data::Object::RawString(Box::new(string)) })
         }

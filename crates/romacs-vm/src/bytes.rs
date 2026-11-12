@@ -58,7 +58,7 @@ pub(crate) struct ByteBuffer {
     /// The markers in this buffer, at byte offsets, which here are its
     /// characters (insdel.c adjust_markers_for_*); as a text buffer's.
     pub anchors: AnchorTree,
-    pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
+    pub properties: ByteProperties,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
@@ -97,7 +97,7 @@ impl Mirror {
     }
 }
 /// A unibyte buffer's or insertion's text properties, by byte.
-pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
+pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<crate::properties::Key, Value>>;
 
 impl ByteBuffer {
     /// Bring the mirror to the bytes, narrowing and point now.
@@ -174,7 +174,7 @@ impl ByteBuffer {
     /// unibyte string holding R's text properties when it has any.
     pub(crate) fn text_object(&self, r: Range<ByteOffset>) -> crate::data::Object {
         let bytes = self.bytes[r.start.0..r.end.0].to_vec();
-        let properties: BTreeMap<ByteOffset, BTreeMap<String, Value>> = self.properties.range(r.clone())
+        let properties: ByteProperties = self.properties.range(r.clone())
             .filter(|(_, values)| !values.is_empty())
             .map(|(&at, values)| (ByteOffset(at.0 - r.start.0), values.clone())).collect();
         if properties.is_empty() { return crate::data::unibyte_object(bytes); }
@@ -289,10 +289,8 @@ impl ByteBuffer {
             .values()
             .map(|p| {
                 size_of::<ByteOffset>()
-                    + size_of::<BTreeMap<String, Value>>()
-                    + p.keys()
-                        .map(|k| size_of::<String>() + size_of::<Value>() + k.capacity())
-                        .sum::<usize>()
+                    + size_of::<BTreeMap<crate::properties::Key, Value>>()
+                    + p.len() * (size_of::<crate::properties::Key>() + size_of::<Value>())
             })
             .sum::<usize>()
     }

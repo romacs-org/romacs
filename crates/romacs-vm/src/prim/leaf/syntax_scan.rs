@@ -69,7 +69,7 @@ impl<'a> View<'a> {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
-                Body::Multibyte(text, text.properties.reader("syntax-table"))
+                Body::Multibyte(text, text.properties.reader(crate::properties::Key::SYNTAX_TABLE))
             }
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
@@ -86,7 +86,7 @@ impl<'a> View<'a> {
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
             Body::Multibyte(_, ref reader) => reader.get(ByteOffset(byte)),
-            Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
+            Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get(&crate::properties::Key::SYNTAX_TABLE)).copied(),
         }
     }
 }

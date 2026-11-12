@@ -89,3 +89,46 @@ fn numeric_type_tests_do_not_allocate_errors() {
         "{allocations} allocations for 1000 n-ary additions"
     );
 }
+
+/// A property write costs the runs it touches: it copies no run of its
+/// range into a list, compares no key by name and edits the leaf holding
+/// its runs in place, so what 1000 writes allocate is bounded, and the same
+/// whether the text has a thousand runs or 64 thousand, five other
+/// properties or 640.  Each round of writes changes what the last one left:
+/// a run's value, nothing, a second property, and a part of a run.
+#[test]
+fn property_writes_allocate_for_the_runs_they_touch_not_for_the_text() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    vm.eval_source("(defvar ROUND 0)").unwrap();
+    let mut counts = Vec::new();
+    for (name, runs, others) in [("small", 1_000, 5), ("large", 64_000, 5), ("many-keys", 64_000, 640)] {
+        vm.eval_source(&format!(
+            "(with-current-buffer (get-buffer-create {name:?}) (setq buffer-undo-list t) (insert (make-string {} ?x)) \
+               (dotimes (i {runs}) \
+                 (put-text-property (+ 1 (* i 10)) (+ 6 (* i 10)) 'face (if (= 0 (% i 2)) 'bold 'italic)) \
+                 (when (= 0 (% i 50)) \
+                   (put-text-property (+ 3 (* i 10)) (+ 9 (* i 10)) (intern (format \"other-%d\" (% i {others}))) i))) \
+               nil)",
+            runs * 10
+        ))
+        .unwrap();
+        let source = format!(
+            "(with-current-buffer {name:?} \
+               (let ((inhibit-modification-hooks t) (i 0) (even (= 0 (% ROUND 2)))) \
+                 (while (< i 1000) \
+                   (let ((p (+ 1 (* 10 (% (* i 7919) {runs})))) (k (% i 4))) \
+                     (cond ((= k 0) (put-text-property p (+ p 5) 'face (if even 'underline 'shadow))) \
+                           ((= k 1) (put-text-property p (+ p 5) 'face (get-text-property p 'face))) \
+                           ((= k 2) (put-text-property p (+ p 7) 'written ROUND)) \
+                           (t (put-text-property (+ p 1) (+ p 3) 'face (if even 'bold 'italic))))) \
+                   (setq i (1+ i))) \
+                 (setq ROUND (1+ ROUND)) \
+                 i))"
+        );
+        counts.push((name, count(&mut vm, &source)));
+    }
+    for (name, allocations) in &counts {
+        assert!(*allocations <= 100, "{name}: {allocations} allocations for 1000 property writes: {counts:?}");
+    }
+}

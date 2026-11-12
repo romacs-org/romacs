@@ -291,7 +291,9 @@ impl<'a> Encoder<'a> {
                     out.n(range.end.0);
                     out.n(props.len());
                     for (key, value) in props {
-                        let key = self.names.of(&key);
+                        // Keys are written by name, which only an interned symbol's gives back.
+                        let name = self.vm.property_key_name(key).ok_or("a text property keyed by a symbol that is not interned")?;
+                        let key = self.names.of(name);
                         out.n(key);
                         let r = self.value(value)?;
                         Self::write_ref(&mut out, r);
@@ -919,10 +921,10 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                     }
                     for (key, value) in props {
                         let key = names.get(*key).ok_or("compiled Lisp artifact: bad property name")?;
-                        let key = vm.symbol_names[*key].clone();
+                        let key = vm.property_key(&vm.symbol_names[*key]).ok_or("compiled Lisp artifact: bad property name")?;
                         let value = resolve(value)?;
                         if let Object::String(s) | Object::RawString(s) = vm.object_mut(v)? {
-                            s.properties.put(crate::coordinates::ByteOffset(*start)..crate::coordinates::ByteOffset(*end), &key, value);
+                            s.properties.put(crate::coordinates::ByteOffset(*start)..crate::coordinates::ByteOffset(*end), key, value);
                         }
                     }
                 }

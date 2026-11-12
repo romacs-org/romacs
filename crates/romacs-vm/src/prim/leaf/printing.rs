@@ -205,7 +205,7 @@ impl Leaf<'_> {
         let inhibit = self.variable_value(inhibit)?.unwrap_or(Value::NIL);
         let read_only = self.intern("buffer-read-only");
         if inhibit == Value::NIL && self.variable_value(read_only)?.is_some_and(|v| v != Value::NIL)
-            && self.fileio_property_at_point("inhibit-read-only")? == Value::NIL {
+            && self.fileio_property_at_point(crate::properties::Key::INHIBIT_READ_ONLY)? == Value::NIL {
             let condition = self.intern("buffer-read-only");
             let buffer = self.current_buffer()?;
             return Err(Fault::Signal(condition, self.cons(buffer, Value::NIL)));

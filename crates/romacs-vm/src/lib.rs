@@ -361,7 +361,7 @@ impl Value {
         self.integer_value()
             .ok_or_else(|| "integer required".into())
     }
-    fn reference(index: usize, tag: u64) -> Self {
+    const fn reference(index: usize, tag: u64) -> Self {
         if tag == 5 {
             Self((((index as u64) + 1) << 3) | 2)
         } else {
@@ -1513,6 +1513,9 @@ pub struct Vm {
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
     fixnum_slots: [usize; 2],
+    /// `char-property-alias-alist' and `default-text-properties', which
+    /// textget reads for every property a character does not have.
+    textget_slots: [usize; 2],
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
@@ -1745,6 +1748,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     variable_redirects,
     forwarded,
     fixnum_slots,
+    textget_slots,
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
@@ -1979,6 +1983,7 @@ impl Vm {
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
+            textget_slots: [usize::MAX; 2],
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
@@ -2049,6 +2054,11 @@ impl Vm {
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
         };
+        // The built-in property keys are the first symbols, each at its
+        // place among them: Rust names them as constants.
+        for (index, name) in properties::Key::BUILTIN.iter().enumerate() {
+            assert_eq!(vm.slot(name), index, "the built-in property key `{name}' is not symbol {index}");
+        }
         for index in 0..PRIMITIVES.len() {
             let d = prim::descriptor(index).unwrap();
             let i = vm.slot(d.name());
@@ -2090,6 +2100,7 @@ impl Vm {
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
         vm.declare_special_raw("default-text-properties", Value::NIL);
         vm.declare_special_raw("char-property-alias-alist", Value::NIL);
+        vm.textget_slots = [vm.slot("char-property-alias-alist"), vm.slot("default-text-properties")];
         vm.specials.insert("text-property-default-nonsticky".into());
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());

@@ -163,11 +163,11 @@ fn change_hooks_run_and_unsupported_keys_refuse_without_mutation() {
           (get-text-property 1 'p) calls
           (let ((inhibit-modification-hooks t)) (add-text-properties 1 4 '(p 8)))
           calls (get-text-property 1 'p)
-          (condition-case e (add-text-properties 1 4 (list 'p 9 (make-symbol "p") 9)) (error e))
+          (condition-case e (add-text-properties 1 4 (list 'p 9 7 9)) (error e))
           (get-text-property 1 'p) (point))))"#;
     assert_eq!(
         vm.eval_source(source).unwrap().display().unwrap(),
-        "(t 7 1 t 1 8 (error \"text property keys other than interned symbols are not implemented\") 8 4)"
+        "(t 7 1 t 1 8 (error \"text property keys other than symbols are not implemented\") 8 4)"
     );
 }
 

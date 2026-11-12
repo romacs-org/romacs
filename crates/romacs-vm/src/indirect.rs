@@ -325,9 +325,10 @@ mod tests {
         let base = vm.create_named_buffer("gc-base", false).unwrap();
         let leaf = vm.allocate_object(Object::String(Box::new(crate::data::LispString::new("λ"))));
         let vector = vm.allocate_object(Object::Vector(vec![leaf, Value::integer(7).unwrap()]));
+        let key = vm.intern_property_key("probe");
         let Object::Buffer(b) = vm.objects.entry_mut(arena(base).unwrap()) else { panic!() };
         assert!(b.replace(ByteOffset(0)..ByteOffset(0), "aλЖz".as_bytes()).is_ok());
-        b.properties.put(ByteOffset(1)..ByteOffset(5), "probe", vector);
+        b.properties.put(ByteOffset(1)..ByteOffset(5), key, vector);
         let indirect = vm.make_indirect_buffer(base, "gc-indirect", false).unwrap();
         unlist(&mut vm, "gc-base");
         unlist(&mut vm, "gc-indirect");
@@ -338,7 +339,7 @@ mod tests {
         let Object::Buffer(b) = vm.object(base).unwrap() else { panic!("base buffer reclaimed") };
         assert!(b.shares_body(i) && b.indirect == [roots[0]]);
         // The shared properties were rewritten once, from the base.
-        let probe = i.properties.get_property(ByteOffset(1), "probe").unwrap();
+        let probe = i.properties.get_property(ByteOffset(1), key).unwrap();
         let Object::Vector(v) = vm.object(probe).unwrap() else { panic!("property value lost") };
         assert!(matches!(vm.object(v[0]).unwrap(), Object::String(s) if s.as_str() == "λ"));
         assert_eq!(v[1], Value::integer(7).unwrap());

@@ -1,4 +1,8 @@
 use super::*;
+/// The key tests call NAME.
+fn named(name: &str) -> Key {
+    Key::test(name)
+}
 fn check(tree: &Tree) -> (usize, usize, u32) {
     match tree {
         Tree::Leaf(runs, len, present, uniform) => {
@@ -43,33 +47,33 @@ fn check(tree: &Tree) -> (usize, usize, u32) {
 #[test]
 fn absence_nil_and_value_are_independent_per_key() {
     let mut p = Properties::new();
-    assert_eq!(p.get_property(ByteOffset(3), "face"), None);
-    p.put(ByteOffset(2)..ByteOffset(8), "face", Value::NIL);
-    p.put(ByteOffset(0)..ByteOffset(10), "fontified", Value::TRUE);
-    assert_eq!(p.get_property(ByteOffset(3), "face"), Some(Value::NIL));
-    assert_eq!(p.get_property(ByteOffset(0), "face"), None);
+    assert_eq!(p.get_property(ByteOffset(3), named("face")), None);
+    p.put(ByteOffset(2)..ByteOffset(8), named("face"), Value::NIL);
+    p.put(ByteOffset(0)..ByteOffset(10), named("fontified"), Value::TRUE);
+    assert_eq!(p.get_property(ByteOffset(3), named("face")), Some(Value::NIL));
+    assert_eq!(p.get_property(ByteOffset(0), named("face")), None);
     assert_eq!(
-        p.get_property(ByteOffset(0), "fontified"),
+        p.get_property(ByteOffset(0), named("fontified")),
         Some(Value::TRUE)
     );
-    p.remove(ByteOffset(0)..ByteOffset(10), "face");
-    assert!(!p.layers.contains_key("face"));
-    assert!(p.layers.contains_key("fontified"));
+    p.remove(ByteOffset(0)..ByteOffset(10), named("face"));
+    assert!(!p.has_key(named("face")));
+    assert!(p.has_key(named("fontified")));
 }
 #[test]
 fn replacement_preserves_stamp_and_new_keys_prepend() {
     let mut p = Properties::new();
     let r = ByteOffset(0)..ByteOffset(10);
-    p.put(r.clone(), "a", Value::TRUE);
-    p.put(r.clone(), "b", Value::NIL);
-    p.put(r.clone(), "a", Value::integer(3).unwrap());
+    p.put(r.clone(), named("a"), Value::TRUE);
+    p.put(r.clone(), named("b"), Value::NIL);
+    p.put(r.clone(), named("a"), Value::integer(3).unwrap());
     assert_eq!(
         p.properties_at(ByteOffset(1)),
-        vec![("b", Value::NIL), ("a", Value::integer(3).unwrap())]
+        vec![(named("b"), Value::NIL), (named("a"), Value::integer(3).unwrap())]
     );
-    p.remove(r.clone(), "a");
-    p.put(r, "a", Value::TRUE);
-    assert_eq!(p.properties_at(ByteOffset(1))[0].0, "a");
+    p.remove(r.clone(), named("a"));
+    p.put(r, named("a"), Value::TRUE);
+    assert_eq!(p.properties_at(ByteOffset(1))[0].0, named("a"));
 }
 #[test]
 fn relative_layers_match_the_old_map_after_every_operation() {
@@ -81,7 +85,7 @@ fn relative_layers_match_the_old_map_after_every_operation() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         if i % 3 == 0 {
             let p = ByteOffset(seed as usize % (len + 1));
-            let v = BTreeMap::from([("x".into(), Value::integer(i).unwrap())]);
+            let v = BTreeMap::from([(named("x"), Value::integer(i).unwrap())]);
             assert_eq!(new.insert(p, v.clone()), old.insert(p, v));
         } else {
             let start = seed as usize % (len + 1);
@@ -110,10 +114,10 @@ fn relative_layers_match_the_old_map_after_every_operation() {
         assert_eq!(new.to_map(), old, "property state after operation {i}");
         for (at, values) in &old {
             for (key, value) in values {
-                assert_eq!(new.get_property(*at, key), Some(*value));
+                assert_eq!(new.get_property(*at, *key), Some(*value));
             }
         }
-        for tree in new.layers.values().flatten() {
+        for tree in new.trees() {
             check(tree);
         }
     }
@@ -128,7 +132,7 @@ fn range_writes_removals_and_edits_match_per_byte_oracle() {
         let start = seed as usize % (oracle.len() + 1);
         let end = (start + ((seed >> 20) as usize % 80)).min(oracle.len());
         let key = (seed >> 32) as usize % 3;
-        let name = ["face", "fontified", "x"][key];
+        let name = ["face", "fontified", "x"].map(named)[key];
         if i % 3 == 0 {
             let n = (seed >> 40) as usize % 12;
             p.replace(ByteOffset(start)..ByteOffset(end), n);
@@ -150,15 +154,15 @@ fn range_writes_removals_and_edits_match_per_byte_oracle() {
             }
         }
         for (at, row) in oracle.iter().enumerate() {
-            for (k, name) in ["face", "fontified", "x"].iter().enumerate() {
+            for (k, name) in ["face", "fontified", "x"].map(named).into_iter().enumerate() {
                 assert_eq!(
                     p.get_property(ByteOffset(at), name),
                     row[k],
-                    "operation {i} byte {at} key {name}"
+                    "operation {i} byte {at} key {name:?}"
                 );
             }
         }
-        for tree in p.layers.values().flatten() {
+        for tree in p.trees() {
             check(tree);
         }
     }
@@ -166,26 +170,26 @@ fn range_writes_removals_and_edits_match_per_byte_oracle() {
 #[test]
 fn boundaries_ignore_stamp_but_not_presence_or_identity() {
     let mut p = Properties::new();
-    p.put(ByteOffset(0)..ByteOffset(2), "face", Value::NIL);
-    p.put(ByteOffset(2)..ByteOffset(4), "face", Value::NIL);
+    p.put(ByteOffset(0)..ByteOffset(2), named("face"), Value::NIL);
+    p.put(ByteOffset(2)..ByteOffset(4), named("face"), Value::NIL);
     assert_eq!(p.next_change(ByteOffset(0), ByteOffset(8)), ByteOffset(4));
-    p.put(ByteOffset(3)..ByteOffset(4), "face", Value::TRUE);
+    p.put(ByteOffset(3)..ByteOffset(4), named("face"), Value::TRUE);
     assert_eq!(p.next_change(ByteOffset(0), ByteOffset(8)), ByteOffset(3));
     assert_eq!(p.next_change(ByteOffset(3), ByteOffset(8)), ByteOffset(4));
     assert_eq!(p.next_change(ByteOffset(4), ByteOffset(8)), ByteOffset(8));
-    p.put(ByteOffset(6)..ByteOffset(7), "x", Value::NIL);
+    p.put(ByteOffset(6)..ByteOffset(7), named("x"), Value::NIL);
     assert_eq!(p.next_change(ByteOffset(4), ByteOffset(8)), ByteOffset(6));
 }
 #[test]
 fn exhausted_stamp_counter_compacts_live_ranks_without_changing_order() {
     let mut p = Properties::new();
-    p.put(ByteOffset(0)..ByteOffset(4), "a", Value::NIL);
-    p.put(ByteOffset(0)..ByteOffset(4), "b", Value::TRUE);
+    p.put(ByteOffset(0)..ByteOffset(4), named("a"), Value::NIL);
+    p.put(ByteOffset(0)..ByteOffset(4), named("b"), Value::TRUE);
     p.stamp = u32::MAX;
-    p.put(ByteOffset(0)..ByteOffset(4), "c", Value::TRUE);
+    p.put(ByteOffset(0)..ByteOffset(4), named("c"), Value::TRUE);
     assert_eq!(
         p.properties_at(ByteOffset(1)),
-        vec![("c", Value::TRUE), ("b", Value::TRUE), ("a", Value::NIL)]
+        vec![(named("c"), Value::TRUE), (named("b"), Value::TRUE), (named("a"), Value::NIL)]
     );
     assert_eq!(p.stamp, 3);
 }
@@ -196,7 +200,7 @@ fn packed_run_capacity_and_large_lengths() {
     for at in 0..8192 {
         p.put(
             ByteOffset(at)..ByteOffset(at + 1),
-            "x",
+            named("x"),
             Value::integer(at as i64).unwrap(),
         );
     }
@@ -222,7 +226,7 @@ fn previous_change_matches_the_per_byte_oracle() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         let start = seed as usize % len;
         let end = (start + ((seed >> 20) as usize % 40)).min(len);
-        let name = ["face", "fontified", "x"][(seed >> 32) as usize % 3];
+        let name = ["face", "fontified", "x"].map(named)[(seed >> 32) as usize % 3];
         // Few distinct values, so runs with equal values and different
         // stamps abut.
         let value = Value::integer((seed >> 40) as i64 % 3).unwrap();
@@ -231,7 +235,7 @@ fn previous_change_matches_the_per_byte_oracle() {
         } else {
             p.put(ByteOffset(start)..ByteOffset(end), name, value);
         }
-        let state = |at: usize| ["face", "fontified", "x"].map(|k| p.get_property(ByteOffset(at), k));
+        let state = |at: usize| ["face", "fontified", "x"].map(named).map(|k| p.get_property(ByteOffset(at), k));
         for at in 0..=len {
             for limit in [0, at / 2] {
                 let mut expected = at.saturating_sub(1);
@@ -253,18 +257,18 @@ fn slice_matches_the_per_byte_oracle() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         let start = seed as usize % len;
         let end = (start + 1 + ((seed >> 20) as usize % 30)).min(len);
-        let name = ["face", "fontified"][(seed >> 32) as usize % 2];
+        let name = ["face", "fontified"].map(named)[(seed >> 32) as usize % 2];
         p.put(ByteOffset(start)..ByteOffset(end), name, Value::integer(i).unwrap());
         let a = (seed >> 41) as usize % (len + 10);
         let b = (a + ((seed >> 50) as usize % 300)).min(len + 10);
         let part = p.slice(ByteOffset(a)..ByteOffset(b));
-        for tree in part.layers.values().flatten() {
+        for tree in part.trees() {
             check(tree);
         }
         for at in 0..b.saturating_sub(a) + 5 {
-            for name in ["face", "fontified"] {
+            for name in ["face", "fontified"].map(named) {
                 let expected = if a + at < b { p.get_property(ByteOffset(a + at), name) } else { None };
-                assert_eq!(part.get_property(ByteOffset(at), name), expected, "operation {i} slice {a}..{b} at {at} {name}");
+                assert_eq!(part.get_property(ByteOffset(at), name), expected, "operation {i} slice {a}..{b} at {at} {name:?}");
             }
         }
         assert_eq!(part.properties_at(ByteOffset(0)), if a < b { p.properties_at(ByteOffset(a)) } else { vec![] });
@@ -275,28 +279,28 @@ fn runs_of_keys_end_only_where_those_keys_change() {
     let mut p = Properties::new();
     let one = Value::integer(1).unwrap();
     for at in 0..10 {
-        p.put(ByteOffset(at)..ByteOffset(at + 1), "face", Value::integer(at as i64 % 2).unwrap());
+        p.put(ByteOffset(at)..ByteOffset(at + 1), named("face"), Value::integer(at as i64 % 2).unwrap());
     }
-    p.put(ByteOffset(2)..ByteOffset(5), "read-only", Value::TRUE);
-    p.put(ByteOffset(4)..ByteOffset(7), "category", one);
-    let keys = ["read-only".to_owned(), "category".to_owned(), "absent".to_owned()];
+    p.put(ByteOffset(2)..ByteOffset(5), named("read-only"), Value::TRUE);
+    p.put(ByteOffset(4)..ByteOffset(7), named("category"), one);
+    let keys = ["read-only", "category", "absent"].map(named);
     let runs = p.runs_of(ByteOffset(1)..ByteOffset(9), &keys);
     let starts: Vec<_> = runs.iter().map(|(at, _)| at.0).collect();
     assert_eq!(starts, vec![1, 2, 4, 5, 7]);
-    fn names(values: &[(String, Value)]) -> Vec<&str> {
-        values.iter().map(|(k, _)| k.as_str()).collect()
+    fn keys_of(values: &[(Key, Value)]) -> Vec<Key> {
+        values.iter().map(|(k, _)| *k).collect()
     }
-    assert_eq!(names(&runs[0].1), Vec::<&str>::new());
-    assert_eq!(names(&runs[2].1), vec!["read-only", "category"]);
-    assert_eq!(runs[3].1, vec![("category".to_owned(), one)]);
+    assert_eq!(keys_of(&runs[0].1), Vec::<Key>::new());
+    assert_eq!(keys_of(&runs[2].1), vec![named("read-only"), named("category")]);
+    assert_eq!(runs[3].1, vec![(named("category"), one)]);
     // Every run agrees with the full properties at its start, on KEYS.
     for (at, values) in &runs {
-        let full: Vec<_> = p.properties_at(*at).into_iter().filter(|(k, _)| keys.iter().any(|key| key == k)).collect();
+        let full: Vec<_> = p.properties_at(*at).into_iter().filter(|(k, _)| keys.contains(k)).collect();
         assert_eq!(full.len(), values.len());
         assert!(full.iter().all(|(k, v)| values.iter().any(|(key, value)| key == k && value == v)));
     }
     assert!(p.runs_of(ByteOffset(3)..ByteOffset(3), &keys).is_empty());
-    assert_eq!(p.runs_of(ByteOffset(0)..ByteOffset(10), &["absent".to_owned()]).len(), 1);
+    assert_eq!(p.runs_of(ByteOffset(0)..ByteOffset(10), &[named("absent")]).len(), 1);
 }
 #[test]
 fn next_change_matches_the_per_byte_oracle_across_uniform_stretches() {
@@ -311,7 +315,7 @@ fn next_change_matches_the_per_byte_oracle_across_uniform_stretches() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         let start = seed as usize % (len + 1);
         let end = (start + ((seed >> 20) as usize % 30)).min(len);
-        let name = ["face", "fontified", "x"][(seed >> 32) as usize % 3];
+        let name = ["face", "fontified", "x"].map(named)[(seed >> 32) as usize % 3];
         let value = Value::integer((seed >> 40) as i64 % 2).unwrap();
         match i % 5 {
             4 => p.remove(ByteOffset(start)..ByteOffset(end), name),
@@ -322,10 +326,10 @@ fn next_change_matches_the_per_byte_oracle_across_uniform_stretches() {
             }
             _ => p.put(ByteOffset(start)..ByteOffset(end), name, value),
         }
-        for tree in p.layers.values().flatten() {
+        for tree in p.trees() {
             check(tree);
         }
-        let state = |at: usize| ["face", "fontified", "x"].map(|k| p.get_property(ByteOffset(at), k));
+        let state = |at: usize| ["face", "fontified", "x"].map(named).map(|k| p.get_property(ByteOffset(at), k));
         for at in 0..len {
             for limit in [len, (at + 7).min(len)] {
                 let mut expected = at + 1;

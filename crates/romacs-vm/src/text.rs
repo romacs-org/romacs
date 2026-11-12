@@ -1,6 +1,8 @@
 //! UTF-8 rope storage; properties and restrictions remain byte-canonical.
 //! The cached ASCII property changes conversion cost, never the payload type.
 use crate::properties::Properties;
+#[cfg(test)]
+use crate::properties::Key;
 use crate::{Result, Value, coordinates::*, indirect::Shared};
 use std::borrow::Cow;
 use std::ops::Range;
@@ -447,7 +449,7 @@ impl Text {
                 let width = text.as_str()[at.0..].chars().next().unwrap().len_utf8();
                 for (key, value) in values {
                     text.properties
-                        .put(at..ByteOffset(at.0 + width), key, *value);
+                        .put(at..ByteOffset(at.0 + width), *key, *value);
                 }
             }
         }
@@ -772,7 +774,7 @@ impl TextBody {
     #[cfg(test)]
     pub(crate) fn property(&self, at: ByteOffset, key: &str) -> Result<Option<Value>> {
         self.boundary(at)?;
-        Ok(self.properties.get_property(at, key))
+        Ok(self.properties.get_property(at, Key::test(key)))
     }
     #[cfg(test)]
     pub(crate) fn put_property(
@@ -782,12 +784,7 @@ impl TextBody {
         value: Value,
     ) -> Result<()> {
         self.validate_range(&range)?;
-        self.properties.put(range, key, value);
-        Ok(())
-    }
-    pub fn remove_property(&mut self, range: Range<ByteOffset>, key: &str) -> Result<()> {
-        self.validate_range(&range)?;
-        self.properties.remove(range, key);
+        self.properties.put(range, Key::test(key), value);
         Ok(())
     }
     pub fn next_property_change(&self, at: ByteOffset, limit: ByteOffset) -> Result<ByteOffset> {
@@ -1489,7 +1486,7 @@ mod tests {
             for p in r {
                 let b = ByteOffset(self.byte_of_char(p).unwrap());
                 let end = ByteOffset(self.byte_of_char(p + 1).unwrap());
-                self.properties.put(b..end, k, Value::integer(v).unwrap());
+                self.properties.put(b..end, Key::test(k), Value::integer(v).unwrap());
             }
             Ok(())
         }
@@ -1501,7 +1498,7 @@ mod tests {
             bad(Text::character_at(self, p))?;
             Ok(self
                 .properties
-                .get_property(ByteOffset(self.byte_of_char(p).unwrap()), k)
+                .get_property(ByteOffset(self.byte_of_char(p).unwrap()), Key::test(k))
                 .map(|v| v.as_integer().unwrap()))
         }
     }
@@ -1542,7 +1539,7 @@ mod tests {
         let mut text = crate::text::Text::new(&vec![b'a'; 8192]).unwrap();
         for at in (0..8192).step_by(8) {
             text.properties
-                .put(ByteOffset(at)..ByteOffset(at + 1), "x", Value::TRUE);
+                .put(ByteOffset(at)..ByteOffset(at + 1), Key::test("x"), Value::TRUE);
         }
         text.replace(ByteOffset(0)..ByteOffset(0), b"prefix")
             .unwrap();
@@ -1553,7 +1550,7 @@ mod tests {
         );
         for at in (0..8192).step_by(8) {
             assert_eq!(
-                text.properties.get_property(ByteOffset(at + 6), "x"),
+                text.properties.get_property(ByteOffset(at + 6), Key::test("x")),
                 Some(Value::TRUE)
             );
         }

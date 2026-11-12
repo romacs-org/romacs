@@ -10,6 +10,7 @@
 //! `visit_values` traces (forwarded.rs COLLECTOR CONTRACT).
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
+use crate::properties::Key;
 
 /// What GNU's insert/write code reads about `current_buffer` before it acts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,13 +146,13 @@ impl Leaf<'_> {
 
     /// GNU textget: direct property, category fallback, then defaults. Values
     /// are copied out of the rope before interning can grow VM storage.
-    fn fileio_text_property(&mut self, at: ByteOffset, key: &str) -> std::result::Result<Value, Fault> {
+    fn fileio_text_property(&mut self, at: ByteOffset, key: Key) -> std::result::Result<Value, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(Value::NIL) };
         let direct = t.properties.get_property(at, key);
-        let category = t.properties.get_property(at, "category").unwrap_or(Value::NIL);
+        let category = t.properties.get_property(at, Key::CATEGORY).unwrap_or(Value::NIL);
         if let Some(value) = direct { return Ok(value) }
-        let symbol = self.intern(key);
+        let symbol = key.symbol();
         if self.kind(category) == Kind::Symbol {
             let value = self.vm.symbol_property(category, symbol).map_err(Fault::Error)?;
             if value != Value::NIL { return Ok(value) }
@@ -174,11 +175,10 @@ impl Leaf<'_> {
                 seen_alternatives.push(alternatives);
                 let (alias, tail) = self.vm.cons_pair(alternatives).map_err(Fault::Error)?;
                 alternatives = tail;
-                if self.kind(alias) != Kind::Symbol { continue }
-                let alias = self.symbol_name(alias)?;
+                let Some(alias) = Key::of(alias) else { continue };
                 let index = self.vm.buffer_index().map_err(Fault::Error)?;
                 if let data::Object::Buffer(t) = &self.vm.objects[index]
-                    && let Some(value) = t.properties.get_property(at, &alias)
+                    && let Some(value) = t.properties.get_property(at, alias)
                     && value != Value::NIL { return Ok(value) }
             }
             break;
@@ -188,7 +188,7 @@ impl Leaf<'_> {
         Ok(self.vm.plist_lookup(defaults, symbol))
     }
 
-    pub fn fileio_property_at_point(&mut self, key: &str) -> std::result::Result<Value, Fault> {
+    pub fn fileio_property_at_point(&mut self, key: Key) -> std::result::Result<Value, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(Value::NIL) };
         let at = t.point;
@@ -220,9 +220,9 @@ impl Leaf<'_> {
         let cat = self.intern("category");
         for (pos, front) in [(left, false), (right, true)] {
             let Some(pos) = pos else { continue };
-            let value = self.fileio_text_property(pos, "read-only")?;
+            let value = self.fileio_text_property(pos, Key::READ_ONLY)?;
             if value == Value::NIL || self.fileio_memq(value, inhibit)? { continue }
-            let sticky = self.fileio_text_property(pos, if front { "front-sticky" } else { "rear-nonsticky" })?;
+            let sticky = self.fileio_text_property(pos, if front { Key::FRONT_STICKY } else { Key::REAR_NONSTICKY })?;
             let member = |this: &Self, key| -> std::result::Result<bool, Fault> {
                 if sticky == Value::NIL { Ok(false) }
                 else if this.kind(sticky) != Kind::Cons { Ok(true) }
@@ -230,7 +230,7 @@ impl Leaf<'_> {
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             let data::Object::Buffer(t) = &self.vm.objects[index] else { unreachable!() };
-            let direct = t.properties.get_property(pos, "read-only").unwrap_or(Value::NIL);
+            let direct = t.properties.get_property(pos, Key::READ_ONLY).unwrap_or(Value::NIL);
             let sticks = member(self, ro)? || (direct == Value::NIL && member(self, cat)?);
             if front == sticks {
                 let condition = self.intern("text-read-only");
@@ -301,7 +301,7 @@ impl Leaf<'_> {
         let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { return Ok(()) };
         let at = t.point.0;
         // to_map gives each byte's properties; put them back as runs.
-        let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<String, Value>)> = vec![];
+        let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<Key, Value>)> = vec![];
         for (offset, values) in &map {
             match runs.last_mut() {
                 Some((_, end, run)) if *end == offset.0 && *run == values => *end += 1,
@@ -310,7 +310,7 @@ impl Leaf<'_> {
         }
         for (start, end, values) in runs {
             for (key, value) in values {
-                t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), key, *value);
+                t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), *key, *value);
             }
         }
         Ok(())
