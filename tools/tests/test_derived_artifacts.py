@@ -97,6 +97,8 @@ class DerivedTests(unittest.TestCase):
         refused = git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', check=False,
                       env={**os.environ, 'ROMACS_LAND': '0'})
         self.assertNotEqual(refused.returncode, 0)
+        named = git(self.root, '-c', 'review.note=x pack-refs', 'update-ref', 'refs/heads/beta', 'HEAD', check=False)
+        self.assertNotEqual(named.returncode, 0, 'a value naming pack-refs is not the command')
         git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', env={**os.environ, 'ROMACS_LAND': '1'})
         git(self.root, 'pack-refs', '--all')                             # storage only: beta is loose here
         git(self.root, 'gc', '-q')

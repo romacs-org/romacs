@@ -7,16 +7,16 @@
 [ "${ROMACS_LAND:-}" = 1 ] && exit 0
 # Packing refs (git pack-refs, run by gc and maintenance) moves a ref between
 # storage files, never to another commit.
-set -- $(tr '\0' '\n' < /proc/$PPID/cmdline 2>/dev/null)
-shift
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -C|-c|--git-dir|--work-tree|--namespace|--exec-path) shift 2 ;;
-    -*) shift ;;
-    *) break ;;
-  esac
-done
-[ "${1:-}" = pack-refs ] && exit 0
+# xargs -0 keeps the parent's arguments whole: a value never reads as the command.
+command=$(xargs -0 sh -c 'shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -C|-c|--git-dir|--work-tree|--namespace|--exec-path) shift 2 ;;
+      -*) shift ;;
+      *) printf %s "$1"; exit 0 ;;
+    esac
+  done' git < /proc/$PPID/cmdline 2>/dev/null)
+[ "$command" = pack-refs ] && exit 0
 # The merge queue itself: an ancestor running python with romacs-merge as its
 # script.  A command line merely naming it elsewhere does not count.
 pid=$PPID
