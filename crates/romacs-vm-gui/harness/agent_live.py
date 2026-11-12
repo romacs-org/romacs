@@ -2717,14 +2717,16 @@ def select(args, base):
                           'starts': len(starts(one))}
 
         # Armed during a turn: nothing mid-turn, the message waits for both.
-        # The turn outlasts the evals that read it under load (6 s).
-        a.send(one, 'slow 60')
+        # The turn is held until it has been looked at.
+        gate = a.work / 'release-armed'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
+        gate.touch()
         until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
@@ -2741,8 +2743,10 @@ def select(args, base):
         result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
                              'in_place': replayed.find(divider) < replayed.find('after')}
 
-        # A restart of the server while armed: applied at the live turn's end.
-        a.send(one, 'slow 40')
+        # A restart of the server while armed: applied at the live turn's end,
+        # the turn held until the restored selection has been read.
+        gate = a.work / 'release-restart'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-haiku-5-5', 'high')
         a.restart()
@@ -2750,6 +2754,7 @@ def select(args, base):
         a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
         a.codex_instance()
         found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
+        gate.touch()
         settled(one, 30)
         result['restart_armed'] = {'found': found, 'options': options(one),
                                    'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
@@ -2796,12 +2801,14 @@ def select(args, base):
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
         # Codex: its next turn names them, once the running one ended.
-        # Its turn under way, not starting: a selection made while it starts
-        # rightly reaches the first turn.
-        run = a.start('slow 8', 'codex')
+        # Its turn under way, not starting (a selection made while it starts
+        # rightly reaches the first turn), and held until the next message waits.
+        gate = a.work / 'release-codex'
+        run = a.start(f'wait {gate}', 'codex')
         until(lambda: a.state(run) == 'running', 15, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
+        gate.touch()
         until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
         runs = a.codex_runs()
         result['codex'] = {'first': runs[0]['model'] == 'gpt-6-luna', 'second': runs[-1]['model'] == 'gpt-6-luna',
