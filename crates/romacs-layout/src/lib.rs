@@ -799,6 +799,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
                 if shift > 0.0 && left_mark(shift) > 0.0 && y < body_height && y + metrics[0].1 > 0.0 {
                     glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?;
+                    // The glyph is this row's: the next row settles its own.
+                    row_glyphs = frame.glyphs.len();
                 }
                 if let Some(place) = place.as_mut().filter(|_| row_start <= snapshot.point_byte && snapshot.point_byte <= byte) {
                     place.truncated_right = hidden;
