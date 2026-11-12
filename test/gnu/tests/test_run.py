@@ -86,7 +86,6 @@ class SourceDirectory(unittest.TestCase):
         self.assertTrue((source / 'nextstep/GNUstep/Emacs.base/Resources/emacs.tiff').is_file())
         image = source / 'test/data/image/black.jpg'
         self.assertTrue(image.is_file())
-        self.assertEqual(image.resolve(), run.TESTS / 'data/image/black.jpg')
         self.assertTrue((source / 'test/data/decompress/tg.tar.gz').is_file(), 'the archives arc-mode and tar-mode read')
         self.assertTrue((source / 'test/gnu/run.py').is_file())
         self.assertIs(run.source_directory(), source)
@@ -98,7 +97,10 @@ class SourceDirectory(unittest.TestCase):
             (root / 'test/other').mkdir()
             with patch.object(run, 'ROOT', root):
                 source = run.made_source_directory.__wrapped__()
-            self.assertEqual((source / 'test/data').resolve(), run.TESTS / 'data')
+            self.assertFalse((source / 'test/data').is_symlink())
+            self.assertTrue((source / 'test/data/decompress/tg.tar.gz').is_file())
+            (source / 'test/data/decompress/written-by-a-test').write_text('x')
+            self.assertFalse((run.TESTS / 'data/decompress/written-by-a-test').exists())
             self.assertTrue((source / 'test/other').is_dir())
 
     def test_a_test_file_is_named_from_the_suite_or_the_repository(self):
