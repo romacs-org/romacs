@@ -104,6 +104,8 @@ impl Vm {
     pub fn world_reinit(&mut self) {
         // The environment lists, from this process's environment.
         self.environment_snapshot = Some(crate::environment::snapshot());
+        // HOST(slot:process-environment): rebuilds the environment lists from this process
+        // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
