@@ -24,7 +24,7 @@
 (defmacro romacs-agent-header-tests--with (&rest body)
   "BODY in the chat of `session', registered and live, its header made;
 `written' counts what is written to display from then on: the header's
-string, a window's cut of it, an overlay."
+string, an overlay."
   (declare (indent 0))
   `(let* ((romacs-agent-glyphs nil)
           (romacs-agent--sessions (make-hash-table :test #'equal))
@@ -65,6 +65,10 @@ string, a window's cut of it, an overlay."
              (setq written 0)
              ,@body)
          (when (buffer-live-p chat) (kill-buffer chat))))))
+
+;; What runs before a redisplay: a batch session has no host to run it.
+(unless (fboundp 'romacs--run-window-change-functions)
+  (load (expand-file-name "vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
 
 (defun romacs-agent-header-tests--header ()
   "The chat's header as its buffer hands it to display."
@@ -258,9 +262,14 @@ string, a window's cut of it, an overlay."
       (let* ((wide (selected-window))
              (narrow (split-window wide (- (window-total-width wide) 14) t)))
         (should (< (window-body-width narrow) (string-width header-line-format) (window-body-width wide)))
+        ;; The header changes; then what runs before a redisplay runs, in
+        ;; the host's order (prepare_menu_bars, then the window change
+        ;; functions, which see the split): nothing writes to a window.
         (romacs-agent--raise session (list :type 'mode :permission-mode "default"))
+        (redisplay--pre-redisplay-functions nil)
+        (romacs--run-window-change-functions)
         (dolist (window (list wide narrow))
-          (should-not (window-parameter window 'header-line-format))
+          (should-not (seq-some (lambda (parameter) (stringp (cdr parameter))) (window-parameters window)))
           (should (eq (buffer-local-value 'header-line-format (window-buffer window)) header-line-format)))))))
 
 (ert-deftest romacs-agent-header-of-a-transcript-follows-glyphs ()
