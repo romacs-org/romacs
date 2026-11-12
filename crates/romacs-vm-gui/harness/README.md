@@ -430,6 +430,7 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+
 ## The render thread at rest (`rest_live.py`)
 
 What the render thread draws, and why, while nothing on screen changes.
@@ -445,12 +446,15 @@ each state's frames from those lines: idle with the blink off (no frame,
 the main thread under 1% of a core), GNU's blink (two frames a second), an
 agent chat whose turn runs (its clock, one frame a second) and the same
 with a timer 20 times a second that changes nothing. A frame that answers
-no scene of the evaluator's, or names another reason, fails its state. Source `romacs-gpu-env.sh` first to run it on the real GPU, where
-effects the software renderer suppresses can stand.
+no scene of the evaluator's, or names another reason, fails its state, and
+so does a blink or a clock that draws too little for the time it was held.
+`ROMACS_HARNESS_WLR_ENV` (`KEY=VALUE ...`) is added to the session's
+environment to run the private compositor on a real GPU, where effects the
+software renderer suppresses can stand.
 
 ```sh
 python3 -B crates/romacs-vm-gui/harness/rest_live.py --binary BIN --output DIR \
-  [--seconds 6] [--tools LABWC-DIR]   # about 1 minute
+  [--seconds 3..6] [--tools LABWC-DIR]   # about 1 minute
 ```
 
 ## Typing while background work allocates (`gc_typing_live.py`)
