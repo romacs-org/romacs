@@ -1,0 +1,20 @@
+# Ledger ids whose row is KNOWN to be wrong or unverified on the GNU side.
+#
+# Source: a read-only audit of DIVERGENCES.md against GNU src/*.c at
+# 45b0f7699df, whose corrections were never applied. An
+# ledger/gnu-test-exclusions.toml row citing one of these ids is never counted as a verified
+# divergence: run.py files the test under `excluded-unverified-row`, which is
+# debt, not parity evidence. Remove an id only in the commit that corrects its
+# DIVERGENCES.md row with implementation evidence.
+
+[suspect]
+D001 = "WRONG GNU SIDE: GNU multibyte aset rejects non-ASCII (data.c:2665-2673), not byte poking"
+VM2-KM1 = "WRONG GNU SIDE: three of the six maps are built in C (keyboard.c:14155,14231,14237)"
+H5 = "WRONG GNU SIDE: GNU compares and hashes closures structurally (fns.c:2990-3003,5524-5538)"
+H3 = "STALE ROMACS SIDE: public equal and equal-table keys differ for closures"
+D004 = "STALE ROMACS SIDE: prin1-to-string no longer shares the JSON escaping"
+H4 = "UNDERSTATED: maphash order after slot reuse is observable"
+H7 = "UNDERSTATED: allocation and the >=2^30 refusal are observable"
+VM2-EV3 = "UNDERSTATED: syntax-table equal and recursion depth differ"
+VM2-DC1 = "UNDERSTATED: the stated revert path cannot work; VM2 has no eval primitive"
+RX1 = "QUALIFY: first-descent promise must be bounded by search-wide abandonment"

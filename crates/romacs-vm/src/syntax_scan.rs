@@ -50,6 +50,13 @@ fn comment_style(flags: i32, other: i32) -> i32 {
     ((flags >> 21) & 1) | ((flags >> 22) & 2) | ((other >> 22) & 2)
 }
 
+/// Whether `forw_comment` only steps over a character of syntax S: no
+/// comment delimiter, no first half of a two-character one, no escape.
+/// After such a character the next is read with nothing pending.
+pub(crate) fn comment_plain(s: i32) -> bool {
+    !matches!(s & 0xff, SCOMMENT | SENDCOMMENT | SCOMMENT_FENCE | SESCAPE | SCHARQUOTE) && !comstartend_first(s)
+}
+
 /// A character position (1-based, like GNU's charpos) and its byte offset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Pos {
@@ -71,6 +78,14 @@ pub(crate) trait Text {
     fn syntax(&self, at: Pos) -> i32;
     /// SYNTAX_WITH_FLAGS of character C in the buffer's own syntax table.
     fn table_syntax(&self, c: u32) -> i32;
+    /// Pass the characters from AT, before character position LIMIT, whose
+    /// syntax `comment_plain` accepts: where the pass ends, and the syntax
+    /// of the last character passed, if any.  A text may pass fewer than
+    /// there are, or none (as here): `forw_comment` reads the rest one at
+    /// a time.
+    fn pass_comment_plain(&self, at: Pos, _limit: i64) -> (Pos, Option<i32>) {
+        (at, None)
+    }
 }
 
 /// The variables a scan reads.
@@ -335,6 +350,20 @@ impl<T: Text> Scanner<'_, T> {
         loop {
             at = match at {
                 ForwAt::Read => {
+                    // A run of characters that are only stepped over, at
+                    // once: none of them ends the comment, starts a
+                    // two-character delimiter, or reaches text that is
+                    // still to be propertized (`update_forward` stops
+                    // there, so the character before it is read below).
+                    let plain_limit = match self.options.propertize_done {
+                        Some(done) if done < self.zv.char => stop.min(done - 1),
+                        _ => stop,
+                    };
+                    if let (to, Some(last)) = self.text.pass_comment_plain(from, plain_limit) {
+                        syntax = last;
+                        code = syntax & 0xff;
+                        from = to;
+                    }
                     if from.char == stop {
                         let last = if code == SESCAPE || code == SCHARQUOTE || comend_first(syntax)
                             || (nesting > 0 && comstart_first(syntax)) { syntax } else { SMAX };

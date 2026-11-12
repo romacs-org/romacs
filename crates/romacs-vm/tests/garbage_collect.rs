@@ -393,7 +393,8 @@ fn a_throw_from_a_collection_at_a_region_exit_still_runs_the_cleanup() {
 /// collection due and throws to the code's catch; no collection may run
 /// finalizer B before that cleanup begins, where B's throw would drop it and
 /// leave A's match data behind. B runs once the throw has landed, at the
-/// catch, its throw no longer caught there.
+/// handler's first tick after the catch (here a loop's first back-jump), its
+/// throw no longer caught there.
 #[test]
 fn a_finalizer_throwing_past_the_runner_leaves_the_match_data() {
     let mut vm = Vm::new();
@@ -407,7 +408,8 @@ fn a_finalizer_throwing_past_the_runner_leaves_the_match_data() {
         (setq mt-b (make-finalizer (lambda () (setq mt-ran (cons 'b mt-ran)) (throw 'mt-out 'b)))) nil)");
     let value = eval(&mut vm, "(progn (set-buffer (get-buffer-create \"mt\")) (insert \"abc\") (goto-char 1) (re-search-forward \"b\") \
         (let ((data (match-data))) \
-          (list (catch 'mt-out (setq mt-a nil mt-b nil) (garbage-collect) 'none) (equal data (match-data)) (reverse mt-ran))))");
+          (list (catch 'mt-out (setq mt-a nil mt-b nil) (garbage-collect) 'none) (equal data (match-data)) \
+                (progn (let ((i 0)) (while (< i 2) (setq i (1+ i)))) (reverse mt-ran)))))");
     assert_eq!(value, "(a t (a b))", "A's throw caught, the match data restored, B after the landing");
 }
 
@@ -492,8 +494,8 @@ fn big_primitive_allocation_collects_inside_the_loop() {
         ("generated, under apply", "(apply #'make-list 100000 '(nil))"),
         ("legacy", "(copy-sequence na-long)"),
         ("reader", "(read-from-string na-text)"),
-        // Not this path's alone: the cleanup's entry collects too, until step
-        // 2b leaves it to the request (lisp-speed 13.4).
+        // The cleanup's entry collected here until step 2b; now only 2a's
+        // request does.
         ("under unwind-protect", "(unwind-protect (make-list 100000 nil) nil)"),
         ("bool vectors", "(make-bool-vector 4000000 nil)"),
     ] {
@@ -533,9 +535,9 @@ fn inline_allocation_waits_at_most_one_budget_period() {
 }
 
 /// A protected form run again and again from native code (`Vm::execute'),
-/// with no back-jump or call to poll at: the cleanup's entry collects,
-/// however the cleanup ends, and a doomed finalizer runs at the execution's
-/// end, a safe point.
+/// with no back-jump or call to poll at: each execution's end collects, as
+/// a request's end does when a collection is due, however the cleanup ends,
+/// and a doomed finalizer runs there, a safe point.
 #[test]
 fn protected_forms_run_from_native_code_collect() {
     let mut vm = Vm::new();
@@ -552,17 +554,17 @@ fn protected_forms_run_from_native_code_collect() {
         vm.execute(completing).unwrap();
     }
     let completed = vm.heap_stats().collections;
-    assert!(completed > before, "the cleanups' entries collected");
+    assert!(completed > before, "the executions' ends collected");
     assert_eq!(vm.eval_source("nx-ran").unwrap().display().unwrap(), "t", "and an execution's end ran the finalizer");
     for _ in 0..20 {
         let error = vm.execute(failing).map(|_| ()).unwrap_err();
         assert!(format!("{error:?}").contains("cleanup failed"), "{error:?}");
     }
-    assert!(vm.heap_stats().collections > completed, "a cleanup that fails still collected at its entry");
+    assert!(vm.heap_stats().collections > completed, "an execution whose cleanup fails still collected at its end");
 }
 
 /// The long finalizer's run keeps its order when the collection that doomed
-/// it ran at a cleanup's entry, leaving its aftermath pending: an explicit
+/// it ran in a cleanup, leaving its aftermath pending: an explicit
 /// `garbage-collect' in that cleanup runs it at once, and no poll inside the
 /// long finalizer starts another run. Nor when a wait for input
 /// (`romacs--timer-check-idle') starts the run, outside any cleanup.
@@ -596,12 +598,73 @@ fn a_long_finalizer_run_from_a_cleanup_or_a_wait_keeps_its_order() {
     assert_eq!(idle, ran, "a wait for input");
 }
 
+/// The forms a file loads run an engine each, with no request's end
+/// between them: a collection their allocation makes due is taken at the
+/// next form's entry, not first after the load, protected by a cleanup or
+/// not.
+#[test]
+fn a_loaded_files_forms_collect_between_them() {
+    let dir = std::env::temp_dir().join(format!("romacs-gc-load-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, form) in [("plain", "(make-list 100000 nil)"), ("protected", "(unwind-protect (make-list 100000 nil) nil)")] {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_stress(0);
+        vm.set_collection_floor(1);
+        vm.eval_source("(progn (defvar ld-start nil) (defvar ld-end nil) (garbage-collect) t)").unwrap();
+        let path = dir.join(format!("{name}.el"));
+        let body = vec![form; 40].join("\n");
+        std::fs::write(&path, format!("(setq ld-start gcs-done)\n{body}\n(setq ld-end gcs-done)\n")).unwrap();
+        vm.load_file(&path).unwrap();
+        let collected = vm.eval_source("(- ld-end ld-start)").unwrap().display().unwrap();
+        assert_ne!(collected, "0", "{name}: no collection between the loaded forms");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A landing whose unwinding made a collection due with no request pending
+/// (a threshold the unbinding restored, 2a's request settled by a poll under
+/// the bound one): the handler's first tick collects, `land` having zeroed
+/// the budget, before anything else polls.
+#[test]
+fn a_collection_its_unwinding_made_due_is_taken_at_the_handlers_first_tick() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.eval_source("(progn (defvar lt-big nil) (fset 'lt-tick (lambda () nil)) (garbage-collect) t)").unwrap();
+    let collected = vm.eval_source("(let ((g gcs-done)) \
+        (catch 'lt-out (let ((gc-cons-threshold most-positive-fixnum) (gc-cons-percentage 2.0)) \
+                         (setq lt-big (make-list 2000000 nil)) (dotimes (_ 20000)) (throw 'lt-out nil))) \
+        (lt-tick) (- gcs-done g))").unwrap().display().unwrap();
+    assert_eq!(collected, "1", "collected at the first tick after the landing");
+}
+
+/// An escape's payload waits in its resume record while the cleanup runs: a
+/// moving, verified collection at the cleanup's first tick keeps it, now that
+/// the cleanup's entry no longer collects (A1's records hold it).
+#[test]
+fn a_cleanup_keeps_the_escape_payload_across_a_moving_collection() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_gc_moving(true);
+    vm.set_gc_verify(true);
+    vm.set_collection_floor(1);
+    vm.eval_source("(progn (defvar cp-big nil) (defvar cp-ran nil) (fset 'cp-tick (lambda () (setq cp-ran t))) t)").unwrap();
+    let value = vm.eval_source("(let ((g gcs-done)) \
+        (list (catch 'cp-out (unwind-protect (throw 'cp-out (list 'payload (make-string 3 ?p) (make-list 3 'x))) \
+                               (setq cp-big (make-list 400000 nil)) (cp-tick))) \
+              cp-ran (> gcs-done g)))").unwrap().display().unwrap();
+    assert_eq!(value, r#"((payload "ppp" (x x x)) t t)"#);
+}
+
 /// Sol's case against deferring the aftermath only to a cleanup's first poll:
 /// a big string's primitive return zeroes the budget, the body throws, and the
 /// cleanup's first form calls a Lisp function, whose entry polls. A doomed
 /// finalizer that throws to the surrounding catch must not run there, inside
 /// the cleanup: the cleanup sets its marker, the body's throw is caught, and
-/// the finalizer runs at the landing, its throw no longer caught.
+/// the finalizer runs at the first tick after the landing (here a Lisp
+/// call), its throw no longer caught.
 #[test]
 fn a_cleanup_whose_first_call_polls_runs_whole() {
     let mut vm = Vm::new();
@@ -609,12 +672,12 @@ fn a_cleanup_whose_first_call_polls_runs_whole() {
     vm.set_collection_floor(1);
     let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
     eval(&mut vm, "(progn (defvar sb-marker nil) (defvar sb-ran nil) (defvar sb-kept nil) (defvar sb-big nil) \
-        (fset 'sb-mark (lambda () (setq sb-marker t))) t)");
+        (fset 'sb-mark (lambda () (setq sb-marker t))) (fset 'sb-tick (lambda () nil)) t)");
     eval(&mut vm, "(progn (setq sb-kept (make-finalizer (lambda () (setq sb-ran t) (throw 'sb-out 'finalizer)))) nil)");
     let value = eval(&mut vm, "(list (catch 'sb-out \
           (unwind-protect (progn (setq sb-kept nil) (setq sb-big (make-string 16000000 ?x)) (throw 'sb-out 'body)) \
             (sb-mark))) \
-        sb-marker sb-ran)");
+        sb-marker (progn (sb-tick) sb-ran))");
     assert_eq!(value, "(body t t)", "the cleanup ran whole, then the finalizer");
 }
 
@@ -638,7 +701,8 @@ fn a_wait_for_input_inside_a_cleanup_runs_no_aftermath() {
 }
 
 /// A watcher an escape's unbinding runs is unwinding too: a collection its
-/// allocation makes due there runs no finalizer inside it; the landing does.
+/// allocation makes due there runs no finalizer inside it; the first tick
+/// after the landing does (here a Lisp call).
 #[test]
 fn a_watcher_run_while_unwinding_starts_no_aftermath() {
     let mut vm = Vm::new();
@@ -646,12 +710,12 @@ fn a_watcher_run_while_unwinding_starts_no_aftermath() {
     vm.set_collection_floor(1);
     let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
     eval(&mut vm, "(progn (defvar wv-var nil) (defvar wv-in nil) (defvar wv-log nil) (defvar wv-kept nil) (defvar wv-big nil) \
-        (fset 'wv-spin (lambda () (let ((i 0)) (while (< i 30000) (setq i (1+ i)))))) \
+        (fset 'wv-spin (lambda () (let ((i 0)) (while (< i 30000) (setq i (1+ i)))))) (fset 'wv-tick (lambda () nil)) \
         (add-variable-watcher 'wv-var (lambda (_symbol _new operation _where) \
           (when (eq operation 'unlet) \
             (setq wv-in t wv-big (make-list 400000 nil)) (wv-spin) (setq wv-in nil)))) t)");
     eval(&mut vm, "(progn (setq wv-kept (make-finalizer (lambda () (setq wv-log (cons wv-in wv-log))))) nil)");
-    let value = eval(&mut vm, "(list (catch 'wv-out (let ((wv-var 1)) (setq wv-kept nil) (throw 'wv-out 'body))) wv-log)");
+    let value = eval(&mut vm, "(list (catch 'wv-out (let ((wv-var 1)) (setq wv-kept nil) (throw 'wv-out 'body))) (progn (wv-tick) wv-log))");
     assert_eq!(value, "(body (nil))", "the finalizer ran once, outside the watcher");
 }
 
@@ -856,6 +920,20 @@ fn a_collections_record_reads_its_pause_to_the_microsecond() {
                                           (< (abs (- ms (* 1000.0 (- gc-elapsed before)))) 0.01)))))")
         .unwrap().display().unwrap();
     assert_eq!(out, "(explicit t t t)");
+}
+
+/// A bignum's digits are memory the next collection must answer for, as a
+/// string's bytes are. GNU collects through this churn; with only the object
+/// counted, a run this size reached 3 GB without a collection.
+#[test]
+fn a_churn_of_bignums_collects() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let out = vm.eval_source("(let ((before gcs-done) (i 0))
+                                (while (< i 40000) (ash 1 65000) (setq i (1+ i)))
+                                (> gcs-done before))")
+        .unwrap().display().unwrap();
+    assert_eq!(out, "t");
 }
 
 /// A record says when its collection ended and what it left live, the second

@@ -7,6 +7,8 @@ use romacs_vm::Vm;
 use std::path::{Path, PathBuf};
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
+#[path = "support/template.rs"]
+mod template;
 
 const SETUP: &str = r##"(set-buffer (get-buffer-create "*ifc-hooks*")) (kill-all-local-variables) (erase-buffer) (set-buffer-modified-p nil) (setq log nil) (defun ifc-log (&rest args) (setq log (cons (append args (list (point) (buffer-string))) log)))"##;
 
@@ -55,7 +57,7 @@ fn insert_file_contents_runs_change_hooks_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = CASES.lines().filter(|line| !line.is_empty())
-        .map(|line| line.replace("FILE", &lisp(&file)).replace("EMPTY", &lisp(&empty)))
+        .map(|line| template::fill(line, &[("FILE", &lisp(&file)), ("EMPTY", &lisp(&empty))]))
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
             (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
@@ -87,8 +89,8 @@ fn insert_file_contents_replace_matches_gnu() {
                  ("abcd", "f4", "(point-max)", "(narrow-to-region 2 4)"), ("abc", "f5", "2", "nil"),
                  ("abc", "f2", "2", "nil")];
     let failures: Vec<String> = cases.iter().map(|(text, file, point, narrow)| {
-            REPLACE_CASES.trim().replace("TEXT", &serde_json::to_string(text).unwrap()).replace("FILE", &lisp(&dir.join(file)))
-                .replace("PT", point).replace("NARROW", narrow)
+            template::fill(REPLACE_CASES.trim(), &[("TEXT", &serde_json::to_string(text).unwrap()), ("FILE", &lisp(&dir.join(file))),
+                                                  ("PT", point), ("NARROW", narrow)])
         })
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
@@ -119,7 +121,7 @@ fn insert_file_contents_records_undo_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = UNDO_CASES.lines().filter(|line| !line.is_empty())
-        .map(|line| line.replace("F1", &lisp(&dir.join("f1"))).replace("F2", &lisp(&dir.join("f2"))))
+        .map(|line| template::fill(line, &[("F1", &lisp(&dir.join("f1"))), ("F2", &lisp(&dir.join("f2")))]))
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
             (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
@@ -163,7 +165,7 @@ fn insert_file_contents_replace_checks_the_ranges_it_changes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = [("1 3", "f1"), ("1 3", "same"), ("4 7", "f1"), ("3 4", "f1")].iter()
-        .map(|(ro, file)| READ_ONLY_CASES.trim().replace("RO", ro).replace("FILE", &lisp(&dir.join(file))))
+        .map(|(ro, file)| template::fill(READ_ONLY_CASES.trim(), &[("RO", ro), ("FILE", &lisp(&dir.join(file)))]))
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
             (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
@@ -189,7 +191,7 @@ fn visiting_replace_does_not_ask_about_supersession_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = ["", "(narrow-to-region 1 2)"].iter()
-        .map(|narrow| VISIT_CASE.replace("FILE", &lisp(&file)).replace("NARROW", narrow))
+        .map(|narrow| template::fill(VISIT_CASE, &[("FILE", &lisp(&file)), ("NARROW", narrow)]))
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
             (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))

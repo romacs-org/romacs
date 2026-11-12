@@ -18,6 +18,8 @@ enum Body<'a> {
 thread_local! {
     /// The syntax reads of every `View` on this thread, replayed or live.
     static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The characters every `View` on this thread passed without a read.
+    static PASSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The current buffer as `crate::syntax_scan::Text`.
@@ -151,6 +153,46 @@ impl scan::Text for View<'_> {
     fn table_syntax(&self, c: u32) -> i32 {
         let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, self.table, c) };
         memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, self.table, c); memo.set(Some(code)); code })
+    }
+    fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
+        let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
+        // A rerun reads what the stopped run read before it reads the text.
+        let recorded = self.read.borrow().len();
+        if self.record && recorded < self.replay.len() {
+            return (at, None);
+        }
+        let len = text.len_bytes();
+        let (mut pos, mut last) = (at, None);
+        while pos.char < limit && pos.byte < len {
+            // Only where the table alone gives the syntax.
+            let unset_until = if self.properties { reader.unset_until(ByteOffset(pos.byte)) } else { usize::MAX };
+            let room = (unset_until.saturating_sub(pos.byte)).min(usize::try_from(limit - pos.char).unwrap_or(usize::MAX));
+            if room == 0 {
+                break;
+            }
+            let (count, whole) = {
+                let piece = text.chunk_from(pos.byte);
+                let bytes = &piece[..piece.len().min(room)];
+                let mut read = self.record.then(|| self.read.borrow_mut());
+                let count = bytes.iter().position(|&byte| {
+                    let plain = byte < 0x80 && scan::comment_plain(self.table_syntax(u32::from(byte)));
+                    if plain {
+                        last = Some(byte);
+                        if let Some(read) = &mut read { read.push(self.table_syntax(u32::from(byte))); }
+                    }
+                    !plain
+                });
+                (count.unwrap_or(bytes.len()), count.is_none())
+            };
+            // ASCII: as many characters as bytes.
+            pos = Pos { char: pos.char + i64::try_from(count).expect("a run inside the text"), byte: pos.byte + count };
+            if !whole {
+                break;
+            }
+        }
+        #[cfg(test)]
+        PASSED.with(|n| n.set(n.get() + usize::try_from(pos.char - at.char).unwrap_or(0)));
+        (pos, last.map(|byte| self.table_syntax(u32::from(byte))))
     }
 }
 
@@ -777,5 +819,48 @@ mod tests {
         let reads = super::READS.with(std::cell::Cell::get) - before;
         assert!(chars > 350_000, "{chars}");
         assert!(reads <= 2 * usize::try_from(chars).unwrap(), "{reads} syntax reads for {chars} characters");
+    }
+
+    /// The body of a comment is passed, not read a character at a time:
+    /// cc-mode scans the same long comment several times on every key.
+    /// So too when a scan records what it reads for a rerun
+    /// (`forward-comment` under `parse-sexp-lookup-properties`), and up to
+    /// a `syntax-table` property, which is read.
+    #[test]
+    fn a_comment_body_is_passed_without_reads() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let setup = "(progn (set-buffer (get-buffer-create \"comment\")) (erase-buffer)
+               (let ((st (make-char-table 'syntax-table)))
+                 (set-char-table-parent st (standard-syntax-table))
+                 (modify-syntax-entry ?/ \". 14\" st) (modify-syntax-entry ?* \". 23\" st) (set-syntax-table st))
+               (insert \"a /* \" (make-string 20000 ?x) \" */ b\")
+               (setq syntax-propertize--done most-positive-fixnum))";
+        vm.eval_source_raw(setup).unwrap();
+        let counted = |vm: &mut Vm, source: &str, expected: &str| {
+            let before = (super::READS.with(std::cell::Cell::get), super::PASSED.with(std::cell::Cell::get));
+            let value = vm.eval_source_raw(source).unwrap();
+            assert_eq!(vm.display(value).unwrap(), expected, "{source}");
+            (super::READS.with(std::cell::Cell::get) - before.0, super::PASSED.with(std::cell::Cell::get) - before.1)
+        };
+        for source in [
+            "(nth 4 (parse-partial-sexp 1 (point-max)))",
+            "(let ((parse-sexp-lookup-properties t)) (nth 4 (parse-partial-sexp 1 (point-max))))",
+            "(let ((s (parse-partial-sexp 1 10))) (parse-partial-sexp 10 (point-max) nil nil s 'syntax-table) (- (point) 20009))",
+            "(let ((parse-sexp-lookup-properties t)) (goto-char 3) (forward-comment 1) (- (point) 20009))",
+            "(progn (goto-char 3) (forward-comment 1) (- (point) 20009))",
+        ] {
+            // A parse to a position, not to a stop, may be answered from
+            // the text's summaries instead of scanned at all.
+            let scanned = source.starts_with("(let ((s") || source.contains("forward-comment");
+            let (reads, passed) = counted(&mut vm, source, if scanned { "0" } else { "nil" });
+            assert!(reads <= 40 && (!scanned || passed >= 19_990), "{source}: {reads} syntax reads, {passed} characters passed");
+        }
+        // A property in the middle is read; the text around it is passed.
+        vm.eval_source_raw("(put-text-property 9000 9001 'syntax-table (string-to-syntax \"w\"))").unwrap();
+        let (reads, passed) = counted(&mut vm, "(let ((parse-sexp-lookup-properties t)) (nth 4 (parse-partial-sexp 1 (point-max))))", "nil");
+        assert!(reads <= 40, "{reads} syntax reads, {passed} characters passed");
+        let (reads, passed) = counted(&mut vm, "(let ((parse-sexp-lookup-properties t)) (goto-char 3) (forward-comment 1) (- (point) 20009))", "0");
+        assert!(reads <= 40 && passed >= 19_980, "{reads} syntax reads, {passed} characters passed");
     }
 }

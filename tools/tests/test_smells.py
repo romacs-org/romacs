@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """tools/lib/smells.py: what counts as each smell, the lint census's dedup and
 attribution, and the floors ratchet in both directions."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -162,14 +164,14 @@ class RatchetTest(unittest.TestCase):
 
     def test_a_new_top_level_entry_or_outside_member_fails(self):
         found = smells.problems(floors(), now(root=('crates', 'tools', 'logs'), outside=('tests/x', 'tests/y')))
-        self.assertEqual(found, ['layout root: logs is new; adding one is a deliberate edit of SMELL-FLOORS.json',
+        self.assertEqual(found, ['layout root: logs is new; adding one is a deliberate edit of ledger/smell-floors.json',
                                  'layout members_outside_crates: tests/y is new; adding one is a deliberate '
-                                 'edit of SMELL-FLOORS.json'])
+                                 'edit of ledger/smell-floors.json'])
 
     def test_a_new_generated_file_fails_until_listed(self):
         found = smells.problems(floors(), now(generated=('Cargo.lock', 'tools/new_index.json')))
         self.assertEqual(found, ['layout generated: tools/new_index.json is new; adding one is a deliberate edit '
-                                 'of SMELL-FLOORS.json'])
+                                 'of ledger/smell-floors.json'])
 
     def test_a_header_says_generated(self):
         heads = {'a.rs': '// @generated\n', 'b.el': ';; Do not edit.\n',
@@ -243,7 +245,82 @@ def counts(lint=3, allows=2, legacy=5, root=('crates', 'tools'), generated=('Car
 
 def rise(what, have, had, over=1):
     return (f"{what}: {have}, above the {had} of its merge-base"
-            f"; remove {over}, or set its floor in SMELL-FLOORS.json {over} above the merge-base's")
+            f"; remove {over}, or set its floor in ledger/smell-floors.json {over} above the merge-base's")
+
+
+class ClippyTreeTest(unittest.TestCase):
+    """A checkout's clippy tree names its checkout, and goes when the checkout does."""
+
+    def setUp(self):
+        self.base, self.home = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.base)
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def tree(self, checkout, device=None):
+        tree = smells.clippy_tree(self.base, checkout)
+        tree.mkdir()
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        smells.record_owner(tree, checkout)
+        if device is not None:
+            (tree / smells.DEVICE).write_text(str(device))
+        return tree
+
+    def prune(self):
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
+                mock.patch.object(sys, 'argv', ['smells.py', 'prune']), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(smells.main(), 0)
+        return sorted(p.name for p in self.base.iterdir() if not p.name.endswith('.lock'))
+
+    def test_only_a_tree_whose_checkout_is_gone_is_pruned(self):
+        live, gone = self.home / 'live', self.home / 'gone'
+        live.mkdir(), gone.mkdir()
+        kept = [self.tree(live), self.base / 'legacy']
+        kept[1].mkdir()
+        self.tree(gone)
+        gone.rmdir()
+        self.assertEqual(self.prune(), sorted(p.name for p in kept))
+
+    def test_a_recorded_path_is_read_exactly(self):
+        for name in ('live\n', 'cr\r', 'crlf\r\n'):
+            checkout = self.home / name
+            checkout.mkdir()
+            tree = self.tree(checkout)
+            self.assertEqual(smells.owner(tree)[0], str(checkout.resolve()))
+            self.assertEqual(self.prune(), [tree.name])
+            checkout.rmdir()
+            self.assertEqual(self.prune(), [])
+
+    def test_a_checkout_whose_disk_is_away_is_kept(self):
+        mount = self.home / 'mnt'
+        tree = self.tree(mount / 'repo', device=smells.os.stat(self.home).st_dev + 1)
+        self.assertEqual(self.prune(), [tree.name], 'the mount point is left, on another device')
+        shutil.rmtree(mount)
+        self.assertEqual(self.prune(), [tree.name], 'no mount point at all')
+
+    def test_a_directory_not_named_for_its_recorded_checkout_is_kept(self):
+        foreign = self.base / 'archive'
+        foreign.mkdir()
+        (foreign / smells.OWNER).write_text(str(self.home / 'gone'))
+        self.assertEqual(self.prune(), ['archive'])
+
+    def test_a_tree_in_use_is_kept(self):
+        gone = self.home / 'gone'
+        tree = self.tree(gone)
+        with smells.tree_lock(self.base, tree.name) as held:
+            smells.fcntl.flock(held, smells.fcntl.LOCK_EX)
+            self.assertEqual(self.prune(), [tree.name])
+        self.assertEqual(self.prune(), [])
+
+    def test_running_clippy_records_the_checkout(self):
+        checkout = self.home / 'repo'
+        checkout.mkdir()
+        done = subprocess.CompletedProcess([], 0, stdout='')
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
+                mock.patch.object(smells.subprocess, 'run', return_value=done) as run:
+            smells.run_clippy(checkout)
+        tree = smells.clippy_tree(self.base, checkout)
+        self.assertEqual((tree / smells.OWNER).read_text(), str(checkout.resolve()))
+        self.assertEqual(run.call_args.kwargs['env']['CARGO_TARGET_DIR'], str(tree))
 
 
 class MergeBaseTest(unittest.TestCase):
@@ -275,7 +352,7 @@ class MergeBaseTest(unittest.TestCase):
         self.assertEqual(smells.rises(raised, was, counts(), counts(lint=5)), [])
         self.assertEqual(smells.rises(raised, was, counts(), counts(lint=6)),
                          ["lint clippy::doc_markdown: 6, above the 3 of its merge-base and the 2 its floor was raised by"
-                          "; remove 1, or set its floor in SMELL-FLOORS.json 3 above the merge-base's"])
+                          "; remove 1, or set its floor in ledger/smell-floors.json 3 above the merge-base's"])
 
     def test_the_same_raise_on_both_sides_merges_to_one_and_the_failure_says_what_to_set(self):
         # The branch and the trunk each added one and raised the floor 9 -> 10.
@@ -284,7 +361,7 @@ class MergeBaseTest(unittest.TestCase):
         merged = counts(lint=10)
         self.assertEqual(smells.rises(merged, merged, counts(lint=6), counts(lint=7)),
                          ["lint clippy::doc_markdown: 7, above the 6 of its merge-base"
-                          "; remove 1, or set its floor in SMELL-FLOORS.json 1 above the merge-base's"])
+                          "; remove 1, or set its floor in ledger/smell-floors.json 1 above the merge-base's"])
         self.assertEqual(smells.rises(counts(lint=11), merged, counts(lint=6), counts(lint=7)), [])
 
     def test_a_branch_does_not_lower_a_floor_or_drop_a_listing(self):
@@ -313,7 +390,7 @@ class MergeBaseTest(unittest.TestCase):
     def test_a_new_top_level_entry_is_listed_or_fails(self):
         tree = counts(root=('crates', 'tools', 'logs'))
         self.assertEqual(smells.rises(counts(), counts(), counts(), tree),
-                         ['layout root: logs is new; adding one is a deliberate edit of SMELL-FLOORS.json'])
+                         ['layout root: logs is new; adding one is a deliberate edit of ledger/smell-floors.json'])
         listed = counts(root=('crates', 'tools', 'logs'))
         self.assertEqual(smells.rises(listed, counts(), counts(), tree), [])
         # A listing the merge-base already had is not this change's: `logs` was
@@ -325,7 +402,7 @@ class MergeBaseTest(unittest.TestCase):
         more = ('Cargo.lock', 'tools/new_index.json')
         self.assertEqual(smells.rises(counts(), counts(), counts(), counts(generated=more)),
                          ['layout generated: tools/new_index.json is new; adding one is a deliberate edit '
-                          'of SMELL-FLOORS.json'])
+                          'of ledger/smell-floors.json'])
         self.assertEqual(smells.rises(counts(generated=more), counts(), counts(), counts(generated=more)), [])
         self.assertEqual(smells.rises(counts(), counts(), counts(), counts(generated=())), [])
 
@@ -367,6 +444,7 @@ class BaseCountsTest(unittest.TestCase):
 
     def commit(self, n, floor=9, name='n'):
         (Path(self.repo) / name).write_text(str(n))
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({'rule': 'r', 'long_file_lines': 1500,
                                                                   **counts(lint=floor)}))
         self.git('add', '-A')
@@ -392,6 +470,15 @@ class BaseCountsTest(unittest.TestCase):
         self.commit(6)
         self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
         self.assertEqual(self.measured, [], 'the merge-base was kept')
+
+    def test_a_merge_base_from_before_the_move_keeps_its_floors(self):
+        self.git('checkout', '-q', 'trunk')
+        self.git('mv', str(smells.FLOORS), smells.FLOORS_BEFORE)
+        self.git('commit', '-q', '-m', 'the floors before the move')
+        self.git('checkout', '-q', '-B', 'branch')
+        self.git('mv', smells.FLOORS_BEFORE, str(smells.FLOORS))
+        self.commit(6)                                    # a rise of one, the floor unchanged
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
 
     def test_merging_the_trunk_moves_the_merge_base(self):
         self.commit(5, name='other')
@@ -458,6 +545,12 @@ class BaseCountsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(base='no-such-branch')
 
+    def test_a_clone_without_the_local_trunk_uses_origins(self):
+        self.commit(6)                                    # a rise of one over the trunk's 5
+        self.git('update-ref', 'refs/remotes/origin/trunk', 'trunk')
+        self.git('branch', '-q', '-D', 'trunk')
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
+
 
 class CargoSettingsTest(unittest.TestCase):
     def settings(self, home, **env):
@@ -494,6 +587,7 @@ class MergeDriverTest(unittest.TestCase):
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def commit(self, floor, other=1):
+        (Path(self.repo) / smells.FLOORS).parent.mkdir(exist_ok=True)
         (Path(self.repo) / smells.FLOORS).write_text(smells.dump({**floors(), 'lints': {
             'clippy::doc_markdown': floor, 'clippy::other': other}}))
         self.git('add', '-A')

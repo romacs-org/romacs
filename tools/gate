@@ -30,13 +30,13 @@ RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve
 def _pinned_oracle(repo):
     """Resolve the submitted reference; copied gates must pass their extracted root."""
     try:
-        text = (pathlib.Path(repo) / 'parity-reference.toml').read_text()
+        text = (pathlib.Path(repo) / 'ledger/parity-reference.toml').read_text()
     except OSError as error:
-        raise SystemExit(f'gate: cannot read parity-reference.toml in {repo}: {error}; '
+        raise SystemExit(f'gate: cannot read ledger/parity-reference.toml in {repo}: {error}; '
                          'restore the submitted reference before gating')
     pin = re.search(r'^mirror_commit\s*=\s*"([0-9a-f]{40})"', text, re.M)
     if not pin:
-        raise SystemExit('gate: parity-reference.toml has no valid mirror_commit; '
+        raise SystemExit('gate: ledger/parity-reference.toml has no valid mirror_commit; '
                          'restore its 40-character GNU revision before gating')
     root = pathlib.Path(os.environ.get('GNU_ORACLE_ROOT', str(pathlib.Path(os.environ.get('XDG_CACHE_HOME', pathlib.Path.home() / '.cache')) / 'gnu-emacs-pin'))).absolute()
     path = root / pin[1] / 'bin' / 'emacs'
@@ -512,7 +512,7 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         features = (['--features', 'romacs-display-runtime/video']
                     if sys.platform == 'linux' and 'romacs-display-runtime' in suites.get('display', [])
                     else [])
-        subject_tool = src / 'gnu-tests/tools/gate_vacuity.py'
+        subject_tool = src / 'test/gnu/tools/gate_vacuity.py'
         subject_source = out(sys.executable, '-B', str(subject_tool), 'source', cwd=src, env=env(src))
         build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *features,
                          '--list-type', 'binaries-only', '--message-format', 'json']
@@ -741,7 +741,7 @@ def inner(args):
     global ORACLE
     wt, run_dir = pathlib.Path(args.worktree), pathlib.Path(args.run_dir)
     # The measured tree is an extracted archive with NO .git, but in-gate receipt
-    # checks (gnu-tests/tools/vacuity_binding.py, reached from the parity_ratchet
+    # checks (test/gnu/tools/vacuity_binding.py, reached from the parity_ratchet
     # tests) verify revision identity with git plumbing. Offer them the candidate
     # worktree as a git root instead of writing a .git into the measured tree:
     # lisp_oracle.rs:130 deliberately refuses a repository with extras there, and
