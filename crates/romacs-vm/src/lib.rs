@@ -970,6 +970,32 @@ impl Op {
     // Register operands only: slots, function ids, branch targets, and arities
     // are different coordinate spaces. Argument windows stay contiguous because
     // capture pruning removes only unused registers from the frame prefix.
+    /// Every register operand, read where `map_registers` would rewrite: a
+    /// call's argument window aside, which `window` gives whole.
+    fn each_register(&self, visit: &mut impl FnMut(usize)) {
+        match *self {
+            Self::Const(d, _) | Self::Global(d, _) | Self::Closure(d, _, _) | Self::Condition(d, _, _)
+            | Self::Protect(d, _, _) | Self::Direct(d, ..) | Self::Sealed(d, ..) => visit(d),
+            Self::Move(d, s) | Self::ReadCell(d, s) | Self::WriteCell(d, s) | Self::ReadLate(d, s, _)
+            | Self::WriteLate(d, s, _) | Self::LateForwarded(d, s) | Self::Call(d, s, _, _) | Self::Catch(d, s, _) => {
+                visit(d);
+                visit(s);
+            }
+            Self::BindLate(_, r) | Self::UnbindLate(r) | Self::Cell(r) | Self::SetGlobal(_, r) | Self::Bind(_, r)
+            | Self::Define(_, r) | Self::DefineMacro(_, r) | Self::Return(r) | Self::LeaveProtect(r)
+            | Self::Unless(r, _) => visit(r),
+            Self::Unbind(_) | Self::Jump(_) | Self::PopHandlers(_) | Self::ResumeExit => {}
+        }
+    }
+    /// A call's argument window: its first register and its count.
+    fn window(&self) -> Option<(usize, usize)> {
+        match *self {
+            Self::Call(_, _, start, count) | Self::Direct(_, _, _, start, count) | Self::Sealed(_, _, start, count) => {
+                Some((start, count))
+            }
+            _ => None,
+        }
+    }
     fn map_registers(&mut self, map: &mut impl FnMut(usize) -> usize) {
         match self {
             Self::Const(d, _)

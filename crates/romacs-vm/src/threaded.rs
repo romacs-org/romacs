@@ -130,9 +130,8 @@ mod control_tests {
                 right: InlineOperand::Nil,
             }));
         }
-        let end = lower(&vm, Op::ResumeExit);
-        program.code.push(Code::for_test(instructions[..2].to_vec(), end));
-        program.code.push(Code::for_test(instructions[2..].to_vec(), end));
+        program.code.push(Code::for_test(instructions[..2].to_vec()));
+        program.code.push(Code::for_test(instructions[2..].to_vec()));
         program.retire_code(&[false, true]);
         assert!(program.inline_bodies[..2].iter().all(Option::is_none));
         assert_eq!(program.free_entries, [0, 1]);
@@ -155,7 +154,7 @@ mod control_tests {
         for (site, inst) in body.iter_mut().enumerate() {
             inst.site = site + 1;
         }
-        program.code.insert(0, Code::for_test(body, end));
+        program.code.insert(0, Code::for_test(body));
         program.entries.resize(dead + 1, entry);
         program.inline_bodies.resize(dead + 1, None);
         program.retire_code(&[false, true, true]);
@@ -259,9 +258,8 @@ mod control_tests {
         let mut vm = Vm::new();
         let code = vec![lower(&vm, Op::Return(0))];
         let mut regs = [Value::NIL];
-        let end = lower(&vm, Op::ResumeExit);
         let mut e = empty_engine(&mut vm);
-        e.code.push(Code::for_test(code, end));
+        e.code.push(Code::for_test(code));
         e.regs = regs.as_mut_ptr();
         e.controls.push(Control {
             kind: ControlKind::Protect { end: 0 },
@@ -1930,30 +1928,21 @@ fn lower_function(
     if id >= code.len() { code.resize_with(vm.functions.len().max(id + 1), Code::none); }
     if code[id].is_none() {
         vm.materialize_image_function(id)?;
-        let body = vm.functions[id]
-            .code
-            .iter()
-            .copied()
-            .map(|op| {
+        let ops = &vm.functions[id].code;
+        // One more for the terminator: building the code moves nothing.
+        let mut body = Vec::with_capacity(ops.len() + 1);
+        body.extend(ops.iter().map(|&op| {
                 let mut inst = lower(vm, op);
                 let function = &vm.functions[id];
                 if function.rest {
                     let rest_reg = function.captures + function.arity;
-                    let mut registers = op;
                     let mut observes = false;
-                    registers.map_registers(&mut |reg| {
-                        observes |= reg == rest_reg;
-                        reg
-                    });
-                    match op {
-                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count)
-                        | Op::Sealed(_, _, start, count) => {
-                            observes |= (start..start + count).contains(&rest_reg);
-                        }
-                        Op::Closure(_, _, site) => {
-                            observes |= function.sites[site].contains(&rest_reg);
-                        }
-                        _ => {}
+                    op.each_register(&mut |reg| observes |= reg == rest_reg);
+                    if let Some((start, count)) = op.window() {
+                        observes |= (start..start + count).contains(&rest_reg);
+                    }
+                    if let Op::Closure(_, _, site) = op {
+                        observes |= function.sites[site].contains(&rest_reg);
                     }
                     // Include replacement writes: they discard a pending tail
                     // before a later observation can resurrect its old value.
@@ -1980,9 +1969,8 @@ fn lower_function(
                     inline_bodies.push(None);
                 }
                 inst
-            })
-            .collect();
-        code[id] = code::validate(&vm.functions[id], body, lower(vm, Op::ResumeExit))
+            }));
+        code[id] = code::validate(&vm.functions[id], body)
             .map_err(|refusal| format!("invalid lowered code in function {id}: {refusal}"))?;
     }
     Ok(())
@@ -5900,16 +5888,18 @@ mod register_tests {
             if name == "plist-get" {
                 continue;
             }
-            // A sealed call of a typed op takes the typed handler, the kernel
-            // its other cases (`kernel_bytes`).
+            // A sealed call of a typed op takes the typed handler, its other
+            // cases the kernel's general path (`kernel_bytes`).
             let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
-            let typed = code::typed_kernel(sealed.value, argc);
-            let kernel = if typed.is_some() { sealed.kernel } else { sealed.handler };
-            assert!(std::ptr::fn_addr_eq(direct.kernel, kernel),
-                "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
-            assert!(typed.is_some() || !matches!(name, "car" | "cdr" | "null"), "{name} has a typed handler");
-            if let Some(typed) = typed {
-                assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
+            match code::typed_kernel(sealed.value, argc) {
+                Some((typed, other)) => {
+                    assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
+                    assert!(std::ptr::fn_addr_eq(sealed.kernel, other), "{name}'s other cases");
+                }
+                None => {
+                    assert!(!matches!(name, "car" | "cdr" | "null"), "{name} has a typed handler");
+                    assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler), "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
+                }
             }
         }
     }

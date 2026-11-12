@@ -1,10 +1,12 @@
 //! The hot handlers, about 85% of the ops a Lisp benchmark runs, as safe
 //! Rust over the audited core's capabilities (`threaded_audited.rs`,
-//! lisp-speed.md §13.6). A window is a `[Value; 256]` indexed by byte
-//! operands, so no bounds check is emitted; a frame whose operands do not
-//! fit a byte takes the `_wide` handler, checked. Each handler ends in one
-//! dispatch in tail position, with no `Drop` or address-taken local across
-//! it, so it compiles to a jump (`tools/check_threading.py` checks).
+//! lisp-speed.md §13.6). A window is a `[Value; 257]` indexed by byte
+//! operands, or one past a byte for a kernel's second argument, so no bounds
+//! check is emitted; a frame whose operands do not
+//! fit a byte takes the `_wide` handler, through the validated slot
+//! (`Regs::slot`). Each handler ends in one dispatch in tail position, with
+//! no `Drop` or address-taken local across it, so it compiles to a jump
+//! (`tools/check_threading.py` checks).
 #![forbid(unsafe_code)]
 use super::audited::{go, legacy, poll, Pc, Regs};
 use super::{Eng, Value};
@@ -23,8 +25,8 @@ pub(super) fn t_mov(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
 }
 #[inline]
 pub(super) fn t_mov_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
-    let regs = r.wide(&mut e);
-    regs[pc.wide_a()] = regs[pc.wide_b()];
+    let value = *r.slot(&mut e, pc.wide_b());
+    *r.slot(&mut e, pc.wide_a()) = value;
     go(e, r, pc.next())
 }
 #[inline]
@@ -34,7 +36,7 @@ pub(super) fn t_constant(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
 }
 #[inline]
 pub(super) fn t_constant_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
-    r.wide(&mut e)[pc.wide_a()] = pc.value();
+    *r.slot(&mut e, pc.wide_a()) = pc.value();
     go(e, r, pc.next())
 }
 #[inline]
@@ -44,7 +46,7 @@ pub(super) fn t_unless(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
 }
 #[inline]
 pub(super) fn t_unless_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
-    let to = if r.wide(&mut e)[pc.wide_a()] == Value::NIL { pc.branch() } else { pc.next() };
+    let to = if *r.slot(&mut e, pc.wide_a()) == Value::NIL { pc.branch() } else { pc.next() };
     go(e, r, to)
 }
 /// A backward jump spends the engine's budget, and polls when it is gone.
@@ -108,11 +110,11 @@ macro_rules! fixnums {
     };
 }
 #[inline]
-fn second(regs: &[Value; 256], pc: Pc) -> Value {
-    regs[pc.b()]
+fn second(regs: &[Value; 257], pc: Pc) -> Value {
+    regs[pc.d() + 1]
 }
 #[inline]
-fn one(_: &[Value; 256], _: Pc) -> Value {
+fn one(_: &[Value; 257], _: Pc) -> Value {
     Value(5)
 }
 fixnums!(t_add, second, |x, y| x.0.cast_signed().checked_add((y.0 - 1).cast_signed()).map(|n| Value(n.cast_unsigned())));
@@ -138,6 +140,6 @@ pub(super) fn t_consp(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
 #[inline]
 pub(super) fn t_eq(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
     let regs = r.window(&mut e);
-    regs[pc.a()] = truth!(regs[pc.d()] == regs[pc.b()]);
+    regs[pc.a()] = truth!(regs[pc.d()] == regs[pc.d() + 1]);
     go(e, r, pc.next())
 }

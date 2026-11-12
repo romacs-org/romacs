@@ -8,7 +8,7 @@
 //! changed only through the methods here, which touch no operand. Lowering's
 //! choice of a typed handler (`bytes`, `typed_kernel`) is here too.
 use super::audited::{self, terminator};
-use super::{prim, Function, Handler, Inst, Op, Primitive, Value};
+use super::{k_inst, prim, Function, Handler, Inst, Op, Primitive, Value};
 use std::fmt;
 use std::ops::Deref;
 
@@ -40,20 +40,19 @@ impl fmt::Display for Refusal {
     }
 }
 
-/// FUNCTION's lowered BODY as `Code`, its branch distances filled in, or why
-/// not. END is any instruction: it becomes the terminator.
-pub(super) fn validate(function: &Function, body: Vec<Inst>, end: Inst) -> Result<Code, Refusal> {
-    for (at, inst) in body.iter().enumerate() {
-        operands(function, at, &inst.op)?;
-    }
-    seal(body, end)
+/// FUNCTION's lowered BODY as `Code`, its branch distances filled in and
+/// the terminator after them, or why not. In one pass, each instruction
+/// read in place; with room for the terminator in BODY, nothing moves.
+pub(super) fn validate(function: &Function, body: Vec<Inst>) -> Result<Code, Refusal> {
+    seal(body, |at, op| operands(function, at, op))
 }
 
-/// BODY with its branch distances filled in and END as its terminator, or
-/// the first target outside it.
-fn seal(mut body: Vec<Inst>, mut end: Inst) -> Result<Code, Refusal> {
+/// BODY with its branch distances filled in and the terminator after it,
+/// or the first refusal of CHECK or of a target outside it.
+fn seal(mut body: Vec<Inst>, check: impl Fn(usize, &Op) -> Result<(), Refusal>) -> Result<Code, Refusal> {
     let len = body.len();
     for (at, inst) in body.iter_mut().enumerate() {
+        check(at, &inst.op)?;
         let target = |to: usize| if to < len { Ok(to) } else { Err(Refusal::Target { at, to, len }) };
         inst.branch = match inst.op {
             Op::Jump(to) | Op::Unless(_, to) => {
@@ -68,9 +67,7 @@ fn seal(mut body: Vec<Inst>, mut end: Inst) -> Result<Code, Refusal> {
             _ => 0,
         };
     }
-    end.handler = terminator;
-    end.branch = 0;
-    body.push(end);
+    body.push(k_inst(terminator));
     Ok(Code(body.into_boxed_slice()))
 }
 
@@ -82,36 +79,22 @@ fn operands(function: &Function, at: usize, op: &Op) -> Result<(), Refusal> {
         Some(end) if end <= width => Ok(()),
         _ => Err(Refusal::Window { at, end: start.saturating_add(count), width }),
     };
-    let mut registers = *op;
-    match *op {
-        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Sealed(_, _, start, count) => {
-            window(start, count)?;
-            // The window is checked whole; its first register may be its end.
-            match &mut registers {
-                Op::Call(_, _, s, _) | Op::Direct(_, _, _, s, _) | Op::Sealed(_, _, s, _) => *s = 0,
-                _ => {}
-            }
-        }
-        Op::Closure(_, _, site) if site >= function.sites.len() => {
-            return Err(Refusal::Site { at, site, sites: function.sites.len() });
-        }
-        Op::Closure(_, _, site) => {
-            for &register in &function.sites[site] {
-                window(register, 1)?;
-            }
-        }
-        _ => {}
+    if let Some((start, count)) = op.window() {
+        window(start, count)?;
     }
-    let mut outside = None;
-    registers.map_registers(&mut |register| {
-        if register >= width && outside.is_none() {
-            outside = Some(register);
+    if let Op::Closure(_, _, site) = *op {
+        let Some(captured) = function.sites.get(site) else {
+            return Err(Refusal::Site { at, site, sites: function.sites.len() });
+        };
+        for &register in captured {
+            window(register, 1)?;
         }
-        register
-    });
-    match outside {
-        Some(register) => Err(Refusal::Register { at, register, width }),
-        None => Ok(()),
+    }
+    let mut highest = None;
+    op.each_register(&mut |register| highest = highest.max(Some(register)));
+    match highest {
+        Some(register) if register >= width => Err(Refusal::Register { at, register, width }),
+        _ => Ok(()),
     }
 }
 
@@ -132,33 +115,37 @@ pub(super) fn bytes(i: &mut Inst, typed: Handler, wide: Handler) {
     }
 }
 /// The typed fast path (`threaded_hot.rs`) of `kernel(TARGET, ARGC)`, if it
-/// has one: X at D and Y at D+1 in a window.
-pub(super) fn typed_kernel(target: Value, argc: usize) -> Option<Handler> {
+/// has one, X at D and Y at D+1 in a window, and the handler of its other
+/// cases: the general path the kernel would reach after its own fast test,
+/// so a case the typed handler leaves is not tested twice.
+pub(super) fn typed_kernel(target: Value, argc: usize) -> Option<(Handler, Handler)> {
+    use super::numbers::op;
+    use super::{not_fixnums, traversal};
     if let Some(d) = prim::generated(target) {
-        return matches!((d.name, argc), (">", 2)).then_some(audited::t_greater as Handler);
+        return matches!((d.name, argc), (">", 2))
+            .then_some((audited::t_greater as Handler, not_fixnums::<{ op::GREATER }> as Handler));
     }
     Some(match (prim::legacy(target)?, argc) {
-        (Primitive::Car, 1) => audited::t_car,
-        (Primitive::Cdr, 1) => audited::t_cdr,
-        (Primitive::Null, 1) => audited::t_null,
-        (Primitive::Eq, 2) => audited::t_eq,
-        (Primitive::Add, 2) => audited::t_add,
-        (Primitive::Sub, 2) => audited::t_sub,
-        (Primitive::Inc, 1) => audited::t_inc,
-        (Primitive::Dec, 1) => audited::t_dec,
-        (Primitive::Less, 2) => audited::t_less,
-        (Primitive::Equal, 2) => audited::t_equal,
-        (Primitive::Consp, 1) => audited::t_consp,
+        (Primitive::Car, 1) => (audited::t_car, traversal::mapped_car),
+        (Primitive::Cdr, 1) => (audited::t_cdr, traversal::mapped_cdr),
+        (Primitive::Null, 1) => (audited::t_null, traversal::null),
+        (Primitive::Eq, 2) => (audited::t_eq, traversal::eq),
+        (Primitive::Add, 2) => (audited::t_add, not_fixnums::<{ op::ADD }>),
+        (Primitive::Sub, 2) => (audited::t_sub, not_fixnums::<{ op::SUB }>),
+        (Primitive::Inc, 1) => (audited::t_inc, not_fixnums::<{ op::ADD }>),
+        (Primitive::Dec, 1) => (audited::t_dec, not_fixnums::<{ op::SUB }>),
+        (Primitive::Less, 2) => (audited::t_less, not_fixnums::<{ op::LESS }>),
+        (Primitive::Equal, 2) => (audited::t_equal, not_fixnums::<{ op::EQUAL }>),
+        (Primitive::Consp, 1) => (audited::t_consp, super::consp),
         _ => return None,
     })
 }
-/// A sealed kernel call takes TYPED when its operands fit a byte, the kernel
-/// it was given becoming the typed handler's other cases (`Inst::kernel`).
-pub(super) fn kernel_bytes(i: &mut Inst, typed: Handler) {
-    let second = i.d.checked_add(1).map(u8::try_from);
-    if let (Ok(a), Ok(d), Some(Ok(b))) = (u8::try_from(i.a), u8::try_from(i.d), second) {
-        (i.a8, i.d8, i.b8) = (a, d, b);
-        i.kernel = i.handler;
+/// A sealed kernel call takes TYPED when its operands fit a byte, OTHER its
+/// other cases (`Inst::kernel`); else it keeps the kernel it was given.
+pub(super) fn kernel_bytes(i: &mut Inst, (typed, other): (Handler, Handler)) {
+    if let (Ok(a), Ok(d)) = (u8::try_from(i.a), u8::try_from(i.d)) {
+        (i.a8, i.d8) = (a, d);
+        i.kernel = other;
         i.handler = typed;
     }
 }
@@ -166,8 +153,8 @@ pub(super) fn kernel_bytes(i: &mut Inst, typed: Handler) {
 impl Code {
     /// A test's hand-made BODY, its operands unchecked: there is no function.
     #[cfg(test)]
-    pub(super) fn for_test(body: Vec<Inst>, end: Inst) -> Code {
-        seal(body, end).expect("a test's branches land in its code")
+    pub(super) fn for_test(body: Vec<Inst>) -> Code {
+        seal(body, |_, _| Ok(())).expect("a test's branches land in its code")
     }
     /// No code: its function was not lowered yet, or was released.
     pub(super) fn none() -> Code {
@@ -210,21 +197,21 @@ mod tests {
     use super::*;
 
     /// The function `defun` gave NAME, lowered as `lower_function` lowers it.
-    fn function(vm: &mut Vm, source: &str, name: &str) -> (Function, Vec<Inst>, Inst) {
+    fn function(vm: &mut Vm, source: &str, name: &str) -> (Function, Vec<Inst>) {
         vm.eval_source_raw(source).unwrap();
         let closure = vm.slots[vm.names[name]].function;
         let id = vm.closures[usize::try_from(closure.payload()).unwrap()].function;
         vm.materialize_image_function(id).unwrap();
         let function = Function::clone(&vm.functions[id]);
         let body = function.code.iter().map(|&op| lower(vm, op)).collect();
-        (function, body, lower(vm, Op::ResumeExit))
+        (function, body)
     }
 
     #[test]
     fn validated_code_holds_its_branches_and_ends_in_the_terminator() {
         let mut vm = Vm::new();
-        let (f, body, end) = function(&mut vm, "(defun st-loop (x) (while x (setq x (cdr x))) 7)", "st-loop");
-        let code = validate(&f, body, end).unwrap();
+        let (f, body) = function(&mut vm, "(defun st-loop (x) (while x (setq x (cdr x))) 7)", "st-loop");
+        let code = validate(&f, body).unwrap();
         assert_eq!(code.len(), f.code.len());
         let mut branches = 0;
         for (at, inst) in code.iter().enumerate() {
@@ -244,13 +231,13 @@ mod tests {
     #[test]
     fn code_naming_what_its_function_lacks_is_refused() {
         let mut vm = Vm::new();
-        let (f, body, end) = function(&mut vm, "(defun st-plain (x y) (if x (cons x y) y))", "st-plain");
+        let (f, body) = function(&mut vm, "(defun st-plain (x y) (if x (cons x y) y))", "st-plain");
         let width = f.regs;
         let len = body.len();
         let refusal = |op: Op| {
             let mut changed = body.clone();
             changed[0] = lower(&vm, op);
-            validate(&f, changed, end).err()
+            validate(&f, changed).err()
         };
         assert_eq!(refusal(Op::Move(0, width)), Some(Refusal::Register { at: 0, register: width, width }));
         assert_eq!(refusal(Op::Return(width + 3)), Some(Refusal::Register { at: 0, register: width + 3, width }));
@@ -260,6 +247,29 @@ mod tests {
         assert_eq!(refusal(Op::Unless(0, len + 9)), Some(Refusal::Target { at: 0, to: len + 9, len }));
         assert_eq!(refusal(Op::Catch(0, 0, len)), Some(Refusal::Target { at: 0, to: len, len }));
         assert_eq!(refusal(Op::Call(0, 0, width, 0)), None, "an empty window may start at the frame's end");
+    }
+
+    /// `each_register` and `window` read what `map_registers` rewrites.
+    #[test]
+    fn the_register_visitors_agree() {
+        let mut vm = Vm::new();
+        let (f, _) = function(&mut vm, "(defun st-all (x &rest r) (let ((y (car x))) (catch 'k (lambda () (list y r (setq x 2))))))", "st-all");
+        for op in &f.code {
+            let mut rewritten = Vec::new();
+            let mut copy = *op;
+            copy.map_registers(&mut |r| {
+                rewritten.push(r);
+                r
+            });
+            let mut read = Vec::new();
+            op.each_register(&mut |r| read.push(r));
+            if let Some((start, _)) = op.window() {
+                read.push(start);
+            }
+            rewritten.sort_unstable();
+            read.sort_unstable();
+            assert_eq!(read, rewritten, "{op:?}");
+        }
     }
 
     #[test]

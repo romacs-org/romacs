@@ -66,4 +66,7 @@ fn main() {
         t_add, t_sub, t_inc, t_dec, t_less, t_greater, t_equal, t_null, t_consp, t_eq, terminator,
     ];
     let _: fn(Eng<'_, '_>, Regs, Pc) -> Value = misuse::body;
+    // The engine's file, which only `file_read_under_window` reads.
+    let vm = Vm { stack: Vec::new(), conses: Vec::new() };
+    let _ = vm.stack.len() + vm.conses.len();
 }

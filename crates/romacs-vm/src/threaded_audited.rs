@@ -4,12 +4,13 @@
 //! it rests on:
 //!
 //! - I1, the file: `WINDOW` (256) initialised slots lie above every window
-//!   (`frame_room`), so a 256-slot view from a frame's base stays in its
+//!   (`frame_room`), so a 257-slot view from the base of a frame one register
+//!   wide or more stays in its
 //!   file. The file moves only by growth, which no typed handler reaches.
 //! - I2 and I5, windows: a view borrows its `Regs` and the engine
 //!   exclusively, so nothing else reads or writes the file while it lives.
 //! - I3, validated code: a `Code` is made only by `threaded_code.rs`, which
-//!   holds every branch inside it and ends it with `terminator`, whose
+//!   holds every register operand inside its frame, every branch inside it and ends it with `terminator`, whose
 //!   handler is here, so no body is handed the terminator's `Pc`.
 //! - I4, instruction pointers: a `Pc` points into a `Code` that outlives the
 //!   handler holding it: code is replaced or cleared only while no engine
@@ -32,6 +33,11 @@ pub(super) struct Regs(*mut Value);
 #[derive(Clone, Copy)]
 pub(super) struct Pc(*const Inst);
 
+/// A register operand of a frame wider than a byte, which validation
+/// proved lies inside the frame: made only from a `Pc`'s operand.
+#[derive(Clone, Copy)]
+pub(super) struct Wide(usize);
+
 /// Where an instruction goes. It can only be dispatched to, so a handler
 /// takes one step at most and reads nothing through it.
 #[repr(transparent)]
@@ -43,24 +49,26 @@ impl Regs {
     fn into_raw(self) -> *mut Value {
         self.0
     }
-    /// 256 slots from the frame's base. The view borrows the engine
+    /// 257 slots from the frame's base: a byte operand and the register after
+    /// it, a binary kernel's second argument. The view borrows the engine
     /// exclusively as well as this capability, so nothing that goes through
     /// the engine, a shared read of the file included, runs while it lives.
     #[inline]
-    pub(super) fn window<'w>(&'w mut self, _engine: &'w mut Eng<'_, '_>) -> &'w mut [Value; 256] {
-        // SAFETY: I1 puts 256 initialised slots past the base; I5 makes this
-        // the one reference to them while it lives.
-        unsafe { &mut *self.0.cast::<[Value; 256]>() }
+    pub(super) fn window<'w>(&'w mut self, _engine: &'w mut Eng<'_, '_>) -> &'w mut [Value; 257] {
+        // SAFETY: I3: a typed handler's operands are validated below its
+        // frame's width, so the frame is one register wide or more, and I1
+        // puts 256 initialised slots past it; I5 makes this the one reference
+        // to them while it lives.
+        unsafe { &mut *self.0.cast::<[Value; 257]>() }
     }
-    /// The frame's base to the end of its file: the checked view for an
-    /// operand past a byte. Borrows as `window` does.
+    /// Register AT of a frame wider than a byte: what its `Wide` operand
+    /// names, read or written through the slot. Borrows as `window` does.
     #[inline]
-    pub(super) fn wide<'w>(&'w mut self, engine: &'w mut Eng<'_, '_>) -> &'w mut [Value] {
-        let file: &[Value] = &engine.vm.stack;
-        let len = (file.as_ptr_range().end as usize - self.0 as usize) / std::mem::size_of::<Value>();
-        // SAFETY: I1 and I6: the base lies in the running engine's file,
-        // which is the current one, initialised to its end; I5 as `window`.
-        unsafe { std::slice::from_raw_parts_mut(self.0, len) }
+    pub(super) fn slot<'w>(&'w mut self, _engine: &'w mut Eng<'_, '_>, at: Wide) -> &'w mut Value {
+        // SAFETY: I3: `code::validate` proved AT below the frame's width, and
+        // I1 puts that width and 256 initialised slots past the base; I5
+        // makes this the one reference to it while it lives.
+        unsafe { &mut *self.0.add(at.0) }
     }
 }
 
@@ -92,14 +100,14 @@ impl Pc {
     pub(super) fn d(self) -> usize {
         self.inst().d8 as usize
     }
-    /// The full operands, for the checked paths of wide frames.
+    /// The full operands, for frames wider than a byte (`Regs::slot`).
     #[inline]
-    pub(super) fn wide_a(self) -> usize {
-        self.inst().a
+    pub(super) fn wide_a(self) -> Wide {
+        Wide(self.inst().a)
     }
     #[inline]
-    pub(super) fn wide_b(self) -> usize {
-        self.inst().b
+    pub(super) fn wide_b(self) -> Wide {
+        Wide(self.inst().b)
     }
     #[inline]
     pub(super) fn value(self) -> Value {
