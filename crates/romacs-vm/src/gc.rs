@@ -1097,13 +1097,14 @@ impl Vm {
         self.cells.settle_old();
         self.objects.settle_old();
         self.functions.settle();
+        self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
     }
     /// Whether every table is as a completed collection leaves it: its
     /// entries old and clean, its log empty.
     #[cfg(test)]
     pub(crate) fn generations_settled(&self) -> bool {
-        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled() && self.functions.settled()
+        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled() && self.functions.settled() && self.slots.settled()
     }
     /// Under verify, after a full collection: every entry in use is
     /// exactly old and no log holds anything, or the next collection would
@@ -1412,7 +1413,7 @@ impl Vm {
         }
         self.reclaim_obarray_symbols(&obarray_symbols_live);
         for name in self.permanent_symbol_names.values_mut() { rewrite(name); }
-        for s in &mut self.slots {
+        for s in self.slots.collector_iter_mut() {
             rewrite(&mut s.value);
             rewrite(&mut s.function);
             rewrite(&mut s.plist);
@@ -1620,11 +1621,12 @@ impl Vm {
     /// no longer reached is freed, and nothing old is read but what may name
     /// the young. Old entries start marked (`Table::mark_old`), so the mark,
     /// the weak rounds and the sweep are a full collection's over the young
-    /// alone. Read whole, whatever their age: the entries stored into since
-    /// the last collection, every buffer and char table, whose shared text
-    /// and nodes no entry's colour records a store into, every root, symbols
-    /// of obarrays of their own included, and the functions changed since
-    /// the last collection (`Functions`). Nothing a full reclaims beside
+    /// alone. Read again, whatever their age: the entries stored into since
+    /// the last collection; every buffer and char table, for the text
+    /// properties and nodes written since, which no entry's colour records
+    /// (`crate::epoch`); the symbol slots written since (`Slots`), those of
+    /// obarrays of their own included; the functions changed since
+    /// (`Functions`); and every other root. Nothing a full reclaims beside
     /// table entries goes: no code is retired, no region, obarray symbol or
     /// local binding freed, nothing moves and no table is cut short. With a
     /// log or the functions' record lost, it promotes everything instead.
@@ -1687,6 +1689,7 @@ impl Vm {
     /// from, so what this promoted counts toward the next one.
     fn settle_minor(&mut self) {
         self.functions.settle();
+        self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
@@ -1695,6 +1698,7 @@ impl Vm {
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
         self.functions.settle();
+        self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
         self.gc_retained = self.heap_objects();
         self.settle_payload();
@@ -1815,7 +1819,8 @@ impl Vm {
         // however it ends.
         let mut lists = std::mem::take(&mut self.lambda_lists);
         let this = &*self;
-        let view = this.mark_view(in_obarray, local_binding, &code_marks);
+        let written_slots = minor_changed.is_some().then(|| this.slots.written().collect());
+        let view = this.mark_view(in_obarray, local_binding, &code_marks, written_slots);
         let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
@@ -2090,20 +2095,22 @@ mod tests {
     fn a_minor_frees_the_young_dead_and_keeps_what_the_old_were_given() {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
-        vm.eval_source_raw("(setq minor-list (list 1 2 3) minor-vector (make-vector 4 nil) minor-table (make-hash-table) minor-weak (make-hash-table :weakness 'key) minor-chars (make-char-table 'minor))").unwrap();
+        vm.eval_source_raw("(setq minor-list (list 1 2 3) minor-vector (make-vector 4 nil) minor-table (make-hash-table) minor-weak (make-hash-table :weakness 'key) minor-chars (make-char-table 'minor) minor-symbol nil)").unwrap();
+        // Symbols enough after it that no later one shares its card.
+        vm.eval_source_raw("(dotimes (i 200) (intern (concat \"minor-filler-\" (number-to-string i))))").unwrap();
         // The table's nodes are split before the collection, so the stores
         // after it go into nodes it left old.
         vm.eval_source_raw("(aset minor-chars ?a 0) (set-char-table-range minor-chars '(#x4e00 . #x4e10) 0)").unwrap();
         vm.collect(&mut []);
         vm.eval_source_raw("(setcar minor-list (list 4)) (aset minor-vector 0 (list 5)) (puthash 'k (list 6) minor-table) (setq minor-young (list 7))").unwrap();
-        vm.eval_source_raw("(fset 'minor-function #'(lambda () '(9 (9))))").unwrap();
+        vm.eval_source_raw("(fset 'minor-function #'(lambda () '(9 (9)))) (setq minor-symbol (list 14))").unwrap();
         vm.eval_source_raw("(aset minor-chars ?a (list 10)) (set-char-table-range minor-chars '(#x4e00 . #x4e10) (list 11))").unwrap();
         vm.eval_source_raw("(puthash (list 'dead) 1 minor-weak) (puthash minor-list (list 8) minor-weak) (dotimes (_ 1000) (list 1 2 3))").unwrap();
         let before = vm.conses.live();
         assert!(vm.collect_minor(&[]));
         assert!(vm.generations_settled());
         assert!(vm.conses.live() + 3000 <= before, "the garbage went: {before} to {}", vm.conses.live());
-        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak) (minor-function) (aref minor-chars ?a) (aref minor-chars #x4e08)) '((4) (5) (6) (7) 1 (8) (9 (9)) (10) (11)))").unwrap();
+        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak) (minor-function) (aref minor-chars ?a) (aref minor-chars #x4e08) minor-symbol) '((4) (5) (6) (7) 1 (8) (9 (9)) (10) (11) (14)))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
         vm.collect(&mut []);
         assert_eq!(vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap(), Value::TRUE, "and a full after it finds the heap whole");

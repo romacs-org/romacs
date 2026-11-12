@@ -220,6 +220,9 @@ impl Grave {
 /// All a mark's threads read of the VM. Shared borrows of `Sync' fields, so
 /// this is everything they can reach, and while one lives no `&mut Vm' can.
 pub(super) struct MarkView<'a> {
+    /// A minor's: the slots written since the last collection, which it
+    /// reads in place of every slot.
+    written_slots: Option<Vec<Range<usize>>>,
     slots: &'a [Slot],
     variable_redirects: &'a [Option<VariableRedirect>],
     functions: &'a [Arc<Function>],
@@ -235,8 +238,11 @@ pub(super) struct MarkView<'a> {
 }
 
 impl Vm {
-    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool]) -> MarkView<'a> {
+    /// What a mark's threads read of the VM. A minor gives the slots it
+    /// reads in place of them all (`Slots::written`).
+    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool], written_slots: Option<Vec<Range<usize>>>) -> MarkView<'a> {
         MarkView {
+            written_slots,
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
@@ -486,8 +492,13 @@ impl Marking {
         for chunk in code.chunks(CHUNK / 8) {
             self.publish(Work::Trace { values: Vec::new(), code: chunk.to_vec() });
         }
-        for from in (0..view.slots.len()).step_by(RANGE) {
-            self.publish(Work::Slots(from..(from + RANGE).min(view.slots.len())));
+        match &view.written_slots {
+            None => for from in (0..view.slots.len()).step_by(RANGE) {
+                self.publish(Work::Slots(from..(from + RANGE).min(view.slots.len())));
+            },
+            Some(written) => for range in written {
+                self.publish(Work::Slots(range.clone()));
+            },
         }
         for (stack, registers) in view.stacks.iter().enumerate() {
             for from in (0..registers.len()).step_by(RANGE) {
@@ -929,7 +940,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut own = Worker::default();
         own.serial.push(first);
         marking.hand_over(&mut own);
@@ -960,7 +971,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut w = Worker::default();
         w.stack.push(list);
         marking.stop.store(true, Ordering::Release);
@@ -979,7 +990,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         marking.outstanding.fetch_add(1, Ordering::AcqRel);
         let (ended, wait) = std::sync::mpsc::channel::<()>();
         let found = std::thread::scope(|scope| {
@@ -1386,7 +1397,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut own = Worker::default();
         own.code = (0..vm.functions.len()).collect();
         let queued = own.code.len();

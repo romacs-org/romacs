@@ -111,6 +111,7 @@ mod gc;
 mod gc_check;
 mod functions;
 mod epoch;
+mod slots;
 mod gc_mark;
 mod table;
 mod handle;
@@ -1575,7 +1576,7 @@ pub struct Vm {
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
-    slots: Vec<Slot>,
+    slots: slots::Slots,
     specials: NameSet<String>,
     /// Bumped whenever a symbol stops being special or an uninterned one's
     /// declaration changes: with the size of `specials', which an insertion
@@ -2009,7 +2010,7 @@ impl Vm {
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::default(),
             generated_slots: HashMap::default(),
-            slots: vec![],
+            slots: slots::Slots::default(),
             specials: NameSet::default(),
             special_changes: 0,
             special_cache: Vec::new(),
