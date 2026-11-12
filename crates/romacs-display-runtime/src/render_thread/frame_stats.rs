@@ -19,14 +19,15 @@
 //! `ROMACS_DIAGNOSTICS=1`, a `frame-stats` line on stderr ([`StatsLines`]) a
 //! second while frames are asked for or drawn and none at rest, which is how
 //! a harness counts the frames of a state and the reasons they were drawn for
-//! (`rest_live.py` among the GUI host's harnesses).
+//! (`rest_live.py` among the GUI host's harnesses). Frame work in a session's
+//! last second may get no line: the file has the final totals.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use romacs_display_protocol::frame_time::EventTime;
 
-use super::frame_sched::{FramePlan, RenderWork};
+use super::frame_sched::{FramePlan, RenderWork, SubmissionResult};
 
 /// One event-loop iteration (about_to_wait or user-event wake).
 pub(super) static EVENT_LOOP_WAKEUPS: AtomicU64 = AtomicU64::new(0);
@@ -164,9 +165,12 @@ pub(super) fn count_plan(plan: &FramePlan) {
     }
 }
 
-/// Record that PLAN's frame reached the surface: one increment per reason it
-/// satisfies.
-pub(super) fn count_presented(plan: &FramePlan) {
+/// Record how drawing PLAN's frame ended: one that reached the surface counts
+/// once under each reason it satisfies, and any other RESULT counts nothing.
+pub(super) fn count_drawn(plan: &FramePlan, result: SubmissionResult) {
+    if result != SubmissionResult::Submitted {
+        return;
+    }
     for reason in plan.reasons.iter() {
         count(&PRESENTED_DEMAND_REASONS[reason.index()]);
     }
