@@ -177,8 +177,8 @@ struct Marked {
 enum MarkFor {
     Collection { until_key: bool },
     Only { keep_weak: bool },
-    /// A minor's mark: every function is a root, old or young, since an old
-    /// one may have been given young values in place.
+    /// A minor's mark: of the functions, it reads those changed since the
+    /// last collection.
     Minor,
 }
 
@@ -1088,12 +1088,13 @@ impl Vm {
         self.closures.settle_old();
         self.cells.settle_old();
         self.objects.settle_old();
+        self.functions.settle();
     }
     /// Whether every table is as a completed collection leaves it: its
     /// entries old and clean, its log empty.
     #[cfg(test)]
     pub(crate) fn generations_settled(&self) -> bool {
-        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled()
+        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled() && self.functions.settled()
     }
     /// Under verify, after a full collection: every entry in use is
     /// exactly old and no log holds anything, or the next collection would
@@ -1467,7 +1468,7 @@ impl Vm {
         });
         self.referrers = None;
         self.local_owners = None;
-        for f in &mut self.functions {
+        for f in self.functions.collector_iter_mut() {
             // Function Arcs are private to this VM; no executable shares IR.
             let f = Arc::get_mut(f).expect("source IR must be exclusively owned at a wait point");
             for op in &mut f.code {
@@ -1611,17 +1612,18 @@ impl Vm {
     /// the weak rounds and the sweep are a full collection's over the young
     /// alone. Read whole, whatever their age: the entries stored into since
     /// the last collection, every buffer and char table, whose shared text
-    /// and nodes no entry's colour records a store into, and every root,
-    /// symbols of obarrays of their own and all code included. Nothing a
-    /// full reclaims beside table entries goes: no code is retired, no
-    /// region, obarray symbol or local binding freed, nothing moves and no
-    /// table is cut short. With a log lost, it promotes everything instead.
+    /// and nodes no entry's colour records a store into, every root, symbols
+    /// of obarrays of their own included, and the functions changed since
+    /// the last collection (`Functions`). Nothing a full reclaims beside
+    /// table entries goes: no code is retired, no region, obarray symbol or
+    /// local binding freed, nothing moves and no table is cut short. With a
+    /// log or the functions' record lost, it promotes everything instead.
     /// Whether it collected.
     pub(crate) fn collect_minor(&mut self, roots: &[Value]) -> bool {
         if !self.may_collect(0) {
             return false;
         }
-        if [self.conses.log_lost(), self.closures.log_lost(), self.cells.log_lost(), self.objects.log_lost()].contains(&true) {
+        if [self.conses.log_lost(), self.closures.log_lost(), self.cells.log_lost(), self.objects.log_lost(), self.functions.changed().is_none()].contains(&true) {
             self.settle_generations();
             self.settle_minor();
             return true;
@@ -1665,12 +1667,14 @@ impl Vm {
     /// pending. What the last full kept stays the base a full is paced
     /// from, so what this promoted counts toward the next one.
     fn settle_minor(&mut self) {
+        self.functions.settle();
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
         self.gc_stats.collections += 1;
     }
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
+        self.functions.settle();
         self.gc_retained = self.heap_objects();
         self.settle_payload();
         // The one place a job child's growth is measured, whatever asked for
@@ -1748,7 +1752,7 @@ impl Vm {
                 local_live.insert(slot);
             }
         }
-        let code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
+        let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
         let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
         let mut code_pending: Vec<_> = self
             .request_code
@@ -1760,7 +1764,13 @@ impl Vm {
             })
             .collect();
         self.source_code_roots(&mut code_pending);
-        if matches!(r#for, MarkFor::Minor) { code_pending = (0..self.functions.len()).collect(); }
+        // A minor reads the functions changed since the last collection and
+        // no other: the rest start reached, as the old entries do.
+        if matches!(r#for, MarkFor::Minor) {
+            code_pending = self.functions.changed().expect("a minor with the record lost promotes instead").to_vec();
+            let changed: HashSet<usize> = code_pending.iter().copied().collect();
+            for (id, mark) in code_marks.iter_mut().enumerate() { *mark.get_mut() = !changed.contains(&id); }
+        }
         for (id, entry) in &self.conditions.entries {
             let custom = id.value().index_if(7).and_then(|n| n.checked_sub(1))
                 .is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
@@ -2045,15 +2055,16 @@ mod tests {
         vm.eval_source_raw("(setq minor-list (list 1 2 3) minor-vector (make-vector 4 nil) minor-table (make-hash-table) minor-weak (make-hash-table :weakness 'key))").unwrap();
         vm.collect(&mut []);
         vm.eval_source_raw("(setcar minor-list (list 4)) (aset minor-vector 0 (list 5)) (puthash 'k (list 6) minor-table) (setq minor-young (list 7))").unwrap();
+        vm.eval_source_raw("(fset 'minor-function #'(lambda () '(9 (9))))").unwrap();
         vm.eval_source_raw("(puthash (list 'dead) 1 minor-weak) (puthash minor-list (list 8) minor-weak) (dotimes (_ 1000) (list 1 2 3))").unwrap();
         let before = vm.conses.live();
         assert!(vm.collect_minor(&[]));
         assert!(vm.generations_settled());
         assert!(vm.conses.live() + 3000 <= before, "the garbage went: {before} to {}", vm.conses.live());
-        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak)) '((4) (5) (6) (7) 1 (8)))").unwrap();
+        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak) (minor-function)) '((4) (5) (6) (7) 1 (8) (9 (9))))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
         vm.collect(&mut []);
-        assert_eq!(vm.eval_source_raw("(car minor-list)").map(|v| vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap() == Value::TRUE && v != Value::NIL).unwrap(), true, "and a full after it finds the heap whole");
+        assert_eq!(vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap(), Value::TRUE, "and a full after it finds the heap whole");
     }
 
     /// With minors on, allocation alone brings them: each frees the garbage

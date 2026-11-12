@@ -282,7 +282,7 @@ mod tests {
         vm.eval_source_raw("(setq oracle-list (list 1 2 3))").unwrap();
         vm.collect(&mut []);
         let young = vm.eval_source_raw("(setcar oracle-list (list 4))").unwrap();
-        (vm, young.payload() as usize)
+        (vm, usize::try_from(young.payload()).expect("an index"))
     }
 
     /// A stand-in for a minor's mark: every entry in use but conses entry
