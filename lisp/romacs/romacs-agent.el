@@ -1569,9 +1569,20 @@ says: one that has ended its journal, or been cancelled, is left as it is."
 
 (defun romacs-agent--attach (session &optional tries steal)
   "Attach to SESSION's supervisor and replay what this server has not seen.
-Retried for a while: a new supervisor takes a moment to listen."
+Retried for a while: a new supervisor takes a moment to listen.  Never a
+second time while it is attached (a retry come late, another caller): a
+second attachment is refused by its supervisor, and the first, no longer
+known, would go on unseen; STEAL takes it over, the first let go."
+  (if (and (not steal) (process-live-p (romacs-agent-connection session)))
+      (romacs-agent-connection session)
+    (romacs-agent--connect session tries steal)))
+
+(defun romacs-agent--connect (session tries steal)
+  "Connect to SESSION's supervisor and ask to attach, TRIES more times
+while it does not yet listen; the connection it replaces is let go."
   (condition-case nil
-      (let ((process (make-network-process
+      (let ((old (romacs-agent-connection session))
+            (process (make-network-process
                       :name (format "romacs-agent-%s" (romacs-agent--key (romacs-agent-id session)))
                       :family 'local :service (romacs-agent-host-socket session)
                       :coding 'no-conversion :noquery t
@@ -1586,6 +1597,7 @@ Retried for a while: a new supervisor takes a moment to listen."
                           (romacs-mcp--object "attach" (romacs-mcp--object "from" (max 1 (romacs-agent-seq session))
                                                                            "steal" (if steal t :false))))
                          "\n"))
+        (when (and (processp old) (process-live-p old)) (delete-process old))
         process)
     (file-error
      (cond ;; Stopped here, its socket left behind: ended, not lost, whatever
@@ -2530,10 +2542,17 @@ started: a request repeated after a lost reply finds its session.")
    (process-put peer 'romacs-agent-session (gethash "session" params))
    ;; Its incarnation: a resumed harness's relay numbers its calls anew.
    (process-put peer 'romacs-agent-relay (gethash "relay" params))
+   ;; A session's own: not one of the endpoint's anonymous peers.
+   (when (romacs-agent-get (gethash "session" params)) (romacs-mcp-own-peer peer))
    ;; A known session another process is attached to: its relay belongs
    ;; there, through its route, and retries until the route leads there.
    (when-let* ((session (romacs-agent-get (gethash "session" params))))
      (unless (process-live-p (romacs-agent-connection session))
+       ;; Its harness runs and this editor is where its relay is led, yet
+       ;; it is not attached here: attached now, so the relay's next try
+       ;; stays (a supervisor attached elsewhere refuses).
+       (when (and (not (romacs-agent-cancelled session)) (file-exists-p (romacs-agent-host-socket session)))
+         (romacs-agent--attach session 0))
        (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer))))))
    (romacs-mcp--object)))
 
