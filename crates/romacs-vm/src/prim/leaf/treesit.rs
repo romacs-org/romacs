@@ -216,7 +216,7 @@ impl Leaf<'_> {
     pub(crate) fn ts_load(&mut self, language: Value) -> R<std::result::Result<(native::Language, Option<String>), Value>> {
         let name = self.symbol_name(language)?;
         if let Some((_, lang, file)) = LANGUAGES.lock().unwrap().iter().find(|(n, ..)| *n == name) {
-            return Ok(Ok((*lang, file.clone())));
+            return Ok(Ok((lang.clone(), file.clone())));
         }
         let extra = self.ts_value("treesit-extra-load-path")?;
         if extra != Value::NIL && self.pair(extra).is_none() {
@@ -259,7 +259,7 @@ impl Leaf<'_> {
             let lang = native::Language::from_function(grammar.language);
             let file = crate::host::current_exe().ok().map(|p| p.to_string_lossy().into_owned());
             if lang.compatible() {
-                LANGUAGES.lock().unwrap().push((name, lang, file.clone()));
+                LANGUAGES.lock().unwrap().push((name, lang.clone(), file.clone()));
                 return Ok(Ok((lang, file)));
             }
         }
@@ -286,13 +286,13 @@ impl Leaf<'_> {
             let data = [self.intern("language-grammar-version-mismatch"), self.string(&message)];
             return Ok(Err(self.ts_list(&data)));
         }
-        LANGUAGES.lock().unwrap().push((name, lang, file.clone()));
+        LANGUAGES.lock().unwrap().push((name, lang.clone(), file.clone()));
         Ok(Ok((lang, file)))
     }
     /// dynlib_open of each name GNU tries for STEMS, in its order: the
     /// first library that opens and its file name, else None with every
     /// attempt's message in ERRORS.
-    fn ts_open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(*mut std::ffi::c_void, Vec<u8>)> {
+    fn ts_open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(native::Library, Vec<u8>)> {
         for stem in stems {
             // GNU conses each suffix's names before the last's.
             for suffix in suffixes.iter().rev() {
@@ -375,7 +375,7 @@ impl Leaf<'_> {
         }
         let lang = self.ts_language(remapped)?;
         let mut native = native::Parser::new();
-        native.set_language(lang);
+        native.set_language(&lang);
         let tracking = self.ts_value("treesit-languages-require-line-column-tracking")?;
         let tracks = self.ts_list_values(tracking).contains(&remapped);
         let region = self.ts_region(buffer);
@@ -597,7 +597,7 @@ impl Leaf<'_> {
         ts::note_early_landed();
         let (core, native) = (core.borrow(), native.borrow());
         let visible = core.visible;
-        if early.language != native.language() || !native.sees_all((visible.1 - visible.0) as u32) {
+        if native.language().as_ref() != Some(&early.language) || !native.sees_all((visible.1 - visible.0) as u32) {
             return None;
         }
         let (tree, region, edited) = early.finish(self.ts_buffer_text(base)?)?;
@@ -632,8 +632,8 @@ impl Leaf<'_> {
         };
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
-            let mut reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &mut reader)
+            let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &reader)
         });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
@@ -1110,7 +1110,7 @@ impl Leaf<'_> {
         } else {
             (self.string_bytes(source)?, source)
         };
-        match native::Query::new(language, &text) {
+        match native::Query::new(&language, &text) {
             Ok(query) => Ok(Rc::new(ts::Compiled::new(query))),
             Err((offset, message)) => {
                 let data = [self.string(message), fixnum(i64::from(offset) + 1), source, self.string("Debug the query with `treesit-query-validate'")];
@@ -1201,7 +1201,7 @@ impl Leaf<'_> {
             self.ts_ensure_compiled(query)?
         } else {
             let language = self.ts_parser(n.parser)?.native.borrow().language();
-            self.ts_compile(language, query)?
+            self.ts_compile(language.ok_or_else(|| Fault::Error("parser has no language".into()))?, query)?
         };
         let range = match (beg, end) {
             (Some(b), Some(e)) => {
