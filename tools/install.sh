@@ -149,10 +149,13 @@ place_release() {
     fi
 }
 
-# Build the GUI world, so the first launch restores it.
+# Build the worlds, so the first launch and the first batch session
+# restore: the user's, then the installation's batch world beside the
+# binary, which a batch session under any HOME reads.
 build_world() {
-    say 'Building the startup image'
+    say 'Building the startup images'
     "$prefix/bin/romacs" -Q --loadup --world-build
+    "$prefix/bin/romacs" --world-store "$prefix/bin/romacs-vm-gui.worlds" --world-build --batch
 }
 
 # Fill the compiled-Lisp store, so the first session already runs at full

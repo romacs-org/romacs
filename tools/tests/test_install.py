@@ -61,7 +61,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual((self.home / '.local/bin/romacs').resolve(), self.prefix / 'bin/romacs')
         self.assertTrue((self.home / '.local/share/applications/romacs.desktop').exists())
-        self.assertEqual((self.home / 'romacs-calls').read_text(), '-Q --loadup --world-build\n')
+        self.assertEqual((self.home / 'romacs-calls').read_text(),
+                         f'-Q --loadup --world-build\n--world-store {self.prefix}/bin/romacs-vm-gui.worlds --world-build --batch\n')
         entry = (self.home / '.local/share/applications/romacs.desktop').read_text()
         self.assertEqual(entry, f'Exec="{self.home}/.local/bin/romacs" %F\n')
 
@@ -70,7 +71,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(self.run_script().returncode, 0)
         calls = (self.home / 'romacs-calls').read_text().splitlines()
         self.assertEqual(calls[0], '-Q --loadup --world-build')
-        self.assertRegex(calls[1], r'^--compile-lisp-tree --jobs \d+$')
+        self.assertEqual(calls[1], f'--world-store {self.prefix}/bin/romacs-vm-gui.worlds --world-build --batch')
+        self.assertRegex(calls[2], r'^--compile-lisp-tree --jobs \d+$')
 
     def test_a_reinstall_leaves_nothing_of_the_old_tree(self):
         self.run_script('--no-compile')

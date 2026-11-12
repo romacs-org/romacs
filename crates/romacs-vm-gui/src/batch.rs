@@ -8,13 +8,18 @@
 //! (`world::default_store`) when that exists, unless ROMACS_WORLD=off. It
 //! holds nothing of its builder's HOME, per-user directory or locale: each
 //! restored session takes the startup steps in its own process
-//! (`romacs-world-restart`), so one world serves every HOME. No
-//! session is slower than a boot from source: one whose world is missing
-//! or stale boots the chain from source while a detached builder, under
-//! the world's lock, prepares it for the next; a session in a fresh HOME
-//! makes no store at all. The batch
-//! world is not the GUI's: their recipes differ, so neither restores the
-//! other's, and `prune` bounds each family alone.
+//! (`romacs-world-restart`), so one world serves every HOME.
+//!
+//! A session that names no store restores the installation's world first,
+//! `EXECUTABLE.worlds` beside the executable, which its installer built
+//! (`--world-build --batch`): it only reads that store, writing no lock,
+//! use stamp or digest there. Then the user's store. No session is slower
+//! than a boot from source: one whose world is missing or stale boots the
+//! chain from source while a detached builder, under the world's lock,
+//! prepares it for the next; a session in a fresh HOME makes no store at
+//! all. `--world-build` prepares the batch world beside the GUI's. The
+//! batch world is not the GUI's: their recipes differ, so neither restores
+//! the other's, and `prune` bounds each family alone.
 use romacs_vm::Vm;
 use romacs_vm::world::store::{Launch, World};
 use std::ffi::OsString;
@@ -125,8 +130,7 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
     let made = |store: &Path| interactive || store.is_dir();
     if let Some(worlds) = worlds { return made(worlds).then(|| (worlds.with_file_name("lisp"), true)); }
     let user = super::world::default_store(|name| std::env::var_os(name)).filter(|store| made(store));
-    let exe = std::env::current_exe().ok()?;
-    let installed = exe.with_file_name(format!("{}.lisp", exe.file_name()?.to_string_lossy()));
+    let installed = beside_executable("lisp")?;
     let private = |dir: &Path| { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().mode(0o700).create(dir) };
     if installed.is_dir() || (user.is_some() && private(&installed).is_ok()) {
         return Some((installed, user.is_some()));
@@ -243,24 +247,48 @@ pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// The batch session's VM up to the chain's end: its world restored, then
-/// this process's startup steps (`romacs-world-restart'); else the chain
-/// from source, as a session without worlds boots, while a builder
-/// prepares the world for the next session ([`world`]), or, when WAIT
-/// (a compile process, whose world keys what it compiles), once it has.
-/// A builder prunes the store, builds the world and exits here.
+/// The installation's directory `EXECUTABLE.SUFFIX` beside this executable.
+fn beside_executable(suffix: &str) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.with_file_name(format!("{}.{suffix}", exe.file_name()?.to_string_lossy())))
+}
+
+/// Say WHAT on stderr when a harness asks why a session booted as it did
+/// (`ROMACS_DIAGNOSTICS=1`): otherwise a batch session is as quiet as GNU's.
+fn diagnose(what: &serde_json::Value) {
+    if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
+        eprintln!("romacs-world: {what}");
+    }
+}
+
+/// A restored VM made this process's: its startup steps taken
+/// (`romacs-world-restart`).
+fn restarted(mut vm: Vm) -> Result<Vm, String> {
+    vm.world_reinit();
+    vm.eval_source("(romacs-world-restart)")?;
+    Ok(vm)
+}
+
+/// The batch session's VM up to the chain's end: a world restored, then
+/// this process's startup steps; else the chain from source, as a session
+/// without worlds boots, while a builder prepares the world for the next
+/// session ([`world`]), or, when WAIT (a compile process, whose world keys
+/// what it compiles), once it has. With no STORE named, the installation's
+/// world serves first ([`installed_world`]). A builder prunes the store,
+/// builds the world and exits here.
 fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
+    if store.is_none() && let Some(vm) = romacs_vm::flight::without(|| installed_world(&dir)) {
+        return restarted(*vm);
+    }
     // The store's checks, locks and use stamps are the launcher's, outside
     // a flight recording (romacs_vm::flight::without).
     let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, || {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
-            let mut vm = *vm;
-            vm.world_reinit();
-            vm.eval_source("(romacs-world-restart)")?;
-            Ok(vm)
+            diagnose(&serde_json::json!({"mode": "restored", "store": world.store}));
+            restarted(*vm)
         }
         Launch::Build => {
             // Room for this world among its family's (its lock file there
@@ -279,13 +307,41 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
             std::process::exit(if result.is_ok() { 0 } else { 1 })
         }
         Launch::Chain { reason } => {
-            // Quiet as GNU's batch, unless a harness asks why the world
-            // was not used.
-            if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
-                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
-            }
+            diagnose(&serde_json::json!({"mode": "source", "reason": reason}));
             chain(&dir)
         }
+    }
+}
+
+/// The installation's batch world over the GNU Lisp in DIR, restored from
+/// `EXECUTABLE.worlds` without writing there, when worlds are on and it is
+/// usable now.
+fn installed_world(dir: &Path) -> Option<Box<Vm>> {
+    let store = beside_executable("worlds").filter(|store| store.is_dir() && !romacs_vm::world::store::disabled())?;
+    match World::restore_read_only::<()>(&store, recipe(dir)) {
+        Ok((vm, ())) => {
+            diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true}));
+            Some(vm)
+        }
+        Err(reason) => {
+            diagnose(&serde_json::json!({"installed": store, "reason": reason}));
+            None
+        }
+    }
+}
+
+/// `--world-build` for a batch session: its world in STORE made usable,
+/// built by a builder or waited for, as `world::prepare` makes the GUI's.
+/// An installer names the installation's store, `EXECUTABLE.worlds`.
+pub fn prepare(store: PathBuf) -> Result<(), String> {
+    let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
+    let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
+    match world.prepare(|| builder_args(&world)) {
+        Ok(manifest) => {
+            eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
+            Ok(())
+        }
+        Err(reason) => Err(format!("batch world not prepared: {reason}")),
     }
 }
 
