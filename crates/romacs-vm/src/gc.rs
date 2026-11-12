@@ -1866,21 +1866,13 @@ impl Vm {
     }
     /// The lowered code a mark starts from: suspended engines', whole. A
     /// minor (CHANGED given) reads lowered code as it reads functions, that
-    /// of the changed alone; and since entry caches are filled by any call,
-    /// it reads every one, an idle program's too: a full reaches those
-    /// through the functions it traces.
+    /// of the changed alone (`Suspended::minor_values`).
     fn lowered_roots(&self, changed: Option<&[usize]>, value: &mut impl FnMut(Value)) {
-        let Some(changed) = changed else {
-            for engine in &self.suspended {
-                engine.code_values(value);
-            }
-            return;
-        };
         for engine in &self.suspended {
-            engine.minor_values(changed, value);
-        }
-        for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
-            program.minor_values(&[], value);
+            match changed {
+                None => engine.code_values(value),
+                Some(changed) => engine.minor_values(changed, value),
+            }
         }
     }
     /// `ROMACS_GC_VERIFY': mark again, alone, from nothing, and require the
@@ -2161,12 +2153,14 @@ mod tests {
         vm.collect(&mut []);
     }
 
-    /// An entry cache is a root: a function made since the last collection
-    /// that only an idle program's entry cache names survives a minor, as
-    /// it does a full. The cache is filled by hand, as a call through its
-    /// site would fill it.
+    /// A minor reads no entry cache, since a call fills one with a
+    /// primitive or with nothing, never with a heap entry. Were one to name
+    /// a function made since the last collection, the minor would free it
+    /// under the cache: the oracle, which reads every cache, says so. The
+    /// cache is filled by hand here, as no call fills it.
     #[test]
-    fn a_minor_keeps_what_only_an_entry_cache_names() {
+    #[should_panic(expected = "the minor missed a young")]
+    fn the_oracle_reports_an_entry_cache_that_names_what_a_minor_frees() {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         vm.eval_source_raw("(fset 'entry-caller #'(lambda () (entry-callee))) (fset 'entry-callee #'(lambda () 1))").unwrap();
@@ -2177,8 +2171,7 @@ mod tests {
         let young = vm.eval_source_raw("(let ((held (list 1 2))) #'(lambda () held))").unwrap();
         assert!(!vm.closures.old(usize::try_from(young.payload()).unwrap()), "made since the collection");
         assert!(vm.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
-        assert!(vm.collect_minor(&[]));
-        assert!(vm.closures.old(usize::try_from(young.payload()).unwrap()), "the cache's function survived, and is old");
+        vm.collect_minor(&[]);
     }
 
     /// A buffer's text belongs to no entry alone: a property stored into

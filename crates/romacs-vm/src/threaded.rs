@@ -672,12 +672,9 @@ impl Program {
     pub(super) fn sites(&self) -> usize {
         self.entries.len()
     }
-    /// What a minor reads of it (`minor_values`).
-    pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
-        minor_values(&self.code, &self.entries, changed, value);
-    }
     /// Make the entry cache of function ID's first instruction name TARGET,
-    /// as a call through it would: whether ID has lowered code here.
+    /// which no call does when TARGET is a heap entry: whether ID has
+    /// lowered code here.
     #[cfg(test)]
     pub(super) fn plant_entry(&mut self, id: usize, target: Value) -> bool {
         let Some(site) = self.code.get(id).and_then(|code| code.first()).map(|inst| inst.site) else { return false };
@@ -763,19 +760,6 @@ impl Program {
         }
     }
 }
-/// What a minor collection reads of lowered CODE and its ENTRIES: the code
-/// of the functions CHANGED since the last collection, the rest naming only
-/// what a collection promoted, and every entry cache's target, which a call
-/// fills at any time.
-fn minor_values(code: &[Vec<Inst>], entries: &[EntryCache], changed: &[usize], value: &mut impl FnMut(Value)) {
-    for inst in changed.iter().filter_map(|&id| code.get(id)).flatten() {
-        let mut copy = *inst;
-        copy.visit_values(&mut |v| value(*v));
-    }
-    for entry in entries {
-        value(entry.target);
-    }
-}
 /// A suspended engine's own state, moved here while a nested call or a
 /// collection runs (`Vm::suspended`) and moved back as it resumes. The Vm owns
 /// it for that long, so the collector reads and rewrites it in place, with no
@@ -835,9 +819,17 @@ impl Suspended {
             value(entry.target);
         }
     }
-    /// What a minor reads of its code and entry caches (`minor_values`).
+    /// What a minor collection reads of its lowered code: that of the
+    /// functions CHANGED since the last collection, the rest naming only
+    /// what a collection promoted. An entry cache names no heap entry: a
+    /// call fills one with a primitive, or with nothing for a closure
+    /// (`resolve_entry`), so a minor reads none. Verify's reference walk
+    /// reads them all, and reports one that names what a minor freed.
     pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
-        minor_values(&self.code, &self.entries, changed, value);
+        for inst in changed.iter().filter_map(|&id| self.code.get(id)).flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
+        }
     }
     /// Whether a cleanup of this engine is running: an escape's or a normal
     /// exit's, its record not yet popped (`Op::ResumeExit`).

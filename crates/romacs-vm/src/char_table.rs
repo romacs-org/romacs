@@ -533,8 +533,12 @@ pub(super) struct CharTableNode {
     /// reached them through. It has no default, so a node cannot be built
     /// without one.
     stamp: u64,
+    /// Whether no slot holds a node, whatever its depth says (a literal
+    /// may put one anywhere): a minor passes over such a node unread when
+    /// it was not written. Like the stamp, it has no default.
+    leaf: bool,
 }
-romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots, stamp });
+romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots, stamp, leaf });
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
@@ -546,6 +550,7 @@ impl CharTableNode {
             min_char,
             slots: vec![CharTableSlot::Value(value); Self::SIZES[depth]],
             stamp: born(),
+            leaf: true,
         }))
     }
 
@@ -564,6 +569,7 @@ impl CharTableNode {
     fn store(&mut self, i: usize, slot: CharTableSlot) {
         wrote(&slot);
         self.stamp = born();
+        self.leaf &= matches!(slot, CharTableSlot::Value(_));
         self.slots[i] = slot;
     }
 
@@ -654,7 +660,7 @@ impl CharTableNode {
         let id = char_table_node_id(handle);
         if let Some(copy) = copies.get(&id) { return Arc::clone(copy); }
         let node = handle.lock().unwrap();
-        let copy = Arc::new(Mutex::new(Self { depth: node.depth, min_char: node.min_char, slots: vec![], stamp: born() }));
+        let copy = Arc::new(Mutex::new(Self { depth: node.depth, min_char: node.min_char, slots: vec![], stamp: born(), leaf: node.leaf }));
         copies.insert(id, Arc::clone(&copy));
         let slots = node.slots.clone();
         drop(node);
@@ -810,6 +816,8 @@ pub(super) fn collector_visit_node(
     if !seen.insert(char_table_node_id(handle)) { return; }
     let mut node = handle.lock().unwrap();
     let written = node.stamp >= since;
+    // A leaf holds no node: one not written has nothing to read.
+    if !written && node.leaf { return; }
     for slot in &mut node.slots {
         match slot {
             CharTableSlot::Value(value) => if written { visit(value) },
@@ -1090,7 +1098,7 @@ impl CharTable {
         let mut parent = node.lock().unwrap();
         let from = parent.min_char + index * CharTableNode::WIDTHS[parent.depth];
         let slots = values.into_iter().map(CharTableSlot::Value).collect();
-        let expanded = CharTableSlot::Node(Arc::new(Mutex::new(CharTableNode { depth: 3, min_char: from, slots, stamp: born() })));
+        let expanded = CharTableSlot::Node(Arc::new(Mutex::new(CharTableNode { depth: 3, min_char: from, slots, stamp: born(), leaf: true })));
         parent.store(index, expanded.clone());
         drop(parent);
         self.reset_ascii();
