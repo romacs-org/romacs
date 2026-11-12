@@ -396,6 +396,7 @@ impl World {
 
     /// Whether RECIPE's world in STORE, a store this process only reads,
     /// would restore now (`restore_read_only`), writing nothing there.
+    #[must_use]
     pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
         World::read_only(store, recipe).is_ok()
     }

@@ -30,17 +30,17 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
     assert!(ok && said.contains(r#""mode":"prepared""#), "{said}");
     let again: Vec<_> = worlds.iter().map(|w| std::fs::metadata(w).unwrap().modified().unwrap()).collect();
     assert_eq!(again, images, "a world was built again");
-    // The batch world gone, and no builder able to start (the pinned
-    // working directory is a file): the GUI's world stands, the batch
-    // world is a warning, the layer step still runs.
+    // The batch world gone and its last build failed just now, so none is
+    // due yet (`World::retry_in`): the GUI's world stands, the batch world
+    // is a warning, the layer step still runs.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     for manifest in worlds.iter().map(|w| w.with_extension("json")) {
         if std::fs::read_to_string(&manifest).unwrap().contains("launch batch") {
             std::fs::remove_file(manifest.with_extension("rwi")).unwrap();
             std::fs::remove_file(&manifest).unwrap();
+            std::fs::write(manifest.with_extension("failed"), format!(r#"{{"kind":"transient","error":"test","attempts":1,"at":{now}}}"#)).unwrap();
         }
     }
-    std::fs::remove_dir(store.join("p/cwd")).unwrap();
-    std::fs::write(store.join("p/cwd"), b"").unwrap();
     let (ok, said) = build(&home);
     assert!(ok && said.contains(r#""event":"batch-world","ok":false"#) && said.contains("layer-prepared"), "{said}");
     let _ = std::fs::remove_dir_all(&home);
