@@ -74,3 +74,78 @@
 
 (provide 'romacs-agent-chat-tests)
 ;;; romacs-agent-chat-tests.el ends here
+
+;;; The composer edits as any buffer; the transcript's keys are its text's
+
+(defmacro romacs-agent-chat-tests--sealed (draft &rest body)
+  "BODY in a chat buffer of a sealed transcript (a line and a link),
+then a composer holding DRAFT, point at the composer's end."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (romacs-agent-chat-mode)
+     (let ((inhibit-read-only t))
+       (insert (romacs-agent-ui--sealed "> asked\nanswered ")
+               (romacs-agent-ui--sealed (propertize "link" 'keymap romacs-agent-ui--link-map))
+               (romacs-agent-ui--sealed "\n"))
+       (setq romacs-agent-ui--end (point-marker))
+       (insert ,draft))
+     ,@body))
+
+(defun romacs-agent-chat-tests--key (key position)
+  "The command KEY runs with point at POSITION."
+  (save-excursion
+    (goto-char position)
+    (let ((command (key-binding (kbd key) t nil (point))))
+      (or (command-remapping command (point)) command))))
+
+(ert-deftest romacs-agent-chat-transcript-keys-are-its-text-s ()
+  (romacs-agent-chat-tests--sealed "draft"
+    (let ((transcript 3) (composer (point-max)))
+      (should (eq (romacs-agent-chat-tests--key "DEL" transcript) #'scroll-down-command))
+      (should (eq (romacs-agent-chat-tests--key "TAB" transcript) #'romacs-agent-chat-toggle))
+      (should (eq (romacs-agent-chat-tests--key "RET" transcript) #'romacs-agent-chat-toggle))
+      (should (eq (romacs-agent-chat-tests--key "n" transcript) #'romacs-agent-chat-next-turn))
+      (should (eq (romacs-agent-chat-tests--key "a" transcript) #'romacs-agent-chat-type))
+      ;; The composer, its start included, has the buffer's own keys.
+      (dolist (position (list composer (marker-position romacs-agent-ui--end)))
+        (should (eq (romacs-agent-chat-tests--key "DEL" position) #'delete-backward-char))
+        (should (eq (romacs-agent-chat-tests--key "n" position) #'self-insert-command))
+        (should (eq (romacs-agent-chat-tests--key "M-DEL" position) #'backward-kill-word))
+        (should (eq (romacs-agent-chat-tests--key "RET" position) #'romacs-agent-chat-return)))
+      ;; A link keeps its keys and falls back to the transcript's.
+      (let ((link (string-search "link" (buffer-string))))
+        (should (eq (romacs-agent-chat-tests--key "RET" (1+ link)) #'romacs-agent-chat-open-task))
+        (should (eq (romacs-agent-chat-tests--key "n" (1+ link)) #'romacs-agent-chat-next-turn))))))
+
+(ert-deftest romacs-agent-chat-composer-deletes-its-region ()
+  (romacs-agent-chat-tests--sealed "keep this"
+    (let ((transient-mark-mode t))
+      (goto-char (point-max))
+      (push-mark (- (point-max) 4) t t)
+      (call-interactively #'delete-backward-char)
+      (should (equal (buffer-substring-no-properties romacs-agent-ui--end (point-max)) "keep ")))))
+
+(ert-deftest romacs-agent-chat-word-kills-stop-at-the-composer ()
+  (romacs-agent-chat-tests--sealed "foo bar"
+    (let ((transcript (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+      (goto-char (point-max))
+      (dotimes (_ 3) (backward-kill-word 1))
+      (should (= (point) romacs-agent-ui--end))
+      (should (equal (buffer-substring-no-properties romacs-agent-ui--end (point-max)) ""))
+      (should (equal (buffer-substring-no-properties (point-min) romacs-agent-ui--end) transcript)))))
+
+(ert-deftest romacs-agent-chat-typing-in-the-transcript-types-in-the-composer ()
+  (romacs-agent-chat-tests--sealed "draft"
+    (goto-char 3)
+    (let ((last-command-event ?x)) (romacs-agent-chat-type 2))
+    (should (equal (buffer-substring-no-properties romacs-agent-ui--end (point-max)) "draftxx"))
+    (goto-char 3)
+    (romacs-agent-chat-newline)
+    (should (equal (buffer-substring-no-properties romacs-agent-ui--end (point-max)) "draftxx\n"))))
+
+(ert-deftest romacs-agent-chat-typed-text-takes-no-transcript-keys ()
+  (romacs-agent-chat-tests--sealed ""
+    (goto-char (point-max))
+    (let ((last-command-event ?n)) (self-insert-command 1))
+    (should-not (get-text-property (1- (point-max)) 'keymap))
+    (should (eq (romacs-agent-chat-tests--key "n" (1- (point-max))) #'self-insert-command))))

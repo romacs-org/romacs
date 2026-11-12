@@ -541,6 +541,8 @@ pub struct ProcessWatch {
 
 impl ProcessWatch {
     pub fn start(mut fds: Vec<(RawFd, i16)>, ready: impl FnOnce() + Send + 'static) -> io::Result<Self> {
+        // HOST(std::net): ProcessWatch's cancel pair: a socket pair private to this process that
+        // stops its own poll thread; it reaches no host fact
         let (cancel, stop) = std::os::unix::net::UnixStream::pair()?;
         let thread = std::thread::Builder::new().name("process-watch".into()).spawn(move || {
             use std::os::fd::AsRawFd;

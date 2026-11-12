@@ -121,7 +121,11 @@ impl Vm {
     pub fn world_begin(&mut self) {
         if host::mode() == host::Mode::Build {
             self.fence = Some(Box::default());
+            // HOST(slot:initial-environment, slot:process-environment): fences the environment
+            // lists by name; reads no slot
             let roots = [("process-environment", Root::Environment), ("initial-environment", Root::Environment),
+                         // HOST(slot:exec-path): fences the environment lists by name; reads no
+                         // slot
                          ("exec-path", Root::Environment), ("default-directory", Root::Directory)];
             for (name, root) in roots {
                 // A build interns nothing a source boot does not, or symbols
@@ -163,6 +167,8 @@ impl Vm {
         self.drop_deferred_escapes();
         self.status_bar_line = None;
         self.idle_since = None;
+        // HOST(slot:exec-path, slot:initial-environment, slot:process-environment): clears the
+        // environment lists before a world capture; restore rebuilds them
         for name in ["process-environment", "initial-environment", "exec-path"] {
             let slot = self.slot(name);
             self.slots[slot].value = Value::NIL;
@@ -353,6 +359,7 @@ impl Vm {
             // its reads and writes go through the fence like any other's.
             Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_))
             | Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) if root == Root::Tainted || !matches!(redirect, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => {
+                // HOST(dynamic:saved): reads the bound variable, not the saved value
                 let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
                 self.fence_mut().cells.insert(slot, Cell { root, redirect, older });
                 self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
@@ -477,6 +484,7 @@ impl Vm {
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
         let saved = matches!(access, Access::SavedRead | Access::SavedWrite);
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, let_default))|
             bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
         if !shadowed {
