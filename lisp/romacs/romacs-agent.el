@@ -2314,6 +2314,10 @@ with MESSAGE."
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
     (and host (gethash "harness" host))))
 
+;; Its record field's accessor, loaded before, left an inliner that would
+;; still read the field in the callers compiled after.
+(function-put 'romacs-agent-stopped 'compiler-macro nil)
+
 (defun romacs-agent-stopped (session)
   "Whether this editor stopped SESSION's harness (`romacs-agent-stop'): an
 end, not a lost attachment, though its supervisor journals none.  Its

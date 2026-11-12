@@ -118,6 +118,21 @@ DELAY), `stopped' each session stopped."
             (should (equal continued (list review))))
         (when (process-live-p process) (delete-process process))))))
 
+(ert-deftest romacs-agent-reap-stopped-reads-no-field-after-a-reload ()
+  ;; Loaded over a definition whose record had the field: its accessor's
+  ;; inliner goes, and callers compiled now read the mark.
+  (function-put 'romacs-agent-stopped 'compiler-macro (lambda (_form &rest _) '(error "inlined field")))
+  (let ((romacs-mcp-call-function romacs-mcp-call-function)
+        (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+    (load "romacs-agent" nil t))
+  (should-not (function-get 'romacs-agent-stopped 'compiler-macro))
+  (let ((dir (make-temp-file "romacs-stopped-" t)))
+    (unwind-protect
+        (let ((session (romacs-agent--make :id "x" :harness 'claude :dir dir)))
+          (romacs-agent--set-stopped session t)
+          (should (funcall (byte-compile (lambda (s) (romacs-agent-stopped s))) session)))
+      (delete-directory dir t))))
+
 (ert-deftest romacs-agent-reap-a-stopped-socket-left-is-ended ()
   (let* ((root (make-temp-file "romacs-stopped-" t))
          (session (romacs-agent--make :id "ssssssss-1111-4000-8000-000000000000" :harness 'claude :state 'detached :dir root :journal-start 0
