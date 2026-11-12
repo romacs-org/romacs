@@ -123,7 +123,8 @@ fn plist(cx: &mut Leaf<'_>, rows: &[(&str, Value)]) -> Value {
 // bytes; nil when the heap is the system allocator's. A process that asked
 // for the file heap (`ROMACS_HEAP_FILE`) has :heap-file too: its counts
 // (`romacs_allocator::file_heap::Stats`; :readers is t once a forked child
-// went untracked), or a string saying why it was refused.
+// went untracked; :outside is the bytes taken outside its range once that
+// had no room), or a string saying why it was refused.
 defsubr! { name = "romacs--arena-census", gnu = "alloc.c:7154", effect = Global,
 fn arena_census(cx) {
     let Some(c) = crate::world::arena::census() else { return Ok(Value::NIL) };
@@ -144,7 +145,7 @@ fn arena_census(cx) {
             let readers = if s.readers == usize::MAX { Value::TRUE } else { int(s.readers) };
             plist(cx, &[("mapped", int(s.mapped)), ("folds", count(s.folds)), ("folded-pages", count(s.folded_pages)),
                 ("punched", count(s.punched)), ("kept", count(s.kept)), ("readers", readers), ("lazy-forks", count(s.lazy_forks)),
-                ("plain-forks", count(s.plain_forks)), ("failed-folds", count(s.failed_folds))])
+                ("plain-forks", count(s.plain_forks)), ("failed-folds", count(s.failed_folds)), ("outside", count(s.outside))])
         }
     };
     let mut all = rows.to_vec();

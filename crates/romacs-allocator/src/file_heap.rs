@@ -59,9 +59,21 @@
 //! scan the kernel refuses, or a span it will not watch, ends folding for
 //! good (`Stats::failed_folds`): the walk has protected pages it never
 //! listed, so the file can no longer be made the heap, and from then on no
-//! fork is lazy. The range is all the writer's arena has: spent, its
-//! allocations fail. Off (`start` never called, or refused) none of this
-//! exists and every path is the old one.
+//! fork is lazy.
+//!
+//! jemalloc keeps every span it is given (the range is never given back,
+//! only purged) and reuses it, so the range in use follows the arena's
+//! largest need, not what it allocates over time. Its spans grow
+//! geometrically up to `GROW_LIMIT`: past that a span is the request's size
+//! class or that limit, whichever is larger, so one large block, a heap
+//! table's reservation say, does not make every later span as large. Should
+//! the range be spent all the same, the arena takes fresh anonymous memory
+//! outside it (`Stats::outside`). Every fork, lazy or not, copies that as it
+//! copies any memory, so a child has it as of the fork; no fold, purge or
+//! punch touches the file for it. A page at each end of the range stays
+//! inaccessible, so such memory never adjoins a span of the range and
+//! jemalloc never joins the two into one. Off (`start` never called, or
+//! refused) none of this exists and every path is the old one.
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::fs::File;
@@ -75,6 +87,12 @@ use tikv_jemalloc_sys as jemalloc;
 const PAGE: usize = 4096;
 /// Readers tracked at once; past that, one more makes the file fixed for good.
 const CHILDREN: usize = 256;
+/// The largest span the arena's geometric growth asks for (jemalloc's
+/// `retain_grow_limit`). A span the arena keeps costs the range alone until
+/// touched; the cost of a smaller limit is a hook call (a mapping and a
+/// watch) per this many bytes the heap grows, and the kernel joins the
+/// mappings, which follow one another in the file, into one.
+const GROW_LIMIT: usize = 64 << 20;
 
 /// Why the file heap did not start. Each leaves the process as it was.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +133,10 @@ pub struct Stats {
     pub plain_forks: u64,
     /// Scans or watches the kernel refused. After the first, no fold runs and no fork is lazy.
     pub failed_folds: u64,
+    /// Bytes handed to the arena from anonymous memory outside the range,
+    /// when the range had no room: forks copy their page-table entries as
+    /// any memory's, and no fold sees them.
+    pub outside: u64,
 }
 
 /// What `start` made, for the process's life.
@@ -151,6 +173,7 @@ static KEPT: AtomicU64 = AtomicU64::new(0);
 static FAILED: AtomicU64 = AtomicU64::new(0);
 static LAZY: AtomicU64 = AtomicU64::new(0);
 static PLAIN: AtomicU64 = AtomicU64::new(0);
+static OUTSIDE: AtomicU64 = AtomicU64::new(0);
 /// A scan or a watch was refused (`broken`).
 static BROKEN: AtomicBool = AtomicBool::new(false);
 /// The range could not be made inheritable again after a lazy fork: until
@@ -292,29 +315,33 @@ fn handlers() -> Result<(), Refused> {
 }
 
 /// The memory file of LEN bytes (sparse), the page map, the write watch, the
-/// range, and the arena with the calling thread bound to it, in that order.
-/// A step that fails closes and unmaps what the ones before made; an arena
-/// made and not bound stays, empty: some kilobytes of the allocator's own.
+/// range with its two guard pages, and the arena with the calling thread
+/// bound to it, in that order. A step that fails closes and unmaps what the
+/// ones before made; an arena made and not bound stays, empty: some
+/// kilobytes of the allocator's own.
 fn open(len: usize) -> Result<Heap, Refused> {
+    let guarded = len.checked_add(2 * PAGE).ok_or(Refused::Range)?;
     let file = rustix::fs::memfd_create(c"romacs-heap", MemfdFlags::CLOEXEC).map_err(|e| Refused::System("memory file", e.raw_os_error()))?;
     let file = File::from(file);
     file.set_len(len as u64).map_err(|e| Refused::System("memory file", e.raw_os_error().unwrap_or(0)))?;
     let pagemap = File::open("/proc/self/pagemap").map_err(|e| Refused::System("page map", e.raw_os_error().unwrap_or(0)))?;
     let watch = watch()?;
     // SAFETY: a new mapping wherever the kernel puts it, replacing nothing:
-    // the range, inaccessible until a span is mapped over it.
-    let base = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_NONE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE, -1, 0) };
-    if base == libc::MAP_FAILED {
+    // the range and a guard page each side, inaccessible until a span is
+    // mapped over the range.
+    let guards = unsafe { libc::mmap(std::ptr::null_mut(), guarded, libc::PROT_NONE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE, -1, 0) };
+    if guards == libc::MAP_FAILED {
         return Err(Refused::System("range", errno()));
     }
-    TOP.store(base as usize, Ordering::Relaxed);
+    let base = guards as usize + PAGE;
+    TOP.store(base, Ordering::Relaxed);
     if let Err(refused) = arena() {
         // SAFETY: the mapping made above, which nothing has used.
-        unsafe { libc::munmap(base, len) };
+        unsafe { libc::munmap(guards, guarded) };
         return Err(refused);
     }
     WRITES.set(true);
-    Ok(Heap { base: base as usize, limit: base as usize + len, file, watch, pagemap })
+    Ok(Heap { base, limit: base + len, file, watch, pagemap })
 }
 
 /// A userfaultfd for asynchronous write-protect.
@@ -336,21 +363,28 @@ fn watch() -> Result<OwnedFd, Refused> {
     Ok(watch)
 }
 
-/// The arena, with the calling thread bound to it. Its own structures stay
-/// anonymous memory: a forked child's allocator finds them as any fork
-/// leaves them, whatever the order of the fork handlers.
+/// The arena, its growth limited to `GROW_LIMIT`, with the calling thread
+/// bound to it. Its own structures stay anonymous memory: a forked child's
+/// allocator finds them as any fork leaves them, whatever the order of the
+/// fork handlers.
 fn arena() -> Result<(), Refused> {
     let config = ArenaConfig { extent_hooks: (&raw const HOOKS).cast_mut(), metadata_use_hooks: false };
-    let (mut index, mut index_len) = (0u32, size_of::<u32>());
+    let (mut index, mut index_len, mut grow) = (0u32, size_of::<u32>(), GROW_LIMIT);
     // SAFETY: the names are NUL-terminated; `index` and `index_len` are live
     // locals of the size the first control reads back, `config` a live
     // `arena_config_t` of the size passed (jemalloc only reads the hooks),
-    // and `index` a live `unsigned` of the size the second takes.
+    // `grow` a live `size_t` and `index` a live `unsigned`, each of the
+    // size its control takes.
     let bound = unsafe {
         match jemalloc::mallctl(c"experimental.arenas_create_ext".as_ptr(), (&raw mut index).cast(), &raw mut index_len,
             (&raw const config).cast_mut().cast(), size_of::<ArenaConfig>())
         {
-            0 => jemalloc::mallctl(c"thread.arena".as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), (&raw mut index).cast(), size_of::<u32>()),
+            0 => match jemalloc::mallctl(format!("arena.{index}.retain_grow_limit\0").as_ptr().cast(), std::ptr::null_mut(), std::ptr::null_mut(),
+                (&raw mut grow).cast(), size_of::<usize>())
+            {
+                0 => jemalloc::mallctl(c"thread.arena".as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), (&raw mut index).cast(), size_of::<u32>()),
+                refused => refused,
+            },
             refused => refused,
         }
     };
@@ -426,15 +460,44 @@ fn broken() {
     FAILED.fetch_add(1, Ordering::Relaxed);
 }
 
+/// SIZE bytes aligned to ALIGNMENT of fresh anonymous memory outside the
+/// range, for when the range has no room: counted, never watched or folded.
+/// None when the kernel has none either.
+fn outside(size: usize, alignment: usize) -> Option<usize> {
+    let alignment = alignment.max(PAGE);
+    let len = size.checked_next_multiple_of(PAGE)?;
+    let padded = len.checked_add(alignment - PAGE)?;
+    // SAFETY: a new mapping wherever the kernel puts it, replacing nothing,
+    // then the parts of it before AT and past AT + LEN, which nothing has
+    // used: what stays is LEN bytes at an address ALIGNMENT divides.
+    let at = unsafe {
+        let mapped = libc::mmap(std::ptr::null_mut(), padded, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE, -1, 0);
+        if mapped == libc::MAP_FAILED {
+            return None;
+        }
+        let (start, at) = (mapped as usize, (mapped as usize).next_multiple_of(alignment));
+        if at > start {
+            libc::munmap(mapped, at - start);
+        }
+        if start + padded > at + len {
+            libc::munmap((at + len) as *mut c_void, start + padded - at - len);
+        }
+        at
+    };
+    OUTSIDE.fetch_add(len as u64, Ordering::Relaxed);
+    Some(at)
+}
+
 extern "C" fn extent_alloc(_: *mut jemalloc::extent_hooks_t, wanted: *mut c_void, size: usize, alignment: usize, zero: *mut bool, commit: *mut bool, _: u32) -> *mut c_void {
     // A span is asked for by address only to grow one in place: not offered.
     let Some(heap) = heap().filter(|_| wanted.is_null()) else { return std::ptr::null_mut() };
-    let Some((_, at, _)) = claim(heap, size, alignment).filter(|&(from, _, end)| map(heap, from, end)) else {
+    let claimed = claim(heap, size, alignment).filter(|&(from, _, end)| map(heap, from, end)).map(|(_, at, _)| at);
+    let Some(at) = claimed.or_else(|| outside(size, alignment)) else {
         return std::ptr::null_mut();
     };
     // SAFETY: jemalloc passes `zero` and `commit` as live out-parameters.
     // A span of the range is handed out once, so the file holds nothing
-    // there: it reads as zeros.
+    // there: it reads as zeros, as fresh anonymous memory does.
     unsafe {
         *zero = true;
         *commit = true;
@@ -443,10 +506,11 @@ extern "C" fn extent_alloc(_: *mut jemalloc::extent_hooks_t, wanted: *mut c_void
 }
 
 /// jemalloc's forced purge: give back the whole pages of the span. This
-/// process's copies go at once, and with no reader left the file's go too.
-/// False says the pages now read as zeros; true that they hold bytes of no
-/// meaning (the file's, kept for a reader, a child's view of its parent's
-/// file, or pages the kernel would not drop), which jemalloc then zeroes
+/// process's copies go at once, and with no reader left the file's go too;
+/// a span outside the range is anonymous memory, which reads as zeros once
+/// dropped. False says the pages now read as zeros; true that they hold
+/// bytes of no meaning (the file's, kept for a reader, a child's view of its
+/// parent's file, or pages the kernel would not drop), which jemalloc then zeroes
 /// itself where it promises zeros. It never waits for this module's lock:
 /// a fold or a fork holds it, and the purging thread holds the allocator's
 /// own locks; held, the file's pages stay, as for a reader.
@@ -456,6 +520,9 @@ extern "C" fn extent_purge(_: *mut jemalloc::extent_hooks_t, at: *mut c_void, _:
     // SAFETY: jemalloc purges part of a span of this arena that it holds
     // nothing in: nothing reads or holds these pages.
     let dropped = unsafe { libc::madvise(start as *mut c_void, end - start, libc::MADV_DONTNEED) } == 0;
+    if !(heap.base..heap.limit).contains(&start) {
+        return !dropped;
+    }
     let punched = dropped && !CHILD.load(Ordering::Acquire) && try_lock() && {
         let punched = readers() == 0
             && rustix::fs::fallocate(&heap.file, FallocateFlags::PUNCH_HOLE | FallocateFlags::KEEP_SIZE, (start - heap.base) as u64, (end - start) as u64).is_ok();
@@ -466,7 +533,9 @@ extern "C" fn extent_purge(_: *mut jemalloc::extent_hooks_t, at: *mut c_void, _:
     !punched
 }
 
-/// Offsets in the file follow addresses, so any two neighbours are one span and any span divides.
+/// Offsets in the file follow addresses, so any two neighbours in the range
+/// are one span and any span divides. A span outside the range neighbours
+/// none in it (`open`'s guard pages), so a span is wholly one or the other.
 extern "C" fn extent_split(_: *mut jemalloc::extent_hooks_t, _: *mut c_void, _: usize, _: usize, _: usize, _: bool, _: u32) -> bool {
     false
 }
@@ -613,7 +682,7 @@ pub fn stats() -> Stats {
         mapped: TOP.load(Ordering::Relaxed) - heap.base, folds: FOLDS.load(Ordering::Relaxed),
         folded_pages: FOLDED.load(Ordering::Relaxed), punched: PUNCHED.load(Ordering::Relaxed), kept: KEPT.load(Ordering::Relaxed),
         readers, lazy_forks: LAZY.load(Ordering::Relaxed), plain_forks: PLAIN.load(Ordering::Relaxed),
-        failed_folds: FAILED.load(Ordering::Relaxed),
+        failed_folds: FAILED.load(Ordering::Relaxed), outside: OUTSIDE.load(Ordering::Relaxed),
     }
 }
 
@@ -714,5 +783,20 @@ extern "C" fn after_fork_child() {
     }
     if MASKED.load(Ordering::Relaxed) {
         block(SIGNALS.load(Ordering::Relaxed));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    /// jemalloc grows with spans aligned to a page, but a span it asks for
+    /// itself may be aligned more: memory outside the range is as aligned as asked.
+    #[test]
+    fn memory_outside_the_range_is_as_aligned_as_asked() {
+        let (align, before) = (2 << 20, super::OUTSIDE.load(Ordering::Relaxed));
+        let at = super::outside(3 * super::PAGE + 1, align).expect("fresh memory");
+        assert_eq!(at % align, 0, "{at:#x}");
+        assert_eq!(super::OUTSIDE.load(Ordering::Relaxed) - before, 4 * super::PAGE as u64, "whole pages, counted");
     }
 }

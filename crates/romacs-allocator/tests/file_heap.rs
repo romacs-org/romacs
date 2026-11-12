@@ -14,18 +14,36 @@ static ALLOCATOR: romacs_allocator::PlatformAllocator = romacs_allocator::PLATFO
 const OWN_PROCESS: &str = "ROMACS_FILE_HEAP_SCENARIOS";
 const MB: usize = 1 << 20;
 const LEN: usize = 16 << 30;
+/// The range of the heap whose range the scenarios spend.
+const SMALL: usize = 1 << 30;
 
-#[test]
-fn the_file_heap_serves_a_writer_and_its_forks() {
+/// Run the test NAME's SCENARIOS in a process of their own: this binary again.
+fn own_process(name: &str, scenarios: fn()) {
     if std::env::var_os(OWN_PROCESS).is_some() {
         return scenarios();
     }
     let run = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["the_file_heap_serves_a_writer_and_its_forks", "--exact", "--nocapture", "--test-threads=1"])
+        .args([name, "--exact", "--nocapture", "--test-threads=1"])
         .env(OWN_PROCESS, "1")
         .output()
         .unwrap();
     assert!(run.status.success(), "the scenarios failed in their own process: {}\n{}", run.status, String::from_utf8_lossy(&run.stderr));
+}
+
+#[test]
+fn the_file_heap_serves_a_writer_and_its_forks() {
+    own_process("the_file_heap_serves_a_writer_and_its_forks", scenarios);
+}
+
+#[test]
+fn the_file_heap_grows_by_bounded_spans_and_outgrows_a_spent_range() {
+    own_process("the_file_heap_grows_by_bounded_spans_and_outgrows_a_spent_range", || {
+        assert_eq!(file_heap::start(SMALL), Ok(()));
+        let mut text = vec![b'a'; MB];
+        growing();
+        beyond_the_range(&mut text);
+        spent_range();
+    });
 }
 
 /// While set, registering fork handlers fails as the C library does when it is out of memory.
@@ -182,6 +200,12 @@ impl Child {
         write_byte(&self.go);
         reaped(Some(self.pid))
     }
+}
+
+/// Lock the page at PAGE in memory (ON), or unlock it: whether the kernel did.
+fn pin(page: usize, on: bool) -> bool {
+    // SAFETY: (un)locks one page by address, mapped by its caller; its bytes are not touched.
+    (unsafe { if on { libc::mlock(page as *const c_void, 4096) } else { libc::munlock(page as *const c_void, 4096) } }) == 0
 }
 
 fn all(bytes: &[u8], byte: u8) -> bool {
@@ -412,15 +436,13 @@ fn purges() {
     // and zeroed memory over it is zeros all the same.
     let locked = vec![9u8; len];
     let page = (locked.as_ptr() as usize).next_multiple_of(4096);
-    // SAFETY: locks one page of this function's live block.
-    let pinned = unsafe { libc::mlock(page as *const c_void, 4096) } == 0;
+    let pinned = pin(page, true);
     let before = file_heap::stats();
     drop(locked);
     romacs_allocator::release_free();
     let after = file_heap::stats();
     let again = vec![0u8; len];
-    // SAFETY: unlocks the page locked above; the memory is the allocator's again.
-    unsafe { libc::munlock(page as *const c_void, 4096) };
+    pin(page, false);
     assert!(pinned, "one page can be locked");
     assert!(after.kept > before.kept, "a purge that could not drop a page keeps it: {before:?} {after:?}");
     assert!(all(&again, 0), "zeroed memory over a page the kernel would not drop");
@@ -452,6 +474,77 @@ fn purge_under_the_lock() {
     let after = file_heap::stats();
     assert!(child_ok, "the child of a fork a purge ran under");
     assert!(after.kept >= before.kept + 64 * MB as u64 && after.punched == before.punched, "purged under the lock: {before:?} {after:?}");
+}
+
+/// A large block does not make every later span as large: past it, the
+/// arena grows by spans of at most its limit, 64 MB.
+fn growing() {
+    let large: Vec<u8> = Vec::with_capacity(256 * MB);
+    let before = file_heap::stats().mapped;
+    // Blocks never written, held until one takes a fresh span.
+    let mut held = Vec::new();
+    while file_heap::stats().mapped == before && held.len() < 1024 {
+        held.push(Vec::<u8>::with_capacity(8 * MB));
+    }
+    let grown = file_heap::stats().mapped - before;
+    assert!((8 * MB..=64 * MB).contains(&grown), "the span after a 256 MB block: {grown} bytes");
+    drop((large, held));
+}
+
+/// A block larger than the range has room for comes from memory outside
+/// it, counted. A lazy child has that memory as of the fork, as it has the
+/// range; freed, it reads as zeros again, and the file is not touched for it.
+fn beyond_the_range(text: &mut [u8]) {
+    let before = file_heap::stats();
+    let mut outside: Vec<u8> = Vec::with_capacity(SMALL);
+    let stats = file_heap::stats();
+    assert!(!file_heap::owns(outside.as_ptr() as usize), "the block is not in the range");
+    assert!(stats.outside >= before.outside + SMALL as u64 && stats.mapped == before.mapped, "{before:?} {stats:?}");
+    outside.resize(4 * MB, 7);
+    text.fill(b's');
+    let child = lazy(|held| {
+        let now = all(&outside, 7) && all(text, b's');
+        held();
+        now && all(&outside, 7) && all(text, b's')
+    });
+    outside.fill(8);
+    text.fill(b't');
+    assert_eq!((file_heap::stats().lazy_forks, file_heap::stats().plain_forks), (before.lazy_forks + 1, before.plain_forks), "the fork was lazy");
+    assert!(child.ok(), "the lazy child had the block outside the range, as of the fork");
+    romacs_allocator::release_free();
+    let quiet = file_heap::stats();
+    drop(outside);
+    romacs_allocator::release_free();
+    let purged = file_heap::stats();
+    assert_eq!((purged.punched, purged.kept), (quiet.punched, quiet.kept), "a purge outside the range leaves the file alone");
+    let again = vec![0u8; SMALL];
+    assert!(all(&again[..4 * MB], 0), "zeroed memory over the purged block");
+}
+
+/// With the range spent, small blocks come from outside it too; a purge
+/// there that the kernel refuses says so, and zeroed memory over it is zeros.
+fn spent_range() {
+    let mut held = Vec::new();
+    let mut size = 256 * MB;
+    // Blocks never written, each half the last once one lands outside the
+    // range, until a 4 MB one does.
+    while size >= 4 * MB && held.len() < 1 << 14 {
+        let block = Vec::<u8>::with_capacity(size);
+        if !file_heap::owns(block.as_ptr() as usize) {
+            size /= 2;
+        }
+        held.push(block);
+    }
+    let locked = vec![9u8; 4 * MB];
+    assert!(!file_heap::owns(locked.as_ptr() as usize), "the range is spent");
+    let page = (locked.as_ptr() as usize).next_multiple_of(4096);
+    let pinned = pin(page, true);
+    drop(locked);
+    romacs_allocator::release_free();
+    let again = vec![0u8; 4 * MB];
+    pin(page, false);
+    assert!(pinned, "one page can be locked");
+    assert!(all(&again, 0), "zeroed memory over a page outside the range the kernel would not drop");
 }
 
 /// A scan the kernel refuses ends folding for good, and every fork after it
