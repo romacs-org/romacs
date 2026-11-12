@@ -274,6 +274,7 @@ impl ByteBuffer {
         if let Some(held) = &mut self.held { held.visit_values(visit); }
         if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(visit); }
         for props in self.properties.values_mut() {
+            crate::properties::visit_keys(props, visit);
             for v in props.values_mut() {
                 visit(v);
             }
