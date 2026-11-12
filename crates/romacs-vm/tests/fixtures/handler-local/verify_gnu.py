@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,9 +18,10 @@ with tempfile.TemporaryDirectory(prefix="handler-local-oracle-", dir=os.environ[
     root = Path(directory)
     for case in cases:
         (root / "input").write_text("hello\n")
-        source = case["source"].replace("@DIR@", json.dumps(str(root) + "/"))
-        source = source.replace("@FILE@", json.dumps(str(root / "input")))
-        source = source.replace("@HOME@", json.dumps(os.environ["HOME"]))
+        # In one pass: a path holding a placeholder is not rewritten.
+        values = {"@DIR@": json.dumps(str(root) + "/"), "@FILE@": json.dumps(str(root / "input")),
+                  "@HOME@": json.dumps(os.environ["HOME"])}
+        source = re.sub("|".join(map(re.escape, values)), lambda m: values[m.group(0)], case["source"])
         result = subprocess.run([str(binary), "-Q", "--batch", "--eval", "(prin1 " + source + ")"], text=True, capture_output=True, check=True)
         assert result.stdout == case["expected"], (case["id"], result.stdout, case["expected"])
         assert (root / "input").read_text() == case.get("file", "hello\n"), (case["id"], (root / "input").read_text())
