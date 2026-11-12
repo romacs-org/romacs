@@ -111,10 +111,12 @@ impl Drop for Tree {
     }
 }
 
-/// A tree no thread holds yet, on its way from the one that parsed it.
+/// A tree no thread holds yet, on its way to or from the one that parses.
 pub(crate) struct Loose(*mut ffi::TSTree);
-// SAFETY: the only handle of the tree, which shares nothing, so its thread
-// may change as a parser's result may.
+// SAFETY: the only handle of this tree. A copy shares its subtrees with the
+// tree it was copied from, which the runtime counts atomically and never
+// changes in place while shared: copying a tree is how the runtime has one
+// used on a second thread.
 unsafe impl Send for Loose {}
 impl Drop for Loose {
     fn drop(&mut self) {
@@ -145,6 +147,12 @@ impl Tree {
         let loose = Loose(self.0);
         std::mem::forget(self);
         loose
+    }
+    /// ts_tree_copy for another thread to parse from: a tree of its own,
+    /// sharing this one's subtrees. No node is made of it here.
+    pub(crate) fn share(&self) -> Loose {
+        // SAFETY: the tree is live; the copy is owned by its new handle.
+        Loose(unsafe { ffi::ts_tree_copy(self.0) })
     }
     /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
     /// until the edits part them, so O(1) in the tree's size. Only an
@@ -181,6 +189,16 @@ unsafe extern "C" fn read_source(payload: *mut c_void, byte: u32, _: TSPoint, re
     bytes.as_ptr().cast()
 }
 
+thread_local! {
+    /// The parses this thread ran (`parses_on_this_thread`).
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// How many parses the calling thread has run: what tells a parse the
+/// evaluator paid for from one a parse thread ran for it.
+pub fn parses_on_this_thread() -> usize {
+    PARSES.with(std::cell::Cell::get)
+}
+
 pub(crate) struct Parser(*mut ffi::TSParser);
 impl Drop for Parser {
     fn drop(&mut self) {
@@ -208,6 +226,13 @@ impl Parser {
         // SAFETY: the array is read for its length during the call.
         unsafe { ffi::ts_parser_set_included_ranges(self.0, if ranges.is_empty() { std::ptr::null() } else { ranges.as_ptr() }, ranges.len() as u32) }
     }
+    /// ts_parser_included_ranges, as `set_included_ranges` takes them.
+    pub(crate) fn included_ranges(&self) -> Vec<(u32, u32)> {
+        let mut count = 0;
+        // SAFETY: the parser is live and owns the array.
+        let ranges = unsafe { raw_slice(ffi::ts_parser_included_ranges(self.0, &mut count), count) };
+        ranges.iter().map(|range| (range.start_byte, range.end_byte)).collect()
+    }
     /// Whether its included ranges show all of a text of LENGTH bytes: the
     /// runtime's default, or one range that covers it.
     pub(crate) fn sees_all(&self, length: u32) -> bool {
@@ -224,6 +249,7 @@ impl Parser {
             encoding: ffi::TSInputEncodingUTF8,
             decode: None,
         };
+        PARSES.with(|n| n.set(n.get() + 1));
         // SAFETY: `input.payload` outlives the call; OLD is live.
         let tree = unsafe { ffi::ts_parser_parse(self.0, old.map_or(std::ptr::null(), |t| t.0), input) };
         (!tree.is_null()).then(|| Tree(tree, OnceCell::new()))

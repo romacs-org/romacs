@@ -5,6 +5,7 @@
 //! to the narrowing before a parse (`treesit_sync_visible_region`), and the
 //! line/column caches of tracking buffers. Byte positions are GNU's
 //! 1-based ones; `TextBody` offsets are 0-based.
+pub(crate) mod ahead;
 pub(crate) mod native;
 
 use crate::text::{FrozenText, TextBody};
@@ -71,6 +72,8 @@ pub(crate) struct Core {
     pub visible: (i64, i64),
     /// `visi_beg/end_linecol`; None unless the parser tracks linecols.
     pub linecols: Option<(Linecol, Linecol)>,
+    /// The reparse an edit's frame started on a thread (`ahead`).
+    pub ahead: Option<ahead::Ahead>,
 }
 
 /// One text change, GNU's `treesit_record_change` arguments: 1-based bytes
@@ -250,11 +253,14 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 
 impl Core {
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, fresh: false, visible, linecols }
+        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.
     fn record(&mut self, c: Change, text: &TextBody) {
+        if self.ahead.as_mut().is_some_and(|ahead| !ahead.record(c)) {
+            self.ahead = None;
+        }
         let Some(tree) = &self.tree else { return };
         let (visible_beg, visible_end) = self.visible;
         let start_offset = visible_end.min(visible_beg.max(c.start)) - visible_beg;

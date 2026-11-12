@@ -2542,6 +2542,14 @@ impl Vm {
         let id = self.window(self.slots[root].value)?.id;
         let buffer = self.slots[buffer_slot].value;
         let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
+        // A reparse on its thread: the window keeps the faces it has, and
+        // the landing wakes the frame that fontifies it (`land_treesit').
+        if self.treesit_deferred.is_some() && self.treesit_ahead_running(buffer)? {
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+            return Ok(true);
+        }
         let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
         if text.treesit.small_edit_due(limit) {
             self.treesit_deferred.as_mut().expect("a deferred frame").push(id);
@@ -2560,7 +2568,7 @@ impl Vm {
         Ok(pending)
     }
     /// BUFFER's text, its base's for an indirect one; none for a killed buffer.
-    fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
+    pub(crate) fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
         let base = match self.object(buffer)? {
             Object::Buffer(b) if b.base != Value::NIL => b.base,
             Object::Buffer(_) => buffer,
@@ -2585,20 +2593,33 @@ impl Vm {
     /// ask for the parse, and fontification wait for the next frame. That
     /// frame always parses, so a run of keys cannot starve the faces, and
     /// tells the hooks every change since the last frame that ran them.
+    ///
+    /// Where the session can be woken, the parse of such an edit starts on
+    /// a thread here (`treesit::ahead`), and frames keep being built this
+    /// way until it lands: the parse then costs the evaluator nothing, and
+    /// no key waits for it.
     pub fn defer_parse(&mut self) -> Result<()> {
-        if std::mem::take(&mut self.treesit_parse_owed) {
-            return Ok(());
-        }
+        use crate::treesit::ahead::State;
         let limit = self.treesit_show_limit();
+        let (mut running, mut small) = (false, false);
         for window in self.displayed_windows() {
             let buffer = self.window(window)?.buffer;
-            if self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit)) {
-                self.treesit_deferred = Some(Vec::new());
-                let shown = self.display_state.shown.clone();
-                self.display_state.hooked.get_or_insert(shown);
-                break;
+            let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
+            match self.treesit_run_ahead(buffer, due)? {
+                State::Running => running = true,
+                // The trees are there: this frame's parsers take them.
+                State::Landed => {}
+                State::None => small |= due,
             }
         }
+        // The frame after one that showed an edit unparsed parses it, unless
+        // its parse is still on a thread.
+        if !running && (std::mem::take(&mut self.treesit_parse_owed) || !small) {
+            return Ok(());
+        }
+        self.treesit_deferred = Some(Vec::new());
+        let shown = self.display_state.shown.clone();
+        self.display_state.hooked.get_or_insert(shown);
         Ok(())
     }
     /// `redisplay' ran the hooks: they have been told what changed so far.
@@ -2609,6 +2630,10 @@ impl Vm {
     /// must then parse and fontify what it left.
     pub fn deferred_parse_done(&mut self) -> bool {
         let Some(windows) = self.treesit_deferred.take() else { return false };
+        // Windows waiting for a thread's parse are woken by its landing.
+        if windows.is_empty() {
+            return false;
+        }
         for id in windows {
             self.display_state.repaint_window(id);
         }
