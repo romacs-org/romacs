@@ -86,6 +86,8 @@ fn second() {
                          [('std::fs', 'line 3 has a HOST(std::fs) comment with another reason')])
         self.assertIn('// HOST(OpenOptions): opens b', again)
         self.assertEqual(self.convert(trunk, out), (out, []), 'the same reason is no change')
+        shorter = f'src.rs first std::fs {a} reads\n'
+        self.assertEqual([e[2] for e, _ in self.convert(shorter, out)[1]], ['std::fs'], 'a shortened reason is a change too')
 
 
 if __name__ == '__main__':

@@ -229,10 +229,11 @@ def said(lines, line, api):
 
 
 def same_reason(lines, line, api, reason):
-    """Whether the comment above LINE gives REASON for API (it may say more
-    below, in comment lines of its own)."""
-    words = reason.split()
-    return said(lines, line, api)[:len(words)] == words
+    """Whether the comment above LINE gives exactly REASON for API: the
+    converter writes a HOST comment directly above its site, so the comment
+    lines from it down to the site or the next HOST comment are its reason;
+    any other text there counts as a different reason, and the list stays."""
+    return said(lines, line, api) == reason.split()
 
 
 def tag(line):
