@@ -1567,6 +1567,7 @@ impl Vm {
     pub(crate) fn clear_collection_caches(&mut self) {
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
+        self.resolved_buffer = None;
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
         // Finished nested runs' programs are caches: relowering what is used

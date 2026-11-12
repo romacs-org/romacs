@@ -26,6 +26,16 @@ pub(crate) fn count_copied(n: usize) {
 pub(crate) fn copied_bytes() -> usize {
     COPIED.with(|c| c.get())
 }
+#[cfg(test)]
+thread_local! {
+    /// Byte positions this thread's texts converted to characters.
+    static CHAR_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The byte positions this thread's texts have converted so far.
+#[cfg(test)]
+pub(crate) fn char_conversions() -> usize {
+    CHAR_CONVERSIONS.with(std::cell::Cell::get)
+}
 
 #[derive(Clone, Default)]
 struct ChunkCursor {
@@ -928,6 +938,8 @@ impl TextBody {
         Ok(ByteOffset(chunk.byte + at))
     }
     pub fn char_of_byte(&self, b: ByteOffset) -> Result<CharOffset> {
+        #[cfg(test)]
+        CHAR_CONVERSIONS.with(|c| c.set(c.get() + 1));
         if b.0 > self.bytes_len {
             return Err("index out of range".into());
         }

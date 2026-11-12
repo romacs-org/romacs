@@ -1332,6 +1332,9 @@ pub struct Vm {
     disable_inline: bool,
     #[cfg(test)]
     speculative_misses: usize,
+    /// Times `buffer_index` resolved the current buffer afresh.
+    #[cfg(test)]
+    buffer_resolutions: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
@@ -1505,6 +1508,12 @@ pub struct Vm {
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
+    /// The current buffer as `buffer_index` last resolved it: the slot's
+    /// value then, a live buffer, and its object index. Kept by value, not
+    /// by writer: `let` and its unwinding write the slot like any special
+    /// variable, and a different value simply resolves again. Killing a
+    /// buffer and a collection (which may move buffers) drop it.
+    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
@@ -1698,6 +1707,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     #[cfg(test)] inline_hits,
     #[cfg(test)] disable_inline,
     #[cfg(test)] speculative_misses,
+    #[cfg(test)] buffer_resolutions,
     regexp,
     execution_fatal,
     loader,
@@ -1739,6 +1749,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     expanded_macros,
     expanded_symbols,
     buffer_slot,
+    resolved_buffer,
     multibyte_slot,
     truncate_lines_slot,
     defun_start_epoch,
@@ -1899,6 +1910,8 @@ impl Vm {
             disable_inline: false,
             #[cfg(test)]
             speculative_misses: 0,
+            #[cfg(test)]
+            buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
@@ -1973,6 +1986,7 @@ impl Vm {
             isolates: isolate::Isolates::default(),
             inotify: None,
             buffer_slot: 0,
+            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             defun_start_epoch: 0,
