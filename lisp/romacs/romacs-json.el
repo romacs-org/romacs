@@ -23,6 +23,9 @@
 
 (require 'json)
 
+;; The loadup chain defines it (lisp/romacs/romacs-loadup-bootstrap.el).
+(defvar romacs-standard-obarray)
+
 (defvar romacs-json--lisp nil
   "Non-nil while json.el's own reader reads: its nested values too.")
 
@@ -94,8 +97,9 @@ the caller's `json-null' and `json-false' to symbols."
                (setq tail nil)))
            value))
         ((vectorp value)
-         (dotimes (i (length value) value)
-           (aset value i (romacs-json--unibyte (aref value i)))))
+         (dotimes (i (length value))
+           (aset value i (romacs-json--unibyte (aref value i))))
+         value)
         ((hash-table-p value)
          (let ((pairs nil))
            (maphash (lambda (key item) (push (cons key item) pairs)) value)
