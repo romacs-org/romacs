@@ -519,6 +519,28 @@ mod tests {
         vm.set_host_input(None);
     }
 
+    /// A full collection a key press abandons has consumed nothing: the
+    /// records of what was stored since the last collection stand, and the
+    /// minor after it reads them all.
+    #[test]
+    fn an_abandoned_collection_leaves_a_minor_its_records() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_threads(1);
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq left-list (list 1 2) left-symbol nil left-chars (make-char-table 'left) left-buffer (get-buffer-create \"left\"))
+          (aset left-chars ?a 0) (set-buffer left-buffer) (insert \"hello world\")").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(setcar left-list (list 1)) (setq left-symbol (list 2)) (aset left-chars ?a (list 3))
+          (set-buffer left-buffer) (put-text-property 1 4 'left (list 4)) (fset 'left-function #'(lambda () '(5)))").unwrap();
+        vm.set_host_input(Some(Box::new(KeyAfter(1))));
+        assert!(!vm.collect_garbage_until_key(), "the key ended the full collection");
+        vm.set_host_input(None);
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer left-buffer) (equal (list (car left-list) left-symbol (aref left-chars ?a) (get-text-property 2 'left) (left-function)) '((1) (2) (3) (4) (5))))").unwrap();
+        assert_eq!(kept, crate::Value::TRUE, "what was stored before the abandoned collection survives the minor");
+    }
+
     /// A collection a key press abandoned is no collection: the report
     /// stays the last completed one's.
     #[test]

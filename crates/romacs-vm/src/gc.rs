@@ -2192,11 +2192,47 @@ mod tests {
         vm.eval_source_raw("(setq minor-buffer (get-buffer-create \"minor\")) (set-buffer minor-buffer) (insert \"hello world\")
           (setq minor-indirect (make-indirect-buffer minor-buffer \"minor-indirect\"))").unwrap();
         vm.collect(&mut []);
-        vm.eval_source_raw("(set-buffer minor-buffer) (put-text-property 1 4 'minor (list 12))
-          (set-buffer minor-indirect) (put-text-property 5 8 'minor (list 13))").unwrap();
+        vm.eval_source_raw("(set-buffer minor-buffer) (put-text-property 1 4 'minor (list 12))").unwrap();
+        // Another VM of the process collects: the epoch moves on, and what
+        // this one recorded must stand.
+        let _ = crate::epoch::commit_point();
+        vm.eval_source_raw("(set-buffer minor-indirect) (put-text-property 5 8 'minor (list 13))").unwrap();
         assert!(vm.collect_minor(&[]));
         let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 2 'minor) (get-text-property 6 'minor)) '((12) (13))))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
+        vm.collect(&mut []);
+    }
+
+    /// A buffer whose text is replaced whole (its bytes read again as
+    /// characters, and back) has a text born written: a property stored
+    /// into it afterwards, and the ones it carried over, survive a minor.
+    #[test]
+    fn a_minor_reads_a_text_that_replaced_another_in_an_old_buffer() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq minor-buffer (get-buffer-create \"minor-replaced\")) (set-buffer minor-buffer) (insert \"hello world\")").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(set-buffer minor-buffer) (put-text-property 1 4 'minor (list 15)) (set-buffer-multibyte nil)
+          (set-buffer-multibyte t) (put-text-property 5 8 'minor (list 16))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 2 'minor) (get-text-property 6 'minor)) '((15) (16))))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what both texts were given survives");
+        vm.collect(&mut []);
+    }
+
+    /// A text given more values than its record keeps is read whole.
+    #[test]
+    fn a_minor_reads_whole_a_text_whose_record_overflowed() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000 minor-buffer (get-buffer-create \"minor-overflow\")) (set-buffer minor-buffer) (insert \"hello world\")").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(set-buffer minor-buffer) (put-text-property 5 8 'first (list 17)) (dotimes (i 70000) (put-text-property 1 2 'minor (list i)))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 6 'first) (get-text-property 1 'minor)) '((17) (69999))))").unwrap();
+        assert_eq!(kept, Value::TRUE, "the first value stored and the last survive");
         vm.collect(&mut []);
     }
 
