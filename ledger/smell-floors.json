@@ -309,6 +309,7 @@
       "tools/tests/omarchy/repo/rlisp/romacs-theme.el"
     ],
     "legacy_primitives": 236,
-    "primitives_outside_prims": 9
+    "primitives_outside_prims": 9,
+    "vm_replacements": 0
   }
 }

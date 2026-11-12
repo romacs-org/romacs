@@ -51,6 +51,44 @@ class FileSmellsTest(unittest.TestCase):
         self.assertEqual(smell('// defsubr! { name = "a" }\nmacro_rules! defsubr { () => {} }')[1], 0)
 
 
+class VmReplacementTest(unittest.TestCase):
+    """The engine's modules may not make a second `Vm` or `Registers`, nor swap
+    one away: a register capability would outlive its file (§13.6 I6)."""
+    def test_each_way_to_replace_a_vm_fires(self):
+        src = '''fn f(e: &mut Eng) {
+    let mut other = Vm::new();
+    std::mem::swap(e.vm, &mut other);
+    *e.vm = Vm::default();
+    let file = mem::replace(&mut e.vm.stack, Registers::new());
+    std::mem::take(&mut *self.vm);
+}
+'''
+        self.assertEqual(smells.vm_replacements(src), [2, 3, 4, 4, 5, 5, 6])
+
+    def test_tests_comments_and_ordinary_moves_are_left_alone(self):
+        src = '''// Vm::new() in a comment, and "std::mem::swap(e.vm, x)" in a string
+let code = std::mem::take(&mut e.code);
+let regs = std::mem::take(&mut e.vm.suspended);
+if *e.vm == other {}
+#[cfg(test)]
+mod tests {
+    fn t() { let vm = Vm::new(); std::mem::swap(&mut vm, &mut Vm::new()); }
+}
+#[cfg(test)]
+use crate::Vm;
+fn after() { let _ = Vm::new(); }
+'''
+        self.assertEqual(smells.vm_replacements(src), [11])
+
+    def test_the_engines_modules_are_its_own_files_less_tests(self):
+        engine = [n for n in ('crates/romacs-vm/src/threaded.rs', 'crates/romacs-vm/src/threaded_hot.rs',
+                              'crates/romacs-vm/src/traversal.rs', 'crates/romacs-vm/src/threaded_reader_gc_tests.rs',
+                              'crates/romacs-vm/src/gc.rs', 'crates/romacs-vm/src/prims/threaded.rs')
+                  if smells.ENGINE.fullmatch(n) and not smells.TEST_FILE.search(n)]
+        self.assertEqual(engine, ['crates/romacs-vm/src/threaded.rs', 'crates/romacs-vm/src/threaded_hot.rs',
+                                  'crates/romacs-vm/src/traversal.rs'])
+
+
 def span(file='src/lib.rs', line=1, called_from=None):
     return {'is_primary': True, 'file_name': file, 'line_start': line, 'column_start': 1,
             'expansion': called_from and {'span': called_from}}
@@ -114,15 +152,17 @@ def floors(**layout):
             'crates': {'a': {'allows': 2, 'todos': 1, 'long_files': 1}},
             'lints': {'clippy::doc_markdown': 3},
             'layout': {'root': ['crates', 'tools'], 'members_outside_crates': ['tests/x'],
-                       'generated': ['Cargo.lock'], 'legacy_primitives': 5, 'primitives_outside_prims': 2, **layout}}
+                       'generated': ['Cargo.lock'], 'legacy_primitives': 5, 'primitives_outside_prims': 2,
+                       'vm_replacements': 0, **layout}}
 
 
 def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outside=('tests/x',), legacy=5,
-        strays=2, generated=('Cargo.lock',)):
+        strays=2, generated=('Cargo.lock',), replacements=0):
     return {'crates': {'a': Counter(allows=allows, todos=todos, long_files=long_files)},
             'lints': Counter({'clippy::doc_markdown': lint}) if lint else Counter(),
             'layout': {'root': list(root), 'members_outside_crates': list(outside), 'legacy_primitives': legacy,
-                       'primitives_outside_prims': strays, 'generated': list(generated)},
+                       'primitives_outside_prims': strays, 'generated': list(generated),
+                       'vm_replacements': replacements},
             'strays': {}, 'long': [], 'lints_by_crate': {}}
 
 
@@ -156,7 +196,7 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(low['crates'], {'a': {'allows': 1, 'todos': 1, 'long_files': 1}})
         self.assertEqual(low['lints'], {})
         self.assertEqual(low['layout'], {'root': ['crates'], 'members_outside_crates': [], 'generated': ['Cargo.lock'],
-                                         'legacy_primitives': 4, 'primitives_outside_prims': 2})
+                                         'legacy_primitives': 4, 'primitives_outside_prims': 2, 'vm_replacements': 0})
 
     def test_lower_never_raises_or_adds(self):
         state = now(allows=9, lint=9, legacy=9, root=('crates', 'tools', 'new'), outside=('tests/x', 'tests/y'))
@@ -185,6 +225,10 @@ class RatchetTest(unittest.TestCase):
     def test_a_primitive_declared_outside_the_tree_fails(self):
         self.assertEqual(smells.problems(floors(), now(strays=3)),
                          ['layout primitives_outside_prims: 3, above its floor 2'])
+
+    def test_a_vm_replacement_in_the_engine_fails(self):
+        self.assertEqual(smells.problems(floors(), now(replacements=1)),
+                         ['layout vm_replacements: 1, above its floor 0'])
 
     def test_a_crate_at_zero_leaves_the_file(self):
         self.assertEqual(smells.lowered(floors(), now(allows=0, todos=0, long_files=0))['crates'], {})
@@ -240,7 +284,7 @@ def counts(lint=3, allows=2, legacy=5, root=('crates', 'tools'), generated=('Car
     return {'crates': {'a': {'allows': allows, 'todos': 1, 'long_files': 1}},
             'lints': {'clippy::doc_markdown': lint} if lint else {},
             'layout': {'root': list(root), 'members_outside_crates': ['tests/x'], 'legacy_primitives': legacy,
-                       'primitives_outside_prims': 2, 'generated': list(generated)}}
+                       'primitives_outside_prims': 2, 'generated': list(generated), 'vm_replacements': 0}}
 
 
 def rise(what, have, had, over=1):
