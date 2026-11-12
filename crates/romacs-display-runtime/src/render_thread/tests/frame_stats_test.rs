@@ -11,19 +11,19 @@ fn at(start: EventTime, ms: u64) -> EventTime {
 fn a_line_follows_frame_work_at_once_or_at_the_intervals_end_and_rest_writes_none() {
     let start = romacs_display_protocol::frame_time::observe_platform_now();
     let mut lines = StatsLines::default();
-    assert_eq!(lines.due(start, [0; 4]), LineDue::Now, "the first pass says where the counters stand");
-    lines.last = Some((start, [0; 4]));
-    assert_eq!(lines.due(at(start, 5_000), [0; 4]), LineDue::Quiet, "at rest: no line, no wake");
+    assert_eq!(lines.step(start, [0; 4]), LineDue::Now, "the first pass says where the counters stand");
+    assert_eq!(lines.step(at(start, 5_000), [0; 4]), LineDue::Quiet, "at rest: no line, no wake");
     let drew = [1, 1, 0, 1];
     assert_eq!(
-        lines.due(at(start, 300), drew),
+        lines.step(at(start, 300), drew),
         LineDue::At(at(start, 1_000)),
         "work just after a line: the loop wakes to write it"
     );
-    assert_eq!(lines.due(at(start, 1_000), drew), LineDue::Now);
-    lines.last = Some((at(start, 1_000), drew));
-    assert_eq!(lines.due(at(start, 9_000), drew), LineDue::Quiet, "the last line holds the totals");
-    assert_eq!(lines.due(at(start, 9_000), [2, 2, 0, 2]), LineDue::Now);
+    assert_eq!(lines.step(at(start, 999), drew), LineDue::At(at(start, 1_000)), "an early wake waits on");
+    assert_eq!(lines.step(at(start, 1_000), drew), LineDue::Now);
+    assert_eq!(lines.step(at(start, 9_000), drew), LineDue::Quiet, "the last line holds the totals");
+    assert_eq!(lines.step(at(start, 9_000), [2, 2, 0, 2]), LineDue::Now, "a rest ends: said at once");
+    assert_eq!(lines.step(at(start, 9_400), [3, 3, 0, 3]), LineDue::At(at(start, 10_000)));
 }
 
 #[test]
@@ -57,4 +57,5 @@ fn a_presented_frame_counts_under_each_of_its_reasons() {
         after.presented_reasons[DemandReason::PlatformRedraw.index()]
     );
     assert!(said["presented"].get("video").is_none(), "a reason with no frames is left out");
+    assert_eq!(said["unattributed_present_attempts"], after.unattributed_present_attempts);
 }

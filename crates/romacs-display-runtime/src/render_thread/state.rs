@@ -893,7 +893,7 @@ pub(super) struct RenderApp {
     /// from the physical modifier keys' own key events.
     pub(super) modifier_sides: super::modifier_sides::ModifierSides,
     pub(super) key_repeats: super::key_repeat::KeyRepeats,
-    /// The frame counters' diagnostic lines (frame_stats.rs).
+    /// The frame counters' diagnostic lines (`frame_stats.rs`).
     pub(super) stats_lines: super::frame_stats::StatsLines,
     /// The evaluator's busy indicator (busy_toast.rs).
     pub(super) busy_toast: super::busy_toast::BusyToast,

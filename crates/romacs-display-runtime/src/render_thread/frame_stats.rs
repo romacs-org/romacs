@@ -15,11 +15,11 @@
 //! and readers only need eventually-consistent totals.
 //!
 //! They are read three ways: [`snapshot`] from any thread, the file
-//! ROMACS_FRAME_STATS names at the session's end, and, under
-//! ROMACS_DIAGNOSTICS=1, a `frame-stats` line on stderr ([`StatsLines`]) a
+//! `ROMACS_FRAME_STATS` names at the session's end, and, under
+//! `ROMACS_DIAGNOSTICS=1`, a `frame-stats` line on stderr ([`StatsLines`]) a
 //! second while frames are asked for or drawn and none at rest, which is how
 //! a harness counts the frames of a state and the reasons they were drawn for
-//! (crates/romacs-vm-gui/harness/rest_live.py).
+//! (`rest_live.py` among the GUI host's harnesses).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -311,33 +311,35 @@ enum LineDue {
 }
 
 impl StatsLines {
-    /// What is due at NOW with the frame WORK counted so far. The lines are a
-    /// series of the counters at [`LINE_INTERVAL`]'s resolution whose last
-    /// line holds the totals once the loop is quiet: a change is written at
-    /// once, or at the interval's end when one was just written, and no
-    /// change writes nothing, so a loop at rest is not woken.
-    fn due(&self, now: EventTime, work: FrameWork) -> LineDue {
+    /// What is due at NOW with the frame WORK counted so far; a line due now
+    /// is taken as written. The lines are a series of the counters at
+    /// [`LINE_INTERVAL`]'s resolution whose last line holds the totals once
+    /// the loop is quiet: a change is written at once, or at the interval's
+    /// end when one was just written, and no change writes nothing, so a
+    /// loop at rest is not woken.
+    fn step(&mut self, now: EventTime, work: FrameWork) -> LineDue {
         match self.last {
             Some((_, reported)) if reported == work => LineDue::Quiet,
             Some((at, _)) if now < at.plus(LINE_INTERVAL) => LineDue::At(at.plus(LINE_INTERVAL)),
-            _ => LineDue::Now,
+            _ => {
+                self.last = Some((now, work));
+                LineDue::Now
+            }
         }
     }
 
-    /// Under ROMACS_DIAGNOSTICS=1, write the counters to stderr as one
+    /// Under `ROMACS_DIAGNOSTICS=1`, write the counters to stderr as one
     /// `frame-stats` line when one is due at NOW; when the loop must wake to
-    /// write the next. Called from about_to_wait.
+    /// write the next. Called as the loop goes to wait.
     pub(super) fn service(&mut self, now: EventTime) -> Option<EventTime> {
         if !super::diagnostics() {
             return None;
         }
         let snap = snapshot();
-        let work = frame_work(&snap);
-        match self.due(now, work) {
+        match self.step(now, frame_work(&snap)) {
             LineDue::Quiet => None,
             LineDue::At(at) => Some(at),
             LineDue::Now => {
-                self.last = Some((now, work));
                 write_line(&line(&snap, tick_us(now)));
                 None
             }
@@ -372,6 +374,7 @@ fn line(snap: &FrameSchedSnapshot, at_us: u64) -> serde_json::Value {
         "root_glyph_passes": snap.root_glyph_passes,
         "composite_only_frames": snap.composite_only_frames,
         "full_frame_texture_refusals": FULL_FRAME_TEXTURE_REFUSALS.load(Ordering::Relaxed),
+        "unattributed_present_attempts": snap.unattributed_present_attempts,
         "planned": by_reason(&snap.demand_reasons),
         "presented": by_reason(&snap.presented_reasons),
     })
