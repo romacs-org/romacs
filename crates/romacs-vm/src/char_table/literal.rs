@@ -17,7 +17,7 @@ impl Vm {
         let root = Arc::new(Mutex::new(CharTableNode {
             depth: 0, min_char: 0,
             slots: fields[4..68].iter().map(|&v| self.literal_table_slot(v)).collect(),
-            stamp: super::born(),
+            stamp: crate::epoch::born(),
         }));
         let table = CharTable {
             default: fields[0], parent: fields[1], purpose: fields[2],
@@ -41,7 +41,7 @@ impl Vm {
         let node = Arc::new(Mutex::new(CharTableNode {
             depth, min_char,
             slots: fields[2..].iter().map(|&v| self.literal_table_slot(v)).collect(),
-            stamp: super::born(),
+            stamp: crate::epoch::born(),
         }));
         Ok(self.allocate_object(data::Object::SubCharTable(node)))
     }

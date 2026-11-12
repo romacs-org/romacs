@@ -110,6 +110,7 @@ use romacs_brand as brand;
 mod gc;
 mod gc_check;
 mod functions;
+mod epoch;
 mod gc_mark;
 mod table;
 mod handle;

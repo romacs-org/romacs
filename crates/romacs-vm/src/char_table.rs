@@ -527,7 +527,7 @@ pub(super) struct CharTableNode {
     depth: usize,
     min_char: usize,
     slots: Vec<CharTableSlot>,
-    /// The collections' epoch (`born`) when it was made or last written: a
+    /// The collections' epoch (`crate::epoch`) when it was made or last written: a
     /// minor collection reads the nodes written since the last collection
     /// and passes over the rest, whatever table, sub table or cursor it
     /// reached them through. It has no default, so a node cannot be built
@@ -765,29 +765,7 @@ fn wrote(_stored: &CharTableSlot) {
     #[cfg(test)]
     tests::WROTE.with(|n| n.set(n.get() + 1));
 }
-/// The collections' epoch in this process: every collection of any VM
-/// advances it (`commit_point`), and a node made or written takes its value
-/// (`born`). It is apart from `WRITES`, which what is derived from a
-/// table's contents keys on and a collection must not renew.
-static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-/// The stamp of a node made or written now.
-pub(super) fn born() -> u64 {
-    EPOCH.load(std::sync::atomic::Ordering::Relaxed)
-}
-/// A collection ends: the epoch it leaves, which the VM remembers. A node
-/// stamped below it was last written before this, and holds only what the
-/// collection kept; one made or written from now on is stamped at or
-/// above it. Another VM's collections only raise later stamps.
-pub(crate) fn commit_point() -> u64 {
-    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
-}
-/// A VM restored from an image remembers the epoch of the process that
-/// built it: this process's is raised to it, so what the VM writes from
-/// now on is stamped at or above what it remembers.
-pub(crate) fn raise_epoch(to: u64) {
-    EPOCH.fetch_max(to, std::sync::atomic::Ordering::Relaxed);
-}
-
+use crate::epoch::born;
 /// The writes to char tables' contents so far in this process, all tables
 /// counted together: what is derived from a table's contents (the syntax
 /// summaries) keys on it with the table's serial, so a write

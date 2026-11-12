@@ -1050,3 +1050,134 @@ impl Properties {
             })
     }
 }
+
+/// What a property primitive's plan asks of the properties it changes: a
+/// string's, or a text body's, which records what is stored.
+pub(crate) trait Store {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value);
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str);
+    fn reset(&mut self);
+    fn keys(&self) -> Vec<String>;
+}
+impl Store for Properties {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { Properties::put(self, range, key, value); }
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { Properties::remove(self, range, key); }
+    fn reset(&mut self) { Properties::reset(self); }
+    fn keys(&self) -> Vec<String> { self.properties_keys() }
+}
+impl Store for BodyProperties {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { BodyProperties::put(self, range, key, value); }
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { BodyProperties::remove(self, range, key); }
+    fn reset(&mut self) { self.store.reset(); }
+    fn keys(&self) -> Vec<String> { self.store.properties_keys() }
+}
+
+/// How a collection reads a text body's properties (`BodyProperties`).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Reading {
+    /// The epoch the VM's last collection ended at (`crate::epoch`).
+    pub(crate) since: u64,
+    /// Every property is read, as a full collection, a compaction's rewrite
+    /// and verify's reference walk do; else only what was stored since.
+    pub(crate) whole: bool,
+}
+
+/// What was stored into a body's properties in the epoch it was last
+/// written in.
+#[derive(Clone, Debug)]
+enum Written {
+    /// The Values stored that can name a heap entry.
+    Values(Vec<Value>),
+    /// More than is worth keeping, or everything: a body is born so, and a
+    /// store that replaces the properties whole leaves it so.
+    All,
+}
+romacs_snapshot::snapshot_enum!(Written {
+    Written::Values(f0) => (f0),
+    Written::All => (),
+});
+
+/// Values kept before a record becomes `Written::All`.
+const WRITTEN_LIMIT: usize = 64 << 10;
+
+/// A text body's properties, with a record of what was stored into them
+/// since the last collection. A body is shared by a buffer and its indirect
+/// buffers and belongs to no table entry alone, so no entry's colour says
+/// it was stored into: the record is here, in the storage, and a minor
+/// collection reads it in place of every property of every buffer. It
+/// hands out the properties to read only (`Deref`), and each method that
+/// can store a Value records it, so a store that records nothing does not
+/// compile. A string's properties need none of this: its entry is dirtied.
+#[derive(Clone)]
+pub(crate) struct BodyProperties {
+    store: Properties,
+    written: Written,
+    /// The epoch of `written` (`crate::epoch`): a record from before the
+    /// VM's last collection is stale, and is begun again by the next store.
+    written_at: u64,
+}
+romacs_snapshot::snapshot_struct!(BodyProperties { store, written, written_at });
+
+impl std::ops::Deref for BodyProperties {
+    type Target = Properties;
+    fn deref(&self) -> &Properties {
+        &self.store
+    }
+}
+
+impl BodyProperties {
+    /// STORE as a body's properties: all of it counts as just stored.
+    pub(crate) fn new(store: Properties) -> Self {
+        Self { store, written: Written::All, written_at: crate::epoch::born() }
+    }
+    /// VALUES are about to be stored.
+    fn record(&mut self, values: impl IntoIterator<Item = Value>) {
+        let now = crate::epoch::born();
+        if self.written_at < now {
+            (self.written, self.written_at) = (Written::Values(Vec::new()), now);
+        }
+        let Written::Values(kept) = &mut self.written else { return };
+        kept.extend(values.into_iter().filter(|v| matches!(v.tag(), 0 | 3..=5) && *v != Value::NIL));
+        if kept.len() > WRITTEN_LIMIT {
+            self.written = Written::All;
+        }
+    }
+    pub fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
+        self.record([value]);
+        self.store.put(range, key, value);
+    }
+    pub fn inherit_inserted(&mut self, range: Range<ByteOffset>, inherited: &[(String, Value)]) {
+        self.record(inherited.iter().map(|&(_, value)| value));
+        self.store.inherit_inserted(range, inherited);
+    }
+    pub fn copy_into(&mut self, at: ByteOffset, source: &Properties) {
+        self.record(source.to_map().into_values().flat_map(BTreeMap::into_values));
+        self.store.copy_into(at, source);
+    }
+    pub fn remove(&mut self, range: Range<ByteOffset>, key: &str) {
+        self.store.remove(range, key);
+    }
+    pub fn replace(&mut self, range: Range<ByteOffset>, inserted: usize) -> usize {
+        self.store.replace(range, inserted)
+    }
+    pub fn resize_character(&mut self, range: Range<ByteOffset>, inserted: usize) {
+        self.store.resize_character(range, inserted);
+    }
+    pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
+        self.store.take_syntax_changes()
+    }
+    /// The collector's visit, as READING says. The record's Values are
+    /// visited while it is current, by a whole reading too: a compaction
+    /// rewrites them, and one removed since it was stored is kept until
+    /// the next collection. A stale record is passed over, and nothing here
+    /// ends a record: a mark a key press abandons has changed nothing.
+    pub(crate) fn visit_values(&mut self, reading: Reading, visit: &mut impl FnMut(&mut Value)) {
+        let current = self.written_at >= reading.since;
+        if current && let Written::Values(kept) = &mut self.written {
+            kept.iter_mut().for_each(&mut *visit);
+        }
+        if reading.whole || (current && matches!(self.written, Written::All)) {
+            self.store.visit_values(visit);
+        }
+    }
+}

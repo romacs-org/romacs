@@ -1322,7 +1322,9 @@ impl AnnotatedBuffer {
         }
         true
     }
-    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
+    /// Every Value the buffer holds; of its text's properties, what READING
+    /// says (`BodyProperties`).
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
         self.per_buffer.visit_values(f);
@@ -1331,7 +1333,7 @@ impl AnnotatedBuffer {
         // the base's to visit, once, as collection rewrites what it visits.
         f(&mut self.base);
         for buffer in &mut self.indirect { f(buffer); }
-        if self.base == Value::NIL { self.text.visit_values(f); }
+        if self.base == Value::NIL { self.text.visit_values(reading, f); }
         self.intervals.visit_values(f);
         for v in self.evaporating.values_mut() {
             f(v);

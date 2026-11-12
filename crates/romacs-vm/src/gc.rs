@@ -197,10 +197,10 @@ pub(crate) struct MarkedSet {
 #[derive(Default)]
 struct MarkState {
     native_nodes: HashSet<usize>,
-    /// A minor's: the epoch its last collection ended at, so that it reads
-    /// the char-table nodes written since (`char_table::commit_point`). 0
-    /// reads every node.
-    tables_since: u64,
+    /// How this mark reads storage no entry owns alone (`crate::epoch`):
+    /// a minor reads the char-table nodes and the text properties written
+    /// since the VM's last collection, anything else reads them whole.
+    reading: properties::Reading,
     /// Weak hash tables reached; their entries are not traced until
     /// `weak_round' (the ephemeron fixpoint) decides which survive.
     weak_tables: Vec<usize>,
@@ -257,12 +257,12 @@ pub(crate) struct Allocation {
     /// ALLOCATED when the last collection ended: what was handed out since
     /// is the young, and makes a minor due (`Vm::minor_due`).
     pub(crate) collected_at: u64,
-    /// The epoch the last collection ended at (`char_table::commit_point`):
-    /// a char-table node stamped below it holds only what that collection,
-    /// or one before, promoted.
-    pub(crate) tables_since: u64,
+    /// The epoch the last collection ended at (`crate::epoch`): storage
+    /// stamped below it holds only what that collection, or one before,
+    /// promoted.
+    pub(crate) since: u64,
 }
-romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at, tables_since });
+romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at, since });
 
 /// What the last mark found in the objects table: `garbage-collect's
 /// statistics and the pacing's traced slots, counted once per entry.
@@ -1097,7 +1097,7 @@ impl Vm {
         self.cells.settle_old();
         self.objects.settle_old();
         self.functions.settle();
-        self.allocation.tables_since = char_table::commit_point();
+        self.allocation.since = crate::epoch::commit_point();
     }
     /// Whether every table is as a completed collection leaves it: its
     /// entries old and clean, its log empty.
@@ -1255,7 +1255,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, tables_since: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         // From here the collection changes the heap: the last point a key
@@ -1441,6 +1441,7 @@ impl Vm {
         // Forward each physical native slot once, even when several live
         // cursors retain the same subtree (possibly detached from its table).
         native_nodes.clear();
+        let whole = properties::Reading { since: self.allocation.since, whole: true };
         self.objects.collector_compact(|object| {
                 match object {
                     data::Object::Vector(values) | data::Object::Record(values) => {
@@ -1456,8 +1457,8 @@ impl Vm {
                     data::Object::Treesit(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Finalizer(function) => rewrite(function),
                     data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),
-                    data::Object::Buffer(t) => t.visit_values(&mut |v| rewrite(v)),
-                    data::Object::ByteBuffer(t) => t.visit_values(&mut |v| rewrite(v)),
+                    data::Object::Buffer(t) => t.visit_values(whole, &mut |v| rewrite(v)),
+                    data::Object::ByteBuffer(t) => t.visit_values(whole, &mut |v| rewrite(v)),
                     data::Object::Marker(m) => m.visit_values(&mut |v| rewrite(v)),
                     data::Object::Overlay(o) => o.visit_values(&mut |v| rewrite(v)),
                     data::Object::String(s) | data::Object::RawString(s) => {
@@ -1686,7 +1687,7 @@ impl Vm {
     /// from, so what this promoted counts toward the next one.
     fn settle_minor(&mut self) {
         self.functions.settle();
-        self.allocation.tables_since = char_table::commit_point();
+        self.allocation.since = crate::epoch::commit_point();
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
         self.gc_stats.collections += 1;
@@ -1694,7 +1695,7 @@ impl Vm {
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
         self.functions.settle();
-        self.allocation.tables_since = char_table::commit_point();
+        self.allocation.since = crate::epoch::commit_point();
         self.gc_retained = self.heap_objects();
         self.settle_payload();
         // The one place a job child's growth is measured, whatever asked for
@@ -1795,7 +1796,8 @@ impl Vm {
         }
         lap.lap(&mut self.gc_times, Phase::Roots);
         let untraced_lists = self.lambda_lists.keys().copied().collect();
-        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, ..MarkState::default() };
+        let reading = properties::Reading { since: self.allocation.since, whole: true };
+        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, reading, ..MarkState::default() };
         state.region_marks[0] = true;
         if minor_changed.is_some() { self.minor_keeps(&mut state); }
         // GNU dooms finalizers once, after the roots and before the weak
@@ -1858,7 +1860,7 @@ impl Vm {
     /// one is live, as each is to what it drops afterwards. Of char tables
     /// it reads the nodes written since the last collection.
     fn minor_keeps(&self, state: &mut MarkState) {
-        state.tables_since = self.allocation.tables_since;
+        state.reading.whole = false;
         state.region_marks.fill(true);
         state.obarray_symbols_live = self.obarray_symbol_names.keys().copied().collect();
     }
@@ -1944,6 +1946,7 @@ impl Vm {
         }
         let i = v.payload() as usize - 1;
         let native_nodes = &mut state.native_nodes;
+        let nodes_since = if state.reading.whole { 0 } else { state.reading.since };
         match handed.object() {
             data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Obarray(t) => {
@@ -1955,11 +1958,11 @@ impl Vm {
             data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::Buffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::ByteBuffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::Buffer(t) => t.visit_values(state.reading, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::ByteBuffer(t) => t.visit_values(state.reading, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Overlay(o) => o.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::String(s) | data::Object::RawString(s) => s.properties.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
@@ -2176,6 +2179,25 @@ mod tests {
         assert!(vm.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
         assert!(vm.collect_minor(&[]));
         assert!(vm.closures.old(usize::try_from(young.payload()).unwrap()), "the cache's function survived, and is old");
+    }
+
+    /// A buffer's text belongs to no entry alone: a property stored into
+    /// it, through the buffer or through an indirect buffer of it, is in
+    /// the text's own record, which a minor reads.
+    #[test]
+    fn a_minor_keeps_what_was_stored_into_an_old_buffers_text() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq minor-buffer (get-buffer-create \"minor\")) (set-buffer minor-buffer) (insert \"hello world\")
+          (setq minor-indirect (make-indirect-buffer minor-buffer \"minor-indirect\"))").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(set-buffer minor-buffer) (put-text-property 1 4 'minor (list 12))
+          (set-buffer minor-indirect) (put-text-property 5 8 'minor (list 13))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 2 'minor) (get-text-property 6 'minor)) '((12) (13))))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what the stores put in survives");
+        vm.collect(&mut []);
     }
 
     /// With a log lost a minor frees nothing and promotes everything.

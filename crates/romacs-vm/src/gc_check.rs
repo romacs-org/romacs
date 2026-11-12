@@ -223,6 +223,7 @@ impl Vm {
                 let i = v.payload() as usize - 1;
                 if !first(&mut r.tables[3], i) { return; }
                 let mut push = |v: &mut Value| values.push(*v);
+                let whole = properties::Reading { since: self.allocation.since, whole: true };
                 use data::Object::*;
                 match &mut self.objects.collector_entries_mut()[i] {
                     Vector(slots) | Record(slots) => slots.iter_mut().for_each(&mut push),
@@ -239,8 +240,8 @@ impl Vm {
                     WindowConfiguration(c) => c.visit_values(&mut push),
                     Treesit(t) => t.visit_values(&mut push),
                     Process(p) => p.visit_values(&mut push),
-                    Buffer(b) => b.visit_values(&mut push),
-                    ByteBuffer(b) => b.visit_values(&mut push),
+                    Buffer(b) => b.visit_values(whole, &mut push),
+                    ByteBuffer(b) => b.visit_values(whole, &mut push),
                     Marker(m) => m.visit_values(&mut push),
                     Overlay(o) => o.visit_values(&mut push),
                     Obarray(t) => t.visit_values(&mut push),
