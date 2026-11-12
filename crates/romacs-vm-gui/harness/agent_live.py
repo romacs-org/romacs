@@ -2308,8 +2308,18 @@ def board_keys(args, base):
             '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
         def open_board():
+            # A key typed as a layer hides or shows can be lost on a loaded
+            # host (seen: no command ran for it): keys must reach the frame,
+            # then the board, before one is relied on.
+            a.keyboard_ready()
             a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
+            def moved():
+                before = a.log().count('"native_command":"romacs-agent-board-next"')
+                a.keys('-k', 'n')
+                time.sleep(.3)
+                return a.log().count('"native_command":"romacs-agent-board-next"') > before
+            until(moved, 30, 'keys reach the board')
 
         def ret_on(regexp):
             """Point to the board's line REGEXP matches; RET there."""
