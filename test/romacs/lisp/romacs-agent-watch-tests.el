@@ -127,5 +127,58 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
                    (expand-file-name "check.log" root)))
     (should romacs-agent-watch--timer)))
 
+(ert-deftest romacs-agent-watch-a-file-section ()
+  (romacs-agent-watch-tests--with
+    (let ((index (expand-file-name "INDEX.md" root)))
+      (cl-flet ((index (&rest decide)
+                  (with-temp-file index
+                    (insert "# Requests\n\n## For the train\n- 111 a  fix  1.0 h\n\n## For the lead to decide\n")
+                    (dolist (line decide) (insert line "\n"))
+                    (insert "\n## Merged\n- 999 z\n"))))
+        (index "- 222 b  conflict  2.0 h")
+        (setq caller "lead")
+        (let ((answer (romacs-agent-watch-tests--watch "taskId" "lead" "file" index "section" "For the lead to decide")))
+          (should (string-match-p "§ For the lead to decide" (aref (gethash "watching" answer) 0))))
+        ;; What is there when it starts is known; ages rewritten are not new.
+        (index "- 222 b  conflict  2.3 h")
+        (romacs-agent-watch--tick)
+        (should-not told)
+        ;; A request held: the lead is told, that line alone.
+        (index "- 222 b  conflict  2.4 h" "- 333 c  decide: waive  0.1 h")
+        (romacs-agent-watch--tick)
+        (should (= (length told) 1))
+        (should (eq (car (car told)) lead))
+        (should (string-match-p "New under \"For the lead to decide\" in .*INDEX.md" (cdr (car told))))
+        (should (string-match-p "333 c" (cdr (car told))))
+        (should-not (string-match-p "222 b\\|111 a\\|999 z" (cdr (car told))))
+        (romacs-agent-watch--tick)
+        (should (= (length told) 1))
+        ;; Kept across a restart, what it has seen with it.
+        (clrhash romacs-agent-watch--watches)
+        (romacs-agent-watch--restore)
+        (romacs-agent-watch--tick)
+        (should (= (length told) 1))
+        ;; Gone and back is new.
+        (index "- 222 b  conflict  2.5 h")
+        (romacs-agent-watch--tick)
+        (index "- 222 b  conflict  2.6 h" "- 333 c  decide again")
+        (romacs-agent-watch--tick)
+        (should (= (length told) 2))
+        ;; A tell that fails is tried again: what was not told is not seen.
+        (index "- 222 b  conflict  2.7 h" "- 333 c  decide again" "- 555 e  held")
+        (cl-letf (((symbol-function 'romacs-agent-tools--tell) (lambda (&rest _) (error "harness gone"))))
+          (romacs-agent-watch--tick))
+        (should (= (length told) 2))
+        (romacs-agent-watch--tick)
+        (should (= (length told) 3))
+        (should (string-match-p "555 e" (cdr (car told))))
+        ;; Stopped, its file gone: nothing more.
+        (delete-file index)
+        (romacs-agent-watch-tests--watch "taskId" "lead" "file" index "section" "For the lead to decide" "stop" t)
+        (should-not (gethash "lead" romacs-agent-watch--watches))
+        (index "- 444 d  new")
+        (romacs-agent-watch--tick)
+        (should (= (length told) 3))))))
+
 (provide 'romacs-agent-watch-tests)
 ;;; romacs-agent-watch-tests.el ends here
