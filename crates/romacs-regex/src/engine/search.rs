@@ -120,6 +120,9 @@ pub fn anchor_alt_enabled() -> bool {
     }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
+        // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+        // process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher
+        // strategy
         let on = !regex_knob_off(std::env::var("ROMACS_REGEX_ANCHOR_ALT").ok().as_deref());
         tracing::debug!(target: "romacs::regex", on, "ROMACS_REGEX_ANCHOR_ALT");
         on
