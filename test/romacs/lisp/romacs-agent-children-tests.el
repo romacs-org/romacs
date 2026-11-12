@@ -211,11 +211,9 @@
   (romacs-agent-children-tests--with
     (child 'running)
     (romacs-agent-ui--summarize-children parent)
-    (with-temp-buffer
-      (let ((romacs-agent-ui--session parent))
-        (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made at redisplay")))
-                  ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned at redisplay"))))
-          (should (string-search "1 running" (romacs-agent-ui--header-line))))))))
+    (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made for the header")))
+              ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned for the header"))))
+      (should (string-search "1 running" (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs parent)))))))
 
 (ert-deftest romacs-agent-children-menu-rows-open-children ()
   (romacs-agent-children-tests--with
@@ -381,7 +379,7 @@
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
         (should (equal (romacs-agent-children-tests--summary parent) "🤖1 ✋1"))
         (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent)) "1 running"))
-        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "🤖")))
+        (should (equal (substring-no-properties (romacs-agent-ui--state-label (romacs-agent-state parent) nil)) "🤖")))
       ;; Turned off, a summary made before says words at once.
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))
@@ -392,7 +390,7 @@
       ;; A frame that cannot draw them gets the words.
       (cl-letf (((symbol-function 'char-displayable-p) #'ignore))
         (should (equal (romacs-agent-children-tests--summary parent) "1 running 1 waiting"))
-        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "Running"))))))
+        (should (equal (substring-no-properties (romacs-agent-ui--state-label (romacs-agent-state parent) nil)) "Running"))))))
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here

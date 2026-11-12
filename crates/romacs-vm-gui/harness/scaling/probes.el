@@ -304,7 +304,7 @@ comment and string syntax, its summaries made by one parse to the end."
 ;; A chat of N characters over a fixed 100 turns.
 (defun scaling--big-chat (n)
   (scaling--agent)
-  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :title "big"
+  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :provider "claude" :title "big"
                                      :dir temporary-file-directory))
         (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
     (romacs-agent-show session)

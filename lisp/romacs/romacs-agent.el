@@ -130,6 +130,18 @@ evaluation, finishes.  A harness's relay takes it at its launch."
 (defvar romacs-agent-event-functions nil
   "Functions called with a session and each event it raises.")
 
+(defvar romacs-agent-changed-functions nil
+  "Functions called with a session whose state changed where no event says
+so: a turn launched, a selection armed or in effect, its options set, its
+connection gone.  A view made from a session's state is made again from
+these and from `romacs-agent-event-functions', never by looking again:
+whatever writes a field a view shows outside `romacs-agent--raise' calls
+`romacs-agent--changed'.")
+
+(defun romacs-agent--changed (session)
+  "Tell SESSION's views its state changed where no event says so."
+  (run-hook-with-args 'romacs-agent-changed-functions session))
+
 (defcustom romacs-agent-approval-policy 'allow
   "What Romacs answers when a harness asks to run a tool: `allow', every
 tool call, at once, the user never asked (full permissions, as T3 Code's
@@ -209,7 +221,8 @@ the plan is the user's to take up.")
 (defun romacs-agent--set-options (session options)
   "Make OPTIONS SESSION's, in its manifest too."
   (setf (romacs-agent-options session) options)
-  (romacs-agent--manifest-put session "options" (romacs-agent--options-object options)))
+  (romacs-agent--manifest-put session "options" (romacs-agent--options-object options))
+  (romacs-agent--changed session))
 
 (defun romacs-agent--without (options keys)
   "OPTIONS, a plist, without KEYS."
@@ -1088,6 +1101,7 @@ itself, so the turn goes on whatever becomes of this server."
     (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
                           input images))
   (setf (romacs-agent-state session) 'starting)
+  (romacs-agent--changed session)
   (romacs-agent--attach session 50))
 
 ;;; Journal records
@@ -1352,7 +1366,8 @@ goes."
       ;; Ready between turns: idle, and the first message waiting goes.
       (when (and (memq (romacs-agent-state session) '(starting running))
                  (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
-        (setf (romacs-agent-state session) 'idle))
+        (setf (romacs-agent-state session) 'idle)
+        (romacs-agent--changed session))
       (when (romacs-agent-queue session) (romacs-agent--send-next session t))))))
 
 (defun romacs-agent--scratch (session)
@@ -1637,6 +1652,7 @@ next message goes."
       ;; Attached to the new harness: what waited goes, after a cut turn
       ;; it takes up, if any.
       ('resuming (setf (romacs-agent-pending-selection session) nil)
+                 (romacs-agent--changed session)
                  (romacs-agent--send-next session (not (romacs-agent-interrupted session)))))))
 
 (defun romacs-agent--apply-switch (session)
@@ -1654,6 +1670,7 @@ next message goes."
                                                      #'romacs-agent--restart session))
                            (cl-loop for (key value) on switch by #'cddr
                                     unless (eq key :state) append (list key value))))
+             (romacs-agent--changed session)
              (dolist (entry how) (romacs-agent--line session (cdr entry)))))))
 
 (defun romacs-agent--select-answered (session id ok)
@@ -1665,6 +1682,7 @@ return whether ID was one.  A refusal restarts SESSION on the selection."
           (romacs-agent--restart session)
         (let ((waiting (remove id (plist-get switch :waiting))))
           (setf (romacs-agent-pending-selection session) (plist-put switch :waiting waiting))
+          (romacs-agent--changed session)
           (unless waiting (romacs-agent--commit-switch session))))
       t)))
 
@@ -1687,6 +1705,7 @@ return whether ID was one.  A refusal restarts SESSION on the selection."
           (romacs-agent-pending-selection session) nil)
     (romacs-agent--manifest-put session "options" (romacs-agent--options-object (romacs-agent-options session))
                                 "switch" :null)
+    (romacs-agent--changed session)
     (romacs-agent--note session (romacs-mcp--object "type" "selection"
                                                     "from" (romacs-agent--selection-object from)
                                                     "to" (romacs-agent--selection-object to)))
@@ -1712,10 +1731,12 @@ when one runs; with none, the journal is the server's to add to."
   (romacs-agent--cancel-select session)
   (setf (romacs-agent-pending-selection session)
         (plist-put (plist-put (romacs-agent-pending-selection session) :state 'restarting) :waiting nil))
+  (romacs-agent--changed session)
   (romacs-agent--stop-then session
                            (lambda ()
                              (setf (romacs-agent-pending-selection session)
                                    (plist-put (romacs-agent-pending-selection session) :stopped t))
+                             (romacs-agent--changed session)
                              (romacs-agent--restarted session))))
 
 (defun romacs-agent--stop-then (session then)
@@ -1735,6 +1756,7 @@ next run takes the unit's name; at once when it ran detached."
     (romacs-agent--commit-switch session)
     ;; Messages go on waiting until the new supervisor is there to take them.
     (setf (romacs-agent-pending-selection session) (list :state 'resuming))
+    (romacs-agent--changed session)
     (romacs-agent-resume session)))
 
 (defun romacs-agent--send-next (session &optional force)
@@ -1990,6 +2012,7 @@ Interactively, open the chat without sending an initial prompt."
       (if (romacs-agent--per-turn-p session)
           ;; No harness runs until a prompt starts a turn.
           (progn (setf (romacs-agent-state session) 'idle)
+                 (romacs-agent--changed session)
                  (romacs-agent--manifest session nil)
                  (when prompt (romacs-agent-send session prompt)))
         (romacs-agent--launch session (romacs-agent--argv session nil))
@@ -2065,7 +2088,9 @@ Romacs is resuming THREAD.  Once started, the supervisor owns it."
                   (romacs-agent--launch session argv)
                   (romacs-agent--attach session 50)))
               (setq dir nil)
-              (when (romacs-agent--per-turn-p session) (setf (romacs-agent-state session) 'idle))
+              (when (romacs-agent--per-turn-p session)
+                (setf (romacs-agent-state session) 'idle)
+                (romacs-agent--changed session))
               session)
           ;; Failed before: no session, no request naming it, and no
           ;; directory claiming one.
@@ -2235,6 +2260,7 @@ keeps the conversation there."
     (romacs-agent--launch session (romacs-agent--argv session t)))
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) nil
         (romacs-agent-startup-pending session) nil)
+  (romacs-agent--changed session)
   (romacs-agent--attach session 50)
   ;; What waited for its turn's end when the harness went goes now, unless
   ;; the harness ended in the middle of a turn: the resumed harness takes
@@ -2331,7 +2357,8 @@ neither callback runs after it."
           (unless (or (eq (romacs-agent-state session) 'ended)
                       ;; A per-turn harness between turns is idle, not detached.
                       (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle)))
-            (setf (romacs-agent-state session) 'detached))
+            (setf (romacs-agent-state session) 'detached)
+            (romacs-agent--changed session))
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
         session))))
 

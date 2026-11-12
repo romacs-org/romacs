@@ -701,6 +701,7 @@ or a repeat."
 (defun romacs-agent-ui--on-event (session event)
   (romacs-agent-ui--track-children session event)
   (romacs-agent-ui--render session event)
+  (romacs-agent-ui--header-refresh session)
   (romacs-agent-ui--dashboard-changed))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-ui--on-event)
@@ -731,7 +732,6 @@ or a repeat."
     (dolist (session sessions)
       (romacs-agent-ui--summarize-children session)
       (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
-        (with-current-buffer buffer (force-mode-line-update))
         ;; An open actions menu follows.
         (when (and (buffer-live-p keymap-popup--buffer)
                    (eq buffer (plist-get (keymap-popup--session-state keymap-popup--buffer) :source)))
@@ -873,9 +873,20 @@ new turn starts, and last turn's failures have been seen."
                                             (romacs-agent-ui--count "✋" "waiting" (aref counts 1) 'warning))
                                        (and (> (aref counts 2) 0)
                                             (romacs-agent-ui--count "❗" "failed" (aref counts 2) 'romacs-agent-error))))))
-            (and parts (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))))))
+            (and parts (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))))
+    ;; Its header says the line.
+    (romacs-agent-ui--header-refresh session)))
 
 ;;; The header (hermes-chat--header-line's shape)
+;;
+;; A value, never a form: the buffer's `header-line-format' is the string
+;; `romacs-agent-ui--header-refresh' last made, so showing it runs no
+;; Lisp.  The refresh is the one way the header changes.  It runs where
+;; what the header reads may have changed: after each event
+;; (`romacs-agent-ui--on-event'), where a session's state changes with no
+;; event (`romacs-agent-changed-functions'), when its workers' line is made
+;; again, and when what draws a glyph changes.  It makes and writes nothing
+;; while the header would read the same.
 
 (defun romacs-agent-ui--harness-icon (harness)
   (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) "●")))
@@ -885,12 +896,10 @@ new turn starts, and last turn's failures have been seen."
   "Whether chats say a state by a glyph (🤖 working, ✋ waiting for you, ❗
 failed...) where the frame can draw it: the word shows on hover."
   :type 'boolean :group 'romacs-agent
-  ;; Sessions' worker summaries are made ahead: made again.
+  ;; Sessions' worker summaries and headers are made ahead: made again.
   :set (lambda (symbol value)
          (set-default symbol value)
-         (when (fboundp 'romacs-agent-ui--summarize-children)
-           (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
-           (force-mode-line-update t))))
+         (when (fboundp 'romacs-agent-ui--glyphs-changed) (romacs-agent-ui--glyphs-changed))))
 
 (defun romacs-agent-ui--glyph (glyph word face)
   "GLYPH, or WORD where glyphs are off or GLYPH cannot be drawn, in FACE,
@@ -898,15 +907,16 @@ WORD its help."
   (propertize (if (and romacs-agent-glyphs (char-displayable-p (aref glyph 0))) glyph word)
               'face face 'help-echo word))
 
-(defun romacs-agent-ui--state-label (session)
-  "SESSION's state, when the header should name it."
-  (pcase (romacs-agent-state session)
+(defun romacs-agent-ui--state-label (state failed)
+  "A session's STATE, when the header should name it: idle, only that its
+last turn FAILED."
+  (pcase state
     ('waiting-approval (romacs-agent-ui--glyph "✋" "Approval" 'warning))
     ((or 'starting 'running) (romacs-agent-ui--glyph "🤖" "Running" 'romacs-agent-running))
     ('detached (romacs-agent-ui--glyph "🔌" "Detached" 'warning))
     ('ended (romacs-agent-ui--glyph "⏹" "Ended" 'romacs-agent-dim))
     ('history (romacs-agent-ui--glyph "📜" "History" 'romacs-agent-dim))
-    (_ (and (romacs-agent-failed session) (romacs-agent-ui--glyph "❗" "Failed" 'romacs-agent-error)))))
+    (_ (and failed (romacs-agent-ui--glyph "❗" "Failed" 'romacs-agent-error)))))
 
 (defun romacs-agent-ui--count (glyph word count face)
   "COUNT of what WORD names: GLYPH and the count, else the count and WORD."
@@ -923,33 +933,107 @@ WORD its help."
         (propertize effort 'face (if (facep face) face 'romacs-agent-effort)))
     (propertize "default" 'face 'romacs-agent-effort-default)))
 
-(defun romacs-agent-ui--header-line ()
-  "The chat's header, only what is worth a glance: harness, the instance
-when not the harness's own, a permission mode other than bypassing them, model
-and effort, a selection waiting, its workers, how full its context is,
-and its state."
-  (let* ((session romacs-agent-ui--session)
-         (harness (romacs-agent-harness session))
-         (mode (romacs-agent-permission-mode session))
-         (effort (plist-get (romacs-agent-options session) :effort))
-         (share (romacs-agent-ui--context-share session))
-         (segments
-          (delq nil
-                (list (romacs-agent-ui--harness-icon harness)
-                      ;; The icon names the harness: only another instance of it is named.
-                      (and (not (equal (romacs-agent-provider session) (symbol-name harness)))
-                           (propertize (romacs-agent-provider session) 'face 'romacs-agent-dim))
-                      (cond ((plist-get (romacs-agent-options session) :plan) (propertize "plan" 'face 'warning))
-                            ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
-                      (concat (propertize (or (romacs-agent-ui--instance nil harness (romacs-agent-model session) nil) "...")
-                                          'face 'romacs-agent-model)
-                              (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
-                      (when-let* ((switch (romacs-agent-pending-selection session)))
-                        (propertize (format "→ %s" (romacs-agent-ui--selection-label switch)) 'face 'warning))
-                      (romacs-agent-children-summary session)
-                      (and share (propertize share 'face 'romacs-agent-context))
-                      (romacs-agent-ui--state-label session)))))
-    (string-replace "%" "%%" (romacs-truncate (mapconcat #'identity segments "  ") (max 1 (window-body-width))))))
+(defun romacs-agent-ui--header-inputs (session)
+  "All that SESSION's header reads of it, a plist, with whether glyphs
+are on: the header is made from it (`romacs-agent-ui--header-text'), and
+made again when it differs."
+  (let ((options (romacs-agent-options session)) (switch (romacs-agent-pending-selection session)))
+    (list :harness (romacs-agent-harness session) :provider (romacs-agent-provider session)
+          :mode (if (plist-get options :plan) 'plan (romacs-agent-permission-mode session))
+          :model (romacs-agent-model session) :effort (plist-get options :effort)
+          :switch (and switch (romacs-agent-ui--selection-label switch))
+          :workers (romacs-agent-children-summary session)
+          :share (romacs-agent-ui--context-share session)
+          :state (romacs-agent-state session) :failed (and (romacs-agent-failed session) t)
+          :glyphs romacs-agent-glyphs)))
+
+(defun romacs-agent-ui--header-text (inputs)
+  "A chat's header for INPUTS (`romacs-agent-ui--header-inputs'), only what
+is worth a glance: harness, the instance when not the harness's own, a
+permission mode other than bypassing them, model and effort, a selection
+waiting, its workers, how full its context is, and its state.  The whole
+line, as wide as it is."
+  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state failed &allow-other-keys)
+      inputs
+    (mapconcat
+     #'identity
+     (delq nil
+           (list (romacs-agent-ui--harness-icon harness)
+                 ;; The icon names the harness: only another instance of it is named.
+                 (and provider (not (equal provider (symbol-name harness)))
+                      (propertize provider 'face 'romacs-agent-dim))
+                 (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
+                       ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
+                 (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
+                                     'face 'romacs-agent-model)
+                         (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
+                 (and switch (propertize (format "→ %s" switch) 'face 'warning))
+                 workers
+                 (and share (propertize share 'face 'romacs-agent-context))
+                 (romacs-agent-ui--state-label state failed)))
+     "  ")))
+
+(defvar-local romacs-agent-ui--header nil
+  "The chat's header as last made: (INPUTS . TEXT), what it was made from
+and the whole line.")
+
+(defun romacs-agent-ui--header-format (text)
+  "TEXT as a header line shows it: each `%' said literally."
+  (string-replace "%" "%%" text))
+
+(defun romacs-agent-ui--header-fit (window)
+  "Cut WINDOW's header where its chat's does not fit it: when the header
+is made again, and when WINDOW's width or buffer changed.
+The buffer's `header-line-format' is the whole line, and a window wide
+enough shows that.  A narrower one holds the line cut to its own width as
+its `header-line-format' parameter, so two windows of one chat are each cut
+where they end.  The parameter goes once WINDOW is wide enough or shows
+another buffer; a parameter that is not this function's is left alone."
+  (let* ((text (cdr (buffer-local-value 'romacs-agent-ui--header (window-buffer window))))
+         (width (max 1 (window-body-width window)))
+         (cut (and text (> (string-width text) width)
+                   (romacs-agent-ui--header-format (romacs-truncate text width))))
+         (held (window-parameter window 'romacs-agent-header)))
+    (unless (equal-including-properties cut held)
+      (when (eq held (window-parameter window 'header-line-format))
+        (set-window-parameter window 'header-line-format cut))
+      (set-window-parameter window 'romacs-agent-header cut))))
+
+(defun romacs-agent-ui--header-release ()
+  "This chat's buffer is going: no window keeps a cut of its header."
+  (setq romacs-agent-ui--header nil)
+  (mapc #'romacs-agent-ui--header-fit (get-buffer-window-list nil nil t)))
+
+(defun romacs-agent-ui--header-refresh (session &optional force)
+  "Make the header of SESSION's chat say what SESSION says now.
+While what the header reads is what it was made from, nothing is made;
+while it would read the same, nothing is written, so display sees no
+change.  FORCE makes it again whatever it was made from: what draws a
+glyph changed."
+  (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer))
+              ;; A copy a journal is replayed into names the same buffer.
+              ((eq (buffer-local-value 'romacs-agent-ui--session buffer) session)))
+    (with-current-buffer buffer
+      (let ((inputs (romacs-agent-ui--header-inputs session)))
+        (unless (and (not force) (equal-including-properties inputs (car romacs-agent-ui--header)))
+          (let* ((text (romacs-agent-ui--header-text inputs))
+                 (same (equal-including-properties text (cdr romacs-agent-ui--header))))
+            (setq romacs-agent-ui--header (cons inputs (if same (cdr romacs-agent-ui--header) text)))
+            (unless same
+              (setq header-line-format (romacs-agent-ui--header-format text))
+              (mapc #'romacs-agent-ui--header-fit (get-buffer-window-list buffer nil t))
+              (force-mode-line-update))))))))
+
+(add-hook 'romacs-agent-changed-functions #'romacs-agent-ui--header-refresh)
+
+(defun romacs-agent-ui--glyphs-changed ()
+  "What draws a glyph changed (`romacs-agent-glyphs', the frame's font):
+every session's workers' line and header are made again."
+  (dolist (session (romacs-agent-sessions))
+    (romacs-agent-ui--summarize-children session)
+    (romacs-agent-ui--header-refresh session t)))
+
+(add-hook 'after-setting-font-hook #'romacs-agent-ui--glyphs-changed)
 
 ;;; The composer
 
@@ -999,13 +1083,23 @@ whoever wrote last and whatever the session's state."
   (concat (if (save-excursion (goto-char romacs-agent-ui--end) (bolp)) "" "\n")
           (or (romacs-agent-ui--live-rule) "")))
 
+(defun romacs-agent-ui--overlay-show (overlay property value)
+  "Make OVERLAY's PROPERTY VALUE, unless it reads the same already: a write
+is a change to display whatever it writes."
+  (unless (equal-including-properties (overlay-get overlay property) value)
+    (overlay-put overlay property value)))
+
 (defun romacs-agent-ui--composer-update ()
-  "The boundary and, in an empty composer, the hint."
-  (when (overlayp romacs-agent-ui--composer)
-    (move-overlay romacs-agent-ui--composer romacs-agent-ui--end romacs-agent-ui--end)
-    (overlay-put romacs-agent-ui--composer 'before-string (romacs-agent-ui--boundary))
-    (overlay-put romacs-agent-ui--composer 'after-string
-                 (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--hint)))))
+  "The boundary and, in an empty composer, the hint: written where they
+differ from what the composer's overlay shows, and only there."
+  (when-let* ((overlay romacs-agent-ui--composer) ((overlayp overlay))
+              (end (marker-position romacs-agent-ui--end)))
+    (unless (and (eq (overlay-buffer overlay) (current-buffer))
+                 (= (overlay-start overlay) end) (= (overlay-end overlay) end))
+      (move-overlay overlay end end))
+    (romacs-agent-ui--overlay-show overlay 'before-string (romacs-agent-ui--boundary))
+    (romacs-agent-ui--overlay-show overlay 'after-string
+                                   (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--hint)))))
 
 ;; One timer ticks every shown chat whose turn runs; it ends when none does.
 (defvar romacs-agent-ui--ticker nil)
@@ -1068,7 +1162,6 @@ The transcript is read-only, its keys its own:
 \\{romacs-agent-chat-transcript-map}"
   :interactive nil
   (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
-  (setq-local header-line-format '(:eval (romacs-agent-ui--header-line)))
   (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
   ;; Wrapped at words, C-k still killing to the line's end.
   (setq-local truncate-lines nil word-wrap t)
@@ -1078,6 +1171,11 @@ The transcript is read-only, its keys its own:
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
+  ;; A window narrower than the header holds its own cut of it, while it
+  ;; shows the chat.
+  (add-hook 'window-size-change-functions #'romacs-agent-ui--header-fit nil t)
+  (add-hook 'window-buffer-change-functions #'romacs-agent-ui--header-fit nil t)
+  (add-hook 'kill-buffer-hook #'romacs-agent-ui--header-release nil t)
   ;; The composer moves as text arrives: the tray goes with it.
   (add-hook 'post-command-hook #'romacs-agent-ui--tray nil t)
   ;; Shown again while its turn runs: the live rule ticks again.
@@ -1111,7 +1209,9 @@ and a running turn's live rule ticks."
         (let ((inhibit-read-only t)) (erase-buffer))
         (setq romacs-agent-ui--end (point-marker))
         (set-marker-insertion-type romacs-agent-ui--end nil)
-        (setq romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil)))
+        (setq romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
+        ;; Its window is laid out with the header it will have.
+        (romacs-agent-ui--header-refresh session))
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer)
       (with-current-buffer buffer
@@ -2278,9 +2378,9 @@ row point was on stays under point."
         (note (plist-get item :cwd) (plist-get item :mtime))
         (push item (gethash (plist-get item :cwd) history))))
     (let ((projects (sort (let ((keys nil)) (maphash (lambda (key _) (push key keys)) recency) keys) (lambda (a b) (> (gethash a recency) (gethash b recency))))))
-    (setq romacs-agents--running
-          (cl-count-if (lambda (s) (memq (romacs-agent-state s) '(starting running waiting-approval)))
-                       (hash-table-values romacs-agent--sessions)))
+    (romacs-agents--header-show
+     (cl-count-if (lambda (s) (memq (romacs-agent-state s) '(starting running waiting-approval)))
+                  (hash-table-values romacs-agent--sessions)))
     (let ((inhibit-read-only t) (line (line-number-at-pos))
           (width (let ((window (get-buffer-window (current-buffer) 'visible)))
                    (1- (if window (window-body-width window) (frame-width))))))
@@ -2326,16 +2426,22 @@ row point was on stays under point."
       (when (equal (plist-get (get-text-property position 'romacs-agent-history) :path) path) (setq found position)))
     found))
 
-(defvar-local romacs-agents--running 0 "Sessions running at the last render.")
+(defun romacs-agents--header (running)
+  "The home page's header when RUNNING sessions run."
+  (concat (propertize "Agents" 'face 'romacs-agent-section)
+          (propertize " | " 'face 'romacs-agent-dim)
+          (format "%d running" running)
+          (propertize " | " 'face 'romacs-agent-dim)
+          (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-new] new  \\[romacs-agents-refresh] refresh  \\[describe-mode] help"
+                           'romacs-agent-dim)))
 
-(defun romacs-agents--header-line ()
-  (let ((running romacs-agents--running))
-    (concat (propertize "Agents" 'face 'romacs-agent-section)
-            (propertize " | " 'face 'romacs-agent-dim)
-            (format "%d running" running)
-            (propertize " | " 'face 'romacs-agent-dim)
-            (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-new] new  \\[romacs-agents-refresh] refresh  \\[describe-mode] help"
-                             'romacs-agent-dim))))
+(defun romacs-agents--header-show (running)
+  "Make the home page's header say RUNNING sessions run: a string, written
+when it reads differently, so showing it runs no Lisp."
+  (let ((header (romacs-agent-ui--header-format (romacs-agents--header running))))
+    (unless (equal-including-properties header header-line-format)
+      (setq header-line-format header)
+      (force-mode-line-update))))
 
 (defvar romacs-agents-mode-map
   (let ((map (make-sparse-keymap)))
@@ -2360,7 +2466,7 @@ row point was on stays under point."
   "Every agent session this server knows, by project.
 \\{romacs-agents-mode-map}"
   :interactive nil
-  (setq-local header-line-format '(:eval (romacs-agents--header-line)))
+  (romacs-agents--header-show 0)
   (setq-local truncate-lines t))
 
 (defvar romacs-agents--refresh nil)

@@ -2574,7 +2574,7 @@ def children(args, base):
         def header():
             return parity_live.read_sexp(a.eval(
                 f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (romacs-agent-ui--header-line)))'))
+                '(substring-no-properties header-line-format))'))
 
         def menu():
             return parity_live.read_sexp(a.eval(
@@ -2722,7 +2722,7 @@ def select(args, base):
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
