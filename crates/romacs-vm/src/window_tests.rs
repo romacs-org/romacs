@@ -390,6 +390,68 @@ fn g3a_surviving_parent_does_not_retain_peak_child_storage() {
     yes(&mut vm, "(and (window-live-p (selected-window)) (window-live-p keep))");
 }
 
+/// An overlay change redisplays the windows showing the overlay's buffer
+/// and no other: each buffer's windows read that buffer's own overlay
+/// revision. One process-wide count made a highlight moved in any buffer,
+/// shown or not, rebuild every window on the frame.
+#[test]
+fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (insert "alpha beta\n")
+                          (setq a (selected-window))
+                          (set-window-new-pixel a 288)
+                          (setq b (split-window-internal a 288 nil 0.5))
+                          (setq other (get-buffer-create "other") hidden (get-buffer-create "hidden"))
+                          (dolist (buffer (list other hidden)) (with-current-buffer buffer (insert "gamma delta\n")))
+                          (set-window-buffer b other)
+                          (setq indirect (make-indirect-buffer other "indirect")))"#);
+    vm.frame_snapshot(800, 576).unwrap();
+    vm.frame_snapshot(800, 576).unwrap();
+    // The windows a redisplay after CHANGE rebuilds.
+    let mut rebuilt = |change: &str| {
+        run(&mut vm, change);
+        let before = vm.window_rebuilds();
+        vm.frame_snapshot(800, 576).unwrap();
+        vm.window_rebuilds() - before
+    };
+    assert_eq!(rebuilt("nil"), 0, "nothing changed");
+    // In a buffer no window shows, and in one sharing a shown buffer's text.
+    for buffer in ["hidden", "indirect"] {
+        for change in ["(setq o (make-overlay 1 3 BUFFER))", "(overlay-put o 'face 'bold)", "(move-overlay o 2 4)",
+                       "(with-current-buffer BUFFER (remove-overlays 3 4))", "(delete-overlay o)",
+                       "(progn (overlay-put (make-overlay 1 3 BUFFER) 'face 'bold) (with-current-buffer BUFFER (delete-all-overlays)))"] {
+            let change = change.replace("BUFFER", buffer);
+            assert_eq!(rebuilt(&change), 0, "{change} is shown in no window");
+        }
+    }
+    // In the other window's buffer: that window, and only when the change shows.
+    for (change, windows) in [("(setq o (make-overlay 1 3 other))", 0), ("(overlay-put o 'face 'bold)", 1), ("(overlay-put o 'face 'bold)", 0),
+                              ("(move-overlay o 2 4)", 1), ("(move-overlay o 1 3 hidden)", 1), ("(move-overlay o 2 4)", 0),
+                              ("(move-overlay o 1 3 other)", 1), ("(with-current-buffer other (remove-overlays 2 3))", 1),
+                              ("(delete-overlay o)", 1), ("(delete-overlay o)", 0),
+                              ("(overlay-put (make-overlay 1 3 other) 'face 'bold)", 1),
+                              ("(with-current-buffer other (delete-all-overlays))", 1), ("(with-current-buffer other (delete-all-overlays))", 0),
+                              // A value its category gave already, which display reads from the overlay itself.
+                              ("(progn (put 'hidden-text 'invisible t) (overlay-put (setq o (make-overlay 1 3 other)) 'category 'hidden-text))", 1),
+                              ("(overlay-put o 'invisible t)", 1), ("(overlay-put o 'invisible t)", 0),
+                              // Its own nil in place of its category's value.
+                              ("(progn (put 'hidden-text 'face 'bold) (overlay-put o 'evaporate nil))", 0), ("(overlay-put o 'face nil)", 1)] {
+        assert_eq!(rebuilt(change), windows, "{change} in the other window's buffer");
+    }
+    // The overlays of a text whose representation changes are put back in
+    // a new store, and an indirect buffer's are copies of its base's: each
+    // store's revision says it has shown something.
+    assert_eq!(rebuilt("(overlay-put (make-overlay 1 3 hidden) 'face 'bold)"), 0);
+    assert_eq!(rebuilt("(set-window-buffer b hidden)"), 1);
+    assert_eq!(rebuilt("(with-current-buffer hidden (set-buffer-multibyte nil))"), 1);
+    assert_eq!(rebuilt("(with-current-buffer other (setq copy (make-indirect-buffer other \"copy\" t)))"), 0);
+    for buffer in ["hidden", "copy"] {
+        let buffer = run(&mut vm, buffer);
+        assert_ne!(vm.overlay_store(buffer).map(|store| store.overlay_revision), Some(0));
+    }
+}
+
 /// Publishing one window must not invalidate another window's last publication.
 ///
 /// `display_state.previous` held a single shared snapshot, so within one
