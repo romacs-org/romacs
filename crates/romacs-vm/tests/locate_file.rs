@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/template.rs"]
+mod template;
 
 #[test]
 fn locate_file_searches_paths_and_suffixes_without_loading() {
@@ -48,7 +50,7 @@ fn locate_file_function_predicates_match_pinned_gnu() {
     let calls = "(let (seen) (list (locate-file-internal \"lib\" PATH '(\".el\" \"\") (lambda (f) (push (file-name-nondirectory (directory-file-name (file-name-directory f))) seen) PRED)) (length seen)))";
     let mut cases = Vec::new();
     for predicate in ["t", "nil", "'dir-ok", "(if (string-match \"/b/lib\\\\'\" f) 'yes nil)"] {
-        cases.push(calls.replace("PATH", &path).replace("PRED", predicate));
+        cases.push(template::fill(calls, &[("PATH", &path), ("PRED", predicate)]));
     }
     cases.push(format!("(locate-file-internal \"lib\" {path} nil #'file-exists-p)"));
     cases.push(format!("(condition-case e (locate-file-internal \"lib\" {path} nil -1) (error (car e)))"));
