@@ -126,6 +126,7 @@ impl Vm {
         self.process_jobs = Default::default();
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
+        crate::char_table::raise_epoch(self.allocation.tables_since);
         self.reset_collection_counters();
     }
 }

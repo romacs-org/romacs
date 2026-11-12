@@ -197,6 +197,10 @@ pub(crate) struct MarkedSet {
 #[derive(Default)]
 struct MarkState {
     native_nodes: HashSet<usize>,
+    /// A minor's: the epoch its last collection ended at, so that it reads
+    /// the char-table nodes written since (`char_table::commit_point`). 0
+    /// reads every node.
+    tables_since: u64,
     /// Weak hash tables reached; their entries are not traced until
     /// `weak_round' (the ephemeron fixpoint) decides which survive.
     weak_tables: Vec<usize>,
@@ -253,8 +257,12 @@ pub(crate) struct Allocation {
     /// ALLOCATED when the last collection ended: what was handed out since
     /// is the young, and makes a minor due (`Vm::minor_due`).
     pub(crate) collected_at: u64,
+    /// The epoch the last collection ended at (`char_table::commit_point`):
+    /// a char-table node stamped below it holds only what that collection,
+    /// or one before, promoted.
+    pub(crate) tables_since: u64,
 }
-romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at });
+romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at, tables_since });
 
 /// What the last mark found in the objects table: `garbage-collect's
 /// statistics and the pacing's traced slots, counted once per entry.
@@ -1089,6 +1097,7 @@ impl Vm {
         self.cells.settle_old();
         self.objects.settle_old();
         self.functions.settle();
+        self.allocation.tables_since = char_table::commit_point();
     }
     /// Whether every table is as a completed collection leaves it: its
     /// entries old and clean, its log empty.
@@ -1246,7 +1255,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, tables_since: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         // From here the collection changes the heap: the last point a key
@@ -1456,9 +1465,9 @@ impl Vm {
                     }
                     data::Object::HashTable(t) => t.forward(&mut |v| rewrite(v)),
                     data::Object::Obarray(t) => t.visit_values(&mut |v| rewrite(v)),
-                    data::Object::CharTable(t) => t.collector_visit_values(&mut native_nodes, &mut |v| rewrite(v)),
-                    data::Object::SubCharTable(node) => char_table::collector_visit_node(node, &mut native_nodes, &mut |v| rewrite(v)),
-                    data::Object::MapKeymapCursor(c) => c.collector_visit_values(&mut native_nodes, &mut |v| rewrite(v)),
+                    data::Object::CharTable(t) => t.collector_visit_values(&mut native_nodes, 0, &mut |v| rewrite(v)),
+                    data::Object::SubCharTable(node) => char_table::collector_visit_node(node, &mut native_nodes, 0, &mut |v| rewrite(v)),
+                    data::Object::MapKeymapCursor(c) => c.collector_visit_values(&mut native_nodes, 0, &mut |v| rewrite(v)),
                     data::Object::Float(_)
                     | data::Object::Bignum(_)
                     | data::Object::BoolVector(_)
@@ -1677,6 +1686,7 @@ impl Vm {
     /// from, so what this promoted counts toward the next one.
     fn settle_minor(&mut self) {
         self.functions.settle();
+        self.allocation.tables_since = char_table::commit_point();
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
         self.gc_stats.collections += 1;
@@ -1684,6 +1694,7 @@ impl Vm {
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
         self.functions.settle();
+        self.allocation.tables_since = char_table::commit_point();
         self.gc_retained = self.heap_objects();
         self.settle_payload();
         // The one place a job child's growth is measured, whatever asked for
@@ -1844,8 +1855,10 @@ impl Vm {
         changed
     }
     /// A minor reclaims no region and no symbol: to its weak rounds every
-    /// one is live, as each is to what it drops afterwards.
+    /// one is live, as each is to what it drops afterwards. Of char tables
+    /// it reads the nodes written since the last collection.
     fn minor_keeps(&self, state: &mut MarkState) {
+        state.tables_since = self.allocation.tables_since;
         state.region_marks.fill(true);
         state.obarray_symbols_live = self.obarray_symbol_names.keys().copied().collect();
     }
@@ -1942,9 +1955,9 @@ impl Vm {
             data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, state.tables_since, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Buffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::ByteBuffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
@@ -2082,16 +2095,20 @@ mod tests {
     fn a_minor_frees_the_young_dead_and_keeps_what_the_old_were_given() {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
-        vm.eval_source_raw("(setq minor-list (list 1 2 3) minor-vector (make-vector 4 nil) minor-table (make-hash-table) minor-weak (make-hash-table :weakness 'key))").unwrap();
+        vm.eval_source_raw("(setq minor-list (list 1 2 3) minor-vector (make-vector 4 nil) minor-table (make-hash-table) minor-weak (make-hash-table :weakness 'key) minor-chars (make-char-table 'minor))").unwrap();
+        // The table's nodes are split before the collection, so the stores
+        // after it go into nodes it left old.
+        vm.eval_source_raw("(aset minor-chars ?a 0) (set-char-table-range minor-chars '(#x4e00 . #x4e10) 0)").unwrap();
         vm.collect(&mut []);
         vm.eval_source_raw("(setcar minor-list (list 4)) (aset minor-vector 0 (list 5)) (puthash 'k (list 6) minor-table) (setq minor-young (list 7))").unwrap();
         vm.eval_source_raw("(fset 'minor-function #'(lambda () '(9 (9))))").unwrap();
+        vm.eval_source_raw("(aset minor-chars ?a (list 10)) (set-char-table-range minor-chars '(#x4e00 . #x4e10) (list 11))").unwrap();
         vm.eval_source_raw("(puthash (list 'dead) 1 minor-weak) (puthash minor-list (list 8) minor-weak) (dotimes (_ 1000) (list 1 2 3))").unwrap();
         let before = vm.conses.live();
         assert!(vm.collect_minor(&[]));
         assert!(vm.generations_settled());
         assert!(vm.conses.live() + 3000 <= before, "the garbage went: {before} to {}", vm.conses.live());
-        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak) (minor-function)) '((4) (5) (6) (7) 1 (8) (9 (9))))").unwrap();
+        let kept = vm.eval_source_raw("(equal (list (car minor-list) (aref minor-vector 0) (gethash 'k minor-table) minor-young (hash-table-count minor-weak) (gethash minor-list minor-weak) (minor-function) (aref minor-chars ?a) (aref minor-chars #x4e08)) '((4) (5) (6) (7) 1 (8) (9 (9)) (10) (11)))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
         vm.collect(&mut []);
         assert_eq!(vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap(), Value::TRUE, "and a full after it finds the heap whole");

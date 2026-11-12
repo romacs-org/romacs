@@ -271,7 +271,7 @@ impl Chartab {
         self.frames[n].from = c;
         self.advance(cx, n);
     }
-    fn visit(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
+    fn visit(&mut self, seen: &mut HashSet<usize>, since: u64, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.table);
         visit(&mut self.val);
         if let Some(range) = &mut self.range {
@@ -283,7 +283,7 @@ impl Chartab {
                 Phase::Parent(v) | Phase::Emitted(v) => visit(v),
                 Phase::Read | Phase::Child => {}
             }
-            collector_visit_node(&f.node, seen, visit);
+            collector_visit_node(&f.node, seen, since, visit);
         }
     }
 }
@@ -491,6 +491,7 @@ impl Cursor {
     pub(super) fn collector_visit_values(
         &mut self,
         seen: &mut HashSet<usize>,
+        since: u64,
         visit: &mut impl FnMut(&mut Value),
     ) {
         visit(&mut self.result);
@@ -507,7 +508,7 @@ impl Cursor {
                 }
                 MapFrame::Table { tail, table } => {
                     visit(tail);
-                    table.visit(seen, visit);
+                    table.visit(seen, since, visit);
                 }
             }
         }
