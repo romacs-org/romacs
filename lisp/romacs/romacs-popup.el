@@ -77,7 +77,8 @@ child frame while `romacs-layer-glass' is nil, and its motion."
 (cl-defun romacs-popup-show (kind buffer &key anchor columns lines max-lines (face 'romacs-popup))
   "Show BUFFER as a KIND menu (see `romacs-popup-look') and return its
 frame, or nil when it cannot show.  ANCHOR is a `cursor' menu's
-\(WINDOW . POSITION), a `hints' menu's window (the selected one).
+\(WINDOW . POSITION), a `hints' menu's window (the selected one), a
+`card''s top-left (LEFT . TOP) in pixels, a `palette''s when not centred.
 COLUMNS and LINES size it, by default to BUFFER's text, at most
 MAX-LINES lines (by default the kind's); FACE paints its background."
   (let* ((buffer (window-normalize-buffer buffer))
@@ -87,7 +88,8 @@ MAX-LINES lines (by default the kind's); FACE paints its background."
     (prog1 (romacs-layer-show buffer
                               :position (pcase kind
                                           ('panel 'bottom)
-                                          ((or 'palette 'viewer) 'center)
+                                          ('palette (if anchor `(pixel ,(car anchor) ,(cdr anchor)) 'center))
+                                          ('viewer 'center)
                                           ('cursor `(at ,(car anchor) ,(cdr anchor)))
                                           ('hints `(window-bottom ,(or anchor (selected-window))))
                                           ('card `(pixel ,(car anchor) ,(cdr anchor)))
@@ -992,10 +994,11 @@ reads one event: a prefix key is not the menu's."
           ((when-let* ((plain (romacs-popup--function-key keys)))
              (romacs-popup--menu-command plain map))))))
 
-(defun romacs-popup-take-keys (buffer)
+(defun romacs-popup-take-keys (buffer &optional on-exit)
   "Make the menu showing BUFFER take the keys its local map binds, until
-it hides or another key is typed; a key read while one of its commands
-reads the minibuffer is the minibuffer's."
+it hides or another key is typed, then call ON-EXIT, if given (the menu's
+own layers hide with it); a key read while one of its commands reads the
+minibuffer is the minibuffer's."
   (unless (and (eq buffer romacs-popup--keys-buffer) (romacs-popup--keys-window))
     (when romacs-popup--keys-exit (funcall romacs-popup--keys-exit))
     (setq romacs-popup--keys-buffer buffer)
@@ -1008,7 +1011,8 @@ reads the minibuffer is the minibuffer's."
                                (lambda ()
                                  (when (eq romacs-popup--keys-buffer buffer)
                                    (setq romacs-popup--keys-buffer nil romacs-popup--keys-exit nil)
-                                   (romacs-popup-hide buffer))))))))
+                                   (romacs-popup-hide buffer)
+                                   (when on-exit (funcall on-exit)))))))))
 
 (defun romacs-popup-then (function)
   "Hide the menu taking keys once this key's command returns, then call

@@ -181,8 +181,9 @@ the id as :request.")
   ;; none), both kept in its manifest.
   permission-mode context-used context-window last-time turn-start
   title-auto (seen-seq 0) settled-seq
-  ;; The seq of the prompt whose turn presented a plan.
-  planned-seq
+  ;; The seq of the prompt whose turn presented a plan, and the tool its
+  ;; running turn called last.
+  planned-seq activity
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
   ;; bytes the harness had written before this session went on with it.
@@ -1157,6 +1158,7 @@ itself, so the turn goes on whatever becomes of this server."
                                                         (or (plist-get event :text) ""))
                                         t)))))
             (setf (romacs-agent-state session) 'running
+                  (romacs-agent-activity session) nil
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
@@ -1179,6 +1181,8 @@ itself, so the turn goes on whatever becomes of this server."
                                                                (romacs-agent-questions session))))
                    (setf (romacs-agent-state session) 'waiting-approval))))
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
+    ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
+             (setf (romacs-agent-activity session) (plist-get event :name))))
     ;; A plan presented, by any harness: its turn's.
     ('plan (setf (romacs-agent-planned-seq session) (romacs-agent-input-seq session)))
     ;; Its harness would not go into plan mode: the session is not in it.
@@ -1192,6 +1196,7 @@ itself, so the turn goes on whatever becomes of this server."
     ('done (romacs-agent--set-asks session nil)
            (romacs-agent--set-questions session nil)
            (setf (romacs-agent-state session) 'idle
+                 (romacs-agent-activity session) nil
                  (romacs-agent-reply session) (plist-get event :text)
                  (romacs-agent-failed session) (plist-get event :error))
            (cl-incf (romacs-agent-turns session))

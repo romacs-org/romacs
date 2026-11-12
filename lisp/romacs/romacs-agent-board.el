@@ -31,11 +31,17 @@
   "How much of the frame's width the agent board takes."
   :type 'float :group 'romacs-agent)
 
+(defcustom romacs-agent-board-preview t
+  "Whether a card beside the agent board shows the last reply of the
+thread at point."
+  :type 'boolean :group 'romacs-agent)
+
 (defface romacs-agent-board-row '((t :inherit highlight :extend t))
   "The agent board's row at point."
   :group 'romacs-agent)
 
 (defconst romacs-agent-board--name "*romacs-agents*")
+(defvar romacs-agent-board--ticker nil "The timer asking the board's live cells again.")
 
 ;;; The view: what the user chose, kept in the board's buffer
 
@@ -179,49 +185,117 @@ it dim for context.  Each row is a plist of :kind (`project', `thread',
                              rows))))
               (nreverse order)))))
 
-;;; Lines
+;;; Columns
 
-(defun romacs-agent-board--instance-width (width)
-  "The provider and model column of a board WIDTH columns wide."
-  (if (< width 72) 14 22))
+(defcustom romacs-agent-board-columns
+  '((romacs-agent-board-state . romacs-agent-board-state-width)
+    (romacs-agent-board-title . fill)
+    (romacs-agent-board-doing . 12)
+    (romacs-agent-board-context . 4)
+    (romacs-agent-board-instance . 18)
+    (romacs-agent-board-time . 4))
+  "A thread's row on the agent board, left to right after its fold: each
+\(FUNCTION . WIDTH).  FUNCTION, called with the row (a plist, see
+`romacs-agent-board-rows'), gives its text or nil.  WIDTH is a number of
+columns, `fill' for the column taking what the others leave, or a
+function giving the number.  A FUNCTION with a non-nil
+`romacs-agent-board-live' property is asked again every second for a
+thread at work, while the board shows."
+  :type '(repeat (cons function (choice integer (const fill) function)))
+  :group 'romacs-agent)
+
+(defun romacs-agent-board-state (row)
+  "ROW's state: its glyph, or its word."
+  (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
+
+(defun romacs-agent-board-state-width ()
+  "The state column's width: a glyph's, or a short word's."
+  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working))) "🤖") 2 9))
+
+(defun romacs-agent-board-title (row)
+  "ROW's title: dim when settled or only there for context, bold unread."
+  (let ((session (plist-get row :session)))
+    (propertize (or (romacs-agent-title session) "")
+                'face (cond ((or (plist-get row :context) (eq (plist-get row :key) 'settled)) 'romacs-agent-dim)
+                            ((romacs-agent-unseen-p session) 'romacs-agent-unread)
+                            (t 'default)))))
+
+(defun romacs-agent-board-doing (row)
+  "What ROW's folded threads are doing, else the tool its turn runs."
+  (or (and (plist-get row :children) (not (plist-get row :open))
+           (romacs-agent-ui--rollup (plist-get row :children)))
+      (and (eq (plist-get row :key) 'working)
+           (when-let* ((tool (romacs-agent-activity (plist-get row :session))))
+             (propertize (romacs-agent-ui--tool-name tool) 'face 'romacs-agent-running)))))
+
+(defun romacs-agent-board-context (row)
+  "How full ROW's context is."
+  (when-let* ((share (romacs-agent-ui--context-share (plist-get row :session))))
+    (propertize share 'face 'romacs-agent-context)))
+
+(defun romacs-agent-board-instance (row)
+  "ROW's provider and model."
+  (let ((session (plist-get row :session)))
+    (propertize (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
+                                           (or (romacs-agent-model session)
+                                               (plist-get (romacs-agent-options session) :model))
+                                           nil)
+                'face 'romacs-agent-model)))
+
+(defun romacs-agent-board--span (seconds)
+  "SECONDS, compactly."
+  (cond ((< seconds 60) (format "%ds" seconds))
+        ((< seconds 3600) (format "%dm" (/ seconds 60)))
+        (t (format "%dh" (/ seconds 3600)))))
+
+(defun romacs-agent-board-time (row)
+  "How long ROW's turn has run, else how long ago it last did something."
+  (let* ((session (plist-get row :session)) (start (romacs-agent-turn-start session)))
+    (propertize (if (and (eq (plist-get row :key) 'working) (numberp start))
+                    (romacs-agent-board--span (floor (- (float-time) start)))
+                  (romacs-agent-ui--ago (romacs-agent-last-time session)))
+                'face 'romacs-agent-dim)))
+
+(put 'romacs-agent-board-doing 'romacs-agent-board-live t)
+(put 'romacs-agent-board-time 'romacs-agent-board-live t)
+
+;;; Lines
 
 (defun romacs-agent-board--cell (text width)
   "TEXT in exactly WIDTH columns."
   (romacs-truncate (or text "") width ?\s))
 
-(defun romacs-agent-board--tail (instance time width)
-  "A row's right columns, within WIDTH: INSTANCE (provider and model)
-and how long ago TIME was."
-  (concat "  " (propertize (romacs-agent-board--cell instance (romacs-agent-board--instance-width width))
-                           'face 'romacs-agent-model)
-          (propertize (format " %4s" (romacs-agent-ui--ago time)) 'face 'romacs-agent-dim)))
+(defun romacs-agent-board--widths (width head)
+  "The columns' widths in a row WIDTH wide after HEAD columns: `fill'
+takes what the others and the gaps between them leave."
+  (let* ((fixed (mapcar (lambda (column)
+                          (let ((w (cdr column))) (cond ((eq w 'fill) nil) ((functionp w) (funcall w)) (t w))))
+                        romacs-agent-board-columns))
+         (rest (- width head (apply #'+ (delq nil (copy-sequence fixed))) (1- (length fixed)))))
+    (mapcar (lambda (w) (or w (max 8 rest))) fixed)))
 
-(defun romacs-agent-board--instance (session)
-  "SESSION's provider and model, as the board names them."
-  (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
-                             (or (romacs-agent-model session) (plist-get (romacs-agent-options session) :model))
-                             nil))
+(defun romacs-agent-board--column (function width row live)
+  "FUNCTION's cell for ROW, WIDTH wide; LIVE, a cell to ask again."
+  (let ((cell (romacs-agent-board--cell (funcall function row) width)))
+    (if (and live (symbolp function) (get function 'romacs-agent-board-live))
+        (propertize cell 'romacs-agent-board-live (list function width))
+      cell)))
 
 (defun romacs-agent-board--thread-line (row width)
-  "Thread ROW in a line WIDTH columns wide: its fold, state, title, what
-its folded threads are doing, provider and model, and age."
-  (let* ((session (plist-get row :session))
-         (state (romacs-agent-ui--state-of (plist-get row :key)))
-         (mark (or (romacs-agent-ui--label state) ""))
-         (head (concat (make-string (* 2 (plist-get row :depth)) ?\s)
-                       (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))
-                       mark (make-string (max 1 (- 3 (string-width mark))) ?\s)))
-         (rollup (and (plist-get row :children) (not (plist-get row :open))
-                      (romacs-agent-ui--rollup (plist-get row :children))))
-         (tail (concat (if rollup (concat "  " rollup) "")
-                       (romacs-agent-board--tail (romacs-agent-board--instance session) (romacs-agent-last-time session) width))))
-    (concat head
-            (propertize (romacs-agent-board--cell (romacs-agent-title session)
-                                                  (max 8 (- width (string-width head) (string-width tail))))
-                        'face (cond ((or (plist-get row :context) (eq (car state) 'settled)) 'romacs-agent-dim)
-                                    ((romacs-agent-unseen-p session) 'romacs-agent-unread)
-                                    (t 'default)))
-            tail)))
+  "Thread ROW in a line WIDTH columns wide: its fold, then its columns
+\(`romacs-agent-board-columns')."
+  (let* ((head (concat (make-string (* 2 (plist-get row :depth)) ?\s)
+                       (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
+         (widths (romacs-agent-board--widths width (string-width head))))
+    (cl-flet ((line (live)
+                (concat head (mapconcat #'identity
+                                        (cl-mapcar (lambda (column width) (romacs-agent-board--column (car column) width row live))
+                                                   romacs-agent-board-columns widths)
+                                        " "))))
+      (let ((line (line (eq (plist-get row :key) 'working))))
+        ;; A board too narrow for every column loses the last ones, and its
+        ;; cells keep still: a cut cell could not keep its width.
+        (if (<= (string-width line) width) line (romacs-truncate (line nil) width))))))
 
 (defun romacs-agent-board--line (row width)
   "ROW as a line WIDTH columns wide."
@@ -230,38 +304,56 @@ its folded threads are doing, provider and model, and age."
                       "  " (propertize (plist-get row :cwd) 'face 'romacs-agent-dim)
                       (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")))
     ('thread (romacs-agent-board--thread-line row width))
-    ('history (let* ((item (plist-get row :item))
-                     (tail (romacs-agent-board--tail (plist-get item :provider) (plist-get item :mtime) width)))
-                (concat (propertize (concat "  ◇  " (romacs-agent-board--cell (plist-get item :title) (max 8 (- width 5 (string-width tail)))))
-                                    'face 'romacs-agent-dim)
-                        tail)))
-    ('more (romacs-key-hint (format "  ◇  %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
+    ('history (let ((item (plist-get row :item)))
+                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (or (plist-get item :provider) "")
+                                                     "  " (romacs-agent-ui--ago (plist-get item :mtime)))
+                                             width)
+                            'face 'romacs-agent-dim)))
+    ('more (romacs-key-hint (format "  ◇ %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
                                     (plist-get row :count))
                             'romacs-agent-dim))))
 
-(defun romacs-agent-board--title-line (rows width)
-  "The board's first line: which section, the filter, the threads' news."
-  (let ((keys (cl-loop for row in rows when (eq (plist-get row :kind) 'thread) collect (plist-get row :key))))
-    (romacs-truncate
-     (concat (propertize (if romacs-agent-board--settled "Settled" "Agents") 'face 'romacs-agent-section)
-             (if romacs-agent-board--words
-                 (propertize (concat "  /" (string-join romacs-agent-board--words " ")) 'face 'romacs-agent-mode)
-               "")
-             (if-let* ((rollup (romacs-agent-ui--rollup keys))) (concat "  " rollup) ""))
-     width)))
-
-(defun romacs-agent-board--keys-line (width)
-  "The board's last line: its keys."
+(defun romacs-agent-board--title-line (width)
+  "The board's first line: which section, and the filter."
   (romacs-truncate
-   (romacs-key-hint
-    (concat "\\<romacs-agent-board-mode-map>\\[romacs-agent-board-open] open  \\[romacs-agent-board-fold] fold  "
-            "\\[romacs-agent-board-approve] approve  \\[romacs-agent-board-interrupt] interrupt  "
-            "\\[romacs-agent-board-stop] stop  \\[romacs-agent-board-resume] resume  "
-            "\\[romacs-agent-board-settle] settle  \\[romacs-agent-board-settle-finished] all finished  "
-            "\\[romacs-agent-board-new] new  \\[romacs-agent-board-filter] filter  "
-            "\\[romacs-agent-board-toggle-settled] settled  \\[romacs-agent-board-quit] close")
-    'romacs-agent-dim)
+   (concat (propertize (if romacs-agent-board--settled "Settled" "Agents") 'face 'romacs-agent-section)
+           (if romacs-agent-board--words
+               (propertize (concat "  /" (string-join romacs-agent-board--words " ")) 'face 'romacs-agent-mode)
+             ""))
    width))
+
+(defvar romacs-agent-board-mode-map)
+(defvar-local romacs-agent-board--all-keys nil "Every key shows, not the few.")
+
+(defconst romacs-agent-board--key-groups
+  '(("Move" (romacs-agent-board-next . "next") (romacs-agent-board-previous . "previous")
+     (romacs-agent-board-fold . "fold") (romacs-agent-board-unfold . "unfold") (romacs-agent-board-close-fold . "fold up"))
+    ("Thread" (romacs-agent-board-open . "open") (romacs-agent-board-approve . "approve")
+     (romacs-agent-board-interrupt . "interrupt") (romacs-agent-board-stop . "stop")
+     (romacs-agent-board-resume . "resume") (romacs-agent-board-settle . "settle") (romacs-agent-board-new . "new"))
+    ("Board" (romacs-agent-board-settle-finished . "settle finished") (romacs-agent-board-filter . "filter")
+     (romacs-agent-board-toggle-settled . "settled") (romacs-agent-board-history . "transcripts")
+     (romacs-agent-board-refresh . "refresh") (romacs-agent-board-quit . "close")))
+  "The board's keys by group, each command with its word.")
+
+(defun romacs-agent-board--keys-text (width)
+  "The board's keys within WIDTH: the few, or every one."
+  (if romacs-agent-board--all-keys
+      (romacs-popup-key-grid
+       (mapcar (lambda (group)
+                 (cons (car group)
+                       (mapcar (lambda (entry)
+                                 (cons (key-description (where-is-internal (car entry) romacs-agent-board-mode-map t))
+                                       (cdr entry)))
+                               (cdr group))))
+               romacs-agent-board--key-groups)
+       width)
+    (romacs-truncate
+     (romacs-key-hint (concat "\\<romacs-agent-board-mode-map>\\[romacs-agent-board-open] open  "
+                              "\\[romacs-agent-board-fold] fold  \\[romacs-agent-board-settle] settle  "
+                              "\\[romacs-agent-board-toggle-settled] settled  \\[romacs-agent-board-keys] keys")
+                      'romacs-agent-dim)
+     width)))
 
 ;;; Drawing
 
@@ -287,7 +379,7 @@ on stays under point, else its line."
         (line (line-number-at-pos))
         (inhibit-read-only t))
     (erase-buffer)
-    (insert (romacs-agent-board--title-line rows width) "\n")
+    (insert (romacs-agent-board--title-line width) "\n")
     (if (null rows)
         (insert (romacs-key-hint (if romacs-agent-board--settled "Nothing is settled."
                                    "No agent threads: \\<romacs-agent-board-mode-map>\\[romacs-agent-board-new] starts one.")
@@ -295,7 +387,7 @@ on stays under point, else its line."
                 "\n")
       (dolist (row rows)
         (insert (propertize (romacs-agent-board--line row width) 'romacs-agent-board-row row) "\n")))
-    (insert (romacs-agent-board--keys-line width))
+    (insert (romacs-agent-board--keys-text width))
     (goto-char (point-min))
     (let ((at (and id (text-property-search-forward 'romacs-agent-board-row id
                                                     (lambda (id row) (equal id (plist-get row :id)))))))
@@ -324,13 +416,98 @@ moves there)."
         (window (get-buffer-window buffer t)))
     (if window (with-selected-window window (funcall draw)) (with-current-buffer buffer (funcall draw)))))
 
+(defvar romacs-agent-board--preview-columns nil "The preview's width, while there is room for it.")
+
+(defun romacs-agent-board--placement (columns lines)
+  "Where a board COLUMNS by LINES goes, its top-left in pixels, centred
+with its preview beside it when there is room for one
+\(`romacs-agent-board--preview-columns' says how wide)."
+  (let* ((root (romacs-layer--root-frame))
+         (room (- (frame-width root) columns 8))
+         (inset (frame-internal-border-width root)))
+    (setq romacs-agent-board--preview-columns (and romacs-agent-board-preview (>= room 24) (min 60 room)))
+    (cons (+ inset (max 0 (/ (- (frame-text-width root)
+                                (* (frame-char-width root) (+ columns (if romacs-agent-board--preview-columns
+                                                                          (+ romacs-agent-board--preview-columns 3)
+                                                                        0))))
+                             2)))
+          (+ inset (max 0 (/ (- (frame-text-height root) (* (frame-char-height root) lines)) 2))))))
+
 (defun romacs-agent-board--show (buffer)
-  "Draw BUFFER's board and show it, sized to its lines and the frame."
-  (let ((columns (romacs-agent-board--columns))
-        (most (max 6 (- (frame-text-lines (romacs-layer--root-frame)) 6))))
-    (romacs-agent-board--render buffer columns)
-    (romacs-popup-show 'palette buffer :columns columns :max-lines most
-                       :lines (with-current-buffer buffer (count-lines (point-min) (point-max))))))
+  "Draw BUFFER's board and show it, sized to its lines and the frame,
+with its preview beside it; its cells at work follow the clock."
+  (let* ((columns (romacs-agent-board--columns))
+         (most (max 6 (- (frame-text-lines (romacs-layer--root-frame)) 6)))
+         (lines (progn (romacs-agent-board--render buffer columns)
+                       (min most (with-current-buffer buffer (count-lines (point-min) (point-max)))))))
+    (romacs-popup-show 'palette buffer :columns columns :max-lines most :lines lines
+                       :anchor (romacs-agent-board--placement columns lines))
+    (when-let* ((window (get-buffer-window buffer t)))
+      (with-selected-window window (romacs-agent-board--preview)))
+    (unless romacs-agent-board--ticker
+      (setq romacs-agent-board--ticker (run-at-time 1 1 #'romacs-agent-board--tick)))))
+
+;;; Cells at work, once a second
+
+(defun romacs-agent-board--tick ()
+  "Ask again each cell of a thread at work (`romacs-agent-board-columns'),
+the same width, while the board shows one; else stop."
+  (let ((buffer (romacs-agent-board--shown)) (live nil))
+    (when buffer
+      (with-current-buffer buffer
+        (save-excursion
+          (let ((inhibit-read-only t) (at (point-min)))
+            (while (setq at (text-property-not-all at (point-max) 'romacs-agent-board-live nil))
+              (let* ((end (next-single-property-change at 'romacs-agent-board-live nil (point-max)))
+                     (spec (get-text-property at 'romacs-agent-board-live))
+                     (row (get-text-property at 'romacs-agent-board-row))
+                     (cell (romacs-agent-board--cell (funcall (car spec) row) (cadr spec))))
+                (setq live t)
+                (unless (equal (buffer-substring-no-properties at end) (substring-no-properties cell))
+                  (goto-char at)
+                  (delete-region at end)
+                  (insert (propertize cell 'romacs-agent-board-live spec 'romacs-agent-board-row row)))
+                (setq at (+ at (length cell)))))))))
+    (unless live
+      (cancel-timer romacs-agent-board--ticker)
+      (setq romacs-agent-board--ticker nil))))
+
+;;; The preview: the last reply of the thread at point, beside the board
+
+(defconst romacs-agent-board--preview-name " *romacs-agents-preview*")
+
+(defun romacs-agent-board--preview-place ()
+  "Where the preview goes, right of the selected board's frame: (LEFT TOP
+COLUMNS LINES), or nil when the board left no room for it."
+  (let ((frame (selected-frame)))
+    (and romacs-agent-board--preview-columns (frame-parent frame)
+         (list (+ (car (frame-position frame)) (frame-outer-width frame) 12) (cdr (frame-position frame))
+               romacs-agent-board--preview-columns (frame-text-lines frame)))))
+
+(defun romacs-agent-board--preview-hide ()
+  (romacs-popup-hide romacs-agent-board--preview-name))
+
+(defun romacs-agent-board--preview ()
+  "Show the last reply of the thread at point beside the board, in its
+window; with none, or no room, hide the card."
+  (let* ((session (plist-get (romacs-agent-board--row) :session))
+         (reply (and romacs-agent-board-preview session (romacs-agent-reply session)))
+         (place (and reply (romacs-agent-board--preview-place)))
+         ;; Its plain text, no more than the card holds: a reply may be
+         ;; long, and formatting Markdown costs tens of milliseconds a key.
+         (text (and place (substring reply 0 (min (length reply) (* (nth 2 place) (nth 3 place)))))))
+    (if (not (and text (string-match-p "[^[:space:]]" text)))
+        (romacs-agent-board--preview-hide)
+      (pcase-let ((`(,left ,top ,columns ,lines) place)
+                  (buffer (get-buffer-create romacs-agent-board--preview-name)))
+        (with-current-buffer buffer
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert (propertize (romacs-agent-title session) 'face 'romacs-agent-section) "\n" text))
+          (goto-char (point-min))
+          (setq-local mode-line-format nil cursor-type nil)
+          (romacs-layer-wrap-words))
+        (romacs-popup-show 'card buffer :anchor (cons left top) :columns columns :lines lines)))))
 
 (defun romacs-agent-board--shown ()
   "The board's buffer, while it shows."
@@ -555,7 +732,14 @@ every word typed, the board following as they are typed."
 (defun romacs-agent-board-quit ()
   "Close the board."
   (interactive nil romacs-agent-board-mode)
-  (romacs-popup-hide (current-buffer)))
+  (romacs-popup-hide (current-buffer))
+  (romacs-agent-board--preview-hide))
+
+(defun romacs-agent-board-keys ()
+  "Show every key of the board, or the few."
+  (interactive nil romacs-agent-board-mode)
+  (setq romacs-agent-board--all-keys (not romacs-agent-board--all-keys))
+  (romacs-agent-board--redraw))
 
 (defvar-keymap romacs-agent-board-mode-map
   :doc "Keys of the agent board."
@@ -579,15 +763,22 @@ every word typed, the board following as they are typed."
   "M-RET" #'romacs-agent-board-toggle-settled
   "h" #'romacs-agent-board-history
   "g" #'romacs-agent-board-refresh
+  "?" #'romacs-agent-board-keys
   "q" #'romacs-agent-board-quit
   "C-g" #'romacs-agent-board-quit)
+
+;; The keys the board names, of the two each of these has.
+(put 'romacs-agent-board-next :advertised-binding [?n])
+(put 'romacs-agent-board-previous :advertised-binding [?p])
+(put 'romacs-agent-board-quit :advertised-binding [?q])
 
 (define-derived-mode romacs-agent-board-mode special-mode "Agents"
   "The agent board: every agent thread by project, what wants you first.
 \\{romacs-agent-board-mode-map}"
   :interactive nil
   (setq-local truncate-lines t cursor-type nil mode-line-format nil)
-  (add-hook 'romacs-popup-key-hook #'romacs-agent-board--follow nil t))
+  (add-hook 'romacs-popup-key-hook #'romacs-agent-board--follow nil t)
+  (add-hook 'romacs-popup-key-hook #'romacs-agent-board--preview nil t))
 
 (defun romacs-agent-board--buffer ()
   (or (get-buffer romacs-agent-board--name)
@@ -607,7 +798,7 @@ folded under it.  Its keys act on the thread at point;
   (romacs-agent-history-list)
   (let ((buffer (romacs-agent-board--buffer)))
     (romacs-agent-board--show buffer)
-    (romacs-popup-take-keys buffer)))
+    (romacs-popup-take-keys buffer #'romacs-agent-board--preview-hide)))
 
 ;;;###autoload
 (defalias 'romacs-agent-switch #'romacs-agents)

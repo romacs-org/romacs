@@ -109,7 +109,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (mk "a" "Port the theme" 'running 30 :model "claude-opus-5-5")
     (let ((line (substring-no-properties (romacs-agent-board--line (cadr (rows)) 100))))
       (should (= (string-width line) 100))
-      (should (string-match-p "Working +Port the theme +claude · opus-5-5 +now\\'" line)))))
+      (should (string-match-p "\\`  Working +Port the theme +claude · opus-5-5 +now *\\'" line)))))
 
 (ert-deftest romacs-agent-board-a-thread-shows-in-its-own-section ()
   (romacs-agent-board-tests--with
@@ -279,6 +279,113 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
           (run-hooks 'romacs-agent-ui-changed-hook))
         (should (= drawn 1))))))
+
+;;; Columns
+
+(ert-deftest romacs-agent-board-columns-are-a-list-of-functions ()
+  (romacs-agent-board-tests--with
+    (mk "a" "Port the theme" 'idle 120)
+    (let ((romacs-agent-board-columns
+           (list (cons (lambda (row) (upcase (romacs-agent-title (plist-get row :session)))) 'fill)
+                 (cons #'romacs-agent-board-time 4))))
+      (should (equal (substring-no-properties (romacs-agent-board--line (cadr (rows)) 30))
+                     "  PORT THE THEME          2m  ")))))
+
+(ert-deftest romacs-agent-board-a-lambda-column-on-a-working-row ()
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'running 5)
+    (let ((romacs-agent-board-columns (list (cons (lambda (_) "x") 'fill))))
+      (should (string-prefix-p "  x" (substring-no-properties (romacs-agent-board--line (cadr (rows)) 20)))))))
+
+(ert-deftest romacs-agent-board-a-cut-row-keeps-still ()
+  ;; Too narrow for every column: no cell of it is asked again, so none
+  ;; can grow the row past the board.
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))
+    (let ((line (romacs-agent-board--line (cadr (rows)) 40)))
+      (should (= (string-width line) 40))
+      (should-not (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))
+    (let ((line (romacs-agent-board--line (cadr (rows)) 120)))
+      (should (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))))
+
+(ert-deftest romacs-agent-board-doing-and-time ()
+  (romacs-agent-board-tests--with
+    (mk "lead" "lead" 'running 5 :activity "mcp__romacs__romacs_eval" :turn-start (- now 75))
+    (mk "w" "w" 'idle 20 :done-seq 2 :options '(:parent "lead"))
+    (let ((folds (make-hash-table :test #'equal)))
+      ;; Unfolded: the tool its turn runs, and how long the turn has.
+      (puthash "lead" 'open folds)
+      (let ((lead (cadr (rows :folds folds))))
+        (should (equal (substring-no-properties (romacs-agent-board-doing lead)) "romacs_eval"))
+        (should (equal (substring-no-properties (romacs-agent-board-time lead)) "1m")))
+      ;; Folded: what its threads are doing.
+      (puthash "lead" 'closed folds)
+      (should (equal (substring-no-properties (romacs-agent-board-doing (cadr (rows :folds folds)))) "1 completed")))))
+
+(ert-deftest romacs-agent-board-activity-is-the-turn-s-last-tool ()
+  (let ((session (romacs-agent--make :id "s" :harness 'claude :state 'idle))
+        (romacs-agent-event-functions nil))
+    (romacs-agent--raise session '(:type input :seq 1))
+    (romacs-agent--raise session '(:type tool :state started :id "t1" :name "Read"))
+    ;; A subagent's own tool is not the turn's.
+    (romacs-agent--raise session '(:type tool :state started :id "t2" :name "Bash" :parent "t1"))
+    (should (equal (romacs-agent-activity session) "Read"))
+    (romacs-agent--raise session '(:type done :seq 2))
+    (should-not (romacs-agent-activity session))))
+
+(ert-deftest romacs-agent-board-cells-at-work-follow-the-clock ()
+  (romacs-agent-board-tests--with
+    (let ((session (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))))
+      (mk "b" "b" 'idle 50)
+      (romacs-agent-board-tests--board
+        (let ((before (buffer-string)) (romacs-agent-board--ticker (run-at-time 3600 nil #'ignore)))
+          (setf (romacs-agent-activity session) "Bash")
+          (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
+            (romacs-agent-board--tick))
+          (should (string-search "Bash" (buffer-string)))
+          (should-not (string-search "Read" (buffer-string)))
+          ;; Only the cells at work changed, each its own width.
+          (should (= (length before) (length (buffer-string))))
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "b")))
+          ;; Nothing at work: the clock stops.
+          (setf (romacs-agent-state session) 'idle)
+          (romacs-agent-board--redraw)
+          (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
+            (romacs-agent-board--tick))
+          (should-not romacs-agent-board--ticker))))))
+
+(ert-deftest romacs-agent-board-preview-shows-the-last-reply ()
+  (romacs-agent-board-tests--with
+    (mk "a" "Port the theme" 'idle 10 :reply "The switcher is **done**.")
+    (mk "b" "Quiet" 'idle 20)
+    (romacs-agent-board-tests--board
+      (let ((shown nil) (hidden 0))
+        (cl-letf (((symbol-function 'romacs-agent-board--preview-place) (lambda () '(400 10 40 12)))
+                  ((symbol-function 'romacs-popup-show) (lambda (kind buffer &rest args) (push (list kind buffer args) shown)))
+                  ((symbol-function 'romacs-popup-hide) (lambda (_) (cl-incf hidden))))
+          (romacs-agent-board--preview)
+          (should (eq (car (car shown)) 'card))
+          (should (equal (plist-get (nth 2 (car shown)) :anchor) '(400 . 10)))
+          (with-current-buffer (nth 1 (car shown))
+            (should (string-search "Port the theme" (buffer-string)))
+            (should (string-search "The switcher is" (buffer-string))))
+          ;; A thread with nothing to say: no card.
+          (romacs-agent-board-next 1)
+          (romacs-agent-board--preview)
+          (should (= hidden 1)))))))
+
+(ert-deftest romacs-agent-board-says-few-words ()
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'waiting-approval 10 :driver-state '(:asks ("r")))
+    (romacs-agent-board-tests--board
+      ;; The counts are the project's, not the title's too.
+      (goto-char (point-min))
+      (should (equal (buffer-substring-no-properties (point) (line-end-position)) "Agents"))
+      (goto-char (point-max))
+      (should (string-search "? keys" (buffer-substring-no-properties (line-beginning-position) (point-max))))
+      (romacs-agent-board-keys)
+      (should (string-search "Thread" (buffer-string)))
+      (should (string-search "settle finished" (buffer-string))))))
 
 (provide 'romacs-agent-board-tests)
 ;;; romacs-agent-board-tests.el ends here
