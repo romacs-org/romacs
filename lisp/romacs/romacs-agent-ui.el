@@ -145,12 +145,48 @@ much of it its deltas wrote.")
       (setq depth (1+ depth) parent (gethash parent tools)))
     depth))
 
+(defvar romacs-agent-chat-transcript-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'romacs-agent-chat-toggle)
+    (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
+    (define-key map (kbd "DEL") #'scroll-down-command)
+    (define-key map " " #'scroll-up-command)
+    (define-key map (kbd "S-SPC") #'scroll-down-command)
+    (define-key map [remap self-insert-command] #'romacs-agent-chat-type)
+    (define-key map (kbd "C-j") #'romacs-agent-chat-newline)
+    (define-key map (kbd "S-<return>") #'romacs-agent-chat-newline)
+    (define-key map "?" #'romacs-agent-chat-actions-map-popup)
+    (define-key map "n" #'romacs-agent-chat-next-turn)
+    (define-key map "p" #'romacs-agent-chat-previous-turn)
+    (define-key map "o" #'romacs-agent-chat-open-task)
+    (define-key map "w" #'romacs-agent-chat-copy)
+    (define-key map "e" #'romacs-agent-chat-edit-turn)
+    (define-key map "r" #'romacs-agent-chat-quote-region)
+    (define-key map "y" #'romacs-agent-chat-allow)
+    (define-key map "N" #'romacs-agent-chat-deny)
+    (define-key map "d" #'romacs-agent-chat-diff)
+    (define-key map "u" #'romacs-agent-chat-rollback)
+    (define-key map "!" #'romacs-agent-chat-allow-always)
+    map)
+  "Keys of a chat's transcript, the read-only text above its composer: a
+`keymap' text property, so they read it as a view and the composer below
+edits as any buffer does.  Typing in it types in the composer.")
+
 (defun romacs-agent-ui--sealed (text)
-  "TEXT as the transcript holds it: read-only, and passing none of its
-properties to text typed after it (the composer), so no fold, face or
-mark of the transcript's end hides or styles what is typed there."
-  (let ((text (copy-sequence text)))
-    (add-text-properties 0 (length text) '(read-only t front-sticky (read-only) rear-nonsticky t) text)
+  "TEXT as the transcript holds it: read-only, a field of its own (word
+and line motion stop at the composer's start), with the transcript's keys
+where it has none of its own (a link's keys fall back to them), and
+passing none of its properties to text typed after it (the composer), so
+no fold, face, key or mark of the transcript's end hides, styles or
+rebinds what is typed there."
+  (let ((text (copy-sequence text)) (position 0))
+    (add-text-properties 0 (length text) '(read-only t field romacs-agent-transcript
+                                           front-sticky (read-only) rear-nonsticky t)
+                         text)
+    (while (setq position (text-property-any position (length text) 'keymap nil text))
+      (let ((end (next-single-property-change position 'keymap text (length text))))
+        (put-text-property position end 'keymap romacs-agent-chat-transcript-map text)
+        (setq position end)))
     text))
 
 (defun romacs-agent-ui--insert-at (position text)
@@ -299,6 +335,7 @@ a brief of INPUT."
 
 (defvar romacs-agent-ui--link-map
   (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map romacs-agent-chat-transcript-map)
     (define-key map (kbd "RET") #'romacs-agent-chat-open-task)
     (define-key map [mouse-1] #'romacs-agent-chat-open-task)
     map)
@@ -311,6 +348,7 @@ a brief of INPUT."
 
 (defvar romacs-agent-ui--compaction-map
   (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map romacs-agent-chat-transcript-map)
     (define-key map (kbd "RET") #'romacs-agent-chat-show-compaction)
     (define-key map [mouse-1] #'romacs-agent-chat-show-compaction)
     map)
@@ -992,24 +1030,15 @@ whoever wrote last and whatever the session's state."
 
 ;;; The chat buffer
 
-(defun romacs-agent-ui--in-composer-p ()
-  (and romacs-agent-ui--end (>= (point) romacs-agent-ui--end)))
-
-(defun romacs-agent-ui--transcript-key (command)
-  "COMMAND in the transcript, the key's own insertion in the composer."
-  `(menu-item "" ,command :filter ,(lambda (command) (if (romacs-agent-ui--in-composer-p) #'self-insert-command command))))
-
 (defvar romacs-agent-chat-mode-map
   (let ((map (make-sparse-keymap)))
+    ;; The composer's: the transcript's are on its text
+    ;; (`romacs-agent-chat-transcript-map').
     (define-key map (kbd "RET") #'romacs-agent-chat-return)
-    (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
-    (define-key map (kbd "DEL") #'romacs-agent-chat-delete-backward)
-    (define-key map [remap self-insert-command] #'romacs-agent-chat-self-insert)
-    (define-key map [remap backward-kill-word] #'romacs-agent-chat-backward-kill-word)
     ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
     ;; has the same action; stopping and resuming are in the actions menu.
-    (define-key map (kbd "C-j") #'romacs-agent-chat-newline)
-    (define-key map (kbd "S-<return>") #'romacs-agent-chat-newline)
+    (define-key map (kbd "C-j") #'newline)
+    (define-key map (kbd "S-<return>") #'newline)
     (define-key map (kbd "C-c C-c") #'romacs-agent-chat-interrupt)
     (define-key map (kbd "C-c C-i") #'romacs-agent-chat-interrupt)
     (define-key map (kbd "C-c C-k") #'romacs-agent-chat-interrupt-and-send)
@@ -1028,25 +1057,15 @@ whoever wrote last and whatever the session's state."
     (define-key map (kbd "C-c C-j") #'romacs-agent-chat-composer)
     (define-key map (kbd "M-p") #'romacs-agent-chat-history-previous)
     (define-key map (kbd "M-n") #'romacs-agent-chat-history-next)
-    (define-key map "?" (romacs-agent-ui--transcript-key #'romacs-agent-chat-actions-map-popup))
-    (define-key map "n" (romacs-agent-ui--transcript-key #'romacs-agent-chat-next-turn))
-    (define-key map "p" (romacs-agent-ui--transcript-key #'romacs-agent-chat-previous-turn))
-    (define-key map "o" (romacs-agent-ui--transcript-key #'romacs-agent-chat-open-task))
-    (define-key map "w" (romacs-agent-ui--transcript-key #'romacs-agent-chat-copy))
-    (define-key map "e" (romacs-agent-ui--transcript-key #'romacs-agent-chat-edit-turn))
-    (define-key map "r" (romacs-agent-ui--transcript-key #'romacs-agent-chat-quote-region))
-    (define-key map "y" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow))
-    (define-key map "N" (romacs-agent-ui--transcript-key #'romacs-agent-chat-deny))
-    (define-key map "d" (romacs-agent-ui--transcript-key #'romacs-agent-chat-diff))
-    (define-key map "u" (romacs-agent-ui--transcript-key #'romacs-agent-chat-rollback))
-    (define-key map "!" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow-always))
-    (define-key map " " (romacs-agent-ui--transcript-key #'scroll-up-command))
-    (define-key map (kbd "S-SPC") (romacs-agent-ui--transcript-key #'scroll-down-command))
     map)
   "Keys of an agent chat buffer.")
 
 (define-derived-mode romacs-agent-chat-mode fundamental-mode "Agent"
-  "An agent session's transcript and composer."
+  "An agent session's transcript and composer.
+The composer, below the transcript, edits as any buffer does:
+\\{romacs-agent-chat-mode-map}
+The transcript is read-only, its keys its own:
+\\{romacs-agent-chat-transcript-map}"
   :interactive nil
   (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header-line)))
@@ -1199,11 +1218,9 @@ nest under SOURCE's calls."
   (string-trim (buffer-substring-no-properties romacs-agent-ui--end (point-max))))
 
 (defun romacs-agent-chat-return ()
-  "In the composer, send its text; on a tool row, show its output."
+  "Send the composer's text."
   (interactive nil romacs-agent-chat-mode)
-  (if (not (romacs-agent-ui--in-composer-p))
-      (romacs-agent-chat-toggle)
-    (romacs-agent-ui--deliver (lambda (text images) (romacs-agent-send romacs-agent-ui--session text nil nil images)))))
+  (romacs-agent-ui--deliver (lambda (text images) (romacs-agent-send romacs-agent-ui--session text nil nil images))))
 
 (defun romacs-agent-ui--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: whatever it inherited
@@ -1212,33 +1229,12 @@ or brought, nothing hides or styles it."
     ;; Yanked transcript text arrives read-only; yank drops that only after this.
     (let ((inhibit-modification-hooks t) (inhibit-read-only t)) (set-text-properties beg end nil))))
 
-(defun romacs-agent-chat-self-insert (n)
-  "Insert the typed character N times in the composer: typed in the
-transcript, it goes to the composer's end."
+(defun romacs-agent-chat-type (n)
+  "Type the character in the composer, N times: typed in the transcript,
+it goes to the composer's end."
   (interactive "p" romacs-agent-chat-mode)
-  (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
+  (goto-char (point-max))
   (self-insert-command n))
-
-;; A selection in the composer is replaced by what is typed, as with
-;; `self-insert-command'.
-(put 'romacs-agent-chat-self-insert 'delete-selection 'delete-selection-uses-region-p)
-
-(defun romacs-agent-chat-backward-kill-word (n)
-  "Kill N words backward, in the composer no further than its start: the
-transcript above it is not the composer's to kill."
-  (interactive "p" romacs-agent-chat-mode)
-  (if (not (romacs-agent-ui--in-composer-p))
-      (backward-kill-word n)
-    ;; Point first: consecutive kills join in the buffer's order.
-    (kill-region (point) (max romacs-agent-ui--end (save-excursion (backward-word n) (point))))))
-
-(defun romacs-agent-chat-delete-backward (n)
-  "Delete N characters backward in the composer; at its start, nothing:
-the transcript above it is not the composer's to delete.  In the
-transcript, scroll back, as hermes's chat does."
-  (interactive "p" romacs-agent-chat-mode)
-  (cond ((not (romacs-agent-ui--in-composer-p)) (scroll-down-command))
-        ((> (point) romacs-agent-ui--end) (delete-char (- (min n (- (point) romacs-agent-ui--end)))))))
 
 (defun romacs-agent-chat-toggle ()
   "Show or hide the output of the tool call, or the thinking, on this row."
@@ -1423,9 +1419,9 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
       (romacs-agent-ui--composer-update))))
 
 (defun romacs-agent-chat-newline ()
-  "A new line in the composer."
+  "From the transcript, a new line at the composer's end."
   (interactive nil romacs-agent-chat-mode)
-  (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
+  (goto-char (point-max))
   (insert "\n"))
 
 (defun romacs-agent-chat-queue ()
@@ -1957,9 +1953,9 @@ only sessions whose chat is open."
 (defalias 'romacs-agent-chat-switch #'romacs-agent-switch-chat)
 
 (defun romacs-agent-chat-show-commands ()
-  "List this chat's keys."
+  "List this chat's keys, the composer's and the transcript's."
   (interactive nil romacs-agent-chat-mode)
-  (describe-keymap 'romacs-agent-chat-mode-map))
+  (describe-mode))
 
 (defun romacs-agent-chat-home () "The agents home page." (interactive nil romacs-agent-chat-mode) (romacs-agents))
 

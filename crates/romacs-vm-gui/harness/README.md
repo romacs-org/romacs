@@ -95,8 +95,7 @@ Implementation-time checks:
   reached; the harness correctly returned exit 1 / `pass: false` with
   `binary stdout closed (exit=1)`. This is only a fail-closed launch preflight.
 * The integrated worker subsequently built the real binary and ran all three
-  live variants successfully; see `../evidence/current-oracle-live/summary.json` and
-  `../README.md` for the exact commands, movement proof, and diagnostic limits.
+  live variants successfully; see `../README.md` for the exact commands, movement proof, and diagnostic limits.
   This harness does not invoke Cargo, a full gate, or Git publication.
 
 # Package parity: pinned GNU beside `--loadup`
