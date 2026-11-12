@@ -158,8 +158,9 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'renderer': args.renderer, 'forced': not args.no_force, 'phases': {}}
     comp = kb = proc = None
+    tmp = None
     try:
-        with tempfile.TemporaryDirectory(prefix='lan-', dir=os.environ.get('XDG_RUNTIME_DIR')) as tmp:
+        with tempfile.TemporaryDirectory(prefix='lan-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as tmp:
             root = Path(tmp)
             root.chmod(0o700)
             home, work, config = root / 'home', root / 'work', root / 'config'
@@ -319,14 +320,12 @@ def main():
         report.update(status='FAIL', error=repr(error))
     finally:
         for p in (proc, kb, comp):
-            if p is not None and p.poll() is None:
-                p.terminate()
-                try:
-                    p.wait(5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-        (out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
-        print(json.dumps(report))
+            live.stop(p)
+        try:
+            (out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+            print(json.dumps(report))
+        finally:
+            live.remove_root(tmp)
     return 0 if report.get('status') == 'PASS' else 1
 
 
