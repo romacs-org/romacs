@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/template.rs"]
+mod template;
 
 #[test]
 fn unrelated_handlers_allow_local_operations() {
@@ -11,7 +13,8 @@ fn unrelated_handlers_allow_local_operations() {
     for case in cases.as_array().unwrap() {
         std::fs::write(root.join("input"), "hello\n").unwrap();
         let mut vm = Vm::new();
-        let source = case["source"].as_str().unwrap().replace("@DIR@", &directory).replace("@FILE@", &file).replace("@HOME@", &serde_json::to_string(&std::env::var("HOME").unwrap()).unwrap());
+        let home = serde_json::to_string(&std::env::var("HOME").unwrap()).unwrap();
+        let source = template::fill(case["source"].as_str().unwrap(), &[("@DIR@", &directory), ("@FILE@", &file), ("@HOME@", &home)]);
         let actual = vm.eval_source(&source).map(|v| v.display().unwrap()).unwrap_or_else(|e| format!("ERROR {e}"));
         let expected = case.get("candidate_expected").unwrap_or(&case["expected"]).as_str().unwrap();
         // The file as GNU leaves it: a handler that signals stops the

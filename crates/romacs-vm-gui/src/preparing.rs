@@ -112,8 +112,13 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32) -> Result<Prepar
             presentation += 1;
             if paint(presentation, t).is_err() { break; }
             // Paced by the renderer: the next frame waits for this one, a
-            // slow one only slows the motion.
-            let _ = sender.wait_for_render(presentation, Duration::from_secs(1));
+            // slow one only slows the motion. In slices, so a stop (the
+            // evaluator joining this thread as its world is ready) ends the
+            // wait at once rather than after a frame's second.
+            let end = Instant::now() + Duration::from_secs(1);
+            while !stopped.load(Ordering::Relaxed)
+                && sender.wait_for_render(presentation, Duration::from_millis(20)).is_err()
+                && Instant::now() < end {}
         }
         presentation + 1
     }).map_err(|e| e.to_string())?;

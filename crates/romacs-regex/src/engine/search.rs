@@ -16,6 +16,7 @@ use crate::engine::matcher::{MatchScratchLease, re_match_candidate_in};
 use crate::engine::opcode::{RegexOp, extract_number};
 use crate::engine::pattern::{CompiledPattern, MatchRegisters, PREFILTER_MIN_BUILD_SPAN};
 use crate::engine::scan::{FoldedScan, SparseAsciiFastmap};
+use crate::engine::syntax_lead::{LeadMemo, SyntaxLead};
 use crate::engine::syntax::SyntaxLookup;
 use crate::engine::translate::{
     AsciiPreimage, ascii_translated_leading_code, multibyte_translated_leading_code,
@@ -69,6 +70,7 @@ pub(crate) fn fastmap_force_disabled() -> bool {
 #[cfg(test)]
 pub fn build_search_optimizations(pattern: &CompiledPattern) {
     let _ = pattern.literal_prefilter();
+    let _ = pattern.syntax_lead();
     if let Some(table) = pattern.translate.as_ref() {
         let _ = pattern.folded_scan(table, true);
     }
@@ -197,6 +199,24 @@ pub fn start_anchor(bytecode: &[u8]) -> StartAnchor {
         (true, _) => StartAnchor::Line,
         (false, true) => StartAnchor::Buffer,
         (false, false) => StartAnchor::None,
+    }
+}
+
+/// The syntax-aware first-character set of a forward search the fastmap
+/// cannot serve (a leading `\sC` turns it off).  Built by the first long
+/// search.
+fn syntax_lead_scan(
+    pattern: &CompiledPattern,
+    use_fastmap: bool,
+    long_span: bool,
+) -> Option<&SyntaxLead> {
+    if use_fastmap || fastmap_force_disabled() {
+        return None;
+    }
+    if long_span {
+        pattern.syntax_lead()
+    } else {
+        pattern.syntax_lead.get().and_then(Option::as_ref)
     }
 }
 
@@ -548,10 +568,46 @@ pub fn re_search(
                     }
                 }
             }
+            // Whether this search is long enough to build a lazily derived
+            // scanner it finds missing (it always uses one already built).
+            let long_span = text_len.saturating_sub(start) >= PREFILTER_MIN_BUILD_SPAN;
+            if let Some(lead) = syntax_lead_scan(pattern, use_fastmap, long_span) {
+                // A leading `\sC`: where the table alone gives the classes
+                // (no `syntax-table' property, and nothing a lazy
+                // `syntax-propertize' has yet to see), pass the characters no
+                // path starts with.  Elsewhere every position is tried.
+                let mut memo = LeadMemo::new();
+                let read_limit = syntax.syntax_read_limit();
+                let mut plain_until = 0;
+                while pos <= end {
+                    if pos < text_len {
+                        if pos >= plain_until {
+                            plain_until = syntax.plain_syntax_until(pos).min(read_limit);
+                        }
+                        if pos < plain_until {
+                            let hi = plain_until.min(text_len).min(end + 1);
+                            let multibyte = pattern.target_multibyte;
+                            let admitted = text[pos..hi]
+                                .iter()
+                                .position(|&byte| lead.admits(byte, multibyte, &mut memo, syntax));
+                            let Some(index) = admitted else {
+                                pos = hi;
+                                continue;
+                            };
+                            pos += index;
+                        } else if pattern.target_multibyte && (text[pos] & 0xC0) == 0x80 {
+                            pos += 1;
+                            continue;
+                        }
+                    }
+                    if let Some(result) = try_candidate!(pos, end) {
+                        break 'scan Some((pos, result.1));
+                    }
+                    pos += 1;
+                }
+                break 'scan None;
+            }
             if use_fastmap {
-                // Whether this search is long enough to build a lazily derived
-                // scanner it finds missing (it always uses one already built).
-                let long_span = text_len.saturating_sub(start) >= PREFILTER_MIN_BUILD_SPAN;
                 // The folded scans and the folded prefilter are exact only while
                 // no non-ASCII character translates into ASCII; a case-canon
                 // char-table can stop meeting that after they were built.

@@ -571,13 +571,23 @@ def made_source_directory() -> pathlib.Path:
     """GNU's `source-directory' for a test: the repository's top-level entries,
     which hold crates/romacs-vm/src/prims as Romacs's own source-directory
     must, and nextstep/, the image fixture GNU's tree has at its top and this
-    one keeps under test/gnu/.  Links in a scratch directory, made once per
-    run and removed at exit."""
+    one keeps under test/gnu/.  Its test/ holds the repository's test/
+    entries, and its test/data is a copy of the suite's own test/data/ (the
+    images and archives GNU's tests read, and arc-mode's write beside),
+    whatever a checkout keeps at test/data, so the pinned import stays
+    untouched.  Links and that copy in a scratch directory, made once per run
+    and removed at exit."""
     scratch = pathlib.Path(tempfile.mkdtemp(prefix='gnu-source-'))
     atexit.register(shutil.rmtree, scratch, True)
     for entry in ROOT.iterdir():
-        (scratch / entry.name).symlink_to(entry)
+        if entry.name != 'test':
+            (scratch / entry.name).symlink_to(entry)
     (scratch / 'nextstep').symlink_to(HERE / 'nextstep')
+    (scratch / 'test').mkdir()
+    for entry in (ROOT / 'test').iterdir():
+        if entry.name != 'data':
+            (scratch / 'test' / entry.name).symlink_to(entry)
+    shutil.copytree(TESTS / 'data', scratch / 'test/data')   # tests write beside their fixtures
     return scratch
 
 
