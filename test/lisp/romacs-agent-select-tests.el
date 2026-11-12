@@ -218,8 +218,9 @@
         (should (equal (gethash "effort" (gethash "options" manifest)) "low"))
         (should-not (gethash "switch" manifest)))
       (let ((event (cl-find 'selection events :key (lambda (e) (plist-get e :type)))))
-        (should (equal (plist-get event :from) '(:model "a" :effort nil)))
-        (should (equal (plist-get event :to) '(:model "b" :effort "low"))))
+        ;; The instance is part of a selection: unchanged here.
+        (should (equal (plist-get event :from) '(:model "a" :effort nil :provider "claude")))
+        (should (equal (plist-get event :to) '(:model "b" :effort "low" :provider "claude"))))
       (let ((record (with-temp-buffer
                       (insert-file-contents (expand-file-name "journal.jsonl" dir))
                       (json-parse-string (buffer-string)))))
@@ -277,7 +278,7 @@
         (should (string-match-p "Effort.*low" (car (car asked))))
         (should (equal (cadr (car asked)) '("low" "high")))
         ;; No harness runs: in effect at once, the model kept.
-        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high")))
+        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high" :provider "claude")))
         (should (equal (romacs-agent-ui--effort-label) "Effort: high"))
         ;; One armed behind a turn shows what is to come.
         (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))

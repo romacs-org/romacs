@@ -1765,20 +1765,37 @@ ALL, what every turn of the session did."
 
 (defun romacs-agent-chat-handoff (provider model next)
   "Go on with this thread under another instance or model: PROVIDER and
-MODEL picked as for a new session, NEXT what to do there.  A new session
-starts on a brief of the thread, and its chat opens."
+MODEL picked as for a new session.  Under an instance of the same harness
+\(claude to claude2) this session goes on, its conversation moved as is,
+once a running turn ends.  Under another harness a new session starts on
+a brief of the thread, to do NEXT, and its chat opens."
   (interactive
-   (let ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows)))))
-     (list (plist-get fields :provider) (plist-get fields :model)
-           (read-string "Go on with: " nil nil "Go on from where this thread left off.")))
+   (let* ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows))))
+          (provider (plist-get fields :provider)))
+     (list provider (plist-get fields :model)
+           (unless (romacs-agent-ui--moves-p romacs-agent-ui--session provider)
+             (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
-    (message "Gathering %s's thread..." (romacs-agent-title session))
+    (if (romacs-agent-ui--moves-p session provider)
+        (let ((wanted (romacs-agent--wanted session)))
+          (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
+          (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
+                   (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
+      (romacs-agent-ui--hand-off session provider model next))))
+
+(defun romacs-agent-ui--moves-p (session provider)
+  "Whether SESSION goes on under PROVIDER as it is: an instance of its harness."
+  (eq (plist-get (romacs-agent--configured provider) :harness) (romacs-agent-harness session)))
+
+(defun romacs-agent-ui--hand-off (session provider model next)
+  "Start a session under PROVIDER on MODEL on a brief of SESSION's thread, to do NEXT."
+  (message "Gathering %s's thread..." (romacs-agent-title session))
     ;; Replayed between keystrokes: a long thread never holds the editor.
     (romacs-agent-events-async
      session (lambda (events)
                (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
-                                                        provider model next))))))
+                                                        provider model next)))))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in plan mode, or take it out: in plan mode it plans
@@ -2099,7 +2116,7 @@ view."
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
-  "H" ("Hand off to another…" romacs-agent-chat-handoff)
+  "H" ("Go on under another instance…" romacs-agent-chat-handoff)
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))
