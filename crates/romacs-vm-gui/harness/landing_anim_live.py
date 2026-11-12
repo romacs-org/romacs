@@ -217,21 +217,17 @@ def main():
 
             no_cursor('at start')
 
-            # quick
+            # quick: one wtype run types the whole sequence, so the clock
+            # no longer counts the pauses between separate runs (five of
+            # them were 1.5 s of the 5 s).  wtype joins adjacent text
+            # arguments with a space: "b*scratch*" is one.  The wait is
+            # bounded by what a hang takes; the latency check judges.
             started = time.monotonic()
-            keys('-M', 'ctrl', 'x', '-m', 'ctrl')
-            keys('b')
-            keys('*scratch*')
-            keys('-k', 'Return')
-            keys('quick')
-            keys('-k', 'Return')
-            fio.wait(lambda: any(r.startswith('quick') for r in rows()), 10, 'quick in the scene', proc)
+            keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'b*scratch*', '-k', 'Return', 'quick', '-k', 'Return')
+            fio.wait(lambda: any(r.startswith('quick') for r in rows()), a.timeout, 'quick in the scene', proc)
             latency = time.monotonic() - started
             check('typing right after the landing reaches the scene', latency < 5, round(latency, 2))
-            keys('-M', 'ctrl', 'x', '-m', 'ctrl')
-            keys('b')
-            keys('*Romacs*')
-            keys('-k', 'Return')
+            keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'b*Romacs*', '-k', 'Return')
 
             # open
             back = time.monotonic()
