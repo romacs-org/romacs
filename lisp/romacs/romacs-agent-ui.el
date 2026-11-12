@@ -886,7 +886,9 @@ new turn starts, and last turn's failures have been seen."
 ;; (`romacs-agent-ui--on-event'), where a session's state changes with no
 ;; event (`romacs-agent-changed-functions'), when its workers' line is made
 ;; again, and when what draws a glyph changes.  It makes and writes nothing
-;; while the header would read the same.
+;; while the header would read the same.  The string is the whole line,
+;; the same for every window: what depends on a window is display's, which
+;; clips the band where the window ends.
 
 (defun romacs-agent-ui--harness-icon (harness)
   (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) "●")))
@@ -949,75 +951,38 @@ made again when it differs."
 
 (defun romacs-agent-ui--header-text (inputs)
   "A chat's header for INPUTS (`romacs-agent-ui--header-inputs'), only what
-is worth a glance: harness, the instance when not the harness's own, a
-permission mode other than bypassing them, model and effort, a selection
-waiting, its workers, how full its context is, and its state.  The whole
-line, as wide as it is."
+is worth a glance, what matters most first: harness, its state, model and
+effort, the instance when not the harness's own, a permission mode other
+than bypassing them, a selection waiting, its workers, and how full its
+context is.  The whole line: a window too narrow for it shows its start,
+display clipping the band where the window ends."
   (cl-destructuring-bind (&key harness provider mode model effort switch workers share state failed &allow-other-keys)
       inputs
     (mapconcat
      #'identity
      (delq nil
            (list (romacs-agent-ui--harness-icon harness)
+                 (romacs-agent-ui--state-label state failed)
+                 (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
+                                     'face 'romacs-agent-model)
+                         (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
                  ;; The icon names the harness: only another instance of it is named.
                  (and provider (not (equal provider (symbol-name harness)))
                       (propertize provider 'face 'romacs-agent-dim))
                  (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
                        ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
-                 (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
-                                     'face 'romacs-agent-model)
-                         (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
                  workers
-                 (and share (propertize share 'face 'romacs-agent-context))
-                 (romacs-agent-ui--state-label state failed)))
+                 (and share (propertize share 'face 'romacs-agent-context))))
      "  ")))
 
 (defvar-local romacs-agent-ui--header nil
   "The chat's header as last made: (INPUTS . TEXT), what it was made from
-and the whole line.")
+and the line.")
 
 (defun romacs-agent-ui--header-format (text)
   "TEXT as a header line shows it: each `%' said literally."
   (string-replace "%" "%%" text))
-
-(defun romacs-agent-ui--header-fit (window)
-  "Give WINDOW its chat's header cut to its width where the whole does not
-fit it, and no cut of a chat it does not show.
-The buffer's `header-line-format' is the whole line, and a window wide
-enough shows that.  A narrower one holds the line cut to its own width as
-its `header-line-format' parameter, so two windows of one chat are each cut
-where they end, and as its `romacs-agent-header' parameter, by which the
-cut is known for this function's: another's parameter is left alone.  Both
-stay with the window whatever becomes of it, so what this does follows
-from what WINDOW shows now and how wide, and from nothing kept elsewhere.
-Run before a redisplay, never between two: inside a
-`save-window-excursion' a window has a width, or a buffer, or is deleted,
-as no redisplay shows it, and nothing tells when that is put back."
-  (let* ((text (cdr (buffer-local-value 'romacs-agent-ui--header (window-buffer window))))
-         (width (max 1 (window-body-width window)))
-         (cut (and text (> (string-width text) width)
-                   (romacs-agent-ui--header-format (romacs-truncate text width))))
-         (held (window-parameter window 'romacs-agent-header)))
-    (unless (equal-including-properties cut held)
-      (when (eq held (window-parameter window 'header-line-format))
-        (set-window-parameter window 'header-line-format cut))
-      (set-window-parameter window 'romacs-agent-header cut))))
-
-(defun romacs-agent-ui--header-fit-frame (frame)
-  "FRAME's windows changed buffers or sizes since the last redisplay: each
-has the cut of what it shows now (a window change function)."
-  (walk-windows #'romacs-agent-ui--header-fit 'no-minibuffer frame))
-
-(add-hook 'window-buffer-change-functions #'romacs-agent-ui--header-fit-frame)
-(add-hook 'window-size-change-functions #'romacs-agent-ui--header-fit-frame)
-
-(defun romacs-agent-ui--header-fit-all (&rest _)
-  "A chat's header was made again: every window has the cut of what it
-shows now.  On `pre-redisplay-functions' from the header's change to the
-redisplay that shows it, and gone again with that."
-  (remove-hook 'pre-redisplay-functions #'romacs-agent-ui--header-fit-all)
-  (walk-windows #'romacs-agent-ui--header-fit 'no-minibuffer t))
 
 (defun romacs-agent-ui--header-refresh (session &optional force)
   "Make the header of SESSION's chat say what SESSION says now.
@@ -1036,7 +1001,6 @@ glyph changed."
             (setq romacs-agent-ui--header (cons inputs (if same (cdr romacs-agent-ui--header) text)))
             (unless same
               (setq header-line-format (romacs-agent-ui--header-format text))
-              (add-hook 'pre-redisplay-functions #'romacs-agent-ui--header-fit-all)
               (force-mode-line-update))))))))
 
 (add-hook 'romacs-agent-changed-functions #'romacs-agent-ui--header-refresh)

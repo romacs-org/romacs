@@ -191,13 +191,13 @@
     (let ((romacs-agent-glyphs nil) (romacs-agent-default-provider "claude"))
       (cl-flet ((header () (substring-no-properties
                             (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session)))))
-        (should (equal (header) (concat (romacs-agent-ui--harness-icon 'claude) "  opus-5-5 high  44%  Running")))
+        (should (equal (header) (concat (romacs-agent-ui--harness-icon 'claude) "  Running  opus-5-5 high  44%")))
         ;; A mode other than bypassing approvals is worth a glance.
         (setf (romacs-agent-permission-mode session) "plan")
         (should (string-search "  plan  " (header)))
-        ;; Another instance of the harness is named.
+        ;; Another instance of the harness is named, after what matters more.
         (setf (romacs-agent-provider session) "claude2")
-        (should (string-search "  claude2  " (header)))))))
+        (should (string-search "  opus-5-5 high  claude2  plan  " (header)))))))
 
 (ert-deftest romacs-agent-composer-starts-on-its-own-line ()
   ;; Thinking left open while no turn runs: the composer is not glued to it.
