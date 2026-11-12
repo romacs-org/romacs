@@ -426,7 +426,7 @@ fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
         }
     }
     // In the other window's buffer: that window, and only when the change shows.
-    for (change, windows) in [("(setq o (make-overlay 1 3 other))", 0), ("(overlay-put o 'face 'bold)", 1), ("(overlay-put o 'face 'bold)", 0),
+    for (change, windows) in [("(setq o (make-overlay 1 3 other))", 1), ("(overlay-put o 'face 'bold)", 1), ("(overlay-put o 'face 'bold)", 0),
                               ("(move-overlay o 2 4)", 1), ("(move-overlay o 1 3 hidden)", 1), ("(move-overlay o 2 4)", 0),
                               ("(move-overlay o 1 3 other)", 1),
                               // To the buffer and range it has: nothing to show anew (a timer's refresh).
@@ -453,6 +453,38 @@ fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
         let buffer = run(&mut vm, buffer);
         assert_ne!(vm.overlay_store(buffer).map(|store| store.overlay_revision), Some(0));
     }
+}
+
+/// An overlay with no property ranks the others where it overlaps them,
+/// and the ranking is not transitive: deleting or moving one can change
+/// which face shows, so it redisplays the windows on its buffer.
+#[test]
+fn a_propertyless_overlay_that_ranks_faces_redisplays_when_it_goes() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (set-buffer (get-buffer-create "ranked")) (insert "abcdefghij\n")
+                           (set-window-buffer nil (current-buffer))
+                           (setq a (make-overlay 1 6) b (make-overlay 3 7) c (make-overlay 2 6))
+                           (overlay-put a 'priority '(nil . 1)) (overlay-put a 'face '(:foreground "#ff0000"))
+                           (overlay-put b 'face '(:foreground "#0000ff")))"##);
+    // The foreground shown at the character at byte 3 (position 4).
+    let shown = |vm: &mut Vm| {
+        let snapshot = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        let run = snapshot.text.face_runs.iter().find(|run| run.bytes.contains(&3)).expect("a run over position 4");
+        snapshot.faces[run.face.0 as usize].foreground
+    };
+    let mut faces = vec![shown(&mut vm)];
+    for change in ["(delete-overlay c)", "(move-overlay c 2 6)", "(move-overlay c 8 9)", "(move-overlay c 2 6)"] {
+        run(&mut vm, change);
+        let after = shown(&mut vm);
+        // What the window shows rebuilt from nothing.
+        let id = vm.selected_window_id().unwrap();
+        vm.display_state.forget_window(id);
+        assert_eq!(shown(&mut vm), after, "{change} left the window showing an old face");
+        faces.push(after);
+    }
+    assert_ne!(faces[0], faces[1], "the overlay with no property decides the face: {faces:?}");
 }
 
 /// Publishing one window must not invalidate another window's last publication.
@@ -1023,9 +1055,11 @@ fn whole(snapshot: &romacs_layout_input::WindowSnapshot) -> crate::WindowEnd {
 }
 
 /// Overlay calls that change nothing a window may show leave its record
-/// standing, as GNU's buffer.c calls no modify_overlay for them: a new
-/// overlay (no properties yet), deleting a detached one, and `overlay-put'
-/// of a value `eq' to the one there. A real change still redisplays fully.
+/// standing, as GNU's buffer.c calls no modify_overlay for them: deleting
+/// a detached overlay, and `overlay-put' of a value `eq' to the one there.
+/// A real change still redisplays fully, and so does a new overlay, which
+/// GNU leaves alone while it has no property: it ranks the others' faces
+/// where it overlaps them (`overlay_order::compare_overlays`).
 #[test]
 fn overlay_calls_that_change_nothing_keep_the_window() {
     let mut vm = Vm::new();
@@ -1046,7 +1080,7 @@ fn overlay_calls_that_change_nothing_keep_the_window() {
     frame(&mut vm);
     frame(&mut vm);
     let before = walks(&mut vm);
-    for (form, changes) in [("(setq o (make-overlay 1 3))", false), ("(overlay-put o 'face nil)", false),
+    for (form, changes) in [("(setq o (make-overlay 1 3))", true), ("(overlay-put o 'face nil)", false),
                             ("(forward-char 1)", false), ("(overlay-put o 'face 'bold)", true),
                             ("(delete-overlay o)", true), ("(delete-overlay o)", false)] {
         let before = walks(&mut vm);

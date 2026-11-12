@@ -429,12 +429,14 @@ impl Vm {
     }
     /// OVERLAY changed what the windows on its buffer may show (GNU's
     /// `modify_overlay`, buffer.c): that buffer's overlay revision takes a
-    /// value no buffer's has had. An overlay in no buffer shows nothing,
-    /// and neither does one with no property yet (`Fmake_overlay`), so
-    /// they change none.
+    /// value no buffer's has had. An overlay in no buffer shows nothing.
+    /// One with no property counts as GNU's does not: it still ranks the
+    /// others where it overlaps them, and the ranking is not transitive
+    /// (`overlay_order::compare_overlays`), so making, moving or deleting
+    /// it can change which face shows.
     pub(crate) fn overlay_changed(&mut self, overlay: Value) -> Result<()> {
         let o = self.overlay(overlay)?;
-        if o.buffer == Value::NIL || o.properties.is_empty() { return Ok(()); }
+        if o.buffer == Value::NIL { return Ok(()); }
         let buffer = o.buffer;
         self.display_state.overlays += 1;
         let revision = self.display_state.overlays;
