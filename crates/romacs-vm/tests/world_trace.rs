@@ -177,7 +177,7 @@ fn the_build_host_is_baked_at_its_one_site() {
     let reads = |trace: &Json| items(trace, "records", "p-read").iter().filter(|r| r["what"] == "system-name")
         .map(|r| r["allowed"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
     let keyed = |trace: &Json| items(trace, "records", "host").iter().filter(|r| r["fact"] == "system-name").count();
-    let (_, trace) = build(&[version.clone()]);
+    let (_, trace) = build(std::slice::from_ref(&version));
     assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 0), "{trace}");
     assert!(refusals(&trace).is_empty(), "{trace}");
     let (_, trace) = build(&[version, other]);
