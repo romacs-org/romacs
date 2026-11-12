@@ -186,20 +186,31 @@ fn forget_window(shared: &mut Shared) {
 }
 
 impl GuiHost {
-    /// Move every queued channel event into `pending`, dropping the ones a
-    /// prompt ignores (releases, activations), so "pending" means a real event.
+    /// Move every queued channel event into `pending`, in order. Each stays
+    /// for whoever handles it: a prompt's read skips what it ignores
+    /// (releases, activations), and the loop takes the clicks on its bars
+    /// that no read returns.
     fn drain(&mut self) {
-        let mut shared = self.shared.borrow_mut();
-        let available = self.sender.input().len();
-        shared.pending.extend(self.sender.input().try_iter().take(available));
-        let kept = std::mem::take(&mut shared.pending)
-            .into_iter()
-            .filter(|event| classify(event).is_some())
-            .collect();
-        shared.pending = kept;
+        take_arrivals(&mut self.shared.borrow_mut(), self.sender.input());
     }
+}
 
+/// The events INPUT holds now, queued in SHARED after those already there.
+fn take_arrivals(shared: &mut Shared, input: &crossbeam_channel::Receiver<InputEvent>) {
+    let available = input.len();
+    shared.pending.extend(input.try_iter().take(available));
+}
 
+/// Whether SHARED's queue holds input a read returns: GNU's
+/// `input-pending-p`, which counts no special event and nothing a read
+/// skips. A closed frame is not repainted, so it counts too.
+fn input_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(|event| classify(event).is_some() && !special(event))
+}
+
+/// Whether SHARED's queue holds a key press that ends idleness.
+fn key_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
 }
 
 /// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
@@ -319,15 +330,12 @@ impl HostInput for GuiHost {
 
     fn input_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        // A closed frame is not repainted.
-        shared.closed || shared.pending.iter().any(|event| !special(event))
+        input_waits(&self.shared.borrow())
     }
 
     fn key_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
+        key_waits(&self.shared.borrow())
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
@@ -423,6 +431,36 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// Looking for input leaves every event queued, in order: a click on
+    /// the status bar is the loop's though no read returns it, and a key
+    /// release stays ahead of the key after it. Only what a read returns
+    /// is input. The look used to drop every event a prompt ignores.
+    #[test]
+    fn looking_for_input_keeps_every_event() {
+        use romacs_display_runtime::host_types::FrontendKey;
+        use romacs_display_runtime::thread_comm::{PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let click = InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x: 17.0, y: 765.0, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button: 1, pressed: false, modifiers: 0 } });
+        let key = |pressed| InputEvent::Key { key: FrontendKey::Character('a'), modifiers: 0, pressed, emacs_frame_id: 1 };
+        let (sender, input) = crossbeam_channel::unbounded();
+        let mut shared = Shared::default();
+        sender.send(click).unwrap();
+        sender.send(key(false)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(!input_waits(&shared) && !key_waits(&shared), "a click and a release are no input");
+        sender.send(key(true)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(input_waits(&shared) && key_waits(&shared));
+        let kinds: Vec<_> = shared.pending.iter().map(|event| match event {
+            InputEvent::PositionedPointer(_) => "click",
+            InputEvent::Key { pressed: false, .. } => "release",
+            InputEvent::Key { pressed: true, .. } => "key",
+            _ => "other",
+        }).collect();
+        assert_eq!(kinds, ["click", "release", "key"]);
     }
 
     /// A queued special event is not input: only an event a read returns is.
