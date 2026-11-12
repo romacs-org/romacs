@@ -695,15 +695,16 @@ impl<T> Table<T> {
     /// A minor's start. To its mark every old entry counts as reached
     /// (`raw`), but those it must read again: the ones stored into since
     /// the last collection, and the ones WHOLE asks for whatever their
-    /// colour. Each of those is made young for this collection and
-    /// returned, for the mark to claim and read as it does the young; being
-    /// roots, all survive, and the sweep leaves them old again. No other
-    /// colour is written.
-    pub(crate) fn read_again(&mut self, whole: impl Fn(&T) -> bool) -> Vec<usize> {
+    /// colour, given its index. Each of those is made young for this
+    /// collection and returned, for the mark to claim and read as it does
+    /// the young; being roots, all survive, and the sweep leaves them old
+    /// again. No other colour is written. A minor that ends any other way
+    /// promotes everything (`Vm::promote_all`), which ages them again.
+    pub(crate) fn read_again(&mut self, whole: impl Fn(usize, &T) -> bool) -> Vec<usize> {
         let mut again = Vec::new();
         for (i, (color, entry)) in self.colors.iter_mut().zip(&self.entries).enumerate() {
             if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
-            if *color & DIRTY != 0 || whole(entry) {
+            if *color & DIRTY != 0 || whole(i, entry) {
                 *color &= !OLD;
                 again.push(i);
             }

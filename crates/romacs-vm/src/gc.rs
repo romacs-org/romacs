@@ -85,9 +85,11 @@ pub(crate) struct Faults {
     /// A cons allocated between the mark and the scan, or the sweep.
     pub(crate) allocate_before_scan: bool,
     pub(crate) allocate_before_sweep: bool,
+    /// A minor panics once it has begun, before its mark.
+    pub(crate) minor_panics: bool,
 }
 #[cfg(test)]
-romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, allocate_before_scan, allocate_before_sweep });
+romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, allocate_before_scan, allocate_before_sweep, minor_panics });
 
 /// Records a session keeps between its usage log's writes: at one a minute
 /// or so, this holds a burst; past it collections are only counted.
@@ -683,8 +685,21 @@ impl Vm {
     /// out since the last collection. `gc-cons-threshold` paces fulls, by
     /// what the heap has grown since the last one, minors or not.
     pub(crate) fn minor_due(&self) -> bool {
+        self.minor_allowed() && self.allocation.allocated - self.allocation.collected_at >= MINOR_BYTES
+    }
+    /// Whether this VM's automatic collections may be minors at all.
+    fn minor_allowed(&self) -> bool {
         self.gc_stress.minor && !self.will_compact() && self.job_budget.is_none()
-            && self.allocation.allocated - self.allocation.collected_at >= MINOR_BYTES
+    }
+    /// Whether the automatic collection about to run is a minor: allocation
+    /// since the last collection alone made it due, or stress forced it
+    /// where minors are allowed (stress that frees in place), so that every
+    /// forced collection puts a minor before verify's oracle. Whatever else
+    /// asked is owed a full: the heap's growth, a scarce region id, or the
+    /// request code compiled since the last one, which only a full retires.
+    pub(crate) fn minor_chosen(&self) -> bool {
+        let code = self.request_code.since_collection >= self.code_collection_threshold();
+        !self.full_due() && !code && (self.minor_due() || (self.gc_stress.shift && self.minor_allowed()))
     }
     /// Whether a full collection is due, by GNU's rule above.
     pub(crate) fn full_due(&self) -> bool {
@@ -1628,36 +1643,69 @@ impl Vm {
     /// obarrays of their own included; the functions changed since
     /// (`Functions`); and every other root. Nothing a full reclaims beside
     /// table entries goes: no code is retired, no region, obarray symbol or
-    /// local binding freed, nothing moves and no table is cut short. With a
-    /// log or the functions' record lost, it promotes everything instead.
+    /// local binding freed, and nothing moves (a table's dead tail is cut,
+    /// as any sweep cuts it). Like a full it has spare programs forget their
+    /// lowered code first. With a log or the functions' record lost, it
+    /// promotes everything instead.
     /// Whether it collected.
     pub(crate) fn collect_minor(&mut self, roots: &[Value]) -> bool {
         if !self.may_collect(0) {
             return false;
         }
         if [self.conses.log_lost(), self.closures.log_lost(), self.cells.log_lost(), self.objects.log_lost(), self.functions.changed().is_none()].contains(&true) {
-            self.settle_generations();
-            self.settle_minor();
+            self.promote_all();
             return true;
         }
+        // A minor that does not complete has made old entries young to read
+        // them again, and may have swept part of a table: promoting
+        // everything is its recovery, whatever stopped it.
+        let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.minor(roots)));
+        if let Err(panic) = done {
+            self.promote_all();
+            std::panic::resume_unwind(panic);
+        }
+        true
+    }
+    /// Promote all: every entry in use becomes old and clean, and every
+    /// record of what changed since the last collection is emptied (the put
+    /// logs, the functions changed, the slot cards, the epoch that text and
+    /// char-table storage is stamped against). Nothing is freed, doomed or
+    /// dropped. With no young entry left no old one names a young one, so
+    /// it is sound wherever a collection may start, whatever was traced
+    /// before: a minor's way to give up and to recover, and the generations'
+    /// commit point for whoever needs one. A record a later slice adds is
+    /// emptied here, or in what this calls.
+    pub(crate) fn promote_all(&mut self) {
+        self.settle_generations();
+        self.settle_minor();
+    }
+    /// `collect_minor`, once it is known to run.
+    fn minor(&mut self, roots: &[Value]) {
         self.clear_dead_tails();
         let mut lap = Lap::start();
         self.clear_collection_caches();
         let mut again: Vec<Value> = roots.to_vec();
-        again.extend(self.conses.read_again(|_| false).into_iter().map(|i| Value::reference(i, 3)));
-        again.extend(self.closures.read_again(|_| false).into_iter().map(|i| Value::reference(i, 4)));
-        again.extend(self.cells.read_again(|_| false).into_iter().map(|i| Value::reference(i, 5)));
-        let shared = |object: &data::Object| matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_));
+        again.extend(self.conses.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 3)));
+        again.extend(self.closures.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 4)));
+        again.extend(self.cells.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 5)));
+        let shared = |_: usize, object: &data::Object| matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_));
         again.extend(self.objects.read_again(shared).into_iter().map(|i| Value::reference(i + 1, 0)));
         for table in [self.conses.logged(), self.closures.logged(), self.cells.logged(), self.objects.logged()] {
             again.extend_from_slice(table);
         }
+        // A lexical pair is named by the map alone, and one may have been
+        // made since the last collection for a cell that is old and clean:
+        // a minor reads them all. (An old cell's pair is kept until a full
+        // finds the cell dead.)
+        again.extend(self.cell_pairs.values().copied());
         // No symbol is reclaimed: those of obarrays of their own are roots
         // like the rest, with their names and their conditions.
         again.extend(self.obarray_symbol_names.values().copied());
         for entry in self.conditions.entries.values() {
             for &(key, value) in &entry.properties { again.extend([key, value]); }
         }
+        #[cfg(test)]
+        assert!(!std::mem::take(&mut self.gc_stress.faults.minor_panics), "a planted fault");
         let none = vec![false; self.slots.len()];
         // Setup is the old marked and what is read again gathered; Roots and
         // Mark as a full's; Weak, all that is dropped; then the sweep.
@@ -1682,12 +1730,13 @@ impl Vm {
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
         self.settle_minor();
-        true
     }
     /// A minor's books: the young start again from here, and no poll is
     /// pending. What the last full kept stays the base a full is paced
     /// from, so what this promoted counts toward the next one.
     fn settle_minor(&mut self) {
+        // A forced collection is over (a full's takes its fillers with it).
+        self.gc_stress.shift = false;
         self.functions.settle();
         self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
@@ -2234,6 +2283,102 @@ mod tests {
         let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 6 'first) (get-text-property 1 'minor)) '((17) (69999))))").unwrap();
         assert_eq!(kept, Value::TRUE, "the first value stored and the last survive");
         vm.collect(&mut []);
+    }
+
+    /// A minor makes the old entries it reads again young for its length.
+    /// One that panics part way leaves none young: it promotes everything,
+    /// so what was old stays in use and old, and the next minor frees none
+    /// of it.
+    #[test]
+    fn a_minor_that_panics_promotes_everything() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(setq panic-list (list 1 2 3) panic-held (list (list 4)))").unwrap();
+        vm.collect(&mut []);
+        // An old cons stored into, which the minor will read again, and
+        // which only an old and clean cons names.
+        vm.eval_source_raw("(setcar (car panic-held) 5)").unwrap();
+        vm.gc_stress.faults.minor_panics = true;
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_minor(&[])));
+        assert!(unwound.is_err(), "the planted fault");
+        assert!(vm.generations_settled(), "everything in use is old and clean");
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(dotimes (_ 100) (list 1 2 3))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        assert_eq!(vm.eval_source_raw("(equal panic-held '((5)))").unwrap(), Value::TRUE, "what was old survived the next minor");
+    }
+
+    /// A capture cell's lexical pair is named by `cell_pairs` alone. One
+    /// made since the last collection, for a cell that collection left old
+    /// and clean, survives a minor with its cell.
+    #[test]
+    fn a_minor_keeps_the_new_lexical_pair_of_an_old_cell() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        let cell = vm.alloc_cell(Value::TRUE);
+        let mut roots = [Value::reference(cell, 5)];
+        vm.collect(&mut roots);
+        assert!(vm.cells.old(cell));
+        let pair = vm.alloc_cons(Value::NIL, Value::integer(5).unwrap());
+        vm.cell_pairs.insert(cell, pair);
+        assert!(vm.collect_minor(&roots));
+        assert!(vm.conses.old(usize::try_from(pair.payload()).unwrap()), "the pair survived, and is old");
+        assert_eq!(vm.cell_pairs.get(&cell), Some(&pair));
+    }
+
+    /// After a promote-all nothing is young and every record is empty: a
+    /// store into a char-table node, a text and a symbol afterwards is
+    /// recorded afresh, and the next minor reads it.
+    #[test]
+    fn a_store_after_a_promote_all_is_read_by_the_next_minor() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq after-chars (make-char-table 'after) after-symbol nil after-buffer (get-buffer-create \"after\"))
+          (aset after-chars ?a 0) (set-buffer after-buffer) (insert \"hello world\")").unwrap();
+        vm.promote_all();
+        assert!(vm.generations_settled());
+        vm.eval_source_raw("(aset after-chars ?a (list 1)) (setq after-symbol (list 2)) (set-buffer after-buffer) (put-text-property 1 4 'after (list 3))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer after-buffer) (equal (list (aref after-chars ?a) after-symbol (get-text-property 2 'after)) '((1) (2) (3))))").unwrap();
+        assert_eq!(kept, Value::TRUE);
+    }
+
+    /// An indirect buffer made since the last collection shares the text of
+    /// its old base: a property stored through it survives a minor, and so
+    /// does the indirect buffer.
+    #[test]
+    fn a_minor_keeps_a_young_indirect_buffer_and_what_it_stored() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq young-base (get-buffer-create \"young-base\")) (set-buffer young-base) (insert \"hello world\")").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(setq young-indirect (make-indirect-buffer young-base \"young-indirect\")) (set-buffer young-indirect) (put-text-property 1 4 'young (list 1))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(progn (set-buffer young-base) (and (buffer-live-p young-indirect) (equal (get-text-property 2 'young) '(1))))").unwrap();
+        assert_eq!(kept, Value::TRUE);
+        vm.collect(&mut []);
+    }
+
+    /// Stress that frees in place forces a minor at every Lisp entry where
+    /// minors are on, each checked by the oracle; a full still comes when
+    /// the heap's growth asks for one.
+    #[test]
+    fn stress_in_place_forces_minors() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_minor(true);
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000 stress-keep nil)").unwrap();
+        vm.collect(&mut []);
+        vm.collection_log = CollectionLog::default();
+        vm.gc_stress.inplace = true;
+        vm.set_gc_stress(1);
+        vm.eval_source_raw("(dotimes (i 20) (setq stress-keep (cons (list i) stress-keep)))").unwrap();
+        vm.set_gc_stress(0);
+        let minors = vm.collection_log.records.iter().filter(|record| record.minor).count();
+        assert!(minors >= 1, "forced collections were minors: {:?}", vm.collection_log.records.iter().map(|record| record.minor).collect::<Vec<_>>());
+        assert_eq!(vm.eval_source_raw("(length stress-keep)").unwrap(), Value::integer(20).unwrap());
     }
 
     /// With a log lost a minor frees nothing and promotes everything.

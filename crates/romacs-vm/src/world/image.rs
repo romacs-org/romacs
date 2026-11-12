@@ -126,7 +126,6 @@ impl Vm {
         self.process_jobs = Default::default();
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
-        crate::epoch::raise(self.allocation.since);
         self.reset_collection_counters();
     }
 }
@@ -161,6 +160,9 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    // With the other counters of the process: what the VM stores from now
+    // on is stamped at or above the epoch its last collection ended at.
+    crate::epoch::raise(root.0.allocation.since);
     Some(*root)
 }
 

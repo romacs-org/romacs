@@ -370,7 +370,7 @@ impl Vm {
         let late = self.collection_late();
         // An automatic collection due only by what was made since the last
         // one is a minor; whatever asks for a collection by name gets a full.
-        let minor = !until_key && !self.collection_log.explicit && !self.full_due() && self.minor_due();
+        let minor = !until_key && !self.collection_log.explicit && self.minor_chosen();
         let last = std::mem::take(&mut self.gc_times);
         let collected = if minor { self.collect_minor_rooted(roots) } else { self.collect_rooted(roots, until_key) };
         if !collected {
@@ -524,18 +524,34 @@ mod tests {
     /// minor after it reads them all.
     #[test]
     fn an_abandoned_collection_leaves_a_minor_its_records() {
-        let mut vm = Vm::new();
-        vm.install_lisp_prelude().unwrap();
-        vm.set_gc_threads(1);
-        vm.set_gc_verify(true);
-        vm.eval_source_raw("(setq left-list (list 1 2) left-symbol nil left-chars (make-char-table 'left) left-buffer (get-buffer-create \"left\"))
-          (aset left-chars ?a 0) (set-buffer left-buffer) (insert \"hello world\")").unwrap();
-        vm.collect(&mut []);
-        vm.eval_source_raw("(setcar left-list (list 1)) (setq left-symbol (list 2)) (aset left-chars ?a (list 3))
-          (set-buffer left-buffer) (put-text-property 1 4 'left (list 4)) (fset 'left-function #'(lambda () '(5)))").unwrap();
-        vm.set_host_input(Some(Box::new(KeyAfter(1))));
-        assert!(!vm.collect_garbage_until_key(), "the key ended the full collection");
-        vm.set_host_input(None);
+        let stored = || {
+            let mut vm = Vm::new();
+            vm.install_lisp_prelude().unwrap();
+            vm.set_gc_threads(1);
+            vm.set_gc_verify(true);
+            vm.eval_source_raw("(setq left-list (list 1 2) left-symbol nil left-chars (make-char-table 'left) left-buffer (get-buffer-create \"left\"))
+              (aset left-chars ?a 0) (set-buffer left-buffer) (insert \"hello world\")").unwrap();
+            vm.collect(&mut []);
+            vm.eval_source_raw("(setcar left-list (list 1)) (setq left-symbol (list 2)) (aset left-chars ?a (list 3))
+              (set-buffer left-buffer) (put-text-property 1 4 'left (list 4)) (fset 'left-function #'(lambda () '(5)))").unwrap();
+            vm
+        };
+        // How often a collection of this heap looks for a key, on a twin of it.
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut twin = stored();
+        twin.set_host_input(Some(Box::new(Looks(count.clone()))));
+        assert!(twin.collect_garbage_until_key(), "no key: it collects");
+        // The last look that still ends it comes after the whole mark:
+        // every record has been visited by then. (Later looks are the
+        // record's, once the collection is over.)
+        let abandoned = (1..=count.get()).rev().find_map(|look| {
+            let mut vm = stored();
+            vm.set_host_input(Some(Box::new(KeyAfter(look))));
+            let ended = !vm.collect_garbage_until_key();
+            vm.set_host_input(None);
+            ended.then_some(vm)
+        });
+        let mut vm = abandoned.expect("a key at some look ends the full collection");
         assert!(vm.collect_minor(&[]));
         let kept = vm.eval_source_raw("(progn (set-buffer left-buffer) (equal (list (car left-list) left-symbol (aref left-chars ?a) (get-text-property 2 'left) (left-function)) '((1) (2) (3) (4) (5))))").unwrap();
         assert_eq!(kept, crate::Value::TRUE, "what was stored before the abandoned collection survives the minor");
