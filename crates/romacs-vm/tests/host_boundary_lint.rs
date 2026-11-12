@@ -552,14 +552,14 @@ fn roots(krate: &Path) -> Vec<PathBuf> {
 fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
     let mut seen = BTreeSet::new();
     let mut work: Vec<(PathBuf, PathBuf)> = roots.into_iter().map(|r| { let d = r.parent().unwrap().to_owned(); (r, d) }).collect();
-    let (mut sites, mut notes) = (Vec::new(), Vec::new());
+    let (mut sites, mut comments) = (Vec::new(), Vec::new());
     while let Some((file, dir)) = work.pop() {
         if !seen.insert(file.clone()) { continue; }
         let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
         let rel = file.strip_prefix(base).unwrap().to_string_lossy().into_owned();
-        let (found, noted, outline) = file_scan(&rel, &src);
+        let (found, said, outline) = file_scan(&rel, &src);
         sites.extend(found);
-        notes.extend(noted);
+        comments.extend(said);
         let here = file.parent().unwrap();
         work.extend(outline.includes.iter().map(|f| (here.join(f), dir.clone())));
         for (inline, name, path) in outline.mods {
@@ -579,14 +579,14 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
         }
     }
     sites.sort();
-    (sites, notes)
+    (sites, comments)
 }
 
 /// The sites and HOST comments of the source SRC of REL, and its outline.
 /// `#[cfg(test)]` items hold no site; BOUNDARY holds none either.
 fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
     let mut v = views(src);
-    let noted = tags(rel, src, &v.text);
+    let said = tags(rel, src, &v.text);
     let outline = outline(&v);
     for &(from, to) in &outline.tests {
         for view in [&mut v.code, &mut v.text] {
@@ -596,7 +596,7 @@ fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
         }
     }
     let found = if rel == BOUNDARY { Vec::new() } else { violations(rel, &v) };
-    (found, noted, outline)
+    (found, said, outline)
 }
 
 /// One view as its tokens joined without whitespace (a space only between
@@ -806,18 +806,18 @@ fn known(api: &str) -> bool {
 }
 
 
-/// What is wrong with SITES and the HOST comments NOTES: a site no comment
+/// What is wrong with SITES and their HOST COMMENTS: a site no comment
 /// covers, and a comment that names an unknown API, an API its line does not
 /// call, or no reason.
-fn problems(sites: &[Violation], notes: &[Tag]) -> Vec<String> {
+fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
     let at = |path: &str, line: Option<usize>, api: &str| sites.binary_search_by(|v| {
         (v.path.as_str(), Some(v.line), v.api).cmp(&(path, line, api))
     }).is_ok();
-    let covered: BTreeSet<(&str, usize, &str)> = notes.iter()
+    let covered: BTreeSet<(&str, usize, &str)> = comments.iter()
         .flat_map(|t| t.apis.iter().filter_map(move |a| Some((t.path.as_str(), t.covers?, a.as_str())))).collect();
     let mut out: Vec<String> = sites.iter().filter(|v| !covered.contains(&(v.path.as_str(), v.line, v.api)))
         .map(|v| format!("  uncovered {}:{} {}", v.path, v.line, v.api)).collect();
-    for t in notes {
+    for t in comments {
         for api in &t.apis {
             let fault = if !known(api) { Some("unknown API") }
                 else if !at(&t.path, t.covers, api) { Some("covers nothing") }
@@ -839,8 +839,8 @@ fn repository() -> PathBuf {
 #[test]
 fn host_boundary_holds() {
     let base = repository();
-    let (sites, notes) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
-    let report = problems(&sites, &notes);
+    let (sites, comments) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
+    let report = problems(&sites, &comments);
     assert!(report.is_empty(), "host boundary: outside {BOUNDARY}, each site needs `// HOST(API): REASON` in the comment \
                                 lines directly above it, or a call through host.rs:\n{}", report.join("\n"));
 }
@@ -875,8 +875,8 @@ fn lint_flags_each_planted_violation() {
 
 /// The problems of one source file, `src/lib.rs`.
 fn report(source: &str) -> Vec<String> {
-    let (sites, notes, _) = file_scan("src/lib.rs", source);
-    problems(&sites, &notes)
+    let (sites, comments, _) = file_scan("src/lib.rs", source);
+    problems(&sites, &comments)
 }
 
 #[test]
