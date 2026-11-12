@@ -30,6 +30,10 @@ possible; say so where you do.
   `substitute-command-keys` or `help-key-binding`, mode-line and status text in
   named faces that inherit theme faces. A command that only makes sense in a mode
   declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
+- Romacs's own Lisp byte-compiles on the pinned GNU Emacs with no new warning: the
+  check's Lisp tier holds each touched file of `lisp/romacs/` to its base. GNU does
+  not know what only Romacs has, so declare it where it is used: `declare-function`
+  for a primitive, naming its Rust file, and `defvar` for a variable.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
