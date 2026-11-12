@@ -229,12 +229,14 @@ checkout (an installed build), or unknown."
 or nil (`romacs-agent--checkout-commit').")
 
 (defun romacs-agent--descends-p (file commit)
-  "Whether the checkout FILE lies in holds COMMIT; t when Git cannot tell
-\(the commit unknown there)."
+  "Whether the checkout FILE lies in holds COMMIT: t, nil, or `unknown'
+when Git cannot tell (the commit not in that repository, or a shallow
+checkout)."
   (let ((process-environment (cl-remove-if (lambda (entry) (string-match-p "\\`GIT_" entry))
                                            process-environment)))
-    (/= 1 (call-process "git" nil nil nil "-C" (file-name-directory (expand-file-name file))
-                        "merge-base" "--is-ancestor" commit "HEAD"))))
+    (pcase (call-process "git" nil nil nil "-C" (file-name-directory (expand-file-name file))
+                         "merge-base" "--is-ancestor" commit "HEAD")
+      (0 t) (1 nil) (_ 'unknown))))
 
 (defun romacs-agent--file-layout (file)
   "The session record FILE defines: (GUARDED . FIELDS), GUARDED non-nil
@@ -249,7 +251,7 @@ when through `romacs-agent--defstruct'; nil when it defines none."
                             (romacs-agent--defstruct-slots (cddr form))))))
       found)))
 
-(defun romacs-agent--load-check (file &rest _)
+(defun romacs-agent--load-check (file &optional _noerror _nomessage nosuffix must-suffix)
   "Before `load' reads FILE, another romacs-agent.el over the live one:
 refuse one from a checkout without the commit the live one came from (it
 would undo changes), and, while sessions are alive, one whose session
@@ -259,8 +261,10 @@ them).  `romacs-agent-load-unchecked' skips it."
               ((featurep 'romacs-agent))
               ((stringp file))
               ((string-match-p "\\`romacs-agent\\(?:\\.el\\)?\\'" (file-name-nondirectory file)))
-              (path (if (file-name-extension file) (expand-file-name file)
-                      (locate-file file load-path '(".el")))))
+              ;; The file `load' itself will read, by its own search.
+              (path (locate-file file load-path
+                                 (cond (nosuffix '("")) (must-suffix (get-load-suffixes))
+                                       (t (append (get-load-suffixes) load-file-rep-suffixes))))))
     (when (romacs-agent--records-of 'romacs-agent)
       (let ((layout (romacs-agent--file-layout path)))
         (cond ((not (car layout))
@@ -273,9 +277,14 @@ Romacs to load it (romacs_restart_request; sessions carry over)"
     (when-let* ((loaded romacs-agent--loaded-from)
                 (commit (romacs-agent--checkout-commit path))
                 ((not (equal commit loaded)))
-                ((not (romacs-agent--descends-p path loaded))))
-      (user-error "%s comes from a checkout without commit %s, which the live romacs-agent.el was loaded from: \
-loading it would undo that one's changes; merge it first" path (substring loaded 0 (min 12 (length loaded)))))))
+                ;; Lacking it, or Git cannot tell: either refuses.
+                (doubt (pcase (romacs-agent--descends-p path loaded) ('t nil) ('unknown 'unknown) (_ 'lacking))))
+      (user-error (if (eq doubt 'unknown)
+                      "%s comes from a checkout where Git cannot tell whether it holds commit %s, which the live \
+romacs-agent.el was loaded from: refused, as it might undo that one's changes"
+                    "%s comes from a checkout without commit %s, which the live romacs-agent.el was loaded from: \
+loading it would undo that one's changes; merge it first")
+                  path (substring loaded 0 (min 12 (length loaded)))))))
 
 (advice-add 'load :before #'romacs-agent--load-check)
 (setq romacs-agent--loaded-from (and load-file-name (romacs-agent--checkout-commit load-file-name)))

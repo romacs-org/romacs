@@ -119,8 +119,29 @@
                 ((symbol-function 'romacs-agent--descends-p) (lambda (_file commit) (and (equal commit "live") holds))))
         (should (string-match-p "without commit live"
                                 (cadr (should-error (romacs-agent--load-check file) :type 'user-error))))
+        ;; Git cannot tell (the commit not in that repository): refused too.
+        (setq holds 'unknown)
+        (should (string-match-p "cannot tell whether it holds commit live"
+                                (cadr (should-error (romacs-agent--load-check file) :type 'user-error))))
         (setq holds t)
         (should-not (romacs-agent--load-check file))))))
+
+(ert-deftest romacs-agent-layout-the-file-load-reads-is-checked ()
+  ;; A relative name: `load' searches load-path, never the current
+  ;; directory, so a guarded copy there neither refuses nor excuses it.
+  (romacs-agent-layout-tests--with-file
+      (romacs-agent-layout-tests--definition "cl-defstruct" (romacs-agent--slot-names 'romacs-agent))
+    (let* ((elsewhere (make-temp-file "romacs-layout-cwd-" t))
+           (default-directory (file-name-as-directory elsewhere))
+           (load-path (cons (file-name-directory file) load-path)))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name "romacs-agent.el" elsewhere)
+              (insert (romacs-agent-layout-tests--definition "romacs-agent--defstruct"
+                                                             (romacs-agent--slot-names 'romacs-agent))))
+            (dolist (name '("romacs-agent" "romacs-agent.el"))
+              (should-error (romacs-agent--load-check name) :type 'user-error)))
+        (delete-directory elsewhere t)))))
 
 (ert-deftest romacs-agent-layout-shorter-records-are-refused ()
   ;; Records an older definition made, shorter than this one's, though the
