@@ -24,7 +24,10 @@ before.
 Every frame presented in any state answers a scene the evaluator sent
 (`scene_commits') and names `redisplay' alone as its reason.  A frame the
 render thread asked for itself (an effect left standing, a platform
-redraw) fails the state it shows up in.
+redraw) fails the state it shows up in.  That is narrower than "a named,
+wanted reason": these states have no effect of their own, so on a real GPU
+a wanted effect that outlasts the settling would fail them too, and would
+then need its reason allowed in its state.
 
 The chat is a session made in place, with no harness behind it: its state
 is `running', which is all the live rule and its timer read.
@@ -70,8 +73,10 @@ INIT = ''';; -*- lexical-binding: t -*-
                                      :turn-start (float-time) :dir rest-live-work :cwd rest-live-work)))
     (puthash (romacs-agent-id session) session romacs-agent--sessions)
     (delete-other-windows)
-    (select-window (split-window-right))
-    (switch-to-buffer (romacs-agent-show session))))
+    (romacs-agent-show session)
+    (rest-live-record (cons 'shown (sort (mapcar (lambda (window) (buffer-name (window-buffer window)))
+                                                 (window-list))
+                                         #'string<)))))
 (rest-live-state "<f7>" chat-poll (run-at-time 0.05 0.05 #'ignore))
 (rest-live-record '(init))
 '''
@@ -139,7 +144,10 @@ def measured(binary, args, output, report):
     def evaluators_only(name, state):
         """Each frame answers a scene the evaluator sent.  The reason alone
         does not say so: a frame the render pass asked to follow (an effect
-        it is still drawing) is named `redisplay' too, beside its effect."""
+        it is still drawing) is named `redisplay' too, beside its effect.
+        The totals are compared, so two scenes drawn as one frame would
+        hide one frame nobody sent: the bounds on each state's rate hold
+        that, and idle is exact."""
         others = {reason: count for reason, count in state['presented'].items() if reason != 'redisplay'}
         check(f'{name}: no frame names a reason but redisplay', not others, state['presented'])
         check(f'{name}: no frame but those the evaluator sent', state['presents'] <= state['scene_commits'] + 1, state)
@@ -176,6 +184,8 @@ def measured(binary, args, output, report):
         check('blink: two frames a second and no more', blink['presents'] <= 2 * blink['seconds'] + 2, blink)
 
         enter('F6', 'chat')
+        check('chat: the chat shows beside *scratch*',
+              '(shown "*agent: at rest*" "*scratch*")' in tl.records(records), tl.records(records))
         tl.quiet(process, .5, args.timeout)
         chat = report['chat'] = held(log, process.pid, seconds)
         evaluators_only('chat', chat)
