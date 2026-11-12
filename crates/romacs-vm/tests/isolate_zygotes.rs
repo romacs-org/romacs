@@ -17,16 +17,30 @@ fn eval(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("ERROR {e}"))
 }
 
-/// The zygote for no features, ready with a forked spare: its pid.
-fn ready_zygote(vm: &mut Vm) -> i64 {
-    let out = eval(vm, "(progn (isolate-zygote nil)
-                         (let ((end (+ (float-time) 20)))
-                           (while (and (not (and (eq (nth 1 (isolate-zygote nil)) 'ready) (nth 3 (isolate-zygote nil))))
+/// Lisp: t once ISO (bound around it) runs: its pid reported and its
+/// hello arrived. A zygote reports a child before it releases it, and the
+/// child sends its hello once released and renamed: a pid alone is a
+/// child that may not run yet.
+const RUNS: &str = "(and (romacs--isolate-pid (romacs--isolate-id iso)) (aref iso 9) t)";
+
+/// The zygote for no features, ready with a running spare: (ZYGOTE SPARE),
+/// their pids.
+fn zygote_and_spare(vm: &mut Vm) -> (i64, i64) {
+    let out = eval(vm, &format!("(progn (isolate-zygote nil)
+                         (let ((end (+ (float-time) 30)))
+                           (while (and (not (let* ((zygote (gethash nil romacs--isolate-zygotes)) (iso (aref zygote 4)))
+                                              (and (eq (aref zygote 3) 'ready) iso {RUNS})))
                                        (< (float-time) end))
                              (romacs--isolate-pump 0.02)))
-                         (isolate-zygote nil))");
+                         (isolate-zygote nil))"));
     assert!(out.starts_with("(nil ready "), "{out}");
-    out.split_whitespace().nth(2).unwrap().parse().unwrap()
+    let pids = numbers(&out);
+    (pids[0], pids[1])
+}
+
+/// The zygote for no features, ready with a running spare: its pid.
+fn ready_zygote(vm: &mut Vm) -> i64 {
+    zygote_and_spare(vm).0
 }
 
 fn stat_field(pid: i64, field: usize) -> Option<String> {
@@ -88,8 +102,7 @@ fn pooled_jobs_run_in_children_forked_for_one_job() {
         assert!(settles(|| !process_exists(child)), "child {child} outlived its job");
     }
     // Each child was the zygote's, named a worker; the next spare is too.
-    let spare = eval(&mut vm, "(progn (romacs--isolate-pump 0.2) (nth 3 (isolate-zygote nil)))");
-    let spare: i64 = spare.parse().unwrap_or_else(|_| panic!("no spare: {spare}"));
+    let (_, spare) = zygote_and_spare(&mut vm);
     assert_eq!(stat_field(spare, 4).as_deref(), Some(zygote.to_string().as_str()));
     assert_eq!(comm(spare), "romacs-worker");
     // A job that cannot be sent leaves the spare where it was: no child
@@ -428,17 +441,19 @@ fn a_childs_death_settles_at_once_with_its_zygote_stopped() {
     let mut vm = vm();
     eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
     let zygote = ready_zygote(&mut vm);
-    let reported = "(let ((end (+ (float-time) 10)) pid)
-                      (while (and (null (setq pid (romacs--isolate-pid (romacs--isolate-id (isolate-future-isolate od-f))))) (< (float-time) end))
-                        (romacs--isolate-pump 0.05))
-                      pid)";
+    // The child runs before its zygote stops: one reported but not yet
+    // released would wait at its gate for the stopped zygote.
+    let reported = format!("(let ((end (+ (float-time) 30)) (iso (isolate-future-isolate od-f)))
+                              (while (and (not {RUNS}) (< (float-time) end))
+                                (romacs--isolate-pump 0.05))
+                              (romacs--isolate-pid (romacs--isolate-id iso)))");
     for (name, body, expected) in [
         ("memory", "(let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))", "isolate-memory-exhausted"),
         ("crash", "(signal-process (emacs-pid) 9)", "isolate-died"),
     ] {
         eval(&mut vm, &format!("(progn (setq od-settled 0 od-f (isolate-spawn '(lambda () (sleep-for 0.6) {body} 'survived)))
                                        (isolate-on-done od-f (lambda (_) (setq od-settled (1+ od-settled)))) t)"));
-        let pid: i64 = eval(&mut vm, reported).parse().expect("the child was reported");
+        let pid: i64 = eval(&mut vm, &reported).parse().expect("the child was reported");
         signal_process(zygote, "STOP");
         let out = eval(&mut vm, "(condition-case e (isolate-await od-f 10) (error (car e)))");
         // Its frame can arrive a moment before its `_exit'.
@@ -451,7 +466,7 @@ fn a_childs_death_settles_at_once_with_its_zygote_stopped() {
     }
     // A reported child killed while its zygote is stopped.
     eval(&mut vm, "(setq od-f (isolate-spawn '(lambda () (while t))))");
-    let _: i64 = eval(&mut vm, reported).parse().expect("the child was reported");
+    let _: i64 = eval(&mut vm, &reported).parse().expect("the child was reported");
     signal_process(zygote, "STOP");
     let took = eval(&mut vm, "(let ((start (float-time))) (isolate-kill (isolate-future-isolate od-f)) (< (- (float-time) start) 3))");
     signal_process(zygote, "CONT");

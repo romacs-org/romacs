@@ -38,7 +38,7 @@ import time
 import perkey_live as perkey
 
 ROOT = Path(__file__).resolve().parents[3]
-FILES = [ROOT / 'gnu-tests/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/gnu/subr.el']
+FILES = [ROOT / 'test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/gnu/subr.el']
 
 # F9 moves point 50 lines: redisplay scrolls to show it and fontifies what
 # comes into view.  (Romacs's `scroll-up-command' refuses text with form

@@ -47,10 +47,13 @@ curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly
 curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
 ```
 
-## Source layout
+## Where things are
 
-`lisp/romacs/` holds Romacs Lisp, `lisp/gnu/` the pinned GNU sources, and
-`lisp/romacs/deps/` temporary third-party dependencies and their replacement plan.
+`crates/` is the Rust, `lisp/` the Lisp (`lisp/gnu/` GNU's, pinned; `lisp/romacs/`
+Romacs's own and the bundled packages), `test/` the test suites (GNU's in `test/gnu/`),
+`tools/` the scripts, `etc/` and `assets/` runtime data, and `ledger/` the pins and
+floors we hold ourselves to. [ARCHITECTURE.md](ARCHITECTURE.md) says where to look
+for anything else.
 
 ## Build and run
 

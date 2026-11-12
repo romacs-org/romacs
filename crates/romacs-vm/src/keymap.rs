@@ -57,7 +57,10 @@ impl Vm {
         for (name, alias, event) in [("esc-map", "ESC-prefix", 27), ("ctl-x-map", "Control-X-prefix", 24)] {
             let map = self.slots[self.names[name]].value;
             let slot = self.slot(alias);
-            self.slots[slot].function = map;
+            // Through the one writer of a function cell, which moves the
+            // slot's version on: a call site that cached what the alias named
+            // before must not go on trusting it.
+            self.define_function(slot, map, false).expect("a function cell's version");
             let global = self.slots[self.names["global-map"]].value;
             self.keymap_store(global, Value::integer(event).unwrap(), Value::reference(slot + 1, 7), false).unwrap();
         }

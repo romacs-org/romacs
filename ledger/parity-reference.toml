@@ -1,0 +1,79 @@
+# The GNU Emacs reference this project's parity numbers are measured against.
+#
+# WHY THIS FILE EXISTS (ledger 214).  Every parity number this project
+# publishes -- the oracle's expectations, ledger 195's motion sweep, ledger
+# 205's below-content audit, the TUI suite -- is a comparison against ONE GNU
+# Emacs build.  Until this file existed each harness only checked that *an*
+# emacs could be RUN (ledger 210 and 211 made that check honest), and none of
+# them checked *which* one.  A reference that VANISHED was caught; a reference
+# that CHANGED would have been scored in silence.
+#
+# WHAT IDENTIFIES THE BUILD. Surviving parity harnesses attest the running
+# release version through crates/romacs-parity-reference/src/lib.rs.
+# `pin-reference` records these fields when deliberately re-baselining.
+# GNU's dump fingerprint identifies the executable/dump pair; the digests bind
+# the pair to the deliberately built mirror revision below.
+#
+# The legacy oracle harness is retired, and its mixed-vintage inline
+# expectations are no longer in the tree; this pin does NOT attest that any of
+# them came from this build.
+#
+# RE-BASELINING.  A rebuild of the GNU mirror is its own change with its own
+# re-baselining, never a side effect of a session.  To re-pin, run
+#
+#     cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason "..."
+#
+# which rewrites the keys below and appends to the log in this comment block.
+# Editing the keys by hand defeats the log; the command exists so that the
+# record cannot be forgotten.
+#
+# RE-BASELINING LOG
+#   2026-10-20  GNU Emacs 32.0.50 built 2026-10-20T21:59:23+03:00 from mirror commit 45b0f7699df.
+#               The 2026-10-14 entry describes a build that exists nowhere on
+#               this host: no GNU binary matches its executable sha256
+#               e40bd060..., and it says built without native compilation or
+#               a window system. The GNU that actually exists at this mirror
+#               commit, and that records every GNU answer
+#               (tools/lib/gnu_oracle.py refuses any binary not reporting this
+#               revision), is the one tools/build-gnu-oracle.sh built into
+#               ~/.cache/gnu-emacs-pin/45b0f7699df.../: pgtk, cairo,
+#               harfbuzz, native compilation (aot), tree-sitter, modules,
+#               CFLAGS -O2 -pipe, configured --disable-build-details,
+#               mirroring the Arch build of the previous recordings so that
+#               only the revision varied. That build reports no
+#               emacs-build-time; build_time is the time its dump was written
+#               (src/emacs-32.0.50.1.pdmp, byte-identical to the installed
+#               dump). Expectations are unchanged: re-recording 50,098 cases
+#               at this build changed zero answers.
+#   2026-10-14  GNU Emacs 32.0.50 built 2026-10-14T08:12:57+03:00 from mirror commit 45b0f7699df.
+#               Adopt the approved GNU Emacs 32 source target, built from its
+#               exact Git archive without native compilation or a window
+#               system; preserve existing expectations and GNU-refresh
+#               converted cases
+#   2026-09-16  GNU Emacs 31.1 built 2026-09-13T03:18:28-04:00 from mirror commit a360712c9d2.
+#               User requested the existing GNU Emacs 31.1 build from
+#               2026-09-13 for full-suite validation; preserve all test
+#               expectations
+#   2026-09-08  GNU Emacs 31.1 built 2026-09-08T02:25:14-04:00 from mirror commit a360712c9d2.
+#               Issue #271: use GNU Emacs 31.1 rebuilt without native
+#               compilation; supersede the interrupted baseline and preserve
+#               expectations until GNU-only refresh
+#   2026-09-08  GNU Emacs 31.1 built 2026-09-08T01:46:47-04:00 from mirror commit a360712c9d2.
+#               Issue #271: deliberately adopt the rebuilt GNU Emacs 31.1
+#               oracle; preserve existing expectations for the compatibility
+#               baseline
+#   2026-08-29  ledger 214  initial pin.  GNU Emacs 31.0.90 built 2026-06-10
+#               from emacs-mirror commit 0ee48ac4df2 with a clean tree.  This
+#               is the build every published parity number in ledgers 195
+#               through 213 was measured against; it is recorded here rather
+#               than chosen here.
+
+schema = "1"
+emacs_version = "32.0.50"
+mirror_commit = "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea"
+build_time = "2026-10-20T21:59:23+03:00"
+fingerprint = "c434975371909a339586fd83bf16d3ab293312d0cce2f3c457ff275659b30534"
+executable_sha256 = "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+executable_size = "4229592"
+pdmp_sha256 = "b963b5df83dd7371e0583e064ca05aa6251f3da430ad28f09452cbff44d59b25"
+pdmp_size = "17708096"

@@ -270,7 +270,7 @@ deleted one.
   spellings; `macroexp.el`'s `cadr`), which R221 forbids: a number measured on
   an edited oracle file is not a number. GNU's files are restored byte for
   byte (`tools/lib/lisp_oracle.py check`), so the divergences no longer exist; the
-  VM gaps they hid are tickets G1-G8 in `reference/lisp-oracle/VM-GAPS.md`.
+  VM gaps they hid were tracked as tickets G1-G8.
   The old row text is in git history (`git show 18e249d7:DIVERGENCES.md`).
 - **VM2-EXCUR1, VM2-RESTRICT1 — a unibyte buffer with a saved excursion
   or restriction stayed unibyte.** Withdrawn 2026-10-29. Unibyte buffers

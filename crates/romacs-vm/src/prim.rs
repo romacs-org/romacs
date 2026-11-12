@@ -1888,6 +1888,7 @@ mod leaf {
     mod frozen;
     mod isolate;
     mod flight;
+    mod host_calls;
     mod compiled_lisp;
     mod casetab;
     mod casing;

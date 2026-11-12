@@ -45,6 +45,7 @@ mod xml_read;
 pub mod host;
 pub mod world;
 pub mod flight;
+pub mod host_calls;
 mod twin;
 pub mod compiled_lisp;
 mod environment;
