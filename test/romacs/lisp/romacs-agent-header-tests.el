@@ -231,9 +231,8 @@ string, an overlay."
       (romacs-agent-ui--header-refresh session)
       (should (eq header-line-format shown))
       (should (= written 0))
-      ;; What it reads changed and reads the same: made, not written.
-      (setf (romacs-agent-context-used session) 440000)
-      (setcar romacs-agent-ui--header nil)
+      ;; Made again, it reads the same: not written.
+      (setq romacs-agent-ui--header nil)
       (romacs-agent-ui--header-refresh session)
       (should (eq header-line-format shown))
       (should (= written 0))
@@ -246,6 +245,28 @@ string, an overlay."
       (romacs-agent--raise session (list :type 'usage :context-used 600000))
       (should-not (eq header-line-format shown))
       (should (= written 1)))))
+
+(ert-deftest romacs-agent-header-loaded-over-a-running-session ()
+  ;; Chats an older version made hold its form, which names functions this
+  ;; version has changed; a transcript's view's session is no recorded
+  ;; one.  Loading this file makes their headers strings, before any event.
+  (romacs-agent-header-tests--with
+    (let ((view (generate-new-buffer "*romacs-agent-header-tests-view*"))
+          (older '(:eval (romacs-agent-ui--header-line))))
+      (unwind-protect
+          (progn
+            (with-current-buffer view
+              (romacs-agent-chat-mode)
+              (setq romacs-agent-ui--session (romacs-agent--make :id "view" :harness 'claude :provider "claude"
+                                                                :state 'history)))
+            (dolist (buffer (list chat view))
+              (with-current-buffer buffer (setq header-line-format older romacs-agent-ui--header nil)))
+            (load (locate-library "romacs-agent-ui.el") nil t t)
+            (should (equal (romacs-agent-header-tests--header)
+                           (concat (romacs-agent-ui--harness-icon 'claude) "  opus-5-5 high  44%%")))
+            (with-current-buffer view
+              (should (string-search "  History  " (romacs-agent-header-tests--header)))))
+        (kill-buffer view)))))
 
 (ert-deftest romacs-agent-header-is-one-line-for-every-window ()
   ;; Nothing of the header is a window's: two windows of one chat, one too

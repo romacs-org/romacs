@@ -898,10 +898,13 @@ new turn starts, and last turn's failures have been seen."
   "Whether chats say a state by a glyph (🤖 working, ✋ waiting for you, ❗
 failed...) where the frame can draw it: the word shows on hover."
   :type 'boolean :group 'romacs-agent
-  ;; Sessions' worker summaries and headers are made ahead: made again.
+  ;; Sessions' worker summaries and headers are made ahead: made again
+  ;; when it is set, never by loading this file (which remakes the headers
+  ;; once its definitions are in, at its end).
+  :initialize #'custom-initialize-default
   :set (lambda (symbol value)
          (set-default symbol value)
-         (when (fboundp 'romacs-agent-ui--glyphs-changed) (romacs-agent-ui--glyphs-changed))))
+         (romacs-agent-ui--glyphs-changed)))
 
 (defun romacs-agent-ui--glyph (glyph word face)
   "GLYPH, or WORD where glyphs are off or GLYPH cannot be drawn, in FACE,
@@ -977,42 +980,46 @@ display clipping the band where the window ends."
      "  ")))
 
 (defvar-local romacs-agent-ui--header nil
-  "The chat's header as last made: (INPUTS . TEXT), what it was made from
-and the line.")
+  "What the chat's header was last made from (`romacs-agent-ui--header-inputs').")
 
 (defun romacs-agent-ui--header-format (text)
   "TEXT as a header line shows it: each `%' said literally."
   (string-replace "%" "%%" text))
 
-(defun romacs-agent-ui--header-refresh (session &optional force)
-  "Make the header of SESSION's chat say what SESSION says now.
+(defun romacs-agent-ui--header-show (&optional force)
+  "Make this chat's header say what its session says now.
 While what the header reads is what it was made from, nothing is made;
 while it would read the same, nothing is written, so display sees no
-change.  FORCE makes it again whatever it was made from: what draws a
-glyph changed."
+change.  FORCE makes it again whatever it was made from."
+  (let ((inputs (romacs-agent-ui--header-inputs romacs-agent-ui--session)))
+    (unless (and (not force) (equal-including-properties inputs romacs-agent-ui--header))
+      (let ((header (romacs-agent-ui--header-format (romacs-agent-ui--header-text inputs))))
+        (setq romacs-agent-ui--header inputs)
+        (unless (equal-including-properties header header-line-format)
+          (setq header-line-format header)
+          (force-mode-line-update))))))
+
+(defun romacs-agent-ui--header-refresh (session)
+  "Make the header of SESSION's chat say what SESSION says now."
   (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer))
               ;; A copy a journal is replayed into names the same buffer.
               ((eq (buffer-local-value 'romacs-agent-ui--session buffer) session)))
-    (with-current-buffer buffer
-      (let ((inputs (romacs-agent-ui--header-inputs session)))
-        (unless (and (not force) (equal-including-properties inputs (car romacs-agent-ui--header)))
-          (let* ((text (romacs-agent-ui--header-text inputs))
-                 (same (equal-including-properties text (cdr romacs-agent-ui--header))))
-            (setq romacs-agent-ui--header (cons inputs (if same (cdr romacs-agent-ui--header) text)))
-            (unless same
-              (setq header-line-format (romacs-agent-ui--header-format text))
-              (force-mode-line-update))))))))
+    (with-current-buffer buffer (romacs-agent-ui--header-show))))
 
 (add-hook 'romacs-agent-changed-functions #'romacs-agent-ui--header-refresh)
 
+(defun romacs-agent-ui--headers-remake ()
+  "Make every chat's header again, a transcript's view's too, whose
+session is no recorded one."
+  (dolist (buffer (buffer-list))
+    (when (buffer-local-value 'romacs-agent-ui--session buffer)
+      (with-current-buffer buffer (romacs-agent-ui--header-show t)))))
+
 (defun romacs-agent-ui--glyphs-changed ()
   "What draws a glyph changed (`romacs-agent-glyphs', the frame's font):
-every session's workers' line is made again, and every chat's header, a
-transcript's view's too, whose session is no recorded one."
+every session's workers' line and every chat's header are made again."
   (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
-  (dolist (buffer (buffer-list))
-    (when-let* ((session (buffer-local-value 'romacs-agent-ui--session buffer)))
-      (romacs-agent-ui--header-refresh session t))))
+  (romacs-agent-ui--headers-remake))
 
 (add-hook 'after-setting-font-hook #'romacs-agent-ui--glyphs-changed)
 
@@ -1187,7 +1194,7 @@ and a running turn's live rule ticks."
         (set-marker-insertion-type romacs-agent-ui--end nil)
         (setq romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
         ;; Its window is laid out with the header it will have.
-        (romacs-agent-ui--header-refresh session))
+        (romacs-agent-ui--header-show))
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer)
       (with-current-buffer buffer
@@ -2548,6 +2555,10 @@ its newest; on \"more\", every transcript."
   (if-let* ((item (romacs-agents--history-at-point)))
       (romacs-agent-history-resume item)
     (romacs-agent-resume (romacs-agents--at-point))))
+
+;; Loaded into a running session, its open chats' headers are this file's:
+;; an older version's form names functions this one has changed.
+(romacs-agent-ui--headers-remake)
 
 (provide 'romacs-agent-ui)
 ;;; romacs-agent-ui.el ends here

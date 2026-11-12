@@ -529,10 +529,8 @@ buffer, for SESSION: its end, from a prompt on."
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer)
       (with-current-buffer buffer
-        ;; A view's session is no registered one: its header is its buffer's.
-        (setf (romacs-agent-buffer romacs-agent-ui--session) buffer)
         (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))
-        (romacs-agent-ui--header-refresh romacs-agent-ui--session)))
+        (romacs-agent-ui--header-show)))
     (pop-to-buffer buffer)
     (goto-char (point-max))
     (recenter -1)
