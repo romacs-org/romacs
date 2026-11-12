@@ -2233,6 +2233,9 @@ SESSION's last fork note, a new one says how far the fork now goes."
 resumed; a per-turn harness goes on with its next message."
   (cond ((process-live-p (romacs-agent-connection session)))
         ((romacs-agent--per-turn-p session))
+        ;; A selection's restart under way resumes it on the selection itself:
+        ;; a resume now would run the old one.
+        ((eq (plist-get (romacs-agent-pending-selection session) :state) 'restarting))
         ;; A stopped supervisor leaves its socket: only a connection says it listens.
         ((and (file-exists-p (romacs-agent-host-socket session)) (processp (romacs-agent--attach session 0))))
         (t (romacs-agent-resume session)))

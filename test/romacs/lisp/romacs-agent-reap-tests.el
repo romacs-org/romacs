@@ -140,6 +140,20 @@ DELAY), `stopped' each session stopped."
           (romacs-agent--restart session)
           (delete-process process)
           (romacs-agent--sentinel process "killed")
+          (should (equal resumed '("new")))
+          ;; Under a unit, the harness gone before its unit is: a message
+          ;; delivered then (a task's, a child's result) leaves the resume
+          ;; to the restart.
+          (setq resumed nil)
+          (romacs-agent--set-stopped session nil)
+          (setf (romacs-agent-connection session) nil
+                (romacs-agent-options session) '(:model "old")
+                (romacs-agent-pending-selection session) (list :state 'restarting :model "new"))
+          (romacs-agent--continue session)
+          (should-not resumed)
+          (setf (romacs-agent-pending-selection session)
+                (plist-put (romacs-agent-pending-selection session) :stopped t))
+          (romacs-agent--restarted session)
           (should (equal resumed '("new"))))
       (when (process-live-p process) (delete-process process))
       (delete-directory dir t))))
