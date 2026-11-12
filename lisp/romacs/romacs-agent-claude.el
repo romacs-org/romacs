@@ -98,6 +98,7 @@ RESUME is non-nil."
                     (resume (list "--resume" (romacs-agent--native-id session)))
                     (t (list "--session-id" (romacs-agent-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
+            (romacs-agent--suggestion-words session)
             (plist-get instance :arguments))))
 
 (defun romacs-agent--claude-image (file)
@@ -349,6 +350,10 @@ cache, it reports none) or does not say."
                ((and id (string-prefix-p "romacs-mode-" id) (equal (gethash "subtype" response) "error"))
                 (cl-return-from romacs-agent--claude-events (romacs-agent--claude-mode-refused session id response))))
          nil))
+      ("prompt_suggestion"
+       (let ((text (romacs-agent--value (gethash "suggestion" line))))
+         (and (stringp text) (not (string-empty-p (setq text (string-trim text))))
+              (list (list :type 'suggestion :text text)))))
       ("rate_limit_event" nil)
       (_ (list (list :type 'unknown :raw line))))))
 
@@ -540,6 +545,8 @@ answers in its input, and for the session when asked."
   :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
+  ;; After a turn's end, at times, a prompt_suggestion line.
+  :suggestions '("--prompt-suggestions")
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
              :keep romacs-agent-history--claude-keep
