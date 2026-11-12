@@ -2,9 +2,13 @@
 //! and GNU's `emacs --batch'.
 //!
 //! A GNU batch session boots from its own world (`romacs_vm::world`): the
-//! VM at the end of the batch chain ([`chain`]), keyed by this executable
-//! and [`recipe`], in `--world-store` or the user's cache
-//! (`world::default_store`) when that exists, unless ROMACS_WORLD=off. No
+//! VM at GNU's dump point, the batch chain's loadup without its startup
+//! steps ([`chain`], `romacs--dumping`), keyed by this executable and
+//! [`recipe`], in `--world-store` or the user's cache
+//! (`world::default_store`) when that exists, unless ROMACS_WORLD=off. It
+//! holds nothing of its builder's HOME, per-user directory or locale: each
+//! restored session takes the startup steps in its own process
+//! (`romacs-world-restart`), so one world serves every HOME. No
 //! session is slower than a boot from source: one whose world is missing
 //! or stale boots the chain from source while a detached builder, under
 //! the world's lock, prepares it for the next; a session in a fresh HOME
@@ -163,7 +167,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     if let Some(root) = super::startup::runtime_of(&dir) { runtime.push(root.join("lisp/romacs")); }
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
-    let recipe = recipe_in(&dir, |name| environment.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()));
+    let recipe = recipe(&dir);
     let worlds = store.join("worlds");
     let made = |name| { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().recursive(true).mode(0o700).create(store.join(name)).is_ok() };
     let compiler = if compiles && made("home") && made("tmp") {
@@ -303,30 +307,15 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
     }
 }
 
-/// The environment the batch chain's startup steps read (the user, the
-/// locale, the per-user directories), which a world's records bind: keyed
-/// too, so the worlds of each HOME or locale a user runs under sit side by
-/// side, `prune` keeping the most recent few, rather than rebuilding one.
-/// The processor count and the OpenMP limits it reads are per-process,
-/// asked again by the restored startup, so they key nothing.
-const STARTUP_ENVIRONMENT: [&str; 13] = ["HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-    "USER", "LOGNAME", "NAME", "EMAIL", "SHELL", "ROMACS_RUNTIME_ROOT", "HANGUL_KEYBOARD_TYPE"];
-
 /// What keys a batch world beside the executable: the batch chain over
 /// the GNU Lisp in DIR, on GNU batch's initial terminal frame, from this
-/// executable's path (the family `prune` bounds) in [`STARTUP_ENVIRONMENT`].
+/// executable's path (the family `prune` bounds). No environment: the
+/// chain up to the dump point reads none of the user's directories or
+/// locale, and what else of the environment it reads its records bind.
 fn recipe(dir: &Path) -> Vec<String> {
-    recipe_in(dir, |name| std::env::var_os(name))
-}
-
-/// [`recipe`] in the environment GET reads.
-fn recipe_in(dir: &Path, get: impl Fn(&str) -> Option<OsString>) -> Vec<String> {
     let exe = std::env::current_exe().map_or_else(|e| e.to_string(), |p| p.display().to_string());
-    let environment: Vec<serde_json::Value> = STARTUP_ENVIRONMENT.iter()
-        .map(|name| get(name).map_or(serde_json::Value::Null, |v| v.to_string_lossy().into()))
-        .collect();
     vec!["consumer romacs-vm-gui".into(), "launch batch".into(), format!("exe {exe}"), "geometry 80 25 1 1".into(),
-         format!("lisp {}", dir.display()), format!("environment {}", serde_json::Value::Array(environment))]
+         format!("lisp {}", dir.display())]
 }
 
 /// A builder's arguments for WORLD: its store, absolute, then `--batch'.
@@ -336,8 +325,9 @@ fn builder_args(world: &World) -> Vec<std::ffi::OsString> {
 
 /// The batch chain from source: a VM on GNU batch's initial terminal
 /// frame, 80 columns by 25 lines of 1x1 characters (DIVERGENCES.md
-/// VM2-WIN5), through the GNU-loadup chain over DIR. What a batch world
-/// holds, and what a session without one boots.
+/// VM2-WIN5), through the GNU-loadup chain over DIR and its startup
+/// steps. What a session without a world boots, and what a batch world
+/// holds up to the dump point.
 fn chain(dir: &Path) -> Result<Vm, String> {
     let mut vm = Vm::new();
     vm.world_begin();
@@ -346,10 +336,11 @@ fn chain(dir: &Path) -> Result<Vm, String> {
     Ok(vm)
 }
 
-/// The builder: the chain in build mode, confined to its read roots, then
-/// the world published. The image's length.
+/// The builder: the chain in build mode up to GNU's dump point, confined
+/// to its read roots, then the world published. The image's length.
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
     world.begin_build(&world.build_roots(super::world::build_roots(dir))).map_err(|e| e.to_string())?;
+    romacs_vm::host::end_at_dump_point();
     world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
 }
 

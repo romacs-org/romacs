@@ -69,7 +69,7 @@ fn refusing() -> bool {
 /// (`Mode::Record`).
 pub fn enter_record() {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0,
+        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0, dump: false,
         site: None, records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Record));
@@ -184,9 +184,8 @@ const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-l
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
 /// fact or fenced variable the form may read, the variable it sets, which is
 /// fenced once the form ends).
-const RESEED: [(&str, &str, &str, Option<&str>); 7] = [
+const RESEED: [(&str, &str, &str, Option<&str>); 6] = [
     ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
-    ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
      Some("find-function-C-source-directory")),
     // It asks only whether exec-path is bound: its standard value is the
@@ -372,6 +371,8 @@ struct Build {
     pinned: Pinned,
     phase: Phase,
     startups: usize,
+    /// The build ends at GNU's dump point (`end_at_dump_point`).
+    dump: bool,
     site: Option<Rc<Site>>,
     records: Vec<Json>,
     refusals: Vec<Json>,
@@ -402,7 +403,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 /// Start recording a build on this thread, in `Phase::Init`.
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned, phase: Phase::Init, startups: 0, site: None,
+        pinned, phase: Phase::Init, startups: 0, dump: false, site: None,
         records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Build));
@@ -418,6 +419,18 @@ pub fn leave_build() -> Option<Json> {
 /// The VM is made: the recipe starts.
 pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
+}
+
+/// This build ends at GNU's dump point, as loadup.el does under
+/// `dump-mode': the chain leaves its startup steps to each restored
+/// process (`romacs--dumping`). A no-op outside a build.
+pub fn end_at_dump_point() {
+    with_build(|b| b.dump = true);
+}
+
+/// Whether this process builds a world that ends at GNU's dump point.
+pub(crate) fn dumping() -> bool {
+    refusing() && with_build(|b| b.dump).unwrap_or(false)
 }
 
 /// How many startup runs a build has begun.
