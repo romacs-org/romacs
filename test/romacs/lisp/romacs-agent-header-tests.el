@@ -64,6 +64,7 @@ string, a window's cut of it, an overlay."
              (romacs-agent-ui--composer-update)
              (setq written 0)
              ,@body)
+         (remove-hook 'pre-redisplay-functions #'romacs-agent-ui--header-fit-all)
          (when (buffer-live-p chat) (kill-buffer chat))))))
 
 ;; The host runs window.c's change functions before it redisplays; a batch
@@ -250,8 +251,8 @@ string, a window's cut of it, an overlay."
 
 (ert-deftest romacs-agent-header-is-cut-at-each-window ()
   ;; Two windows of one chat, one too narrow for its header: each shows it
-  ;; cut at its own width, and the cut follows the header, and the window's
-  ;; width and buffer as redisplay sees them.
+  ;; cut at its own width.  The cut follows the header, and the window's
+  ;; width and buffer, as each redisplay finds them.
   (romacs-agent-header-tests--with
     (save-window-excursion
       (delete-other-windows)
@@ -260,8 +261,11 @@ string, a window's cut of it, an overlay."
              (narrow (split-window wide (- (window-total-width wide) 14) t))
              (other (get-buffer-create " *romacs-agent-header-tests*")))
         (cl-flet* ((cut (window) (window-parameter window 'header-line-format))
-                   ;; What a redisplay runs first.
-                   (redisplayed () (romacs--run-window-change-functions))
+                   ;; What a redisplay runs before it shows anything.
+                   (redisplayed ()
+                     (romacs--run-window-change-functions)
+                     (redisplay--pre-redisplay-functions nil)
+                     (should-not (memq #'romacs-agent-ui--header-fit-all (default-value 'pre-redisplay-functions))))
                    (mode (mode) (romacs-agent--raise session (list :type 'mode :permission-mode mode)))
                    (cut-p (window)
                      (equal (substring-no-properties (cut window))
@@ -275,35 +279,48 @@ string, a window's cut of it, an overlay."
           (should (eq (get-text-property 0 'face (cut narrow)) (get-text-property 0 'face header-line-format)))
           ;; The header changes: the cut is of the new one.
           (mode "acceptEdits")
+          (redisplayed)
           (should-not (cut wide))
           (should (cut-p narrow))
           (should (string-search "acc" (cut narrow)))
-          ;; Unchanged, a window is not written again.
+          ;; Unchanged, a window is not written again, and nothing waits
+          ;; for the next redisplay.
           (let ((held (cut narrow)))
             (romacs-agent--raise session (list :type 'status :text "requesting"))
+            (should-not (memq #'romacs-agent-ui--header-fit-all (default-value 'pre-redisplay-functions)))
             (redisplayed)
             (should (eq (cut narrow) held)))
-          ;; The header changes while the narrow window is wide for a moment
-          ;; no redisplay sees: put back, it shows the new header cut.
+          ;; The header changes while the narrow window is, for a moment no
+          ;; redisplay sees, wide, showing another buffer, or deleted: put
+          ;; back, it shows the new header cut.
           (save-window-excursion
             (delete-other-windows narrow)
             (mode "dontAsk"))
+          (redisplayed)
           (should (= (window-body-width narrow) 14))
           (should (cut-p narrow))
           (should (string-search "don" (cut narrow)))
-          ;; The same while it shows another buffer for such a moment.
           (save-window-excursion
             (set-window-buffer narrow other)
             (mode "default"))
+          (redisplayed)
           (should (cut-p narrow))
           (should (string-search "def" (cut narrow)))
+          (save-window-excursion
+            (delete-window narrow)
+            (mode "acceptEdits"))
+          (redisplayed)
+          (should (window-live-p narrow))
+          (should (cut-p narrow))
+          (should (string-search "acc" (cut narrow)))
           ;; A window showing the chat only for such a moment gets no cut.
           (set-window-buffer narrow other)
           (redisplayed)
           (should-not (cut narrow))
           (save-window-excursion
             (set-window-buffer narrow chat)
-            (mode "acceptEdits"))
+            (mode "dontAsk"))
+          (redisplayed)
           (should-not (cut narrow))
           (set-window-buffer narrow chat)
           (redisplayed)
@@ -311,6 +328,7 @@ string, a window's cut of it, an overlay."
           ;; A `%' cut into view is still said literally.
           (setf (romacs-agent-provider session) "100%")
           (romacs-agent-ui--header-refresh session)
+          (redisplayed)
           (should (string-search "100%%" (cut narrow)))
           ;; The narrow one widened shows the buffer's again.
           (delete-window wide)
@@ -327,7 +345,8 @@ string, a window's cut of it, an overlay."
           (set-window-parameter narrow 'header-line-format 'none)
           (set-window-buffer narrow chat)
           (redisplayed)
-          (mode "dontAsk")
+          (mode "default")
+          (redisplayed)
           (set-window-buffer narrow other)
           (redisplayed)
           (should (eq (cut narrow) 'none))
@@ -337,7 +356,9 @@ string, a window's cut of it, an overlay."
           (redisplayed)
           (should (cut narrow))
           (kill-buffer chat)
-          (should-not (cut narrow)))))))
+          (redisplayed)
+          (should-not (cut narrow))
+          (should-not (window-parameter narrow 'romacs-agent-header)))))))
 
 (ert-deftest romacs-agent-header-of-a-transcript-follows-glyphs ()
   ;; A transcript's view has a session no one records: its header is made

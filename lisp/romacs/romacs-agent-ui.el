@@ -981,51 +981,43 @@ and the whole line.")
   "TEXT as a header line shows it: each `%' said literally."
   (string-replace "%" "%%" text))
 
-(defvar-local romacs-agent-ui--header-cuts nil
-  "The windows this chat was in when redisplay last looked, each with its
-width then and the header cut to it where the whole does not fit:
-\(WINDOW WIDTH . CUT).")
-
-(defun romacs-agent-ui--header-cut (window width)
-  "Cut this chat's header to WIDTH columns for WINDOW; with no WIDTH,
-WINDOW shows the chat no more.
+(defun romacs-agent-ui--header-fit (window)
+  "Give WINDOW its chat's header cut to its width where the whole does not
+fit it, and no cut of a chat it does not show.
 The buffer's `header-line-format' is the whole line, and a window wide
 enough shows that.  A narrower one holds the line cut to its own width as
 its `header-line-format' parameter, so two windows of one chat are each cut
-where they end.  A parameter that is not the cut this chat gave is left
-alone."
-  (let* ((held (cdr (alist-get window romacs-agent-ui--header-cuts)))
-         (text (cdr romacs-agent-ui--header))
-         (cut (and width text (> (string-width text) width)
+where they end, and as its `romacs-agent-header' parameter, by which the
+cut is known for this function's: another's parameter is left alone.  Both
+stay with the window whatever becomes of it, so what this does follows
+from what WINDOW shows now and how wide, and from nothing kept elsewhere.
+Run before a redisplay, never between two: inside a
+`save-window-excursion' a window has a width, or a buffer, or is deleted,
+as no redisplay shows it, and nothing tells when that is put back."
+  (let* ((text (cdr (buffer-local-value 'romacs-agent-ui--header (window-buffer window))))
+         (width (max 1 (window-body-width window)))
+         (cut (and text (> (string-width text) width)
                    (romacs-agent-ui--header-format (romacs-truncate text width))))
-         (same (equal-including-properties cut held)))
-    (unless (or same (not (eq held (window-parameter window 'header-line-format))))
-      (set-window-parameter window 'header-line-format cut))
-    (setf (alist-get window romacs-agent-ui--header-cuts nil t)
-          (and width (cons width (if same held cut))))))
+         (held (window-parameter window 'romacs-agent-header)))
+    (unless (equal-including-properties cut held)
+      (when (eq held (window-parameter window 'header-line-format))
+        (set-window-parameter window 'header-line-format cut))
+      (set-window-parameter window 'romacs-agent-header cut))))
 
-(defun romacs-agent-ui--header-fit (window)
-  "WINDOW shows this chat or shows it no more, or its width changed: its
-cut of the header is for what it shows now.  A window change function, so
-run before a redisplay with what that redisplay will show (a window's old
-buffer's before its new one's)."
-  (romacs-agent-ui--header-cut window (and (eq (window-buffer window) (current-buffer))
-                                           (max 1 (window-body-width window)))))
+(defun romacs-agent-ui--header-fit-frame (frame)
+  "FRAME's windows changed buffers or sizes since the last redisplay: each
+has the cut of what it shows now (a window change function)."
+  (walk-windows #'romacs-agent-ui--header-fit 'no-minibuffer frame))
 
-(defun romacs-agent-ui--header-recut ()
-  "This chat's header was made again, or its buffer is going: each window
-redisplay last saw it in holds its cut of what the header is now, at the
-width it had then.  Not at the width it has now: inside a
-`save-window-excursion' that is a width, or a buffer, no redisplay shows,
-and nothing tells when it is put back."
-  (pcase-dolist (`(,window ,width . ,_) (copy-sequence romacs-agent-ui--header-cuts))
-    (if (window-live-p window) (romacs-agent-ui--header-cut window width)
-      (setf (alist-get window romacs-agent-ui--header-cuts nil t) nil))))
+(add-hook 'window-buffer-change-functions #'romacs-agent-ui--header-fit-frame)
+(add-hook 'window-size-change-functions #'romacs-agent-ui--header-fit-frame)
 
-(defun romacs-agent-ui--header-release ()
-  "This chat's buffer is going: no window keeps a cut of its header."
-  (setq romacs-agent-ui--header nil)
-  (romacs-agent-ui--header-recut))
+(defun romacs-agent-ui--header-fit-all (&rest _)
+  "A chat's header was made again: every window has the cut of what it
+shows now.  On `pre-redisplay-functions' from the header's change to the
+redisplay that shows it, and gone again with that."
+  (remove-hook 'pre-redisplay-functions #'romacs-agent-ui--header-fit-all)
+  (walk-windows #'romacs-agent-ui--header-fit 'no-minibuffer t))
 
 (defun romacs-agent-ui--header-refresh (session &optional force)
   "Make the header of SESSION's chat say what SESSION says now.
@@ -1044,7 +1036,7 @@ glyph changed."
             (setq romacs-agent-ui--header (cons inputs (if same (cdr romacs-agent-ui--header) text)))
             (unless same
               (setq header-line-format (romacs-agent-ui--header-format text))
-              (romacs-agent-ui--header-recut)
+              (add-hook 'pre-redisplay-functions #'romacs-agent-ui--header-fit-all)
               (force-mode-line-update))))))))
 
 (add-hook 'romacs-agent-changed-functions #'romacs-agent-ui--header-refresh)
@@ -1196,11 +1188,6 @@ The transcript is read-only, its keys its own:
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
-  ;; A window narrower than the header holds its own cut of it, while it
-  ;; shows the chat.
-  (add-hook 'window-size-change-functions #'romacs-agent-ui--header-fit nil t)
-  (add-hook 'window-buffer-change-functions #'romacs-agent-ui--header-fit nil t)
-  (add-hook 'kill-buffer-hook #'romacs-agent-ui--header-release nil t)
   ;; The composer moves as text arrives: the tray goes with it.
   (add-hook 'post-command-hook #'romacs-agent-ui--tray nil t)
   ;; Shown again while its turn runs: the live rule ticks again.
