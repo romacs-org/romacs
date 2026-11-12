@@ -676,6 +676,14 @@ impl Program {
     pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
         minor_values(&self.code, &self.entries, changed, value);
     }
+    /// Make the entry cache of function ID's first instruction name TARGET,
+    /// as a call through it would: whether ID has lowered code here.
+    #[cfg(test)]
+    pub(super) fn plant_entry(&mut self, id: usize, target: Value) -> bool {
+        let Some(site) = self.code.get(id).and_then(|code| code.first()).map(|inst| inst.site) else { return false };
+        self.entries[site].target = target;
+        true
+    }
     /// What function ID's lowered code holds, each instruction read on a copy,
     /// and the functions its entry caches enter: for verify's reference
     /// marker (gc_check.rs), apart from `trace_function'.

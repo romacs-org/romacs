@@ -2122,9 +2122,7 @@ mod tests {
 
     /// A minor inside a request, its engine suspended with code and entry
     /// caches whole: a call site whose symbol was given another function
-    /// since it was last entered calls the new one afterwards. (No test
-    /// isolates the read of entry caches: a stale target is also held by
-    /// the frame's registers here.)
+    /// since it was last entered calls the new one afterwards.
     #[test]
     fn a_minor_inside_a_request_leaves_its_call_sites_right() {
         let mut vm = Vm::new();
@@ -2141,6 +2139,26 @@ mod tests {
         assert!(vm.collection_log.records.iter().any(|record| record.minor), "a minor ran inside the request");
         assert_eq!(last, Value::NIL, "and the site calls the new one");
         vm.collect(&mut []);
+    }
+
+    /// An entry cache is a root: a function made since the last collection
+    /// that only an idle program's entry cache names survives a minor, as
+    /// it does a full. The cache is filled by hand, as a call through its
+    /// site would fill it.
+    #[test]
+    fn a_minor_keeps_what_only_an_entry_cache_names() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(fset 'entry-caller #'(lambda () (entry-callee))) (fset 'entry-callee #'(lambda () 1))").unwrap();
+        vm.eval_source_raw("(entry-caller)").unwrap();
+        vm.collect(&mut []);
+        let caller = vm.eval_source_raw("(symbol-function 'entry-caller)").unwrap();
+        let function = vm.closures[usize::try_from(caller.payload()).unwrap()].function;
+        let young = vm.eval_source_raw("(let ((held (list 1 2))) #'(lambda () held))").unwrap();
+        assert!(!vm.closures.old(usize::try_from(young.payload()).unwrap()), "made since the collection");
+        assert!(vm.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
+        assert!(vm.collect_minor(&[]));
+        assert!(vm.closures.old(usize::try_from(young.payload()).unwrap()), "the cache's function survived, and is old");
     }
 
     /// With a log lost a minor frees nothing and promotes everything.
