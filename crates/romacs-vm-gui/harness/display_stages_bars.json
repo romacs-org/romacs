@@ -1,102 +1,122 @@
 {
  "plain-idle": {
-  "step_instructions": 654000,
-  "display_instructions": 355000,
+  "step_instructions": 663000,
+  "display_instructions": 356000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 0,
   "layouts": 0,
   "frames_submitted": 0,
-  "display_instructions_p90": 359000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 360000
  },
  "chat-idle": {
-  "step_instructions": 5360000,
+  "step_instructions": 5350000,
   "display_instructions": 5050000,
   "display_conses": 8190,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 0,
+  "lines_laid": 0,
+  "rows_wrapped": 0,
   "display_instructions_p90": 5070000
  },
  "chat-tick": {
-  "step_instructions": 34200000,
-  "display_instructions": 33200000,
+  "step_instructions": 26000000,
+  "display_instructions": 25000000,
   "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 1,
   "layouts": 2,
   "frames_submitted": 0,
-  "display_instructions_p90": 33200000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 25100000
  },
  "chat-collected": {
-  "step_instructions": 189000000,
-  "display_instructions": 38800000,
+  "step_instructions": 176000000,
+  "display_instructions": 30500000,
   "display_conses": 8360,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 0,
-  "display_instructions_p90": 38900000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 30600000
  },
  "cursor-move": {
-  "step_instructions": 5600000,
-  "display_instructions": 5120000,
+  "step_instructions": 2290000,
+  "display_instructions": 1810000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 1,
-  "display_instructions_p90": 5150000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 2070000
  },
  "typed": {
-  "step_instructions": 9860000,
-  "display_instructions": 9220000,
+  "step_instructions": 3900000,
+  "display_instructions": 3240000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 9260000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 3430000
  },
  "append-unseen": {
-  "step_instructions": 5380000,
-  "display_instructions": 5020000,
+  "step_instructions": 2100000,
+  "display_instructions": 1740000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 0,
-  "display_instructions_p90": 5020000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 1740000
  },
  "typed-elements": {
-  "step_instructions": 24200000,
-  "display_instructions": 23600000,
+  "step_instructions": 18500000,
+  "display_instructions": 17900000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 23700000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 18000000
  },
  "chat-stream-1k": {
-  "step_instructions": 38600000,
-  "display_instructions": 36900000,
+  "step_instructions": 25500000,
+  "display_instructions": 24100000,
   "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 1,
-  "display_instructions_p90": 107000000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 60800000
  },
  "chat-stream-10k": {
-  "step_instructions": 96100000,
-  "display_instructions": 94600000,
+  "step_instructions": 52800000,
+  "display_instructions": 51500000,
   "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 1,
-  "display_instructions_p90": 617000000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 287000000
  }
 }
