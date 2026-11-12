@@ -13,6 +13,7 @@ use crate::engine::scan::{
 use crate::engine::search::StartAnchor;
 use crate::engine::syntax::SyntaxLookup;
 use crate::engine::translate::CaseTranslation;
+use crate::engine::syntax_lead::{SyntaxLead, syntax_lead};
 use regex_automata::util::prefilter::Prefilter as RaPrefilter;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -53,6 +54,10 @@ pub struct CompiledPattern {
     /// The tiny ASCII candidate set used by memchr, derived on first use.
     /// Rebuilt with the fastmap, including syntax-table recomputation.
     pub(crate) sparse_ascii_fastmap: std::cell::OnceCell<Option<SparseAsciiFastmap>>,
+
+    /// The syntax-aware first-character set ([`syntax_lead`](crate::engine::syntax_lead::syntax_lead)),
+    /// derived on first use from the bytecode alone.
+    pub(crate) syntax_lead: std::cell::OnceCell<Option<SyntaxLead>>,
 
     /// How a case-folded search finds its next candidate: `TRANSLATE` folded
     /// into the fastmap once, per text representation (see
@@ -207,6 +212,10 @@ impl CompiledPattern {
         *self
             .sparse_ascii_fastmap
             .get_or_init(|| sparse_ascii_fastmap(&self.fastmap))
+    }
+
+    pub(crate) fn syntax_lead(&self) -> Option<&SyntaxLead> {
+        self.syntax_lead.get_or_init(|| syntax_lead(self)).as_ref()
     }
 
     /// The multi-literal prefilter, built now if it was not yet.
