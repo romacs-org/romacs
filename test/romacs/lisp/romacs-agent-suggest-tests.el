@@ -83,6 +83,28 @@
       (romacs-agent--record session record))
     (should-not (romacs-agent-suggestion session))))
 
+(ert-deftest romacs-agent-suggest-replayed-while-reattaching-between-turns ()
+  ;; A turn ended and was seen; the attachment was lost (the sentinel's
+  ;; detached), and attaching again replays the prediction journaled after.
+  (let ((romacs-agent-event-functions nil)
+        (session (romacs-agent--make :id "s" :harness 'claude :state 'running)))
+    (romacs-agent-suggest-tests--feed session 1 "in" (romacs-agent--claude-user session "go" 1))
+    (romacs-agent-suggest-tests--feed session 2 "out" (romacs-agent-suggest-tests--result))
+    (setf (romacs-agent-state session) 'detached)
+    (romacs-agent-suggest-tests--feed session 3 "out" (romacs-agent-suggest-tests--suggestion "run it to confirm"))
+    ;; Kept, though not offered while detached.
+    (should (equal (plist-get (romacs-agent-driver-state session) :suggestion) "run it to confirm"))
+    (should-not (romacs-agent-suggestion session))
+    ;; The attachment's acknowledgement finds it idle: offered.
+    (setf (romacs-agent-state session) 'idle)
+    (should (equal (romacs-agent-suggestion session) "run it to confirm"))
+    ;; Detached with a prompt journaled since the last turn's end: mid-turn,
+    ;; a late prediction is the turn before's.
+    (romacs-agent-suggest-tests--feed session 4 "in" (romacs-agent--claude-user session "more" 2))
+    (setf (romacs-agent-state session) 'detached)
+    (romacs-agent-suggest-tests--feed session 5 "out" (romacs-agent-suggest-tests--suggestion "stale"))
+    (should-not (plist-get (romacs-agent-driver-state session) :suggestion))))
+
 (defmacro romacs-agent-suggest-tests--chat (suggestion &rest body)
   "BODY in an empty composer of an idle session whose harness predicted
 SUGGESTION (nil, none)."
@@ -101,6 +123,17 @@ SUGGESTION (nil, none)."
   "What the composer's overlay draws after it, as text."
   (let ((after (overlay-get romacs-agent-ui--composer 'after-string)))
     (and after (substring-no-properties after))))
+
+(ert-deftest romacs-agent-suggest-gone-once-stopped ()
+  ;; Stopping an idle session ends it (detached, as its supervisor
+  ;; journals no end): its prediction is neither shown nor there to take.
+  (let ((romacs-agent-suggestions t))
+    (dolist (state '(ended detached))
+      (romacs-agent-suggest-tests--chat "run it to confirm"
+        (setf (romacs-agent-state romacs-agent-ui--session) state)
+        (romacs-agent-ui--composer-update)
+        (should (equal (romacs-agent-suggest-tests--shown) "Message…"))
+        (should-not (romacs-agent-ui--suggestion))))))
 
 (ert-deftest romacs-agent-suggest-composer-shows-hides-and-shows-again ()
   (let ((romacs-agent-suggestions t))

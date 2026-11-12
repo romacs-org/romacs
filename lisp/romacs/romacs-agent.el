@@ -284,8 +284,10 @@ Its run's, kept in the driver's state."
 (defun romacs-agent-suggestion (session)
   "The prompt SESSION's harness predicts the user sends next, or nil: given
 after a turn's end, gone when the next turn starts or the run ends.  Its
-run's, kept in the driver's state."
-  (plist-get (romacs-agent-driver-state session) :suggestion))
+run's, kept in the driver's state, and offered only while SESSION is idle:
+one stopped, ended or detached takes no prompt from it."
+  (and (eq (romacs-agent-state session) 'idle)
+       (plist-get (romacs-agent-driver-state session) :suggestion)))
 
 (defun romacs-agent--set-asks (session asks)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :asks asks)))
@@ -1186,8 +1188,10 @@ itself, so the turn goes on whatever becomes of this server."
                    (setf (romacs-agent-state session) 'waiting-approval))))
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
     ;; The prompt predicted next: only between turns (one arriving after
-    ;; the next prompt is about the turn before).
-    ('suggestion (when (eq (romacs-agent-state session) 'idle)
+    ;; the next prompt is about the turn before), as the journal says, so
+    ;; one replayed to a session attaching again, detached till then, counts.
+    ('suggestion (when (and (memq (romacs-agent-state session) '(idle detached))
+                            (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
                    (setf (romacs-agent-driver-state session)
                          (plist-put (romacs-agent-driver-state session) :suggestion (plist-get event :text)))))
     ;; Its harness would not go into plan mode: the session is not in it.
