@@ -12,7 +12,8 @@
         (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
     (require 'romacs-agent)
     (require 'romacs-agent-claude)
-    (require 'romacs-agent-ui)))
+    (require 'romacs-agent-ui)
+    (require 'completion-preview)))
 
 (defmacro romacs-agent-suggest-tests--registry (&rest body)
   "BODY with the driver registry its own: what it defines goes with it."
@@ -197,7 +198,6 @@ SUGGESTION (nil, none)."
        (substring-no-properties (overlay-get completion-preview--overlay 'after-string))))
 
 (ert-deftest romacs-agent-suggest-preview-shows-the-rest ()
-  (require 'completion-preview)
   (let ((romacs-agent-suggestions t) (suggestion "add tests for reverse_words"))
     (romacs-agent-suggest-tests--chat suggestion
       (completion-preview-mode)
