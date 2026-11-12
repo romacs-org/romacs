@@ -87,8 +87,19 @@ class SourceDirectory(unittest.TestCase):
         image = source / 'test/data/image/black.jpg'
         self.assertTrue(image.is_file())
         self.assertEqual(image.resolve(), run.TESTS / 'data/image/black.jpg')
+        self.assertTrue((source / 'test/data/decompress/tg.tar.gz').is_file(), 'the archives arc-mode and tar-mode read')
         self.assertTrue((source / 'test/gnu/run.py').is_file())
         self.assertIs(run.source_directory(), source)
+
+    def test_a_checkouts_own_test_data_does_not_hide_gnus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / 'test/data/video').mkdir(parents=True)
+            (root / 'test/other').mkdir()
+            with patch.object(run, 'ROOT', root):
+                source = run.made_source_directory.__wrapped__()
+            self.assertEqual((source / 'test/data').resolve(), run.TESTS / 'data')
+            self.assertTrue((source / 'test/other').is_dir())
 
     def test_a_test_file_is_named_from_the_suite_or_the_repository(self):
         for name in ('src/fns-tests.el', 'test/src/fns-tests.el', 'test/gnu/test/src/fns-tests.el',
