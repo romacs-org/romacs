@@ -672,6 +672,10 @@ impl Program {
     pub(super) fn sites(&self) -> usize {
         self.entries.len()
     }
+    /// What a minor reads of it (`minor_values`).
+    pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
+        minor_values(&self.code, &self.entries, changed, value);
+    }
     /// What function ID's lowered code holds, each instruction read on a copy,
     /// and the functions its entry caches enter: for verify's reference
     /// marker (gc_check.rs), apart from `trace_function'.
@@ -751,6 +755,19 @@ impl Program {
         }
     }
 }
+/// What a minor collection reads of lowered CODE and its ENTRIES: the code
+/// of the functions CHANGED since the last collection, the rest naming only
+/// what a collection promoted, and every entry cache's target, which a call
+/// fills at any time.
+fn minor_values(code: &[Vec<Inst>], entries: &[EntryCache], changed: &[usize], value: &mut impl FnMut(Value)) {
+    for inst in changed.iter().filter_map(|&id| code.get(id)).flatten() {
+        let mut copy = *inst;
+        copy.visit_values(&mut |v| value(*v));
+    }
+    for entry in entries {
+        value(entry.target);
+    }
+}
 /// A suspended engine's own state, moved here while a nested call or a
 /// collection runs (`Vm::suspended`) and moved back as it resumes. The Vm owns
 /// it for that long, so the collector reads and rewrites it in place, with no
@@ -809,6 +826,10 @@ impl Suspended {
         for entry in &self.entries {
             value(entry.target);
         }
+    }
+    /// What a minor reads of its code and entry caches (`minor_values`).
+    pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
+        minor_values(&self.code, &self.entries, changed, value);
     }
     /// Whether a cleanup of this engine is running: an escape's or a normal
     /// exit's, its record not yet popped (`Op::ResumeExit`).

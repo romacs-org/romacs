@@ -1629,6 +1629,7 @@ impl Vm {
             return true;
         }
         self.clear_dead_tails();
+        let mut lap = Lap::start();
         self.clear_collection_caches();
         let mut again: Vec<Value> = roots.to_vec();
         again.extend(self.conses.mark_old(|_| false).into_iter().map(|i| Value::reference(i, 3)));
@@ -1646,7 +1647,11 @@ impl Vm {
             for &(key, value) in &entry.properties { again.extend([key, value]); }
         }
         let none = vec![false; self.slots.len()];
-        let Some(marked) = self.mark_heap(&again, &none, &none, MarkFor::Minor, 1, &mut Lap(None)) else { unreachable!("no key ends a minor") };
+        // Setup is the old marked and what is read again gathered; Roots and
+        // Mark as a full's; Weak, all that is dropped; then the sweep.
+        lap.lap(&mut self.gc_times, Phase::Setup);
+        let Some(marked) = self.mark_heap(&again, &none, &none, MarkFor::Minor, 1, &mut lap) else { unreachable!("no key ends a minor") };
+        lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
             self.check_minor(roots);
         }
@@ -1658,7 +1663,11 @@ impl Vm {
         let dead = marking.dead_objects(self, &mut own);
         self.unanchor(&dead);
         self.empty_dead_caches(&symbols, &regions);
+        lap.lap(&mut self.gc_times, Phase::Weak);
+        self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         self.sweep_in_place(&marking, own, &dead);
+        lap.lap(&mut self.gc_times, Phase::Sweep);
+        self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
         self.settle_minor();
         true
@@ -1764,13 +1773,8 @@ impl Vm {
             })
             .collect();
         self.source_code_roots(&mut code_pending);
-        // A minor reads the functions changed since the last collection and
-        // no other: the rest start reached, as the old entries do.
-        if matches!(r#for, MarkFor::Minor) {
-            code_pending = self.functions.changed().expect("a minor with the record lost promotes instead").to_vec();
-            let changed: HashSet<usize> = code_pending.iter().copied().collect();
-            for (id, mark) in code_marks.iter_mut().enumerate() { *mark.get_mut() = !changed.contains(&id); }
-        }
+        let minor_changed = matches!(r#for, MarkFor::Minor).then(|| self.minor_code(&mut code_marks));
+        if let Some(changed) = &minor_changed { code_pending.clone_from(changed); }
         for (id, entry) in &self.conditions.entries {
             let custom = id.value().index_if(7).and_then(|n| n.checked_sub(1))
                 .is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
@@ -1782,12 +1786,7 @@ impl Vm {
         let untraced_lists = self.lambda_lists.keys().copied().collect();
         let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, ..MarkState::default() };
         state.region_marks[0] = true;
-        // A minor reclaims no region and no symbol: to its weak rounds every
-        // one is live, as each is to what it drops afterwards.
-        if matches!(r#for, MarkFor::Minor) {
-            state.region_marks.fill(true);
-            state.obarray_symbols_live = self.obarray_symbol_names.keys().copied().collect();
-        }
+        if minor_changed.is_some() { self.minor_keeps(&mut state); }
         // GNU dooms finalizers once, after the roots and before the weak
         // tables' contents are marked.
         let mut finalizers_doomed = false;
@@ -1808,9 +1807,7 @@ impl Vm {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
             // lowered code.
-            for engine in &this.suspended {
-                engine.code_values(&mut |v| if keep(&v) { pending.push(v) });
-            }
+            this.lowered_roots(minor_changed.as_deref(), &mut |v| if keep(&v) { pending.push(v) });
             marking.add(&mut own, &mut pending);
             loop {
                 let drained = marking.round(&view, &mut own, KEY_POLL,
@@ -1837,6 +1834,39 @@ impl Vm {
         let census = marking.census(&own);
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();
         Some(Marked { marking, own, doomed, local_live, code_marks, census, state })
+    }
+    /// The functions a minor reads, those changed since the last collection:
+    /// every other starts reached in `code_marks`, as the old entries do.
+    fn minor_code(&self, code_marks: &mut [std::sync::atomic::AtomicBool]) -> Vec<usize> {
+        let changed = self.functions.changed().expect("a minor with the record lost promotes instead").to_vec();
+        let set: HashSet<usize> = changed.iter().copied().collect();
+        for (id, mark) in code_marks.iter_mut().enumerate() { *mark.get_mut() = !set.contains(&id); }
+        changed
+    }
+    /// A minor reclaims no region and no symbol: to its weak rounds every
+    /// one is live, as each is to what it drops afterwards.
+    fn minor_keeps(&self, state: &mut MarkState) {
+        state.region_marks.fill(true);
+        state.obarray_symbols_live = self.obarray_symbol_names.keys().copied().collect();
+    }
+    /// The lowered code a mark starts from: suspended engines', whole. A
+    /// minor (CHANGED given) reads lowered code as it reads functions, that
+    /// of the changed alone; and since entry caches are filled by any call,
+    /// it reads every one, an idle program's too: a full reaches those
+    /// through the functions it traces.
+    fn lowered_roots(&self, changed: Option<&[usize]>, value: &mut impl FnMut(Value)) {
+        let Some(changed) = changed else {
+            for engine in &self.suspended {
+                engine.code_values(value);
+            }
+            return;
+        };
+        for engine in &self.suspended {
+            engine.minor_values(changed, value);
+        }
+        for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+            program.minor_values(&[], value);
+        }
     }
     /// `ROMACS_GC_VERIFY': mark again, alone, from nothing, and require the
     /// threads' answer: every colour, function, symbol and region, the doomed
@@ -2088,6 +2118,29 @@ mod tests {
         assert!(vm.conses.live() < before + 400_000, "the garbage went: {before} to {}", vm.conses.live());
         let kept = vm.eval_source_raw("(equal (list (length minor-keep) (car (car minor-keep)) (car (nth 599 minor-keep))) '(600 1198000 0))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the variable holds survives every minor");
+    }
+
+    /// A minor inside a request, its engine suspended with code and entry
+    /// caches whole: a call site whose symbol was given another function
+    /// since it was last entered calls the new one afterwards. (No test
+    /// isolates the read of entry caches: a stale target is also held by
+    /// the frame's registers here.)
+    #[test]
+    fn a_minor_inside_a_request_leaves_its_call_sites_right() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_minor(true);
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000) (fset 'entry-caller #'(lambda () (entry-callee)))").unwrap();
+        vm.collect(&mut []);
+        vm.collection_log = CollectionLog::default();
+        // One request: its engine is suspended, code and entry caches whole,
+        // when allocation brings the minor.
+        let last = vm.eval_source_raw("(progn (fset 'entry-callee #'(lambda () '(1 2))) (entry-caller) (entry-caller)
+          (fset 'entry-callee #'(lambda () nil)) (dotimes (i 400000) (list i i)) (entry-caller))").unwrap();
+        assert!(vm.collection_log.records.iter().any(|record| record.minor), "a minor ran inside the request");
+        assert_eq!(last, Value::NIL, "and the site calls the new one");
+        vm.collect(&mut []);
     }
 
     /// With a log lost a minor frees nothing and promotes everything.
