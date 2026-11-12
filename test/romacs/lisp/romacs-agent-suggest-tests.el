@@ -122,27 +122,36 @@ SUGGESTION (nil, none)."
         (romacs-agent-ui--composer-update)
         (should (equal (romacs-agent-suggest-tests--shown) "Message…"))))))
 
+;;; It is a completion: TAB, M-TAB, C-M-i take it; typed, a preview shows the rest
+
 (ert-deftest romacs-agent-suggest-without-one-shows-the-hint ()
   ;; A harness that predicts nothing (a driver without :suggestions).
   (let ((romacs-agent-suggestions t))
     (romacs-agent-suggest-tests--chat nil
       (should (equal (romacs-agent-suggest-tests--shown) "Message…"))
-      ;; TAB indents as it would.
-      (romacs-agent-chat-accept-suggestion)
-      (should-not (string-search "run" (romacs-agent-ui--composer-text))))))
+      (should-not (romacs-agent-ui--suggestion-capf))
+      (completion-at-point)
+      (should (equal (romacs-agent-ui--composer-text) "")))))
 
-(ert-deftest romacs-agent-suggest-tab-takes-it ()
+(ert-deftest romacs-agent-suggest-completion-takes-it ()
   (let ((romacs-agent-suggestions t))
+    (dolist (key '("TAB" "M-TAB" "C-M-i"))
+      (romacs-agent-suggest-tests--chat "run it to confirm"
+        (call-interactively (key-binding (kbd key)))
+        (should (equal (romacs-agent-ui--composer-text) "run it to confirm"))
+        (should (= (point) (point-max)))
+        (romacs-agent-ui--composer-update)
+        (should-not (romacs-agent-suggest-tests--shown))
+        ;; Taken, it is taken once, wherever point is in it.
+        (call-interactively (key-binding (kbd key)))
+        (goto-char romacs-agent-ui--end)
+        (call-interactively (key-binding (kbd key)))
+        (should (equal (romacs-agent-ui--composer-text) "run it to confirm"))))
+    ;; Typed text that begins it completes to it.
     (romacs-agent-suggest-tests--chat "run it to confirm"
-      (should (eq (lookup-key romacs-agent-chat-mode-map (kbd "TAB")) #'romacs-agent-chat-accept-suggestion))
-      (romacs-agent-chat-accept-suggestion)
-      (should (equal (romacs-agent-ui--composer-text) "run it to confirm"))
-      (should (= (point) (point-max)))
-      (romacs-agent-ui--composer-update)
-      (should-not (romacs-agent-suggest-tests--shown))
-      ;; A composer with text takes no second copy.
-      (romacs-agent-chat-accept-suggestion)
-      (should-not (string-search "confirmrun" (romacs-agent-ui--composer-text))))))
+      (insert "run i")
+      (completion-at-point)
+      (should (equal (romacs-agent-ui--composer-text) "run it to confirm")))))
 
 (ert-deftest romacs-agent-suggest-ret-never-sends-it ()
   (let ((romacs-agent-suggestions t) (sent nil))
@@ -152,9 +161,55 @@ SUGGESTION (nil, none)."
         (should-not sent)
         (should (equal (romacs-agent-ui--composer-text) ""))
         ;; Taken, it is the user's message.
-        (romacs-agent-chat-accept-suggestion)
+        (completion-at-point)
         (romacs-agent-chat-return)
         (should (equal (nth 1 (car sent)) "run it to confirm"))))))
+
+(ert-deftest romacs-agent-suggest-capf-completes-what-begins-it ()
+  (let ((romacs-agent-suggestions t) (suggestion "add tests for reverse_words"))
+    (romacs-agent-suggest-tests--chat suggestion
+      ;; The chat's own: no other buffer completes to it.
+      (should (memq #'romacs-agent-ui--suggestion-capf completion-at-point-functions))
+      (should-not (memq #'romacs-agent-ui--suggestion-capf (default-value 'completion-at-point-functions)))
+      (let ((start (marker-position romacs-agent-ui--end)))
+        (should (equal (romacs-agent-ui--suggestion-capf) (list start start (list suggestion) :exclusive 'no)))
+        (insert "add t")
+        (should (equal (romacs-agent-ui--suggestion-capf) (list start (point-max) (list suggestion) :exclusive 'no))))
+      ;; Never in the transcript.
+      (save-excursion (goto-char (point-min)) (should-not (romacs-agent-ui--suggestion-capf)))
+      ;; Typed text that does not begin it.
+      (insert "x")
+      (should-not (romacs-agent-ui--suggestion-capf))
+      (delete-char -1)
+      ;; None predicted, or offering turned off.
+      (let ((romacs-agent-suggestions nil)) (should-not (romacs-agent-ui--suggestion-capf)))
+      (setf (romacs-agent-driver-state romacs-agent-ui--session) nil)
+      (should-not (romacs-agent-ui--suggestion-capf)))))
+
+(defun romacs-agent-suggest-tests--preview-after (text)
+  "The completion preview after TEXT is typed in the empty composer, or nil."
+  (completion-preview-active-mode -1)
+  (delete-region romacs-agent-ui--end (point-max))
+  (insert text)
+  (let ((this-command (if (string-empty-p text) 'delete-backward-char 'self-insert-command)))
+    (completion-preview--post-command))
+  (and completion-preview-active-mode
+       (substring-no-properties (overlay-get completion-preview--overlay 'after-string))))
+
+(ert-deftest romacs-agent-suggest-preview-shows-the-rest ()
+  (require 'completion-preview)
+  (let ((romacs-agent-suggestions t) (suggestion "add tests for reverse_words"))
+    (romacs-agent-suggest-tests--chat suggestion
+      (completion-preview-mode)
+      ;; After any character typed, a space too.
+      (dolist (typed '("a" "add " "add tests f"))
+        (should (equal (romacs-agent-suggest-tests--preview-after typed) (substring suggestion (length typed)))))
+      (completion-preview-insert)
+      (should (equal (romacs-agent-ui--composer-text) suggestion))
+      ;; Deleted back to empty: the hint shows it, no preview over it.
+      (should-not (romacs-agent-suggest-tests--preview-after ""))
+      (romacs-agent-ui--composer-update)
+      (should (string-prefix-p suggestion (romacs-agent-suggest-tests--shown))))))
 
 (provide 'romacs-agent-suggest-tests)
 ;;; romacs-agent-suggest-tests.el ends here
