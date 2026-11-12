@@ -149,6 +149,9 @@ pub enum Fact<'a> {
     /// The machine's live load: memory and load averages change at every
     /// read, so no world is keyed on them.
     Machine,
+    /// The machine's name: keyed, except where GNU bakes it as the build
+    /// host (`BAKED_HOST`).
+    SystemName,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -176,6 +179,9 @@ pub const P_ENV: [&str; 17] = [
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
 /// the world was built, as a dumped GNU's is its dump time.
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
+/// The baked site of the machine's name: `emacs-build-system` is the host
+/// the world was built on, as a dumped GNU's is its dump's.
+const BAKED_HOST: (&str, &str) = ("/version.el", "(defconst emacs-build-system");
 /// jit-lock.el's default for `jit-lock-stealth-load' only asks whether
 /// `load-average' works, and a dumped GNU keeps the dump's answer.
 const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-load");
@@ -361,8 +367,9 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
         Fact::Machine if site.is_some_and(|s| s.at(BAKED_LOAD)) => Class::B,
+        Fact::SystemName if site.is_some_and(|s| s.at(BAKED_HOST)) => Class::B,
         Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors | Fact::Machine => Class::P,
-        Fact::Other => Class::K,
+        Fact::SystemName | Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
 }
@@ -1715,7 +1722,12 @@ pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
 pub fn system_name() -> io::Result<String> {
     let result = std::fs::read_to_string("/proc/sys/kernel/hostname");
     if building() {
-        host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        let baked = with_build(|b| class(Fact::SystemName, b.site.as_deref()) == Class::B).unwrap_or(false);
+        if baked && refusing() {
+            p_read(Fact::SystemName, "system-name".into());
+        } else {
+            host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        }
     }
     result
 }

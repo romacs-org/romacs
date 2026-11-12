@@ -163,6 +163,23 @@ fn the_build_time_is_baked_at_its_one_site() {
     assert_eq!(eval(&mut vm, "(time-convert emacs-build-time 'integer)"), "0");
 }
 
+/// `emacs-build-system` names the build host, as a dumped GNU's names its
+/// dump's: the machine's name read there is baked, so a renamed host keeps
+/// the world. Read anywhere else it is a keyed fact.
+#[test]
+fn the_build_host_is_baked_at_its_one_site() {
+    let dir = scratch("baked-host");
+    let version = write(&dir.join("version.el"), "(defconst emacs-build-system (system-name))\n(defconst emacs-other-host (system-name))\n");
+    let (_, trace) = build(&[version]);
+    let reads: Vec<_> = items(&trace, "records", "p-read").iter().filter(|r| r["what"] == "system-name")
+        .map(|r| (r["allowed"].as_str().unwrap(), r["site"]["line"].as_u64().unwrap())).collect();
+    assert_eq!(reads, [("baked", 1)], "{trace}");
+    let keyed: Vec<_> = items(&trace, "records", "host").iter().filter(|r| r["fact"] == "system-name")
+        .map(|r| r["site"]["line"].as_u64().unwrap()).collect();
+    assert_eq!(keyed, [2], "{trace}");
+    assert!(refusals(&trace).is_empty(), "{trace}");
+}
+
 #[test]
 fn keyed_environment_reads_record_form_and_value() {
     let dir = scratch("env");
