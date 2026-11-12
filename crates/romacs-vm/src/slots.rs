@@ -25,19 +25,20 @@ romacs_snapshot::snapshot_struct!(Slots { list, cards });
 
 impl std::ops::Deref for Slots {
     type Target = [Slot];
+    #[inline(always)]
     fn deref(&self) -> &[Slot] {
         &self.list
     }
 }
 impl std::ops::Index<usize> for Slots {
     type Output = Slot;
-    #[inline]
+    #[inline(always)]
     fn index(&self, i: usize) -> &Slot {
         &self.list[i]
     }
 }
 impl std::ops::IndexMut<usize> for Slots {
-    #[inline]
+    #[inline(always)]
     fn index_mut(&mut self, i: usize) -> &mut Slot {
         let slot = &mut self.list[i];
         // In bounds: the cards cover every slot (`push`).

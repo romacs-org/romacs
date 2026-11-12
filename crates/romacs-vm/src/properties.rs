@@ -1120,6 +1120,7 @@ romacs_snapshot::snapshot_struct!(BodyProperties { store, written, written_at })
 
 impl std::ops::Deref for BodyProperties {
     type Target = Properties;
+    #[inline]
     fn deref(&self) -> &Properties {
         &self.store
     }

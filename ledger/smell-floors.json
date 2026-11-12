@@ -60,7 +60,7 @@
     "clippy::implicit_clone": 39,
     "clippy::implicit_saturating_sub": 2,
     "clippy::inconsistent_struct_constructor": 4,
-    "clippy::inline_always": 81,
+    "clippy::inline_always": 85,
     "clippy::int_plus_one": 1,
     "clippy::invisible_characters": 1,
     "clippy::items_after_statements": 121,

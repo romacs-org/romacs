@@ -28,6 +28,7 @@ romacs_snapshot::snapshot_struct!(Functions { list, changed, lost });
 
 impl std::ops::Deref for Functions {
     type Target = [Arc<Function>];
+    #[inline(always)]
     fn deref(&self) -> &[Arc<Function>] {
         &self.list
     }
