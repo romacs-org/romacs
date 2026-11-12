@@ -91,6 +91,20 @@ pub(crate) fn position(at: usize) -> i64 {
 pub(crate) fn random_text(rng: &mut Rng, len: usize) -> Vec<u8> {
     (0..len).map(|_| ALPHABET[rng.below(ALPHABET.len())]).collect()
 }
+/// TABLE with `a` an open paren and `b` a close.
+pub(crate) fn with_parens(mut table: [i32; 128]) -> [i32; 128] {
+    (table[usize::from(b'a')], table[usize::from(b'b')]) = (SOPEN, SCLOSE);
+    table
+}
+/// A text of LEN mostly of `a` and `b`, half the time after a run of `a`
+/// about as long as GNU's level cap: under `with_parens`, nesting that
+/// closes past the bottom level and reaches the cap.
+pub(crate) fn nested_text(rng: &mut Rng, len: usize) -> Vec<u8> {
+    let run = if rng.chance(50) { 90 + rng.below(40) } else { 0 };
+    (0..len).map(|i| {
+        if i < run || rng.chance(30) { b'a' } else if rng.chance(45) { b'b' } else { ALPHABET[rng.below(ALPHABET.len())] }
+    }).collect()
+}
 
 /// ASCII text whose syntax a propagation changes as a parse goes, read
 /// live or, on a rerun, replayed in order as `View` replays it.

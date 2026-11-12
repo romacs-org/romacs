@@ -83,6 +83,37 @@ fn summaries_serve_the_long_parses() {
     }
 }
 
+/// Closes past the outermost level and nesting past GNU's 100 levels have
+/// summaries of their own: once made, the same parses read no leaf again,
+/// neither for a summary nor in place of one. The char-table write count
+/// is the process's, which the other tests here move from their threads:
+/// a round counts only after a whole round in one context, and in one.
+#[test]
+fn closes_past_the_bottom_and_deep_nesting_are_served_from_kept_summaries() {
+    let fixtures = [
+        r#"(syn ?\( "()" ?\) ")(") (build "a) b)) (c (d) e\n" 4000)"#,
+        r#"(syn ?\( "()" ?\) ")(" ?\; "<" ?\n ">") (insert (make-string 150 ?\() "\n") (build "(a ; ) (\n b)\n" 3000) (insert (make-string 160 ?\)) "\n") (build "x (y) z\n" 1000)"#,
+    ];
+    for fixture in fixtures {
+        let expression = format!(r"(with-temp-buffer {fixture}
+           (let ((stats (lambda () (let ((stats (romacs-syntax-summaries-stats)))
+                                     (list (plist-get stats :leaf-scans) (plist-get stats :context-switches) (plist-get stats :plain-leaves)))))
+                 (clean 0) (tries 0) (result nil))
+             (probe) (chain)
+             (while (and (not result) (< tries 20))
+               (let ((before (funcall stats)))
+                 (probe) (chain)
+                 (let ((after (funcall stats)))
+                   (setq clean (if (= (nth 1 before) (nth 1 after)) (1+ clean) 0) tries (1+ tries))
+                   (when (>= clean 2) (setq result (list (- (car after) (car before)) (nth 2 after)))))))
+             result))");
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shown = vm.eval_source(&PRELUDE.replace("EXPR", &expression)).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{fixture}: {e:?}"));
+        assert_eq!(shown, "(0 0)", "{fixture}: leaf scans a warm round added, leaves ever scanned outside a summary");
+    }
+}
+
 /// Two tables holding one sub-char-table: a write through either changes
 /// both, so summaries read under the other are not used again.
 #[test]
