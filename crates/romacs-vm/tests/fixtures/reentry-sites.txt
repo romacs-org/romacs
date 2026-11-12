@@ -75,6 +75,7 @@ prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not susp
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
 protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect
 protocol.rs submit prepare_source 2 clean  # no caller Values
+quit.rs eval_as_wait eval_source_raw 1 boundary  # embedder API: the result is a Local borrowing the VM, or none for a quit, whose flag is a constant
 reader/mod.rs compile_source compile 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
