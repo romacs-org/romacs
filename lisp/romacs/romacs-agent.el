@@ -1528,8 +1528,11 @@ byte FROM (a record's start) when given."
           (unless (eq (romacs-agent-state session) 'ended)
             (setf (romacs-agent-state session) (if (romacs-agent-stopped session) 'ended 'detached)))
           (romacs-agent--raise session (list :type 'status :text (if (romacs-agent-stopped session) "stopped" "detached")))
-          ;; Spoken to while it stopped: resumed to take it.
-          (when (and (romacs-agent-stopped session) (romacs-agent-queue session))
+          ;; Spoken to while it stopped: resumed to take it.  Not when a
+          ;; selection restarted it: that resumes it once the selection is
+          ;; in effect, below, and a resume now would run the old one.
+          (when (and (romacs-agent-stopped session) (romacs-agent-queue session)
+                     (not (romacs-agent-pending-selection session)))
             (romacs-agent-resume session))
           (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection

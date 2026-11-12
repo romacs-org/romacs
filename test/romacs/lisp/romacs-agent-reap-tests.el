@@ -118,6 +118,32 @@ DELAY), `stopped' each session stopped."
             (should (equal continued (list review))))
         (when (process-live-p process) (delete-process process))))))
 
+(ert-deftest romacs-agent-reap-a-selection-restart-resumes-on-the-selection ()
+  ;; A selection restarts a harness run without a unit: stopped here, a
+  ;; message held.  Its end resumes it on the selection, once.
+  (let* ((dir (make-temp-file "romacs-restart-" t))
+         (session (romacs-agent--make :id "x" :harness 'claude :state 'idle :dir dir :options '(:model "old")
+                                      :host-socket (expand-file-name "none.sock" dir)))
+         (process (make-process :name "romacs-restart-fixture" :command '("cat") :noquery t))
+         (resumed nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-resume)
+                   (lambda (s) (push (plist-get (romacs-agent-options s) :model) resumed)))
+                  ((symbol-function 'romacs-agent-stop) (lambda (s) (romacs-agent--set-stopped s t)))
+                  ((symbol-function 'romacs-agent--manifest) #'ignore)
+                  ((symbol-function 'romacs-agent--note) #'ignore)
+                  ((symbol-function 'run-at-time) #'ignore))
+          (setf (romacs-agent-connection session) process
+                (romacs-agent-pending-selection session) (list :state 'applying :waiting '("x") :model "new"))
+          (romacs-agent--enqueue session (list "held" nil nil nil))
+          (process-put process 'romacs-agent session)
+          (romacs-agent--restart session)
+          (delete-process process)
+          (romacs-agent--sentinel process "killed")
+          (should (equal resumed '("new"))))
+      (when (process-live-p process) (delete-process process))
+      (delete-directory dir t))))
+
 (ert-deftest romacs-agent-reap-stopped-reads-no-field-after-a-reload ()
   ;; Loaded over a definition whose record had the field: its accessor's
   ;; inliner goes, and callers compiled now read the mark.
