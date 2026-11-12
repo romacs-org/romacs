@@ -34,6 +34,11 @@ possible; say so where you do.
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
+- Reach for a safe API before `unsafe`. A new unsafe site needs a stated
+  reason, in its comment or its module's doc, that no crate in `Cargo.lock`
+  covers the call safely: rustix for system calls, memmap2 for mappings,
+  libloading for libraries, the tree-sitter crate for parse trees. Keep what
+  remains in one small safe wrapper per module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
   the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
   each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
@@ -44,7 +49,7 @@ possible; say so where you do.
   rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
   primitives declared outside `src/prims/` or through lib.rs's own enum. It
   holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
-  `master`): a count above the merge-base's own fails. A drop needs no
+  `beta`): a count above the merge-base's own fails. A drop needs no
   record, and a branch never lowers a floor. Adding a smell takes raising its
   floor in `ledger/smell-floors.json` by as much, and a new top-level entry takes
   listing it there: a deliberate commit with its reason. `smells.py check
@@ -142,7 +147,7 @@ the pinned oracle.
 The gates, small and whole for each side:
 
 - Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  master, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
+  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
   in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
   everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.

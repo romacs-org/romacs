@@ -106,9 +106,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'launches': [], 'checks': [], 'failures': []}
-    compositor = None
+    compositor = temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='world-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='world-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -247,12 +247,8 @@ def main():
     except Exception as error:  # noqa: BLE001 - the report carries it
         report['error'] = repr(error)
     finally:
-        if compositor is not None:
-            compositor.terminate()
-            try:
-                compositor.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                compositor.kill()
+        live.stop(compositor)
+        live.remove_root(temporary)
         (output / 'report.json').write_text(json.dumps(report, indent=2))
     print(report['status'], json.dumps({'launches': report['launches'], 'failures': report['failures'],
                                         'error': report.get('error')}))

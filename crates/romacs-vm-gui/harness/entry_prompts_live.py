@@ -47,8 +47,9 @@ def main():
     output.mkdir(parents=True)
     report = {'binary': str(Path(args.binary).resolve()), 'status': 'FAIL', 'cases': {}}
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='entry-prompts-', dir=os.environ.get('XDG_RUNTIME_DIR')) as temporary:
+        with tempfile.TemporaryDirectory(prefix='entry-prompts-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -110,7 +111,10 @@ def main():
     finally:
         for proc in (process, keyboard, compositor):
             live.stop(proc)
-        (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        finally:
+            live.remove_root(temporary)
     print(report['status'], json.dumps({k: report.get(k) for k in ('cases', 'error')}, ensure_ascii=False))
     return 0 if report['status'] == 'PASS' else 1
 
