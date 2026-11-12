@@ -142,7 +142,7 @@ the pinned oracle.
 The gates, small and whole for each side:
 
 - Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  master, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
+  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
   in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
   everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
