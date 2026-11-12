@@ -98,5 +98,49 @@
   "layouts": 2,
   "frames_submitted": 1,
   "display_instructions_p90": 617000000
+ },
+ "fontify-open-org-folded": {
+  "step_instructions": 1490000000,
+  "display_instructions": 1190000000,
+  "display_conses": 33700,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 1,
+  "frames_submitted": 1,
+  "chars_fontified": 22500,
+  "display_instructions_p90": 1620000000
+ },
+ "fontify-typed-org-folded": {
+  "step_instructions": 569000000,
+  "display_instructions": 545000000,
+  "display_conses": 61,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 3,
+  "frames_submitted": 1,
+  "chars_fontified": 43,
+  "display_instructions_p90": 549000000
+ },
+ "fontify-typed-elisp": {
+  "step_instructions": 44700000,
+  "display_instructions": 42900000,
+  "display_conses": 219,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 2,
+  "frames_submitted": 1,
+  "chars_fontified": 133,
+  "display_instructions_p90": 44100000
+ },
+ "fontify-unfold-org": {
+  "step_instructions": 2140000000,
+  "display_instructions": 2130000000,
+  "display_conses": 9520,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 3,
+  "frames_submitted": 1,
+  "chars_fontified": 6004,
+  "display_instructions_p90": 2920000000
  }
 }

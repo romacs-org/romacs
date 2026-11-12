@@ -796,24 +796,25 @@ The signal is logged, after LOG, to *Messages* only, as GNU's add_to_log."
 ;; nil `fontified' char property, call `fontification-functions' with that
 ;; position, each through dsafe_call1 and with the variable itself bound to
 ;; nil.  A buffer-local `t' runs the global functions; a global `t' is
-;; ignored.  Redisplay then reads the property again: a function that left
-;; it nil is not called again in that stretch, so none can loop.
-(defun romacs--redisplay-fontify (start end)
-  "Run `fontification-functions' over the unfontified text from START to END.
-Redisplay calls this in the buffer of a window showing START to END."
-  (let ((buffer (current-buffer)) (pos start))
-    (while (and pos (< pos end) fontification-functions (not memory-full))
-      (if (get-char-property pos 'fontified)
-          (setq pos (next-single-char-property-change pos 'fontified nil end))
-        (romacs--run-fontification-functions pos)
-        (if (not (buffer-live-p buffer))
-            (setq pos nil)
-          ;; GNU's fig leaf: back to the displayed buffer, whose text the
-          ;; functions may have shortened.
-          (set-buffer buffer)
-          (setq end (min end (point-max)))
-          (unless (get-char-property pos 'fontified)
-            (setq pos (next-single-char-property-change pos 'fontified nil end))))))))
+;; ignored.  The display iterator runs its handlers at the first position
+;; of a hidden stretch too, `fontified' before `invisible', and then steps
+;; over the stretch, so nothing inside it is asked for:
+;; `romacs--fontify-next' finds each position as the iterator reaches it.
+;; Redisplay then reads the property again: a function that left it nil is
+;; not called again in that stretch, so none can loop.
+(defun romacs--redisplay-fontify (window start end)
+  "Run `fontification-functions' over the text WINDOW shows from START to END.
+Redisplay calls this in the buffer of WINDOW."
+  (let ((buffer (current-buffer))
+        (pos (romacs--fontify-next window start end)))
+    (while (and pos fontification-functions (not memory-full))
+      (romacs--run-fontification-functions pos)
+      (setq pos (when (and (buffer-live-p buffer) (window-live-p window))
+                  ;; GNU's fig leaf: back to the displayed buffer, whose text
+                  ;; the functions may have shortened.
+                  (set-buffer buffer)
+                  (setq end (min end (point-max)))
+                  (romacs--fontify-next window pos end t))))))
 
 (defun romacs--run-fontification-functions (pos)
   (let ((functions fontification-functions)

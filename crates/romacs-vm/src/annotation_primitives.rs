@@ -726,23 +726,50 @@ impl Vm {
         self.annotation_resolve(&raw, property).map_err(Fault::Error)
     }
 
-    /// get_char_property_and_overlay (textprop.c) with a window as OBJECT,
+    /// `get_char_property_and_overlay` (textprop.c) with a window as OBJECT,
     /// as the display iterator asks: PROPERTY of the character at BYTE of
     /// BUFFER from the highest overlay that applies to WINDOW (an overlay
-    /// whose `window' property is another window does not), else from the
-    /// text, together with that overlay or nil.
+    /// whose `window` property is another window does not), read as
+    /// `overlay-get` reads it, else from the text, together with that
+    /// overlay or nil.
     pub(crate) fn window_char_property(&self, buffer: Value, byte: usize, property: Value, window: Value) -> Result<(Value, Value)> {
         let text = self.annotated(buffer)?;
         let at = byte as u32;
-        let mut found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
-        let mut having = vec![];
-        for overlay in found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)) {
-            let value = self.overlay_property(overlay, property)?;
-            if value != Value::NIL { having.push((self.overlay_sort_item(overlay)?, value)); }
-        }
-        if let Some((item, value)) = crate::overlay_order::highest_overlay(having, |h| h.0) { return Ok((value, item.overlay)); }
+        let found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
+        let applying = found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)).collect();
+        let hit = self.ordered_overlay_hit(applying, property)?;
+        if hit.0 != Value::NIL { return Ok(hit); }
         let raw = self.annotation_raw(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?;
         Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
+    }
+    /// The text properties whose runs decide PROPERTY's char-property
+    /// value: its own, `category`, and its `char-property-alias-alist`
+    /// aliases.
+    pub(crate) fn deciding_keys(&self, property: Value) -> Result<Vec<String>> {
+        let mut keys = vec![self.annotation_key_name(property)?.to_owned(), "category".to_owned()];
+        for alias in self.annotation_alias_names(property)? {
+            if !keys.iter().any(|key| key == alias) { keys.push(alias.to_owned()); }
+        }
+        Ok(keys)
+    }
+    /// The first position after POS, at most END, of BUFFER where a text
+    /// property named in KEYS or an overlay may change: where a char
+    /// property KEYS decide may change, so a walk by it pays for those runs,
+    /// not every property's. A unibyte buffer's properties are not kept by
+    /// key: there, where any may.
+    pub(crate) fn next_keys_change(&self, buffer: Value, (pos, end): (i64, i64), keys: &[String]) -> Result<i64> {
+        let text = self.shown_text(buffer)?;
+        let offset = |n: i64| usize::try_from(n - 1).map(CharOffset).map_err(|_| "position out of range".to_owned());
+        let (at, limit) = (text.byte_of_char(offset(pos)?)?, text.byte_of_char(offset(end)?)?);
+        let next = match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => keys.iter()
+                .fold(limit, |next, key| next.min(b.properties.next_single_change(at, key, next)))
+                .min(self.next_overlay_change_byte(buffer, at)?),
+            _ => self.next_property_boundary(buffer, at, limit)?,
+        };
+        let next = text.char_of_byte(next.min(limit))?.0;
+        let next = i64::try_from(next).map_err(|_| "position out of range".to_owned())? + 1;
+        Ok(next.max(pos + 1).min(end))
     }
     /// The display ignores an overlay whose `window' property names
     /// another window (xdisp.c load_overlay_strings).
