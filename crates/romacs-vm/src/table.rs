@@ -601,7 +601,8 @@ impl<T> Table<T> {
     /// one stopped while it marked leaves both as they were. One stopped
     /// part way through its sweep has not: a survivor in a range it swept is
     /// old and clean, and may name a young entry in a range it did not reach.
-    /// Nothing reads the generations yet, and what does will have to know.
+    /// A VM used again after that promotes everything first
+    /// (`Vm::restore_nesting`).
     pub(crate) fn clear_marks(&mut self) {
         let (mut free, mut quarantined) = (0, 0);
         for color in &mut self.colors {

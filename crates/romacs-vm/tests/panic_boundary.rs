@@ -15,9 +15,8 @@ use std::path::{Path, PathBuf};
 const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm-gui/src/main.rs", 2,
      "`main` holds no VM; the evaluator thread's top: the unwinding drops the VM, and the session ends"),
-    ("crates/romacs-vm/src/gc.rs", 4,
-     "`Vm::catching` itself; a mark handing its host back before re-raising; a minor promoting everything \
-      before re-raising, and the test of it, which nests no engine"),
+    ("crates/romacs-vm/src/gc.rs", 2,
+     "`Vm::catching` itself, and a mark handing its host back before re-raising"),
     ("crates/romacs-vm/src/gc_mark.rs", 4, "tests of a panic inside the collector, which nests no engine"),
     ("crates/romacs-vm/src/handle.rs", 1, "a test of a host panicking in an idle mark, which nests no engine"),
     ("crates/romacs-vm/src/prim.rs", 2, "tests of the declaration parser, with no VM"),

@@ -541,6 +541,12 @@ impl Vm {
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
+        // A collection the panic stopped may have left the generations
+        // false: a minor makes the old entries it reads again young for its
+        // length, and a sweep stopped part way leaves old, clean survivors
+        // naming young entries it did not reach. With everything promoted
+        // no such edge is left; nothing is freed.
+        self.promote_all();
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
@@ -696,9 +702,13 @@ impl Vm {
     /// where minors are allowed (stress that frees in place), so that every
     /// forced collection puts a minor before verify's oracle. Whatever else
     /// asked is owed a full: the heap's growth, a scarce region id, or the
-    /// request code compiled since the last one, which only a full retires.
+    /// request code compiled since the last one, which only a full at a
+    /// request's boundary retires.
     pub(crate) fn minor_chosen(&self) -> bool {
-        let code = self.request_code.since_collection >= self.code_collection_threshold();
+        // Owed where it can be paid: only a collection at a request's
+        // boundary retires request code and starts the count again.
+        let code = self.stack.is_empty() && self.suspended_stacks.is_empty()
+            && self.request_code.since_collection >= self.code_collection_threshold();
         !self.full_due() && !code && (self.minor_due() || (self.gc_stress.shift && self.minor_allowed()))
     }
     /// Whether a full collection is due, by GNU's rule above.
@@ -1641,7 +1651,7 @@ impl Vm {
     /// properties and nodes written since, which no entry's colour records
     /// (`crate::epoch`); the symbol slots written since (`Slots`), those of
     /// obarrays of their own included; the functions changed since
-    /// (`Functions`); and every other root. Nothing a full reclaims beside
+    /// (`Functions`); every lexical pair; and every other root. Nothing a full reclaims beside
     /// table entries goes: no code is retired, no region, obarray symbol or
     /// local binding freed, and nothing moves (a table's dead tail is cut,
     /// as any sweep cuts it). Like a full it has spare programs forget their
@@ -1654,16 +1664,10 @@ impl Vm {
         }
         if [self.conses.log_lost(), self.closures.log_lost(), self.cells.log_lost(), self.objects.log_lost(), self.functions.changed().is_none()].contains(&true) {
             self.promote_all();
-            return true;
+        } else {
+            self.minor(roots);
         }
-        // A minor that does not complete has made old entries young to read
-        // them again, and may have swept part of a table: promoting
-        // everything is its recovery, whatever stopped it.
-        let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.minor(roots)));
-        if let Err(panic) = done {
-            self.promote_all();
-            std::panic::resume_unwind(panic);
-        }
+        self.gc_stats.collections += 1;
         true
     }
     /// Promote all: every entry in use becomes old and clean, and every
@@ -1672,14 +1676,17 @@ impl Vm {
     /// char-table storage is stamped against). Nothing is freed, doomed or
     /// dropped. With no young entry left no old one names a young one, so
     /// it is sound wherever a collection may start, whatever was traced
-    /// before: a minor's way to give up and to recover, and the generations'
-    /// commit point for whoever needs one. A record a later slice adds is
-    /// emptied here, or in what this calls.
+    /// before: a minor's way to give up, the recovery of a collection a
+    /// panic stopped (`restore_nesting`), and the generations' commit point
+    /// for whoever needs one. A record a later slice adds is emptied here,
+    /// or in what this calls.
     pub(crate) fn promote_all(&mut self) {
         self.settle_generations();
         self.settle_minor();
     }
-    /// `collect_minor`, once it is known to run.
+    /// `collect_minor`, once it is known to run. One that a panic stops
+    /// has made old entries young, and may have swept part of a table: the
+    /// VM is used again only through `Vm::catching`, which promotes all.
     fn minor(&mut self, roots: &[Value]) {
         self.clear_dead_tails();
         let mut lap = Lap::start();
@@ -1695,8 +1702,10 @@ impl Vm {
         }
         // A lexical pair is named by the map alone, and one may have been
         // made since the last collection for a cell that is old and clean:
-        // a minor reads them all. (An old cell's pair is kept until a full
-        // finds the cell dead.)
+        // a minor reads them all, at a claim each. (An old cell's pair is
+        // kept until a full finds the cell dead; a dead young cell's pair
+        // is kept by this minor, which drops its mapping, and goes at the
+        // next full.)
         again.extend(self.cell_pairs.values().copied());
         // No symbol is reclaimed: those of obarrays of their own are roots
         // like the rest, with their names and their conditions.
@@ -1742,7 +1751,6 @@ impl Vm {
         self.allocation.since = crate::epoch::commit_point();
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
-        self.gc_stats.collections += 1;
     }
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
@@ -2286,9 +2294,9 @@ mod tests {
     }
 
     /// A minor makes the old entries it reads again young for its length.
-    /// One that panics part way leaves none young: it promotes everything,
-    /// so what was old stays in use and old, and the next minor frees none
-    /// of it.
+    /// A VM used again after one panicked part way (`Vm::catching`) has
+    /// none young: everything is promoted, so what was old stays in use and
+    /// old, and the next minor frees none of it.
     #[test]
     fn a_minor_that_panics_promotes_everything() {
         let mut vm = Vm::new();
@@ -2298,7 +2306,7 @@ mod tests {
         // which only an old and clean cons names.
         vm.eval_source_raw("(setcar (car panic-held) 5)").unwrap();
         vm.gc_stress.faults.minor_panics = true;
-        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_minor(&[])));
+        let unwound = vm.catching(|vm| vm.collect_minor(&[]));
         assert!(unwound.is_err(), "the planted fault");
         assert!(vm.generations_settled(), "everything in use is old and clean");
         vm.set_gc_verify(true);
