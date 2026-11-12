@@ -69,7 +69,7 @@
 (defface romacs-agent-approval '((t :inherit warning :weight bold))
   "An approval the harness waits for.")
 (defface romacs-agent-plan '((t :inherit font-lock-constant-face))
-  "A plan presented, waiting to be taken up.")
+  "A plan presented, waiting to be taken up." :group 'romacs-agent)
 (defface romacs-agent-error '((t :inherit error))
   "A failed tool call or turn.")
 (defface romacs-agent-model '((t :inherit font-lock-type-face))
