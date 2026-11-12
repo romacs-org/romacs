@@ -2966,7 +2966,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     results = {}
     for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe']:
+                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
