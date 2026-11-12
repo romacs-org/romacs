@@ -322,9 +322,7 @@ impl HostInput for GuiHost {
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
-        if crate::diagnostics() { eprintln!(
-            "{}",
-            serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
+        if crate::diagnostics() { crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,"drawn":drawn,
                 "minibuffer":frame.frame.windows.iter().chain(frame.frame.children.iter().flat_map(|c| &c.windows))
                     .find(|w| w.snapshot.id == frame.minibuffer).map(|w| w.snapshot.text.utf8.clone()),
@@ -336,7 +334,7 @@ impl HostInput for GuiHost {
         // The key's command and hooks ran before this redisplay began.
         if let Some(read) = self.shared.borrow_mut().key_read.take() {
             let now = std::time::Instant::now();
-            eprintln!("{}", serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
+            crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
                 "command_ns":started.duration_since(read).as_nanos(),"redisplay_ns":now.duration_since(started).as_nanos(),
                 "key_to_render_ns":now.duration_since(read).as_nanos(),
                 // command_ns includes snapshot_ns; redisplay_ns is layout_ns, the
