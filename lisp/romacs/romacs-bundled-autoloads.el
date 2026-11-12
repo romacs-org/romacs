@@ -291,6 +291,11 @@ disabled.
 (register-definition-prefixes "romacs-dired" '("dired" "romacs-dired-"))
 
 
+;;; Generated autoloads from romacs-display.el
+
+(register-definition-prefixes "romacs-display" '("romacs-display-check"))
+
+
 ;;; Generated autoloads from romacs-editing.el
 
 (register-definition-prefixes "romacs-editing" '("activate-mark-hook" "deactivate-mark-hook" "delete-selection-mode" "eval-expression-print-le" "global-mark-ring" "interprogram-" "kill-" "mark-ring" "romacs-" "save-interprogram-paste-before-kill" "set-mark-command-repeat-pop" "use-empty-active-region" "values" "yank-pop-change-selection"))

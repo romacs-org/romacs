@@ -9,6 +9,8 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
+#[path = "display_check.rs"]
+mod display_check;
 pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Base, BoundedDatum, FaceDef, LispGraph, LiveView, NodeView,
@@ -284,8 +286,11 @@ pub(super) struct DisplayState {
     pub(crate) refusals: Vec<LayoutRefusal>,
     /// What redisplay did, counted (`romacs--display-stats`).
     pub(super) stats: crate::display_stats::DisplayStats,
+    /// Per window id, the causes the reuse check has told of it
+    /// (`Vm::check_reuse`), a bit each.
+    check_told: std::collections::BTreeMap<u64, u16>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats, check_told });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -336,6 +341,7 @@ impl DisplayState {
         self.shown.remove(&id);
         self.segments.remove(&id);
         self.bases.remove(&id);
+        self.check_told.remove(&id);
     }
     /// How window ID's last publication maps display bytes to buffer bytes.
     pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
@@ -402,6 +408,7 @@ impl DisplayState {
             mode_line_evals: 0,
             refusals: vec![],
             stats: crate::display_stats::DisplayStats::default(),
+            check_told: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -1380,6 +1387,52 @@ impl Vm {
             .clamp(accessible.start.0, accessible.end.0);
         Ok(Some(mark.min(point)..mark.max(point)))
     }
+    /// The mini-window's text with its overlay strings spliced in: SHOWN's
+    /// text, start and point become what the window shows, and the answer
+    /// is how that text maps to the buffer's. None, SHOWN as it was, where
+    /// no overlay has a string to show.
+    fn splice_mini_window(&mut self, window: Value, buffer: Value, shown: &mut ShownText) -> Result<Option<Vec<mini_window::Segment>>> {
+        let spliced = self.splice_overlay_strings(window, buffer, &shown.text.utf8)?;
+        if !spliced.has_strings() { return Ok(None); }
+        let TextSlice { utf8, face_runs, raw, extends } = &shown.text;
+        let mut strings = vec![];
+        for (bytes, value) in &spliced.string_faces {
+            strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&shown.table, &shown.faces, &mut shown.merged, *value) });
+        }
+        let runs = mini_window::display_face_runs(face_runs, &spliced.segments, strings);
+        // Each buffer segment's raw bytes, where the splice put it.
+        let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
+            let (display, from, len) = (s.display, s.buffer, s.len);
+            raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
+        }).collect();
+        // Each buffer newline's end-of-line face where the splice put
+        // it, the end's at the new end, and a string's newlines in
+        // the string's face (extend_face_to_end_of_line's `it->s').
+        let end = utf8.len() as u32;
+        let mut moved: Vec<romacs_layout_input::Extend> = vec![];
+        for s in &spliced.segments {
+            if s.string {
+                for (offset, c) in spliced.text.get(s.display..s.display + s.len).unwrap_or("").char_indices() {
+                    let byte = s.display + offset;
+                    let face = runs.iter().find(|run| run.bytes.contains(&byte)).map_or(FaceHandle(0), |run| run.face);
+                    if c == '\n' && (face != FaceHandle(0) || decorated(&shown.faces.default)) {
+                        moved.push(romacs_layout_input::Extend { byte: byte as u32, face });
+                    }
+                }
+            } else {
+                let (from, len, display) = (s.buffer as u32, s.len as u32, s.display as u32);
+                moved.extend(extends.iter().filter(|e| e.byte != end && (from..from + len).contains(&e.byte))
+                    .map(|e| romacs_layout_input::Extend { byte: e.byte - from + display, face: e.face }));
+            }
+        }
+        moved.extend(extends.iter().filter(|e| e.byte == end).map(|e| romacs_layout_input::Extend { byte: spliced.text.len() as u32, face: e.face }));
+        moved.sort_by_key(|e| e.byte);
+        moved.dedup_by_key(|e| e.byte);
+        let (start, point) = (spliced.before_strings(shown.start_byte), spliced.cursor(shown.point_byte));
+        shown.text = TextSlice { utf8: spliced.text, face_runs: runs, raw, extends: moved };
+        (shown.start_byte, shown.point_byte) = (start, point);
+        Ok(Some(spliced.segments))
+    }
     fn snapshot_window_inner(
         &mut self,
         root: usize,
@@ -1389,6 +1442,7 @@ impl Vm {
     ) -> Result<WindowSnapshot> {
         if let Some(snapshot) = self.reuse_shown(root, slot, width, height)? {
             self.display_state.stats.reused += 1;
+            self.check_reuse(self.slots[root].value, height, &snapshot);
             return Ok(self.publish_window(snapshot));
         }
         self.display_state.stats.rebuilt += 1;
@@ -1402,13 +1456,14 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, faces, base, at_zv, table, mut merged, segments, stretches, images, wrap_flips, line_numbers }
-            = self.window_text(window, height, None)?;
+        let mut shown = self.window_text(window, height, None)?;
+        // The mini-window shows its overlay strings (icomplete's candidates).
+        let segments = if mini { self.splice_mini_window(window, buffer, &mut shown)? } else { shown.segments.take() };
+        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, faces, base, at_zv, table, merged: _, segments: _, stretches, images, wrap_flips, line_numbers } = shown;
         self.display_state.bases.insert(id, base);
         match segments {
             Some(segments) => { self.display_state.segments.insert(id, segments); }
-            None if !mini => { self.display_state.segments.remove(&id); }
-            None => {}
+            None => { self.display_state.segments.remove(&id); }
         }
         // No version bump here: this runs once per WINDOW, and
         // `display_state.width/height` is frame-wide, so each window's own
@@ -1419,53 +1474,6 @@ impl Vm {
         // the snapshot and so are compared per window below.
         self.display_state.width = width;
         self.display_state.height = height;
-        // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, raw, extends, start_byte, point_byte) = if mini {
-            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
-            if spliced.has_strings() {
-                let mut strings = vec![];
-                for (bytes, value) in &spliced.string_faces {
-                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &faces, &mut merged, *value) });
-                }
-                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
-                // Each buffer segment's raw bytes, where the splice put it.
-                let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
-                    let (display, from, len) = (s.display, s.buffer, s.len);
-                    raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
-                }).collect();
-                // Each buffer newline's end-of-line face where the splice put
-                // it, the end's at the new end, and a string's newlines in
-                // the string's face (extend_face_to_end_of_line's `it->s').
-                let end = utf8.len() as u32;
-                let mut moved: Vec<romacs_layout_input::Extend> = vec![];
-                for s in &spliced.segments {
-                    if s.string {
-                        for (offset, c) in spliced.text.get(s.display..s.display + s.len).unwrap_or("").char_indices() {
-                            let byte = s.display + offset;
-                            let face = runs.iter().find(|run| run.bytes.contains(&byte)).map_or(FaceHandle(0), |run| run.face);
-                            if c == '\n' && (face != FaceHandle(0) || decorated(&faces.default)) {
-                                moved.push(romacs_layout_input::Extend { byte: byte as u32, face });
-                            }
-                        }
-                    } else {
-                        let (from, len, display) = (s.buffer as u32, s.len as u32, s.display as u32);
-                        moved.extend(extends.iter().filter(|e| e.byte != end && (from..from + len).contains(&e.byte))
-                            .map(|e| romacs_layout_input::Extend { byte: e.byte - from + display, face: e.face }));
-                    }
-                }
-                moved.extend(extends.iter().filter(|e| e.byte == end).map(|e| romacs_layout_input::Extend { byte: spliced.text.len() as u32, face: e.face }));
-                moved.sort_by_key(|e| e.byte);
-                moved.dedup_by_key(|e| e.byte);
-                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
-                self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, raw, moved, start, point)
-            } else {
-                self.display_state.segments.remove(&id);
-                (utf8, face_runs, raw, extends, start_byte, point_byte)
-            }
-        } else {
-            (utf8, face_runs, raw, extends, start_byte, point_byte)
-        };
         let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands, &band_face, &header_face)?;
         // Before FACES is published: what it asks for is realised as it asks.
         let chrome = self.text_chrome(window, &table, base, at_zv)?;

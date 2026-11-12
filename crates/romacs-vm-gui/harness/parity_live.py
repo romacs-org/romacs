@@ -439,7 +439,10 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup', *args], root, lisp, env, timeout).start(tools)
+    # Every reused window is checked against a full build of its text; a
+    # difference is a `display-check:' line in the engine's log.
+    check = ('--eval', '(setq romacs-display-check t)')
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *check, *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 

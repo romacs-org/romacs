@@ -15,8 +15,8 @@ use crate::{Result, Value, Vm};
 
 /// The counts `romacs--display-stats` reports, in order.
 const NAMES: [&str; COUNTS] = ["cycles", "instructions", "conses", "windows-visited", "windows-reused", "windows-rebuilt",
-    "band-expansions", "band-evals", "layouts", "measures", "frames-submitted"];
-const COUNTS: usize = 11;
+    "band-expansions", "band-evals", "layouts", "measures", "frames-submitted", "check-mismatches"];
+const COUNTS: usize = 12;
 const INSTRUCTIONS: usize = 1;
 
 /// Redisplay's own counts since the VM started, the cycle under way, and
@@ -32,12 +32,14 @@ pub(crate) struct DisplayStats {
     pub(crate) rebuilt: u64,
     /// Mode lines, header lines and status bars expanded (`Vm::mode_line_band`).
     pub(crate) bands: u64,
+    /// Reused windows the reuse check found different (`Vm::check_reuse`).
+    pub(crate) mismatches: u64,
     /// The thread's instruction counter and the conses made, at the begin
     /// of the cycle under way.
     open: Option<(Option<u64>, u64)>,
     base: [u64; COUNTS],
 }
-romacs_snapshot::snapshot_struct!(DisplayStats { cycles, instructions, conses, reused, rebuilt, bands, open, base });
+romacs_snapshot::snapshot_struct!(DisplayStats { cycles, instructions, conses, reused, rebuilt, bands, mismatches, open, base });
 
 impl DisplayStats {
     fn begin(&mut self, conses: u64) {
@@ -69,7 +71,7 @@ impl Vm {
         let calls = romacs_display_protocol::call_count::of;
         [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
          stats.bands, self.display_state.mode_line_evals,
-         calls("layout.lay_out"), calls("layout.measure"), calls("sender.submit_scene")]
+         calls("layout.lay_out"), calls("layout.measure"), calls("sender.submit_scene"), stats.mismatches]
     }
     /// `romacs--display-stats`: ((NAME . COUNT)...) since the last reset,
     /// and with RESET a reset. `instructions` is nil where the thread has

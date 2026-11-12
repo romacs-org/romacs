@@ -172,6 +172,8 @@ and load nothing when none is."
 (load "emacs-lisp/syntax.el" nil t t)
 ;; The syntax summaries' switches (DIVERGENCES.md VM2-SYNTAX-SUMMARIES).
 (load "romacs-syntax.el" nil t t)
+;; Redisplay's switches.
+(load "romacs-display.el" nil t t)
 (load "font-lock.el" nil t t)
 (load "jit-lock.el" nil t t)
 (load "mouse.el" nil t t)

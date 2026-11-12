@@ -10,8 +10,10 @@ use crate::Value;
 // snapshot or `windows-rebuilt' in full; `band-expansions' (mode lines,
 // header lines, the status bar) and the evaluator entries they made
 // (`band-evals'); `layouts' and `measures' asked of the layout host
-// besides each paint's own layout; and `frames-submitted' to the renderer.
-// RESET non-nil starts every count over after reading it.
+// besides each paint's own layout; `frames-submitted' to the renderer; and
+// `check-mismatches', the reused windows `romacs-display-check' found to
+// differ from a full build.  RESET non-nil starts every count over after
+// reading it.
 defsubr! { name = "romacs--display-stats", gnu = "romacs:display", effect = Global,
 fn display_stats(cx; optional reset: Value) {
     cx.display_stats(reset != Value::NIL)
