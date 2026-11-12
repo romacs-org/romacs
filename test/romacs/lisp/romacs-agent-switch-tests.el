@@ -19,7 +19,7 @@
          (asking (romacs-agent-switch-tests--session "asking" :state 'waiting-approval :last-time 0))
          (given (list old new busy done asking)))
     (should (equal (mapcar #'romacs-agent-title (romacs-agent-ui--by-attention given))
-                   '("asking" "done" "busy" "new" "old")))
+                   '("asking" "busy" "done" "new" "old")))
     ;; The list it was given stays as it was.
     (should (eq (car given) old))))
 
@@ -136,11 +136,13 @@
     (should (<= (+ 2 (string-width (get-text-property 0 'display (car row))) (string-width (nth 2 row))) 44))))
 
 (ert-deftest romacs-agent-switch-marks-only-what-wants-you ()
-  (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :turns 1))) " "))
-  (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'running))) "●"))
-  (should (equal (substring-no-properties
-                  (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'waiting-approval)))
-                 "◆")))
+  (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
+    (let ((romacs-agent-glyphs t))
+      (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :turns 1))) "  "))
+      (should (equal (substring-no-properties (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'running))) "🤖"))
+      (should (equal (substring-no-properties
+                      (romacs-agent-ui--switch-mark (romacs-agent-switch-tests--session "s" :state 'waiting-approval)))
+                     "✋")))))
 
 (ert-deftest romacs-agent-switch-copes-with-a-bare-session ()
   (let ((row (romacs-agent-ui--switch-suffix

@@ -43,18 +43,18 @@
     (child 'running) (child 'starting) (child 'waiting-approval)
     (child 'idle :failed t :done-seq 3)
     (child 'idle :turns 1 :done-seq 3 :seen-seq 3)
-    (should (equal (romacs-agent-children-tests--summary parent) "2 running · 1 waiting · 1 failed"))
+    (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval · 1 failed · 2 working"))
     ;; What wants the user first, then what runs, then the rest.
-    (should (equal (mapcar (lambda (row) (plist-get row :state)) (romacs-agent-children-rows parent))
-                   '("waiting" "failed" "running" "running" "completed")))))
+    (should (equal (mapcar (lambda (row) (plist-get row :key)) (romacs-agent-children-rows parent))
+                   '(approval failed working working idle)))))
 
 (ert-deftest romacs-agent-children-faces-mean-the-state ()
   (romacs-agent-children-tests--with
     (child 'running) (child 'waiting-approval) (child 'idle :failed t :done-seq 3)
     (romacs-agent-ui--summarize-children parent)
     (let ((summary (romacs-agent-children-summary parent)))
-      (should (eq (get-text-property 0 'face summary) 'romacs-agent-running))
-      (should (eq (get-text-property (string-search "waiting" summary) 'face summary) 'warning))
+      (should (eq (get-text-property (string-search "working" summary) 'face summary) 'romacs-agent-running))
+      (should (eq (get-text-property (string-search "approval" summary) 'face summary) 'romacs-agent-approval))
       (should (eq (get-text-property (string-search "failed" summary) 'face summary) 'romacs-agent-error)))))
 
 (ert-deftest romacs-agent-children-nothing-to-say ()
@@ -110,7 +110,7 @@
       (romacs-agent-ui--track-children parent '(:type tool :state started :id "t2" :name "Bash"))
       (romacs-agent-ui--track-children parent (list :type 'tool :state 'started :id "t3" :name "Agent" :parent "t1"
                                                     :input (romacs-mcp--object "description" "nested")))
-      (should (equal (romacs-agent-children-tests--summary parent) "1 running"))
+      (should (equal (romacs-agent-children-tests--summary parent) "1 working"))
       (should (equal (plist-get (car (romacs-agent-children-rows parent)) :title) "read the code"))
       (funcall event 'completed)
       (should (equal (romacs-agent-children-tests--summary parent) ""))
@@ -142,7 +142,7 @@
       ;; Detached, it no longer reads as running.
       (setf (romacs-agent-state session) 'detached)
       (should (equal (romacs-agent-children-tests--summary parent) ""))
-      (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "detached"))
+      (should (eq (plist-get (car (romacs-agent-children-rows parent)) :key) 'detached))
       (cancel-timer romacs-agent-ui--children-timer))))
 
 (ert-deftest romacs-agent-children-cancelling-an-idle-child-is-heard ()
@@ -157,7 +157,7 @@
               (romacs-agent-tools--cancel (romacs-mcp--object "taskId" (romacs-agent-id session))))
             (should (gethash parent romacs-agent-ui--children-changed))
             (should (equal (romacs-agent-children-tests--summary parent) ""))
-            (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled")))
+            (should (eq (plist-get (car (romacs-agent-children-rows parent)) :key) 'ended)))
         (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
         (delete-directory dir t)))))
 
@@ -215,7 +215,7 @@
       (let ((romacs-agent-ui--session parent))
         (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made at redisplay")))
                   ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned at redisplay"))))
-          (should (string-search "1 running" (romacs-agent-ui--header-line))))))))
+          (should (string-search "Working" (romacs-agent-ui--header-line))))))))
 
 (ert-deftest romacs-agent-children-menu-rows-open-children ()
   (romacs-agent-children-tests--with
@@ -224,9 +224,9 @@
       (romacs-agent-ui--summarize-children parent)
       (with-temp-buffer
         (let ((romacs-agent-ui--session parent))
-          (should (string-prefix-p "Workers 1 running" (romacs-agent-ui--children-title)))
+          (should (string-prefix-p "Workers 1 needs approval · 1 working" (romacs-agent-ui--children-title)))
           (should (string-search "task 1" (romacs-agent-ui--child-label 0)))
-          (should (string-search "waiting" (romacs-agent-ui--child-label 0)))
+          (should (string-search "Needs approval" (romacs-agent-ui--child-label 0)))
           (should-not (romacs-agent-ui--child-label 2))
           (cl-letf (((symbol-function 'romacs-agent-switch) (lambda (session) (setq opened session))))
             (let ((last-command-event ?1)) (romacs-agent-chat-open-child))
@@ -258,7 +258,7 @@
             (romacs-agent-ui--tool-lines (make-hash-table :test #'equal))
             (mark (copy-marker 8)))
         (puthash "t1" mark romacs-agent-ui--tool-lines)
-        (setf (romacs-agent-children-rows parent) (list (list :tool "t1" :state "running" :title "x")))
+        (setf (romacs-agent-children-rows parent) (list (list :tool "t1" :key 'working :state "running" :title "x")))
         (cl-letf (((symbol-function 'recenter) #'ignore))
           (let ((last-command-event ?1)) (romacs-agent-chat-open-child)))
         (should (= (point) 8))))))
@@ -298,7 +298,7 @@
       (funcall track '(:type task :id "t1" :state progress :activity "Bash"))
       (with-temp-buffer
         (let ((romacs-agent-ui--session parent))
-          (should (string-search "running Bash" (substring-no-properties (romacs-agent-ui--child-label 0))))))
+          (should (string-search "Working Bash" (substring-no-properties (romacs-agent-ui--child-label 0))))))
       ;; Its own notice ends it.
       (funcall track '(:type task :id "t1" :state failed :summary "no"))
       (should (equal (plist-get (funcall row) :state) "failed"))
@@ -315,7 +315,7 @@
     (romacs-agent-ui--track-children parent '(:type task :task "b1" :state backgrounded))
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :title) "make test"))
-    (should (equal (romacs-agent-children-tests--summary parent) "1 running"))
+    (should (equal (romacs-agent-children-tests--summary parent) "1 working"))
     (romacs-agent-ui--track-children parent '(:type exit))
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
@@ -323,9 +323,9 @@
 
 (ert-deftest romacs-agent-children-menu-keeps-the-latest-finished ()
   ;; The latest to finish, however each ended: a seen failure among them.
-  (let ((rows (append (list '(:state "running" :title "r") '(:state "failed" :unseen t :title "f"))
-                      (cl-loop for i below 4 collect (list :state "completed" :title (format "c%d" i) :time i))
-                      (list '(:state "failed" :title "seen" :time 10)))))
+  (let ((rows (append (list '(:key working :title "r") '(:key failed :title "f"))
+                      (cl-loop for i below 4 collect (list :key 'idle :title (format "c%d" i) :time i))
+                      (list '(:key idle :title "seen" :time 10)))))
     (should (equal (mapcar (lambda (row) (plist-get row :title)) (romacs-agent-ui--workers rows))
                    '("r" "f" "seen" "c3" "c2")))))
 
@@ -379,20 +379,20 @@
     (child 'running) (child 'waiting-approval)
     (let ((romacs-agent-glyphs t))
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
-        (should (equal (romacs-agent-children-tests--summary parent) "🤖1 ✋1"))
-        (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent)) "1 running"))
-        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "🤖")))
+        (should (equal (romacs-agent-children-tests--summary parent) "✋1 🤖1"))
+        (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent)) "1 needs approval"))
+        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🤖")))
       ;; Turned off, a summary made before says words at once.
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))
         (romacs-agent-ui--summarize-children parent)
         (customize-set-variable 'romacs-agent-glyphs nil)
-        (should (equal (substring-no-properties (romacs-agent-children-summary parent)) "1 running · 1 waiting"))
+        (should (equal (substring-no-properties (romacs-agent-children-summary parent)) "1 needs approval · 1 working"))
         (customize-set-variable 'romacs-agent-glyphs t))
       ;; A frame that cannot draw them gets the words.
       (cl-letf (((symbol-function 'char-displayable-p) #'ignore))
-        (should (equal (romacs-agent-children-tests--summary parent) "1 running 1 waiting"))
-        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "Running"))))))
+        (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval 1 working"))
+        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "Working"))))))
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here
