@@ -566,6 +566,22 @@ mod tests {
         assert!((5_000..40_000).contains(&first), "{got}");
     }
 
+    /// A read that waits for input redisplays inside the bracket
+    /// `romacs--display-stats` counts: a cycle a read, each visiting the
+    /// frame's windows.
+    #[test]
+    fn a_reads_redisplay_is_a_counted_cycle() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120, 121], vec![0, 0]))));
+        let got = vm
+            .eval_source("(progn (romacs--read-host-event) (romacs--read-host-event)
+                                 (let ((stats (romacs--display-stats)))
+                                   (list (cdr (assq 'cycles stats)) (> (cdr (assq 'windows-visited stats)) 1))))")
+            .unwrap();
+        assert_eq!(got.display().unwrap(), "(2 t)");
+    }
+
     /// A collection in a prompt's redisplay runs with the host taken for the
     /// read, so no key can be seen: its record says so rather than nothing.
     #[test]

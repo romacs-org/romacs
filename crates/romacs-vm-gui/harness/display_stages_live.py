@@ -54,7 +54,6 @@ usage: display_stages_live.py --binary PATH --output DIR [--only NAME ...]
 """
 import argparse
 import json
-import math
 import os
 from pathlib import Path
 import shutil
@@ -78,7 +77,7 @@ COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'ins
 # that may be odd.
 PEAKS = ('display_instructions',)
 MARGINED = ('instructions', 'conses')
-MARGIN = 1.10
+MARGIN_PERCENT = 110
 ODD = 0.1
 
 
@@ -163,9 +162,9 @@ def ceiling(figure, value):
     it is."""
     if not margined(figure) or value <= 0:
         return value
-    raised = value * MARGIN
-    unit = 10 ** max(0, math.floor(math.log10(raised)) - 2)
-    return math.ceil(raised / unit) * unit
+    raised = -(-value * MARGIN_PERCENT // 100)
+    unit = 10 ** max(0, len(str(raised)) - 3)
+    return -(-raised // unit) * unit
 
 
 def bars_of(rows):
@@ -262,6 +261,8 @@ def main():
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--timeout', type=float, default=300, help='seconds per session')
     args = parser.parse_args()
+    if args.steps < 1:
+        parser.error('--steps: at least one step')
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
     binary = args.binary.resolve()
@@ -272,6 +273,9 @@ def main():
         bars = json.loads(args.bars.read_text()) if args.bars.is_file() else {}
         scaling.prepare(binary, home, args.timeout)
         selected = scenarios(binary, home, args.timeout)
+        stale = sorted(set(bars) - {s['name'] for s in selected})
+        if stale:
+            raise Refused(f'bars for no scenario: {stale}')
         if args.only is not None:
             unknown = set(args.only) - {s['name'] for s in selected}
             if unknown:

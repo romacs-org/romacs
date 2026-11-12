@@ -87,6 +87,7 @@ class Bars(unittest.TestCase):
         self.assertEqual((self.bars['display_conses'], d.ceiling('display_conses', 7439), d.ceiling('layouts', 2)), (8, 8190, 2))
         self.assertEqual((self.bars['display_instructions'], self.bars['display_instructions_p90']), (550, 550))
         self.assertEqual((d.ceiling('step_instructions', 5_234_567), d.ceiling('step_instructions', 0)), (5_760_000, 0))
+        self.assertEqual((d.ceiling('display_instructions', 900), d.ceiling('display_instructions', 999)), (990, 1100))
 
     def test_a_figure_over_its_bar_fails_by_name(self):
         row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'windows_rebuilt': 0, 'display_instructions': 499}})

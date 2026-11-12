@@ -90,8 +90,8 @@ impl Vm {
     /// questions and Lisp's (`window-text-pixel-size`) asked besides.
     fn display_counts(&self) -> [u64; COUNTS] {
         let stats = &self.display_state.stats;
-        let own = [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
-                   stats.bands, self.display_state.mode_line_evals, stats.mismatches];
+        let own: [u64; HOST] = [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
+                                stats.bands, self.display_state.mode_line_evals, stats.mismatches];
         std::array::from_fn(|i| if i < HOST { own[i] } else { romacs_display_protocol::call_count::of(HOST_CALLS[i - HOST]) })
     }
     /// `romacs--display-stats`: ((NAME . COUNT)...) since the last reset,

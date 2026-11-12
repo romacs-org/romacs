@@ -466,8 +466,8 @@ figures: instructions and conses under a ceiling, the counts exactly, so a
 step that no longer does its change fails too. So does a scenario more
 than a tenth of whose steps paint when they change nothing, or do not when
 they do. Work that removes cost lowers the bars in the same change:
-`--write-bars FILE` writes the ones a run would pass. `--record` adds a call graph of each scenario's steps (a
-frame-pointer build).
+`--write-bars FILE` writes the ones a run would pass. `--record` adds a
+call graph of each scenario's steps (a frame-pointer build).
 
 ```sh
 python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \
