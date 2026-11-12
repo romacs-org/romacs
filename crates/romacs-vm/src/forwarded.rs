@@ -735,6 +735,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     // auto-save reads and resets it; files.el and gnosis read it.
     CVariable { name: "buffer-saved-size", gnu: "buffer.c:5465", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    // HOST(delayed-variable): declares the variable; reads no slot
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
@@ -1618,6 +1619,7 @@ impl Vm {
     /// GNU `let_shadows_buffer_binding_p`: a `let` of SLOT's default made
     /// while BUFFER was current is in effect.
     fn let_shadows_buffer_binding(&self, slot: usize, buffer: Value) -> bool {
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         self.dynamic.iter().any(|&(bound, _, owner, let_default)| bound == slot && let_default && owner == buffer)
     }
     /// GNU `set_internal` (data.c:1806): setting per-buffer variable I with
@@ -1814,6 +1816,7 @@ const FILEIO_SPECIALS: [(&str, &str); 17] = [
     ("write-region-annotate-functions", "fileio.c:6899"),
     ("write-region-post-annotation-function", "fileio.c:6925"),
     // Initially nil; cus-start.el's delayed initializer chooses the default.
+    // HOST(delayed-variable): declares the variable; reads no slot
     ("temporary-file-directory", "filelock.c:814"),
 ];
 
