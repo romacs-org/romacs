@@ -196,7 +196,10 @@ the id as :request.")
   compacting
   ;; What runs under it, for its views: its harness's own subagents by tool
   ;; id, then those and its delegated tasks as rows and as a line.
-  subagents children-rows children-summary)
+  subagents children-rows children-summary
+  ;; How many times it has looked for its supervisor again since its
+  ;; attachment ended (`romacs-agent--reattach-later').
+  (reattaching 0))
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1490,6 +1493,18 @@ byte FROM (a record's start) when given."
                  (romacs-agent--raise session (list :type 'error :text "another server is attached")))
                 ((gethash "attached" record)
                  (romacs-agent--kept session process)
+                 (setf (romacs-agent-reattaching session) 0)
+                 ;; Attached again: what it does is what its records say, a
+                 ;; turn under way or none; a replay from the last record
+                 ;; seen says nothing new.
+                 (when (eq (romacs-agent-state session) 'detached)
+                   (setf (romacs-agent-state session)
+                         (cond ((> (hash-table-count (romacs-agent-approvals session)) 0) 'waiting-approval)
+                               ((> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
+                                'running)
+                               (t 'idle)))
+                   ;; Its views, and its parent's rows, read it anew.
+                   (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
                  (romacs-agent--allow-tool-calls session)
@@ -1516,9 +1531,35 @@ byte FROM (a record's start) when given."
           (unless (eq (romacs-agent-state session) 'ended)
             (setf (romacs-agent-state session) 'detached))
           (romacs-agent--raise session (list :type 'status :text "detached"))
+          (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection
           ;; waiting for it takes effect.
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))))))
+
+(defconst romacs-agent--reattach-delays '(1 2 4 8 15 30 60)
+  "Seconds before each look for a supervisor that still listens after its
+attachment ended: another server leaving it (a restart's predecessor), or
+its writes timing out on a server too busy to read (a restart's replay of
+every journal at once).")
+
+(defun romacs-agent--reattach-later (session)
+  "Attach SESSION again a moment from now, when its supervisor still
+listens and it has looked fewer times than `romacs-agent--reattach-delays'
+says: one that has ended its journal, or been cancelled, is left as it is."
+  (let ((delay (nth (romacs-agent-reattaching session) romacs-agent--reattach-delays)))
+    (when (and delay (not (romacs-agent--per-turn-p session)) (not (romacs-agent-cancelled session))
+               (not (eq (romacs-agent-state session) 'ended))
+               (file-exists-p (romacs-agent-host-socket session)))
+      (cl-incf (romacs-agent-reattaching session))
+      (run-at-time delay nil #'romacs-agent--reattach session))))
+
+(defun romacs-agent--reattach (session)
+  "Attach SESSION again, unless something has meanwhile."
+  (when (and (eq (romacs-agent-get (romacs-agent-id session)) session)
+             (not (romacs-agent-cancelled session))
+             (not (process-live-p (romacs-agent-connection session)))
+             (eq (romacs-agent-state session) 'detached))
+    (romacs-agent--attach session 0)))
 
 (defun romacs-agent--attach (session &optional tries steal)
   "Attach to SESSION's supervisor and replay what this server has not seen.
@@ -2391,6 +2432,13 @@ A server runs this at its start, so sessions survive it."
   (when (file-directory-p (romacs-agent--state-root))
     (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
       (romacs-agent--load dir)))
+  ;; Known and detached, its supervisor still listening: attached again.
+  (dolist (session (hash-table-values romacs-agent--sessions))
+    (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
+               (not (process-live-p (romacs-agent-connection session)))
+               (file-exists-p (romacs-agent-host-socket session)))
+      (setf (romacs-agent-reattaching session) 0)
+      (romacs-agent--attach session 0)))
   ;; A session whose supervisor runs may call a tool any moment: the
   ;; endpoint listens now, where its relay looks.
   (when (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
