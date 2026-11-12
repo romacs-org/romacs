@@ -38,6 +38,7 @@ impl Leaf<'_> {
         self.vm.set_marker_object(marker, point, buffer).map_err(Fault::Error)
     }
     fn editor_check_activation(&mut self) -> std::result::Result<(), Fault> {
+        // HOST(delayed-variable): reads through variable_value, which checks the fence
         let transient = self.intern("transient-mark-mode");
         let even = self.intern("mark-even-if-inactive");
         let active = self.intern("mark-active");
