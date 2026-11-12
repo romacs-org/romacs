@@ -55,7 +55,12 @@ impl FlatTable {
         }
         if self.pages.get() == PAGES { return vm.char_table_get(self.table, code); }
         let mut page = Box::new([Value::NIL; PAGE]);
-        vm.char_table_fill(self.table, code & !(PAGE - 1), &mut page[..])?;
+        // A page whose other characters a table cannot give (a literal's
+        // malformed subdivision, read for a neighbour's nil) is not kept:
+        // CODE is read alone, as it would be without a view.
+        if vm.char_table_fill(self.table, code & !(PAGE - 1), &mut page[..]).is_err() {
+            return vm.char_table_get(self.table, code);
+        }
         self.pages.set(self.pages.get() + 1);
         let plane = plane.get_or_init(|| Box::new([const { OnceCell::new() }; 256]));
         Ok(plane[(code >> 8) & 0xff].get_or_init(|| page)[code & (PAGE - 1)])
@@ -413,6 +418,50 @@ mod tests {
         });
         assert_eq!(pages, Some(PAGES));
         assert!(read.iter().all(|&value| value == Value::integer(i64::try_from(3 * VIEWS - 1).unwrap()).unwrap()));
+    }
+
+    /// A page a table cannot fill, here a parent's malformed subdivision
+    /// read for the child's nil neighbours of its own entry, is not kept,
+    /// and each of its characters reads as it would alone: before the page
+    /// cap, past it, and after the view is replaced and made again.
+    #[test]
+    fn a_page_that_cannot_be_filled_reads_each_character_alone() {
+        let mut vm = Vm::new();
+        let int = |n: i64| Value::integer(n).unwrap();
+        // Root slot 0 (characters 0..65535) holds a depth-1 node that
+        // claims to start at 4096; the ASCII slot is a plain value.
+        let mut node = vec![int(1), int(4096)];
+        node.extend(std::iter::repeat_n(int(9), CharTableNode::SIZES[1]));
+        let node = vm.sub_char_table_from_literal(&node).unwrap();
+        let mut fields = vec![Value::NIL; 68];
+        fields[3] = int(5);
+        fields[4] = node;
+        let parent = vm.char_table_from_literal(&fields).unwrap();
+        let mut child = CharTable::new(Value::NIL);
+        child.set(256, int(2)).unwrap();
+        child.set_parent(parent);
+        let child = vm.allocate_object(data::Object::CharTable(Box::new(child)));
+        assert_eq!(vm.char_table_get(child, 256), Ok(int(2)));
+        assert!(vm.char_table_get(child, 257).is_err(), "the fixture's parent is malformed past ASCII");
+        let read = |vm: &mut Vm, fill: bool| undisturbed(vm, |vm| {
+            vm.flatten_table(child);
+            let reader = vm.char_table_reader(child);
+            if fill { for page in 0..PAGES { reader.get(u32::try_from(65536 + page * PAGE).unwrap()).unwrap(); } }
+            let pages = vm.flat_table(child).map(|view| view.pages.get());
+            ([65, 256, 256, 257].map(|code| reader.get(code)), pages)
+        });
+        let expected = [Ok(int(5)), Ok(int(2)), Ok(int(2)), vm.char_table_get(child, 257)];
+        assert_eq!(read(&mut vm, false), (expected.clone(), Some(0)), "before the cap");
+        assert_eq!(read(&mut vm, true), (expected.clone(), Some(PAGES)), "past the cap");
+        let replaced = undisturbed(&mut vm, |vm| {
+            for _ in 0..VIEWS {
+                let other = vm.allocate_object(data::Object::CharTable(Box::new(CharTable::new(Value::NIL))));
+                vm.flatten_table(other);
+            }
+            vm.flat_table(child).is_none()
+        });
+        assert!(replaced, "eight other tables read replace the child's view");
+        assert_eq!(read(&mut vm, false), (expected, Some(0)), "after the view was replaced");
     }
 
     /// A write to any char table, and a collection, leave no view to read.
