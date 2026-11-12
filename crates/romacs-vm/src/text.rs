@@ -1084,6 +1084,17 @@ impl TextBody {
             Err("index out of range".into())
         }
     }
+    /// Byte AT of the text, None at or past its end: read where
+    /// `character_at` reads, in the tail or the cached chunk.
+    #[inline]
+    pub(crate) fn byte_at(&self, at: usize) -> Option<u8> {
+        let prefix = self.bytes_len - self.tail.len();
+        if at >= prefix {
+            return self.tail.as_bytes().get(at - prefix).copied();
+        }
+        let chunk = self.chunk_for_byte(at);
+        chunk.text.as_bytes().get(at - chunk.byte).copied()
+    }
     #[inline]
     pub fn character_at(&self, b: ByteOffset) -> Result<Option<i64>> {
         if b.0 > self.len_bytes() {
