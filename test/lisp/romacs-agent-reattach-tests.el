@@ -142,6 +142,28 @@ attach."
             (should (equal attached (list session))))
         (delete-process peer)))))
 
+(ert-deftest romacs-agent-reattach-a-relay-with-no-supervisor-stays ()
+  (romacs-agent-reattach-tests--with
+    (let ((peer (make-process :name "romacs-relay-fixture" :command '("cat") :noquery t))
+          (romacs-mcp--peers nil) (closing 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf closing))))
+            (push peer romacs-mcp--peers)
+            ;; No supervisor listens: nothing to attach, and no other editor
+            ;; can; the relay is kept, not sent to come back for ever.
+            (delete-file (romacs-agent-host-socket session))
+            (funcall (gethash "romacs/hello" romacs-mcp-methods) peer
+                     (romacs-mcp--object "session" (romacs-agent-id session) "relay" "r1"))
+            (should (= closing 0))
+            (should-not attached)
+            ;; One listens (attach returns its connection): turned away until attached here.
+            (write-region "" nil (romacs-agent-host-socket session))
+            (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (s &rest _) (push s attached) peer)))
+              (funcall (gethash "romacs/hello" romacs-mcp-methods) peer
+                       (romacs-mcp--object "session" (romacs-agent-id session) "relay" "r2")))
+            (should (= closing 1)))
+        (delete-process peer)))))
+
 (ert-deftest romacs-agent-reattach-relays-do-not-fill-the-endpoint ()
   (let* ((romacs-mcp--listener 'listener) (romacs-mcp--peers nil) (closed nil) (fixtures nil))
     (cl-letf (((symbol-function 'romacs-mcp--close) (lambda (p) (push p closed))))
