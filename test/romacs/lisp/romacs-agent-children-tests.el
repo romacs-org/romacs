@@ -228,7 +228,7 @@
           (should (string-search "task 1" (romacs-agent-ui--child-label 0)))
           (should (string-search "Needs approval" (romacs-agent-ui--child-label 0)))
           (should-not (romacs-agent-ui--child-label 2))
-          (cl-letf (((symbol-function 'romacs-agent-switch) (lambda (session) (setq opened session))))
+          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq opened session))))
             (let ((last-command-event ?1)) (romacs-agent-chat-open-child))
             (should (eq opened waiting))
             (let ((last-command-event ?5))
@@ -370,7 +370,7 @@
                    (lambda (_prompt table &rest _)
                      (should (= (length (all-completions "" table)) 12))
                      (car (last (all-completions "" table)))))
-                  ((symbol-function 'romacs-agent-switch) (lambda (session) (setq opened session))))
+                  ((symbol-function 'romacs-agent-show) (lambda (session) (setq opened session))))
           (romacs-agent-chat-workers)
           (should (eq opened (plist-get (car (last (romacs-agent-children-rows parent))) :session))))))))
 

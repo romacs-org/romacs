@@ -1299,13 +1299,13 @@ activity, a prompt from anyone or a turn's end, unsettles it."
 caught up with counts as seen, not news."
   (unless (romacs-agent-seen-seq session) (romacs-agent-mark-seen session)))
 
-(defun romacs-agent-settle (session)
+(defun romacs-agent-settle (session &optional undo)
   "Acknowledge SESSION: its last turn is seen and it is settled until its
-next activity, in its manifest too."
+next activity, in its manifest too.  UNDO: it is no longer settled."
   (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session)
-        (romacs-agent-settled-seq session) (romacs-agent-activity-seq session))
+        (romacs-agent-settled-seq session) (and (not undo) (romacs-agent-activity-seq session)))
   (romacs-agent--manifest-put session "seenSeq" (romacs-agent-seen-seq session)
-                              "settledSeq" (romacs-agent-settled-seq session))
+                              "settledSeq" (or (romacs-agent-settled-seq session) :null))
   ;; Its views follow, as they follow its events.
   (romacs-agent--raise session (list :type 'settled)))
 

@@ -1,4 +1,4 @@
-;;; romacs-agent-ui.el --- Chat buffers and the agents home page -*- lexical-binding: t; -*-
+;;; romacs-agent-ui.el --- Agent sessions' chats and state -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
@@ -11,11 +11,9 @@
 ;; turn footer, the composer hint and the header's shape are adapted from
 ;; hermes-chat.el and hermes-chat-buffer.el to romacs-agent's sessions.
 ;;
-;; - `romacs-agents': the home page, as T3 Code's sidebar: sessions grouped
-;;   by project, delegated ones nested under the session that started them,
-;;   each with its state, the time of its last activity and its model
-;;   (and instance, when not the default).  RET opens a chat, c starts a session, i
-;;   interrupts, k stops, r resumes, g refreshes; n and p move.
+;; - One state for a session (`romacs-agent-ui--state'), every view's:
+;;   the header, the workers' rows, the cards of delegated tasks, the status
+;;   bar and the agent board (romacs-agent-board.el, `romacs-agents').
 ;; - A chat buffer per session: a header (harness, permission mode, model,
 ;;   context used of its window), the transcript (`> prompt', tool rows
 ;;   marked ● running, ✓ done or ! failed with their output folded, the
@@ -24,8 +22,8 @@
 ;;   sends, C-c C-c interrupts, C-c C-k stops, C-c C-r resumes, M-p recalls;
 ;;   in the transcript TAB folds a tool's output and n and p move between
 ;;   prompts.  An approval the harness asks for is answered with y or N (or
-;;   the actions menu).  C-c C-a attaches an image.  C-c C-b goes to another
-;;   open chat, C-c C-t to any session, opening its chat.
+;;   the actions menu).  C-c C-a attaches an image.  C-c C-b (and C-c C-t)
+;;   show the agent board.
 ;;
 ;; The chat is rebuilt from the journal, so a new server shows what the
 ;; session did while no server was there.
@@ -40,7 +38,7 @@
 (defvar romacs-agents-map
   (let ((map (make-sparse-keymap)))
     (define-key map "n" #'romacs-agent-start)
-    (define-key map "s" #'romacs-agent-switch-chat)
+    (define-key map "s" #'romacs-agents)
     (define-key map "a" #'romacs-agents)
     map)
   "Global prefix map for starting and finding agent sessions.
@@ -708,8 +706,7 @@ or a repeat."
 (defun romacs-agent-ui--on-event (session event)
   (romacs-agent-ui--track-children session event)
   (romacs-agent-ui--render session event)
-  (when (romacs-agent-ui--state-event-p event) (romacs-agent-ui--batch))
-  (romacs-agent-ui--dashboard-changed))
+  (when (romacs-agent-ui--state-event-p event) (romacs-agent-ui--batch)))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-ui--on-event)
 
@@ -726,9 +723,15 @@ or a repeat."
   "The sessions whose rows are to be made again.")
 (defvar romacs-agent-ui--children-timer nil)
 
+(defvar romacs-agent-ui-changed-hook nil
+  "Run once per batch of events that may change sessions' states, after
+their rows and the status bar: views of every session (the agent board)
+follow.")
+
 (defun romacs-agent-ui--batch ()
   "Bring what sessions' events change up to date at the end of this batch
-of them: rows of `romacs-agent-ui--children-changed', then the status bar."
+of them: rows of `romacs-agent-ui--children-changed', the status bar,
+then `romacs-agent-ui-changed-hook'."
   (unless romacs-agent-ui--children-timer
     (setq romacs-agent-ui--children-timer (run-at-time 0 nil #'romacs-agent-ui--children-flush))))
 
@@ -742,7 +745,8 @@ of them: rows of `romacs-agent-ui--children-changed', then the status bar."
   (let ((sessions (hash-table-keys romacs-agent-ui--children-changed)))
     (clrhash romacs-agent-ui--children-changed)
     (romacs-agent-ui--flush-rows sessions)
-    (romacs-agent-ui--status-bar)))
+    (romacs-agent-ui--status-bar)
+    (run-hooks 'romacs-agent-ui-changed-hook)))
 
 (defun romacs-agent-ui--flush-rows (sessions)
   "Make SESSIONS' rows again; their chats and an open actions menu follow,
@@ -1188,8 +1192,8 @@ whoever wrote last and whatever the session's state."
     (define-key map (kbd "C-c C-n") #'romacs-agent-chat-new)
     (define-key map (kbd "C-c C-r") #'romacs-agent-chat-rename)
     (define-key map (kbd "C-c C-e") #'romacs-agent-chat-effort)
-    (define-key map (kbd "C-c C-b") #'romacs-agent-switch-chat)
-    (define-key map (kbd "C-c C-t") #'romacs-agent-switch)
+    (define-key map (kbd "C-c C-b") #'romacs-agents)
+    (define-key map (kbd "C-c C-t") #'romacs-agents)
     (define-key map (kbd "C-c C-j") #'romacs-agent-chat-composer)
     (define-key map (kbd "M-p") #'romacs-agent-chat-history-previous)
     (define-key map (kbd "M-n") #'romacs-agent-chat-history-next)
@@ -1264,7 +1268,6 @@ and a running turn's live rule ticks."
     (when-let* ((parent (romacs-agent-get (plist-get (romacs-agent-options session) :parent))))
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--batch)
-    (romacs-agent-ui--dashboard-changed)
     (when (memq (romacs-agent-state session) '(starting running waiting-approval)) (romacs-agent-ui--tick-start))
     buffer))
 
@@ -1777,7 +1780,7 @@ this one goes on too (`romacs-agent-fork')."
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
     (romacs-agent--update-manifest session)
     (rename-buffer (format "*agent: %s*" title) t)
-    (romacs-agent-ui--dashboard-changed)))
+    (romacs-agent-ui--batch)))
 
 (defun romacs-agent-chat-effort (effort)
   "Run this session at reasoning EFFORT from its next turn on, its model
@@ -1941,156 +1944,16 @@ and changes nothing; its plan comes as a card to implement."
   (apply #'funcall-interactively #'romacs-agent-start
          (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session)))))
 
-(defun romacs-agent-ui--attention (session)
-  "How much SESSION wants the user, least first: its state's rank, a
-finished delegated task after every other."
-  (if (romacs-agent-ui--finished-child-p session) (length romacs-agent-ui--states)
-    (romacs-agent-ui--rank (romacs-agent-ui--state-key session))))
-
-(defun romacs-agent-ui--by-attention (sessions)
-  "SESSIONS, those wanting the user first, then the latest active."
-  (sort (copy-sequence sessions)
-        (lambda (a b)
-          (let ((x (romacs-agent-ui--attention a)) (y (romacs-agent-ui--attention b)))
-            (if (= x y)
-                (> (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0))
-              (< x y))))))
-
 (defun romacs-agent-ui--context-share (session)
   "How full SESSION's context is, as \"NN%\", or nil when it is not known."
   (let ((used (romacs-agent-context-used session)) (window (romacs-agent-context-window session)))
     (and (numberp used) (numberp window) (> window 0)
          (format "%d%%" (round (* 100.0 (/ used (float window))))))))
 
-(defun romacs-agent-ui--switch-suffix (session width)
-  "What the switcher says of SESSION after its title, in at most WIDTH
-columns: when it was last active, and its project."
-  (let ((cwd (romacs-agent-cwd session)))
-    (truncate-string-to-width
-     (concat (propertize (format "%4s  " (romacs-agent-ui--ago (romacs-agent-last-time session))) 'face 'romacs-agent-dim)
-             (propertize (if cwd (file-name-nondirectory (directory-file-name cwd)) "") 'face 'romacs-agent-project))
-     (max 0 width))))
-
-(defconst romacs-agent-ui--switch-suffix-width 26
-  "The columns a switcher row keeps after its title: the mark, the padding,
-the age and a project's name.")
-
-(defun romacs-agent-ui--switch-mark (session)
-  "SESSION's mark in the switcher, two columns or its word: only a state
-that is news."
-  (let* ((state (romacs-agent-ui--state session))
-         (mark (or (and (romacs-agent-ui--news-p (car state)) (romacs-agent-ui--label state)) "")))
-    (concat mark (make-string (max 0 (- 2 (string-width mark))) ?\s))))
-
-(defun romacs-agent-ui--session-names (sessions)
-  "A table of a unique name to each of SESSIONS, and the names in order, as
-\(TABLE . NAMES).  A title in use takes its id, then as much of it as it
-needs, then a count: every name stands for one session."
-  (let ((table (make-hash-table :test #'equal)) (names nil))
-    (dolist (session sessions)
-      (let* ((title (or (romacs-agent-title session) "session"))
-             (id (romacs-agent-id session))
-             (name title) (n 1))
-        (while (gethash name table)
-          (setq name (if (= n 1) (format "%s <%s>" title (substring id 0 (min 8 (length id))))
-                       (format "%s <%s %d>" title (substring id 0 (min 8 (length id))) n))
-                n (1+ n)))
-        (puthash name session table)
-        (push name names)))
-    (cons table (nreverse names))))
-
-(defun romacs-agent-ui--switch-row (name session column width)
-  "NAME's row for SESSION: the affixation of a candidate, whose value stays
-NAME and whose shown form fits COLUMN."
-  (let ((shown (romacs-truncate name column)))
-    (list (if (equal shown name) name (propertize name 'display shown))
-          (concat (romacs-agent-ui--switch-mark session) " ")
-          (concat (make-string (max 1 (- (+ column 2) (string-width shown))) ?\s)
-                  (romacs-agent-ui--switch-suffix session (- width column 4))))))
-
-(defun romacs-agent-ui--session-table (table names width)
-  "A completion table of NAMES in their order, each TABLE's session, each
-row its status within WIDTH columns."
-  (let* ((column (min 44 (apply #'max 1 (mapcar #'string-width names))
-                      ;; What follows a title, its age and project, keeps its room.
-                      (max 12 (- width romacs-agent-ui--switch-suffix-width))))
-         (rows (lambda (candidates)
-                 (mapcar (lambda (name)
-                           (romacs-agent-ui--switch-row name (gethash name table) column width))
-                         candidates))))
-    (lambda (string predicate action)
-      (if (eq action 'metadata)
-          `(metadata (category . romacs-agent) (display-sort-function . identity)
-                     (cycle-sort-function . identity) (affixation-function . ,rows))
-        (complete-with-action action names string predicate)))))
-
-(defvar romacs-complete-center-width)
-
-(defcustom romacs-agent-switch-width 0.5
-  "How much of the frame's width `romacs-agent-switch' takes."
-  :type 'float :group 'romacs-agent)
-
-(defun romacs-agent-ui--finished-child-p (session)
-  "Whether SESSION is a delegated task with nothing more for anyone to do."
-  (and (plist-get (romacs-agent-options session) :parent)
-       (not (memq (romacs-agent-state session) '(starting running waiting-approval)))))
-
-(defun romacs-agent-ui--switch-sessions ()
-  "Every session but this chat's, those wanting the user first."
-  (let ((here (and (derived-mode-p 'romacs-agent-chat-mode) romacs-agent-ui--session)))
-    (romacs-agent-ui--by-attention (remq here (romacs-agent-sessions)))))
-
-(defun romacs-agent-ui--open-sessions ()
-  "The sessions of `romacs-agent-ui--switch-sessions' with a live chat buffer."
-  (seq-filter (lambda (session) (buffer-live-p (romacs-agent-buffer session)))
-              (romacs-agent-ui--switch-sessions)))
-
-(defun romacs-agent-ui--resolve-session (table names answer)
-  "The session of ANSWER, as a prompt accepted it: its case may differ."
-  (or (gethash answer table)
-      (let ((name (seq-find (lambda (name) (eq t (compare-strings name nil nil answer nil nil t))) names)))
-        (and name (gethash name table)))
-      (user-error "No agent session %s" answer)))
-
-(defun romacs-agent-ui--read-session (prompt sessions none)
-  "Read one of SESSIONS by its status with PROMPT; with none, say NONE."
-  (pcase-let ((`(,table . ,names) (romacs-agent-ui--session-names sessions)))
-    (unless names (user-error "%s" none))
-    (let ((romacs-complete-center-width romacs-agent-switch-width))
-      (romacs-agent-ui--resolve-session
-       table names
-       (completing-read prompt
-                        (romacs-agent-ui--session-table
-                         table names (- (floor (* (frame-width) romacs-agent-switch-width)) 6))
-                        nil t)))))
-
-;;;###autoload
-(defun romacs-agent-switch (session)
-  "Switch to agent SESSION, in this window, chosen by what each is doing:
-those that want you first, finished delegated tasks last, each with its
-state, last activity, context, model, project and the start of its last
-reply.  A session with no chat yet gets one."
-  (interactive (list (romacs-agent-ui--read-session
-                      "Agent: " (romacs-agent-ui--switch-sessions) "No other agent sessions")))
-  (let ((display-buffer-overriding-action '(display-buffer-same-window)))
-    (romacs-agent-show session)))
-
-;;;###autoload
-(defun romacs-agent-switch-chat (session)
-  "Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
-only sessions whose chat is open."
-  (interactive (list (romacs-agent-ui--read-session
-                      "Chat: " (romacs-agent-ui--open-sessions) "No other agent chats are open")))
-  (romacs-agent-switch session))
-
-(defalias 'romacs-agent-chat-switch #'romacs-agent-switch-chat)
-
 (defun romacs-agent-chat-show-commands ()
   "List this chat's keys, the composer's and the transcript's."
   (interactive nil romacs-agent-chat-mode)
   (describe-mode))
-
-(defun romacs-agent-chat-home () "The agents home page." (interactive nil romacs-agent-chat-mode) (romacs-agents))
 
 (defun romacs-agent-ui--asking-p ()
   "Whether the approval here asks questions."
@@ -2170,7 +2033,9 @@ something, its title in the room a menu entry leaves
 (defun romacs-agent-ui--open-worker (row)
   "Open worker ROW: a delegated task's chat, or the card in this chat of a
 harness's own subagent or command."
-  (if (plist-get row :session) (romacs-agent-switch (plist-get row :session))
+  (if (plist-get row :session)
+      (let ((display-buffer-overriding-action '(display-buffer-same-window)))
+        (romacs-agent-show (plist-get row :session)))
     (goto-char (or (gethash (plist-get row :tool) romacs-agent-ui--tool-lines)
                    (user-error "Its card is not in this chat")))
     (recenter)))
@@ -2195,14 +2060,6 @@ wanting you first."
                            rows))))
     (romacs-agent-ui--open-worker
      (cdr (assoc (completing-read "Worker: " (romacs-agent--ordered-table (mapcar #'car labels)) nil t) labels)))))
-
-(defun romacs-agent-chat-children (session)
-  "Switch to SESSION, chosen among those this one delegated."
-  (interactive (list (romacs-agent-ui--read-session
-                      "Subagent: " (romacs-agent-ui--by-attention (romacs-agent-children romacs-agent-ui--session))
-                      "No delegated tasks"))
-               romacs-agent-chat-mode)
-  (romacs-agent-switch session))
 
 (keymap-popup-define romacs-agent-chat-actions-map
   "Actions of an agent chat: an approval waiting first; then the turn, what
@@ -2232,15 +2089,13 @@ view."
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))
   :group "Session"
-  "b" ("Switch chat" romacs-agent-switch-chat)
-  "t" ("Switch thread" romacs-agent-switch)
+  "b" ("Agent board" romacs-agents)
   "n" ("New session" romacs-agent-chat-new)
   "R" ("Rename" romacs-agent-chat-rename)
   "f" ("Fork" romacs-agent-chat-fork
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-ui--session))))
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
   "x" ("Stop" romacs-agent-chat-stop :inapt-if (lambda () (eq (romacs-agent-state romacs-agent-ui--session) 'ended)))
-  "h" ("Home page" romacs-agent-chat-home)
   :group (#'romacs-agent-ui--children-title :if #'romacs-agent-ui--children-here)
   "1" ((lambda () (romacs-agent-ui--child-label 0)) romacs-agent-chat-open-child)
   "2" ((lambda () (romacs-agent-ui--child-label 1)) romacs-agent-chat-open-child)
@@ -2268,7 +2123,7 @@ view."
 
 (put 'romacs-agent-chat-actions-map-popup 'command-modes '(romacs-agent-chat-mode))
 
-;;; The home page
+;;; Words rows share
 
 (defun romacs-agent-ui--ago (time)
   "How long ago TIME was, compactly."
@@ -2279,315 +2134,12 @@ view."
             ((< seconds 86400) (format "%dh" (/ seconds 3600)))
             (t (format "%dd" (/ seconds 86400)))))))
 
-(defun romacs-agent-ui--column (text width)
-  (romacs-truncate (or text "") width ?\s))
-
-(defconst romacs-agent-ui--word-width 10 "The status column: its longest word and a space.")
-(defconst romacs-agent-ui--instance-width 20 "The model column, shown on a page 72 columns wide or more.")
-
-(defun romacs-agent-ui--default-provider ()
-  "The default provider's name, or nil when there is none: a row still shows."
-  (ignore-errors (romacs-agent--default-provider)))
-
 (defun romacs-agent-ui--instance (provider harness model default)
   "The model column: PROVIDER when not DEFAULT, then MODEL without its
 HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
   (let ((provider (and provider (not (equal provider default)) provider))
         (model (if (and model harness) (string-remove-prefix (concat (symbol-name harness) "-") model) model)))
     (mapconcat #'identity (delq nil (list provider model)) " · ")))
-
-(defun romacs-agent-ui--fit (row width)
-  "ROW, a plist (:indent :mark :face :title :title-face :word :ago :instance),
-as one home-page line WIDTH columns wide: the title takes what the status,
-age and model columns leave; a narrow page drops the model."
-  (let* ((show-instance (>= width 72))
-         (indent (plist-get row :indent))
-         (face (plist-get row :face))
-         (tail (+ romacs-agent-ui--word-width 5 (if show-instance romacs-agent-ui--instance-width 0)))
-         (title-width (max 12 (- width (string-width indent) 2 1 tail))))
-    (concat indent (propertize (plist-get row :mark) 'face face) " "
-            (propertize (romacs-agent-ui--column (plist-get row :title) title-width) 'face (plist-get row :title-face))
-            " " (propertize (romacs-agent-ui--column (plist-get row :word) romacs-agent-ui--word-width) 'face face)
-            (propertize (romacs-agent-ui--column (plist-get row :ago) 5) 'face 'romacs-agent-dim)
-            (if show-instance
-                (propertize (truncate-string-to-width (plist-get row :instance) romacs-agent-ui--instance-width nil nil t)
-                            'face 'romacs-agent-dim)
-              "")
-            "\n")))
-
-(defun romacs-agent-ui--row (session depth root-cwd width)
-  "SESSION's row on the home page, nested DEPTH under its root, fitted to WIDTH."
-  (pcase-let ((`(,_ ,glyph ,word ,face) (romacs-agent-ui--state session))
-              (cwd (romacs-agent-cwd session)))
-    (propertize
-     (romacs-agent-ui--fit
-      (list :indent (if (> depth 0) (concat (make-string (* 2 (1- depth)) ?\s) "└ ") "")
-            :mark (romacs-agent-ui--column (and glyph (romacs-agent-ui--glyph glyph word face)) 2)
-            :face face :word (downcase word)
-            :title (concat (romacs-agent-title session)
-                           (if (and (> depth 0) root-cwd (not (equal cwd root-cwd)))
-                               (propertize (concat "  " (abbreviate-file-name cwd)) 'face 'romacs-agent-dim) ""))
-            :title-face (if (romacs-agent-unseen-p session) 'romacs-agent-unread 'default)
-            :ago (romacs-agent-ui--ago (romacs-agent-last-time session))
-            :instance (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
-                                                 (or (romacs-agent-model session)
-                                                     (plist-get (romacs-agent-options session) :model))
-                                                 (romacs-agent-ui--default-provider)))
-      width)
-     'romacs-agent-session (romacs-agent-id session))))
-
-(defun romacs-agent-ui--tree ()
-  "Every session as (ROOT . DESCENDANTS-BY-PARENT): the roots, newest
-activity first, and a table from a session's id to its children."
-  (let ((children (make-hash-table :test #'equal)) (roots nil))
-    (dolist (session (romacs-agent-sessions))
-      (let ((parent (plist-get (romacs-agent-options session) :parent)))
-        (if (and parent (romacs-agent-get parent))
-            (push session (gethash parent children))
-          (push session roots))))
-    (cons (sort roots (lambda (a b) (> (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0))))
-          children)))
-
-(defun romacs-agent-ui--newer (a b)
-  "Whichever of sessions A and B (either nil) was active last."
-  (if (and b (or (null a) (> (or (romacs-agent-last-time b) 0) (or (romacs-agent-last-time a) 0)))) b a))
-
-(defun romacs-agent-ui--insert-subtree (session children depth root-cwd width)
-  "Insert SESSION's row and its descendants'; return the one active last."
-  (insert (romacs-agent-ui--row session depth root-cwd width))
-  (let ((newest session))
-    (dolist (child (sort (copy-sequence (gethash (romacs-agent-id session) children))
-                         (lambda (a b) (< (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0)))))
-      (setq newest (romacs-agent-ui--newer newest (romacs-agent-ui--insert-subtree child children (1+ depth) root-cwd width))))
-    newest))
-
-(defun romacs-agent-ui--history-row (item width)
-  "A harness transcript ITEM's row, dimmed, in the session rows' columns."
-  (propertize
-   (romacs-agent-ui--fit
-    (list :indent "" :mark "◇" :face 'romacs-agent-dim :word ""
-          :title (plist-get item :title) :title-face 'romacs-agent-dim
-          :ago (romacs-agent-ui--ago (plist-get item :mtime))
-          :instance (romacs-agent-ui--instance (plist-get item :provider) nil nil (romacs-agent-ui--default-provider)))
-    width)
-   'romacs-agent-history item))
-
-(defvar-local romacs-agents--all-history nil "Every project's history shows, not its newest few.")
-
-(declare-function romacs-agent-history-items "romacs-agent-history" ())
-(declare-function romacs-agent-history-list "romacs-agent-history" ())
-(declare-function romacs-agent-history-open "romacs-agent-history" (item))
-(declare-function romacs-agent-history-resume "romacs-agent-history" (item))
-
-(defun romacs-agent-ui--home ()
-  "Render the home page: a section per project, newest activity first,
-its sessions nested and then the harnesses' own transcripts of it; the
-row point was on stays under point."
-  (require 'romacs-agent-history)
-  (pcase-let* ((`(,roots . ,children) (romacs-agent-ui--tree))
-               (sessions (make-hash-table :test #'equal))
-               (history (make-hash-table :test #'equal))
-               (recency (make-hash-table :test #'equal))
-               (selected (or (get-text-property (line-beginning-position) 'romacs-agent-session)
-                             (plist-get (get-text-property (line-beginning-position) 'romacs-agent-history) :path)))
-               (now (float-time)))
-    (cl-flet ((note (cwd time) (puthash cwd (max (or time now) (gethash cwd recency 0)) recency)))
-      (dolist (root roots)
-        (let ((cwd (or (romacs-agent-cwd root) "")))
-          (note cwd (romacs-agent-last-time root))
-          (push root (gethash cwd sessions))))
-      (dolist (item (romacs-agent-history-items))
-        (note (plist-get item :cwd) (plist-get item :mtime))
-        (push item (gethash (plist-get item :cwd) history))))
-    (let ((projects (sort (let ((keys nil)) (maphash (lambda (key _) (push key keys)) recency) keys) (lambda (a b) (> (gethash a recency) (gethash b recency))))))
-    (setq romacs-agents--running
-          (cl-count-if (lambda (s) (memq (romacs-agent-state s) '(starting running waiting-approval)))
-                       (hash-table-values romacs-agent--sessions)))
-    (let ((inhibit-read-only t) (line (line-number-at-pos))
-          (width (let ((window (get-buffer-window (current-buffer) 'visible)))
-                   (1- (if window (window-body-width window) (frame-width))))))
-      (erase-buffer)
-      (if (null projects)
-          (insert (propertize "No agent sessions yet: c starts one.\n" 'face 'romacs-agent-dim))
-        (dolist (cwd projects)
-          (let* ((roots (nreverse (gethash cwd sessions)))
-                 (items (nreverse (gethash cwd history)))
-                 (shown (if romacs-agents--all-history items (seq-take items romacs-agent-history-per-project)))
-                 (header (point)) (newest nil))
-            (insert (propertize (file-name-nondirectory (directory-file-name cwd)) 'face 'romacs-agent-section)
-                    "  " (propertize (abbreviate-file-name cwd) 'face 'romacs-agent-dim) "\n")
-            (dolist (root roots)
-              (setq newest (romacs-agent-ui--newer newest (romacs-agent-ui--insert-subtree root children 0 cwd width))))
-            ;; RET on the project opens its newest: a session (a delegated
-            ;; one too), else its newest transcript.
-            (when-let* ((target (if newest (romacs-agent-id newest) (car items))))
-              (put-text-property header (save-excursion (goto-char header) (line-beginning-position 2))
-                                 'romacs-agents-newest target))
-            (dolist (item shown) (insert (romacs-agent-ui--history-row item width)))
-            (when (> (length items) (length shown))
-              (insert (propertize (concat (propertize (format "  ◇ %d more  " (- (length items) (length shown)))
-                                                      'face 'romacs-agent-dim)
-                                          (romacs-key-hint "(\\<romacs-agents-mode-map>\\[romacs-agents-toggle-history] shows all)\n"
-                                                           'romacs-agent-dim))
-                                  'romacs-agents-more t)))
-            ;; `c' anywhere in it starts a session here.
-            (put-text-property header (point) 'romacs-agents-project cwd))
-          (insert "\n")))
-      (insert (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-open] open  \\[romacs-agents-new] new  \\[romacs-agents-interrupt] interrupt  \\[romacs-agents-stop] stop  \\[romacs-agents-resume] resume  \\[romacs-agents-toggle-history] history  \\[romacs-agents-refresh] refresh  \\[romacs-agents-next]/\\[romacs-agents-previous] move\n"
-                               'romacs-agent-dim))
-      (add-hook 'window-size-change-functions #'romacs-agents--resized nil t)
-      (goto-char (point-min))
-      (let ((row (and selected (or (text-property-any (point-min) (point-max) 'romacs-agent-session selected)
-                                   (romacs-agent-ui--history-row-of selected)))))
-        (if row (goto-char row) (forward-line (1- line))))))))
-
-(defun romacs-agent-ui--history-row-of (path)
-  "The start of PATH's history row, or nil."
-  (let ((position (point-min)) (found nil))
-    (while (and (not found) (setq position (next-single-property-change position 'romacs-agent-history)))
-      (when (equal (plist-get (get-text-property position 'romacs-agent-history) :path) path) (setq found position)))
-    found))
-
-(defvar-local romacs-agents--running 0 "Sessions running at the last render.")
-
-(defun romacs-agents--header-line ()
-  (let ((running romacs-agents--running))
-    (concat (propertize "Agents" 'face 'romacs-agent-section)
-            (propertize " | " 'face 'romacs-agent-dim)
-            (format "%d running" running)
-            (propertize " | " 'face 'romacs-agent-dim)
-            (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-new] new  \\[romacs-agents-refresh] refresh  \\[describe-mode] help"
-                             'romacs-agent-dim))))
-
-(defvar romacs-agents-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'romacs-agents-open)
-    (define-key map "c" #'romacs-agents-new)
-    (define-key map "+" #'romacs-agents-new)
-    (define-key map "i" #'romacs-agents-interrupt)
-    (define-key map "k" #'romacs-agents-stop)
-    (define-key map "r" #'romacs-agents-resume)
-    (define-key map "g" #'romacs-agents-refresh)
-    (define-key map "h" #'romacs-agents-toggle-history)
-    (define-key map "n" #'romacs-agents-next)
-    (define-key map "p" #'romacs-agents-previous)
-    (define-key map "?" #'describe-mode)
-    map)
-  "Keys of the agents home page.")
-
-;; The key the page names, of the two that start a session.
-(put 'romacs-agents-new :advertised-binding [?c])
-
-(define-derived-mode romacs-agents-mode special-mode "Agents"
-  "Every agent session this server knows, by project.
-\\{romacs-agents-mode-map}"
-  :interactive nil
-  (setq-local header-line-format '(:eval (romacs-agents--header-line)))
-  (setq-local truncate-lines t))
-
-(defvar romacs-agents--refresh nil)
-(defvar romacs-agents--stale nil "The home page changed while not shown.")
-
-(defun romacs-agent-ui--dashboard-changed ()
-  "Refresh the home page soon, at most once a second, and only while it is
-shown; hidden, it is rebuilt when shown."
-  (if (not (and (get-buffer "*romacs-agents*") (get-buffer-window "*romacs-agents*" 'visible)))
-      (setq romacs-agents--stale t)
-    (unless romacs-agents--refresh
-      (setq romacs-agents--refresh
-            (run-at-time 1 nil (lambda ()
-                                 (setq romacs-agents--refresh nil)
-                                 (when-let* ((buffer (get-buffer "*romacs-agents*")))
-                                   (with-current-buffer buffer (romacs-agent-ui--home)))))))))
-
-;;;###autoload
-(defun romacs-agents ()
-  "Show every agent session, by project."
-  (interactive)
-  (romacs-agent-restore)
-  (require 'romacs-agent-history)
-  (romacs-agent-history-list)
-  (with-current-buffer (get-buffer-create "*romacs-agents*")
-    (unless (derived-mode-p 'romacs-agents-mode) (romacs-agents-mode))
-    (pop-to-buffer (current-buffer))
-    ;; Shown first: the rows fit its window.
-    (romacs-agent-ui--home)
-    (setq romacs-agents--stale nil)))
-
-(defun romacs-agents-refresh ()
-  "Rebuild the home page, the harnesses' transcripts listed anew."
-  (interactive nil romacs-agents-mode)
-  (require 'romacs-agent-history)
-  (romacs-agent-history-list)
-  (romacs-agent-ui--home))
-
-(defun romacs-agents-toggle-history ()
-  "Show every project's history, or its newest few."
-  (interactive nil romacs-agents-mode)
-  (setq romacs-agents--all-history (not romacs-agents--all-history))
-  (romacs-agent-ui--home))
-
-(defun romacs-agents--resized (_frame)
-  "A new width: the rows fit it again (once per resize, not per event)."
-  (when-let* ((buffer (get-buffer "*romacs-agents*")))
-    (with-current-buffer buffer (romacs-agent-ui--home))))
-
-(defun romacs-agents--at-point ()
-  (or (romacs-agent-get (get-text-property (line-beginning-position) 'romacs-agent-session))
-      (user-error "%s" (substitute-command-keys
-                        "No session on this line: \\<romacs-agents-mode-map>\\[romacs-agents-next] and \\[romacs-agents-previous] move to one"))))
-
-(defun romacs-agents--history-at-point ()
-  (get-text-property (line-beginning-position) 'romacs-agent-history))
-
-(defun romacs-agents--row-p ()
-  (or (get-text-property (point) 'romacs-agent-session) (get-text-property (point) 'romacs-agent-history)))
-
-(defun romacs-agents-next ()
-  "The next row."
-  (interactive nil romacs-agents-mode)
-  (forward-line 1)
-  (while (and (not (eobp)) (not (romacs-agents--row-p))) (forward-line 1)))
-
-(defun romacs-agents-previous ()
-  "The previous row."
-  (interactive nil romacs-agents-mode)
-  (forward-line -1)
-  (while (and (not (bobp)) (not (romacs-agents--row-p))) (forward-line -1)))
-
-(defun romacs-agents-open ()
-  "Open this session's chat, or this transcript read-only; on a project,
-its newest; on \"more\", every transcript."
-  (interactive nil romacs-agents-mode)
-  (let ((start (line-beginning-position)))
-    (cond ((romacs-agents--history-at-point) (romacs-agent-history-open (romacs-agents--history-at-point)))
-          ((get-text-property start 'romacs-agent-session) (romacs-agent-show (romacs-agents--at-point)))
-          ((get-text-property start 'romacs-agents-more) (romacs-agents-toggle-history))
-          ((get-text-property start 'romacs-agents-newest)
-           (let ((newest (get-text-property start 'romacs-agents-newest)))
-             (cond ((not (stringp newest)) (romacs-agent-history-open newest))
-                   ((romacs-agent-get newest) (romacs-agent-show (romacs-agent-get newest)))
-                   (t (romacs-agent-ui--home) (user-error "That session is gone; the page is redrawn")))))
-          (t (romacs-agents--at-point)))))
-(defun romacs-agents-new ()
-  "Start a new session, by default in the project at point."
-  (interactive nil romacs-agents-mode)
-  (let ((project (get-text-property (line-beginning-position) 'romacs-agents-project)))
-    (apply #'funcall-interactively #'romacs-agent-start
-           (romacs-agent--start-arguments (if project (file-name-as-directory project)
-                                            (romacs-agent--project-default))))))
-
-(defun romacs-agents-interrupt () "Interrupt this session." (interactive nil romacs-agents-mode) (romacs-agent-interrupt (romacs-agents--at-point)))
-(defun romacs-agents-stop ()
-  "Stop this session."
-  (interactive nil romacs-agents-mode)
-  (when (yes-or-no-p "Stop this agent session? ") (romacs-agent-stop (romacs-agents--at-point))))
-(defun romacs-agents-resume ()
-  "Resume this session, or go on with this transcript as a session."
-  (interactive nil romacs-agents-mode)
-  (if-let* ((item (romacs-agents--history-at-point)))
-      (romacs-agent-history-resume item)
-    (romacs-agent-resume (romacs-agents--at-point))))
 
 (provide 'romacs-agent-ui)
 ;;; romacs-agent-ui.el ends here

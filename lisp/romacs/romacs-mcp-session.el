@@ -286,7 +286,7 @@ only when asked for.")
   "BUFFER's kind: agent, chat, mail, file, directory, process or other;
 PROCESSES is the set of buffers a process has."
   (with-current-buffer buffer
-    (cond ((or (derived-mode-p 'romacs-agent-chat-mode 'romacs-agents-mode)
+    (cond ((or (derived-mode-p 'romacs-agent-chat-mode 'romacs-agent-board-mode)
                (string-match-p "\\`\\*\\(agent\\|history\\): " (buffer-name)))
            "agent")
           ((or (derived-mode-p 'jabber-chat-mode 'jabber-roster-mode 'erc-mode 'rcirc-mode)
