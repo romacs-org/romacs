@@ -840,6 +840,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         // An image's slot is its own height (produce_image_glyph).
         let (ascent, height) = match &shown {
             Shown::Image(i) => (i.ascent as f32, (i.ascent + i.descent) as f32),
+            _ if escaped(&snapshot.text, byte, ch) => (ascent, height),
             _ => shown_rise(frame, id, (&snapshot.text.utf8, byte, ch), &shown, (ascent, height), &mut cluster_rise),
         };
         let own_mixed = (ascent, height) != (metrics[index].0, metrics[index].1) && !matches!(shown, Shown::Image(_));
@@ -1523,6 +1524,14 @@ fn sequence_at(text: &TextSlice, byte: usize, ch: char, inside: &mut usize, fram
     shown(ch, raw)
 }
 
+/// Whether the character CH at BYTE of TEXT, beyond ASCII, shows as an
+/// escape (a raw byte, or a control character): ASCII glyphs of its face,
+/// which rise as the face does, whatever font the character it stands
+/// for is drawn in elsewhere.
+fn escaped(text: &TextSlice, byte: usize, ch: char) -> bool {
+    !ch.is_ascii() && (ch.is_control() || text.is_raw(byte))
+}
+
 /// Whether SHOWN draws glyphs (a composed sequence's included), which a
 /// box run's edges belong to, rather than a stretch.
 fn shows_glyphs(shown: &Shown) -> bool {
@@ -1947,7 +1956,7 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
             Shown::Inside => 0.0,
         };
         let face = (face_ascents[index] as f32, face_heights[index] as f32);
-        let (ascent, height) = shown_rise(&frame, id, (&input.text.utf8, byte, ch), &shown, face, &mut cluster_rise);
+        let (ascent, height) = if escaped(&input.text, byte, ch) { face } else { shown_rise(&frame, id, (&input.text.utf8, byte, ch), &shown, face, &mut cluster_rise) };
         glyphs.push((pixels(width)?, pixels(height)?));
         ascents.push(ascent as u32);
         fallback.push((ascent, height) != face);
