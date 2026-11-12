@@ -405,6 +405,35 @@ class Transport(unittest.TestCase):
         self.say(child, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "romacs_debug_inspect"}})
         self.assertIs(self.hear(child, 3, 2)["result"]["isError"], False)
 
+    def test_reconnect_backs_off_a_refusing_session_until_its_route_is_relinked(self):
+        # A Romacs its session is not attached to closes the relay at once:
+        # the relay asks again less and less often, and at once when the
+        # route is relinked (rename(2)) to the process that attached it.
+        route = self.root / "route"
+        route.symlink_to(self.path)
+        self.path, real = str(route), self.path
+        child, peer = self.relay()
+        self.path = real
+        peer.close()
+        self.listener.settimeout(.2)
+        accepted, deadline = 0, time.monotonic() + 4
+        while time.monotonic() < deadline:
+            try:
+                again, _ = self.listener.accept()
+            except socket.timeout:
+                continue
+            again.close()
+            accepted += 1
+        self.assertLessEqual(accepted, 4, "a refused relay reconnects every tick")
+        self.assertGreaterEqual(accepted, 1)
+        relinked = self.root / "route.new"
+        relinked.symlink_to(self.path)
+        os.rename(relinked, route)
+        self.listener.settimeout(1)
+        back, _ = self.listener.accept()
+        self.sockets.append(back)
+        self.assertIn(b"romacs/hello", back.recv(1 << 16))
+
     def test_reconnect_a_session_lost_during_discovery_settles_it(self):
         child, peer = self.relay()
         self.say(child, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "v"}})
