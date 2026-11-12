@@ -1,5 +1,6 @@
 //! Capacity-bounded command transport with CPU-only startup extraction.
 //! Shutdown is one independent coalescing bit; len includes that pending bit.
+//! A paint replaces a paint not yet taken (the newest frame is what draws).
 //!
 //! Deferred startup already applies window/configuration/clipboard commands
 //! ahead of staged GPU work. Extract the same commands without moving or
@@ -88,9 +89,16 @@ impl CommandSender {
             // Cancellation is one coalescing bit, independent of FIFO capacity.
             pending.shutdown = true;
         } else {
-            if pending.queue.len() >= limit.min(self.shared.capacity) {
+            // A paint is a mailbox: it replaces a paint the renderer has not
+            // taken, and goes behind what was sent since, so its producer
+            // never waits for drawing and the renderer draws the newest.
+            let superseded = matches!(command, RenderCommand::Paint(_))
+                .then(|| pending.queue.iter().position(|queued| matches!(queued, RenderCommand::Paint(_))))
+                .flatten();
+            if pending.queue.len() - usize::from(superseded.is_some()) >= limit.min(self.shared.capacity) {
                 return Err(TrySendError::Full(command));
             }
+            if let Some(index) = superseded { pending.queue.remove(index); }
             pending.queue.push_back(command);
         }
         // Publish and notify under the same lock.

@@ -35,6 +35,9 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
+    /// Under --trace-latency, the key a paint carries until it is drawn:
+    /// its presentation and timings (`KeyPaint`).
+    pub key_paint: Option<KeyPaint>,
     /// The prompt's last painted frame, its selected window, presentation,
     /// window ends and text animations: an unchanged redisplay answers
     /// these again.
@@ -208,6 +211,52 @@ pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
     sender.software_adapter().map(|software| !software || forced())
 }
 
+/// A key read in a prompt and the paint that carries it, timed until the
+/// paint is drawn.
+#[derive(Debug)]
+pub struct KeyPaint {
+    presentation: u64,
+    read: std::time::Instant,
+    started: std::time::Instant,
+    laying: std::time::Instant,
+    submitted: std::time::Instant,
+    snapshot: Duration,
+}
+
+impl KeyPaint {
+    /// The key's latency, DRAWN being the presentation drawn AT (this paint's,
+    /// or a later one that superseded it).
+    fn tell(&self, drawn: u64, at: std::time::Instant) {
+        crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-key-latency","presentation":drawn,"units":"ns",
+            "command_ns":self.started.duration_since(self.read).as_nanos(),"redisplay_ns":self.submitted.duration_since(self.started).as_nanos(),
+            "key_to_render_ns":at.duration_since(self.read).as_nanos(),
+            // command_ns includes snapshot_ns; redisplay_ns is layout_ns and
+            // the submission; render_ns is from submission to drawn.
+            "snapshot_ns":self.snapshot.as_nanos(),"layout_ns":self.submitted.duration_since(self.laying).as_nanos(),
+            "render_ns":at.duration_since(self.submitted).as_nanos()}));
+    }
+}
+
+impl GuiHost {
+    /// Settle the prompt's paint in flight once the renderer has drawn it,
+    /// noting it (`prompt-drawn`, what harnesses wait on for a prompt on
+    /// screen). Never waits. True while a paint is still undrawn.
+    fn settle_drawn(&self) -> bool {
+        let mut shared = self.shared.borrow_mut();
+        let Some((presentation, _)) = shared.in_flight else { return false };
+        if self.sender.wait_for_render(presentation, Duration::ZERO).is_err() { return true; }
+        shared.in_flight = None;
+        let now = std::time::Instant::now();
+        shared.settled = Some((presentation, now));
+        // A key carried by this paint, or by one it superseded: on screen now.
+        if let Some(paint) = shared.key_paint.take_if(|paint| paint.presentation <= presentation) { paint.tell(presentation, now); }
+        if crate::diagnostics() {
+            crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-drawn","presentation":presentation}));
+        }
+        false
+    }
+}
+
 impl HostInput for GuiHost {
     fn clipboard_text(&mut self) -> Result<Option<String>, String> {
         self.sender.clipboard_text()
@@ -261,7 +310,9 @@ impl HostInput for GuiHost {
 
     fn images_behind(&mut self) -> bool {
         // Not while a paint is in flight (a stalled render is not spun on),
-        // nor with no window to paint.
+        // nor with no window to paint. A paint drawn since (its render woke
+        // this read) is settled first, so the next batch of images goes on.
+        self.settle_drawn();
         let shared = self.shared.borrow();
         self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
     }
@@ -302,29 +353,22 @@ impl HostInput for GuiHost {
         let laying = std::time::Instant::now();
         let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
         let submitted = std::time::Instant::now();
-        // Synchronous, like the oracle path: the prompt is on screen before
-        // the evaluator blocks for its key. A window the compositor does not
-        // draw never renders it: wait no longer than the paint in flight
-        // may stall, then leave this one in flight in its place. A drawn
-        // paint settles every earlier one.
+        // Handed to the renderer, never waited for: the evaluator goes on to
+        // its key while the frame draws, and a paint not yet drawn is
+        // replaced by this one (the command channel's mailbox). The paint
+        // stays in flight until a read sees it drawn (`settle_drawn'); a
+        // drawn paint settles every earlier one.
         let drawn = {
+            self.settle_drawn();
             let mut shared = self.shared.borrow_mut();
-            if let Some((earlier, _)) = shared.in_flight
-                && self.sender.wait_for_render(earlier, Duration::ZERO).is_ok() {
-                shared.in_flight = None;
-                shared.settled = Some((earlier, std::time::Instant::now()));
-            }
             let since = shared.in_flight.map_or(submitted, |(_, since)| since);
-            let deadline = since + crate::presentation::render_stall();
-            let drawn = self.sender.wait_for_render(presentation, deadline.saturating_duration_since(submitted)).is_ok();
+            let drawn = self.sender.wait_for_render(presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
-        if crate::diagnostics() { eprintln!(
-            "{}",
-            serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
+        if crate::diagnostics() { crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,"drawn":drawn,
                 "minibuffer":frame.frame.windows.iter().chain(frame.frame.children.iter().flat_map(|c| &c.windows))
                     .find(|w| w.snapshot.id == frame.minibuffer).map(|w| w.snapshot.text.utf8.clone()),
@@ -333,16 +377,12 @@ impl HostInput for GuiHost {
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
         ); }
-        // The key's command and hooks ran before this redisplay began.
-        if let Some(read) = self.shared.borrow_mut().key_read.take() {
-            let now = std::time::Instant::now();
-            eprintln!("{}", serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
-                "command_ns":started.duration_since(read).as_nanos(),"redisplay_ns":now.duration_since(started).as_nanos(),
-                "key_to_render_ns":now.duration_since(read).as_nanos(),
-                // command_ns includes snapshot_ns; redisplay_ns is layout_ns, the
-                // wait for the previous frame, and render_ns.
-                "snapshot_ns":frame.snapshot.as_nanos(),"layout_ns":submitted.duration_since(laying).as_nanos(),
-                "render_ns":now.duration_since(submitted).as_nanos()}));
+        // The key's command and hooks ran before this redisplay began; its
+        // latency is told when a paint carrying it is drawn (`settle_drawn').
+        let read = self.shared.borrow_mut().key_read.take();
+        if let Some(read) = read {
+            let paint = KeyPaint { presentation, read, started, laying, submitted, snapshot: frame.snapshot };
+            if drawn { paint.tell(presentation, std::time::Instant::now()); } else { self.shared.borrow_mut().key_paint = Some(paint); }
         }
         Ok(ends)
     }
@@ -354,6 +394,10 @@ impl HostInput for GuiHost {
     fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String> {
         // The descriptors this read watches, through every wait it makes.
         let processes = std::mem::take(&mut self.processes);
+        // A paint drawn while the prompt waited woke the wait as background
+        // work (`PaintSender::on_render'): each read settles it, so nothing
+        // polls for it.
+        self.settle_drawn();
         let event = next_event(&self.shared, self.sender.input(), &self.terminal_ready, timeout, &processes)?;
         if crate::tracing() && matches!(event, HostEvent::Key(_)) {
             self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
