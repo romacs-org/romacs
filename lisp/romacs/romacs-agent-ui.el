@@ -818,7 +818,7 @@ new turn starts, and last turn's failures have been seen."
                         table)))))
     (romacs-agent-ui--children-changed session)))
 
-(defconst romacs-agent-ui--child-statuses '("detached" "attached" "supervisor not reachable" "cancelled")
+(defconst romacs-agent-ui--child-statuses '("detached" "attached" "stopped" "supervisor not reachable" "cancelled")
   "The `status' events that change what a task's state reads.")
 
 (defun romacs-agent-ui--track-children (session event)

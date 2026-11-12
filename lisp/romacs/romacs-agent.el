@@ -1692,8 +1692,14 @@ byte FROM (a record's start) when given."
         (if (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle))
             (romacs-agent--run-ended session)
           (unless (eq (romacs-agent-state session) 'ended)
-            (setf (romacs-agent-state session) 'detached))
-          (romacs-agent--raise session (list :type 'status :text "detached"))
+            (setf (romacs-agent-state session) (if (romacs-agent-stopped session) 'ended 'detached)))
+          (romacs-agent--raise session (list :type 'status :text (if (romacs-agent-stopped session) "stopped" "detached")))
+          ;; Spoken to while it stopped: resumed to take it.  Not when a
+          ;; selection restarted it: that resumes it once the selection is
+          ;; in effect, below, and a resume now would run the old one.
+          (when (and (romacs-agent-stopped session) (romacs-agent-queue session)
+                     (not (romacs-agent-pending-selection session)))
+            (romacs-agent-resume session))
           (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection
           ;; waiting for it takes effect.
@@ -1764,7 +1770,13 @@ while it does not yet listen; the connection it replaces is let go."
         (when (and (processp old) (process-live-p old)) (delete-process old))
         process)
     (file-error
-     (cond ((romacs-agent--caught-up-p session)
+     (cond ;; Stopped here, its socket left behind: ended, not lost, whatever
+           ;; an earlier run's journaled exit replays as.
+           ((romacs-agent-stopped session)
+            (romacs-agent--caught-up-p session)
+            (setf (romacs-agent-state session) 'ended)
+            nil)
+           ((romacs-agent--caught-up-p session)
             ;; It ended before this server attached: its journal says it all.
             (romacs-agent--run-ended session))
            ((> (or tries 0) 0)
@@ -2248,6 +2260,7 @@ harness as its whole stdin, and IMAGES what the journal keeps as attached
 to it."
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
+  (romacs-agent--set-stopped session nil)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
          (command (append (list host "--dir" (romacs-agent-dir session)
                                 "--socket" (romacs-agent-host-socket session)
@@ -2496,6 +2509,9 @@ SESSION's last fork note, a new one says how far the fork now goes."
 resumed; a per-turn harness goes on with its next message."
   (cond ((process-live-p (romacs-agent-connection session)))
         ((romacs-agent--per-turn-p session))
+        ;; A selection's restart under way resumes it on the selection itself:
+        ;; a resume now would run the old one.
+        ((eq (plist-get (romacs-agent-pending-selection session) :state) 'restarting))
         ;; A stopped supervisor leaves its socket: only a connection says it listens.
         ((and (file-exists-p (romacs-agent-host-socket session)) (processp (romacs-agent--attach session 0))))
         (t (romacs-agent-resume session)))
@@ -2521,6 +2537,12 @@ attached to it."
              ;; as the rollback leaves it.
              (plist-get (romacs-agent-driver-state session) :rolling-back))
          (romacs-agent--enqueue session (list text delivered valid images)))
+        ;; Stopped (`romacs-agent-stop'): never to the harness going away;
+        ;; it waits for the harness resumed, now when it has gone, else
+        ;; once it has (`romacs-agent--sentinel').
+        ((and (romacs-agent-stopped session) (not (romacs-agent--per-turn-p session)))
+         (romacs-agent--enqueue session (list text delivered valid images))
+         (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
         ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
          (romacs-agent--input session text images)
          (when delivered (funcall delivered)))
@@ -2574,8 +2596,28 @@ with MESSAGE."
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
     (and host (gethash "harness" host))))
 
+;; Its record field's accessor, loaded before, left an inliner that would
+;; still read the field in the callers compiled after.
+(function-put 'romacs-agent-stopped 'compiler-macro nil)
+
+(defun romacs-agent-stopped (session)
+  "Whether this editor stopped SESSION's harness (`romacs-agent-stop'): an
+end, not a lost attachment, though its supervisor journals none.  Its
+mark is a file in its directory, kept for a restart, and no field of its
+record: a record an earlier definition made reads it the same."
+  (when-let* ((dir (romacs-agent-dir session)))
+    (file-exists-p (expand-file-name "stopped" dir))))
+
+(defun romacs-agent--set-stopped (session stopped)
+  "Mark SESSION STOPPED by this editor, or not."
+  (when-let* ((dir (romacs-agent-dir session)))
+    (let ((file (expand-file-name "stopped" dir)))
+      (if stopped (with-temp-file file) (when (file-exists-p file) (delete-file file))))))
+
 (defun romacs-agent-stop (session)
-  "End SESSION: its unit stops, ending the harness and everything it started."
+  "End SESSION: its unit stops, ending the harness and everything it started.
+It reads ended, not detached: its supervisor, stopped too, journals no end."
+  (romacs-agent--set-stopped session t)
   (cond ((romacs-agent-unit session)
          (call-process "systemctl" nil 0 nil "--user" "stop" (romacs-agent-unit session)))
         ;; Detached, only while attached: the pids are then the live
@@ -2707,10 +2749,12 @@ neither callback runs after it."
           (unless (or (eq (romacs-agent-state session) 'ended)
                       ;; A per-turn harness between turns is idle, not detached.
                       (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle)))
-            ;; No journal: no supervisor ever ran it.
+            ;; No journal: no supervisor ever ran it; stopped here: ended.
             (setf (romacs-agent-state session)
-                  (if (or (romacs-agent--per-turn-p session) (file-exists-p (expand-file-name "journal.jsonl" dir)))
-                      'detached 'unstarted)))
+                  (cond ((romacs-agent-stopped session) 'ended)
+                        ((or (romacs-agent--per-turn-p session) (file-exists-p (expand-file-name "journal.jsonl" dir)))
+                         'detached)
+                        (t 'unstarted))))
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
         session))))
 
