@@ -10,21 +10,26 @@ fn vm() -> Vm {
 }
 
 /// SOURCE's printed value, and how many characters it read alone by
-/// descending a table's nodes and how many rows it read: of four runs
-/// after a first, which makes what is made on first use, the one that
-/// read the fewest characters alone. The count of char-table writes is
-/// the process's: a write by another test's VM on another thread drops
-/// this one's views, which costs their rows again and, between the making
-/// of a view and its first read, a call's characters read alone.
+/// descending a table's nodes and how many rows it read, in a run after a
+/// first (which makes what is made on first use) during which no other
+/// thread wrote a char table. The count of writes is the process's: a
+/// write by another test's VM drops this one's views, which costs their
+/// rows again and, between the making of a view and its first read, a
+/// call's characters read alone.
 fn counted(vm: &mut Vm, source: &str) -> (String, [usize; 2]) {
     let run = |vm: &mut Vm| {
-        let before = reads();
+        let before = (reads(), writes(), writes_here());
         let value = vm.eval_source_raw(source).unwrap_or_else(|error| panic!("{source}: {error}"));
         let after = reads();
-        (vm.display(value).unwrap(), [after[0] - before[0], after[1] - before[1]])
+        let foreign = writes() - before.1 != u64::try_from(writes_here() - before.2).unwrap();
+        ((vm.display(value).unwrap(), [after[0] - before.0[0], after[1] - before.0[1]]), foreign)
     };
     run(vm);
-    (0..4).map(|_| run(vm)).min_by_key(|run| run.1).expect("four runs")
+    loop {
+        let (counted, foreign) = run(vm);
+        if !foreign { return counted; }
+        std::thread::yield_now();
+    }
 }
 
 /// SOURCE's printed value.
@@ -40,8 +45,8 @@ fn within(vm: &mut Vm, source: &str, expected: &str) {
     assert!(alone <= STRAY, "{source}: {alone} characters read alone by descending table nodes ({rows} rows read)");
 }
 
-/// The characters a run may read alone: none, but for a call whose view
-/// another thread's write dropped before its first read.
+/// The characters a run may read alone: a margin, since a run no other
+/// thread disturbed reads none alone.
 const STRAY: usize = 32;
 
 #[test]
@@ -110,8 +115,7 @@ fn a_fresh_table_costs_its_row() {
                 (setq n (+ n (skip-syntax-forward \"w\")))))
             n))");
     assert_eq!(value, "1600");
-    // The table's row and its parent's; each write by another thread
-    // costs them once more.
+    // Each table's row and its parent's.
     assert!(alone <= STRAY && rows <= 200 * 8, "{alone} characters read alone and {rows} rows read for 200 fresh tables");
 }
 

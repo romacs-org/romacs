@@ -4,26 +4,38 @@
 //! A view holds what `Vm::char_table_get` gives for each character: the
 //! table's own value, its default for nil, a parent's where it has none.
 //! Its ASCII row is read when it is made, a page of 256 characters when one
-//! of them is first read. The views are the VM's, by table serial, and hold
-//! while no char table is written (`writes`): a write to any table, to a
-//! parent or to a node another table shares, drops them all, and so does a
-//! collection, since they hold Values. A view is made by the first read
-//! under its table, so a table set for one call costs its row then, and
-//! nothing before.
-use super::{CharTable, CharTableNode, CharTableNodeHandle, CharTableSlot, HashMap, Result, Value, Vm, data, row_read, writes};
-use std::cell::OnceCell;
+//! of them is first read. The VM keeps a few (`VIEWS`), the tables read
+//! last, and they hold while no char table is written (`writes`): a write
+//! to any table drops them all, and so does a collection, since they hold
+//! Values. A table's own count of writes would not do: a write to a parent,
+//! or to a node another table shares (`set-char-table-range` with a
+//! sub-char-table), changes what a table reads without counting there. A
+//! view is made by the first read under its table, so a table set for one
+//! call costs its row then, and nothing before.
+use super::{CharTable, CharTableNode, CharTableNodeHandle, CharTableSlot, Result, Value, Vm, data, row_read, writes};
+use std::cell::{Cell, OnceCell};
 
 /// The characters a page holds.
 const PAGE: usize = 256;
 type Page = [Value; PAGE];
 /// The pages of 65,536 characters, each read on first use.
 type Plane = [OnceCell<Box<Page>>; 256];
+/// The views a VM keeps, the one least recently made current replaced first.
+const VIEWS: usize = 8;
+/// The pages a view reads; a character of a page past them is read node
+/// by node. With `VIEWS`, what the views hold stays near 2 MiB at most,
+/// however many tables a session reads and however much text under them.
+const PAGES: usize = 64;
 
 pub(crate) struct FlatTable {
     /// The table read; the VM's views do not outlive a collection.
     table: Value,
     ascii: [Value; 128],
     planes: [OnceCell<Box<Plane>>; CharTable::LEN >> 16],
+    /// The pages read so far.
+    pages: Cell<usize>,
+    /// When it was last made current (`FlatTables::clock`).
+    used: u64,
 }
 
 impl FlatTable {
@@ -37,52 +49,45 @@ impl FlatTable {
     }
 
     fn paged(&self, vm: &Vm, code: usize) -> Result<Value> {
-        let plane = self.planes.get(code >> 16).ok_or("index out of range")?
-            .get_or_init(|| Box::new([const { OnceCell::new() }; 256]));
-        let cell = &plane[(code >> 8) & 0xff];
-        let page = if let Some(page) = cell.get() { page } else {
-            let mut page = Box::new([Value::NIL; PAGE]);
-            vm.char_table_fill(self.table, code & !(PAGE - 1), &mut page[..])?;
-            cell.get_or_init(|| page)
-        };
-        Ok(page[code & (PAGE - 1)])
+        let plane = self.planes.get(code >> 16).ok_or("index out of range")?;
+        if let Some(page) = plane.get().and_then(|plane| plane[(code >> 8) & 0xff].get()) {
+            return Ok(page[code & (PAGE - 1)]);
+        }
+        if self.pages.get() == PAGES { return vm.char_table_get(self.table, code); }
+        let mut page = Box::new([Value::NIL; PAGE]);
+        vm.char_table_fill(self.table, code & !(PAGE - 1), &mut page[..])?;
+        self.pages.set(self.pages.get() + 1);
+        let plane = plane.get_or_init(|| Box::new([const { OnceCell::new() }; 256]));
+        Ok(plane[(code >> 8) & 0xff].get_or_init(|| page)[code & (PAGE - 1)])
     }
 }
 
-/// The views a VM holds, all read under one count of char-table writes.
+/// The views a VM keeps, all read under one count of char-table writes:
+/// at most `VIEWS`, each where it was made. Dropping them, at a write or
+/// a collection, costs those few, whatever number of tables were read
+/// before.
 #[derive(Default)]
 pub(crate) struct FlatTables {
     writes: u64,
+    /// Counts the times a view was made current.
+    clock: u64,
     views: Vec<FlatTable>,
-    /// Each view's place in `views`, by its table's serial.
-    places: HashMap<u64, usize>,
-    /// The places of the views last made current, the latest first: one
-    /// call after another reads the same few tables (a buffer's syntax
-    /// table, its case tables), and finds each view without its serial.
-    recent: [usize; 4],
 }
 
 impl FlatTables {
     /// Drop every view: a collection moves the Values they hold.
     pub(crate) fn forget(&mut self) {
         self.views.clear();
-        self.places.clear();
     }
     pub(crate) fn is_empty(&self) -> bool {
         self.views.is_empty()
     }
-    /// Where among `recent` TABLE's view is, when it is there and no char
-    /// table has been written since the views were read.
-    fn recent(&self, table: Value) -> Option<usize> {
+    /// Where TABLE's view is, when it has one and no char table has been
+    /// written since the views were read. Between collections a table
+    /// keeps its Value and no other object takes it.
+    fn place(&self, table: Value) -> Option<usize> {
         if self.writes != writes() { return None; }
-        self.recent.iter().position(|&place| self.views.get(place).is_some_and(|view| view.table == table))
-    }
-    /// The view at PLACE is the last made current: first among `recent`,
-    /// where it was at AT or, for None, was not.
-    fn made_current(&mut self, place: usize, at: Option<usize>) {
-        let at = at.unwrap_or(self.recent.len() - 1);
-        self.recent.copy_within(..at, 1);
-        self.recent[0] = place;
+        self.views.iter().position(|view| view.table == table)
     }
 }
 
@@ -235,12 +240,7 @@ impl Vm {
     #[inline]
     pub(crate) fn flat_table(&self, table: Value) -> Option<&FlatTable> {
         let flat = &self.flat_tables;
-        let place = match flat.recent(table) {
-            Some(at) => flat.recent[at],
-            None if flat.writes == writes() => *flat.places.get(&self.char_table_serial(table))?,
-            None => return None,
-        };
-        Some(&flat.views[place])
+        flat.place(table).map(|place| &flat.views[place])
     }
 
     /// Make TABLE's view current: read its ASCII row unless it has one
@@ -248,9 +248,10 @@ impl Vm {
     /// No view is made of what does not read flat
     /// (`char_table_flattens`), which is read node by node.
     pub(crate) fn flatten_table(&mut self, table: Value) -> bool {
-        let at = self.flat_tables.recent(table);
-        if let Some(at) = at {
-            if at != 0 { self.flat_tables.made_current(self.flat_tables.recent[at], Some(at)); }
+        self.flat_tables.clock += 1;
+        let used = self.flat_tables.clock;
+        if let Some(place) = self.flat_tables.place(table) {
+            self.flat_tables.views[place].used = used;
             return true;
         }
         let now = writes();
@@ -258,18 +259,15 @@ impl Vm {
             self.flat_tables.forget();
             self.flat_tables.writes = now;
         }
-        let serial = self.char_table_serial(table);
-        if let Some(&place) = self.flat_tables.places.get(&serial) {
-            self.flat_tables.made_current(place, None);
-            return true;
-        }
         let mut ascii = [Value::NIL; 128];
         if !self.char_table_flattens(table) || self.char_table_fill(table, 0, &mut ascii).is_err() { return false; }
-        let flat = &mut self.flat_tables;
-        let place = flat.views.len();
-        flat.places.insert(serial, place);
-        flat.views.push(FlatTable { table, ascii, planes: [const { OnceCell::new() }; CharTable::LEN >> 16] });
-        flat.made_current(place, None);
+        let planes = [const { OnceCell::new() }; CharTable::LEN >> 16];
+        let view = FlatTable { table, ascii, planes, pages: Cell::new(0), used };
+        let views = &mut self.flat_tables.views;
+        match views.iter().enumerate().min_by_key(|(_, view)| view.used) {
+            Some((oldest, _)) if views.len() == VIEWS => views[oldest] = view,
+            _ => views.push(view),
+        }
         false
     }
 
@@ -389,6 +387,32 @@ mod tests {
         let uniprop = vm.eval_source_raw("(progn (put 'char-code-property-table 'char-table-extra-slots 5)
               (make-char-table 'char-code-property-table))").unwrap();
         assert_eq!(flattened(&mut vm, &[uniprop, Value::NIL]), [false, false]);
+    }
+
+    /// The VM keeps the views of the tables read last, however many were
+    /// read, and a view reads at most `PAGES` pages, the rest node by node.
+    #[test]
+    fn the_views_and_their_pages_are_bounded() {
+        let mut vm = Vm::new();
+        let tables: Vec<Value> = (0..3 * VIEWS).map(|i| {
+            let mut table = CharTable::new(Value::NIL);
+            table.set_range(0, CharTable::LEN - 1, Value::integer(i64::try_from(i).unwrap()).unwrap()).unwrap();
+            vm.allocate_object(data::Object::CharTable(Box::new(table)))
+        }).collect();
+        let (kept, oldest) = undisturbed(&mut vm, |vm| {
+            for &table in &tables { vm.flatten_table(table); }
+            (vm.flat_tables.views.len(), vm.flat_table(tables[0]).is_some())
+        });
+        assert_eq!((kept, oldest), (VIEWS, false));
+        let last = *tables.last().unwrap();
+        let (pages, read) = undisturbed(&mut vm, |vm| {
+            vm.flatten_table(last);
+            let reader = vm.char_table_reader(last);
+            let read: Vec<Value> = (0..2 * PAGES).map(|page| reader.get(u32::try_from(1000 + page * PAGE).unwrap()).unwrap()).collect();
+            (vm.flat_table(last).unwrap().pages.get(), read)
+        });
+        assert_eq!(pages, PAGES);
+        assert!(read.iter().all(|&value| value == Value::integer(i64::try_from(3 * VIEWS - 1).unwrap()).unwrap()));
     }
 
     /// A write to any char table, and a collection, leave no view to read.

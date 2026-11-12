@@ -1,12 +1,12 @@
 ;;; flat-tables-held.el --- scaling probe  -*- lexical-binding: t -*-
 
 ;; N syntax tables, each read under in turn, a case-insensitive compare
-;; after each, twice round, one of them written between the rounds.  A
-;; table's flat view (its ASCII row, and a page for the Greek) is made by
-;; the first read under it and found by the table's serial, so a read
-;; costs its own table's rows whatever the number of views held; the
-;; write drops every view, and each table read after it reads its rows
-;; once more.
+;; after each, twice round, one of them written between the rounds.  Then
+;; every table read once more, and N times one table written and read
+;; under at once: each write drops the views, and dropping them costs the
+;; few views kept, not the N tables ever read.  A table's view (its ASCII
+;; row, and a page for the Greek) is made by the first read under it, so
+;; a read costs its own table's rows whatever the number of tables.
 (scaling-probe flat-tables-held :n 1000
   :setup (with-current-buffer (get-buffer-create " scaling-flat-tables")
            (erase-buffer)
@@ -23,4 +23,9 @@
                 (skip-syntax-forward "^w")
                 (skip-syntax-forward "w"))
               (compare-strings "Flat Table" nil nil "fLAT tABLE" nil nil t))
-            (modify-syntax-entry ?_ "w" (cadr it)))))
+            (modify-syntax-entry ?_ "w" (cadr it)))
+          (dolist (table (cdr it))
+            (with-syntax-table table (char-syntax ?α)))
+          (dolist (table (cdr it))
+            (modify-syntax-entry ?x "w" table)
+            (with-syntax-table table (char-syntax ?α)))))
