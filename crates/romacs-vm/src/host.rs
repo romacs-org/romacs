@@ -353,6 +353,11 @@ pub(crate) fn layer_timers_allowed() -> bool {
     LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
+/// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
+pub(crate) fn at_baked_host() -> bool {
+    with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
+}
+
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
 pub(crate) fn reseed_output() -> Option<&'static str> {
     reseed_entry().and_then(|(_, output)| output)

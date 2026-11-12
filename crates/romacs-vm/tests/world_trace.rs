@@ -164,9 +164,11 @@ fn the_build_time_is_baked_at_its_one_site() {
 }
 
 /// `emacs-build-system` names the build host, as a dumped GNU's names its
-/// dump's: the machine's name read there is baked, so a renamed host keeps
-/// the world (a restored process reads its own, `forget_system_name`).
-/// Read first anywhere else, it is a keyed fact.
+/// dump's: the machine's name read there is baked, so a world whose only
+/// reader it is keeps no record of it and survives a renamed host (a
+/// restored process reads its own, `forget_system_name`). The value read
+/// there is not kept: a later reader in the same build asks the host, and
+/// its read is keyed.
 #[test]
 fn the_build_host_is_baked_at_its_one_site() {
     let dir = scratch("baked-host");
@@ -175,11 +177,13 @@ fn the_build_host_is_baked_at_its_one_site() {
     let reads = |trace: &Json| items(trace, "records", "p-read").iter().filter(|r| r["what"] == "system-name")
         .map(|r| r["allowed"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
     let keyed = |trace: &Json| items(trace, "records", "host").iter().filter(|r| r["fact"] == "system-name").count();
-    let (_, trace) = build(&[version]);
+    let (_, trace) = build(&[version.clone()]);
     assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 0), "{trace}");
     assert!(refusals(&trace).is_empty(), "{trace}");
-    let (_, trace) = build(&[other]);
-    assert_eq!((reads(&trace), keyed(&trace)), (vec![], 1), "{trace}");
+    let (_, trace) = build(&[version, other]);
+    assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 1), "{trace}");
+    let site = items(&trace, "records", "host").iter().find(|r| r["fact"] == "system-name").map(|r| r["site"]["file"].clone());
+    assert!(site.is_some_and(|file| file.as_str().is_some_and(|f| f.ends_with("/other.el"))), "{trace}");
 }
 
 #[test]
