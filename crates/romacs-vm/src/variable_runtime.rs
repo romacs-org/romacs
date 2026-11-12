@@ -134,6 +134,7 @@ impl Vm {
     /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         self.dynamic.iter().position(|(bound, _, _, let_default)| {
             *bound == slot && (!buffer_forwarded || *let_default)
         })
@@ -148,6 +149,7 @@ impl Vm {
         let symbol = Value::reference(slot + 1, 7);
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
         self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             let (bound, _, owner, let_default) = self.dynamic[at];
             owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
         })
@@ -277,6 +279,7 @@ impl Vm {
         let explicit = self.slots[slot].explicit_local;
         // Assignment within a default binding belongs to that binding in
         // its originating buffer, not to a newly created local entry.
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, localized)| {
             *localized && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
         });
@@ -391,6 +394,8 @@ impl Vm {
     /// Give the forwarded global built-in at SLOT its local-binding table.
     pub(super) fn promote_forwarded_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
         if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
+            // HOST(dynamic:saved): reads saved values of a localized Boolean, which the fence never
+            // holds
             && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
@@ -422,6 +427,7 @@ impl Vm {
         if base != self.buffer_slot {
             self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
         }
+        // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
         self.dynamic.push(binding);
         let mut local = local;
         let mut value = value;
@@ -578,6 +584,8 @@ impl Vm {
                 Ok(value)
             }
             DefvarBoundp => {
+                // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
+                // checks a fenced variable first (F2)
                 let value = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).map(|(_,v,_,_)| *v).unwrap_or(self.slots[slot].value);
                 Ok(truth(value != Value::UNBOUND))
             }
@@ -598,6 +606,8 @@ impl Vm {
             // saved value written in place, without notification.
             DefvarSetDefault => {
                 let value = self.stack[start+1];
+                // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
+                // variable_primitive checks a fenced variable first (F2)
                 if let Some((_,old,_,_)) = self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot) { *old = value; }
                 else {
                     self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
