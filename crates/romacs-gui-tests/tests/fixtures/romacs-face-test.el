@@ -1,7 +1,7 @@
 ;;; romacs-face-test.el --- Comprehensive face attribute rendering test -*- lexical-binding: t -*-
 
 ;; Test ALL Emacs face attributes to verify romacs GPU renderer handles them.
-;; Usage: emacs -Q -l test/romacs/manual/romacs-face-test.el
+;; Usage: emacs -Q -l crates/romacs-gui-tests/tests/fixtures/romacs-face-test.el
 
 ;;; Commentary:
 
