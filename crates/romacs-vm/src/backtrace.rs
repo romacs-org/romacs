@@ -312,12 +312,14 @@ impl Vm {
         Ok(index.and_then(|i| i.checked_sub(offset)))
     }
     fn backtrace_boolean_local(&self, at: usize) -> Option<(usize, Value)> {
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, _) = self.dynamic[at];
         let symbol = self.backtrace.binding_symbol(at)?;
         let base = symbol.index_if(7)? - 1;
         (self.local_binding_slots.contains(&slot) && self.localized_forwarded(base).is_some()).then_some((base, owner))
     }
     fn backtrace_binding_live(&mut self, at: usize, symbol: Value) -> Result<bool> {
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, default) = self.dynamic[at];
         if let Some((base, owner)) = self.backtrace_boolean_local(at) {
             return Ok(self.live_buffer_value(owner) && self.declaration_hash_get(self.slots[base].local, owner)?.is_some());
@@ -343,6 +345,7 @@ impl Vm {
     /// variable: its slot, and for a per-buffer variable also whether it is
     /// the default and whose local it is.
     fn backtrace_shadow_key(&self, at: usize) -> (usize, bool, u64) {
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, default) = self.dynamic[at];
         let fwd = self.localized_forwarded(slot).or_else(|| self.forwarding_ref(slot));
         match fwd {
@@ -378,14 +381,20 @@ impl Vm {
     }
     /// The value of the binding at AT, which SUCCESSOR saved if it is set.
     fn backtrace_binding_value(&mut self, at: usize, successor: Option<usize>) -> Result<Value> {
+        // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
+        // let's own, never the root's
         let (slot, _, owner, default) = self.dynamic[at];
         if let Some((base, owner)) = self.backtrace_boolean_local(at) {
+            // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
+            // let's own, never the root's
             if let Some(next) = successor { return Ok(self.dynamic[next].1); }
             let local = self.declaration_hash_get(self.slots[base].local, owner)?.ok_or("missing local binding")?;
             return Ok(self.slots[local.index(7)? - 1].value);
         }
         self.fence_binding(slot, at, owner);
         match successor {
+            // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
+            // let's own, never the root's
             Some(next) => Ok(self.dynamic[next].1),
             None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
@@ -563,6 +572,8 @@ impl Vm {
     /// `local-variable-p`); one it has lost can be neither undone nor redone,
     /// so it becomes a binding of nothing (GNU SPECPDL_NOP).
     fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
+        // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
+        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
         let (slot, saved, owner, default) = self.dynamic[at];
         let symbol = self.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
@@ -589,6 +600,8 @@ impl Vm {
         let restored = self.restore_binding(slot, base, saved, owner, default);
         let [current] = self.release_frame(frame);
         restored?;
+        // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
+        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
         self.dynamic[at].1 = current;
         Ok(())
     }
@@ -599,6 +612,8 @@ impl Vm {
     fn backtrace_disable_binding(&mut self, at: usize) {
         let nothing = self.intern(INERT_BINDING);
         let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
+        // HOST(dynamic:saved): backtrace-eval's unrewind makes a binding whose buffer lost its
+        // local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
         self.dynamic[at] = (slot, Value::NIL, Value::NIL, false);
         if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
             self.backtrace.bindings[i].1 = nothing;

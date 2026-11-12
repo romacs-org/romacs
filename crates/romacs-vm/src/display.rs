@@ -416,6 +416,8 @@ impl DisplayState {
 /// read, besides its buffer's text and the window itself.
 const DISPLAY_VARIABLES: [&str; 29] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
+    // HOST(delayed-variable): the window record's display variables, read through variable_value,
+    // which checks the fence
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
     "cursor-type", "show-trailing-whitespace", "buffer-display-table", "fontification-functions",
@@ -1370,6 +1372,7 @@ impl Vm {
         self.slots[self.buffer_slot].value = buffer;
         let active = (|| -> Result<bool> {
             let mark = self.slot("mark-active");
+            // HOST(delayed-variable): reads through variable_value, which checks the fence
             let transient = self.slot("transient-mark-mode");
             Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
         })();
