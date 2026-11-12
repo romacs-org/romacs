@@ -223,7 +223,8 @@ class Session:
 
 @contextlib.contextmanager
 def session(binary, output, *, prefix, init=None, args=('--loadup', '--trace-scene'), rc_xml=RC_XML,
-            env=None, size='1280x800', tools=None, prepare=None, report=None, log='binary.stderr', compositor_env=None):
+            env=None, size='1280x800', tools=None, prepare=None, report=None, log='binary.stderr', compositor_env=None,
+            compositor_log='compositor.log', before_launch=None):
     """One live session, its whole life in order: a private root (HOME,
     WORK, CONFIG; INIT as the init file), a headless labwc on RC_XML sized
     SIZE, a held key for the seat's keyboard, BINARY with ARGS run from
@@ -234,7 +235,10 @@ def session(binary, output, *, prefix, init=None, args=('--loadup', '--trace-sce
     root removed: never while something still writes into it.  An error
     the body raised is recorded in REPORT, not raised, when REPORT is given;
     one before the session started is recorded and raised. COMPOSITOR_ENV
-    is labwc's alone (its renderer on a real GPU)."""
+    is labwc's alone (its renderer on a real GPU), logging to
+    OUTPUT/COMPOSITOR_LOG.  BEFORE_LAUNCH(session), once the compositor and the
+    keyboard are up and before the binary starts: a baseline shot of the
+    empty output, a client of the harness's own."""
     root, processes = None, []
     started = False
     try:
@@ -261,9 +265,9 @@ def session(binary, output, *, prefix, init=None, args=('--loadup', '--trace-sce
         current = Session(root, home, work, config, live_env, log_path, processes=processes)
         if prepare is not None:
             prepare(current)
-        with (Path(output) / 'compositor.log').open('w') as compositor_log, log_path.open('w') as binary_log:
+        with (Path(output) / compositor_log).open('w') as compositor_out, log_path.open('w') as binary_log:
             processes.append(subprocess.Popen([shutil.which('labwc', path=live_env['PATH']) or LABWC, '-C', str(config)],
-                                              env=live_env | (compositor_env or {}), stdout=compositor_log, stderr=compositor_log))
+                                              env=live_env | (compositor_env or {}), stdout=compositor_out, stderr=compositor_out))
             wait_socket = time.monotonic() + 60
             while not any(p.is_socket() for p in root.glob('wayland-*')):
                 if processes[0].poll() is not None or time.monotonic() > wait_socket:
@@ -276,6 +280,8 @@ def session(binary, output, *, prefix, init=None, args=('--loadup', '--trace-sce
             processes.append(subprocess.Popen(['wtype', '-s', '86400000', '-k', 'Shift_L'], env=live_env,
                                               stdout=binary_log, stderr=binary_log))
             time.sleep(.3)
+            if before_launch is not None:
+                before_launch(current)
             current.process = subprocess.Popen([str(Path(binary).resolve()), *args], env=live_env, cwd=work,
                                                stdin=subprocess.DEVNULL, stdout=binary_log, stderr=binary_log)
             processes.append(current.process)
