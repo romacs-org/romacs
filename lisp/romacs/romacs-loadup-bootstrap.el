@@ -503,6 +503,10 @@ definitions (`romacs--world-reseed-all')."
 ;; bootstrap, so it takes this one step itself, in batch.  A session that
 ;; starts in another context evaluates the same list again in its own
 ;; (lisp/romacs/romacs-gui-loadup.el).
+;; `project-list-file' is delayed for project.el, which the chain loads: a
+;; chain that stops loading it must drop the delay, or the variable keeps nil.
+(unless (featurep 'project)
+  (error "The chain no longer loads project.el: drop `project-list-file' from the delayed variables"))
 (defvar romacs-loadup-delayed-init-variables
   (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
   "The preloaded variables whose standard value depends on the runtime, in load order.
