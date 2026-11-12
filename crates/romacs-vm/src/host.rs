@@ -704,13 +704,75 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
-/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
-/// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
-/// (an unpacked release tarball, wherever it lives), else [`build_root`].
+/// The generation of runtime tree this executable was built for: the tree's own
+/// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
+/// raised when the tree's layout or its contract with the executable changes
+/// so that one cannot run on the other.
+const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
+
+/// The file beside an executable that names its runtime tree, for one that
+/// was copied out of its build: one line, a directory, relative to the file's
+/// own directory or absolute.
+pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
+
+/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/), found from where the
+/// executable is, never from where it was once built:
+///   1. `ROMACS_RUNTIME_ROOT`, said outright (the Nix wrapper sets it);
+///   2. `share/romacs` beside the executable's `bin/` (an installation, or an
+///      unpacked release, wherever it lives), or the executable's own
+///      directory when the tree was laid out around it (a test install);
+///   3. the tree [`RUNTIME_RECORD`] beside the executable names (a copy of a
+///      development build);
+///   4. the tree it was built in, while it still sits in that build's Cargo
+///      target directory.
+///
+/// The tree found must be one of this executable's generation. With none
+/// found, or a wrong one, the process says which and why and ends: loading
+/// another tree's Lisp and data into this executable fails later, and
+/// far from the cause.
+///
+/// It is found once, the first time it is asked for, and is the session's
+/// from then on: a target directory cleaned or a variable changed under a
+/// running session moves nothing and ends nothing. A build that records what
+/// it reads has the session's tree in its record, read again as it is now:
+/// the variable that may have chosen it and its generation. A tree that has
+/// stopped being this executable's refuses that build; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from)
-        .or_else(|| installed_root(&current_exe().ok()?))
-        .unwrap_or_else(build_root)
+    static FOUND: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let root = FOUND.get_or_init(|| located_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    }));
+    if building() {
+        let _ = getenv("ROMACS_RUNTIME_ROOT");
+        if let Err(why) = runtime_tree(root) {
+            refuse("runtime-tree", json!({"path": path_json(root), "why": why}));
+        }
+    }
+    root.clone()
+}
+
+/// [`runtime_root`], or why there is none.
+fn located_runtime() -> Result<PathBuf, String> {
+    let exe = current_exe().ok();
+    let (root, from) = if let Some(dir) = getenv("ROMACS_RUNTIME_ROOT") {
+        (PathBuf::from(dir), "ROMACS_RUNTIME_ROOT")
+    } else if let Some(root) = exe.as_deref().and_then(installed_root) {
+        (root, "share/romacs beside the executable")
+    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp/gnu"))) {
+        (root.to_path_buf(), "the executable's own directory")
+    } else if let Some(root) = exe.as_deref().and_then(recorded_root) {
+        (root, "named beside the executable")
+    } else if exe.as_deref().is_some_and(|exe| in_build_target(exe, &build_root())) {
+        (build_root(), "the tree this executable was built in")
+    } else {
+        let exe = exe.map_or_else(|| "this executable".to_owned(), |exe| exe.display().to_string());
+        return Err(format!("{exe} is neither installed (no share/romacs beside its bin/, no tree around it), nor in its build's target directory, and names no tree"));
+    };
+    runtime_tree(&root).map_err(|why| format!("{} ({from}) {why}", root.display()))?;
+    Ok(root)
 }
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
@@ -718,6 +780,57 @@ pub fn runtime_root() -> PathBuf {
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
     probe(Probe::IsDir, root.join("lisp/gnu")).then_some(root)
+}
+
+/// The tree [`RUNTIME_RECORD`] beside EXE names, when there is such a file.
+fn recorded_root(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let text = read_to_string(dir.join(RUNTIME_RECORD)).ok()?;
+    let named = text.lines().next().map(str::trim).filter(|line| !line.is_empty())?;
+    let tree = dir.join(named);          // an absolute name replaces DIR
+    // The directory's own name, as file names under it are compared with it.
+    Some(canonicalize(&tree).unwrap_or(tree))
+}
+
+/// The file in a Cargo profile directory (`target/PROFILE`) that lists the
+/// trees built into it, one a line: this crate's build script adds its own.
+pub const BUILD_TREES: &str = "romacs-build-trees";
+
+/// Whether EXE is in a Cargo profile directory (or its `deps` or `examples`)
+/// that TREE was built into, by that directory's own list. An executable
+/// carried into another build's target directory finds a list without its
+/// tree, and one carried anywhere else finds none: it has left its build,
+/// and the tree compiled into it is no longer its own to assume.
+///
+/// Decided, not missed: the list says which checkouts built into a
+/// directory, not which directory built this executable. One carried into
+/// a pooled target that also built the same checkout path is taken for that
+/// directory's own, and assumes that same path. Naming the build's directory
+/// in the executable would close that, and would make one tree build a
+/// different executable in every target directory; checks key their results
+/// on the executable, so that was the dearer loss. What a checkout holds
+/// after a build is not this rule's to judge either: Lisp edited under a
+/// build is meant to be picked up.
+fn in_build_target(exe: &Path, tree: &Path) -> bool {
+    let Some(dir) = exe.parent() else { return false };
+    let profile = match dir.file_name().and_then(OsStr::to_str) {
+        Some("deps" | "examples") => dir.parent().unwrap_or(dir),
+        _ => dir,
+    };
+    read_to_string(profile.join(BUILD_TREES)).is_ok_and(|built| built.lines().any(|line| Path::new(line) == tree))
+}
+
+/// Whether ROOT is a runtime tree of this executable's generation, or why not.
+fn runtime_tree(root: &Path) -> Result<(), String> {
+    if !probe(Probe::IsDir, root.join("lisp/gnu")) || !probe(Probe::IsDir, root.join("etc")) {
+        return Err("is not a Romacs runtime tree (it has no lisp/gnu or no etc)".into());
+    }
+    let wanted = RUNTIME_EPOCH.trim();
+    match read_to_string(root.join("etc/romacs-runtime-epoch")) {
+        Ok(found) if found.trim() == wanted => Ok(()),
+        Ok(found) => Err(format!("is a runtime tree of generation {}, and this executable was built for generation {wanted}", found.trim())),
+        Err(_) => Err(format!("is a runtime tree from before generations (no etc/romacs-runtime-epoch), and this executable was built for generation {wanted}")),
+    }
 }
 
 /// The checkout this crate was built from: a compile-time path that no
@@ -3276,6 +3389,63 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 #[cfg(test)]
 mod tests {
 
+    /// A copy of a development build names its tree in a file beside it:
+    /// absolute, or relative to the file. No file, no tree.
+    #[test]
+    fn a_copied_executable_reads_the_tree_named_beside_it() {
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-record-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let exe = dir.join("bin/romacs-vm-gui");
+        assert_eq!(recorded_root(&exe), None);
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "../tree\n").unwrap();
+        assert_eq!(recorded_root(&exe), Some(dir.join("bin/../tree")), "a tree that is not there keeps the name given");
+        std::fs::create_dir_all(dir.join("tree")).unwrap();
+        assert_eq!(recorded_root(&exe), Some(std::fs::canonicalize(dir.join("tree")).unwrap()), "one that is there has its own name, with no parent steps");
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "/somewhere/else\n").unwrap();
+        assert_eq!(recorded_root(&exe), Some(PathBuf::from("/somewhere/else")));
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "\n").unwrap();
+        assert_eq!(recorded_root(&exe), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// Only an executable in a target directory its tree was built into may
+    /// assume that tree. The directory's list decides, not its shape:
+    /// another build's target, and any other directory, give it nothing to
+    /// assume. (Made-up directories only: this test's own executable may
+    /// have been carried off by an archive, with its tree said outright.)
+    #[test]
+    fn only_an_executable_in_a_target_its_tree_built_into_assumes_that_tree() {
+        let tree = build_root();
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-target-{}", std::process::id()));
+        for sub in ["gate/deps", "gate/examples", "gate/.fingerprint", "gate/build"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let places = ["gate/romacs-vm-gui", "gate/deps/some_test-0123456789abcdef", "gate/examples/demo"];
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "a target's shape is no list");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), "/another/checkout\n").unwrap();
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "another build's target");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), format!("/another/checkout\n{}\n", tree.display())).unwrap();
+        assert!(places.iter().all(|place| in_build_target(&dir.join(place), &tree)));
+        assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui"), &tree));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// A tree is the executable's own only with its generation: a directory
+    /// that is no tree, a tree with no generation and a tree of another are
+    /// each refused, by name.
+    #[test]
+    fn a_runtime_tree_must_be_of_the_executables_generation() {
+        assert_eq!(runtime_tree(&build_root()), Ok(()));
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
+        std::fs::create_dir_all(dir.join("lisp/gnu")).unwrap();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
+        std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("generation 0"));
+        std::fs::write(dir.join("etc/romacs-runtime-epoch"), RUNTIME_EPOCH).unwrap();
+        assert_eq!(runtime_tree(&dir), Ok(()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     /// The build tree is a directory name with no `..` in it, so the
     /// runtime directories built from it are what they expand to.
     #[test]
