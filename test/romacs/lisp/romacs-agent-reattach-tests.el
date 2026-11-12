@@ -51,13 +51,14 @@ attach."
       (unwind-protect
           (progn
             (process-put process 'romacs-agent session)
-            (setf (romacs-agent-connection session) process (romacs-agent-reattaching session) 3)
+            (setf (romacs-agent-connection session) process)
+            (puthash session 3 romacs-agent--reattaching)
             (cl-letf (((symbol-function 'romacs-agent--kept) #'ignore)
                       ((symbol-function 'romacs-agent--allow-tool-calls) #'ignore)
                       ((symbol-function 'romacs-agent--step) #'ignore))
               (romacs-agent--filter process "{\"attached\":2}\n")
               (should (eq (romacs-agent-state session) 'idle))
-              (should (= (romacs-agent-reattaching session) 0))
+              (should (= (gethash session romacs-agent--reattaching 0) 0))
               ;; Its last prompt's turn not done: running.
               (setf (romacs-agent-state session) 'detached (romacs-agent-input-seq session) 9)
               (romacs-agent--filter process "{\"attached\":3}\n")
@@ -85,7 +86,7 @@ attach."
     (setf (romacs-agent-cancelled session) nil)
     ;; Nothing to look for: no socket, its journal ended, or cancelled.
     (setq scheduled nil)
-    (setf (romacs-agent-reattaching session) 0)
+    (remhash session romacs-agent--reattaching)
     (setf (romacs-agent-state session) 'ended)
     (romacs-agent--reattach-later session)
     (setf (romacs-agent-state session) 'detached (romacs-agent-cancelled session) t)
@@ -95,15 +96,26 @@ attach."
     (romacs-agent--reattach-later session)
     (should-not scheduled)))
 
+(ert-deftest romacs-agent-reattach-a-record-of-an-earlier-definition ()
+  ;; A record an earlier definition made (a live load since), shorter than
+  ;; this one's: looking for its supervisor again reads nothing past it.
+  (romacs-agent-reattach-tests--with
+    (let* ((fields (cl-subseq (vconcat (cl-loop for i below (length session) collect (aref session i))) 0
+                              (- (length session) 2)))
+           (short (apply #'record (append fields nil))))
+      (romacs-agent--reattach-later short)
+      (should (= (gethash short romacs-agent--reattaching 0) 1))
+      (should (equal scheduled (list (car romacs-agent--reattach-delays)))))))
+
 (ert-deftest romacs-agent-reattach-on-restore ()
   (romacs-agent-reattach-tests--with
     (let ((process-environment (cons (concat "XDG_STATE_HOME=" root "/state") process-environment)))
       (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
                 ((symbol-function 'romacs-agent--sweep) #'ignore))
-        (setf (romacs-agent-reattaching session) 5)
+        (puthash session 5 romacs-agent--reattaching)
         (romacs-agent-restore)
         (should (equal attached (list session)))
-        (should (= (romacs-agent-reattaching session) 0))))))
+        (should (= (gethash session romacs-agent--reattaching 0) 0))))))
 
 (ert-deftest romacs-agent-reattach-never-a-second-attachment ()
   (let* ((root (make-temp-file "romacs-attach-" t))

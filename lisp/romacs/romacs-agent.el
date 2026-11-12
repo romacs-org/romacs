@@ -196,10 +196,7 @@ the id as :request.")
   compacting
   ;; What runs under it, for its views: its harness's own subagents by tool
   ;; id, then those and its delegated tasks as rows and as a line.
-  subagents children-rows children-summary
-  ;; How many times it has looked for its supervisor again since its
-  ;; attachment ended (`romacs-agent--reattach-later').
-  (reattaching 0))
+  subagents children-rows children-summary)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1493,7 +1490,7 @@ byte FROM (a record's start) when given."
                  (romacs-agent--raise session (list :type 'error :text "another server is attached")))
                 ((gethash "attached" record)
                  (romacs-agent--kept session process)
-                 (setf (romacs-agent-reattaching session) 0)
+                 (remhash session romacs-agent--reattaching)
                  ;; Attached again: what it does is what its records say, a
                  ;; turn under way or none; a replay from the last record
                  ;; seen says nothing new.
@@ -1542,15 +1539,22 @@ attachment ended: another server leaving it (a restart's predecessor), or
 its writes timing out on a server too busy to read (a restart's replay of
 every journal at once).")
 
+(defvar romacs-agent--reattaching (make-hash-table :test #'eq :weakness 'key)
+  "How many times each session has looked for its supervisor again since
+its attachment ended (`romacs-agent--reattach-later').  Kept beside the
+session record, not in it: records made by an earlier definition of it
+\(a live load) work here the same.")
+
 (defun romacs-agent--reattach-later (session)
   "Attach SESSION again a moment from now, when its supervisor still
 listens and it has looked fewer times than `romacs-agent--reattach-delays'
 says: one that has ended its journal, or been cancelled, is left as it is."
-  (let ((delay (nth (romacs-agent-reattaching session) romacs-agent--reattach-delays)))
+  (let* ((tries (gethash session romacs-agent--reattaching 0))
+         (delay (nth tries romacs-agent--reattach-delays)))
     (when (and delay (not (romacs-agent--per-turn-p session)) (not (romacs-agent-cancelled session))
                (not (eq (romacs-agent-state session) 'ended))
                (file-exists-p (romacs-agent-host-socket session)))
-      (cl-incf (romacs-agent-reattaching session))
+      (puthash session (1+ tries) romacs-agent--reattaching)
       (run-at-time delay nil #'romacs-agent--reattach session))))
 
 (defun romacs-agent--reattach (session)
@@ -2449,7 +2453,7 @@ A server runs this at its start, so sessions survive it."
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
                (not (process-live-p (romacs-agent-connection session)))
                (file-exists-p (romacs-agent-host-socket session)))
-      (setf (romacs-agent-reattaching session) 0)
+      (remhash session romacs-agent--reattaching)
       (romacs-agent--attach session 0)))
   ;; A session whose supervisor runs may call a tool any moment: the
   ;; endpoint listens now, where its relay looks.
