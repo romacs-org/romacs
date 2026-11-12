@@ -99,6 +99,9 @@ pub fn cold_path_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
         let on = !crate::engine::search::regex_knob_off(
+            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
+            // strategy
             std::env::var("ROMACS_REGEX_DFA_COLD").ok().as_deref(),
         );
         tracing::debug!(target: "romacs::regex", on, "ROMACS_REGEX_DFA_COLD");
@@ -119,10 +122,15 @@ pub fn dfa_mode() -> DfaMode {
 
 #[cold]
 fn read_dfa_mode() -> DfaMode {
+    // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs; process-wide
+    // ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
     let mode = DfaMode::parse(std::env::var("ROMACS_REGEX_DFA").ok().as_deref());
     tracing::debug!(target: "romacs::regex", ?mode, "ROMACS_REGEX_DFA");
     if mode != DfaMode::Off
         && crate::engine::search::regex_knob_on(
+            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
+            // strategy
             std::env::var("ROMACS_REGEX_DFA_STATS").ok().as_deref(),
         )
     {
@@ -166,6 +174,9 @@ pub fn first_step_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
         let on = !crate::engine::search::regex_knob_off(
+            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
+            // strategy
             std::env::var("ROMACS_REGEX_DFA_FIRST_STEP").ok().as_deref(),
         );
         tracing::debug!(target: "romacs::regex", on, "ROMACS_REGEX_DFA_FIRST_STEP");

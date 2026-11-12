@@ -12,11 +12,7 @@ re-checks at the end, if it differs. `run.py verify-pin --gnu GNU` (run by
 GNU's tests write beside themselves (`bytecomp-resources/*.elc`).
 
 The milestone metric is **passed GNU deftests under real ERT**, not static
-source forms. The native registration census observed 7,925 file-owned tests
-in 510 eligible `test/lisp` files (not 7,925 passes). See
-[the real ERT scoreboard](ERT-SCOREBOARD.md) for scope and failure semantics.
-The older 6,987 / 565-file figure covers textual forms across the wider import,
-not the 0.1.0 `test/lisp` runtime denominator.
+source forms.
 
 ## Run it
 
@@ -35,12 +31,11 @@ Real ERT: `run --harness real FILE`; native runner validation:
 pinned native GNU binary: `run --harness-fidelity FILE`. Set
 `ROMACS_GNU_ORACLE` to the pinned executable; no PATH oracle is accepted by
 these paths. Every real row identifies both `harness: gnu-ert` and its engine.
-See [ERT-SCOREBOARD.md](ERT-SCOREBOARD.md).
 
 ## How a default mini-harness verdict is reached
 
 1. GNU's reader splits the file into top-level forms (`tools/extract-forms.el`).
-2. The adapter (`runner/`, binary `romacs-gnu-ert`) starts ONE fresh VM2 per
+2. The adapter (`crates/romacs-gnu-tests/`, binary `romacs-gnu-ert`) starts ONE fresh VM2 per
    file, installs VM2's prelude, loads the loadup bootstrap chain as far as it
    reaches (the WARM census chain), loads the harness, evaluates every form
    with `Vm::eval_source` (one failing form does not hide the rest), then runs
@@ -82,7 +77,7 @@ test now passes refuses it too. There is no skip flag.
 
 ## The runner's own tests
 
-`tests/test_run.py` (run by the gate via `runner/tests/python_contract.rs`)
+`tests/test_run.py` (run by the gate via `crates/romacs-gnu-tests/tests/python_contract.rs`)
 and `tests/mutants.py`, which removes each protection in turn and requires the
 targeted test to fail.
 
@@ -90,7 +85,7 @@ targeted test to fail.
 
 The suite's passes are floors (`ledger/parity-ratchet.json` at the repo root,
 `tools/lib/parity_ratchet.py`): per file, the exact deftests that pass. The gate
-runs the whole suite in four shards (`runner/tests/parity_ratchet.rs`), and
+runs the whole suite in shards (`crates/romacs-gnu-tests/tests/parity_ratchet.rs`), and
 the WARM and COLD Lisp census beside it (`crates/romacs-vm/tests/
 parity_ratchet.rs`). A lost pass fails and names the test; a new pass fails
 until recorded with `python3 tools/lib/parity_ratchet.py record` in the same

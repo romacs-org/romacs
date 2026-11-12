@@ -949,12 +949,12 @@ impl Vm {
         };
         Ok(pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
     }
-    fn annotation_base(&self, raw: &[(String, Value)], key: Value) -> Result<Option<Value>> {
+    fn annotation_base(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Option<Value>> {
         let name = self.annotation_symbol_name(key)?;
-        if let Some((_, v)) = raw.iter().find(|(k, _)| k == name) {
+        if let Some((_, v)) = raw.iter().find(|(k, _)| k.as_ref() == name) {
             return Ok(Some(*v));
         }
-        if let Some((_, category)) = raw.iter().find(|(k, _)| k == "category") {
+        if let Some((_, category)) = raw.iter().find(|(k, _)| k.as_ref() == "category") {
             let plist = self.annotation_symbol_plist(*category)?;
             // GNU category nil, unlike directly stored nil, does not mask aliases/defaults.
             return Ok(self
@@ -963,22 +963,40 @@ impl Vm {
         }
         Ok(None)
     }
-    pub(super) fn annotation_resolve(&self, raw: &[(String, Value)], key: Value) -> Result<Value> {
+    /// KEY's aliases in `char-property-alias-alist`: `assq`, stopping at
+    /// KEY's entry and copying nothing of the others.
+    fn annotation_aliases(&self, key: Value) -> Result<Vec<Value>> {
+        let mut tail = self.annotation_variable("char-property-alias-alist");
+        for _ in 0..=self.list_limit() {
+            if tail == Value::NIL {
+                return Ok(Vec::new());
+            }
+            let (entry, rest) = self.cons_pair(tail)?;
+            let (alias_key, aliases) = self.cons_pair(entry)?;
+            if alias_key == key {
+                return self.list_values(aliases);
+            }
+            tail = rest;
+        }
+        Err("circular list".into())
+    }
+    /// The names of KEY's aliases, which decide
+    /// [`Self::annotation_resolve`] of KEY where neither KEY nor `category`
+    /// gives it.
+    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
+        self.annotation_aliases(key)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect()
+    }
+    /// The name KEY's own property layer has.
+    pub(super) fn annotation_key_name(&self, key: Value) -> Result<&str> {
+        self.annotation_symbol_name(key)
+    }
+    pub(super) fn annotation_resolve(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }
-        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
-            let (alias_key, aliases) = self.cons_pair(entry)?;
-            if alias_key == key {
-                for alias in self.list_values(aliases)? {
-                    if let Some(v) = self
-                        .annotation_base(raw, alias)?
-                        .filter(|v| *v != Value::NIL)
-                    {
-                        return Ok(v);
-                    }
-                }
-                break;
+        for alias in self.annotation_aliases(key)? {
+            if let Some(v) = self.annotation_base(raw, alias)?.filter(|v| *v != Value::NIL) {
+                return Ok(v);
             }
         }
         Ok(self

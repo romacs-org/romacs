@@ -527,7 +527,12 @@ mod leaf {
         }
         #[inline(always)]
         pub fn pair(&self, v: Value) -> Option<(Value, Value)> {
-            (v.tag() == 3).then(|| self.vm.cons_pair(v).ok()).flatten()
+            if v.tag() != 3 { return None; }
+            // A match, not `or_else': the closure would not inline here.
+            match self.vm.private_cons(v) {
+                Some(pair) => Some(pair),
+                None => self.vm.cons_pair(v).ok(),
+            }
         }
         #[inline(always)]
         pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
@@ -1069,6 +1074,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1079,6 +1085,7 @@ mod leaf {
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1091,6 +1098,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1100,6 +1108,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1185,6 +1194,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             Ok(self.vm.dynamic.iter().any(|(bound, ..)| *bound == slot))
         }
         /// GNU `find_symbol_value`: the current binding through aliases,
