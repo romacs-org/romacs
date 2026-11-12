@@ -75,6 +75,18 @@ fn second() {
         out, failed = self.convert(listed)
         self.assertEqual((out, [(e[2], why) for e, why in failed]), (SOURCE, [('std::fs', 'no line, or no one line, has its mark')]))
 
+    def test_a_changed_reason_keeps_the_list_and_added_entries_still_land(self):
+        a, b = line_mark('read("a")'), line_mark('OpenOptions')
+        trunk = f'src.rs first std::fs {a} reads a\n'
+        out, _ = self.convert(trunk)
+        branch = (f'src.rs first std::fs {a} reads a, now for a reason the branch changed\n'
+                  f'src.rs second OpenOptions {b} opens b\n')
+        again, failed = self.convert(branch, out)
+        self.assertEqual([(e[2], why.split(';')[0]) for e, why in failed],
+                         [('std::fs', 'line 3 has a HOST(std::fs) comment with another reason')])
+        self.assertIn('// HOST(OpenOptions): opens b', again)
+        self.assertEqual(self.convert(trunk, out), (out, []), 'the same reason is no change')
+
 
 if __name__ == '__main__':
     unittest.main()

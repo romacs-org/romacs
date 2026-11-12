@@ -214,6 +214,8 @@ fn ident(b: u8) -> bool {
 struct Views {
     code: Vec<u8>,
     text: Vec<u8>,
+    /// Where each real `//` comment starts, outside block comments and literals.
+    line_comments: BTreeSet<usize>,
 }
 
 fn views(src: &str) -> Views {
@@ -225,10 +227,12 @@ fn views(src: &str) -> Views {
             if *b != b'\n' { *b = b' '; }
         }
     };
+    let mut line_comments = BTreeSet::new();
     let mut i = 0;
     while i < s.len() {
         let rest = &s[i..];
         if rest.starts_with(b"//") {
+            line_comments.insert(i);
             let end = rest.iter().position(|&b| b == b'\n').map_or(s.len(), |n| i + n);
             blank(&mut code, i, end);
             blank(&mut text, i, end);
@@ -269,7 +273,7 @@ fn views(src: &str) -> Views {
             i += 1;
         }
     }
-    Views { code, text }
+    Views { code, text, line_comments }
 }
 
 /// `r"`, `r#"`, `br"` …, at an identifier start: the opening quote and the
@@ -498,12 +502,17 @@ struct Tag {
     reason: String,
 }
 
-/// The HOST comments of SRC, whose comments TEXT blanks.
-fn tags(rel: &str, src: &str, text: &[u8]) -> Vec<Tag> {
+/// The HOST comments of SRC: lines that are one real `//` comment (VIEWS
+/// knows which `//` start one, so a `//` inside a block comment is none).
+fn tags(rel: &str, src: &str, views: &Views) -> Vec<Tag> {
     let raw: Vec<&str> = src.split('\n').collect();
-    let seen: Vec<&[u8]> = text.split(|&b| b == b'\n').collect();
+    let seen: Vec<&[u8]> = views.text.split(|&b| b == b'\n').collect();
+    let starts: Vec<usize> = raw.iter().scan(0, |at, line| { let here = *at; *at += line.len() + 1; Some(here) }).collect();
     let blank = |i: usize| seen[i].iter().all(u8::is_ascii_whitespace);
-    let comment = |i: usize| raw[i].trim_start().starts_with("//") && blank(i);
+    let comment = |i: usize| {
+        let indent = raw[i].len() - raw[i].trim_start().len();
+        raw[i].trim_start().starts_with("//") && blank(i) && views.line_comments.contains(&(starts[i] + indent))
+    };
     (0..raw.len()).filter(|&i| comment(i)).filter_map(|i| {
         let rest = raw[i].trim_start().strip_prefix("// HOST(")?;
         let (apis, reason) = rest.split_once(')').unwrap_or((rest, ""));
@@ -586,7 +595,7 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
 /// `#[cfg(test)]` items hold no site; BOUNDARY holds none either.
 fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
     let mut v = views(src);
-    let said = tags(rel, src, &v.text);
+    let said = tags(rel, src, &v);
     let outline = outline(&v);
     for &(from, to) in &outline.tests {
         for view in [&mut v.code, &mut v.text] {
@@ -824,7 +833,7 @@ fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
                 else { None };
             out.extend(fault.map(|fault| format!("  {fault}: {}:{} HOST({api})", t.path, t.line)));
         }
-        if t.reason.is_empty() {
+        if t.reason.is_empty() || t.reason == "pending" || t.reason.starts_with("pending:") {
             out.push(format!("  no reason: {}:{} HOST({})", t.path, t.line, t.apis.join(", ")));
         }
     }
@@ -935,5 +944,26 @@ mod tests {
         "  no reason: src/lib.rs:11 HOST(std::fs)",
         "  unknown API: src/lib.rs:13 HOST(std::fsx)",
         "  covers nothing: src/lib.rs:18 HOST(std::fs)",
+    ]);
+}
+
+#[test]
+fn a_pending_reason_or_a_comment_inside_a_block_comment_covers_nothing() {
+    let source = "\
+fn read() {
+    // HOST(std::fs): pending
+    let a = std::fs::read(\"a\");
+    // HOST(std::fs): pending: a guessed reason
+    let b = std::fs::read(\"b\");
+    /*
+    // HOST(std::fs): inside a block comment
+    // */
+    let c = std::fs::read(\"c\");
+}
+";
+    assert_eq!(report(source), [
+        "  uncovered src/lib.rs:9 std::fs",
+        "  no reason: src/lib.rs:2 HOST(std::fs)",
+        "  no reason: src/lib.rs:4 HOST(std::fs)",
     ]);
 }

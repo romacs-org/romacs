@@ -18,8 +18,8 @@ reports it deleted by the trunk, and runs convert: the branch's new entries
 become comments, and the trunk's are there already.
 
 An entry it cannot place is printed, and the list stays: its line is gone,
-or several lines of its file share its mark and its item does not tell them
-apart. Place those by hand (the lint names each uncovered site), then delete
+several lines of its file share its mark and its item does not tell them
+apart, or the comment there gives another reason (a branch changed it). Place those by hand (the lint names each uncovered site), then delete
 the list. Delete this tool when no branch forked before the comments is open.
 """
 import argparse
@@ -214,6 +214,27 @@ def tagged(lines, line, api):
     return any(api in apis for l in comment_run(lines, line) if (apis := tag(l)))
 
 
+def said(lines, line, api):
+    """The words of the reason the HOST comment above LINE gives for API: its
+    line's text after the colon and the comment lines below it, up to the
+    next HOST comment."""
+    run = comment_run(lines, line)
+    at = next(i for i, l in enumerate(run) if api in tag(l))
+    words = run[at].split('):', 1)[1].split()
+    for l in run[at + 1:]:
+        if tag(l):
+            break
+        words += l.strip().removeprefix('//').split()
+    return words
+
+
+def same_reason(lines, line, api, reason):
+    """Whether the comment above LINE gives REASON for API (it may say more
+    below, in comment lines of its own)."""
+    words = reason.split()
+    return said(lines, line, api)[:len(words)] == words
+
+
 def tag(line):
     """The APIs a `// HOST(A, B): REASON` comment line names, or []."""
     found = TAG.match(line)
@@ -257,7 +278,11 @@ def convert(root, listed):
                 failed.append((entry, 'no line, or no one line, has its mark'))
             elif inside[starts[line - 1]] if starts[line - 1] < len(src) else False:
                 failed.append((entry, f'line {line} opens inside a literal or comment'))
-            elif not tagged(lines, line, api) and (api, reason) not in inserts.get(line, []):
+            elif tagged(lines, line, api):
+                if not same_reason(lines, line, api, reason):
+                    failed.append((entry, f'line {line} has a HOST({api}) comment with another reason; '
+                                          'keep the one meant, then delete the list'))
+            elif (api, reason) not in inserts.get(line, []):
                 inserts.setdefault(line, []).append((api, reason))
         for line in sorted(inserts, reverse=True):
             indent = re.match(r'\s*', lines[line - 1]).group()
