@@ -1895,6 +1895,7 @@ mod leaf {
     mod isolate;
     mod flight;
     mod host_calls;
+    mod display_stats;
     mod compiled_lisp;
     mod casetab;
     mod casing;

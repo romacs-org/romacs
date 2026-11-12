@@ -28,7 +28,10 @@ back), and counts from before the first step to after the last step's
 layout and paint submission; the steps' work includes the redisplay they
 cause.  A GUI measurement is refused
 unless the host's diagnostics show a paint submitted (laid out by the
-evaluator) after every step, before the next step's mark or the end mark.
+evaluator) after every step, before the next step's mark or the end mark;
+an :idle probe's steps change nothing shown, and its measurement is refused
+if any step submitted a paint (and taken again, three sessions at most: the
+host repaints for reasons of its own now and then).
 
 --record profiles the body of every batch probe over its budget at K*N
 with `perf record --call-graph fp', counting only while the probe enables
@@ -64,6 +67,8 @@ PROBES = HERE / 'scaling' / 'probes.el'
 MIN_WORK = 1_000_000
 STACK_SLACK = 64 * 1024
 DEFAULT_BUDGET = 1.25
+# Sessions an :idle GUI probe gets for a measurement no stray paint disturbed.
+IDLE_TRIES = 3
 # A session that spends no CPU for this many times its CPU bound is hung.
 WALL_FACTOR = 10
 
@@ -164,11 +169,20 @@ def step_paints(stderr_text):
     return counts
 
 
+def paints_problem(probe, paints):
+    """What is wrong with PAINTS, the paints submitted after each step of
+    PROBE: every step of a probe paints, and no step of an :idle one does."""
+    if len(paints) != probe['steps'] or (any(paints) if probe['idle'] else 0 in paints):
+        return f"paints after each of {probe['steps']} {'idle ' if probe['idle'] else ''}steps: {paints}"
+    return None
+
+
 def probe_entry(raw):
     """A probe from `scaling-list''s JSON, nulls and defaults normalised."""
     return {'name': raw['name'], 'n': int(raw['n']), 'k': int(raw.get('k') or 4),
             'budget': float(raw.get('budget') or DEFAULT_BUDGET), 'known': raw.get('known') or None,
-            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True}
+            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True,
+            'idle': raw.get('idle') is True}
 
 
 # Sessions.
@@ -204,9 +218,10 @@ def bounded(what, argv, timeout, **kwargs):
     return done
 
 
-def batch(binary, home, form, timeout, prefix=(), env=None):
-    """Run FORM after loading the probes in a batch session; its SCALING lines."""
-    argv = [*prefix, str(binary), '-Q', '--batch', '-l', str(PROBES), '--eval', form]
+def batch(binary, home, form, timeout, prefix=(), env=None, loads=()):
+    """Run FORM after loading the probes and LOADS in a batch session; its SCALING lines."""
+    argv = [*prefix, str(binary), '-Q', '--batch', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
+            '--eval', form]
     done = bounded(form, argv, timeout, env=private_env(home, env), cwd=home)
     lines = scaling_lines(done.stdout)
     if done.returncode != 0 or not lines:
@@ -265,29 +280,45 @@ class Gui:
         subprocess.run([randr or 'wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1600x1000'],
                        env=self.env, check=True, timeout=15, stdout=subprocess.DEVNULL)
 
-    def measure(self, probe, n):
-        """The steps' instructions of PROBE at N in a fresh --loadup session,
-        refused unless the host submitted a paint after every step."""
-        out = self.home / 'tmp' / f"{probe['name']}-{n}.json"
-        stderr = self.home / f"{probe['name']}-{n}.stderr"
-        form = f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")'
-        # Append mode: the probe's marks append to the same file.
+    def session(self, tag, form, loads=(), env=None, prefix=()):
+        """A fresh --loadup session named TAG that loads the probes and LOADS
+        and evaluates FORM of a file name, which writes that file and ends
+        the session: what it wrote, as JSON, and the session's stderr.
+        Refused unless it exits 0 having written the file."""
+        out = self.home / 'tmp' / f'{tag}.json'
+        stderr = self.home / f'{tag}.stderr'
+        argv = [*prefix, str(self.binary), '-Q', '--loadup', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
+                '--eval', form(out)]
+        # Append mode: the session's marks append to the same file.
         with stderr.open('a') as log:
-            proc = subprocess.Popen([str(self.binary), '-Q', '--loadup', '-l', str(PROBES), '--eval', form],
-                                    env=self.env, cwd=self.home, stdin=subprocess.DEVNULL,
+            proc = subprocess.Popen(argv, env={**self.env, **(env or {})}, cwd=self.home, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=log)
             try:
                 proc.wait(timeout=self.timeout / 5)
             except subprocess.TimeoutExpired:
-                raise Refused(f"{probe['name']} at {n}: GUI session timed out") from None
+                raise Refused(f'{tag}: GUI session timed out') from None
             finally:
                 self.live.stop(proc)
+        text = stderr.read_text(errors='replace')
         if proc.returncode != 0 or not out.is_file():
-            raise Refused(f"{probe['name']} at {n}: exit {proc.returncode}: {stderr.read_text(errors='replace')[-600:]}")
-        paints = step_paints(stderr.read_text(errors='replace'))
-        if len(paints) != probe['steps'] or 0 in paints:
-            raise Refused(f"{probe['name']} at {n}: paints after each of {probe['steps']} steps: {paints}")
-        return json.loads(out.read_text())
+            raise Refused(f'{tag}: exit {proc.returncode}: {text[-600:]}')
+        return json.loads(out.read_text()), text
+
+    def measure(self, probe, n):
+        """The steps' instructions of PROBE at N in a fresh --loadup session,
+        refused unless the host submitted a paint after every step, or after
+        none for an :idle probe.  The host repaints for reasons of its own
+        now and then; that paint is in an idle probe's count and breaks its
+        rule, so an idle measurement so disturbed is taken again, IDLE_TRIES
+        sessions at most."""
+        problem = None
+        for attempt in range(IDLE_TRIES if probe['idle'] else 1):
+            tag = f"{probe['name']}-{n}" + (f'-again{attempt}' if attempt else '')
+            result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
+            problem = paints_problem(probe, step_paints(stderr))
+            if not problem:
+                return result
+        raise Refused(f"{probe['name']} at {n}: {problem}")
 
     def close(self):
         self.live.stop(self.compositor)

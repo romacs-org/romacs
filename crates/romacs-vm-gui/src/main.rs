@@ -1669,6 +1669,7 @@ fn evaluate(
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
+                vm.redisplay_begin();
                 vm.defer_parse()?;
                 let next = frame(&mut vm, g1, width, height)?;
                 title::consider(&mut vm, sender, &host);

@@ -26,6 +26,9 @@
 ;;           does for the redisplay, rather than for a time.
 ;;   :gap    how often, in seconds, a GUI probe looks for its step's
 ;;           redisplay (default 0.1).
+;;   :idle   a GUI probe whose steps change nothing shown: the measurement
+;;           is refused if a step submits a paint, where any other probe's
+;;           is refused unless every step does.
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -545,7 +548,8 @@ closures over a mutable variable (each a closure and a cell)."
       (scaling--print (list :name (symbol-name (car probe)) :n (plist-get plist :n)
                             :k (or (plist-get plist :k) 4) :budget (or (plist-get plist :budget) 1.25)
                             :known (or (plist-get plist :known) nil) :gui (if (plist-get plist :gui) t :json-false)
-                            :steps (or (plist-get plist :steps) 1) :stack (if (plist-get plist :stack) t :json-false))))))
+                            :steps (or (plist-get plist :steps) 1) :stack (if (plist-get plist :stack) t :json-false)
+                            :idle (if (plist-get plist :idle) t :json-false))))))
 
 (defun scaling--perf (command)
   "Send COMMAND to the `perf record --control' fifo SCALING_PERF_CTL names, if any.

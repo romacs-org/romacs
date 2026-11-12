@@ -5,7 +5,8 @@ import unittest
 
 import scaling_live as s
 
-PROBE = {'name': 'p', 'n': 100, 'k': 4, 'budget': 1.25, 'known': None, 'gui': False, 'steps': 1, 'stack': False}
+PROBE = {'name': 'p', 'n': 100, 'k': 4, 'budget': 1.25, 'known': None, 'gui': False, 'steps': 1, 'stack': False,
+         'idle': False}
 
 
 def row(work_n, work_kn, **probe):
@@ -66,8 +67,16 @@ class Parsing(unittest.TestCase):
         text = 'noise\nSCALING {"name":"a","n":3,"k":4,"budget":1.25,"known":null,"gui":false,"steps":1,"stack":true}\n'
         (raw,) = s.scaling_lines(text)
         probe = s.probe_entry(raw)
-        self.assertEqual((probe['name'], probe['n'], probe['known'], probe['stack'], probe['gui']),
-                         ('a', 3, None, True, False))
+        self.assertEqual((probe['name'], probe['n'], probe['known'], probe['stack'], probe['gui'], probe['idle']),
+                         ('a', 3, None, True, False, False))
+
+    def test_every_step_paints_and_no_idle_step_does(self):
+        painting, idle = {**PROBE, 'steps': 2}, {**PROBE, 'steps': 2, 'idle': True}
+        self.assertIsNone(s.paints_problem(painting, [1, 2]))
+        self.assertIn('[1, 0]', s.paints_problem(painting, [1, 0]))
+        self.assertIn('[1]', s.paints_problem(painting, [1]))
+        self.assertIsNone(s.paints_problem(idle, [0, 0]))
+        self.assertIn('idle steps: [0, 1]', s.paints_problem(idle, [0, 1]))
 
     def test_step_paints_counts_each_steps_submitted_paints_before_the_next_mark(self):
         text = '\n'.join(['{"diagnostic":"paint-submitted","presentation":1}', '{"scaling":"start"}',

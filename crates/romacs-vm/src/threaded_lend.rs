@@ -216,6 +216,7 @@ pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'
     m.request(&EngineKey, gc, |vm| {
         let (width, height) = (vm.window_state.width, vm.window_state.height);
         let started = crate::host::monotonic();
+        vm.redisplay_begin();
         (started, vm.frame_snapshot(width, height))
     }, b, then)
 }

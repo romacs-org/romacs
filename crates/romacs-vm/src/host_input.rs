@@ -254,8 +254,11 @@ impl Vm {
     }
 
     /// A redisplay took TOOK: the first after `romacs--redisplay-since-mark's
-    /// mark is what the command that marked it cost the display.
+    /// mark is what the command that marked it cost the display. Ends the
+    /// cycle `redisplay_begin' began (`romacs--display-stats').
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
+        let conses = self.allocation.consed.conses;
+        self.display_state.stats.end(conses);
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }

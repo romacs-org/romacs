@@ -282,8 +282,10 @@ pub(super) struct DisplayState {
     /// The layout questions displayed windows answered by approximation
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
+    /// What redisplay did, counted (`romacs--display-stats`).
+    pub(super) stats: crate::display_stats::DisplayStats,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -399,6 +401,7 @@ impl DisplayState {
             diagnostics: Default::default(),
             mode_line_evals: 0,
             refusals: vec![],
+            stats: crate::display_stats::DisplayStats::default(),
         }
     }
 }
@@ -1385,8 +1388,10 @@ impl Vm {
         height: u32,
     ) -> Result<WindowSnapshot> {
         if let Some(snapshot) = self.reuse_shown(root, slot, width, height)? {
+            self.display_state.stats.reused += 1;
             return Ok(self.publish_window(snapshot));
         }
+        self.display_state.stats.rebuilt += 1;
         let bands = self.redisplay_and_build_mode_line(root, slot, height, true)?;
         let window = self.slots[root].value;
         let band_face = self.mode_line_face_name(window)?;

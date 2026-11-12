@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Display stages: what one redisplay costs, by scenario, held to bars.
+
+Each scenario of display_stages.el runs in a fresh `BINARY -Q --loadup'
+window in a private headless labwc (scaling_live.py's sessions): a buffer
+shown one way, then STEPS steps, each a timer that makes the scenario's
+change followed by the loop's own redisplay.  The session reads the
+evaluator's instruction counter and `romacs--display-stats' at the start of
+every step and after the last one's redisplay, all before it serializes
+anything, so a step's figures are differences of two readings:
+
+  step_instructions     everything the step ran: its timer, its change and
+                        its redisplay
+  display_instructions  the part inside redisplay (the frame frozen and
+                        compared, and laid out and submitted if it changed)
+  display_conses        conses made inside redisplay
+  windows_rebuilt       windows redisplay built in full
+  band_expansions       mode lines, header lines and status bars expanded
+  layouts               layouts redisplay asked of the layout host besides
+                        a paint's own
+  frames_submitted      frames sent to the renderer
+
+A scenario's figure is the median over its steps (the upper of two middle
+ones); redisplay's instructions have their 90th percentile as well
+(`display_instructions_p90': the streamed deltas that add a row).  A step is odd when it broke
+its scenario's rule: a scenario that changes what the frame shows submits a
+frame in every step, and one that changes nothing submits none (the host
+repaints for reasons of its own now and then, and the order statistics
+leave such a step out).  A measurement is refused when the thread has no
+instruction counter, when a step ran no redisplay, or when more than a
+tenth of the steps are odd.  Each step's counts, `collections' among them,
+are in the report.
+
+The bars file maps each scenario to a ceiling per figure; a figure over its
+ceiling, or a scenario or figure without one, fails.  --write-bars FILE
+writes the bars this run would pass: counts as measured, instruction
+figures a tenth higher, so that work which removes cost lowers them.
+
+--record profiles each scenario's steps with `perf record', enabled by the
+session at its first step and disabled after its last reading, and writes
+NAME.perf.data and its top inclusive symbols (NAME.callgraph.txt).  Whole
+stacks need a build made with RUSTFLAGS='-C force-frame-pointers=yes'.
+
+Writes OUTPUT/report.json (status PASS or FAIL) and OUTPUT/table.md, and
+prints the table.
+
+usage: display_stages_live.py --binary PATH --output DIR [--only NAME ...]
+                              [--bars FILE] [--write-bars FILE] [--steps 30]
+                              [--record] [--timeout 300]
+"""
+import argparse
+import json
+import math
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import time
+
+import scaling_live as scaling
+from scaling_live import Refused
+
+HERE = Path(__file__).resolve().parent
+SCENARIOS = HERE / 'display_stages.el'
+BARS = HERE / 'display_stages_bars.json'
+# A figure and the count of a reading it is the difference of.
+COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'instructions', 'display_conses': 'conses',
+          'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
+          'frames_submitted': 'frames-submitted'}
+# The figures whose 90th percentile is held too (a whole step's varies
+# with the timers that poll for its redisplay), the margin --write-bars
+# gives an instruction figure, and the share of steps that may be odd.
+PEAKS = ('display_instructions',)
+MARGIN = 1.10
+ODD = 0.1
+
+
+# Pure parts: steps, figures, bars and the table.
+
+def steps(readings):
+    """Each step's counts: the differences of consecutive READINGS."""
+    return [{name: after[name] - before[name] for name in after} for before, after in zip(readings, readings[1:])]
+
+
+def quantile(values, share):
+    """The value SHARE of the way through VALUES in order: the upper of the
+    two middle ones at a half."""
+    return sorted(values)[min(len(values) - 1, int(len(values) * share))]
+
+
+def figures(deltas):
+    """A scenario's figures from its steps' counts."""
+    out = {figure: quantile([d[count] for d in deltas], .5) for figure, count in COUNTS.items()}
+    out.update({f'{figure}_p90': quantile([d[COUNTS[figure]] for d in deltas], .9) for figure in PEAKS})
+    return out
+
+
+def odd_steps(scenario, deltas):
+    """The steps that broke SCENARIO's rule: a frame submitted in every
+    step of one that paints, and in none of one that does not."""
+    return [i for i, d in enumerate(deltas) if (d['frames-submitted'] == 0) == scenario['paints']]
+
+
+def refusal(scenario, result, wanted):
+    """Why RESULT, a session's readings, is no measurement of SCENARIO over
+    WANTED steps; None when it is one."""
+    readings = result.get('readings') or []
+    if len(readings) != wanted + 1:
+        return f'{len(readings)} readings for {wanted} steps'
+    if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):
+        return 'no instruction counter (romacs-instructions is nil)'
+    deltas = steps(readings)
+    idle = [i for i, d in enumerate(deltas) if d['cycles'] == 0]
+    if idle:
+        return f'no redisplay in steps {idle}'
+    odd = odd_steps(scenario, deltas)
+    if len(odd) > ODD * len(deltas):
+        return (f"its steps change {'the frame' if scenario['paints'] else 'nothing shown'}, and steps {odd} submitted "
+                f"{'none' if scenario['paints'] else 'a frame'}")
+    return None
+
+
+def over(measured, ceilings):
+    """The figures of MEASURED over their ceiling or without one: (figure,
+    value, ceiling or None)."""
+    return [(figure, value, ceilings.get(figure)) for figure, value in measured.items()
+            if ceilings.get(figure) is None or value > ceilings[figure]]
+
+
+def verdict(scenario, result, wanted, bars):
+    """SCENARIO's row from its session's RESULT: PASS, or FAIL with a reason."""
+    row = {'name': scenario['name'], 'paints': scenario['paints']}
+    problem = refusal(scenario, result, wanted)
+    if problem:
+        return {**row, 'status': 'FAIL', 'reason': problem}
+    deltas = steps(result['readings'])
+    row.update(chars=result.get('chars'), figures=figures(deltas), odd=odd_steps(scenario, deltas), steps=deltas)
+    if scenario['name'] not in bars:
+        return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
+    row['over'] = over(row['figures'], bars[scenario['name']])
+    if row['over']:
+        reason = '; '.join(f'{figure} {value}, ' + ('no ceiling' if ceiling is None else f'over {ceiling}')
+                           for figure, value, ceiling in row['over'])
+        return {**row, 'status': 'FAIL', 'reason': reason}
+    return {**row, 'status': 'PASS'}
+
+
+def ceiling(figure, value):
+    """The bar --write-bars sets for FIGURE measured at VALUE: a count as
+    it is, an instruction figure its margin higher, to three digits."""
+    if 'instructions' not in figure or value <= 0:
+        return value
+    raised = value * MARGIN
+    unit = 10 ** max(0, math.floor(math.log10(raised)) - 2)
+    return math.ceil(raised / unit) * unit
+
+
+def bars_of(rows):
+    """The bars ROWS' figures would pass."""
+    return {row['name']: {figure: ceiling(figure, value) for figure, value in row['figures'].items()}
+            for row in rows if 'figures' in row}
+
+
+def overall(rows):
+    """PASS unless a row failed or there are none."""
+    return 'PASS' if rows and all(row['status'] == 'PASS' for row in rows) else 'FAIL'
+
+
+def table(rows):
+    """The report as a Markdown table, instructions in millions."""
+    lines = ['| scenario | step | display | display p90 | conses | rebuilt | bands | layouts | frames | status |',
+             '|---|---|---|---|---|---|---|---|---|---|']
+    for row in rows:
+        f = row.get('figures')
+        millions = lambda name: f'{f[name] / 1e6:.2f}M'  # noqa: E731
+        cells = ([millions('step_instructions'), millions('display_instructions'), millions('display_instructions_p90'),
+                  f['display_conses'], f['windows_rebuilt'], f['band_expansions'], f['layouts'], f['frames_submitted']]
+                 if f else ['-'] * 8)
+        note = f" — {row['reason']}" if row.get('reason') else (f" — odd steps {row['odd']}" if row.get('odd') else '')
+        lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
+    return '\n'.join(lines) + '\n'
+
+
+# Sessions.
+
+def scenarios(binary, home, timeout):
+    """The scenarios display_stages.el defines."""
+    listed = scaling.batch(binary, home, '(display-stages-list)', timeout, loads=(SCENARIOS,))
+    return [{'name': raw['name'], 'paints': raw.get('paints') is True} for raw in listed]
+
+
+def recording(output, home, name):
+    """The `perf record' prefix and environment that profile scenario NAME's
+    steps, perf waiting disabled for the session to enable it, and the
+    profile's file."""
+    data, fifo = output / f'{name}.perf.data', home / 'tmp' / f'{name}.perf-ctl'
+    os.mkfifo(fifo)
+    prefix = ('perf', 'record', '-q', '-D', '-1', '--control', f'fifo:{fifo}', '-e', 'instructions:u',
+              '--call-graph', 'fp', '--user-callchains', '-o', str(data), '--')
+    return prefix, {'SCALING_PERF_CTL': str(fifo)}, data
+
+
+def callgraph(data, timeout):
+    """DATA's top inclusive symbols, written beside it."""
+    report = subprocess.run(['perf', 'report', '-i', str(data), '--stdio', '--children', '--percent-limit', '3',
+                             '--sort', 'symbol', '-g', 'none'], capture_output=True, text=True, timeout=timeout)
+    text = '\n'.join(' '.join(line.split()) for line in report.stdout.splitlines()
+                     if line.strip() and not line.startswith('#'))
+    data.with_name(data.name.replace('.perf.data', '.callgraph.txt')).write_text(text + '\n')
+
+
+def measure(gui, scenario, args):
+    """SCENARIO's readings from a fresh session, profiled under --record."""
+    name = scenario['name']
+    prefix, env, data = recording(args.output, gui.home, name) if args.record else ((), {}, None)
+    # No paint diagnostics: a step costs what it costs a session in use.
+    result, _ = gui.session(name, lambda out: f'(display-stages-start (quote {name}) "{out}" {args.steps})',
+                            loads=(SCENARIOS,), env={'ROMACS_DIAGNOSTICS': '0', **env}, prefix=prefix)
+    if data:
+        callgraph(data, args.timeout)
+    return result
+
+
+def run(binary, home, selected, bars, args):
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/1000'))
+    rows = []
+    with tempfile.TemporaryDirectory(prefix='stages-', dir=runtime) as temporary:
+        Path(temporary).chmod(0o700)
+        # A session gets the whole timeout: scaling's GUI probes get a fifth.
+        gui = scaling.Gui(home, Path(temporary), args.timeout * 5)
+        gui.binary = binary
+        try:
+            for scenario in selected:
+                try:
+                    rows.append(verdict(scenario, measure(gui, scenario, args), args.steps, bars))
+                except (Refused, RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+                    rows.append({'name': scenario['name'], 'paints': scenario['paints'], 'status': 'FAIL', 'reason': str(error)})
+        finally:
+            gui.close()
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--binary', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--only', nargs='*', default=None)
+    parser.add_argument('--bars', type=Path, default=BARS)
+    parser.add_argument('--write-bars', type=Path)
+    parser.add_argument('--steps', type=int, default=30)
+    parser.add_argument('--record', action='store_true')
+    parser.add_argument('--timeout', type=float, default=300, help='seconds per session')
+    args = parser.parse_args()
+    args.output = args.output.resolve()
+    args.output.mkdir(parents=True)
+    binary = args.binary.resolve()
+    home = args.output / 'home'
+    report = {'binary': str(binary), 'bars': str(args.bars), 'steps': args.steps, 'status': 'FAIL', 'rows': []}
+    started = time.monotonic()
+    try:
+        bars = json.loads(args.bars.read_text()) if args.bars.is_file() else {}
+        scaling.prepare(binary, home, args.timeout)
+        selected = scenarios(binary, home, args.timeout)
+        if args.only is not None:
+            unknown = set(args.only) - {s['name'] for s in selected}
+            if unknown:
+                raise Refused(f'no such scenarios: {sorted(unknown)}')
+            selected = [s for s in selected if s['name'] in args.only]
+        report['rows'] = run(binary, home, selected, bars, args)
+        report['status'] = overall(report['rows'])
+        if args.write_bars:
+            args.write_bars.write_text(json.dumps({**bars, **bars_of(report['rows'])}, indent=1) + '\n')
+    except (Refused, subprocess.SubprocessError, OSError, ValueError) as error:
+        report['error'] = str(error)
+    # The worlds are the bulk of HOME, and no part of the report.
+    shutil.rmtree(home / 'cache', ignore_errors=True)
+    report['seconds'] = round(time.monotonic() - started, 1)
+    (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+    text = table(report['rows'])
+    (args.output / 'table.md').write_text(text)
+    print(text, end='')
+    print(f"{report['status']} in {report['seconds']}s{': ' + report['error'] if 'error' in report else ''}")
+    return 0 if report['status'] == 'PASS' else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

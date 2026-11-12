@@ -450,6 +450,30 @@ python3 -B crates/romacs-vm-gui/harness/gc_typing_live.py --binary BIN --output 
   [--prompt] [--seed N] [--tools LABWC-DIR:WLR-RANDR-DIR]   # about 3 minutes
 ```
 
+## What one redisplay costs (`display_stages_live.py`)
+
+Redisplay's cost by scenario, in instructions, held to bars. Each scenario
+of `display_stages.el` (synthetic buffers: plain text, text with invisible
+and `display` parts, an agent chat) runs in a fresh `-Q --loadup` session
+in a private headless labwc: a buffer shown one way, then 30 steps, each a
+timer that makes the scenario's change followed by the loop's own
+redisplay. The session reads `romacs-instructions` and
+`romacs--display-stats` at each step's start, all before it writes
+anything, so the report has, per step and as medians, the instructions and
+conses spent inside redisplay beside the whole step's instructions, the
+windows rebuilt, the bands expanded, the layouts asked of the layout host
+and the frames submitted. A scenario's figures over their ceilings in
+`display_stages_bars.json` fail, as does a scenario more than a tenth of
+whose steps paint when they change nothing, or do not when they do. Work that removes cost
+lowers the bars: `--write-bars FILE` writes the ones a run would pass.
+`--record` adds a call graph of each scenario's steps (a frame-pointer
+build).
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \
+  [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
+```
+
 ## Typing while jabber catches up its archives (`jabber_live.py`, `xmpp_fixture.py`)
 
 `xmpp_fixture.py` is a private XMPP server on 127.0.0.1 (standard library
