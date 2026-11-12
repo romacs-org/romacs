@@ -4,11 +4,12 @@
 //! the wait is a plain blocking receive on that channel; the redisplay uses
 //! the same layout engine and presentation sequence as the outer loop.
 //!
-//! Shared state is per evaluator thread (Rc/RefCell): the outer loop parks
-//! the rest of its input batch here before it dispatches a command and takes
-//! back whatever the prompt did not consume afterwards, so keys typed ahead of
-//! a prompt reach it in order. A RefCell borrow held across a dispatch would
-//! panic the moment a prompt waits: a re-entry is loud, never silent.
+//! Shared state is per evaluator thread (Rc/RefCell). Its queue is the outer
+//! loop's only one, so keys typed ahead of a prompt reach it in order, and a
+//! key any read took from the channel (an `input-pending-p` in a redisplay,
+//! the look a collection takes) stays queued for the loop. A RefCell borrow
+//! held across a dispatch would panic the moment a prompt waits: a re-entry
+//! is loud, never silent.
 use romacs_display_runtime::paint_host::PaintSender;
 use romacs_display_runtime::thread_comm::InputEvent;
 use romacs_vm::{HostEvent, HostFrame, HostInput};
@@ -20,7 +21,8 @@ use std::time::Duration;
 
 #[derive(Default)]
 pub struct Shared {
-    /// Events received but not yet dispatched (the outer batch's remainder).
+    /// Events received but not yet dispatched: the outer loop's one input
+    /// queue (main.rs `queue`), which every read takes from and adds to.
     pub pending: VecDeque<InputEvent>,
     /// Last presentation id submitted, by either loop.
     pub presentation: u64,
