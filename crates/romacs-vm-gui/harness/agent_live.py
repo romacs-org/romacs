@@ -2948,7 +2948,8 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--romacs', required=True)
+    # --binary: the name romacs-check gives every live harness its binary by.
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
@@ -2973,7 +2974,11 @@ def main():
             results[name] = {'ok': False, 'error': repr(error)}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
-    return 0 if all(r.get('ok') is not False for r in results.values()) else 1
+    ok = all(r.get('ok') is not False for r in results.values())
+    # What romacs-check reads of a live harness.
+    (out / 'report.json').write_text(json.dumps({'status': 'PASS' if ok else 'FAIL',
+                                                 'failed': [n for n, r in results.items() if r.get('ok') is False]}))
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':
