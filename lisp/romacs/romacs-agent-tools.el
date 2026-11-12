@@ -261,7 +261,7 @@ call stays running until its answer is ready."
   (romacs-agent-tools--bounded
    arguments
    ;; A command the agent's code starts gets no editor launch variable
-   ;; either (`romacs-agent--editor-variables').
+   ;; either (`romacs-agent--editor-variable-p').
    (lambda ()
      (let ((process-environment (romacs-agent--harness-environment)))
        (romacs-mcp-eval-string (gethash "code" arguments))))))
