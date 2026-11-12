@@ -85,7 +85,7 @@ targeted test to fail.
 
 The suite's passes are floors (`ledger/parity-ratchet.json` at the repo root,
 `tools/lib/parity_ratchet.py`): per file, the exact deftests that pass. The gate
-runs the whole suite in four shards (`crates/romacs-gnu-tests/tests/parity_ratchet.rs`), and
+runs the whole suite in shards (`crates/romacs-gnu-tests/tests/parity_ratchet.rs`), and
 the WARM and COLD Lisp census beside it (`crates/romacs-vm/tests/
 parity_ratchet.rs`). A lost pass fails and names the test; a new pass fails
 until recorded with `python3 tools/lib/parity_ratchet.py record` in the same
