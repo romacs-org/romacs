@@ -838,10 +838,18 @@ must not act as if its answer were delivered."
         (if (and (not (process-get peer 'token)) (string-match-p "\n" text)) (romacs-mcp--close peer)
           (process-put peer 'input text))))))
 
+(defun romacs-mcp-own-peer (peer)
+  "Vouch for PEER: a layer's own connection (an agent session's relay),
+bounded by what owns it, it leaves the anonymous peers' quota."
+  (process-put peer 'romacs-mcp-owned t))
+
 (defun romacs-mcp--accept (listener peer _message)
-  "Admit PEER from LISTENER, subject to the finite connection quota."
+  "Admit PEER from LISTENER, subject to the finite connection quota: of
+the peers no layer vouches for (`romacs-mcp-own-peer'), as many sessions'
+relays as run never crowd out one."
   (if (or (not (eq listener romacs-mcp--listener))
-          (>= (length romacs-mcp--peers) romacs-mcp--peer-limit))
+          (>= (cl-count-if-not (lambda (p) (process-get p 'romacs-mcp-owned)) romacs-mcp--peers)
+              romacs-mcp--peer-limit))
       (romacs-mcp--close peer)
     (push peer romacs-mcp--peers)
     (process-put peer 'generation romacs-mcp--generation)
