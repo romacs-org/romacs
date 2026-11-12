@@ -532,13 +532,7 @@ def main():
             raise
         finally:
             for child in (proc, keyboard, comp):
-                if child is not None and child.poll() is None:
-                    child.terminate()
-                    try:
-                        child.wait(timeout=8)
-                    except subprocess.TimeoutExpired:
-                        child.kill()
-                        child.wait(timeout=8)
+                live.stop(child)
             (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
             (args.output / "INDEX.txt").write_text("\n".join(f"{s['name']}.png: {s['name']}" for s in report["steps"]) + "\n")
     print(json.dumps(report, ensure_ascii=False))

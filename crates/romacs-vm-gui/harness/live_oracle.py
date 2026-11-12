@@ -193,14 +193,21 @@ def judge(oracle: str, spec: Path, capture: Path, report: Path, *, reject: bool)
     return record
 
 
+# How long a process ending is given before it counts as hung: a loaded
+# host has taken over ten seconds to end a session, a hang takes forever.
+HANG = 120
+
+
 def stop(proc) -> None:
+    """End PROC, if it runs: SIGTERM, then SIGKILL once it has had HANG
+    seconds to go."""
     if proc is not None and proc.poll() is None:
         proc.terminate()
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=HANG)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=HANG)
 
 
 def capture(path: Path, env: dict, args, proc) -> None:

@@ -17,15 +17,19 @@ impl Drop for Session {
     }
 }
 
-/// A session that listens, then runs BODY.
+/// A session that listens, then runs BODY, which calls `inspect-ready` where
+/// the test may begin: from inside the frame the test asserts on
+/// (`inspect-spin` calls it), or just before a native call, which a test
+/// then polls for (`inspect_until`). The marker exists while it is being
+/// written, so only the frames around it are known when it appears.
 fn session(name: &str, body: &str) -> Session {
     let dir = std::env::temp_dir().join(format!("ri-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let source = format!(r#"(setq debug-on-event nil)
-(defun inspect-spin (tag) (let ((inhibit-quit t) (n 0)) (while t (setq n (1+ n)))))
+(defun inspect-ready () (with-temp-file (expand-file-name "ready" (getenv "MARK")) (insert "ready")))
+(defun inspect-spin (tag) (let ((inhibit-quit t) (n 0)) (inspect-ready) (while t (setq n (1+ n)))))
 (romacs--inspect-listen (concat (getenv "MARK") "/") (concat (getenv "MARK") "/store"))
-(with-temp-file (expand-file-name "busy" (getenv "MARK")) (insert "busy"))
 {body}
 "#);
     std::fs::write(dir.join("busy.el"), source).unwrap();
@@ -34,11 +38,10 @@ fn session(name: &str, body: &str) -> Session {
         .env("HOME", &dir).env("MARK", &dir).env("ROMACS_WORLD", "off")
         .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     let start = Instant::now();
-    while !dir.join("busy").exists() {
+    while !dir.join("ready").exists() {
         assert!(start.elapsed() < Duration::from_secs(60), "{name}: the session never began");
         std::thread::sleep(Duration::from_millis(20));
     }
-    std::thread::sleep(Duration::from_millis(300));
     Session { child, dir }
 }
 
@@ -51,8 +54,22 @@ fn inspect(dir: &Path) -> (serde_json::Value, Duration) {
     (serde_json::from_str(&answer).unwrap_or_else(|error| panic!("{error}: {answer}")), start.elapsed())
 }
 
+/// Inspect until DONE holds of the answer, or a minute has passed: the
+/// last answer and how long it took.
+fn inspect_until(dir: &Path, done: impl Fn(&serde_json::Value) -> bool) -> (serde_json::Value, Duration) {
+    let start = Instant::now();
+    loop {
+        let (answer, took) = inspect(dir);
+        if done(&answer) || start.elapsed() > Duration::from_secs(60) { return (answer, took); }
+    }
+}
+
+fn calls(answer: &serde_json::Value, name: &str) -> bool {
+    answer["snapshot"]["frames"].as_array().is_some_and(|frames| frames.iter().any(|frame| frame["fn"] == name))
+}
+
 fn spins(answer: &serde_json::Value) -> bool {
-    answer["snapshot"]["frames"].as_array().unwrap().iter().any(|frame| frame["fn"] == "inspect-spin")
+    calls(answer, "inspect-spin")
 }
 
 #[test]
@@ -89,8 +106,8 @@ fn sigusr2_saves_a_snapshot() {
 
 #[test]
 fn a_session_with_no_safe_point_says_so_in_time() {
-    let session = session("wait", r#"(sleep-for 60)"#);
-    let (answer, took) = inspect(&session.dir);
+    let session = session("wait", r#"(inspect-ready) (sleep-for 60)"#);
+    let (answer, took) = inspect_until(&session.dir, |answer| answer["status"] != "ok");
     assert_eq!(answer["status"], "busy", "{answer}");
     assert_eq!(answer["detail"], "no safe point");
     assert!(took < Duration::from_secs(4), "{took:?}");
@@ -126,19 +143,15 @@ fn a_long_motion_is_inspected_and_finishes() {
     let session = session("motion", r#"(switch-to-buffer (generate-new-buffer "big"))
 (insert (make-string 5000000 ?\n))
 (goto-char 1)
-(with-temp-file (expand-file-name "moving" (getenv "MARK")) (insert "moving"))
+(inspect-ready)
 (let ((moved (vertical-motion 5000000)))
   (with-temp-file (expand-file-name "moved" (getenv "MARK")) (insert (format "%d" moved))))
 (inspect-spin "marker")"#);
     let start = Instant::now();
-    while !session.dir.join("moving").exists() {
-        assert!(start.elapsed() < Duration::from_secs(60), "the motion never began");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let (answer, _) = inspect(&session.dir);
+    let moved = session.dir.join("moved");
+    let (answer, _) = inspect_until(&session.dir, |answer| calls(answer, "vertical-motion") || moved.exists());
     assert_eq!(answer["status"], "ok", "{answer}");
-    let in_motion = answer["snapshot"]["frames"].as_array().unwrap().iter().any(|frame| frame["fn"] == "vertical-motion");
-    assert!(in_motion, "{answer}");
+    assert!(calls(&answer, "vertical-motion"), "{answer}");
     while !session.dir.join("moved").exists() {
         assert!(start.elapsed() < Duration::from_secs(120), "the motion never ended");
         std::thread::sleep(Duration::from_millis(20));
@@ -148,8 +161,8 @@ fn a_long_motion_is_inspected_and_finishes() {
 
 #[test]
 fn a_long_search_is_inspected_and_goes_on() {
-    let mut session = session("search", r#"(string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b"))"#);
-    let (answer, took) = inspect(&session.dir);
+    let mut session = session("search", r#"(inspect-ready) (string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b"))"#);
+    let (answer, took) = inspect_until(&session.dir, |answer| calls(answer, "string-match"));
     assert_eq!(answer["status"], "ok", "{answer}");
     assert_eq!(answer["snapshot"]["in"], "regexp", "{answer}");
     let names: Vec<_> = answer["snapshot"]["frames"].as_array().unwrap().iter().filter_map(|frame| frame["fn"].as_str()).collect();
