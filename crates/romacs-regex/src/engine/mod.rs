@@ -59,6 +59,10 @@ mod short_literal_tests;
 mod tests;
 
 #[cfg(test)]
+#[path = "tests/interval_test.rs"]
+mod interval_tests;
+
+#[cfg(test)]
 #[path = "tests/opcode_decode_test.rs"]
 mod opcode_decode_tests;
 
