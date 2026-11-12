@@ -22,13 +22,14 @@ anything, so a step's figures are differences of two readings:
 
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
-(`display_instructions_p90': the streamed deltas that add a row).  A step is odd when it broke
-its scenario's rule: a scenario that changes what the frame shows submits a
-frame in every step, and one that changes nothing submits none.  The host
-repaints for reasons of its own now and then, so the figures are taken over
-the steps that kept the rule, and the report names the odd ones.  A
-measurement is refused when the thread has no instruction counter, when a
-step ran no redisplay, or when more than a tenth of the steps are odd.  Each step's counts, `collections' among them,
+(`display_instructions_p90': the streamed deltas that add a row).  A step is
+odd when it broke its scenario's rule: a scenario that changes what the
+frame shows submits a frame in every step, and one that changes nothing
+submits none.  The host repaints for reasons of its own now and then, so
+the figures are taken over the steps that kept the rule, and the report
+names the odd ones.  A measurement is refused when the thread has no
+instruction counter, when a step ran no redisplay, or when more than a
+tenth of the steps are odd.  Each step's counts, `collections' among them,
 are in the report.
 
 The bars file maps each scenario to a ceiling per figure; a figure over its
@@ -237,7 +238,7 @@ def run(binary, home, selected, bars, args):
             for scenario in selected:
                 try:
                     rows.append(verdict(scenario, measure(gui, scenario, args), args.steps, bars))
-                except (Refused, RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+                except (Refused, RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
                     rows.append({'name': scenario['name'], 'paints': scenario['paints'], 'status': 'FAIL', 'reason': str(error)})
         finally:
             gui.close()

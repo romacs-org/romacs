@@ -463,10 +463,10 @@ conses spent inside redisplay beside the whole step's instructions, the
 windows rebuilt, the bands expanded, the layouts asked of the layout host
 and the frames submitted. A scenario's figures over their ceilings in
 `display_stages_bars.json` fail, as does a scenario more than a tenth of
-whose steps paint when they change nothing, or do not when they do. Work that removes cost
-lowers the bars: `--write-bars FILE` writes the ones a run would pass.
-`--record` adds a call graph of each scenario's steps (a frame-pointer
-build).
+whose steps paint when they change nothing, or do not when they do. Work
+that removes cost lowers the bars: `--write-bars FILE` writes the ones a
+run would pass. `--record` adds a call graph of each scenario's steps (a
+frame-pointer build).
 
 ```sh
 python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \

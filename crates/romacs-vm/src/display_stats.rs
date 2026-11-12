@@ -3,7 +3,9 @@
 //! windows a snapshot reused or rebuilt, the bands it expanded, what this
 //! evaluator asked of the layout host besides a paint's own layout, and
 //! the frames it submitted. Plain counters, always on: a cycle pays two
-//! reads of the thread's instruction counter for them.
+//! reads of the thread's instruction counter for them, which the first
+//! cycle opens; the reads are no host calls of the session's
+//! (`host::instruction_count`).
 //!
 //! A cycle is what the host brackets with `Vm::redisplay_begin` and
 //! `Vm::redisplay_done`: the frame's freeze, its comparison with the frame
@@ -17,14 +19,24 @@
 //! and the outer one is not.
 use crate::{Result, Value, Vm};
 
-/// The counts `romacs--display-stats` reports, in order.
+/// The counts `romacs--display-stats` reports, in order: the VM's own,
+/// then from HOST on the host calls its thread keeps.
 const NAMES: [&str; COUNTS] = ["cycles", "instructions", "conses", "windows-visited", "windows-reused", "windows-rebuilt",
-    "band-expansions", "band-evals", "layouts", "measures", "frames-submitted", "check-mismatches"];
+    "band-expansions", "band-evals", "check-mismatches", "layouts", "measures", "frames-submitted"];
 const COUNTS: usize = 12;
 const INSTRUCTIONS: usize = 1;
+const HOST: usize = 9;
+const HOST_CALLS: [&str; COUNTS - HOST] = ["layout.lay_out", "layout.measure", "sender.submit_scene"];
+
+thread_local! {
+    /// The thread's HOST_CALLS at the last reset. It is kept with the
+    /// thread, as the counts are: a session image restored into another
+    /// process meets counts that started over, and a base to match.
+    static HOST_BASE: std::cell::Cell<[u64; COUNTS - HOST]> = const { std::cell::Cell::new([0; COUNTS - HOST]) };
+}
 
 /// Redisplay's own counts since the VM started, the cycle under way, and
-/// every count as the last reset read it.
+/// the VM's counts as the last reset read them.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DisplayStats {
     cycles: u64,
@@ -44,20 +56,20 @@ pub(crate) struct DisplayStats {
     /// The thread's instruction counter and the conses made, at the begin
     /// of the cycle under way.
     open: Option<(Option<u64>, u64)>,
-    base: [u64; COUNTS],
+    base: [u64; HOST],
 }
 romacs_snapshot::snapshot_struct!(DisplayStats { cycles, instructions, conses, reused, rebuilt, bands, mismatches, open, base });
 
 impl DisplayStats {
     fn begin(&mut self, conses: u64) {
-        self.open = Some((crate::host::thread_instructions(), conses));
+        self.open = Some((crate::host::instruction_count(), conses));
     }
     /// The cycle under way is over (`Vm::redisplay_done`); nothing without one.
     pub(crate) fn end(&mut self, conses: u64) {
         let Some((counter, made)) = self.open.take() else { return };
         self.cycles += 1;
         self.conses += conses.saturating_sub(made);
-        if let (Some(from), Some(to)) = (counter, crate::host::thread_instructions()) {
+        if let (Some(from), Some(to)) = (counter, crate::host::instruction_count()) {
             self.instructions += to.saturating_sub(from);
         }
     }
@@ -76,25 +88,26 @@ impl Vm {
     /// questions and Lisp's (`window-text-pixel-size`) asked besides.
     fn display_counts(&self) -> [u64; COUNTS] {
         let stats = &self.display_state.stats;
-        let calls = romacs_display_protocol::call_count::of;
-        [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
-         stats.bands, self.display_state.mode_line_evals,
-         calls("layout.lay_out"), calls("layout.measure"), calls("sender.submit_scene"), stats.mismatches]
+        let own = [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
+                   stats.bands, self.display_state.mode_line_evals, stats.mismatches];
+        std::array::from_fn(|i| if i < HOST { own[i] } else { romacs_display_protocol::call_count::of(HOST_CALLS[i - HOST]) })
     }
     /// `romacs--display-stats`: ((NAME . COUNT)...) since the last reset,
     /// and with RESET a reset. `instructions` is nil where the thread has
     /// no instruction counter.
     pub(crate) fn display_stats(&mut self, reset: bool) -> Result<Value> {
         let now = self.display_counts();
-        let base = self.display_state.stats.base;
-        if reset { self.display_state.stats.base = now; }
-        let counted = crate::host::thread_instructions().is_some();
+        let (own, host) = (self.display_state.stats.base, HOST_BASE.get());
+        if reset {
+            self.display_state.stats.base.copy_from_slice(&now[..HOST]);
+            HOST_BASE.set(std::array::from_fn(|i| now[HOST + i]));
+        }
+        let counted = crate::host::instruction_count().is_some();
         let mut list = Value::NIL;
         for i in (0..COUNTS).rev() {
-            // A restored image's thread starts its host calls over: those
-            // three read 0 until they pass the image's base, or a reset.
+            let base = if i < HOST { own[i] } else { host[i - HOST] };
             let count = if i == INSTRUCTIONS && !counted { Value::NIL }
-                else { Value::integer(i64::try_from(now[i].saturating_sub(base[i])).map_err(|e| e.to_string())?)? };
+                else { Value::integer(i64::try_from(now[i].saturating_sub(base)).map_err(|e| e.to_string())?)? };
             let name = self.intern(NAMES[i]);
             let row = self.alloc_cons(name, count);
             list = self.alloc_cons(row, list);
@@ -123,9 +136,11 @@ mod tests {
         assert_eq!(count(&mut vm, "cycles"), "1");
         let conses: u64 = count(&mut vm, "conses").parse().unwrap();
         assert!((2..100).contains(&conses), "the cycle's conses, not the session's: {conses}");
-        if crate::host::thread_instructions().is_some() {
+        if crate::host::instruction_count().is_some() {
             let instructions: u64 = count(&mut vm, "instructions").parse().unwrap();
             assert!(instructions > 0, "the cycle's instructions");
+            // The bracket's reads are no host calls of the session's.
+            assert_eq!(romacs_display_protocol::call_count::of("instructions"), 0);
         } else {
             assert_eq!(count(&mut vm, "instructions"), "nil");
         }
@@ -141,13 +156,13 @@ mod tests {
     #[test]
     fn an_empty_cycle_costs_two_counter_reads() {
         let mut vm = Vm::new();
-        let Some(before) = crate::host::thread_instructions() else { return };
+        let Some(before) = crate::host::instruction_count() else { return };
         vm.redisplay_begin();
         vm.redisplay_done(std::time::Duration::ZERO);
-        let whole = crate::host::thread_instructions().unwrap() - before;
+        let whole = crate::host::instruction_count().unwrap() - before;
         let counted: u64 = count(&mut vm, "instructions").parse().unwrap();
-        eprintln!("an empty cycle: {whole} instructions in all (one read of the counter more than a cycle pays), {counted} of them counted as its own");
-        assert!(counted < whole && whole < 20_000, "{counted} counted of {whole}");
+        // WHOLE holds a third read, this test's own.
+        assert!(counted < whole && whole < 5_000, "{counted} counted of {whole}");
     }
 
     #[test]

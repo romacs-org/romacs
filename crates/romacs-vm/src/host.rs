@@ -1749,10 +1749,17 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    crate::flight::value("instructions", || INSTRUCTION_COUNTER.with(|counter| {
+    crate::flight::value("instructions", instruction_count)
+}
+
+/// `thread_instructions` as a meter reads it: not a result the session
+/// computes with, so neither logged for a replay nor counted among the
+/// host calls (redisplay's bracket reads it twice a cycle).
+pub(crate) fn instruction_count() -> Option<u64> {
+    INSTRUCTION_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();
         counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
-    }))
+    })
 }
 
 thread_local! {

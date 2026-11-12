@@ -2,7 +2,8 @@
 //! is answered from its last one (`Vm::reuse_shown`), the window's text is
 //! also built in full from the same state, and the two are compared: text,
 //! face runs, start, point, stretches, images and line numbers. The bands
-//! are no part of it: reuse expands them again. A difference is an input
+//! are no part of it: reuse expands them again. Nor is what lays the text
+//! out (tab width, wrap, scroll, chrome), which a snapshot reads apart. A difference is an input
 //! the window's key (`ShownKey`) does not hold. It is counted
 //! (`romacs--display-stats`, `check-mismatches`) and told once per window
 //! and cause as a display diagnostic.
@@ -131,11 +132,13 @@ impl Vm {
 mod tests {
     use super::*;
 
-    /// A frame whose window shows three lines, snapshot once, the check on.
-    fn shown() -> (Vm, u64) {
+    /// A frame whose window shows three lines, snapshot once, the check
+    /// set to CHECK where given.
+    fn shown(check: Option<&str>) -> (Vm, u64) {
         let mut vm = Vm::new();
         vm.set_frame_geometry(800, 280, 20, 10).unwrap();
-        vm.eval_source("(progn (setq romacs-display-check t) (insert \"one\\ntwo\\nthree\\n\") (goto-char 1))").unwrap();
+        if let Some(value) = check { vm.eval_source(&format!("(setq romacs-display-check {value})")).unwrap(); }
+        vm.eval_source("(progn (insert \"one\\ntwo\\nthree\\n\") (goto-char 1))").unwrap();
         vm.frame_snapshot(800, 280).unwrap();
         let id = vm.selected_window_id().unwrap();
         (vm, id)
@@ -154,7 +157,7 @@ mod tests {
 
     #[test]
     fn a_right_reuse_passes_the_check() {
-        let (mut vm, _) = shown();
+        let (mut vm, _) = shown(Some("t"));
         vm.frame_snapshot(800, 280).unwrap();
         assert!(count(&mut vm, "windows-reused") >= 1, "the second snapshot reuses");
         assert_eq!(count(&mut vm, "check-mismatches"), 0);
@@ -163,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_stale_reuse_is_counted_and_each_cause_told_once() {
-        let (mut vm, id) = shown();
+        let (mut vm, id) = shown(Some("t"));
         vm.eval_source("(save-excursion (goto-char (point-max)) (insert \"four\\n\"))").unwrap();
         forge_key(&mut vm, id);
         let stale = vm.frame_snapshot(800, 280).unwrap();
@@ -189,13 +192,15 @@ mod tests {
     }
 
     #[test]
-    fn the_check_is_off_by_default() {
-        let (mut vm, id) = shown();
-        vm.eval_source("(progn (setq romacs-display-check nil) (save-excursion (goto-char (point-max)) (insert \"four\\n\")))").unwrap();
-        forge_key(&mut vm, id);
-        vm.frame_snapshot(800, 280).unwrap();
-        assert_eq!(count(&mut vm, "check-mismatches"), 0);
-        assert_eq!(vm.take_display_diagnostics(), Vec::<String>::new());
+    fn the_check_is_off_unless_set() {
+        for check in [None, Some("nil")] {
+            let (mut vm, id) = shown(check);
+            vm.eval_source("(save-excursion (goto-char (point-max)) (insert \"four\\n\"))").unwrap();
+            forge_key(&mut vm, id);
+            vm.frame_snapshot(800, 280).unwrap();
+            assert_eq!(count(&mut vm, "check-mismatches"), 0, "{check:?}");
+            assert_eq!(vm.take_display_diagnostics(), Vec::<String>::new(), "{check:?}");
+        }
     }
 
     #[test]
