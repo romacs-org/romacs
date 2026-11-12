@@ -474,6 +474,32 @@ python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --ou
   [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
 ```
 
+## What one frame costs the render thread (`render_stages_live.py`)
+
+The render thread's side of the same scenarios, held to bars. Under
+`ROMACS_DIAGNOSTICS=1` the render thread writes a `frame-cost` line for
+every frame it draws (the display runtime's `frame_cost`): what it added,
+since the frame before, to the renderer's counts (text rows met,
+tessellated and reused, glyph records handed to glyph passes, font
+identities hashed, bytes uploaded) and the instructions it retired in the
+scene's ingestion and the frame's draw, with the part inside the surface's
+acquire, the queue's submit and the present apart. The harness runs each
+painting scenario of `display_stages.el` and of `render_stages.el` (three
+windows with one typed in, a scroll by a line) as `display_stages_live.py`
+does, and takes medians over the frames that carried a new scene: its own
+instructions are a frame's less the driver's part. Frames drawn with no
+new scene (an animation's) are counted apart, per ten steps.
+`render_stages_bars.json` holds each scenario's figures, measured on a
+software adapter: the rows exactly, every cost under a ceiling. The
+compositor, and so Romacs, runs on the host's GPU when
+`ROMACS_HARNESS_WLR_ENV` gives it one; a GPU draws the animations a
+software adapter is spared, so a GPU run takes its own `--bars`.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/render_stages_live.py --binary BIN --output DIR \
+  [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
+```
+
 ## Typing while jabber catches up its archives (`jabber_live.py`, `xmpp_fixture.py`)
 
 `xmpp_fixture.py` is a private XMPP server on 127.0.0.1 (standard library
