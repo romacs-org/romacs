@@ -107,7 +107,12 @@ longer running (a collected unit is inactive); one it does not name
     (dolist (line (split-string journal "\n" t))
       (cond ((string-match "Main process exited, code=\\([a-z]+\\), status=\\([^ ]+\\)" line)
              (setq status (format "%s, status=%s" (match-string 1 line) (match-string 2 line))))
-            ((string-match-p "Deactivated successfully" line)
+            ((string-match-p "\\`\\(?:[^ ]+: \\)?Stopped " line)
+             (setq status (or status "stopped")))
+            ;; A unit that ends well records no exit: the user manager
+            ;; logs only what it consumed, and a collected unit leaves
+            ;; no state to ask systemd for.
+            ((string-match-p "Deactivated successfully\\|: Consumed .* CPU time" line)
              (setq status (or status "exited, status=0/SUCCESS")))
             ((string-match "Failed with result '\\([^']+\\)'" line)
              (setq status (format "%s (failed: %s)" (or status "no exit recorded") (match-string 1 line))))))

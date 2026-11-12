@@ -25,6 +25,14 @@
   (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=exited, status=1/FAILURE\nx.service: Failed with result 'exit-code'.\n")
                  "exited, status=1/FAILURE (failed: exit-code)"))
   (should (equal (romacs-agent-watch--status "x.service: Deactivated successfully.\n") "exited, status=0/SUCCESS"))
+  ;; As the user manager logs them: a success only by what it consumed,
+  ;; a stop by its own line, a failure with its exit before the tally.
+  (should (equal (romacs-agent-watch--status "Started [systemd-run] check.\nx.service: Consumed 3h 30min CPU time over 3h wall clock time, 10.5G memory peak.\n")
+                 "exited, status=0/SUCCESS"))
+  (should (equal (romacs-agent-watch--status "Stopping [systemd-run] check...\nStopped [systemd-run] check.\nx.service: Consumed 2min CPU time over 4min wall clock time.\n")
+                 "stopped"))
+  (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=exited, status=2/INVALIDARGUMENT\nx.service: Failed with result 'exit-code'.\nx.service: Consumed 1s CPU time over 2s wall clock time.\n")
+                 "exited, status=2/INVALIDARGUMENT (failed: exit-code)"))
   (should (string-prefix-p "unknown" (romacs-agent-watch--status ""))))
 
 (defmacro romacs-agent-watch-tests--with (&rest body)
