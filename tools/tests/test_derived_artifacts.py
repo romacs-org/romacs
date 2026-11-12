@@ -94,7 +94,13 @@ class DerivedTests(unittest.TestCase):
         self.assertNotEqual(moved.returncode, 0)
         self.assertIn('moves only through the merge queue', moved.stdout)
         git(self.root, 'update-ref', 'refs/heads/lane', 'HEAD')          # any other branch moves
+        refused = git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', check=False,
+                      env={**os.environ, 'ROMACS_LAND': '0'})
+        self.assertNotEqual(refused.returncode, 0)
         git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', env={**os.environ, 'ROMACS_LAND': '1'})
+        git(self.root, 'pack-refs', '--all')                             # storage only: beta is loose here
+        git(self.root, 'gc', '-q')
+        self.assertEqual(git(self.root, 'rev-parse', 'beta').stdout, git(self.root, 'rev-parse', 'HEAD').stdout)
         queue = Path(self.tmp.name) / 'romacs-merge'                    # the queue, by its script's name
         queue.write_text("import subprocess\nsubprocess.run(['git', 'update-ref', '-d', 'refs/heads/beta'], check=True)\n")
         run(self.root, sys.executable, str(queue))
