@@ -461,11 +461,12 @@ redisplay. The session reads `romacs-instructions` and
 anything, so the report has, per step and as medians, the instructions and
 conses spent inside redisplay beside the whole step's instructions, the
 windows rebuilt, the bands expanded, the layouts asked of the layout host
-and the frames submitted. A scenario's figures over their ceilings in
-`display_stages_bars.json` fail, as does a scenario more than a tenth of
-whose steps paint when they change nothing, or do not when they do. Work
-that removes cost lowers the bars: `--write-bars FILE` writes the ones a
-run would pass. `--record` adds a call graph of each scenario's steps (a
+and the frames submitted. `display_stages_bars.json` holds each scenario's
+figures: instructions and conses under a ceiling, the counts exactly, so a
+step that no longer does its change fails too. So does a scenario more
+than a tenth of whose steps paint when they change nothing, or do not when
+they do. Work that removes cost lowers the bars in the same change:
+`--write-bars FILE` writes the ones a run would pass. `--record` adds a call graph of each scenario's steps (a
 frame-pointer build).
 
 ```sh

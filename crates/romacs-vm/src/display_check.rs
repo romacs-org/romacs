@@ -1,12 +1,14 @@
 //! The reuse check (`romacs-display-check`): each time a window's snapshot
 //! is answered from its last one (`Vm::reuse_shown`), the window's text is
 //! also built in full from the same state, and the two are compared: text,
-//! face runs, start, point, stretches, images and line numbers. The bands
-//! are no part of it: reuse expands them again. Nor is what lays the text
-//! out (tab width, wrap, scroll, chrome), which a snapshot reads apart. A difference is an input
-//! the window's key (`ShownKey`) does not hold. It is counted
-//! (`romacs--display-stats`, `check-mismatches`) and told once per window
-//! and cause as a display diagnostic.
+//! face runs, start, point, stretches, images, wraps and line numbers. A
+//! difference is an input the window's key (`ShownKey`) does not hold. It
+//! is counted (`romacs--display-stats`, `check-mismatches`) and told once
+//! per window and cause as a display diagnostic.
+//!
+//! Not checked: the bands, which reuse expands again; and what lays the
+//! text out (tab width, line wrap, scroll, chrome, underline rules), which
+//! reuse takes from the last snapshot on the key's word alone.
 //!
 //! The full build here is the one a snapshot makes, less what runs Lisp:
 //! point visibility and fontification come before a window's text and
@@ -18,8 +20,8 @@ use romacs_layout_input::{Extend, Face, FaceRun, WindowSnapshot};
 
 /// What a reused snapshot and the full build can differ in, in the order
 /// told; a cause's index is its bit in `DisplayState::check_told`.
-const CAUSES: [&str; 10] = ["text", "raw bytes", "face runs", "line ends", "start", "point", "stretches", "images", "line numbers", "full build"];
-const NO_BUILD: usize = 9;
+const CAUSES: [&str; 11] = ["text", "raw bytes", "face runs", "line ends", "start", "point", "stretches", "images", "wraps", "line numbers", "full build"];
+const NO_BUILD: usize = 10;
 
 /// At most this much of a text or a list is quoted in a diagnostic.
 const QUOTED: usize = 48;
@@ -67,8 +69,8 @@ fn differences(reused: &WindowSnapshot, rebuilt: &ShownText, faces: &[Face]) -> 
         (5, (reused.point_byte != rebuilt.point_byte).then(|| format!("reused {}, rebuilt {}", reused.point_byte, rebuilt.point_byte))),
         (6, first_difference(&reused.stretches, &rebuilt.stretches)),
         (7, first_difference(&reused.images, &rebuilt.images)),
-        (8, (reused.wrap_flips != rebuilt.wrap_flips || reused.line_numbers != rebuilt.line_numbers)
-            .then(|| format!("reused {:?} {:?}, rebuilt {:?} {:?}", reused.wrap_flips, reused.line_numbers, rebuilt.wrap_flips, rebuilt.line_numbers))),
+        (8, first_difference(&reused.wrap_flips, &rebuilt.wrap_flips)),
+        (9, (reused.line_numbers != rebuilt.line_numbers).then(|| format!("reused {:?}, rebuilt {:?}", reused.line_numbers, rebuilt.line_numbers))),
     ];
     out.extend(listed.into_iter().filter_map(|(cause, detail)| detail.map(|detail| (cause, detail))));
     out

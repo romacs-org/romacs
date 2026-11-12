@@ -23,20 +23,22 @@ anything, so a step's figures are differences of two readings:
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
 (`display_instructions_p90': the streamed deltas that add a row).  A step is
-odd when it broke its scenario's rule: a scenario that changes what the
-frame shows submits a frame in every step, and one that changes nothing
-submits none.  The host repaints for reasons of its own now and then, so
-the figures are taken over the steps that kept the rule, and the report
-names the odd ones.  A measurement is refused when the thread has no
-instruction counter, when a step ran no redisplay, or when more than a
-tenth of the steps are odd.  Each step's counts, `collections' among them,
-are in the report.
+odd when it broke its scenario's rule: one redisplay a step, with a frame
+submitted in every step of a scenario that changes what the frame shows,
+and in none of one that does not.  The host redisplays for reasons of its
+own now and then, so the figures are taken over the steps that kept the
+rule, and the report names the odd ones.  A measurement is refused when
+the thread has no instruction counter, or when more than a tenth of the
+steps are odd.  Each step's counts, `collections' among them, are in the
+report.
 
-The bars file maps each scenario to a ceiling per figure; a figure over its
-ceiling, or a scenario or figure without one, fails.  --write-bars FILE
-writes the bars this run would pass: windows, bands, layouts and frames as
-counted, instructions and conses a tenth higher, so that work which removes
-cost lowers them.
+The bars file maps each scenario to a bar per figure.  Instructions and
+conses are held under theirs, a ceiling; the windows rebuilt, the bands,
+the layouts and the frames are held to theirs exactly, so a scenario whose
+step no longer does its change fails as one that costs more does, and work
+that removes cost lowers its bars in the same change.  A scenario or figure
+without a bar fails.  --write-bars FILE writes the bars this run would
+pass: the counts as counted, instructions and conses a tenth higher.
 
 --record profiles each scenario's steps with `perf record', enabled by the
 session at its first step and disabled after its last reading, and writes
@@ -71,8 +73,9 @@ COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'ins
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
           'frames_submitted': 'frames-submitted'}
 # The figures whose 90th percentile is held too (a whole step's varies
-# with the timers that poll for its redisplay), the figures --write-bars
-# gives a margin and that margin, and the share of steps that may be odd.
+# with the timers that poll for its redisplay), the figures held under a
+# ceiling and the margin --write-bars gives them, and the share of steps
+# that may be odd.
 PEAKS = ('display_instructions',)
 MARGINED = ('instructions', 'conses')
 MARGIN = 1.10
@@ -100,9 +103,10 @@ def figures(deltas):
 
 
 def odd_steps(scenario, deltas):
-    """The steps that broke SCENARIO's rule: a frame submitted in every
-    step of one that paints, and in none of one that does not."""
-    return [i for i, d in enumerate(deltas) if (d['frames-submitted'] == 0) == scenario['paints']]
+    """The steps that broke SCENARIO's rule: one redisplay, with a frame
+    submitted in every step of one that paints, and in none of one that
+    does not."""
+    return [i for i, d in enumerate(deltas) if d['cycles'] != 1 or (d['frames-submitted'] == 0) == scenario['paints']]
 
 
 def refusal(scenario, result, wanted):
@@ -113,22 +117,19 @@ def refusal(scenario, result, wanted):
         return f'{len(readings)} readings for {wanted} steps'
     if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):
         return 'no instruction counter (romacs-instructions is nil)'
-    deltas = steps(readings)
-    idle = [i for i, d in enumerate(deltas) if d['cycles'] == 0]
-    if idle:
-        return f'no redisplay in steps {idle}'
-    odd = odd_steps(scenario, deltas)
-    if len(odd) > ODD * len(deltas):
-        return (f"its steps change {'the frame' if scenario['paints'] else 'nothing shown'}, and steps {odd} submitted "
-                f"{'none' if scenario['paints'] else 'a frame'}")
+    odd = odd_steps(scenario, steps(readings))
+    if len(odd) > ODD * wanted:
+        return (f"steps {odd} did not run one redisplay that submitted "
+                f"{'a frame, as a step that changes the frame does' if scenario['paints'] else 'no frame, as a step that changes nothing shown does'}")
     return None
 
 
-def over(measured, ceilings):
-    """The figures of MEASURED over their ceiling or without one: (figure,
-    value, ceiling or None)."""
-    return [(figure, value, ceilings.get(figure)) for figure, value in measured.items()
-            if ceilings.get(figure) is None or value > ceilings[figure]]
+def off(measured, bars):
+    """The figures of MEASURED off their bar or without one: (figure,
+    value, bar or None).  Instructions and conses are off over their bar,
+    any other count when it differs."""
+    return [(figure, value, bars.get(figure)) for figure, value in measured.items()
+            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure))]
 
 
 def verdict(scenario, result, wanted, bars):
@@ -143,19 +144,24 @@ def verdict(scenario, result, wanted, bars):
     row.update(chars=result.get('chars'), figures=figures(kept), odd=odd, steps=deltas)
     if scenario['name'] not in bars:
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
-    row['over'] = over(row['figures'], bars[scenario['name']])
-    if row['over']:
-        reason = '; '.join(f'{figure} {value}, ' + ('no ceiling' if ceiling is None else f'over {ceiling}')
-                           for figure, value, ceiling in row['over'])
+    row['off'] = off(row['figures'], bars[scenario['name']])
+    if row['off']:
+        reason = '; '.join(f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
+                           for figure, value, bar in row['off'])
         return {**row, 'status': 'FAIL', 'reason': reason}
     return {**row, 'status': 'PASS'}
+
+
+def margined(figure):
+    """Whether FIGURE is held under a ceiling with a margin, not exactly."""
+    return any(kind in figure for kind in MARGINED)
 
 
 def ceiling(figure, value):
     """The bar --write-bars sets for FIGURE measured at VALUE: instructions
     and conses their margin higher, to three digits, any other count as
     it is."""
-    if not any(kind in figure for kind in MARGINED) or value <= 0:
+    if not margined(figure) or value <= 0:
         return value
     raised = value * MARGIN
     unit = 10 ** max(0, math.floor(math.log10(raised)) - 2)

@@ -52,11 +52,15 @@ class Refusals(unittest.TestCase):
         self.assertIn('no instruction counter', d.refusal(PAINTS, {'readings': blind}, 1))
 
     def test_a_step_without_a_redisplay_is_refused(self):
-        self.assertIn('no redisplay in steps [1]', d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
+        self.assertIn('steps [1] did not run one redisplay', d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
+
+    def test_a_step_of_two_redisplays_is_odd(self):
+        twice = (600, 0, 2, 200, 0, 0, 4, 0, 0)
+        self.assertEqual(d.odd_steps(IDLE, d.steps(readings(QUIET, twice, QUIET))), [1])
 
     def test_a_scenario_paints_every_step_or_none(self):
-        self.assertIn('change the frame, and steps [1] submitted none', d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
-        self.assertIn('change nothing shown, and steps [1] submitted a frame', d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
+        self.assertIn('steps [1] did not run one redisplay that submitted a frame', d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
+        self.assertIn('steps [1] did not run one redisplay that submitted no frame', d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
 
     def test_a_tenth_of_the_steps_may_be_odd(self):
         disturbed = {'readings': readings(*[QUIET] * 9, STEP)}
@@ -75,7 +79,7 @@ class Bars(unittest.TestCase):
 
     def test_written_bars_pass_the_run_they_came_from(self):
         row = d.verdict(PAINTS, self.result, 2, {'typed': self.bars})
-        self.assertEqual((row['status'], row['over']), ('PASS', []))
+        self.assertEqual((row['status'], row['off']), ('PASS', []))
         self.assertEqual(d.overall([row]), 'PASS')
 
     def test_counts_are_held_as_measured_and_instructions_and_conses_with_a_margin(self):
@@ -84,15 +88,23 @@ class Bars(unittest.TestCase):
         self.assertEqual((self.bars['display_instructions'], self.bars['display_instructions_p90']), (550, 550))
         self.assertEqual((d.ceiling('step_instructions', 5_234_567), d.ceiling('step_instructions', 0)), (5_760_000, 0))
 
-    def test_a_figure_over_its_ceiling_fails_by_name(self):
-        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'windows_rebuilt': 0}})
+    def test_a_figure_over_its_bar_fails_by_name(self):
+        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'windows_rebuilt': 0, 'display_instructions': 499}})
         self.assertEqual(row['status'], 'FAIL')
-        self.assertEqual(row['reason'], 'windows_rebuilt 1, over 0')
+        self.assertEqual(row['reason'], 'display_instructions 500, over 499; windows_rebuilt 1, over 0')
+
+    def test_a_count_under_its_bar_fails_and_cheaper_instructions_pass(self):
+        # A step that rebuilds no window where its bar holds one no longer
+        # does its change, or got cheaper: either way the bar is to move.
+        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'windows_rebuilt': 2}})
+        self.assertEqual((row['status'], row['reason']), ('FAIL', 'windows_rebuilt 1, under 2'))
+        cheaper = {**self.bars, 'display_instructions': 10**6, 'display_conses': 10**6, 'step_instructions': 10**6}
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': cheaper})['status'], 'PASS')
 
     def test_a_scenario_or_figure_without_a_bar_fails(self):
         self.assertIn('no bars', d.verdict(PAINTS, self.result, 2, {})['reason'])
         partial = {k: v for k, v in self.bars.items() if k != 'layouts'}
-        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': partial})['reason'], 'layouts 0, no ceiling')
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': partial})['reason'], 'layouts 0, no bar')
 
     def test_a_refused_measurement_fails_and_has_no_figures(self):
         row = d.verdict(PAINTS, {'readings': readings(STEP, QUIET)}, 2, {'typed': self.bars})

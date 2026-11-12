@@ -89,7 +89,7 @@ const SIDES: &[(&str, Side)] = &[
 
 /// The host.rs results that are the process's own: its clocks, counters,
 /// identity, entropy and environment.
-const OWN: &[&str] = &["monotonic", "clock", "boot-clock", "run-time", "instructions", "tid", "pid", "ppid", "processors",
+const OWN: &[&str] = &["monotonic", "clock", "boot-clock", "run-time", "instructions", "display-instructions", "tid", "pid", "ppid", "processors",
                        "entropy", "getenv", "environment", "cwd", "umask"];
 
 /// NAME's side.

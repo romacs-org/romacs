@@ -4,8 +4,10 @@
 //! evaluator asked of the layout host besides a paint's own layout, and
 //! the frames it submitted. Plain counters, always on: a cycle pays two
 //! reads of the thread's instruction counter for them, which the first
-//! cycle opens; the reads are no host calls of the session's
-//! (`host::instruction_count`).
+//! cycle opens (a pinned event: the thread has one hardware counter fewer
+//! for a profiler); the reads are no host calls of the session's
+//! (`host::instruction_count`), and what `romacs--display-stats` hands to
+//! Lisp of them is one.
 //!
 //! A cycle is what the host brackets with `Vm::redisplay_begin` and
 //! `Vm::redisplay_done`: the frame's freeze, its comparison with the frame
@@ -102,12 +104,18 @@ impl Vm {
             self.display_state.stats.base.copy_from_slice(&now[..HOST]);
             HOST_BASE.set(std::array::from_fn(|i| now[HOST + i]));
         }
-        let counted = crate::host::instruction_count().is_some();
+        // What Lisp gets of the counter is a host result, as
+        // `romacs-instructions' is: a replay hands back the recorded one.
+        let spent = now[INSTRUCTIONS].saturating_sub(own[INSTRUCTIONS]);
+        let spent = crate::flight::value("display-instructions", || crate::host::instruction_count().map(|_| spent));
         let mut list = Value::NIL;
         for i in (0..COUNTS).rev() {
             let base = if i < HOST { own[i] } else { host[i - HOST] };
-            let count = if i == INSTRUCTIONS && !counted { Value::NIL }
-                else { Value::integer(i64::try_from(now[i].saturating_sub(base)).map_err(|e| e.to_string())?)? };
+            let count = if i == INSTRUCTIONS { spent } else { Some(now[i].saturating_sub(base)) };
+            let count = match count {
+                Some(count) => Value::integer(i64::try_from(count).map_err(|e| e.to_string())?)?,
+                None => Value::NIL,
+            };
             let name = self.intern(NAMES[i]);
             let row = self.alloc_cons(name, count);
             list = self.alloc_cons(row, list);
@@ -128,9 +136,11 @@ mod tests {
     fn a_bracketed_cycle_counts_what_ran_inside_it_and_a_reset_starts_over() {
         let mut vm = Vm::new();
         assert_eq!(count(&mut vm, "cycles"), "0");
+        let reads = romacs_display_protocol::call_count::of("instructions");
         vm.redisplay_begin();
         vm.eval_source("(cons 1 (cons 2 nil))").unwrap();
         vm.redisplay_done(std::time::Duration::ZERO);
+        assert_eq!(romacs_display_protocol::call_count::of("instructions"), reads, "the bracket's reads are no host calls");
         // Outside a cycle nothing is counted.
         vm.eval_source("(make-list 100 nil)").unwrap();
         assert_eq!(count(&mut vm, "cycles"), "1");
@@ -139,8 +149,6 @@ mod tests {
         if crate::host::instruction_count().is_some() {
             let instructions: u64 = count(&mut vm, "instructions").parse().unwrap();
             assert!(instructions > 0, "the cycle's instructions");
-            // The bracket's reads are no host calls of the session's.
-            assert_eq!(romacs_display_protocol::call_count::of("instructions"), 0);
         } else {
             assert_eq!(count(&mut vm, "instructions"), "nil");
         }

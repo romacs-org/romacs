@@ -10,9 +10,9 @@ use crate::Value;
 // windows a frozen frame visited, `windows-reused' from their last
 // snapshot or `windows-rebuilt' in full; `band-expansions' (mode lines,
 // header lines, the status bar) and the evaluator entries they made
-// (`band-evals'); `layouts' and `measures' this evaluator asked of the
-// layout host besides each paint's own layout, redisplay's and Lisp's
-// (`window-text-pixel-size'); `frames-submitted' to the renderer; and
+// (`band-evals'); `layouts' and `measures' this evaluator's thread asked
+// of the layout host besides each paint's own layout, redisplay's and
+// Lisp's (`window-text-pixel-size'); `frames-submitted' to the renderer; and
 // `check-mismatches', the reused windows `romacs-display-check' found to
 // differ from a full build.  That check's own builds are in every count
 // they add to.  RESET non-nil starts every count over after reading it.

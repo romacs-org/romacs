@@ -1752,9 +1752,10 @@ pub(crate) fn thread_instructions() -> Option<u64> {
     crate::flight::value("instructions", instruction_count)
 }
 
-/// `thread_instructions` as a meter reads it: not a result the session
-/// computes with, so neither logged for a replay nor counted among the
-/// host calls (redisplay's bracket reads it twice a cycle).
+/// `thread_instructions` as a meter reads it (redisplay's bracket, twice
+/// a cycle): neither logged for a replay nor counted among the host
+/// calls. What a meter hands on to Lisp is a host result, and logged
+/// there.
 pub(crate) fn instruction_count() -> Option<u64> {
     INSTRUCTION_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();
