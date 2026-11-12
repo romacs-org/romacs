@@ -452,11 +452,20 @@ def base_counts(root, commit, floors, how):
     return json.loads(path.read_text())
 
 
+def trunk_ref(root, rev):
+    """REV, or origin/REV in a clone that has only the remote-tracking trunk."""
+    remote = f'origin/{rev}'
+    if git(root, 'rev-parse', '--verify', '--quiet', rev) is None and git(root, 'rev-parse', '--verify', '--quiet', remote):
+        return remote
+    return rev
+
+
 def merge_base(root, rev):
     """The commit of the trunk REV that HEAD is held to. Where a branch and the
     trunk have merged each other there are several merge-bases; the one on the
     trunk's own line (its first parents) is the trunk the branch last took in,
     and what the branch has beyond it is the branch's own."""
+    rev = trunk_ref(root, rev)
     bases = (git(root, 'merge-base', '--all', 'HEAD', rev) or '').split()
     if len(bases) > 1:
         trunk = set(git(root, 'rev-list', '--first-parent', rev).split())
