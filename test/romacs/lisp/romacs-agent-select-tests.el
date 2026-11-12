@@ -218,14 +218,35 @@
         (should (equal (gethash "effort" (gethash "options" manifest)) "low"))
         (should-not (gethash "switch" manifest)))
       (let ((event (cl-find 'selection events :key (lambda (e) (plist-get e :type)))))
-        (should (equal (plist-get event :from) '(:model "a" :effort nil)))
-        (should (equal (plist-get event :to) '(:model "b" :effort "low"))))
+        ;; The instance is part of a selection: unchanged here.
+        (should (equal (plist-get event :from) '(:model "a" :effort nil :provider "claude")))
+        (should (equal (plist-get event :to) '(:model "b" :effort "low" :provider "claude"))))
       (let ((record (with-temp-buffer
                       (insert-file-contents (expand-file-name "journal.jsonl" dir))
                       (json-parse-string (buffer-string)))))
         (should (= (gethash "seq" record) 8))
         (should (equal (gethash "type" (gethash "note" record)) "selection")))
       (should (= (romacs-agent-seq session) 8)))))
+
+(ert-deftest romacs-agent-select-an-unseen-harness-restarts ()
+  ;; Its attachment lost while its supervisor still listens: the harness
+  ;; runs on unseen, so the selection restarts it rather than being only
+  ;; recorded (the next turn would run on the old model).
+  (romacs-agent-select-tests--with (:state 'idle :options '(:model "a") :caught-up t :unit "romacs-agent-s")
+    (write-region "" nil (romacs-agent-host-socket session))
+    (let ((restarted nil))
+      (cl-letf (((symbol-function 'romacs-agent--restart) (lambda (_session) (setq restarted t))))
+        (should (romacs-agent-select session "b" nil))
+        (should restarted)
+        (should (equal (plist-get (romacs-agent-options session) :model) "a"))
+        ;; Started without a unit, nothing can stop it surely: armed until
+        ;; it is attached again.
+        (setq restarted nil)
+        (setf (romacs-agent-unit session) nil (romacs-agent-pending-selection session) nil)
+        (should (romacs-agent-select session "c" nil))
+        (should-not restarted)
+        (should (eq (plist-get (romacs-agent-pending-selection session) :state) 'armed))
+        (should (equal (plist-get (romacs-agent-options session) :model) "a"))))))
 
 (ert-deftest romacs-agent-select-replayed-note-only-draws ()
   ;; A replay's selection neither changes the options nor writes anything.
@@ -277,7 +298,7 @@
         (should (string-match-p "Effort.*low" (car (car asked))))
         (should (equal (cadr (car asked)) '("low" "high")))
         ;; No harness runs: in effect at once, the model kept.
-        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high")))
+        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high" :provider "claude")))
         (should (equal (romacs-agent-ui--effort-label) "Effort: high"))
         ;; One armed behind a turn shows what is to come.
         (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
