@@ -145,7 +145,58 @@ is written to its harness: before the harness has acted on it, whenever
 its journal's record is read back.  The message's `input' event carries
 the id as :request.")
 
-(cl-defstruct (romacs-agent (:constructor romacs-agent--make))
+(eval-and-compile
+  (defun romacs-agent--records-of (type)
+    "The records of TYPE alive now, where they are kept: the sessions
+table, processes' properties and buffers' local values (a history view's
+own session)."
+    (let* ((records nil)
+           (keep (lambda (value) (when (eq (type-of value) type) (push value records)))))
+      (when (boundp 'romacs-agent--sessions) (mapc keep (hash-table-values romacs-agent--sessions)))
+      (dolist (process (process-list))
+        (let ((plist (process-plist process)))
+          (while (consp plist) (funcall keep (car-safe (cdr plist))) (setq plist (cddr plist)))))
+      (dolist (buffer (buffer-list))
+        (dolist (local (buffer-local-variables buffer))
+          (when (consp local) (funcall keep (cdr local)))))
+      records))
+
+  (defun romacs-agent--layout-check (type slots)
+    "Refuse, with an error naming the change, to define record TYPE with
+SLOTS while any record of it alive now holds another layout: every
+accessor would fail on it, or read another field.  A record cannot grow in
+place, and its references (closures among them) cannot all be found to
+swap a new one in: such a change takes a restart, which carries the
+sessions over.  The layout recorded at the last definition says whether it
+changed (a class is registered already while its definition is expanded,
+so it cannot); with none recorded, a record's length does."
+    (let* ((old (get type 'romacs-agent--layout))
+           (held (and (not (equal old slots))
+                      (cl-count-if (lambda (record) (or old (/= (length record) (1+ (length slots)))))
+                                   (romacs-agent--records-of type)))))
+      (when (and held (> held 0))
+        (error "Loading this changes the fields of `%s' (%s) while %d live records hold the old layout, which would \
+break them: restart Romacs to load it (romacs_restart_request; sessions carry over)"
+               type (if old
+                        (format "added: %s; removed: %s" (mapconcat #'symbol-name (cl-set-difference slots old) " ")
+                                (mapconcat #'symbol-name (cl-set-difference old slots) " "))
+                      (format "now %d fields" (length slots)))
+               held)))))
+
+(defmacro romacs-agent--defstruct (name &rest doc-and-slots)
+  "`cl-defstruct' NAME, DOC-AND-SLOTS, loadable into a live editor only
+with its records' layout (`romacs-agent--layout-check'): checked as it is
+expanded, before the class is registered, and as it runs (a compiled load)."
+  (declare (indent 1) (doc-string 2))
+  (let ((type (if (consp name) (car name) name))
+        (names (mapcar (lambda (slot) (if (consp slot) (car slot) slot))
+                       (if (stringp (car doc-and-slots)) (cdr doc-and-slots) doc-and-slots))))
+    (romacs-agent--layout-check type names)
+    `(progn (romacs-agent--layout-check ',type ',names)
+            (cl-defstruct ,name ,@doc-and-slots)
+            (put ',type 'romacs-agent--layout ',names))))
+
+(romacs-agent--defstruct (romacs-agent (:constructor romacs-agent--make))
   "One agent session."
   id harness provider config-dir cwd dir host-socket connection (seq 0) (state 'starting)
   title model harness-session cost unit buffer
