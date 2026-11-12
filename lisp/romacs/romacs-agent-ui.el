@@ -1785,7 +1785,8 @@ a brief of the thread, to do NEXT, and its chat opens."
   (eq (plist-get (romacs-agent--configured provider) :harness) (romacs-agent-harness session)))
 
 (defun romacs-agent-ui--hand-off (session provider model next)
-  "Start a session under PROVIDER on MODEL on a brief of SESSION's thread, to do NEXT."
+  "Start a session under PROVIDER on MODEL on a brief of SESSION's thread,
+to do NEXT."
   (message "Gathering %s's thread..." (romacs-agent-title session))
     ;; Replayed between keystrokes: a long thread never holds the editor.
     (romacs-agent-events-async
