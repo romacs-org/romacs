@@ -1,7 +1,8 @@
 //! Host boundary lint, rules 1 to 4 of the world-snapshot design (§6.1).
 //!
-//! Rule 1: outside `crates/romacs-vm/src/host.rs`, no source in the runner's
-//! dependency closure calls a host query or effect API directly. Rule 2: only
+//! Rule 1: outside `crates/romacs-vm/src/host.rs` and its modules, no
+//! source in the runner's dependency closure calls a host query or effect
+//! API directly. Rule 2: only
 //! the environment owners name the environment slots, and only the per-buffer
 //! accessor looks up `default-directory`'s storage. Rule 3: each source that
 //! names a variable on the B3 trace's delayed list is listed, so no Rust read
@@ -58,6 +59,8 @@ const CRATES: &[&str] = &[
     "crates/romacs-gnu-tests",
 ];
 const BOUNDARY: &str = "crates/romacs-vm/src/host.rs";
+/// host.rs's own modules, its C library calls (`host/sys.rs`).
+const BOUNDARY_MODULES: &str = "crates/romacs-vm/src/host/";
 const ALLOW: &str = "crates/romacs-vm/tests/host_boundary_allow.txt";
 const FIXTURES: &str = "crates/romacs-vm/tests/host_boundary_fixtures";
 const ENVIRONMENT_OWNERS: &[&str] = &[
@@ -103,9 +106,10 @@ macro_rules! path_method {
     };
 }
 /// A `fs::` path naming only data types and extension traits queries nothing;
-/// `File::open` and `File::create` are their own APIs.
+/// `File::open` and `File::create` are their own APIs. rustix's `fs` has its
+/// own row.
 const fn fs_path(needle: &'static [&'static str]) -> Api {
-    Api { unless_pure: true, ..apis("std::fs", needle) }
+    Api { unless_pure: true, unless_after: "rustix::", ..apis("std::fs", needle) }
 }
 const PURE_FS: &[&str] = &["File", "Metadata", "Permissions", "FileType", "FileTimes", "DirEntry", "ReadDir"];
 const fn slot(name: &'static str, needle: &'static [&'static str], owners: &'static [&'static str]) -> Api {
@@ -177,6 +181,24 @@ const APIS: &[Api] = &[
     api!("libc::descriptor", "libc::pipe*", "libc::eventfd", "libc::posix_openpt", "libc::socketpair"),
     api!("libc::socket", "libc::socket", "libc::connect", "libc::bind", "libc::listen", "libc::accept*",
          "libc::getaddrinfo", "libc::gethostbyname*"),
+    // rustix's spellings of the same queries and effects. Its descriptor
+    // calls (read, poll, fcntl, waitpid, termios) act only on what host.rs
+    // returned, as libc's do.
+    api!("rustix::query", "rustix::process::get*", "rustix::process::sched_getaffinity", "rustix::thread::sched_getaffinity",
+         "rustix::system::*", "rustix::param::*", "rustix::time::clock_gettime*", "rustix::rand::*"),
+    api!("rustix::file", "rustix::fs::open*", "rustix::fs::access*", "rustix::fs::chmod*", "rustix::fs::fchmod*",
+         "rustix::fs::chown*", "rustix::fs::fchown*", "rustix::fs::rename*", "rustix::fs::unlink*", "rustix::fs::mkdir*",
+         "rustix::fs::link*", "rustix::fs::symlink*", "rustix::fs::readlink*", "rustix::fs::stat*", "rustix::fs::fstat*",
+         "rustix::fs::lstat*", "rustix::fs::truncate", "rustix::fs::ftruncate", "rustix::fs::utimensat", "rustix::fs::futimens",
+         "rustix::fs::copy_file_range", "rustix::fs::sendfile", "rustix::fs::memfd_create", "rustix::fs::mknod*",
+         "rustix::fs::Dir", "rustix::fs::RawDir", "rustix::fs::getxattr", "rustix::fs::fgetxattr", "rustix::fs::lgetxattr",
+         "rustix::fs::setxattr", "rustix::fs::fsetxattr", "rustix::fs::lsetxattr", "rustix::fs::listxattr",
+         "rustix::fs::flistxattr", "rustix::fs::llistxattr", "rustix::fs::removexattr", "rustix::fs::fremovexattr",
+         "rustix::fs::lremovexattr", "rustix::fs::sync", "rustix::fs::inotify", "rustix::fs::ioctl_ficlone"),
+    api!("rustix::process", "rustix::process::kill*", "rustix::process::test_kill*", "rustix::process::pidfd_*",
+         "rustix::process::set*", "rustix::process::chdir", "rustix::process::fchdir"),
+    api!("rustix::descriptor", "rustix::pipe::*", "rustix::event::eventfd", "rustix::pty::*", "rustix::net::socket*",
+         "rustix::net::connect*", "rustix::net::bind*", "rustix::net::listen", "rustix::net::accept*"),
     slot("slot:process-environment", &["\"process-environment\""], ENVIRONMENT_OWNERS),
     slot("slot:initial-environment", &["\"initial-environment\""], ENVIRONMENT_OWNERS),
     slot("slot:exec-path", &["\"exec-path\""], ENVIRONMENT_OWNERS),
@@ -209,9 +231,12 @@ const HOST_PATHS: &[&[&str]] = &[
     &["std", "env"], &["std", "fs"], &["std", "process"], &["std", "net"],
     &["std", "time", "Instant"], &["std", "time", "SystemTime"], &["std", "path", "absolute"],
     &["std", "os", "unix", "fs"], &["std", "os", "unix", "net"],
+    &["rustix", "fs"], &["rustix", "process"], &["rustix", "thread"], &["rustix", "net"], &["rustix", "pipe"],
+    &["rustix", "pty"], &["rustix", "event"], &["rustix", "system"], &["rustix", "param"], &["rustix", "time"],
+    &["rustix", "rand"],
 ];
 /// The crates whose items no import may rename or glob.
-const ROOTS: &[&str] = &["std", "core", "alloc", "libc"];
+const ROOTS: &[&str] = &["std", "core", "alloc", "libc", "rustix"];
 /// Types with forbidden associated functions, which no type alias may name
 /// and no `use` may rename.
 const TYPES: &[&str] = &[
@@ -642,7 +667,7 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> Vec<Violation> {
             }
         }
         let rel = file.strip_prefix(base).unwrap().to_string_lossy().into_owned();
-        if rel != BOUNDARY { out.extend(violations(&rel, &v)); }
+        if rel != BOUNDARY && !rel.starts_with(BOUNDARY_MODULES) { out.extend(violations(&rel, &v)); }
         let here = file.parent().unwrap();
         work.extend(outline.includes.iter().map(|f| (here.join(f), dir.clone())));
         for (inline, name, path) in outline.mods {

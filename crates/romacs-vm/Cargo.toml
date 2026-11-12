@@ -21,6 +21,9 @@ num-bigint = "0.4"
 num-integer = "0.1"
 stacker.workspace = true
 libc.workspace = true
+# The safe system-call layer host.rs calls through; host/sys.rs holds the
+# C library calls it lacks.
+rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "pty", "system", "thread", "time"] }
 sha2 = "0.11"
 # xxh3: the fast content hash of mapped library segments (world::arena).
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128", "std"] }
