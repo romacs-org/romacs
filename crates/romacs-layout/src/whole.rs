@@ -3,7 +3,7 @@
 //! its start's line, rows broken and glyphs emitted in one loop
 //! (`append_window'), and the measurement that shares its geometry
 //! (`measure_inner').
-use super::*;
+use super::{fringe, glyphless, advance, box_step, BoxStep, color, Color, DisplayWindowId, edges, escaped, Face, face_at, FaceHandle, FaceId, font_request, FontRequest, FontResolver, FrameGlyphBuffer, glyph, glyph_of, Glyphless, GlyphRowRole, is_icon, LineWrap, Measured, MeasureInput, Metrics, new_frame, NoFont, paint_band, PointPlace, publish_face_text, publish_selected_glyph, Rect, relief_strips, Row, RowMarks, set_box_edges, set_glyph_box_edges, settle_row, shown, Shown, shows_glyphs, stretch_advance, StretchWidth, tab_advance, TextSlice, underline_placement, validate_runs, warn_once, WindowEnd, WindowSnapshot};
 
 /// Paint SNAPSHOT's window at OX, OY, and report its rows (`WindowEnd`).
 pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>, no_font: &NoFont) -> Result<WindowEnd, String> {

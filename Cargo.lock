@@ -3626,6 +3626,7 @@ dependencies = [
  "romacs-font",
  "romacs-layout-input",
  "romacs-vm",
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]

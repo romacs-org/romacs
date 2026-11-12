@@ -1,12 +1,33 @@
-//! G1a logical-line layout over owned Seam L data. No evaluator can enter this pass.
+//! Layout of owned display input (`romacs-layout-input`) into glyphs. No
+//! evaluator can enter this pass.
+//!
+//! A window is laid out by display line: its published text is cut at the
+//! newlines that end rows (`line`), each line wrapped into rows from its own
+//! state (`wrap`), and the rows kept in a cache by the line's content
+//! (`rows`), found again on the next layout and resumed from after an edit.
+//! A window's view of the rows, its paint and its row questions are
+//! `window`; faces are realised once per content (`faces`). `whole` is the
+//! layout of a window from its start's line in one loop, which tests and
+//! `ROMACS_LAYOUT_CHECK` compare every window against. The engine also keeps
+//! the last frame, for a blink and for a frame whose windows only moved
+//! their point.
 #[cfg(test)]
 #[path = "selection_order_tests.rs"]
 mod selection_order_tests;
 #[cfg(test)]
 mod alternative_state_tests;
+mod faces;
 mod fringe;
+mod px;
 mod glyphless;
+mod line;
+mod rows;
 mod whole;
+mod window;
+mod wrap;
+#[cfg(test)]
+mod differential_tests;
+pub use rows::Counts;
 use glyphless::Glyphless;
 use fringe::RowMarks;
 use romacs_display_protocol::frame_glyphs::GlyphRowRole;
@@ -15,7 +36,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, publish_face_text};
-use romacs_layout_input::{NoFont, ChildFrameSnapshot, STATUS_BAR_ACCENT, STATUS_BAR_PAD, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{NoFont, ChildFrameSnapshot, PlacedWindowSnapshot, STATUS_BAR_ACCENT, STATUS_BAR_PAD, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -33,30 +54,163 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
     }
 }
 
-/// Stateful font discovery cache and the last frame laid out. Contains only
-/// owned font and glyph data, never VM values.
-pub struct LayoutEngine { resolver: FontResolver, last: Option<Laid> }
+/// Stateful font discovery cache, the faces realised and the lines laid
+/// out so far, and the last frame laid out. Contains only owned font and
+/// glyph data, never VM values.
+pub struct LayoutEngine { store: Store, last: Option<Laid> }
+
+/// What layouts keep: the fonts, the faces realised under the font rules
+/// the resolver last retired its answers for (RETIRED), and the lines.
+/// CHECK lays every window out whole beside and counts where the two
+/// differ (`ROMACS_LAYOUT_CHECK`).
+struct Store {
+    resolver: FontResolver,
+    faces: faces::Faces,
+    cache: rows::Cache,
+    retired: u64,
+    check: bool,
+    mismatches: u64,
+}
+
+impl Store {
+    fn new() -> Result<Self, String> {
+        let resolver = FontResolver::new().map_err(|e| e.to_string())?;
+        let check = cfg!(test) || std::env::var_os("ROMACS_LAYOUT_CHECK").is_some_and(|v| v != "0");
+        Ok(Store { retired: resolver.retired(), resolver, faces: faces::Faces::default(), cache: rows::Cache::default(), check, mismatches: 0 })
+    }
+
+    /// Adopt the font rules SNAPSHOT lays out under: what was realised or
+    /// laid out under others goes.
+    fn rules(&mut self, selection: romacs_layout_input::FontSelectionState, alternatives: &romacs_layout_input::FontAlternativeState,
+             fontsets: &std::sync::Arc<romacs_layout_input::FontsetState>, no_font: &NoFont) {
+        self.resolver.set_selection_state(selection);
+        self.resolver.set_alternative_state(alternatives.clone());
+        self.resolver.set_fontsets(fontsets.clone());
+        let renamed = self.faces.set_no_font(no_font);
+        if renamed || self.resolver.retired() != self.retired {
+            self.retired = self.resolver.retired();
+            self.faces.clear();
+            self.cache.clear();
+        }
+    }
+
+    fn kept(&mut self) -> window::Kept<'_> {
+        window::Kept { cache: &mut self.cache, faces: &mut self.faces, resolver: &mut self.resolver }
+    }
+
+    /// SNAPSHOT's window laid out, and painted into FRAME at OX, OY with
+    /// CURSOR when given; under CHECK, laid out whole beside and compared.
+    fn window(&mut self, snapshot: &WindowSnapshot, frame: Option<&mut FrameGlyphBuffer>, (ox, oy): (f32, f32), cursor: Option<(bool, Color)>, no_font: &NoFont) -> Result<WindowEnd, String> {
+        let Some(frame) = frame else {
+            let end = window::append_window(snapshot, None, &mut self.kept(), ox, oy, None, window::Paint::No)?;
+            if self.check {
+                let mut whole = new_frame(snapshot.width.max(1), snapshot.height.max(1), 1)?;
+                let oracle = whole::append_window(snapshot, &mut whole, &mut self.resolver, ox, oy, None, no_font)?;
+                if oracle != end { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
+            }
+            return Ok(end);
+        };
+        let before = self.check.then(|| frame.clone());
+        let end = window::append_window(snapshot, Some(frame), &mut self.kept(), ox, oy, cursor, window::Paint::Whole)?;
+        if let Some(mut whole) = before {
+            let oracle = whole::append_window(snapshot, &mut whole, &mut self.resolver, ox, oy, cursor, no_font)?;
+            if oracle != end { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
+            else if whole != *frame { self.mismatch(&format!("window {} paints otherwise than whole: {}", snapshot.id, differ(&whole, frame))); }
+        }
+        Ok(end)
+    }
+
+    fn mismatch(&mut self, what: &str) {
+        self.mismatches += 1;
+        warn_once(what.chars().take(2000).collect());
+        assert!(!cfg!(test) && std::env::var_os("ROMACS_LAYOUT_CHECK").is_none_or(|v| v != "panic"), "{what}");
+    }
+}
+
+/// Where frames A and B, which should be equal, first differ.
+fn differ(a: &FrameGlyphBuffer, b: &FrameGlyphBuffer) -> String {
+    if a.glyphs.len() != b.glyphs.len() || a.glyphs != b.glyphs {
+        let at = a.glyphs.iter().zip(&b.glyphs).position(|(a, b)| a != b).unwrap_or(a.glyphs.len().min(b.glyphs.len()));
+        return format!("glyph {at} of {}/{}: {:?} / {:?}", a.glyphs.len(), b.glyphs.len(), a.glyphs.get(at), b.glyphs.get(at));
+    }
+    if a.faces != b.faces { return format!("faces {:?} / {:?}", a.faces.keys().collect::<Vec<_>>(), b.faces.keys().collect::<Vec<_>>()); }
+    if a.char_fonts != b.char_fonts { return format!("char fonts {:?} / {:?}", a.char_fonts, b.char_fonts); }
+    if a.fonts.len() != b.fonts.len() { return format!("fonts {} / {}", a.fonts.len(), b.fonts.len()); }
+    if a.window_cursors != b.window_cursors { return format!("cursors {:?} / {:?}", a.window_cursors, b.window_cursors); }
+    format!("elsewhere: {:?}", (a.char_width, a.char_height, b.char_width, b.char_height))
+}
 
 /// A frame laid out with every cursor, as if none were turned off.
 struct Laid {
     snapshot: FrameSnapshot,
     cursor: Option<(u64, Color)>,
     frame: FrameGlyphBuffer,
+    /// Where in FRAME its windows end and its bars begin.
+    bars: Bars,
     ends: Vec<WindowEnd>,
+}
+
+/// What a frame held when its windows were laid out and its bars were
+/// not yet: its glyphs, its rounded fills, the first face id after its
+/// windows' faces, and its fonts.
+#[derive(Clone)]
+struct Bars {
+    glyphs: usize,
+    fills: usize,
+    faces: u32,
+    fonts: Vec<romacs_display_protocol::font::ResolvedFontId>,
+}
+
+impl Bars {
+    fn of(frame: &FrameGlyphBuffer) -> Self {
+        Bars { glyphs: frame.glyphs.len(), fills: frame.rounded_fills.len(),
+            faces: frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0), fonts: frame.fonts.keys().copied().collect() }
+    }
+
+    /// FRAME as it was before its bars were painted.
+    fn undo(&self, frame: &mut FrameGlyphBuffer) {
+        frame.glyphs.truncate(self.glyphs);
+        frame.rounded_fills.truncate(self.fills);
+        let first = self.faces;
+        frame.faces.retain(|id, _| id.get() < first);
+        frame.char_fonts.retain(|id, _| id.get() < first);
+        frame.shaped_clusters.retain(|id, _| id.get() < first);
+        frame.fonts.retain(|id, _| self.fonts.contains(id));
+        (frame.status_bar, frame.status_bar_places) = (None, vec![]);
+    }
 }
 impl LayoutEngine {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, last: None })
+        Ok(Self { store: Store::new()?, last: None })
     }
     /// SNAPSHOT laid out at PRESENTATION. A frame that differs from the last
-    /// one only in which cursors are off (GNU's blink, `internal-show-cursor')
+    /// one only in which cursors are off (GNU's blink, `internal-show-cursor`)
     /// is not laid out again: the last layout shows it, less those cursors.
     pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
         let reusable = self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.lays_out_like(snapshot));
-        if !reusable {
-            let (mut frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+        // A frame whose windows differ only in where point is, where point
+        // moves no glyph, is the last one's windows with their cursors
+        // placed anew and the bars painted again.
+        let moved = !reusable && self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.windows_lay_out_like(snapshot, false)
+            && (last.snapshot.tab_bar.is_some(), last.snapshot.status_bar.is_some()) == (snapshot.tab_bar.is_some(), snapshot.status_bar.is_some()));
+        if moved {
+            let last = self.last.as_mut().expect("compared above");
+            let bars = last.snapshot.tab_bar != snapshot.tab_bar || last.snapshot.status_bar != snapshot.status_bar;
+            last.ends = cursors_moved(snapshot, &mut last.frame, &last.bars, cursor, &mut self.store)?;
+            // Only cursors moved: the same layout. Bars painted again: another.
+            if bars { last.frame.layout_identity = next_layout_identity(); }
+            if self.store.check {
+                let (mut whole, _) = layout_frame_inner(snapshot, last.frame.presentation_id.get(), cursor, &mut self.store)?;
+                whole.0.layout_identity = last.frame.layout_identity;
+                if whole.0 != last.frame { self.store.mismatch(&format!("a frame of moved cursors paints otherwise than a whole one: {}", differ(&whole.0, &last.frame))); }
+            }
+            // It is SNAPSHOT now: its points and bars.
+            for (kept, placed) in last.snapshot.windows.iter_mut().zip(&snapshot.windows) { kept.snapshot.point_byte = placed.snapshot.point_byte; }
+            if bars { (last.snapshot.tab_bar, last.snapshot.status_bar) = (snapshot.tab_bar.clone(), snapshot.status_bar.clone()); }
+        } else if !reusable {
+            let ((mut frame, bars), ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.store)?;
             frame.layout_identity = next_layout_identity();
-            self.last = Some(Laid { snapshot: snapshot.clone(), cursor, frame, ends });
+            self.last = Some(Laid { snapshot: snapshot.clone(), cursor, frame, bars, ends });
         }
         let last = self.last.as_ref().expect("laid out above");
         let mut frame = last.frame.clone();
@@ -72,7 +226,7 @@ impl LayoutEngine {
         let mut frames = Vec::with_capacity(snapshot.children.len());
         let mut ends = Vec::new();
         for (z, child) in snapshot.children.iter().enumerate() {
-            let (frame, child_ends) = layout_child(snapshot, child, presentation, z as i32, cursor, &mut self.resolver)?;
+            let (frame, child_ends) = layout_child(snapshot, child, presentation, z as i32, cursor, &mut self.store)?;
             frames.push(frame);
             ends.extend(child_ends);
         }
@@ -81,11 +235,20 @@ impl LayoutEngine {
     /// What laying SNAPSHOT out reports, presenting nothing and leaving the
     /// last painted frame, which a cursor-only repaint reuses, in place.
     pub fn lay_out(&mut self, snapshot: &FrameSnapshot) -> Result<Vec<WindowEnd>, String> {
-        layout_frame_inner(snapshot, 1, None, &mut self.resolver).map(|(_, ends)| ends)
+        let store = &mut self.store;
+        store.rules(snapshot.font_selection, &snapshot.font_alternatives, &snapshot.fontsets, &snapshot.no_font);
+        snapshot.windows.first().ok_or("empty frame")?;
+        store.cache.begin();
+        let ends = placed_windows(snapshot).map(|placed| placed.and_then(|placed| store.window(&placed.snapshot, None, (px::of(placed.x), px::of(placed.y)), None, &snapshot.no_font))).collect();
+        store.cache.finish();
+        ends
     }
+    /// What the layouts so far did (`Counts`), and how often a layout
+    /// checked against the whole one differed from it.
+    pub fn counts(&self) -> (Counts, u64) { (self.store.cache.counts, self.store.mismatches) }
     /// The host layout hook: INPUT's geometry as painting would lay it out.
     pub fn measure(&mut self, input: &MeasureInput) -> Result<Measured, String> {
-        whole::measure_inner(input, &mut self.resolver)
+        whole::measure_inner(input, &mut self.store.resolver)
     }
     /// `frame_metrics`, from this engine's fonts.
     pub fn frame_metrics(&mut self, face: &Face) -> Result<(u32, u32), String> {
@@ -94,12 +257,14 @@ impl LayoutEngine {
     }
     /// The files this engine's answers came from (`FontResolver::font_inputs`).
     pub fn font_inputs(&self) -> Vec<String> {
-        self.resolver.font_inputs()
+        self.store.resolver.font_inputs()
     }
     pub fn layout(&mut self, snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
         let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
         frame.background = color(snapshot.faces.first().ok_or("missing face")?.background);
-        whole::append_window(snapshot, &mut frame, &mut self.resolver, 0.0, 0.0, None, &NoFont::default())?;
+        self.store.cache.begin();
+        self.store.window(snapshot, Some(&mut frame), (0.0, 0.0), None, &NoFont::default())?;
+        self.store.cache.finish();
         Ok(frame)
     }
 }
@@ -123,7 +288,26 @@ pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, se
     LayoutEngine::new()?.layout_frame(snapshot, presentation, Some((selected, cursor_color)))
 }
 
-/// No cursor in a window of SNAPSHOT whose cursor `internal-show-cursor'
+/// SNAPSHOT laid out in FRAME, laid out from a snapshot whose windows
+/// differ only in where point is: its windows' glyphs as they are (FRAME
+/// before BARS), their cursors placed anew, its bars painted again.
+fn cursors_moved(snapshot: &FrameSnapshot, frame: &mut FrameGlyphBuffer, bars: &Bars, cursor: Option<(u64, Color)>, store: &mut Store) -> Result<Vec<WindowEnd>, String> {
+    store.rules(snapshot.font_selection, &snapshot.font_alternatives, &snapshot.fontsets, &snapshot.no_font);
+    bars.undo(frame);
+    frame.window_cursors.clear();
+    let mut ends = Vec::with_capacity(snapshot.windows.len());
+    store.cache.begin();
+    for placed in &snapshot.windows {
+        let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
+        let cursor = cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color));
+        ends.push(window::append_window(&placed.snapshot, Some(frame), &mut store.kept(), px::of(placed.x), px::of(placed.y), cursor, window::Paint::Cursor)?);
+    }
+    store.cache.finish();
+    paint_bars(frame, snapshot, &mut store.resolver)?;
+    Ok(ends)
+}
+
+/// No cursor in a window of SNAPSHOT whose cursor `internal-show-cursor`
 /// turned off, which is a blink, or whose buffer has none, which is not.
 fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
     let ids = |hidden: fn(&WindowSnapshot) -> bool| -> Vec<i64> {
@@ -135,14 +319,38 @@ fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
 }
 
 /// SNAPSHOT laid out with every cursor its windows own, on or off.
-fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
-    resolver.set_selection_state(snapshot.font_selection);
-    resolver.set_alternative_state(snapshot.font_alternatives.clone());
-    resolver.set_fontsets(snapshot.fontsets.clone());
+fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, store: &mut Store) -> Result<((FrameGlyphBuffer, Bars), Vec<WindowEnd>), String> {
+    store.rules(snapshot.font_selection, &snapshot.font_alternatives, &snapshot.fontsets, &snapshot.no_font);
     let first = snapshot.windows.first().ok_or("empty frame")?;
     let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
     frame.background = color(first.snapshot.faces.first().ok_or("missing face")?.background);
-    let mut ends = Vec::new();
+    let mut ends = Vec::with_capacity(snapshot.windows.len());
+    store.cache.begin();
+    for placed in placed_windows(snapshot) {
+        let placed = placed?;
+        // Windows with a mode line always own a cursor; the minibuffer (no mode
+        // line) only while it is the selected window, i.e. a prompt is active.
+        let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
+        let cursor = cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color));
+        ends.push(store.window(&placed.snapshot, Some(&mut frame), (px::of(placed.x), px::of(placed.y)), cursor, &snapshot.no_font)?);
+    }
+    store.cache.finish();
+    let bars = Bars::of(&frame);
+    paint_bars(&mut frame, snapshot, &mut store.resolver)?;
+    Ok(((frame, bars), ends))
+}
+
+/// SNAPSHOT's tab bar, status bar and panes over its windows in FRAME.
+fn paint_bars(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot, resolver: &mut FontResolver) -> Result<(), String> {
+    if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(frame, tab_bar, snapshot.width as f32, resolver, &snapshot.no_font)?; }
+    if let Some(bar) = &snapshot.status_bar { paint_status_bar(frame, bar, snapshot.chrome.focus, resolver, &snapshot.no_font)?; }
+    frame.panes = panes(snapshot);
+    Ok(())
+}
+
+/// SNAPSHOT's windows, each refused when its id repeats or its extent
+/// does not fit the frame.
+fn placed_windows(snapshot: &FrameSnapshot) -> impl Iterator<Item = Result<&PlacedWindowSnapshot, String>> {
     let mut ids = std::collections::HashSet::new();
     // An EMPTY extent draws nothing, so it cannot overflow the frame and its
     // origin is not meaningful: GNU clamps a body width to
@@ -156,21 +364,14 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         None => false,
         Some(end) => extent == 0 || end <= limit,
     };
-    for placed in &snapshot.windows {
+    snapshot.windows.iter().map(move |placed| {
         if !ids.insert(placed.snapshot.id)
             || !fits(placed.x, placed.snapshot.width, snapshot.width)
             || !fits(placed.y, placed.snapshot.height, snapshot.height) {
             return Err("invalid or duplicate placed window".into());
         }
-        // Windows with a mode line always own a cursor; the minibuffer (no mode
-        // line) only while it is the selected window, i.e. a prompt is active.
-        let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
-        ends.push(whole::append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)), &snapshot.no_font)?);
-    }
-    if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver, &snapshot.no_font)?; }
-    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, snapshot.chrome.focus, resolver, &snapshot.no_font)?; }
-    frame.panes = panes(snapshot);
-    Ok((frame, ends))
+        Ok(placed)
+    })
 }
 
 /// SNAPSHOT's windows as panes (VM2-PANE-CHROME): each window's box (its
@@ -287,7 +488,7 @@ fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus
     Ok(())
 }
 
-/// A band whose painter reads its marks (`BandMarks'): the status bar, or
+/// A band whose painter reads its marks (`BandMarks`): the status bar, or
 /// a window's mode line in Romacs's format. Its text starts right of the
 /// accent block, drawn in ACCENT when it has one.
 struct Marked<'a> {
@@ -302,8 +503,8 @@ struct Marked<'a> {
 /// Paint BAND for the window and row role OWNER: its face's background,
 /// the accent block, each segment's pill, its characters in its faces on
 /// that background (an icon in place of the character it marks, a pill's
-/// text in the pill's foreground), the part after its `right-align'
-/// marker flush with the right edge (`BandMarks::places'). Where each
+/// text in the pill's foreground), the part after its `right-align`
+/// marker flush with the right edge (`BandMarks::places`). Where each
 /// character went, from the band's left edge.
 fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver, no_font: &NoFont) -> Result<Vec<Option<(f32, f32)>>, String> {
     let (text, face, bounds) = (band.text, band.face, band.bounds);
@@ -452,7 +653,7 @@ pub fn status_bar_extents(frame: &FrameGlyphBuffer, bar: &StatusBarSnapshot) -> 
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
 /// on its background, placed over the root frame at stacking Z. A child
 /// window has the cursor only when it is the selected window.
-fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentation: u64, z: i32, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
+fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentation: u64, z: i32, cursor: Option<(u64, Color)>, store: &mut Store) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(), fontsets: snapshot.fontsets.clone(),
@@ -460,7 +661,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         no_font: snapshot.no_font.clone(),
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
-    let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
+    let ((mut frame, _), ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, store)?;
     frame.background = color(child.background);
     frame.background_alpha = child.background_alpha;
     frame.border_width = child.border as f32;
@@ -576,17 +777,13 @@ fn color(rgb: [u8; 3]) -> Color {
 /// fringes and their indicators; no cursor or policy evaluation.
 /// Byte positions are relative to the owned UTF-8 text, not VM heap references.
 pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
-    let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
-    frame.background = color(snapshot.faces.first().ok_or("missing face")?.background);
-    let mut resolver = FontResolver::new().map_err(|e| e.to_string())?;
-    whole::append_window(snapshot, &mut frame, &mut resolver, 0.0, 0.0, None, &NoFont::default())?;
-    Ok(frame)
+    LayoutEngine::new()?.layout(snapshot, presentation)
 }
 
 /// Paint BAND, a header or mode line, in BOUNDS: its FACE's background,
 /// then its characters in copies of the window's faces on that background,
 /// published from FACE_BASE plus COPY face tables on. A character STRETCHES
-/// names is that stretch, blank (produce_stretch_glyph), its `:align-to'
+/// names is that stretch, blank (produce_stretch_glyph), its `:align-to`
 /// counted from the text area's left edge, TEXT_LEFT into the band, as
 /// GNU's full-width band row measures it (calc_pixel_width_or_height).
 #[allow(clippy::too_many_arguments)]
@@ -925,7 +1122,7 @@ fn shows_glyphs(shown: &Shown) -> bool {
 }
 
 /// Publish the one glyph a sequence of a single character and its
-/// selectors (VS-16's `❤️') shows in face ID, when it has one: the
+/// selectors (VS-16's `❤️`) shows in face ID, when it has one: the
 /// character's glyph in the font its representative resolved to (the emoji
 /// font for VS-16), so the renderer draws that exact glyph rather than
 /// shaping the text in the text font. Other sequences (ZWJ ligatures) are
@@ -952,8 +1149,8 @@ fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
 
 /// Where FACE's underline goes in FONT, and how thick it is, as xterm.c
 /// x_draw_glyph_string decides: the font's thickness, else 1; at the
-/// descent line (less `:position' pixels) under RULES' at-descent-line or a
-/// `:position', else the font's own position under `use_position' when it
+/// descent line (less `:position` pixels) under RULES' at-descent-line or a
+/// `:position`, else the font's own position under `use_position` when it
 /// has one, else half its descent, never above RULES' minimum offset.
 fn underline_placement(face: &Face, font: &romacs_display_protocol::font::ResolvedFont, rules: romacs_layout_input::UnderlineRules)
     -> (romacs_display_protocol::face::UnderlinePosition, i32) {
