@@ -140,7 +140,14 @@
               (insert (romacs-agent-layout-tests--definition "romacs-agent--defstruct"
                                                              (romacs-agent--slot-names 'romacs-agent))))
             (dolist (name '("romacs-agent" "romacs-agent.el"))
-              (should-error (romacs-agent--load-check name) :type 'user-error)))
+              (should-error (romacs-agent--load-check name) :type 'user-error))
+            ;; As load itself is called, its suffix arguments too: nothing
+            ;; of the file runs.
+            (setq romacs-agent-layout-tests--evaluated nil)
+            (dolist (call `(("romacs-agent.el" nil t nil t) ("romacs-agent" nil t nil t)
+                            (,file nil t nil t) (,file nil t t) ("romacs-agent.el" nil t t)))
+              (should-error (apply #'load call) :type 'user-error))
+            (should-not romacs-agent-layout-tests--evaluated))
         (delete-directory elsewhere t)))))
 
 (ert-deftest romacs-agent-layout-shorter-records-are-refused ()

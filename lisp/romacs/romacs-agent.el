@@ -263,7 +263,12 @@ them).  `romacs-agent-load-unchecked' skips it."
               ((string-match-p "\\`romacs-agent\\(?:\\.el\\)?\\'" (file-name-nondirectory file)))
               ;; The file `load' itself will read, by its own search.
               (path (locate-file file load-path
-                                 (cond (nosuffix '("")) (must-suffix (get-load-suffixes))
+                                 (cond (nosuffix '(""))
+                                       ;; MUST-SUFFIX still takes FILE as named when it
+                                       ;; ends in a suffix or names a directory.
+                                       ((and must-suffix (not (string-match-p "\\.elc?\\'" file))
+                                             (not (file-name-directory file)))
+                                        (get-load-suffixes))
                                        (t (append (get-load-suffixes) load-file-rep-suffixes))))))
     (when (romacs-agent--records-of 'romacs-agent)
       (let ((layout (romacs-agent--file-layout path)))
