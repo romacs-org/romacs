@@ -45,6 +45,19 @@ every command the collections so far and their seconds (`gcs-done',
 `gc-elapsed') and the selected window's start, end, point and body and
 total heights in pixels, and writes them to the session's state.el at
 C-x C-s; --mode sets the output's size (default 1600x1000).
+With --setup FORM (repeatable) the same M-: also evaluates FORM.
+With --host-calls the same kind of hook records `romacs--host-calls'
+after every command, and before it saves the session scrolls (C-v) a few
+times, runs M-x auto-fill-mode typed in full, and searches (C-s, six
+letters, C-s twice, RET).  The report then gives, per command, the calls
+the evaluator made out of the VM that stay with it (`local') and those
+that reach the display side, another thread or a file (`cross'), each by
+name: the mean over the commands that followed the same command, so one
+command's count is its own body, plus the redisplay and the idle time
+before it.  A command read in the minibuffer or during a search is named
+with that (`minibuffer self-insert-command').  Each of the two prompts
+is also reported whole (`host_calls_per_prompt_key'): its calls from the
+key that opens it to the command that ends it, over the keys typed.
 With --sample FILE the session visits a copy of FILE, under its name (so
 its extension picks the major mode, e.g. a tree-sitter mode), instead of
 --lines lines of prose; FILE must have no tabs, as C-n's expected point
@@ -60,12 +73,14 @@ usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
                       [--mode WxH] [--populate] [--line-numbers TYPE] [--sample FILE]
+                      [--host-calls] [--setup FORM]...
 """
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import statistics
@@ -79,7 +94,11 @@ PHASES = ('self-insert', 'C-n', 'C-f')
 KEYS = {'self-insert': ['a'], 'C-n': ['-M', 'ctrl', 'n', '-m', 'ctrl'],
         'C-f': ['-M', 'ctrl', 'f', '-m', 'ctrl'], 'region': ['-M', 'ctrl', 'f', '-m', 'ctrl'],
         'mark': ['-M', 'ctrl', '-k', 'space', '-m', 'ctrl'],
-        'save': ['-M', 'ctrl', '-k', 'x', '-k', 's', '-m', 'ctrl']}
+        'save': ['-M', 'ctrl', '-k', 'x', '-k', 's', '-m', 'ctrl'],
+        'scroll': ['-M', 'ctrl', 'v', '-m', 'ctrl'], 'M-x': ['-M', 'alt', 'x', '-m', 'alt'],
+        'C-s': ['-M', 'ctrl', 's', '-m', 'ctrl'], 'RET': ['-k', 'Return']}
+SCROLLS = 4
+EXTENDED = 'auto-fill-mode'
 IDLE_SLACK = 1_000_000
 SPREAD_FLAG = 0.10
 
@@ -225,6 +244,113 @@ def bindings(stderr_text):
     return found
 
 
+def sexps(text):
+    """The Lisp forms printed in TEXT, as nested lists of atoms' names."""
+    stack = [[]]
+    for token in re.findall(r'[()]|[^\s()]+', text):
+        if token == '(':
+            stack.append([])
+        elif token == ')':
+            done = stack.pop()
+            stack[-1].append(done)
+        else:
+            stack[-1].append(token)
+    return stack[0]
+
+
+def search_word(text):
+    """Six lowercase letters TEXT has at least three times, not all one letter, to search for."""
+    runs = (word for word in dict.fromkeys(re.findall(r'[a-z]{6}', text)) if len(set(word)) > 1 and text.count(word) >= 3)
+    found = next(runs, None)
+    if not found:
+        raise Invalid('no six letters to search for')
+    return found
+
+
+def host_call_rows(forms):
+    """--host-calls' rows, [COMMAND, CONTEXT, WINDOW-START, [[NAME, SIDE, COUNT]...]]
+    after each command, as (command, context, window start, {name: (side, count)})."""
+    return [(command, context, start, {name: (side, int(count)) for name, side, count in calls})
+            for command, context, start, calls in forms]
+
+
+def after_setup(rows):
+    """ROWS after the session's last M-: (its setup, typed in a minibuffer of its own)."""
+    last = max((i for i, row in enumerate(rows) if row[0] == 'eval-expression'), default=-1)
+    return rows[last + 1:]
+
+
+def calls_between(was, now):
+    """The calls NOW counts that WAS did not: {name: (side, calls)}."""
+    calls = {name: (side, count - was.get(name, (side, 0))[1]) for name, (side, count) in now.items()}
+    return {name: call for name, call in calls.items() if call[1]}
+
+
+def host_call_segments(rows):
+    """(command, {name: (side, calls)}) for each command of ROWS that followed
+    the same command in the same context, the calls since that one ended.  A
+    command not at top level is named with its context.  A scroll that left
+    the window where it was (the buffer's end) is none."""
+    found = []
+    for (before, was_in, start, was), (command, context, end, now) in zip(rows, rows[1:]):
+        if (command, context) != (before, was_in) or (command.startswith('scroll-') and start == end):
+            continue
+        found.append((command if context == 'top' else f'{context} {command}', calls_between(was, now)))
+    return found
+
+
+def host_call_prompts(rows):
+    """{context: {name: (side, calls)}} for each prompt of ROWS: the calls from
+    the last top-level command before it to the first after it, which is
+    the command that ended it."""
+    found, opened = {}, None
+    for (_, was_in, _, was), (_, context, _, now) in zip(rows, rows[1:]):
+        if was_in == 'top' and context != 'top':
+            opened = (context, was)
+        elif context == 'top' and opened:
+            found.setdefault(opened[0], calls_between(opened[1], now))
+            opened = None
+    return found
+
+
+def side_total(calls, side):
+    return sum(n for s, n in calls.values() if s == side)
+
+
+def host_calls_per_command(segments):
+    """Per command of SEGMENTS: how many, the mean and the most calls on each
+    side, and each name's side and mean."""
+    report = {}
+    for command in dict.fromkeys(command for command, _ in segments):
+        runs = [calls for name, calls in segments if name == command]
+        entry = {'commands': len(runs), 'by_name': {}}
+        for side in ('local', 'cross'):
+            totals = [side_total(calls, side) for calls in runs]
+            entry[side] = {'mean': statistics.mean(totals), 'max': max(totals)}
+        for name in sorted({name for calls in runs for name in calls}):
+            side = next(calls[name][0] for calls in runs if name in calls)
+            entry['by_name'][name] = {'side': side, 'mean': sum(calls.get(name, (side, 0))[1] for calls in runs) / len(runs)}
+        report[command] = entry
+    return report
+
+
+def host_calls_per_prompt_key(prompts, keys):
+    """Per prompt context of PROMPTS, one {context: calls} per session: the
+    calls on each side and by name per key typed, KEYS[context] of them."""
+    report = {}
+    for context in dict.fromkeys(context for prompt in prompts for context in prompt):
+        runs = [prompt[context] for prompt in prompts if context in prompt]
+        typed = keys[context] * len(runs)
+        entry = {'prompts': len(runs), 'keys_each': keys[context], 'by_name': {}}
+        for side in ('local', 'cross'):
+            entry[side] = sum(side_total(calls, side) for calls in runs) / typed
+        for name in sorted({name for calls in runs for name in calls}):
+            side = next(calls[name][0] for calls in runs if name in calls)
+            entry['by_name'][name] = {'side': side, 'per_key': sum(calls.get(name, (side, 0))[1] for calls in runs) / typed}
+        report[context] = entry
+    return report
+
+
 def text_point(stderr_records):
     """Point of the first (text) window in the last cursor publication."""
     published = [r for r in stderr_records if r.get('diagnostic') == 'cursor-publication']
@@ -283,7 +409,8 @@ class Session:
         time.sleep(.3)
         argv = [str(self.args.binary), '-Q'] + (['--loadup'] if self.args.regime == 'loadup' else []) \
             + (['--trace-latency'] if self.latency else []) \
-            + (['--eval', self.state_form()] if self.args.state else []) + [str(self.file)]
+            + (['--eval', self.state_form()] if self.args.state else []) \
+            + (['--eval', self.host_calls_form()] if getattr(self.args, 'host_calls', False) else []) + [str(self.file)]
         self.process = subprocess.Popen(argv, env=env, cwd=work, stdin=subprocess.DEVNULL,
                                         stdout=self.stdout.open('w'), stderr=self.stderr.open('w'))
         self.wait(lambda: any(r.get('ready') for r in records(self.stdout)), self.args.timeout, 'ready')
@@ -322,6 +449,7 @@ class Session:
                          ' (save-selected-window (select-window (split-window-below))'
                          ' (switch-to-buffer (car others))'
                          f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if getattr(self.args, 'split', 1) > 2 else ""}))')
+        forms += getattr(self.args, 'setup', None) or []
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -333,6 +461,17 @@ class Session:
                 ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
                 f' (with-temp-file "{path}"'
                 ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))))))')
+
+    def host_calls_form(self):
+        """--host-calls' hook: the counts after each command, written out at C-x C-s."""
+        path = self.root / 'host-calls.el'
+        return ('(progn (defvar perkey--calls nil) (add-hook (quote post-command-hook) (lambda ()'
+                ' (push (list this-command (cond ((minibufferp) (quote minibuffer)) ((bound-and-true-p isearch-mode) (quote isearch)) (t (quote top)))'
+                ' (window-start) (romacs--host-calls)) perkey--calls)'
+                ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
+                f' (let ((mode major-mode)) (with-temp-file "{path}"'
+                ' (prin1 mode (current-buffer)) (terpri (current-buffer))'
+                ' (dolist (s (reverse perkey--calls)) (prin1 s (current-buffer)) (terpri (current-buffer)))))))))')
 
     def no_idle_auto_save(self):
         """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the
@@ -401,6 +540,14 @@ class Session:
                               for r in records(self.stderr)), self.args.timeout, 'paint after the last command')
         return replies
 
+    def prompt(self, keys):
+        """Type KEYS, one prompt from the key that opens it to the one that ends
+        it, then let its last redisplay and idle work land."""
+        for parts in keys:
+            self.type(parts)
+            time.sleep(self.args.gap)
+        time.sleep(1)
+
     def counted(self, action, idle=False):
         """(instructions, seconds, result) of ACTION on the evaluator thread, or seconds only."""
         if self.latency:
@@ -462,11 +609,27 @@ class Session:
         second = self.counted(idle, idle=True)
         if not self.latency:
             result['idle'] = [(first[0], first[1]), (second[0], second[1])]
+        counting = getattr(self.args, 'host_calls', False)
+        if counting:
+            self.run_keys(KEYS['scroll'], SCROLLS)
+            word = search_word(text)
+            self.prompt([KEYS['M-x']] + [['-k', 'minus'] if letter == '-' else [letter] for letter in EXTENDED] + [KEYS['RET']])
+            self.prompt([KEYS['C-s']] + [[letter] for letter in word] + [KEYS['C-s'], KEYS['C-s'], KEYS['RET']])
+            result['prompt_keys'] = {'minibuffer': len(EXTENDED) + 2, 'isearch': len(word) + 4}
         save = self.run_keys(KEYS['save'], 1)
         result['save'] = save
         problems = delivery(save, self.commands.get('[24 19]'), 1) + result.get('mark', [])
         self.wait(lambda: self.file.read_text() == text, 10, 'saved text')
         result['problems'] = problems
+        if counting:
+            calls = self.root / 'host-calls.el'
+            self.wait(calls.exists, 10, 'host calls')
+            result['major_mode'], *forms = sexps(calls.read_text())
+            rows = after_setup(host_call_rows(forms))
+            result['host_calls'] = host_call_segments(rows)
+            result['host_call_prompts'] = host_call_prompts(rows)
+            if sorted(result['host_call_prompts']) != ['isearch', 'minibuffer']:
+                problems.append(f"prompts counted: {sorted(result['host_call_prompts'])}")
         if self.evaluator() != self.tid:
             raise Invalid('evaluator thread changed')
         if self.args.record and not self.latency:
@@ -509,7 +672,7 @@ def session(args, index, latency):
             live_session.stop()
             kept = args.output / f"{'latency' if latency else 'counted'}-{index}"
             kept.mkdir()
-            for name in ('binary.stdout', 'binary.stderr', 'compositor.log', 'state.el'):
+            for name in ('binary.stdout', 'binary.stderr', 'compositor.log', 'state.el', 'host-calls.el'):
                 if (root / name).exists():
                     shutil.copy(root / name, kept / name)
     return result
@@ -581,9 +744,11 @@ def main():
     parser.add_argument('--split', type=int, default=1, choices=(1, 2, 3), help='windows in the frame, each with its own buffer')
     parser.add_argument('--state', action='store_true', help='record collections and the window around each phase')
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
+    parser.add_argument('--setup', action='append', help='a form the M-: setup also evaluates (--regime loadup)')
+    parser.add_argument('--host-calls', action='store_true', help='count the calls out of the VM per command, by side')
     args = parser.parse_args()
-    if args.line_numbers and args.regime != 'loadup':
-        parser.error('--line-numbers needs --regime loadup, whose M-: setup turns them on')
+    if (args.line_numbers or args.setup) and args.regime != 'loadup':
+        parser.error('--line-numbers and --setup need --regime loadup, whose M-: setup evaluates them')
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
@@ -601,13 +766,19 @@ def main():
                                  for kind, rs in (('counted', counted), ('latency', timed))
                                  for i, r in enumerate(rs) if r['valid']},
               'latency_ms': latencies([r for r in timed if not invalid(r)]),
+              'host_calls_per_command': host_calls_per_command(
+                  [tuple(s) for r in counted + timed if not invalid(r) for s in r.get('host_calls', [])]) or None,
+              'major_mode': sorted({r['major_mode'] for r in counted + timed if 'major_mode' in r}),
+              'host_calls_per_prompt_key': host_calls_per_prompt_key(
+                  [r['host_call_prompts'] for r in counted + timed if not invalid(r) and 'host_call_prompts' in r],
+                  {'minibuffer': len(EXTENDED) + 2, 'isearch': 10}) or None,
               'renderer': sorted({r['renderer'] or 'unknown' for r in counted + timed if r['valid']}),
               'coalesced': sorted({name for r in counted + timed if r['valid']
                                    for name, p in r['phases'].items() if p['coalesced']}),
               'valid_sessions': len(good), 'rejected': rejected, 'sessions': counted, 'latency_sessions': timed}
     (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
-    print(json.dumps({k: report[k] for k in ('regime', 'lines', 'instructions_per_key', 'latency_ms', 'renderer',
-                                             'coalesced', 'valid_sessions', 'rejected')}, indent=1))
+    print(json.dumps({k: report[k] for k in ('regime', 'lines', 'instructions_per_key', 'latency_ms', 'major_mode', 'host_calls_per_command', 'host_calls_per_prompt_key',
+                                             'renderer', 'coalesced', 'valid_sessions', 'rejected')}, indent=1))
     refused = any(report['refused_phases'].values())
     return 0 if len(good) == args.sessions and not rejected and not refused else 1
 

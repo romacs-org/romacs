@@ -78,12 +78,13 @@ def main():
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    subr = Path(__file__).resolve().parents[3] / 'gnu-lisp' / 'subr.el'
+    subr = Path(__file__).resolve().parents[3] / 'lisp/gnu' / 'subr.el'
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='fontify-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='fontify-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -171,7 +172,10 @@ def main():
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
-        (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        finally:
+            live.remove_root(temporary)
     print(report['status'])
     return 0 if report['status'] == 'PASS' else 1
 

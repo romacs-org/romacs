@@ -3,9 +3,9 @@
 
 The session launches with no font override, in a work directory holding
 sub/notes.txt.  A private init.el records, when init runs, the completion
-options Romacs's defaults gave it (rlisp/romacs-completion-defaults.el) and
+options Romacs's defaults gave it (lisp/romacs/romacs-completion-defaults.el) and
 defines a probe command that records when it runs.  The defaults display
-GNU's readers with `romacs-complete-mode' (rlisp/romacs-complete.el): real
+GNU's readers with `romacs-complete-mode' (lisp/romacs/romacs-complete.el): real
 keys drive vertico's UI, whose candidates show in the layer that hosts the
 minibuffer, TAB inserts the selected candidate and Return exits with it.
 Every prompt's first command records the root window's height, which must
@@ -237,8 +237,9 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='completion-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='completion-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -342,7 +343,10 @@ def main():
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
-        (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        finally:
+            live.remove_root(temporary)
     print(report['status'])
     return 0 if report['status'] == 'PASS' else 1
 

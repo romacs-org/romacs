@@ -594,25 +594,25 @@ fn a_due_quit_ends_an_entry_before_its_first_instruction() {
 /// stays quittable, as GNU's is) and marks it waiting only while it blocks.
 #[test]
 fn a_read_is_waiting_only_while_it_blocks() {
-    struct Watching(Arc<QuitSignal>, Vec<(&'static str, bool)>, Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>);
+    struct Watching(Arc<QuitSignal>, Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>);
     impl HostInput for Watching {
         fn input_pending(&mut self) -> bool { false }
         fn redisplay(&mut self, _: HostFrame) -> Result<Vec<WindowEnd>, String> {
-            self.2.lock().unwrap().push(("redisplay", self.0.busy_span().is_some()));
+            self.1.lock().unwrap().push(("redisplay", self.0.busy_for().is_some()));
             Ok(Vec::new())
         }
         fn next_event(&mut self, _: Option<Duration>) -> Result<HostEvent, String> {
-            self.2.lock().unwrap().push(("wait", self.0.busy_span().is_some()));
+            self.1.lock().unwrap().push(("wait", self.0.busy_for().is_some()));
             Ok(HostEvent::Key(CommandEvent::Character(120)))
         }
     }
     let (mut vm, signal) = busy_vm();
     vm.set_frame_geometry(800, 600, 20, 10).unwrap();
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    vm.set_host_input(Some(Box::new(Watching(signal.clone(), Vec::new(), seen.clone()))));
+    vm.set_host_input(Some(Box::new(Watching(signal.clone(), seen.clone()))));
     assert_eq!(eval(&mut vm, "(read-event)"), "120");
     assert_eq!(*seen.lock().unwrap(), [("redisplay", true), ("wait", false)]);
-    assert!(signal.busy_span().is_some(), "busy again after the read");
+    assert!(signal.busy_for().is_some(), "busy again after the read");
 }
 
 /// Text long enough that one motion over it outlasts the press.
@@ -636,4 +636,59 @@ fn inhibit_quit_holds_a_long_motion() {
     let value = eval(&mut vm, "(let ((inhibit-quit t)) (let ((moved (vertical-motion 3000000))) (setq quit-flag nil) moved))");
     presser.join().unwrap();
     assert_eq!(value, "3000000");
+}
+
+/// A quit that unwinding releases is taken at the handler's first tick
+/// after the landing, here a loop's first back-jump inside the
+/// `condition-case` around the catch (`land` zeroes the budget): after the
+/// form before the loop, before the one after it. A long loop first runs the
+/// budget out, so its poll settles any request and refills the budget: the
+/// landing is then the only thing that zeroes it.
+#[test]
+fn a_released_quit_is_taken_at_the_handlers_first_tick() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(progn (defvar rq-a nil) (defvar rq-b nil))");
+    let form = "(condition-case nil \
+        (progn (dotimes (_ 10050)) \
+               (catch 'done (let ((inhibit-quit t)) (setq quit-flag t) (throw 'done 'ok))) \
+               (setq rq-a 1) (let ((i 0)) (while (< i 2) (setq i (1+ i)))) (setq rq-b 1) 'not-quit) \
+      (quit (list 'quit rq-a rq-b)))";
+    assert_eq!(eval(&mut vm, form), "(quit 1 nil)");
+}
+
+/// A handler of primitives only passes a released quit over: the form
+/// returns its value, and the next evaluation quits at its entry, before its
+/// body runs, so the quit is never lost (VM2-QUIT-POINTS: pinned GNU's outer
+/// handler takes it). The same inside a nested `eval`, whose engine ends with
+/// the zeroed budget.
+#[test]
+fn a_released_quit_a_handler_of_primitives_passes_over_is_taken_at_the_next_entry() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar rq-side nil)");
+    let inner = "(condition-case nil (catch 'done (let ((inhibit-quit t)) (setq quit-flag t) (throw 'done 'ok))) (quit 'quit))";
+    for (shape, form) in [
+        ("plain", format!("(condition-case nil (list {inner} 'after) (quit 'outer-quit))")),
+        ("nested", format!("(condition-case nil (list (eval '{inner} t) 'after) (quit 'outer-quit))")),
+    ] {
+        assert_eq!(eval(&mut vm, &form), "(ok after)", "{shape}");
+        assert!(eval(&mut vm, "(setq rq-side 1)").starts_with("ERROR"), "{shape}: the next evaluation quits at its entry");
+        assert_eq!(eval(&mut vm, "rq-side"), "nil", "{shape}: before its body ran");
+    }
+}
+
+/// A quit pending as an escape enters a cleanup is not taken at the entry:
+/// the cleanup's first instruction runs, its resume record on top
+/// (gc-smooth 4.12, invariant 5). The quit comes after, at the first tick
+/// past the landing.
+#[test]
+fn a_quit_pending_at_a_cleanups_entry_lets_its_first_instruction_run() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defvar rq-marker nil)");
+    let form = "(condition-case nil \
+        (progn (dotimes (_ 10050)) \
+               (catch 'out (unwind-protect (let ((inhibit-quit t)) (setq quit-flag t) (throw 'out 'body)) \
+                             (setq rq-marker t))) \
+               (let ((i 0)) (while (< i 2) (setq i (1+ i)))) 'not-quit) \
+      (quit (list 'quit rq-marker)))";
+    assert_eq!(eval(&mut vm, form), "(quit t)");
 }

@@ -99,8 +99,8 @@ fn byte_run_loads_with_existing_t3_prelude() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn eval_and_compile_runs_source_body_once() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
     let value = vm.eval_source("(defvar bootstrap-count 0) (eval-and-compile (setq bootstrap-count (1+ bootstrap-count))) bootstrap-count").unwrap();
     assert_eq!(value.display().unwrap(), "1");
 }
@@ -119,14 +119,14 @@ fn eval_and_compile_runs_source_body_once() {
 // (lisp/emacs-lisp/byte-run.el, `(list 'quote (eval (cons 'progn body) ...))`).
 // GNU 32.0.50: `(macroexpand-all '(eval-and-compile (setq bt (1+ bt))))` with bt
 // 0 gives `'1`, bt is 1 after expansion, evaluating the expansion gives 1 and bt
-// stays 1 (transcript in reference/lisp-oracle/VM-GAPS.md, VM2-BOOT1 withdrawn).
+// stays 1 (VM2-BOOT1 withdrawn).
 // This used to assert the opposite (deferral to execution), which held only
 // because lisp/emacs-lisp/byte-run.el had been edited in place.
 fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
     vm.eval_source("(defvar bootstrap-timing 0)").unwrap();
     let id = vm.compile_source("(eval-and-compile (setq bootstrap-timing (1+ bootstrap-timing)))").unwrap();
     let before = vm.eval_source("bootstrap-timing").unwrap();
@@ -142,8 +142,7 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
 // (lisp/subr.el:256) destructures with `pcase-dolist`, which GNU autoloads from
 // pcase.el. This test used to pass against an in-place rewrite of subr.el
 // (plain `dolist` + `car-safe`, ledger row VM2-BOOT2, withdrawn). GNU 32.0.50
-// answers `(nil 9 (nil))` and `nil` for the two calls below (transcript in
-// reference/lisp-oracle/VM-GAPS.md, gap G4). VM2 cannot reach pcase yet:
+// answers `(nil 9 (nil))` and `nil` for the two calls below. VM2 cannot reach pcase yet:
 // subr.el stops at form 139 (radix reader, G1), so pcase-dolist is unbound,
 // and `eval_source` (which compiles the body eagerly, unlike GNU's lazy
 // `defun`) already signals on the definition. Measured 2026-10-20 on the
@@ -151,11 +150,11 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
 // SUCCEEDS, assert GNU's answers above instead; never relax the pin.
 fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let source = std::fs::read_to_string(root.join("gnu-lisp/subr.el")).unwrap();
+    let source = std::fs::read_to_string(root.join("lisp/gnu/subr.el")).unwrap();
     let definition = source.split("(defun buffer-local-restore-state").nth(1).unwrap()
         .split("(defmacro push").next().unwrap();
     assert!(definition.contains("(pcase-dolist (`(,variable ,local ,value) states)"),
-        "gnu-lisp/subr.el is GNU's again; this pins GNU's definition: {definition}");
+        "lisp/gnu/subr.el is GNU's again; this pins GNU's definition: {definition}");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     // `.map(|_| ())` ends the result's borrow of `vm` (master's heap boundary:
@@ -237,12 +236,12 @@ fn subr_cold_frontier_is_pinned() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
     // The returned `Local` borrows `vm`; drop it before `load_report`.
-    let outcome = vm.load_file(&root.join("gnu-lisp/subr.el")).map(drop);
+    let outcome = vm.load_file(&root.join("lisp/gnu/subr.el")).map(drop);
     let report = vm.load_report();
-    let subr = root.join("gnu-lisp/subr.el").canonicalize().unwrap();
+    let subr = root.join("lisp/gnu/subr.el").canonicalize().unwrap();
     let subr = subr.to_string_lossy();
 
     // Count first, so that a frontier move in EITHER direction (including subr.el
@@ -259,7 +258,7 @@ fn subr_cold_frontier_is_pinned() {
     assert!(outcome.is_ok(), "{failure}");
     assert_eq!(report["completed_forms"], 578, "{failure}");
     assert_eq!(vm.eval_source("(fboundp 'add-hook)").unwrap().display().unwrap(), "t", "SUBR_ADD_HOOK_MISSING");
-    for (relative, expected) in [("gnu-lisp/emacs-lisp/macroexp.el", 50), ("gnu-lisp/emacs-lisp/pcase.el", 53), ("gnu-lisp/files.el", 49)] {
+    for (relative, expected) in [("lisp/gnu/emacs-lisp/macroexp.el", 50), ("lisp/gnu/emacs-lisp/pcase.el", 53), ("lisp/gnu/files.el", 49)] {
         let path = root.join(relative);
         let result = vm.load_file(&path).map(drop);
         let canonical = path.canonicalize().unwrap().to_string_lossy().into_owned();
@@ -267,7 +266,7 @@ fn subr_cold_frontier_is_pinned() {
         let completed = report["steps"].as_array().unwrap().iter().filter(|s| s["file"] == canonical && s["status"] == "ok").count();
         eprintln!("BOOTSTRAP_CHAIN {relative}: completed={completed}; result={result:?}");
         assert_eq!(completed, expected, "BOOTSTRAP_CHAIN_MOVED {relative}: {result:?}");
-        if relative == "gnu-lisp/files.el" {
+        if relative == "lisp/gnu/files.el" {
             let error = result.unwrap_err();
             // The expander's compiled body reads the unbound `bound-and-true-p'
             // after its argument, the void variable (DIVERGENCES VM2-BCALL1).

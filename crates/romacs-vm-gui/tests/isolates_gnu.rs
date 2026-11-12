@@ -24,7 +24,7 @@ fn batch(script: &str, cwd: &Path) -> (bool, String, String) {
 }
 
 /// A git project of several thousand files for the project commands: the
-/// gnu-lisp tree copied into a fresh scratch directory and committed there
+/// lisp/gnu tree copied into a fresh scratch directory and committed there
 /// with a fixed author and date, in a repository of its own. The tests then
 /// hold their project wherever the tree they run from lives: the gate tests
 /// a frozen copy of the tree that is no git checkout.
@@ -33,7 +33,7 @@ fn fixture_project(name: &str) -> (PathBuf, PathBuf) {
     let scratch = std::env::temp_dir().join(format!("romacs-isolates-gnu-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     let project = scratch.join("project");
-    copy_tree(&root.join("gnu-lisp"), &project);
+    copy_tree(&root.join("lisp/gnu"), &project);
     let git = |args: &[&str]| {
         let output = Command::new("git").arg("-C").arg(&project).args(args)
             .env_clear().env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -46,7 +46,7 @@ fn fixture_project(name: &str) -> (PathBuf, PathBuf) {
     };
     git(&["init", "-q", "-b", "main"]);
     git(&["add", "-A"]);
-    git(&["commit", "-q", "-m", "The gnu-lisp tree"]);
+    git(&["commit", "-q", "-m", "The lisp/gnu tree"]);
     (scratch, project)
 }
 
@@ -146,7 +146,7 @@ fn the_project_commands_give_the_synchronous_results() {
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
                      'ready (list before preparing ready (romacs-project--warm pr))
                      'boot (isolate-await (isolate-spawn '(lambda () isolate-boot) :allow-source-boot t))))
-        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/romacs/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     let out = out.trim();
@@ -181,7 +181,7 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
                                   (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
                                   (list (romacs-project-find-file original-file) (romacs-project-find-regexp original-regexp \"x\")))
                      'live (progn (romacs--isolate-pump 0.5) (isolate-list))))
-        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/romacs/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(ready t full ((original-file nil) (original-regexp \"x\")) still-ready t dead ((original-file nil) (original-regexp \"x\")) live nil)", "{err}");
@@ -212,7 +212,7 @@ fn a_small_project_enumerates_in_the_session_and_its_time_is_recorded() {
                      'slow (progn (puthash root 10.0 romacs-project--enumerations)
                                   (setq romacs-project-inline-threshold 1) (romacs-project--inline-p pr))
                      'live (isolate-list)))
-        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/romacs/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(index t small t none nil unrecorded nil inline original recorded t slow nil live nil)", "{err}");
@@ -244,7 +244,7 @@ fn a_worker_search_leaves_its_xref_window_selected_as_gnus_does() {
             (prin1 (list 'selected (eq (window-buffer (selected-window)) xref) (eq (current-buffer) xref)
                          'moved (not (eq (selected-window) window))
                          'order (eq (nth 0 (buffer-list)) xref) (eq (nth 1 (buffer-list)) origin)))))
-        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/romacs/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(returned nil)(selected t t moved t order t t)", "{err}");
@@ -361,9 +361,9 @@ fn a_workers_fontification_is_the_sessions() {
                           results)))))))
         (prin1 (nreverse results))
         (isolate-kill-all)))",
-        module = root.join("rlisp/romacs-fontify.el").display().to_string(),
-        el = root.join("gnu-lisp/subr.el").display().to_string(),
-        c = root.join("gnu-tests/test/manual/etags/c-src/emacs/src/keyboard.c").display().to_string());
+        module = root.join("lisp/romacs/romacs-fontify.el").display().to_string(),
+        el = root.join("lisp/gnu/subr.el").display().to_string(),
+        c = root.join("test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c").display().to_string());
     let (ok, out, err) = batch(&script, Path::new("/"));
     assert!(ok, "batch failed: {err}");
     let out = out.trim();
@@ -423,8 +423,8 @@ fn results_wait_for_a_widened_buffer_and_a_changed_setup_refuses_them() {
                                                     (romacs-fontify--covering 1 2000))
                          'refused romacs-fontify--refused)))))
         (isolate-kill-all))",
-        module = root.join("rlisp/romacs-fontify.el").display().to_string(),
-        el = root.join("gnu-lisp/subr.el").display().to_string());
+        module = root.join("lisp/romacs/romacs-fontify.el").display().to_string(),
+        el = root.join("lisp/gnu/subr.el").display().to_string());
     let (ok, out, err) = batch(&script, Path::new("/"));
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(delivered covered t syntactic-fingerprint-differs t syntax-changed (nil t) after-new-keywords nil refused t)", "{err}");

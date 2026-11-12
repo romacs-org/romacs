@@ -95,8 +95,7 @@ Implementation-time checks:
   reached; the harness correctly returned exit 1 / `pass: false` with
   `binary stdout closed (exit=1)`. This is only a fail-closed launch preflight.
 * The integrated worker subsequently built the real binary and ran all three
-  live variants successfully; see `../evidence/current-oracle-live/summary.json` and
-  `../README.md` for the exact commands, movement proof, and diagnostic limits.
+  live variants successfully; see `../README.md` for the exact commands, movement proof, and diagnostic limits.
   This harness does not invoke Cargo, a full gate, or Git publication.
 
 # Package parity: pinned GNU beside `--loadup`
@@ -113,7 +112,7 @@ and its comparison policy in its docstring:
   and tags, review, adding and editing a thema), each engine on its own copy
   of a Gnosis database (`--db`, or a profile config's; a live database is
   refused).
-* `hermes_parity_live.py`: hermes (rlisp's copy, or a profile config's
+* `hermes_parity_live.py`: hermes (lisp/romacs's copy, or a profile config's
   `hermes_sources`), read-only against a running dashboard (hermes's
   default URL, or the profile's `hermes_url`), never started (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
@@ -157,7 +156,7 @@ and its comparison policy in its docstring:
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
-with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock gnu-lisp and rlisp, on a
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/gnu and lisp/romacs, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init
@@ -170,8 +169,8 @@ profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
 own completion layer (`romacs-complete-mode`), which takes the root
 window's last line, and the completion styles without fzf.  Each engine serves
-`rlisp/romacs-mcp.el` with the session tools from
-`rlisp/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
+`lisp/romacs/romacs-mcp.el` with the session tools from
+`lisp/romacs/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
 
 * `romacs_send_keys`: `kbd` keys or literal text, fed through
@@ -347,7 +346,7 @@ The workloads, and how each is counted, are in the script's docstring:
   workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
-  not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
+  not comparable with `test/gnu/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
 * session, real commands and keys in a GUI session on headless labwc:
   dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,
@@ -415,7 +414,7 @@ the lead takes a quiet run.  A whole run also rewrites the headlines between
 Romacs is 0.80x or better against a rival on every metric measured, with build
 and rerun command.  It names on standard error any headline the run lost.
 
-A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
+A binary installed beside its runtime (`lisp/gnu/`, `lisp/romacs/`, as an
 installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
 from `--commit`.  `--only` takes groups (`batch micro ert elb session gui init apps`)

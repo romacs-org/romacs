@@ -91,7 +91,7 @@ romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, alloc
 pub(crate) const COLLECTION_RECORDS: usize = 256;
 
 /// A finished collection, for a real pause to name itself in the usage log
-/// (rlisp/romacs-usage-log.el). MS bounds what a key or command waited.
+/// (lisp/romacs/romacs-usage-log.el). MS bounds what a key or command waited.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CollectionRecord {
     /// The idle pass's or a prompt's: it gave way to no key while marking.
@@ -1048,6 +1048,29 @@ impl Vm {
         self.cells.clear_marks();
         self.objects.clear_marks();
     }
+    /// Every table as a completed collection leaves it, its entries old and
+    /// its log empty, without collecting: what a world image holds, since to
+    /// the process that restores it the image is the old generation.
+    pub(crate) fn settle_generations(&mut self) {
+        self.conses.settle_old();
+        self.closures.settle_old();
+        self.cells.settle_old();
+        self.objects.settle_old();
+    }
+    /// Whether every table is as a completed collection leaves it: its
+    /// entries old and clean, its log empty.
+    #[cfg(test)]
+    pub(crate) fn generations_settled(&self) -> bool {
+        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled()
+    }
+    /// Under verify, after a full collection: every entry in use is
+    /// exactly old and no log holds anything, or the next collection would
+    /// start from generations this one did not leave.
+    fn check_settled(&self) {
+        for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
+            assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
+        }
+    }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
         let dead: Vec<usize> = self.obarray_symbol_names.keys().copied().filter(|slot| !live.contains(slot)).collect();
@@ -1300,6 +1323,18 @@ impl Vm {
                 t.reclaim_removed(&obarray_symbols_live);
             }
         }
+        // A call cache whose target died is stale: its symbol's function
+        // changed since it was filled, or the symbol itself, in an obarray
+        // of its own, is dead; else the cell would hold the target live. It
+        // is emptied now, while the marks are whole, so that no
+        // cache names a freed entry once this collection is over: the next
+        // may cut that entry off its table, or compact and rewrite every
+        // reference it keeps.
+        for i in 0..self.caches.len() {
+            if !self.survives(&obarray_symbols_live, &region_marks, self.caches[i].target) {
+                self.caches[i] = Cache { version: 0, target: Value::UNBOUND };
+            }
+        }
         let compacting = self.compacts();
         lap.lap(&mut self.gc_times, Phase::Census);
         if !compacting {
@@ -1330,6 +1365,7 @@ impl Vm {
             lap.lap(&mut self.gc_times, Phase::Shrink);
             self.settle_collection(before);
             lap.lap(&mut self.gc_times, Phase::Settle);
+            if verify { self.check_settled(); }
             return true;
         }
         // Compaction: every live entry moves down, every reference is
@@ -1510,6 +1546,7 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Shrink);
         self.settle_collection(before);
         lap.lap(&mut self.gc_times, Phase::Settle);
+        if self.gc_stress.verify { self.check_settled(); }
         true
     }
     /// A collection's books, BEFORE being the objects it found.
@@ -1792,6 +1829,94 @@ mod tests {
         }
         assert_eq!(deferral(-0.5), 0.0);
         assert_eq!(deferral(f64::NAN), 0.0);
+    }
+
+    /// A cache left stale by a collection that frees in place names nothing
+    /// by the time a later one compacts: the old callee, the last closure
+    /// made, is cut off its table's tail by the first.
+    #[test]
+    fn a_stale_call_cache_is_emptied_before_a_later_compaction() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+        vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
+        vm.eval_source_raw("(cache-caller)").unwrap();
+        vm.eval_source_raw("(fset 'cache-callee 'list)").unwrap();
+        let closures = vm.closures.len();
+        vm.collect(&mut []);
+        assert!(vm.closures.len() < closures, "the old callee was the tail, and is cut");
+        vm.set_gc_moving(true);
+        vm.collect(&mut []);
+        assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+    }
+
+    /// The keymaps' late setup rewrites two function cells. A site that
+    /// cached what one named before must see the change, whether or not
+    /// what it cached is still alive: a cache is trusted only under its
+    /// slot's version, so every write of a function cell moves it on.
+    #[test]
+    fn a_function_cell_rewritten_by_keymap_setup_is_not_called_from_a_cache() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(fset 'ESC-prefix (setq cache-kept #'(lambda () 7)))").unwrap();
+        vm.eval_source_raw("(fset 'cache-caller #'(lambda () (ESC-prefix)))").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_ok(), "the closure, while the alias names it");
+        vm.eval_source_raw("(make-keymap)").unwrap();
+        assert!(vm.eval_source_raw("(cache-caller)").is_err(), "a keymap is no function to call with no event");
+    }
+
+    /// A call site's cache keeps no closure alive: once its symbol is
+    /// redefined, what the old closure captured is garbage, though a site
+    /// that has not run since was the last to name it; and a collection
+    /// that compacts copes as one that frees in place does.
+    #[test]
+    fn a_stale_call_cache_keeps_nothing_alive() {
+        for moving in [false, true] {
+            let mut vm = Vm::new();
+            vm.set_gc_moving(moving);
+            vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 5000 0))) #'(lambda () held)))").unwrap();
+            vm.eval_source_raw("(fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+            vm.eval_source_raw("(cache-caller)").unwrap();
+            vm.collect(&mut []);
+            let slots = vm.gc_census.vector_slots;
+            assert!(slots >= 5000, "the callee holds its vector");
+            vm.eval_source_raw("(fset 'cache-callee #'(lambda () nil))").unwrap();
+            vm.collect(&mut []);
+            assert!(vm.gc_census.vector_slots + 5000 <= slots, "the old callee's vector died (moving: {moving})");
+            assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+        }
+    }
+
+    /// A collection leaves every survivor old and no log; Lisp's stores into
+    /// what survived reach the logs, and the next collection empties them.
+    #[test]
+    fn a_collection_settles_the_generations_and_lisp_stores_are_logged() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gen-list (list 1 2 3) gen-vector (make-vector 4 nil) gen-table (make-hash-table))").unwrap();
+        assert!(!vm.generations_settled(), "what was just made is young");
+        vm.collect(&mut []);
+        assert!(vm.generations_settled());
+        vm.eval_source_raw("(setcar gen-list (list 4)) (setcdr (cdr gen-list) (list 5)) (setcar (cdr gen-list) 6)").unwrap();
+        assert_eq!(vm.conses.dirty_old().count(), 2, "the two old conses written");
+        vm.eval_source_raw("(aset gen-vector 0 (list 7)) (aset gen-vector 1 'symbol) (puthash (list 8) (list 9) gen-table)").unwrap();
+        assert_eq!(vm.objects.logged().len(), 2, "a strong table's key and value");
+        assert!(vm.objects.dirty_old().count() >= 1, "and a short vector");
+        vm.collect(&mut []);
+        assert!(vm.generations_settled());
+        let kept = vm.eval_source_raw("(equal (list (car gen-list) (cdr (cdr gen-list)) (aref gen-vector 0) (hash-table-count gen-table)) '((4) (5) (7) 1))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what the stores put in survives");
+    }
+
+    /// What a capture does to the heap it writes: only old entries and no
+    /// log, whatever was allocated or stored since the last collection.
+    #[test]
+    fn settling_leaves_one_old_generation() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(setq gen-old (list 1 2) gen-table (make-hash-table))").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(setcar gen-old (list 3)) (puthash (list 4) (list 5) gen-table)").unwrap();
+        assert!(!vm.generations_settled());
+        vm.settle_generations();
+        assert!(vm.generations_settled());
     }
 
     #[test]

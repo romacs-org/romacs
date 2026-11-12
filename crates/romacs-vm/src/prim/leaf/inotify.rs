@@ -1,6 +1,6 @@
 //! GNU inotify.c's descriptor from a leaf: one inotify instance per VM,
 //! made by the first watch and closed when Lisp drops the last
-//! (rlisp/vm/inotify.el keeps GNU's watch list). The keyboard waits poll it
+//! (lisp/romacs/vm/inotify.el keeps GNU's watch list). The keyboard waits poll it
 //! (`Vm::file_notify_fd`); the records are read only when Lisp asks, so the
 //! kernel's queue is GNU's keyboard buffer for these events.
 use super::*;

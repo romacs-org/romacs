@@ -7,9 +7,9 @@
 ;; the :mode, :modus and :palette properties `romacs-theme-define' takes.
 ;; :modus is Rum's own definition (its base colours, its warm preference,
 ;; the vivendi core and its palette overrides), from which Modus's face
-;; table makes every face (rlisp/romacs-theme-modus.el); Romacs's own
+;; table makes every face (lisp/romacs/romacs-theme-modus.el); Romacs's own
 ;; faces take :palette, the Rum palette as base and pinned slots
-;; (rlisp/romacs-theme.el), which a launch without Custom uses for every
+;; (lisp/romacs/romacs-theme.el), which a launch without Custom uses for every
 ;; face.  `rum' (rum-theme.el) is exactly this look, which
 ;; crates/romacs-vm-gui/tests/romacs-theme-rum-test.el compares with
 ;; GNU's; the stock theme `default' starts from it.

@@ -20,6 +20,7 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/src/gc_mark.rs", 4, "tests of a panic inside the collector, which nests no engine"),
     ("crates/romacs-vm/src/handle.rs", 1, "a test of a host panicking in an idle mark, which nests no engine"),
     ("crates/romacs-vm/src/prim.rs", 2, "tests of the declaration parser, with no VM"),
+    ("crates/romacs-vm/src/table.rs", 1, "a test of a table left by a panicking filler, with no VM"),
     ("crates/romacs-vm/src/twin.rs", 1,
      "a mark twin's forked child: its VM is a copy no other process uses, and it sends the panic as its report and ends (`exit_at_once`)"),
     ("crates/romacs-vm/tests/buffer_lifecycle.rs", 1, "a VM made in the closure, which the unwinding drops"),
@@ -27,7 +28,7 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/tests/gnu_reader.rs", 1, "a test that asserts no panic came"),
     ("crates/romacs-vm/tests/gnutls.rs", 1, "the VM is on the thread the bound gave up on"),
     ("crates/romacs-vm/tests/support/bulk.rs", 1, "a VM made in the closure, which the unwinding drops"),
-    ("gnu-tests/runner/src/main.rs", 7,
+    ("crates/romacs-gnu-tests/src/main.rs", 7,
      "its import, and six that each report the panic and exit (`panic_exit`); what goes on after one uses `catching`"),
 ];
 

@@ -1,6 +1,6 @@
 //! The censuses of GNU's DEFUNs a Romacs session leaves undefined
-//! (DEFUN-CENSUS.tsv at the repository root) and of its DEFVARs left
-//! unbound (DEFVAR-CENSUS.tsv): every DEFUN in GNU's src/*.c at the Lisp
+//! (ledger/defun-census.tsv at the repository root) and of its DEFVARs left
+//! unbound (ledger/defvar-census.tsv): every DEFUN in GNU's src/*.c at the Lisp
 //! pin (crates/romacs-vm/tests/fixtures/gnu_defun_arity.json) is either
 //! fboundp in the session's world, as the GUI's loadup makes it, or has
 //! one line in its census, and every DEFVAR there (fixtures/
@@ -27,7 +27,7 @@ mod tests {
     use std::path::PathBuf;
 
     const STATUSES: [&str; 3] = ["needed", "elsewhere", "absent"];
-    /// The rlisp/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
+    /// The lisp/romacs/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
     const LAZY_HALVES: [&str; 9] = ["keyboard.el", "minibuf.el", "window-change.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
 
     fn root() -> PathBuf { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")) }
@@ -65,7 +65,7 @@ mod tests {
             // loop, the minibuffer, insdel, messages, scrolling, treesit),
             // as a session's first commands install them.
             for half in LAZY_HALVES {
-                vm.eval_source(&std::fs::read_to_string(root().join("rlisp/vm").join(half)).unwrap()).unwrap();
+                vm.eval_source(&std::fs::read_to_string(root().join("lisp/romacs/vm").join(half)).unwrap()).unwrap();
             }
             let quoted: Vec<String> = names.iter().map(|n| serde_json::to_string(n).unwrap()).collect();
             // Written one name a line to a file, read back as UTF-8.
@@ -81,12 +81,12 @@ mod tests {
 
     #[test]
     fn every_gnu_defun_is_defined_or_in_the_census() {
-        check_census("DEFUN-CENSUS.tsv", undefined(gnu_names("gnu_defun_arity.json", "arity"), "fboundp"));
+        check_census("ledger/defun-census.tsv", undefined(gnu_names("gnu_defun_arity.json", "arity"), "fboundp"));
     }
 
     #[test]
     fn every_gnu_defvar_is_bound_or_in_the_census() {
-        check_census("DEFVAR-CENSUS.tsv", undefined(gnu_names("gnu_defvars.json", "defvars"), "boundp"));
+        check_census("ledger/defvar-census.tsv", undefined(gnu_names("gnu_defvars.json", "defvars"), "boundp"));
     }
 
     /// The census at FILE against the MISSING names: blessed, or checked.

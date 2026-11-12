@@ -106,7 +106,7 @@ def init_source(engine, snippet, accounts=None):
     mail = f'(load {lisp_string(str(snippet))} nil t)' if snippet else DEFAULT_INIT
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
                  '(setq scroll-conservatively 101)\n'
-                 f'(load {lisp_string(str(parity_live.ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n'
+                 f'(load {lisp_string(str(parity_live.ROOT / "lisp/romacs/romacs-completion-defaults.el"))} nil t)\n'
                  ) if engine == 'gnu' else ''
     variables = ' '.join(PROBE_VARIABLES)
     return f''';; -*- lexical-binding: t -*-

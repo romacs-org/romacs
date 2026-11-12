@@ -527,7 +527,12 @@ mod leaf {
         }
         #[inline(always)]
         pub fn pair(&self, v: Value) -> Option<(Value, Value)> {
-            (v.tag() == 3).then(|| self.vm.cons_pair(v).ok()).flatten()
+            if v.tag() != 3 { return None; }
+            // A match, not `or_else': the closure would not inline here.
+            match self.vm.private_cons(v) {
+                Some(pair) => Some(pair),
+                None => self.vm.cons_pair(v).ok(),
+            }
         }
         #[inline(always)]
         pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
@@ -1889,6 +1894,7 @@ mod leaf {
     mod frozen;
     mod isolate;
     mod flight;
+    mod host_calls;
     mod compiled_lisp;
     mod casetab;
     mod casing;

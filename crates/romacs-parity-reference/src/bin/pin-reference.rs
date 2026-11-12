@@ -8,7 +8,7 @@
 //! A pin that cannot be updated is a pin people delete, so this must be
 //! possible.  But the convention this project settled on is that *a rebuild of
 //! the GNU mirror is its own change with its own re-baselining, never a side
-//! effect of a session*, and a hand-edit of `parity-reference.toml` cannot
+//! effect of a session*, and a hand-edit of `ledger/parity-reference.toml` cannot
 //! encode that: it leaves no record of what changed or why, and the next reader
 //! cannot tell a considered re-baselining from a stray `make`.
 //!
@@ -27,7 +27,7 @@ use romacs_parity_reference::{
 
 type Result<T> = std::result::Result<T, String>;
 
-/// The marker in `parity-reference.toml` that new log lines are inserted after.
+/// The marker in `ledger/parity-reference.toml` that new log lines are inserted after.
 const LOG_HEADER: &str = "# RE-BASELINING LOG";
 
 /// A non-empty re-baselining reason.

@@ -1549,7 +1549,7 @@ impl Leaf<'_> {
     /// with `coding-category-list' updated as coding.c updates it.  It
     /// gives back an order `coding-category-list' recorded, which
     /// `set-coding-system-priority' cannot for a category with no coding
-    /// system set up (startup's locale replay, rlisp/romacs-loadup-bootstrap.el).
+    /// system set up (startup's locale replay, lisp/romacs/romacs-loadup-bootstrap.el).
     pub fn set_coding_category_order(&mut self, categories: &[Value]) -> super::super::Out {
         self.coding_init()?;
         let priorities = self.coding_category_state(PRIORITIES)?;

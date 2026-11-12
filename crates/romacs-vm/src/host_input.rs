@@ -140,13 +140,13 @@ impl Vm {
     /// `read-from-minibuffer' outside a keyboard macro reads its keys here.
     pub fn set_host_input(&mut self, host: Option<Box<dyn HostInput>>) {
         let attached = if host.is_some() { Value::TRUE } else { Value::NIL };
-        self.host_input = host;
+        self.host_input = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn HostInput>);
         self.declare_special_raw(HOST_INPUT_VARIABLE, attached);
     }
 
     /// redisplay_internal's run_window_change_functions, which every
     /// redisplay's frame snapshot runs first (display.rs): the command
-    /// loop's Lisp half (rlisp/vm/window-change.el) once it is installed.
+    /// loop's Lisp half (lisp/romacs/vm/window-change.el) once it is installed.
     /// Lisp runs only when the windows differ from what the last run saw,
     /// so a redisplay that changed no window enters no Lisp.
     pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
@@ -299,7 +299,7 @@ fn host(vm: &mut Vm) -> &mut dyn HostInput {
 }
 
 /// What a host wait's deadline depends on besides the clock, as
-/// `romacs--wait-state` (`rlisp/vm/keyboard.el`) prints it: empty before the
+/// `romacs--wait-state` (`lisp/romacs/vm/keyboard.el`) prints it: empty before the
 /// Lisp half is installed.
 const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
 /// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
@@ -308,7 +308,7 @@ const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--e
 /// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
 /// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
 /// input is pending, then wait for one event, or nil once SECONDS pass; its
-/// value goes to OUT. Lisp runs timers between reads (`rlisp/vm/keyboard.el`).
+/// value goes to OUT. Lisp runs timers between reads (`lisp/romacs/vm/keyboard.el`).
 /// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
 /// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
 pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
@@ -467,10 +467,10 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
         HostEvent::Resize { width, height } => (Some((width, height)), false),
         // A completed background command ends the wait as a timeout does:
         // Lisp may run its callback between commands
-        // (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
         HostEvent::Background => (None, false),
-        // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // Lisp reads it (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
         event => (None, ended(vm, event)),
     })

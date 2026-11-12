@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unsafe Rust census, with per-crate ratchets (UNSAFE-FLOORS.json).
+"""Unsafe Rust census, with per-crate ratchets (ledger/unsafe-floors.json).
 
 Scope: every .rs file Git tracks or would track (untracked files that are not
 ignored count too) inside a Cargo package directory, credited to the nearest
@@ -30,7 +30,7 @@ doc comment counts too. A trailing comment after code, or a SAFETY comment
 above the start of a multi-line statement whose `unsafe` begins a later
 line, does not count: put the comment on the line above the keyword.
 
-The ratchet. UNSAFE-FLOORS.json records, per crate, `sites` and
+The ratchet. ledger/unsafe-floors.json records, per crate, `sites` and
 `undocumented`. `check` fails when a crate's count rises above its floor, and
 also when a floor is slack (the crate now has fewer), so a deletion is
 recorded in the same change: run `lower`, which only ever lowers floors and
@@ -58,7 +58,7 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-FLOORS = Path('UNSAFE-FLOORS.json')
+FLOORS = Path('ledger/unsafe-floors.json')
 KINDS = ('block', 'fn', 'impl', 'trait', 'extern', 'attr', 'other')
 PENDING = 'unsafe_op_in_unsafe_fn_pending'
 
@@ -275,7 +275,7 @@ def lint_problems(root, pending, counts):
 
 
 def problems(root, floors=None, counts=None):
-    """Why ROOT's unsafe census breaks UNSAFE-FLOORS.json, one line each."""
+    """Why ROOT's unsafe census breaks ledger/unsafe-floors.json, one line each."""
     floors = floors if floors is not None else json.loads((Path(root) / FLOORS).read_text())
     counts = counts if counts is not None else census(root)
     recorded = floors.get('crates', {})
@@ -305,13 +305,57 @@ def lowered(floors, counts):
 
 
 def dump(floors):
-    """FLOORS as UNSAFE-FLOORS.json text: one line per crate, so lanes that
+    """FLOORS as ledger/unsafe-floors.json text: one line per crate, so lanes that
     lower different crates merge cleanly."""
     crates = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(floor)}' for crate, floor in floors['crates'].items())
     pending = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(reason)}'
                           for crate, reason in sorted(floors.get(PENDING, {}).items()))
     return (f'{{\n  "rule": {json.dumps(floors["rule"])},\n  "crates": {{\n{crates}\n  }},\n'
             f'  "{PENDING}": {{\n{pending}\n  }}\n}}\n')
+
+
+def merged(base, ours, theirs):
+    """The floors a merge of OURS and THEIRS has, both grown from BASE. The
+    floors are exact (check fails below one as well as above), so each count
+    is BASE plus both sides' changes: two lanes that each removed sites in a
+    crate both count. Where both sides removed the same site the result is
+    low by one and check says so. Pending entries merge three ways."""
+    keys = ('sites', 'undocumented')
+    names = set(base['crates']) | set(ours['crates']) | set(theirs['crates'])
+
+    def count(crate, key):
+        b, o, t = (side['crates'].get(crate, {}).get(key, 0) for side in (base, ours, theirs))
+        return o + t - b
+    crates = {crate: {key: count(crate, key) for key in keys} for crate in sorted(names)}
+    return {**ours, 'crates': {c: f for c, f in crates.items() if f['sites'] > 0},
+            PENDING: merged_entries(*(side.get(PENDING, {}) for side in (base, ours, theirs)))}
+
+
+def merged_entries(base, ours, theirs):
+    """A three-way merge of two maps grown from BASE: an entry one side
+    changed or removed takes that side's change; both sides changing one
+    entry differently is a conflict (ValueError)."""
+    result = {}
+    for key in sorted(set(base) | set(ours) | set(theirs)):
+        b, o, t = base.get(key), ours.get(key), theirs.get(key)
+        if o != b and t != b and o != t:
+            raise ValueError(f'{key} changed differently on the two sides')
+        value = t if o == b else o
+        if value is not None:
+            result[key] = value
+    return result
+
+
+def merge_files(base, ours, theirs):
+    """Git's merge driver for ledger/unsafe-floors.json (tools/derived setup installs
+    it): write the merge over OURS. 1, leaving OURS, when a side does not
+    parse: git then reports the conflict as it would without a driver."""
+    try:
+        text = dump(merged(*(json.loads(Path(p).read_text()) for p in (base, ours, theirs))))
+    except (OSError, ValueError, KeyError, TypeError):
+        return 1
+    Path(ours).write_text(text)
+    return 0
 
 
 def report(counts):
@@ -333,9 +377,12 @@ def row(name, tally):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower'])
+    parser.add_argument('command', choices=['check', 'report', 'lower', 'merge'])
+    parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS, as git passes them')
     parser.add_argument('--root', default='.')
     args = parser.parse_args()
+    if args.command == 'merge':
+        return merge_files(*args.files)
     if args.command == 'report':
         print(report(census(args.root)))
         return 0

@@ -20,10 +20,10 @@ from derived_artifacts import ARTIFACTS  # noqa: E402
 AUTOLOADS = ARTIFACTS[0]
 MERGED = 'merged artifacts must describe both source branches'
 OWNED = ('tools/check-derived', 'tools/derived', 'tools/lib/derived_artifacts.py', '.gitattributes',
-         'LISP-BUNDLED.json')
+         'lisp/bundled.json')
 AUTOLOADS_FIXTURE = '''import json
 from pathlib import Path
-output = Path(json.loads(Path('LISP-BUNDLED.json').read_text())['autoloads'])
+output = Path(json.loads(Path('lisp/bundled.json').read_text())['autoloads'])
 output.parent.mkdir(parents=True, exist_ok=True)
 inputs = sorted(p.stem for p in Path('.').glob('autoload-input-*.txt'))
 output.write_text(f';;; {output.name} --- fixture\\n' + ''.join(f';; {i}\\n' for i in inputs)
@@ -31,10 +31,10 @@ output.write_text(f';;; {output.name} --- fixture\\n' + ''.join(f';; {i}\\n' for
 '''
 # check-derived's other checks are not under test here: each passes.
 STUB = 'GNU_SOURCE = "."\nif __name__ == "__main__":\n    raise SystemExit(0)\n'
-CHECKERS = ('tools/lib/python_tests.py', 'tools/lib/lisp_oracle.py', 'gnu-tests/run.py', 'tools/lib/parity_ratchet.py',
+CHECKERS = ('tools/lib/python_tests.py', 'tools/lib/lisp_oracle.py', 'test/gnu/run.py', 'tools/lib/parity_ratchet.py',
             'tools/lib/gnu_arity.py', 'tools/lib/gnu_defvars.py', 'tools/lib/icon_font.py', 'tools/lib/bundled_fonts.py',
             'tools/lib/treesit_grammars.py', 'tools/lib/unsafe_census.py', 'tools/lib/smells.py',
-            'tools/lib/divergence_index.py')
+            'tools/lib/divergence_index.py', 'tools/lib/lisp_tree.py')
 
 
 def run(root, *args, check=True, env=None):

@@ -1,6 +1,6 @@
 //! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S]`:
 //! the relay an agent session's harness runs as its Romacs MCP server
-//! (rlisp/romacs-agent.el). Unlike the plain relay it reads the lines it
+//! (lisp/romacs/romacs-agent.el). Unlike the plain relay it reads the lines it
 //! copies, so the harness's MCP session outlives the Romacs server it
 //! reaches:
 //!
@@ -17,6 +17,11 @@
 //!   comes after is dropped, as the call's outcome is the server's record;
 //! - it reconnects, says hello and replays the handshake, and copies lines
 //!   again; a reply is forwarded only to a call still waiting for it;
+//! - a server that ends each connection at once (a Romacs its session is
+//!   not attached to closes its relays) is asked again less and less often,
+//!   up to `REFUSED_MAX` apart, and at once when the socket path is
+//!   replaced (the route relinked to the process attaching the session):
+//!   an orphaned harness costs the editor nothing while it waits;
 //! - a writer thread owns the server's socket behind a bounded queue, so a
 //!   busy server that stops reading never stops the relay reading the
 //!   harness: past the queue a call is refused `not executed';
@@ -58,6 +63,12 @@ const INSPECT_TOOL: &str = "romacs_debug_inspect";
 const INSPECTIONS: usize = 4;
 /// How long an inspection may take, its connect included.
 const INSPECT_LIMIT: Duration = Duration::from_secs(10);
+/// The keeper's tick: how often it watches calls and the route.
+const TICK: Duration = Duration::from_millis(250);
+/// A connection the server ends sooner than this was refused.
+const REFUSED_WITHIN: Duration = Duration::from_secs(1);
+/// The longest wait between attempts at a server that keeps refusing.
+const REFUSED_MAX: Duration = Duration::from_secs(30);
 
 struct Call {
     id: Json,
@@ -90,6 +101,7 @@ struct Line {
 /// that shuts both halves down.
 struct Upstream {
     number: u64,
+    since: Instant,
     queue: SyncSender<Line>,
     control: UnixStream,
 }
@@ -111,6 +123,24 @@ struct State {
     /// The relay's `tools/list' probe, which ends that.
     probe: Option<String>,
     probes: u64,
+    /// Connections in a row the server ended within `REFUSED_WITHIN`.
+    refusals: u32,
+}
+
+/// How long to wait before the next connection attempt, after FAILURES
+/// connects in a row that found no server and REFUSALS connections in a
+/// row it ended at once: no server, 100 ms doubling to 2 s; a refusing
+/// one, 500 ms doubling to `REFUSED_MAX`.
+fn retry_after(failures: u32, refusals: u32) -> Duration {
+    let doubled = |base: u64, n: u32, max: Duration| Duration::from_millis(base.saturating_mul(1 << n.min(16))).min(max);
+    if refusals > 0 { doubled(250, refusals, REFUSED_MAX) } else { doubled(50, failures.max(1), Duration::from_secs(2)) }
+}
+
+/// What the socket path is now: a link's or socket's inode and change
+/// time. Relinking a route (rename(2)) or a new listener makes another.
+fn path_identity(path: &std::path::Path) -> Option<(u64, i64, i64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::symlink_metadata(path).ok().map(|m| (m.ino(), m.ctime(), m.ctime_nsec()))
 }
 
 fn key(id: &Json) -> String { id.to_string() }
@@ -375,7 +405,10 @@ impl Relay {
         {
             let mut state = self.lock();
             if state.upstream.as_ref().map(|upstream| upstream.number) != Some(number) { return; }
-            if let Some(upstream) = state.upstream.take() { let _ = upstream.control.shutdown(std::net::Shutdown::Both); }
+            if let Some(upstream) = state.upstream.take() {
+                let _ = upstream.control.shutdown(std::net::Shutdown::Both);
+                state.refusals = if upstream.since.elapsed() < REFUSED_WITHIN { state.refusals.saturating_add(1) } else { 0 };
+            }
             state.cancels.clear();
             state.probe = None;
             let left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
@@ -433,7 +466,7 @@ impl Relay {
         for text in lines {
             if queue.try_send(Line { text, call: None }).is_err() { return false; }
         }
-        state.upstream = Some(Upstream { number, queue, control });
+        state.upstream = Some(Upstream { number, since: Instant::now(), queue, control });
         Self::probe(&mut state);
         drop(state);
         let relay = self.clone();
@@ -454,18 +487,22 @@ pub fn main(config: Config) -> ! {
     let incarnation = format!("{}-{now}", std::process::id());
     let relay = Arc::new(Relay { state: Mutex::default(), stdout: Mutex::new(std::io::stdout()), config, incarnation, inspections: AtomicUsize::new(0) });
     let keeper = relay.clone();
-    // Reconnect for as long as the harness runs, backing off to 2 s, and
-    // watch the calls' reply timeout.
+    // Reconnect for as long as the harness runs (`retry_after`), at once
+    // when the socket path is replaced, and watch the calls' reply timeout.
     std::thread::spawn(move || {
-        let mut wait = Duration::from_millis(50);
+        let (mut failures, mut attempted, mut path) = (0, None::<Instant>, path_identity(&keeper.config.socket));
         loop {
-            if keeper.connected() || keeper.connect() {
-                wait = Duration::from_millis(250);
-                keeper.watch();
-            } else {
-                wait = (wait * 2).min(Duration::from_secs(2));
+            if !keeper.connected() {
+                let now = path_identity(&keeper.config.socket);
+                let wait = retry_after(failures, keeper.lock().refusals);
+                if attempted.is_none_or(|at| at.elapsed() >= wait) || now != path {
+                    (attempted, path) = (Some(Instant::now()), now);
+                    failures = if keeper.connect() { 0 } else { failures + 1 };
+                }
             }
-            std::thread::sleep(wait);
+            let connected = keeper.connected();
+            if connected { keeper.watch(); }
+            std::thread::sleep(if connected { TICK } else { TICK.min(retry_after(failures, keeper.lock().refusals)) });
         }
     });
     // The first connection, before any line: a harness starts with Romacs up.
@@ -480,6 +517,13 @@ pub fn main(config: Config) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusing_server_is_asked_less_often_than_an_absent_one() {
+        let ms = |n: u64| Duration::from_millis(n);
+        assert_eq!([0, 1, 2, 5, 6].map(|failures| retry_after(failures, 0)), [ms(100), ms(100), ms(200), ms(1600), ms(2000)]);
+        assert_eq!([1, 2, 3, 7, 40].map(|refusals| retry_after(9, refusals)), [ms(500), ms(1000), ms(2000), REFUSED_MAX, REFUSED_MAX]);
+    }
 
     #[test]
     fn a_lost_tool_call_is_a_tool_error_and_other_calls_are_rpc_errors() {

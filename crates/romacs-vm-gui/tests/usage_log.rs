@@ -1,4 +1,4 @@
-//! rlisp/romacs-usage-log.el's ERT tests (fixtures/usage-log-test.el) in
+//! lisp/romacs/romacs-usage-log.el's ERT tests (fixtures/usage-log-test.el) in
 //! Romacs's `--batch` session and in pinned GNU's: the library is GNU Lisp
 //! on GNU's API, so both run every test and pass it.
 use std::process::Command;
@@ -6,7 +6,7 @@ use std::process::Command;
 fn run(binary: &str, dir: &std::path::Path) -> (Option<i32>, String) {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let output = Command::new(binary)
-        .args(["-Q", "--batch", "-l", &format!("{root}/rlisp/romacs-usage-log.el"),
+        .args(["-Q", "--batch", "-l", &format!("{root}/lisp/romacs/romacs-usage-log.el"),
                "-l", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/usage-log-test.el"),
                "-f", "ert-run-tests-batch-and-exit"])
         .current_dir(dir).env("HOME", dir).env("TMPDIR", dir).env("XDG_CACHE_HOME", dir.join("cache"))

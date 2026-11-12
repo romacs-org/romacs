@@ -1,4 +1,4 @@
-//! Native model surfaces on the open display (rlisp/romacs-model.el). The
+//! Native model surfaces on the open display (lisp/romacs/romacs-model.el). The
 //! VM names each surface by an integer id it allocates, sends Lisp's
 //! requests to the display host, and hands the renderer's events to Lisp as
 //! special events `(romacs-model ID TYPE PLIST)`, which `special-event-map`

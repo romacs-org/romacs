@@ -44,6 +44,7 @@ mod xml_read;
 pub mod host;
 pub mod world;
 pub mod flight;
+pub mod host_calls;
 mod twin;
 pub mod compiled_lisp;
 mod environment;
@@ -2094,7 +2095,7 @@ impl Vm {
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
         // keyboard.c:13843: the command that entered the innermost
-        // minibuffer, which read_minibuf binds (rlisp/vm/minibuf.el).
+        // minibuffer, which read_minibuf binds (lisp/romacs/vm/minibuf.el).
         vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
@@ -2114,7 +2115,7 @@ impl Vm {
             "last-command-event",
             "command-history",
             // keyboard.c this_command_keys, this_single_command_key_start
-            // and raw_keybuf (prims/keyboard.rs, rlisp/vm/keyboard.el).
+            // and raw_keybuf (prims/keyboard.rs, lisp/romacs/vm/keyboard.el).
             "romacs--command-keys",
             "romacs--single-command-key-start",
             "romacs--raw-command-keys",

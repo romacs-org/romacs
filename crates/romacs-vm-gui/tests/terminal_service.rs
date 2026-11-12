@@ -337,10 +337,23 @@ fn confirmed_close_hangs_up_shell_background_jobs() {
     let pid=s.text.lines().find_map(|l|l.strip_prefix("BG_PID:")).unwrap().parse().unwrap();
     let job=Background(pid);
     assert!(running(job.0),"BACKGROUND_JOB_STARTED");
+    // The job's own exit, by event: its pidfd reads ready once it ends, a
+    // zombie too. Bounded by what a hang takes, not by a quiet host's pace.
+    let pidfd=rustix::process::pidfd_open(rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap(),rustix::process::PidfdFlags::empty())
+        .expect("BACKGROUND_JOB_PIDFD");
     service.close(id).unwrap();
-    let deadline=Instant::now()+Duration::from_secs(2);
-    while running(job.0) && Instant::now()<deadline { std::thread::sleep(Duration::from_millis(10)); }
-    assert!(!running(job.0),"CONFIRMED_CLOSE_MUST_TERMINATE_BACKGROUND_JOB");
+    let mut ready=[rustix::event::PollFd::new(&pidfd,rustix::event::PollFlags::IN)];
+    let deadline=Instant::now()+Duration::from_mins(2);
+    let woken=loop {
+        // One deadline across interruptions (the shell's SIGCHLD among them).
+        let left=deadline.saturating_duration_since(Instant::now());
+        let left=rustix::event::Timespec{tv_sec:i64::try_from(left.as_secs()).unwrap_or(i64::MAX),tv_nsec:i64::from(left.subsec_nanos())};
+        match rustix::event::poll(&mut ready,Some(&left)) {
+            Err(rustix::io::Errno::INTR)=>{}
+            woken=>break woken.expect("BACKGROUND_JOB_POLL"),
+        }
+    };
+    assert!(woken==1 && !running(job.0),"CONFIRMED_CLOSE_MUST_TERMINATE_BACKGROUND_JOB");
 }
 
 #[test]

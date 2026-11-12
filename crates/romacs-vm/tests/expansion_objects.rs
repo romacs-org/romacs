@@ -201,8 +201,8 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
     // subr.el stops at its own frontier (pinned in bootstrap_descriptors.rs).
     // Since Phase 0 restored GNU's subr.el that frontier (form 139, the radix
     // reader gap G1) comes BEFORE `add-hook` (subr.el:2295), which is all
@@ -210,8 +210,8 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     // closure-in-quoted-expansion representation, not subr's frontier, so it
     // loads GNU's own `add-hook` defun, verbatim from lisp/subr.el, through the
     // loader (lazy body, as GNU defines it) instead of depending on the frontier.
-    let _ = vm.load_file(&root.join("gnu-lisp/subr.el"));
-    let subr = std::fs::read_to_string(root.join("gnu-lisp/subr.el")).unwrap();
+    let _ = vm.load_file(&root.join("lisp/gnu/subr.el"));
+    let subr = std::fs::read_to_string(root.join("lisp/gnu/subr.el")).unwrap();
     let start = subr.find("\n(defun add-hook (hook function &optional depth local)\n").expect("GNU add-hook") + 1;
     let end = start + subr[start..].find("\n(defun remove-hook ").expect("GNU remove-hook follows add-hook");
     let add_hook = std::env::temp_dir().join(format!("gnu-add-hook-{}.el", std::process::id()));
@@ -219,7 +219,7 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     let loaded = vm.load_file(&add_hook);
     let _ = std::fs::remove_file(&add_hook);
     loaded.unwrap();
-    let path = root.join("gnu-lisp/emacs-lisp/macroexp.el").canonicalize().unwrap();
+    let path = root.join("lisp/gnu/emacs-lisp/macroexp.el").canonicalize().unwrap();
     let result = vm.load_file(&path).map(|_| ());
     let report = vm.load_report();
     let step = report["steps"].as_array().unwrap().iter()
