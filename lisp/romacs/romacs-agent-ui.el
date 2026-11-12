@@ -326,10 +326,19 @@ a brief of INPUT."
       (let ((brief (romacs-agent-ui--brief input)))
         (concat " " name (if (string-empty-p brief) "" (concat "  " brief)))))))
 
-(defun romacs-agent-ui--chip (word)
-  "A task's status WORD as its card shows it: its state's glyph."
-  (propertize (or (romacs-agent-ui--label (romacs-agent-ui--state-of (romacs-agent-ui--status-key word))) word)
-              'romacs-agent-chip t))
+(defun romacs-agent-ui--task-key (id word)
+  "Task ID's state key: its status WORD (a record's, a wake's), unless its
+session is known and still goes on.  A turn ended is not the task done:
+work it left running, such as a command in the background, keeps it
+waiting on its workers."
+  (let ((key (and-let* ((session (romacs-agent-get id))) (romacs-agent-ui--state-key session))))
+    (if (memq key romacs-agent-ui--live-keys) key (romacs-agent-ui--status-key word))))
+
+(defun romacs-agent-ui--chip (id word)
+  "Task ID's state, its status WORD as `romacs-agent-ui--task-key' reads
+it, as its card shows it: the state's glyph."
+  (let ((state (romacs-agent-ui--state-of (romacs-agent-ui--task-key id word))))
+    (propertize (or (romacs-agent-ui--label state) (downcase (nth 2 state))) 'romacs-agent-chip t)))
 
 (defvar romacs-agent-ui--link-map
   (let ((map (make-sparse-keymap)))
@@ -340,8 +349,9 @@ a brief of INPUT."
   "Keys of a link to a delegated task's thread.")
 
 (defun romacs-agent-ui--thread-link (id)
-  "A link to task ID's thread."
-  (propertize "↗ thread" 'face 'romacs-agent-link 'mouse-face 'highlight 'help-echo "Open this task's thread"
+  "A link to task ID's thread: 🧵, or the word where glyphs do not show."
+  (propertize (romacs-agent-ui--glyph "🧵" "thread" 'romacs-agent-link)
+              'mouse-face 'highlight 'help-echo "Open this task's thread"
               'keymap romacs-agent-ui--link-map 'romacs-agent-task id))
 
 (defvar romacs-agent-ui--compaction-map
@@ -365,7 +375,7 @@ to its thread, which fold its result as the rest of the row does."
       (end-of-line)
       (let ((start (point)))
         (romacs-agent-ui--insert-at
-         start (propertize (concat "  " (romacs-agent-ui--chip (gethash "status" record "running"))
+         start (propertize (concat "  " (romacs-agent-ui--chip id (gethash "status" record "running"))
                                    "  " (romacs-agent-ui--thread-link id))
                            'romacs-agent-tool tool))
         (puthash id (copy-marker (+ start 2)) romacs-agent-ui--tasks)))))
@@ -377,7 +387,7 @@ to its thread, which fold its result as the rest of the row does."
       (let* ((inhibit-read-only t) (start (marker-position mark))
              (tool (get-text-property start 'romacs-agent-tool)))
         (delete-region start (next-single-property-change start 'romacs-agent-chip))
-        (romacs-agent-ui--insert-at start (propertize (romacs-agent-ui--chip state) 'romacs-agent-tool tool))
+        (romacs-agent-ui--insert-at start (propertize (romacs-agent-ui--chip id state) 'romacs-agent-tool tool))
         (set-marker mark start)))))
 
 (defun romacs-agent-ui--wakes (session text)
@@ -402,7 +412,7 @@ never a prompt, the result folded below it, and its card settled."
     (romacs-agent-ui--line
      session event
      (concat "  ⇠ " (propertize (plist-get wake :title) 'face 'romacs-agent-delegate 'romacs-agent-card t)
-             "  " (romacs-agent-ui--chip state) "  " (romacs-agent-ui--thread-link id)
+             "  " (romacs-agent-ui--chip id state) "  " (romacs-agent-ui--thread-link id)
              (if (string-empty-p preview) "" (propertize (concat "  " preview) 'face 'romacs-agent-dim)))
      'romacs-agent-tool key)
     (unless (string-empty-p result)
@@ -941,6 +951,15 @@ RANK), RANK its place here.  The states ranked before `idle' are news.")
        (eql (romacs-agent-planned-seq session) (romacs-agent-input-seq session))
        (not (romacs-agent-failed session))))
 
+(defun romacs-agent-ui--workers-live-p (session)
+  "Whether one of SESSION's workers still goes on.  Its rows are ranked
+\(`romacs-agent-ui--summarize-children'): the live ones rank no later
+than `waiting', so the finished ones are never read."
+  (let ((last (romacs-agent-ui--rank 'waiting)))
+    (cl-loop for row in (romacs-agent-children-rows session)
+             while (<= (romacs-agent-ui--row-rank row) last)
+             thereis (memq (plist-get row :key) romacs-agent-ui--live-keys))))
+
 (defun romacs-agent-ui--state-key (session)
   "SESSION's state key (`romacs-agent-ui--states'), from its data alone:
 its workers' as their rows were last made.  What goes on comes first,
@@ -955,9 +974,7 @@ completion went to its parent: not news to the user."
            'failed)
           ((memq state '(starting running)) 'working)
           ((eq state 'history) 'history)
-          ((cl-some (lambda (row) (memq (plist-get row :key) romacs-agent-ui--live-keys))
-                    (romacs-agent-children-rows session))
-           'waiting)
+          ((romacs-agent-ui--workers-live-p session) 'waiting)
           ((romacs-agent-settled-p session) 'settled)
           ((romacs-agent-cancelled session) 'ended)
           ((eq state 'detached) 'detached)
