@@ -146,6 +146,31 @@ conversation is in `one'; `told' collects what a task is told."
       ;; Still one wake, read back whole.
       (should (romacs-agent-tools--wake-parse wake)))))
 
+(ert-deftest romacs-agent-instance-a-model-limit ()
+  ;; A model that needs usage credits the account has spent: its overage
+  ;; window is refused, the instance still runs its other models.
+  (romacs-agent-instance-tests--with
+    (setf (romacs-agent-model session) "fable")
+    (let ((overage (romacs-agent--claude-events
+                    session (romacs-mcp--object "type" "rate_limit_event"
+                                                "rate_limit_info" (romacs-mcp--object "status" "rejected"
+                                                                                      "rateLimitType" "seven_day_overage_included"
+                                                                                      "resetsAt" 4102444800))))
+          (refused (romacs-agent--claude-events
+                    session (romacs-mcp--object "type" "result" "is_error" t "api_error" "model_requires_usage_credits"
+                                                "result" "This model needs usage credits"))))
+      (should (eq (plist-get (car refused) :limit) 'model))
+      (romacs-agent--raise session (append (car overage) (list :time 100.0)))
+      (romacs-agent--raise session (append (car refused) (list :seq 9))))
+    (should (romacs-agent-room "claude"))
+    (should (equal (plist-get (romacs-agent-limited session) :model) "fable"))
+    (should (equal (gethash "model" (gethash "limit" (romacs-agent-tools--task session))) "fable"))
+    (let ((wake (romacs-agent-tools--wake-text session (list 9 (romacs-agent-reply session) t))))
+      (should (string-match-p "Usage limit for fable on claude" wake))
+      (should (string-match-p "romacs_task_switch with taskId and model goes on in place" wake))
+      (should (string-match-p "or with provider (claude2) on fable; codex take a handoff on a brief" wake))
+      (should (romacs-agent-tools--wake-parse wake)))))
+
 (ert-deftest romacs-agent-instance-codex-limits ()
   (romacs-agent-instance-tests--with
     (let ((codex (romacs-agent--make :id "c" :harness 'codex :provider "codex")))
@@ -212,6 +237,12 @@ conversation is in `one'; `told' collects what a task is told."
         (should (equal (plist-get (romacs-agent-pending-selection session) :provider) "claude2"))
         (should (string-match-p "moves once its running turn ends" (gethash "next" record)))
         (should (equal (cdr (car told)) "go on")))
+      ;; A model alone: in place, on its own instance.
+      (let ((record (romacs-agent-tools--switch (romacs-mcp--object "taskId" romacs-agent-instance-tests--id
+                                                                    "model" "sonnet"))))
+        (should (equal (plist-get (romacs-agent-pending-selection session) :model) "sonnet"))
+        (should (equal (plist-get (romacs-agent-pending-selection session) :provider) "claude"))
+        (should (string-match-p "changes once its running turn ends" (gethash "next" record))))
       ;; Another session's task: refused.
       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "other")))
         (should-error (romacs-agent-tools--switch (romacs-mcp--object "taskId" romacs-agent-instance-tests--id "provider" "claude2"))

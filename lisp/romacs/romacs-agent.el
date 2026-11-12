@@ -1208,6 +1208,7 @@ itself, so the turn goes on whatever becomes of this server."
                  (and (plist-get event :limit)
                       (let ((room (gethash (romacs-agent-provider session) romacs-agent--room)))
                         (list :provider (romacs-agent-provider session)
+                              :model (and (eq (plist-get event :limit) 'model) (romacs-agent-model session))
                               :text (or (plist-get event :text) (plist-get event :reason))
                               :window (plist-get room :window) :resets (plist-get room :resets)))))
            (cl-incf (romacs-agent-turns session))
@@ -1806,10 +1807,14 @@ fraction), :resets (seconds since the epoch), :window and :time.")
 
 (defun romacs-agent--note-room (session event)
   "Keep EVENT, a `rate-limit' report of SESSION's harness, as its
-instance's, unless an older one: a replay reports the past too."
+instance's, unless an older one: a replay reports the past too.  Its
+overage spent is no instance's limit: only the models that need usage
+credits are refused, and the others run."
   (let ((known (gethash (romacs-agent-provider session) romacs-agent--room))
         (time (or (plist-get event :time) (float-time))))
-    (unless (and known (> (plist-get known :time) time))
+    (unless (or (and known (> (plist-get known :time) time))
+                (and (eq (plist-get event :status) 'rejected)
+                     (string-match-p "overage" (format "%s" (plist-get event :window)))))
       (puthash (romacs-agent-provider session)
                (list :status (plist-get event :status) :used (plist-get event :used)
                      :resets (plist-get event :resets) :window (plist-get event :window) :time time)

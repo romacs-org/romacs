@@ -300,8 +300,11 @@ cache, it reports none) or does not say."
       ("result"
        (list (list :type 'done :cost (gethash "total_cost_usd" line)
                    :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
-                   ;; Refused at its instance's usage limit.
-                   :limit (equal (gethash "api_error" line) "usage_limit_reached")
+                   ;; Refused at a usage limit: its instance's, or its model's
+                   ;; alone (one that needs usage credits the account has spent;
+                   ;; its other models still run).
+                   :limit (pcase (gethash "api_error" line)
+                            ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
                    :reason (romacs-agent--claude-reason line)
                    :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
                    :context-window (let ((usage (gethash "modelUsage" line)) (window nil))

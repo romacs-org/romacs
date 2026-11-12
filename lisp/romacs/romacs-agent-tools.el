@@ -356,7 +356,8 @@ the rest is."
 that have room, as a task record says it; or null."
   (if-let* ((limited (romacs-agent-limited session)))
       (romacs-mcp--object
-       "provider" (plist-get limited :provider) "text" (or (plist-get limited :text) :null)
+       "provider" (plist-get limited :provider) "model" (or (plist-get limited :model) :null)
+       "text" (or (plist-get limited :text) :null)
        "window" (or (plist-get limited :window) :null) "resets" (or (plist-get limited :resets) :null)
        "alternatives" (vconcat (mapcar (lambda (a) (romacs-mcp--object "provider" (plist-get a :provider)
                                                                        "lossless" (if (plist-get a :lossless) t :false)))
@@ -366,17 +367,33 @@ that have room, as a task record says it; or null."
 (defun romacs-agent-tools--limit-note (session)
   "What a wake adds to SESSION's end at its usage limit: where it could go on."
   (when-let* ((limited (romacs-agent-limited session)))
-    (let ((alternatives (romacs-agent-alternatives session)))
-      (format "\n[Usage limit on %s%s. %s]" (plist-get limited :provider)
+    (let ((alternatives (romacs-agent-alternatives session))
+          (model (plist-get limited :model)))
+      (format "\n[Usage limit %s%s. %s]"
+              (if model (format "for %s on %s" model (plist-get limited :provider))
+                (format "on %s" (plist-get limited :provider)))
               (if (plist-get limited :resets)
                   (format-time-string " (resets %b %-d %H:%M)" (seconds-to-time (plist-get limited :resets))) "")
+              (if model
+                  (let ((lossless (cl-remove-if-not (lambda (a) (plist-get a :lossless)) alternatives))
+                        (handoffs (cl-remove-if (lambda (a) (plist-get a :lossless)) alternatives)))
+                    (format "Its other models run: romacs_task_switch with taskId and model goes on in place, \
+the same conversation%s%s."
+                            (if lossless
+                                (format ", or with provider (%s) on %s"
+                                        (mapconcat (lambda (a) (plist-get a :provider)) lossless ", ") model)
+                              "")
+                            (if handoffs
+                                (format "; %s take a handoff on a brief, on a model of their own"
+                                        (mapconcat (lambda (a) (plist-get a :provider)) handoffs ", "))
+                              "")))
               (if alternatives
                   (concat "With room: "
                           (mapconcat (lambda (a) (format "%s (%s)" (plist-get a :provider)
                                                          (if (plist-get a :lossless) "the same conversation moves" "a handoff on a brief")))
                                      alternatives ", ")
                           ". romacs_task_switch with that provider goes on there.")
-                "No instance has room.")))))
+                "No instance has room."))))))
 
 (defun romacs-agent-tools--wake-text (session end)
   "The parent's message for SESSION's turn END, (SEQ RESULT FAILED).  Its
@@ -850,26 +867,29 @@ and it is told to go on; not, its parent is woken with that end."
 
 (defun romacs-agent-tools--switch (arguments)
   "Go on with the task taskId (the caller's own session by default) under
-instance provider: of its harness, the same session and conversation,
-once its running turn ends; of another, a handoff (a new task on a brief
-of the thread, with its parent and wake rule)."
+instance provider (default its own: a model or effort changes in place):
+of its harness, the same session and conversation, once its running turn
+ends; of another, a handoff (a new task on a brief of the thread, with
+its parent and wake rule)."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
          (task (or (romacs-agent-get id) (user-error "No task %s" id)))
-         (provider (gethash "provider" arguments))
+         (provider (or (gethash "provider" arguments) (romacs-agent-provider task)))
          (instance (or (romacs-agent--configured provider) (user-error "No agent provider %s" provider)))
          (model (gethash "model" arguments)) (effort (gethash "effort" arguments))
          (next (gethash "next" arguments)))
     (unless (equal id caller) (romacs-agent-tools--own task caller "move it"))
     (if (eq (plist-get instance :harness) (romacs-agent-harness task))
-        (let ((wanted (romacs-agent--wanted task)))
+        (let ((wanted (romacs-agent--wanted task))
+              (verb (if (equal provider (romacs-agent-provider task)) "change" "move")))
           (romacs-agent-select task (or model (plist-get wanted :model)) (or effort (plist-get wanted :effort)) provider)
           (when (and next (not (string-empty-p (string-trim next)))) (romacs-agent-tools--tell task next))
           (let ((record (romacs-agent-tools--task task)))
             (puthash "next" (if (equal id caller)
-                                "You move once this turn ends, the same conversation: end your turn now."
-                              "It moves once its running turn ends, the same conversation; its next end wakes you as before.")
+                                (format "You %s once this turn ends, the same conversation: end your turn now." verb)
+                              (format "It %ss once its running turn ends, the same conversation; its next end wakes you as before."
+                                      verb))
                      record)
             record))
       (romacs-agent-tools--handed-off task provider model effort next))))
@@ -1267,14 +1287,15 @@ romacs_task_send."
 
 (romacs-mcp-register-tool
  "romacs_task_switch"
- "Go on with a task (taskId, default your own session) under another provider instance, e.g. when its instance \
-hits its usage limit: on an instance of the same harness (claude to claude2) the same session goes on, its \
-conversation moved as is, once its running turn ends (your own: end your turn); on another harness, a new task \
-starts on a brief of the thread, with the same parent and wake rule. model and effort default to the task's; \
-next is a message it is given. A task's record names its usage limit and the instances with room."
+ "Change a task's model or effort, or go on with it under another provider instance (taskId, default your own \
+session), e.g. when its model or instance hits a usage limit. The same session and conversation go on, once its \
+running turn ends (your own: end your turn): in place with model or effort alone (provider defaults to its own), \
+or moved as is to an instance of the same harness (claude to claude2); on another harness, a new task starts on a \
+brief of the thread, with the same parent and wake rule. model and effort default to the task's; next is a message \
+it is given. A task's record names its usage limit and the instances with room."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string") ("provider" . "string") ("model" . "string")
                        ("effort" . "string") ("next" . "string"))
-                     '("provider"))
+                     nil)
  #'romacs-agent-tools--switch)
 
 (romacs-mcp-register-tool
