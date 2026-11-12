@@ -81,6 +81,7 @@ impl Vm {
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
         self.charsets.trace(&mut values);
+        // HOST(dynamic:saved): verify's reference marker: the saved values are roots it reads again
         for &(slot, old, buffer, _) in &self.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }

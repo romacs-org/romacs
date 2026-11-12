@@ -60,8 +60,9 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='editing-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='editing-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -211,15 +212,12 @@ def main():
         return 1
     finally:
         for child in (process, keyboard, compositor):
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
-        (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-        (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
+            live.stop(child)
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+            (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
+        finally:
+            live.remove_root(temporary)
 
 
 if __name__ == '__main__':

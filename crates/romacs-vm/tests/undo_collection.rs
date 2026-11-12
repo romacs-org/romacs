@@ -1,6 +1,6 @@
 //! What a collection does to undo lists: what a marker nothing holds loses,
 //! here against the pinned GNU, and where the collector's own modes and paths
-//! matter. `test/src/undo-collection-tests.el` holds the rest of what GNU's
+//! matter. `test/romacs/src/undo-collection-tests.el` holds the rest of what GNU's
 //! does. The forms here each run as a request of their own, since within one a
 //! register a frame has finished with still holds what it held: as firmly as a
 //! variable, until the roots stop at the frames in use.

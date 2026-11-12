@@ -220,7 +220,7 @@ def bootstrap_chain(root=None):
 
 
 def load_path(root=None):
-    """GNU's installed load-path, as gnu-tests/run.py load_path: the Lisp
+    """GNU's installed load-path, as test/gnu/run.py load_path: the Lisp
     root, then the immediate subdirectories its generated subdirs.el names
     (reverse name order, obsolete last, term and VCS/backup names omitted)."""
     lisp = (root or ROOT) / 'lisp/gnu'

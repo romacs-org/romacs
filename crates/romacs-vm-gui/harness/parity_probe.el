@@ -8,9 +8,11 @@
 ;; $PARITY_PROBE_DIR/request.eld, a `(ID . FORM)' pair, by writing
 ;; `(ID ok VALUE)' or `(ID error CONDITION)' to response.eld: every exit
 ;; of the form is answered, a `quit' and a `throw' too.  Timers run
-;; when the engine waits for input, so an answer also means the engine has
-;; consumed the input before it.  The observer reads state; it does not
-;; touch the match data, the current buffer, the echo area or *Messages*.
+;; whenever the engine waits, inside a command too, and before keys the
+;; compositor has yet to deliver: an answer alone says nothing of the keys
+;; typed before it (parity_live's `Engine.press' asks what does).  The
+;; observer reads state; it does not touch the match data, the current
+;; buffer, the echo area or *Messages*.
 ;; An init may set `parity-probe-variable-prefix', `parity-probe-variables'
 ;; and `parity-probe-secrets-function' before loading it.
 

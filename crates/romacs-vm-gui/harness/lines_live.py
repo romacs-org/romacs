@@ -428,7 +428,8 @@ RETURN_INIT = INIT + '''(setq initial-major-mode 'fundamental-mode)
         unread-post-input-method-events (list ?a))))
 (run-with-timer 3 nil (lambda ()
   (lines-live-record '(sit-start))
-  (lines-live-record (list 'sit-end (sit-for 6)))))
+  ;; Long enough for a loaded host's key to arrive; the key ends it.
+  (lines-live-record (list 'sit-end (sit-for 600)))))
 '''
 
 
@@ -446,7 +447,7 @@ def check_return(args, report, check):
         time.sleep(.5)
         typed = time.monotonic()
         subprocess.run(['wtype', '-M', 'ctrl', 'b', '-m', 'ctrl'], env=env, check=True, timeout=20)
-        fio.wait(lambda: len(replies()) >= 1, 5, 'the key typed during sit-for as a command', process)
+        fio.wait(lambda: len(replies()) >= 1, args.timeout, 'the key typed during sit-for as a command', process)
         unread = {'records': records(state), 'reply': replies()[0], 'seconds': round(time.monotonic() - typed, 2)}
         report['unread'] = unread
         check('a key sit-for read in a timer runs as the next command, with no other key',
@@ -455,13 +456,13 @@ def check_return(args, report, check):
         time.sleep(.5)
         for count, key in enumerate([['-k', 'Return'], ['-M', 'ctrl', 'j', '-m', 'ctrl']], 2):
             subprocess.run(['wtype', *key], env=env, check=True, timeout=20)
-            fio.wait(lambda: len(replies()) >= count, 10, f'command {count}', process)
+            fio.wait(lambda: len(replies()) >= count, args.timeout, f'command {count}', process)
         time.sleep(.5)
         shown = replies()[1:]
         start = len(records(state))
         subprocess.run(['wtype', '-k', 'F8'], env=env, check=True, timeout=20)
         try:
-            fio.wait(lambda: any(r.startswith('(post self-insert-command 99') for r in records(state)[start:]), 5, 'the queued events', process)
+            fio.wait(lambda: any(r.startswith('(post self-insert-command 99') for r in records(state)[start:]), args.timeout, 'the queued events', process)
         except AssertionError:
             pass
         later = records(state)[start:]

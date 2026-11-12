@@ -512,7 +512,7 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         features = (['--features', 'romacs-display-runtime/video']
                     if sys.platform == 'linux' and 'romacs-display-runtime' in suites.get('display', [])
                     else [])
-        subject_tool = src / 'gnu-tests/tools/gate_vacuity.py'
+        subject_tool = src / 'test/gnu/tools/gate_vacuity.py'
         subject_source = out(sys.executable, '-B', str(subject_tool), 'source', cwd=src, env=env(src))
         build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *features,
                          '--list-type', 'binaries-only', '--message-format', 'json']
@@ -642,8 +642,14 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
               'romacs-gui-tests::harness_contract')
 
 
-def changed_filter(wt, base='master'):
-    """Nextest filter for the small gate: `filter_for` what changed since BASE."""
+def changed_filter(wt, base='beta'):
+    """Nextest filter for the small gate: `filter_for` what changed since BASE,
+    or since origin/BASE in a clone that has only the remote-tracking trunk."""
+    def resolves(rev):
+        return subprocess.run(['git', 'rev-parse', '--verify', '--quiet', rev], cwd=wt,
+                              stdout=subprocess.DEVNULL).returncode == 0
+    if not resolves(base) and resolves(f'origin/{base}'):
+        base = f'origin/{base}'
     base = out('git', 'merge-base', 'HEAD', base, cwd=wt).decode().strip()
     names = set(out('git', 'diff', '--name-only', base, cwd=wt).decode().split())
     names |= set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
@@ -741,7 +747,7 @@ def inner(args):
     global ORACLE
     wt, run_dir = pathlib.Path(args.worktree), pathlib.Path(args.run_dir)
     # The measured tree is an extracted archive with NO .git, but in-gate receipt
-    # checks (gnu-tests/tools/vacuity_binding.py, reached from the parity_ratchet
+    # checks (test/gnu/tools/vacuity_binding.py, reached from the parity_ratchet
     # tests) verify revision identity with git plumbing. Offer them the candidate
     # worktree as a git root instead of writing a .git into the measured tree:
     # lisp_oracle.rs:130 deliberately refuses a repository with extras there, and
