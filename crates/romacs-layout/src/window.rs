@@ -491,12 +491,14 @@ fn context_of(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, seen: &
     let shift = px::of(shift);
     // A slot whose face no character of the window shows in answers no
     // metrics; only a line with a slot that shows no character can have one.
-    let mut ghosts = 0u64;
+    let mut ghosts = None;
     if kept.cache.line(seen.key).ghostly {
         let slots = pass.slots(seen).to_vec();
-        for (slot, &index) in slots.iter().enumerate().skip(1).take(63) {
-            if !pass.keeps(index as usize) && !pass.shown(kept)?[index as usize].used { ghosts |= 1 << slot; }
+        let mut bits = vec![0u64; slots.len().div_ceil(64)];
+        for (slot, &index) in slots.iter().enumerate().skip(1) {
+            if !pass.keeps(index as usize) && !pass.shown(kept)?[index as usize].used { bits[slot / 64] |= 1 << (slot % 64); }
         }
+        ghosts = bits.iter().any(|&word| word != 0).then(|| bits.into());
     }
     Ok(Context {
         width: px::of(snapshot.width),
@@ -756,7 +758,7 @@ fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell:
             end_byte = row_end;
             if pointed.is_some() { place = pointed.map(|p| p.place); }
             if !ends_text || y < body {
-                let shift = context.shift;
+                let shift = shown.context.shift;
                 let scrolled = shift > 0.0 && (seen.newline || row_start < text_len);
                 rows.push(Row { start: row_start, y, height: row.height });
                 marks.push(RowMarks { continued: !last, continuation: starts || row.restart.continuation, truncated: last && row.truncated,

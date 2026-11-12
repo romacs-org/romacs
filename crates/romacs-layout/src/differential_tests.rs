@@ -256,6 +256,8 @@ fn edits_to_a_long_line_lay_out_as_whole() {
         eprintln!("{wrap:?}: {counts:?}");
         // A truncated line is one row, read to its cut: laid out whole.
         assert_eq!(counts.lines_resumed > 20, simple && wrap != LineWrap::Truncate, "{counts:?}");
+        // Some edits leave later rows where they were, in the same state.
+        if simple && wrap == LineWrap::Word { assert!(counts.resyncs > 0, "{counts:?}"); }
     }
 }
 
@@ -307,5 +309,73 @@ fn point_moves_lay_out_as_whole() {
             }
             both(&mut engine, &frame, seed * 100 + step);
         }
+    }
+}
+
+/// Under window wrap, a deletion a TAB absorbs leaves every later row
+/// starting a byte earlier in the same state: the rows after it are the
+/// earlier version's, taken again, and nothing overflows finding them.
+#[test]
+fn a_deletion_a_tab_absorbs_takes_the_rows_after_it_again() {
+    let mut engine = LayoutEngine::new().unwrap();
+    let mut rng = Rng(29);
+    let mut window = snapshot(&mut rng, 1);
+    (window.wrap, window.hscroll, window.height, window.width, window.start_byte, window.vscroll_px) = (LineWrap::Window, Hscroll::default(), 700, 600, 0, 0);
+    (window.stretches, window.images, window.wrap_flips, window.line_numbers, window.mode_line, window.header_line) = (vec![], vec![], vec![], None, None, None);
+    window.faces.truncate(1);
+    window.point_byte = 0;
+    let long: String = (0..400).map(|i| ["cdefgh", "ijk", "lmnopq"][i % 3]).collect::<Vec<_>>().join(" ");
+    window.text = TextSlice { utf8: format!("head\nab\t{long}\ntail"), face_runs: vec![], raw: vec![], extends: vec![] };
+    both(&mut engine, &frame(vec![window.clone()]), 1);
+    window.text.utf8.remove(5);
+    both(&mut engine, &frame(vec![window.clone()]), 2);
+    let counts = engine.counts().0;
+    assert!(counts.resyncs > 0 && counts.rows_reused > 0, "{counts:?}");
+}
+
+/// Faces of ever new colours, frame after frame (a fade): the faces kept
+/// stay bounded, and each frame still lays out as whole.
+#[test]
+fn faces_of_new_colours_stay_bounded() {
+    let mut engine = LayoutEngine::new().unwrap();
+    let mut rng = Rng(31);
+    let mut window = snapshot(&mut rng, 1);
+    window.text = TextSlice { utf8: "a fading line\nand another".into(), face_runs: vec![FaceRun { bytes: 2..8, face: FaceHandle(1) }], raw: vec![], extends: vec![] };
+    (window.start_byte, window.point_byte) = (0, 0);
+    (window.stretches, window.images, window.wrap_flips, window.line_numbers) = (vec![], vec![], vec![], None);
+    for step in 0..(crate::MAX_FACES as u32 + 50) {
+        let [r, g, b] = step.to_le_bytes()[..3].try_into().unwrap();
+        window.faces[1].foreground = [r, g, b];
+        engine.lay_out(&frame(vec![window.clone()])).unwrap();
+    }
+    assert!(engine.store.faces.len() <= crate::MAX_FACES + 1, "{}", engine.store.faces.len());
+}
+
+/// Edits to a long line holding a line number's label (a buffer line a
+/// hidden newline joined to it) whose width changes from one version to
+/// the next: rows after the label take its gutter, which a resumed line
+/// must not take from the earlier version.
+#[test]
+fn edits_under_a_label_inside_a_line_lay_out_as_whole() {
+    let mut engine = LayoutEngine::new().unwrap();
+    let mut rng = Rng(37);
+    let mut window = snapshot(&mut rng, 1);
+    (window.wrap, window.hscroll, window.height, window.width, window.start_byte, window.vscroll_px) = (LineWrap::Word, Hscroll::default(), 700, 600, 0, 0);
+    (window.stretches, window.images, window.wrap_flips, window.mode_line, window.header_line) = (vec![], vec![], vec![], None, None);
+    window.faces.truncate(1);
+    let long = (0..300).map(|i| ["tab\tstop", "words", "of", "a reply"][i % 4]).collect::<Vec<_>>().join(" ");
+    window.text = TextSlice { utf8: format!("head\n{long}\ntail"), face_runs: vec![], raw: vec![], extends: vec![] };
+    for step in 0..30usize {
+        let text = &mut window.text.utf8;
+        let at = 5 + (step * 37) % 400;
+        let at = (at..).find(|&at| text.is_char_boundary(at)).unwrap();
+        if step % 2 == 0 { text.insert_str(at, "more "); } else { text.replace_range(at..at + 1, ""); }
+        let inside = (900..).find(|&at| window.text.utf8.is_char_boundary(at)).unwrap();
+        let tail = window.text.utf8.rfind('\n').unwrap() + 1;
+        let width = 3 + step % 3;
+        window.line_numbers = Some(LineNumbers { columns: 4, face: FaceHandle(0), current: FaceHandle(0),
+            labels: vec![(0, "  1 ".into(), false), (5, "  2 ".into(), true), (inside, format!("{:>width$} ", 7), false), (tail, "  9 ".into(), false)] });
+        window.point_byte = at;
+        both(&mut engine, &frame(vec![window.clone()]), step as u64 + 1);
     }
 }

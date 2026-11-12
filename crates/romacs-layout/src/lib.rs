@@ -72,6 +72,9 @@ struct Store {
     mismatches: u64,
 }
 
+/// The realised faces kept before they, and the lines that name them, start over.
+const MAX_FACES: usize = 4096;
+
 impl Store {
     fn new() -> Result<Self, String> {
         let resolver = FontResolver::new().map_err(|e| e.to_string())?;
@@ -87,7 +90,9 @@ impl Store {
         self.resolver.set_alternative_state(alternatives.clone());
         self.resolver.set_fontsets(fontsets.clone());
         let renamed = self.faces.set_no_font(no_font);
-        if renamed || self.resolver.retired() != self.retired {
+        // Faces whose colours keep changing (a fade, terminal colours) mint
+        // a face each: past a bound, faces and the lines naming them go.
+        if renamed || self.resolver.retired() != self.retired || self.faces.len() > MAX_FACES {
             self.retired = self.resolver.retired();
             self.faces.clear();
             self.cache.clear();

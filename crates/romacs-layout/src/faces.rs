@@ -101,7 +101,10 @@ impl Faces {
         true
     }
 
-    /// Forget every face: the font rules changed.
+    /// How many faces are realised.
+    pub(crate) fn len(&self) -> usize { self.by_key.values().map(Vec::len).sum() }
+
+    /// Forget every face: the font rules changed, or too many were made.
     pub(crate) fn clear(&mut self) {
         self.by_key.clear();
         self.fonts.clear();

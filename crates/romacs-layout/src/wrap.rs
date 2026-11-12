@@ -30,8 +30,10 @@ pub(crate) enum Mode { Truncate, Window, Word }
 /// its advance (`LEFT_GLYPH`, DOLLAR; 0 with a fringe); the tab width; the
 /// line's gutter X0 and whether the window numbers its lines; the line's
 /// horizontal scroll SHIFT; and GHOSTS, the slots whose face no character
-/// of the window's text shows in (a bit each), which answer no metrics.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// of the window's text shows in (a bit each, slot N bit N % 64 of word
+/// N / 64), which answer no metrics: none for a line every slot of which
+/// shows a character.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Context {
     pub(crate) width: f32,
     pub(crate) mode: Mode,
@@ -47,7 +49,7 @@ pub(crate) struct Context {
     pub(crate) number_cell: f32,
     pub(crate) numbered: bool,
     pub(crate) shift: f32,
-    pub(crate) ghosts: u64,
+    pub(crate) ghosts: Option<Rc<[u64]>>,
 }
 
 impl Context {
@@ -74,8 +76,11 @@ impl Ahead {
     /// At a line's start.
     pub(crate) const START: Ahead = Ahead { row: 0, continued: 0.0, next: None, done: false, box_open: false };
 
-    /// This state in a line whose bytes from the row's start on moved as SHIFT says.
+    /// This state in a line whose bytes from the row's start on moved as
+    /// SHIFT says. Only word wrap moves the look-ahead off its start; a
+    /// state still at it names no byte, and stays as it is.
     fn moved(self, shift: Shift) -> Self {
+        if self == Ahead::START { return self; }
         Ahead { row: shift.at(self.row), next: self.next.map(|next| shift.at(next)), ..self }
     }
 }
@@ -310,7 +315,9 @@ impl Walk<'_> {
     /// The metrics of the face in SLOT: none of a face no character of
     /// the window's text shows in.
     fn metrics(&self, slot: u16) -> crate::Metrics {
-        if self.context.ghosts >> slot.min(63) & 1 == 1 { (0.0, 0.0, 0.0, 0.0) } else { self.line.faces[slot as usize].metrics }
+        let slot = usize::from(slot);
+        let ghost = self.context.ghosts.as_ref().and_then(|bits| bits.get(slot / 64)).is_some_and(|word| word >> (slot % 64) & 1 == 1);
+        if ghost { (0.0, 0.0, 0.0, 0.0) } else { self.line.faces[slot].metrics }
     }
 
     fn advance(&mut self, slot: u16, ch: char) -> f32 {
@@ -409,7 +416,7 @@ impl Walk<'_> {
 
     /// The break of the row AHEAD scans, or none when the line ends on it.
     fn row_break(&mut self, ahead: &mut Ahead, horizon: &mut usize) -> Option<usize> {
-        let (line, context) = (self.line, *self.context);
+        let (line, context) = (self.line, self.context);
         let (row, x0) = (ahead.row, self.x0_at(ahead.row));
         let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32, bool)>);
         let mut inside = 0;
@@ -459,7 +466,7 @@ impl Walk<'_> {
     #[expect(clippy::float_cmp, reason = "layout coordinates are whole pixels, compared as the frame-at-once loop compared them")]
     pub(crate) fn row(&mut self, from: &Standing, restart: &Restart, mut ask: Ask) -> Walked {
         debug_assert!(ask.ops.as_ref().is_none_or(|ops| ops.is_empty()), "a row's glyphs start their own list");
-        let (line, context) = (self.line, *self.context);
+        let (line, context) = (self.line, self.context);
         let text = &*line.text;
         let default = line.faces[0].metrics;
         let (truncate, word) = (context.mode == Mode::Truncate, context.mode == Mode::Word);
@@ -691,7 +698,7 @@ impl Walk<'_> {
     /// Draw SHOWN as DRAWN places it, into OPS when it is visible and they
     /// are collected: the width the cursor takes on it.
     fn draw(&mut self, shown: &Shown, drawn: &Drawn, s: &mut Standing, mut ops: Option<&mut Vec<Op>>, images: &mut Vec<(usize, f32)>, has_image: &mut bool) -> f32 {
-        let (line, context) = (self.line, *self.context);
+        let (line, context) = (self.line, self.context);
         let Drawn { byte, ch, slot, x, advance: advance_px, ascent, height, cell, step, opening, visible } = *drawn;
         let default = line.faces[0].metrics;
         let face = Ink::Face(slot);

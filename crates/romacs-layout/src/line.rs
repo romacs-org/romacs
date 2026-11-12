@@ -115,6 +115,8 @@ pub(crate) struct LineView {
     pub(crate) runs: Vec<Run>,
     pub(crate) faces: Vec<Rc<Realized>>,
     pub(crate) indexes: Vec<u32>,
+    /// Each table index's slot plus one, 0 for none: `indexes` inverted.
+    slot_of: Vec<u16>,
     pub(crate) raw: Vec<usize>,
     pub(crate) stretches: Vec<(usize, StretchWidth)>,
     pub(crate) images: Vec<InlineImage>,
@@ -127,8 +129,11 @@ pub(crate) struct LineView {
 impl LineView {
     /// The slot table index INDEX has in this line, given one if new.
     fn slot(&mut self, index: u32, table: &mut Table, faces: &mut Faces, resolver: &mut FontResolver) -> Result<u16, String> {
-        if let Some(slot) = self.indexes.iter().position(|&known| known == index) { return u16::try_from(slot).map_err(|_| "too many faces in one line".into()); }
-        let slot = u16::try_from(self.indexes.len()).map_err(|_| "too many faces in one line")?;
+        let at = index as usize;
+        if self.slot_of.len() <= at { self.slot_of.resize(at + 1, 0); }
+        if let Some(slot) = self.slot_of[at].checked_sub(1) { return Ok(slot); }
+        let slot = u16::try_from(self.indexes.len()).ok().filter(|&slot| slot < u16::MAX).ok_or("too many faces in one line")?;
+        self.slot_of[at] = slot + 1;
         self.faces.push(table.get(index as usize, faces, resolver)?);
         self.indexes.push(index);
         Ok(slot)
@@ -297,6 +302,7 @@ impl<'a> Lines<'a> {
         }
         view.runs.clear();
         view.faces.clear();
+        for &index in &view.indexes { view.slot_of[index as usize] = 0; }
         view.indexes.clear();
         view.stretches.clear();
         view.images.clear();

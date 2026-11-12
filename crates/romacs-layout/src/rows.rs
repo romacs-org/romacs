@@ -140,8 +140,11 @@ fn common_end(old: &LineText, new: &LineText, from: usize) -> Option<usize> {
     let mut start = new.text.len() - common;
     while !new.text.is_char_boundary(start) { start += 1; }
     let shift = Shift { old: old.text.len(), new: new.text.len() };
-    // What the lists say from START on must agree, moved.
+    // What the lists say from START on must agree, moved, and the gutter a
+    // row starting there takes from the last line number's label before it.
     let old_start = shift.back(start);
+    let governing = |line: &LineText, at: usize| line.labels[..line.labels.partition_point(|label| label.0 <= at)].last().map(|label| label.1);
+    if governing(old, old_start) != governing(new, start) { return None; }
     let same = tail(&old.raw, old_start, |&b| b).iter().map(|&b| shift.at(b)).eq(tail(&new.raw, start, |&b| b).iter().copied())
         && tail(&old.flips, old_start, |&b| b).iter().map(|&b| shift.at(b)).eq(tail(&new.flips, start, |&b| b).iter().copied())
         && tail(&old.labels, old_start, |l| l.0).iter().map(|l| (shift.at(l.0), l.1)).eq(tail(&new.labels, start, |l| l.0).iter().copied())
@@ -191,16 +194,21 @@ impl Cache {
     /// The key of the line VIEW read, its characters TEXT, laid out for
     /// WINDOW: its entry is made if it is new, and read by this pass.
     pub(crate) fn key(&mut self, view: &LineView, text: &str, window: u64) -> u64 {
-        let key = view.hash(text);
         let pass = self.pass;
-        match self.entries.get_mut(&key) {
-            Some(entry) if view.is(text, &entry.line) => entry.used = pass,
-            _ => {
-                let line = Rc::new(view.own(text));
-                let bytes = line.bytes();
-                // A line of another content under the same hash gives way.
-                if let Some(other) = self.entries.insert(key, Entry { line, earlier: vec![], layouts: vec![], used: pass, bytes }) { self.bytes -= other.bytes; }
-                self.bytes += bytes;
+        // A line of another content under the same hash keeps its key, which
+        // a pass may hold: this one takes the next free one.
+        let mut key = view.hash(text);
+        loop {
+            match self.entries.get_mut(&key) {
+                Some(entry) if view.is(text, &entry.line) => { entry.used = pass; break; }
+                Some(_) => key = key.wrapping_add(0x9e37_79b9_7f4a_7c15),
+                None => {
+                    let line = Rc::new(view.own(text));
+                    let bytes = line.bytes();
+                    self.entries.insert(key, Entry { line, earlier: vec![], layouts: vec![], used: pass, bytes });
+                    self.bytes += bytes;
+                    break;
+                }
             }
         }
         if text.len() > RESUME_MIN {
@@ -234,8 +242,9 @@ impl Cache {
         let resumed = resumed.map(|(_, layout)| layout);
         self.counts.rows_reused += resumed.as_ref().map_or(0, |layout| layout.rows.len()) as u64;
         self.counts.lines_resumed += u64::from(resumed.is_some());
-        let layout = resumed.unwrap_or(Layout { context: *context, rows: vec![], next: Some(Restart::start(rise)), resume: None });
-        let grown: usize = layout.rows.iter().map(Row::bytes).sum();
+        let layout = resumed.unwrap_or(Layout { context: context.clone(), rows: vec![], next: Some(Restart::start(rise)), resume: None });
+        // The earlier version's rows kept to be met again count too.
+        let grown: usize = layout.rows.iter().chain(layout.resume.iter().flat_map(|resume| &resume.rows)).map(Row::bytes).sum();
         let entry = self.entries.get_mut(&key).expect("its entry");
         if entry.layouts.len() == 2 {
             let dropped: usize = entry.layouts.remove(0).rows.iter().map(Row::bytes).sum();
@@ -275,7 +284,7 @@ impl Cache {
         next?;
         let resume = common_end(old_line, new, at).filter(|_| keep < old.rows.len()).map(|from| Resume {
             rows: old.rows[keep..].to_vec(), next: old.next, shift: Shift { old: old_line.text.len(), new: new.text.len() }, from });
-        Some((from_key, Layout { context: *context, rows, next, resume }))
+        Some((from_key, Layout { context: context.clone(), rows, next, resume }))
     }
 
     /// Wrap the rows of layout LAYOUT of KEY's line through row INDEX.
@@ -285,7 +294,7 @@ impl Cache {
         let layout = &mut entry.layouts[layout];
         let mut grown = 0;
         while !until(&layout.rows) && let Some(restart) = layout.next {
-            let context = layout.context;
+            let context = layout.context.clone();
             let mut walk = Walk { line: &line, context: &context, faces, resolver };
             let (row, next) = wrap(&mut walk, &restart);
             grown += row.bytes();
@@ -306,7 +315,7 @@ impl Cache {
         let entry = self.entries.get_mut(&key).expect("its entry");
         let line = entry.line.clone();
         let lay = &mut entry.layouts[layout];
-        let context = lay.context;
+        let context = lay.context.clone();
         let row = lay.rows.get_mut(index)?;
         if paint && row.ops.is_none() {
             let mut walk = Walk { line: &line, context: &context, faces, resolver };
@@ -384,11 +393,11 @@ fn meet(layout: &mut Layout, counts: &mut Counts) -> usize {
     counts.rows_reused += (resume.rows.len() - at) as u64;
     counts.resyncs += 1;
     let rows: Vec<Row> = resume.rows[at..].iter().map(|row| Row { restart: row.restart.moved(shift), end: moved(row.end), horizon: moved(row.horizon), ..row.clone() }).collect();
-    let bytes = rows.iter().map(Row::bytes).sum();
     layout.next = resume.next.map(|old| old.moved(shift));
     layout.rows.extend(rows);
     layout.resume = None;
-    bytes
+    // Counted when the earlier version's rows were kept.
+    0
 }
 
 /// The hashes of TEXT's first and last `RESUME_MIN` bytes, told apart.
