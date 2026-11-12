@@ -10,13 +10,9 @@
 # then says UNATTESTED and the exit is 0, so a number can still be taken, but
 # it can never be mistaken for a comparable one.
 #
-# WHY THIS EXISTS ALONGSIDE THE RUST ONE.  Four harnesses need this check and
-# two of them are shell.  Making the shell ones call Rust would put a cargo
-# build in front of every sweep; making the Rust ones call this would put a
-# subprocess inside a 38k-test run.  So there are two readers of ONE manifest,
-# and `romacs-parity-reference' has a test that runs THIS script over planted
-# fixtures and requires it to agree with the Rust reader on every one of them.
-# Two implementations that are not held together are how a guard rots.
+# A shell reader of the same manifest as `romacs-parity-reference', for a
+# caller that should not build Rust.  That crate's tests run THIS script over
+# planted fixtures and require it to agree with the Rust reader on every one.
 #
 # The manifest format is deliberately tiny (see ledger/parity-reference.toml).  This
 # parser REFUSES a line it does not understand rather than skipping it: a pin
