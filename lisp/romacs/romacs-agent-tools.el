@@ -287,6 +287,9 @@ call stays running until its answer is ready."
   (let ((state (romacs-agent-state session)))
     (cond ((romacs-agent-cancelled session) "cancelled")
           ((eq state 'waiting-approval) "waiting")
+          ;; Never started: failed, whatever waits for it, its state saying
+          ;; so (not detached).
+          ((eq state 'unstarted) "failed")
           ((or (memq state '(starting running)) (romacs-agent-queue session)) "running")
           ((romacs-agent-failed session) "failed")
           ((> (romacs-agent-turns session) 0) "completed")
@@ -526,12 +529,27 @@ asked first: nil drops the message."
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")
 
+(defun romacs-agent-tools--forget-ends (child)
+  "Forget what was delivered or answered of CHILD's ends, and its ends
+waiting for its parent: a session with no journal has had no end but its
+launches' failures, each numbered as the first, so the next one wakes
+its parent again."
+  (delete-file (romacs-agent-tools--woken-file child))
+  (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
+  (remhash (romacs-agent-id child) romacs-agent-tools--answered)
+  (when-let* ((parent (plist-get (romacs-agent-options child) :parent)))
+    (puthash parent (cl-remove child (gethash parent romacs-agent-tools--pending) :key #'car)
+             romacs-agent-tools--pending)))
+
 (defun romacs-agent-tools--on-event (session event)
+  ;; A launch failed: its end is new, whatever an earlier failure's was.
+  (when (eq (plist-get event :type) 'unstarted)
+    (romacs-agent-tools--forget-ends session))
   ;; A parent's turn ended: what waited while it worked wakes it now.
   (when (and (eq (plist-get event :type) 'done) (gethash (romacs-agent-id session) romacs-agent-tools--pending))
     (romacs-agent-tools--wake-soon session))
   (when (and (plist-get (romacs-agent-options session) :parent)
-             (or (eq (plist-get event :type) 'done)
+             (or (memq (plist-get event :type) '(done unstarted))
                  (and (eq (plist-get event :type) 'exit) (romacs-agent-failed session)
                       (= (romacs-agent-done-seq session) (or (plist-get event :seq) -1)))))
     ;; A moment later: a `wait' answering with this end (its poll runs
@@ -604,9 +622,11 @@ with resume it goes on with that conversation of the instance's
                    cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
                    (gethash "title" arguments) provider (append start-options worktree))))
          (answer (lambda (child)
-                   (if (equal (gethash "mode" arguments) "wait")
-                       (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
-                     (romacs-agent-tools--task child))))
+                   (romacs-agent-tools--started
+                    child (lambda ()
+                            (if (equal (gethash "mode" arguments) "wait")
+                                (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
+                              (romacs-agent-tools--task child))))))
          (known (and request (romacs-agent-requested parent request))))
     (cond (known (funcall answer known))
           ((gethash "resume" arguments)
@@ -717,6 +737,26 @@ sessions' own on disk: a restarted server lists them all."
      "tasks" (vconcat (mapcar #'romacs-agent-tools--row
                               (sort tasks (lambda (a b) (> (or (romacs-agent-last-time a) 0)
                                                            (or (romacs-agent-last-time b) 0)))))))))
+
+(defun romacs-agent-tools--started (child then)
+  "A deferred answer: THEN's, once CHILD's supervisor is attached (or a
+per-turn harness, which has none between turns, is created); the call's
+failure when it never started, an end then answered, so it wakes no one
+besides."
+  (let ((next nil))
+    (romacs-mcp-defer
+     (lambda ()
+       (cond (next (funcall next))
+             ((eq (romacs-agent-state child) 'unstarted)
+              (romacs-agent-tools--answer child (romacs-agent-done-seq child))
+              (user-error "Task %s (%s) did not start: %s" (romacs-agent-id child) (romacs-agent-title child)
+                          (romacs-agent-reply child)))
+             ((or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
+                  (not (eq (romacs-agent-state child) 'starting)))
+              (let ((value (funcall then)))
+                (if (eq (car-safe value) 'romacs-mcp--deferred)
+                    (funcall (setq next (cadr value)))
+                  (list value)))))))))
 
 (defvar romacs-agent-tools--making (make-hash-table :test #'equal)
   "A caller's (PARENT . CLIENT-REQUEST-ID) to its isolated task being made:

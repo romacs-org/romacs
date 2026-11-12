@@ -314,9 +314,27 @@ form, readable, and a digest of all of it, since ids made close together
   (concat (romacs-agent--short id) "-" (substring (secure-hash 'sha256 id) 0 8)))
 
 (defun romacs-agent--program (name)
-  "Romacs's own program NAME, beside the running binary, else on PATH."
+  "Romacs's own program NAME, beside the running binary, else on PATH,
+else NAME (`romacs-agent--check-companions' refuses that first)."
+  (or (romacs-agent--found-program name) name))
+
+(defun romacs-agent--found-program (name)
   (let ((beside (expand-file-name name invocation-directory)))
-    (if (file-executable-p beside) beside (or (executable-find name) name))))
+    (if (file-executable-p beside) beside (executable-find name))))
+
+(defun romacs-agent--check-companions ()
+  "Signal a `user-error' unless the supervisor and the relay a session's
+harness runs are found: checked before a session is made, so a build
+without them starts nothing rather than a session that never comes up."
+  (dolist (name '("romacs-agent-host" "romacs-mcp"))
+    (unless (romacs-agent--found-program name)
+      (user-error "%s is neither beside %s nor on PATH: this build lacks it" name
+                  (directory-file-name invocation-directory)))))
+
+(defconst romacs-agent--launch-tries 300
+  "How many times, 0.1 s apart, a new supervisor is looked for before its
+session is taken never to have started: a loaded host starts a unit
+slowly.")
 
 (defun romacs-agent--uuid ()
   "A random version 4 UUID, as Claude Code's --session-id takes it."
@@ -1088,7 +1106,7 @@ itself, so the turn goes on whatever becomes of this server."
     (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
                           input images))
   (setf (romacs-agent-state session) 'starting)
-  (romacs-agent--attach session 50))
+  (romacs-agent--attach session romacs-agent--launch-tries))
 
 ;;; Journal records
 
@@ -1192,6 +1210,13 @@ itself, so the turn goes on whatever becomes of this server."
                       (not (romacs-agent--per-turn-p session))
                       (process-live-p (romacs-agent-connection session)))
              (run-at-time 0 nil #'romacs-agent--settle session)))
+    ;; Its supervisor never came up: an end, failed, with no record of
+    ;; its own (the journal is the supervisor's).
+    ('unstarted
+     (setf (romacs-agent-state session) 'unstarted (romacs-agent-failed session) t
+           (romacs-agent-reply session) (plist-get event :text)
+           (romacs-agent-done-seq session) (plist-get event :seq))
+     (romacs-agent--note-end session))
     ('exit
      ;; A run's startup is its own: the next run starts over.  What its
      ;; harness asked is no longer anyone's to answer.
@@ -1521,6 +1546,11 @@ Retried for a while: a new supervisor takes a moment to listen."
             (romacs-agent--run-ended session))
            ((> (or tries 0) 0)
             (run-at-time 0.1 nil #'romacs-agent--attach session (1- tries) steal))
+           ;; Not a record from any supervisor: none ever ran.
+           ((not (file-exists-p (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+            (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session))
+                                               :text "its supervisor never started"))
+            nil)
            (t (setf (romacs-agent-state session) 'detached)
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
               nil)))))
@@ -1952,6 +1982,7 @@ or its configuration directory missing."
       (user-error "Agent provider %s is disabled" (plist-get instance :name)))
     ;; The directory as configured: the harness's default too, when named.
     (romacs-agent--check-config-dir (plist-get instance :name) (plist-get instance :config-dir))
+    (romacs-agent--check-companions)
     instance))
 
 (defun romacs-agent--instance-options (instance options)
@@ -1993,7 +2024,7 @@ Interactively, open the chat without sending an initial prompt."
                  (romacs-agent--manifest session nil)
                  (when prompt (romacs-agent-send session prompt)))
         (romacs-agent--launch session (romacs-agent--argv session nil))
-        (romacs-agent--attach session 50)
+        (romacs-agent--attach session romacs-agent--launch-tries)
         (romacs-agent--when-attached session (lambda ()
                                                (romacs-agent--refresh-models session)
                                                (when prompt (romacs-agent-send session prompt))))))
@@ -2042,6 +2073,7 @@ Romacs is resuming THREAD.  Once started, the supervisor owns it."
   (unless (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) thread)
     (user-error "Not a conversation id: %s" thread))
   (romacs-agent--check-config-dir provider config-dir)
+  (romacs-agent--check-companions)
   (let ((id (romacs-agent--import-id harness config-dir thread))
         (existing (romacs-agent--conversation harness config-dir thread)))
     (if existing
@@ -2063,7 +2095,7 @@ Romacs is resuming THREAD.  Once started, the supervisor owns it."
                   ;; Its supervisor's from here.
                   (setq dir nil)
                   (romacs-agent--launch session argv)
-                  (romacs-agent--attach session 50)))
+                  (romacs-agent--attach session romacs-agent--launch-tries)))
               (setq dir nil)
               (when (romacs-agent--per-turn-p session) (setf (romacs-agent-state session) 'idle))
               session)
@@ -2137,11 +2169,13 @@ resumed; a per-turn harness goes on with its next message."
   session)
 
 (defun romacs-agent--when-attached (session function &optional tries)
-  "Call FUNCTION once SESSION is attached."
+  "Call FUNCTION once SESSION is attached, if it is within a launch's
+window (`romacs-agent--launch-tries'), as long as attaching is tried."
   (if (process-live-p (romacs-agent-connection session))
       (funcall function)
-    (when (> (or tries 100) 0)
-      (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- (or tries 100))))))
+    (let ((tries (or tries romacs-agent--launch-tries)))
+      (when (> tries 0)
+        (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- tries))))))
 
 (defun romacs-agent-send (session text &optional delivered valid images)
   "Send TEXT to SESSION's harness as the user's next message, then call
@@ -2220,6 +2254,12 @@ with MESSAGE."
         ((eq (romacs-agent-state session) 'starting)
          (romacs-agent--when-attached session (lambda () (romacs-agent-stop session))))))
 
+(defun romacs-agent--conversation-p (session)
+  "Whether SESSION's harness has a conversation to resume: one imported or
+forked, or one a message was sent to."
+  (or (romacs-agent-imported session) (plist-get (romacs-agent-options session) :fork)
+      (romacs-agent-input-seq session) (> (romacs-agent-turns session) 0)))
+
 (defun romacs-agent-resume (session)
   "Run SESSION's harness again on its conversation, after it ended, in the
 configuration directory its instance had when it started: the harness
@@ -2229,13 +2269,16 @@ keeps the conversation there."
   (when (romacs-agent--per-turn-p session)
     (user-error "Session %s continues with its next message" (romacs-agent-title session)))
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
+  (romacs-agent--check-companions)
   (romacs-agent--refork session)
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   (let ((process-environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
-    (romacs-agent--launch session (romacs-agent--argv session t)))
+    ;; A conversation that never began (its first run never started) is
+    ;; begun, under its own id: there is none to resume.
+    (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) nil
         (romacs-agent-startup-pending session) nil)
-  (romacs-agent--attach session 50)
+  (romacs-agent--attach session romacs-agent--launch-tries)
   ;; What waited for its turn's end when the harness went goes now, unless
   ;; the harness ended in the middle of a turn: the resumed harness takes
   ;; that turn up again, and the queue goes at its end (a done), as known
@@ -2331,7 +2374,10 @@ neither callback runs after it."
           (unless (or (eq (romacs-agent-state session) 'ended)
                       ;; A per-turn harness between turns is idle, not detached.
                       (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle)))
-            (setf (romacs-agent-state session) 'detached))
+            ;; No journal: no supervisor ever ran it.
+            (setf (romacs-agent-state session)
+                  (if (or (romacs-agent--per-turn-p session) (file-exists-p (expand-file-name "journal.jsonl" dir)))
+                      'detached 'unstarted)))
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
         session))))
 

@@ -15,6 +15,10 @@
   (require 'romacs-agent-t3)
   (require 'romacs-mcp-session))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 ;;; The user's own errors
 
 (ert-deftest romacs-mcp-dogfood-user-errors-apart ()
