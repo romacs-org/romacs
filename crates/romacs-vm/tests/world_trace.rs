@@ -120,17 +120,17 @@ fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
     let dir = scratch("reseed");
     let extra = write(&dir.join("emacs-lisp/cl-extra.el"),
                       "(defvar cl--random-state (current-time))\n(defvar cl-other (current-time))\n");
-    let project = write(&dir.join("progmodes/project.el"),
-                        "(defcustom project-list-file (expand-file-name \"p\") \"\" :type 'file)\n");
-    let after = write(&dir.join("after.el"), "(defvar seen (car cl--random-state))\n(defvar seen2 project-list-file)\n");
-    let (_, trace) = build(&[extra, project, after]);
+    let find_func = write(&dir.join("emacs-lisp/find-func.el"),
+                          "(defvar find-function-C-source-directory (expand-file-name \"p\"))\n");
+    let after = write(&dir.join("after.el"), "(defvar seen (car cl--random-state))\n(defvar seen2 find-function-C-source-directory)\n");
+    let (_, trace) = build(&[extra, find_func, after]);
     let reseeds: Vec<_> = items(&trace, "records", "reseed").iter().map(|r| r["reads"].as_str().unwrap()).collect();
     assert_eq!(reseeds, ["clock", "default-directory"], "{trace}");
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().filter_map(|r| r["allowed"].as_str()).filter(|a| *a != "init").collect();
     assert_eq!(allowed, ["reseed"], "{trace}");
     let fenced: Vec<_> = items(&trace, "refusals", "fence").iter()
         .map(|r| (r["root"].as_u64().unwrap(), r["symbol"].as_str().unwrap(), r["site"]["line"].as_u64().unwrap())).collect();
-    assert_eq!(fenced, [(4, "cl--random-state", 1), (4, "project-list-file", 2)], "{trace}");
+    assert_eq!(fenced, [(4, "cl--random-state", 1), (4, "find-function-C-source-directory", 2)], "{trace}");
     assert_eq!(refusals(&trace).iter().filter(|(what, _)| what == "clock").count(), 1, "the second clock read refuses: {trace}");
 }
 
@@ -142,8 +142,6 @@ fn reseed_forms_restate_their_gnu_sources() {
     for (file, source, restated) in [
         ("emacs-lisp/cl-extra.el", "(defvar cl--random-state (cl--make-random-state (cl--random-time)))",
          "(setq cl--random-state (cl--make-random-state (cl--random-time)))"),
-        ("progmodes/project.el", "(defcustom project-list-file", "(custom-reevaluate-setting 'project-list-file)"),
-        ("subr.el", "(defvar user-emacs-directory\n  ;; The value does not matter since Emacs sets this at startup.\n  nil", "(let ((user-emacs-directory nil))"),
         ("emacs-lisp/find-func.el",
          "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
          "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),

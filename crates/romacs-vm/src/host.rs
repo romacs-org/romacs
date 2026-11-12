@@ -422,7 +422,7 @@ pub fn begin_recipe() {
 }
 
 /// This build ends at GNU's dump point, as loadup.el does under
-/// `dump-mode': the chain leaves its startup steps to each restored
+/// `dump-mode`: the chain leaves its startup steps to each restored
 /// process (`romacs--dumping`). A no-op outside a build.
 pub fn end_at_dump_point() {
     with_build(|b| b.dump = true);
