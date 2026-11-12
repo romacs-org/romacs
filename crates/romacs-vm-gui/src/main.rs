@@ -612,7 +612,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
-  ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
+  ROMACS_DIAGNOSTICS=1  print each paint, message, the render thread's frame counters
+                        and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
 ";

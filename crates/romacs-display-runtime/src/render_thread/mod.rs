@@ -92,6 +92,12 @@ pub use romacs_renderer_wgpu::RowRange;
 
 use winit::event_loop::EventLoopProxy;
 
+/// Whether ROMACS_DIAGNOSTICS=1 asks for diagnostics on stderr.
+fn diagnostics() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"))
+}
+
 pub(crate) type RenderEventLoopProxy = EventLoopProxy;
 pub(crate) type RenderEventLoop = winit::event_loop::EventLoop;
 

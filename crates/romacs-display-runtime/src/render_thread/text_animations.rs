@@ -202,7 +202,7 @@ impl Running {
     fn report(&mut self, drawn: Drawn) {
         if self.drawn == Some(drawn) { return; }
         self.drawn = Some(drawn);
-        if !diagnostics() { return; }
+        if !super::diagnostics() { return; }
         let window = self.animation.window;
         match drawn {
             Drawn::Scene(r) => eprintln!("romacs-text-animation: window={window} drawn=scene x={} y={} width={} height={}",
@@ -211,12 +211,6 @@ impl Running {
             Drawn::Hidden => eprintln!("romacs-text-animation: window={window} drawn=hidden"),
         }
     }
-}
-
-/// Whether ROMACS_DIAGNOSTICS=1 asks for diagnostics on stderr.
-fn diagnostics() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"))
 }
 
 impl super::state::RenderApp {
