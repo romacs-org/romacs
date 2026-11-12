@@ -2717,7 +2717,8 @@ def select(args, base):
                           'starts': len(starts(one))}
 
         # Armed during a turn: nothing mid-turn, the message waits for both.
-        a.send(one, 'slow 15')
+        # The turn outlasts the evals that read it under load (6 s).
+        a.send(one, 'slow 60')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
@@ -2795,8 +2796,10 @@ def select(args, base):
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
         # Codex: its next turn names them, once the running one ended.
-        run = a.start('slow 3', 'codex')
-        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        # Its turn under way, not starting: a selection made while it starts
+        # rightly reaches the first turn.
+        run = a.start('slow 8', 'codex')
+        until(lambda: a.state(run) == 'running', 15, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
         until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
