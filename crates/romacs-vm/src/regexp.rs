@@ -1,10 +1,27 @@
 //! Lisp search boundary. Only owned text and integer offsets reach the engine.
-use crate::{coordinates::*, data::Object, *};
+use crate::{coordinates::*, data::Object, variable_runtime::Places, *};
 use romacs_regex::{self as regex, EmacsStr, MatchRegisters};
+use std::borrow::Cow;
 use std::ops::Range;
 #[path = "regexp_syntax.rs"]
 mod syntax;
 pub(crate) use syntax::{parse_syntax_descriptor, VmSyntax};
+
+#[cfg(test)]
+#[path = "regexp_entry_tests.rs"]
+mod entry_tests;
+
+#[cfg(test)]
+thread_local! {
+    /// The buffer positions this thread's searches converted between bytes
+    /// and characters, and the strings they copied to read.
+    static CONVERTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn note(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>, n: usize) {
+    counter.with(|c| c.set(c.get() + n));
+}
 
 #[derive(Default)]
 pub(super) struct MatchState {
@@ -40,8 +57,8 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
     )
 }
 
-struct Input {
-    bytes: Vec<u8>,
+struct Input<'a> {
+    bytes: Cow<'a, [u8]>,
     multibyte: bool,
     /// Whether a character is a byte: unibyte or all-ASCII text.
     bytewise: bool,
@@ -59,13 +76,17 @@ fn starts_character(byte: u8) -> bool {
 fn characters_in(bytes: &[u8]) -> usize {
     bytes.iter().filter(|&&b| starts_character(b)).count()
 }
-impl Input {
+impl<'a> Input<'a> {
     /// BYTES, which hold CHARS characters.
-    fn new(bytes: Vec<u8>, chars: usize, multibyte: bool) -> Self {
-        let bytewise = !multibyte || bytes.is_ascii();
+    fn new(bytes: impl Into<Cow<'a, [u8]>>, chars: usize, multibyte: bool) -> Self {
+        let bytes = bytes.into();
+        // Multibyte text with a byte to each character is ASCII.
+        let bytewise = !multibyte || chars == bytes.len();
         let end = (bytes.len(), chars);
         Input { bytes, multibyte, bytewise, anchors: std::cell::Cell::new([(0, 0), end, end]) }
     }
+}
+impl Input<'_> {
     fn len(&self) -> usize {
         self.anchors.get()[1].1
     }
@@ -118,27 +139,39 @@ impl Input {
 const SEARCH_MARGIN: usize = 16;
 
 /// A run of the current buffer's accessible text for one search, read in
-/// place: the engine gets its bytes and positions convert through the
-/// buffer's own character index, so a search costs what it reads, not the
-/// buffer.
+/// place, so a search costs what it reads, not the buffer.
 struct BufferInput<'a> {
     bytes: &'a [u8],
-    /// None for a unibyte buffer, whose characters are its bytes.
-    text: Option<&'a crate::text::TextBody>,
-    /// The byte of the text BYTES start at.
-    start: usize,
-    /// The one-based character position of the accessible text's start,
-    /// from which [`Self::character`] counts.
-    base_char: usize,
     /// Point, as a byte of BYTES.
     point: usize,
 }
-impl BufferInput<'_> {
-    /// The characters of the accessible text before byte BYTE of BYTES.
-    fn character(&self, byte: usize) -> SearchResult<usize> {
-        let Some(t) = self.text else { return Ok(byte) };
-        Ok(t.char_of_byte(ByteOffset(self.start + byte))?.0 + 1 - self.base_char)
+
+/// The current buffer as a search finds it: its object, which nothing moves
+/// while the search runs (a collection waits for the engine), the bytes
+/// of its accessible text and of point, and whether it is multibyte.
+struct SearchBuffer {
+    index: usize,
+    accessible: Range<usize>,
+    point: usize,
+    multibyte: bool,
+}
+
+/// A register as an offset: None for a group that took no part.
+fn register(offset: i64) -> Option<usize> {
+    usize::try_from(offset).ok()
+}
+
+/// REGISTERS, byte offsets into a text, as the positions AT gives those
+/// bytes, in place: what Lisp is to see of a match.
+fn place_registers(registers: &mut MatchRegisters, at: impl Fn(usize) -> SearchResult<usize>) -> SearchResult<()> {
+    for offsets in [&mut registers.start[..], &mut registers.end[..]] {
+        for offset in offsets {
+            if let Some(byte) = register(*offset) {
+                *offset = i64::try_from(at(byte)?).map_err(|e| Fault::Internal(e.to_string()))?;
+            }
+        }
     }
+    Ok(())
 }
 
 /// REGISTERS as group spans at the positions AT gives their bytes.
@@ -184,21 +217,37 @@ pub(crate) struct PatternCache {
     len: usize,
     /// Uses so far: the clock `CachedPattern::used` reads.
     clock: u64,
-    /// The slots of the variables every search reads, found by name at the
-    /// first search and kept: a search reads the variable itself, as
-    /// GNU's reads its C variable, whatever its name is interned as later.
+    /// The variables every search or syntax scan reads, found by name at
+    /// the first and kept: each reads the variable itself, as GNU's reads
+    /// its C variable, whatever its name is interned as later.
     slots: Option<SearchSlots>,
     /// What the last search learned of its syntax table.
     syntax: syntax::SyntaxMemo,
+    /// The last literal search's string, quoted: its bytes are kept for
+    /// the next.
+    quoted: Vec<u8>,
 }
-#[derive(Clone, Copy)]
 struct SearchSlots {
-    case_fold: usize,
     preserve_match_data: usize,
     match_buffer: usize,
     standard_syntax: usize,
-    lookup_properties: usize,
+    /// The symbol `syntax-table`, a syntax table's purpose.
+    syntax_table: usize,
+    /// `case-fold-search`, often buffer-local.
+    case_fold: Places<1>,
+    /// `parse-sexp-lookup-properties`, which `syntax-propertize` sets
+    /// buffer-locally.
+    lookup_properties: Places<1>,
+    scan: Places<{ SCAN_VARIABLES.len() }>,
+    /// `forward-comment-function`, which replaces `forward-comment`.
+    forward_comment: Places<1>,
 }
+/// The variables a syntax scan obeys, in the order [`Vm::scan_variables`]
+/// gives their values: six flags, then how far `syntax-propertize` has
+/// gone.
+pub(crate) const SCAN_VARIABLES: [&str; 7] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments",
+    "comment-end-can-be-escaped", "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start",
+    "comment-use-syntax-ppss", "syntax-propertize--done"];
 impl PatternCache {
     pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
@@ -210,7 +259,7 @@ impl PatternCache {
     /// Drop the least recently used pattern.
     fn evict(&mut self) {
         let oldest = self.patterns.iter()
-            .flat_map(|(source, v)| v.iter().enumerate().map(move |(i, e)| (e.used, source, i)))
+            .flat_map(|(source, v)| v.iter().enumerate().map(move |(i, e)| (e.used.get(), source, i)))
             .min_by_key(|&(used, ..)| used)
             .map(|(_, source, i)| (source.clone(), i));
         if let Some((source, i)) = oldest {
@@ -230,8 +279,8 @@ struct CachedPattern {
     /// The syntax table the compiled fastmap read (GNU `used_syntax').
     syntax: Option<Value>,
     compiled: std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>,
-    /// The cache's clock at the last use.
-    used: u64,
+    /// The cache's clock at the last use: a hit moves it without the cache.
+    used: std::cell::Cell<u64>,
 }
 
 /// The patterns [`PatternCache`] keeps.
@@ -288,7 +337,7 @@ impl Vm {
         -> std::result::Result<Option<Vec<Option<(usize, usize)>>>, prim::Fault> {
         let Some(registers) = self.string_matcher_search(matcher, i, string)? else { return Ok(None) };
         let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
-        let input = Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte());
+        let input = Input::new(view.bytes(), view.chars, view.is_multibyte());
         let groups = register_spans(&registers, |byte| Ok(input.character(byte)));
         Ok(Some(groups.map_err(|fault| self.regexp_fault(fault))?))
     }
@@ -320,15 +369,15 @@ impl Vm {
     /// TRANSLATION KEY names (built as TRANSLATION) for the syntax table
     /// SOURCE reads: the cached one, or a new one cached in place of the
     /// least recently used.
-    fn regexp_pattern(&mut self, pattern: &Input, posix: bool, key: Translation,
+    fn regexp_pattern(&mut self, pattern: &Input<'_>, posix: bool, key: Translation,
                       translation: impl FnOnce() -> Option<regex::CaseTranslation>, source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let table = source.table();
         let cache = &mut self.regexp_cache;
         cache.clock += 1;
         let clock = cache.clock;
-        if let Some(entry) = cache.patterns.get_mut(&pattern.bytes).and_then(|v| v.iter_mut().find(|e| e.multibyte == pattern.multibyte
+        if let Some(entry) = cache.patterns.get(&*pattern.bytes).and_then(|v| v.iter().find(|e| e.multibyte == pattern.multibyte
             && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))) {
-            entry.used = clock;
+            entry.used.set(clock);
             return Ok(entry.compiled.clone());
         }
         let mut compiled = regex::regex_compile_lisp_with_translation(
@@ -341,8 +390,8 @@ impl Vm {
         if cache.len >= PATTERN_CACHE_SIZE {
             cache.evict();
         }
-        cache.patterns.entry(pattern.bytes.clone()).or_default().push(CachedPattern {
-            multibyte: pattern.multibyte, posix, translation: key, syntax, compiled: compiled.clone(), used: clock });
+        cache.patterns.entry(pattern.bytes.to_vec()).or_default().push(CachedPattern {
+            multibyte: pattern.multibyte, posix, translation: key, syntax, compiled: compiled.clone(), used: std::cell::Cell::new(clock) });
         cache.len += 1;
         Ok(compiled)
     }
@@ -454,8 +503,8 @@ impl Vm {
     }
 
     fn string_search(&mut self, pattern: Value, string: Value, key: Translation, translation: Option<regex::CaseTranslation>)
-        -> std::result::Result<Option<(Input, usize, MatchRegisters)>, prim::Fault> {
-        let run = |vm: &mut Self| -> SearchResult<Option<(Input, usize, MatchRegisters)>> {
+        -> std::result::Result<Option<(Input<'static>, usize, MatchRegisters)>, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<Option<(Input<'static>, usize, MatchRegisters)>> {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let source = vm.regexp_syntax(Some(string))?;
@@ -582,26 +631,74 @@ impl Vm {
         }
         Ok(())
     }
-    fn regexp_input(&self, v: Value) -> SearchResult<Input> {
+    /// The string V's text, copied: what outlives a borrow of the VM.
+    fn regexp_input(&self, v: Value) -> SearchResult<Input<'static>> {
+        #[cfg(test)]
+        note(&COPIED, 1);
         let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte()))
     }
-    /// The current buffer's accessible bytes, the one-based character
-    /// position of their start and their characters, and point's byte:
-    /// what a search needs before it reads any text.
-    fn regexp_buffer_frame(&self, index: usize) -> SearchResult<(Range<usize>, usize, usize, usize)> {
+    /// The string V's text where it lies, for a search that borrows the VM.
+    fn regexp_subject(&self, v: Value) -> SearchResult<Input<'_>> {
+        let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+        Ok(Input::new(view.bytes(), view.chars, view.is_multibyte()))
+    }
+    /// The current buffer, as a search needs it before it reads any text:
+    /// no position is converted until Lisp is to see one.
+    fn regexp_search_buffer(&mut self) -> SearchResult<SearchBuffer> {
+        let index = self.buffer_index()?;
         Ok(match &self.objects[index] {
             Object::Buffer(t) => {
                 let r = t.accessible();
-                let base = t.char_of_byte(r.start)?.0;
-                (r.start.0..r.end.0, base + 1, t.char_of_byte(r.end)?.0 - base, t.point.0)
+                SearchBuffer { index, accessible: r.start.0..r.end.0, point: t.point.0, multibyte: true }
             }
             Object::ByteBuffer(t) => {
-                let r = t.restriction.start.0..t.restriction.end.0;
-                (r.clone(), r.start + 1, r.len(), t.point.0)
+                SearchBuffer { index, accessible: t.restriction.start.0..t.restriction.end.0, point: t.point.0, multibyte: false }
             }
             _ => unreachable!("buffer_index validates"),
         })
+    }
+    /// The one-based character position of byte BYTE in the buffer at
+    /// object INDEX.
+    fn regexp_buffer_char(&self, index: usize, byte: usize) -> SearchResult<usize> {
+        Ok(match &self.objects[index] {
+            Object::Buffer(t) => {
+                #[cfg(test)]
+                note(&CONVERTED, 1);
+                t.char_of_byte(ByteOffset(byte))?.0 + 1
+            }
+            _ => byte + 1,
+        })
+    }
+    /// The byte a search of BUFFER going FORWARD (or back) stops at for
+    /// BOUND, a position or a marker: an error when it lies on the wrong
+    /// side of point, else clipped to the accessible text.
+    fn regexp_bound(&self, buffer: &SearchBuffer, bound: Value, forward: bool) -> SearchResult<usize> {
+        let limit = if let Some(Object::Marker(_)) = self.object_if(bound) {
+            let position = self.marker_position_value(bound)?;
+            if position == Value::NIL {
+                return Err(Fault::Text("error", "Marker does not point anywhere".into()));
+            }
+            position.as_integer()?
+        } else {
+            bound.as_integer().map_err(|_| Fault::Wrong("integer-or-marker-p", bound))?
+        };
+        let point = i64::try_from(self.regexp_buffer_char(buffer.index, buffer.point)?).map_err(|e| Fault::Internal(e.to_string()))?;
+        if if forward { limit < point } else { limit > point } {
+            return Err(Fault::Text("error", "Invalid search bound (wrong side of point)".into()));
+        }
+        // The characters before the bound; none before a bound below 1.
+        let before = usize::try_from(limit - 1).unwrap_or(0);
+        let byte = match &self.objects[buffer.index] {
+            Object::Buffer(t) if before < t.len_chars() => {
+                #[cfg(test)]
+                note(&CONVERTED, 1);
+                t.byte_of_char(CharOffset(before))?.0
+            }
+            Object::Buffer(t) => t.len_bytes(),
+            _ => before,
+        };
+        Ok(byte.clamp(buffer.accessible.start, buffer.accessible.end))
     }
     /// A run of the buffer at object INDEX that holds the bytes NEED and
     /// lies within its accessible bytes, readable contiguously: for a
@@ -616,57 +713,78 @@ impl Vm {
             _ => unreachable!("buffer_index validates"),
         }
     }
-    /// WINDOW of the buffer at object INDEX, for one search, its
-    /// characters counted from BASE_CHAR, the accessible text's first.
-    fn regexp_buffer_input(&self, index: usize, window: Range<usize>, base_char: usize) -> BufferInput<'_> {
+    /// WINDOW of the buffer at object INDEX, for one search.
+    fn regexp_buffer_input(&self, index: usize, window: Range<usize>) -> BufferInput<'_> {
         match &self.objects[index] {
-            Object::Buffer(t) => BufferInput {
-                bytes: t.search_bytes(window.clone()),
-                text: Some(t),
-                start: window.start,
-                base_char,
-                point: t.point.0 - window.start,
-            },
-            Object::ByteBuffer(t) => BufferInput {
-                bytes: &t.bytes[window.clone()],
-                text: None,
-                start: window.start,
-                base_char,
-                point: t.point.0 - window.start,
-            },
+            Object::Buffer(t) => BufferInput { bytes: t.search_bytes(window.clone()), point: t.point.0 - window.start },
+            Object::ByteBuffer(t) => BufferInput { bytes: &t.bytes[window.clone()], point: t.point.0 - window.start },
             _ => unreachable!("buffer_index validates"),
         }
     }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
     }
-    fn search_slots(&mut self) -> SearchSlots {
-        if let Some(slots) = self.regexp_cache.slots { return slots; }
-        let slots = SearchSlots {
-            case_fold: self.slot("case-fold-search"),
-            preserve_match_data: self.slot("inhibit-changing-match-data"),
-            match_buffer: self.slot("#:vm2-match-buffer"),
-            standard_syntax: self.slot("#:vm2-standard-syntax"),
-            lookup_properties: self.slot("parse-sexp-lookup-properties"),
-        };
-        self.regexp_cache.slots = Some(slots);
-        slots
+    #[inline]
+    fn search_slots(&mut self) -> &mut SearchSlots {
+        if self.regexp_cache.slots.is_none() {
+            self.regexp_cache.slots = Some(SearchSlots {
+                preserve_match_data: self.slot("inhibit-changing-match-data"),
+                match_buffer: self.slot("#:vm2-match-buffer"),
+                standard_syntax: self.slot("#:vm2-standard-syntax"),
+                syntax_table: self.slot("syntax-table"),
+                case_fold: Places::new([self.slot("case-fold-search")]),
+                lookup_properties: Places::new([self.slot("parse-sexp-lookup-properties")]),
+                scan: Places::new(SCAN_VARIABLES.map(|name| self.slot(name))),
+                forward_comment: Places::new([self.slot("forward-comment-function")]),
+            });
+        }
+        self.regexp_cache.slots.as_mut().expect("found above")
     }
+    /// The values in the current buffer of the variables AT names among
+    /// the search slots, read where they were last found while that holds.
+    fn search_values<const N: usize>(&mut self, at: fn(&mut SearchSlots) -> &mut Places<N>) -> Result<[Value; N]> {
+        let mut places = *at(self.search_slots());
+        if let Some(values) = self.read_places(&places) {
+            return Ok(values);
+        }
+        let values = self.find_places(&mut places)?;
+        *at(self.search_slots()) = places;
+        Ok(values)
+    }
+    /// The values in the current buffer of [`SCAN_VARIABLES`], in order.
+    pub(crate) fn scan_variables(&mut self) -> Result<[Value; SCAN_VARIABLES.len()]> {
+        self.search_values(|slots| &mut slots.scan)
+    }
+    /// `forward-comment-function` in the current buffer.
+    pub(crate) fn forward_comment_function(&mut self) -> Result<Value> {
+        self.search_values(|slots| &mut slots.forward_comment).map(|[function]| function)
+    }
+    /// The symbol `syntax-table`.
+    pub(crate) fn syntax_table_symbol(&mut self) -> Value {
+        Value::reference(self.search_slots().syntax_table + 1, 7)
+    }
+    /// Whether V is a string: what a search checks of its arguments, in
+    /// their order, before it reads either.
+    #[inline]
+    fn regexp_stringp(&self, v: Value) -> bool {
+        Self::image_string(v) || matches!(self.object_if(v), Some(Object::String(_) | Object::RawString(_) | Object::Bytes(_)))
+    }
+    #[inline]
     fn regexp_preserve(&mut self) -> bool {
         let slot = self.search_slots().preserve_match_data;
         self.slots[slot].value != Value::NIL
     }
     /// The current buffer's binding: case-fold-search is often buffer-local.
     fn regexp_case_fold(&mut self) -> SearchResult<bool> {
-        let slot = self.search_slots().case_fold;
-        Ok(self.variable_value(slot)? != Value::NIL)
+        let [fold] = self.search_values(|slots| &mut slots.case_fold)?;
+        Ok(fold != Value::NIL)
     }
     /// PATTERN for a search of MULTIBYTE text, for the longest match when
     /// POSIX, case-folded with the standard table when FOLDED, from the
     /// pattern cache.
     fn regexp_compiled(
         &mut self,
-        pattern: &Input,
+        pattern: &Input<'_>,
         multibyte: bool,
         posix: bool,
         folded: bool,
@@ -693,15 +811,12 @@ impl Vm {
         let table = source.table();
         self.regexp_cache.clock += 1;
         let clock = self.regexp_cache.clock;
-        // The map alone leaves the VM while the pattern's bytes are borrowed.
-        let mut patterns = std::mem::take(&mut self.regexp_cache.patterns);
         let hit = self.str_view(pattern).and_then(|view| {
-            let entry = patterns.get_mut(view.bytes())?.iter_mut().find(|e| e.multibyte == view.is_multibyte()
+            let entry = self.regexp_cache.patterns.get(view.bytes())?.iter().find(|e| e.multibyte == view.is_multibyte()
                 && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))?;
-            entry.used = clock;
+            entry.used.set(clock);
             Some(entry.compiled.clone())
         });
-        self.regexp_cache.patterns = patterns;
         let compiled = if let Some(compiled) = hit {
             compiled
         } else {
@@ -711,9 +826,20 @@ impl Vm {
         compiled.borrow_mut().set_target_multibyte(multibyte);
         Ok(compiled)
     }
-    /// GROUPS as the match data, of the current buffer when BUFFER.
-    fn regexp_save(&mut self, groups: Vec<Option<(usize, usize)>>, buffer: bool) {
-        self.regexp.groups = groups;
+    /// REGISTERS, positions already (`place_registers`), as the match data,
+    /// of the current buffer when BUFFER: into the groups GNU's one
+    /// `search_regs` is, which a match as wide as the last allocates
+    /// nothing to fill.
+    fn regexp_save(&mut self, registers: &MatchRegisters, buffer: bool) {
+        let (starts, ends) = (&registers.start[..], &registers.end[..]);
+        let groups = &mut self.regexp.groups;
+        groups.clear();
+        for (i, &start) in starts.iter().enumerate() {
+            groups.push(match (register(start), register(ends[i])) {
+                (Some(start), Some(end)) => Some((start, end)),
+                _ => None,
+            });
+        }
         self.regexp.succeeded = true;
         let slot = self.search_slots().match_buffer;
         self.slots[slot].value = if buffer {
@@ -721,6 +847,25 @@ impl Vm {
         } else {
             Value::NIL
         };
+    }
+    /// The compiled pattern that matches exactly STRING: `search_command`
+    /// with RE false is the same search over STRING quoted, which matches
+    /// where the literal does, with the same folding.
+    fn regexp_compiled_literal(&mut self, string: Value, multibyte: bool, posix: bool, folded: bool, source: &syntax::SyntaxSource)
+        -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        let mut quoted = std::mem::take(&mut self.regexp_cache.quoted);
+        quoted.clear();
+        let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        for &byte in view.bytes() {
+            if b"[*.\\?+^$".contains(&byte) {
+                quoted.push(b'\\');
+            }
+            quoted.push(byte);
+        }
+        let (chars, pattern_multibyte) = (view.chars + quoted.len() - view.bytes().len(), view.is_multibyte());
+        let compiled = self.regexp_compiled(&Input::new(&quoted[..], chars, pattern_multibyte), multibyte, posix, folded, source);
+        self.regexp_cache.quoted = quoted;
+        compiled
     }
     fn regexp_group(&self, v: Value) -> SearchResult<Option<(usize, usize)>> {
         let n = self.regexp_int(v)?;
@@ -960,211 +1105,173 @@ impl Vm {
             _ => (),
         }
         if p == StringMatch {
-            self.str_view(args[0]).ok_or(Fault::Wrong("stringp", args[0]))?;
-            let input = self.regexp_input(args[1])?;
-            let pos = if args[2] == Value::NIL {
-                0
-            } else {
-                self.regexp_int(args[2])?
-            };
-            let pos = if pos < 0 {
-                input.len() as i64 + pos
-            } else {
-                pos
-            };
-            if pos < 0 || pos as usize > input.len() {
-                return Err(Fault::Signal("args-out-of-range", vec![args[1], args[2]]));
-            }
-            let folded = self.regexp_case_fold()?;
-            let source = self.regexp_syntax(Some(args[1]))?;
-            let compiled = self.regexp_compiled_string(args[0], input.multibyte, posix, folded, &source)?;
-            let compiled = compiled.borrow();
-            let syntax = syntax::VmSyntax::new(self, source);
-            let byte = input.byte(pos as usize);
-            let armed = self.arm_regexp_quit();
-            let found = regex::re_search(
-                &compiled,
-                &input.bytes,
-                byte,
-                (input.bytes.len() - byte) as isize,
-                &syntax,
-                // GNU at_dot compares the text pointer with buffer point;
-                // a standalone string cannot contain that buffer address.
-                usize::MAX,
-            );
-            drop((syntax, compiled));
-            self.regexp_quit(armed)?;
-            if regex::take_matcher_overflow() {
-                return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
-            }
-            if let Some((at, registers)) = found {
-                if !self.regexp_preserve() && args[3] == Value::NIL {
-                    let groups = register_spans(&registers, |byte| Ok(input.character(byte)))?;
-                    self.regexp_save(groups, false);
-                }
-                return Ok(Value::integer(input.character(at) as i64)?);
-            }
-            return Ok(Value::NIL);
+            return self.regexp_string_match(&args, posix);
         }
-        let count = if matches!(p, ReSearchForward | ReSearchBackward | SearchForward | SearchBackward) && args[3] != Value::NIL {
-            self.regexp_int(args[3])?
-        } else {
-            1
-        };
-        let count = if matches!(p, ReSearchBackward | SearchBackward) { -count } else { count };
-        self.str_view(args[0]).ok_or(Fault::Wrong("stringp", args[0]))?;
-        // search_command with RE false: the same search over STRING quoted,
-        // which matches exactly where the literal does, with the same folding.
-        let mut literal = None;
-        if matches!(p, SearchForward | SearchBackward) {
-            let pattern = self.regexp_input(args[0])?;
-            let quoted: Vec<u8> = pattern.bytes.iter().flat_map(|&b| {
-                let special = b"[*.\\?+^$".contains(&b);
-                if special { vec![b'\\', b] } else { vec![b] }
-            }).collect();
-            let chars = pattern.len() + quoted.len() - pattern.bytes.len();
-            literal = Some(Input::new(quoted, chars, pattern.multibyte));
+        self.regexp_buffer_search(p, posix, &args)
+    }
+    /// `string-match` of PATTERN in STRING from START, unless INHIBIT
+    /// leaving the match data; for the longest match when POSIX.
+    fn regexp_string_match(&mut self, &[pattern, string, start, inhibit]: &[Value; 4], posix: bool) -> SearchResult<Value> {
+        if !self.regexp_stringp(pattern) {
+            return Err(Fault::Wrong("stringp", pattern));
         }
-        let index = self.buffer_index()?;
-        let (accessible, base_char, chars, point_byte) = self.regexp_buffer_frame(index)?;
-        let multibyte = matches!(self.objects[index], Object::Buffer(_));
-        let end_char = base_char + chars;
-        let character_of = |vm: &Self, byte: usize| -> SearchResult<usize> {
-            Ok(match &vm.objects[index] {
-                Object::Buffer(t) => t.char_of_byte(ByteOffset(byte))?.0 + 1,
-                _ => byte + 1,
-            })
+        let (chars, multibyte) = {
+            let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+            (view.chars, view.is_multibyte())
         };
-        let original_char = character_of(self, point_byte)?;
-        let bound = if p == LookingAt || args[1] == Value::NIL {
-            if p == LookingAt || count > 0 {
-                end_char
-            } else {
-                base_char
-            }
-        } else {
-            let limit = if let Some(Object::Marker(_)) = self.object_if(args[1]) {
-                let position = self.marker_position_value(args[1])?;
-                if position == Value::NIL {
-                    return Err(Fault::Text(
-                        "error",
-                        "Marker does not point anywhere".into(),
-                    ));
-                }
-                position.as_integer()?
-            } else {
-                args[1]
-                    .as_integer()
-                    .map_err(|_| Fault::Wrong("integer-or-marker-p", args[1]))?
-            };
-            if if count > 0 {
-                limit < original_char as i64
-            } else {
-                limit > original_char as i64
-            } {
-                return Err(Fault::Text(
-                    "error",
-                    "Invalid search bound (wrong side of point)".into(),
-                ));
-            }
-            limit.clamp(base_char as i64, end_char as i64) as usize
-        };
-        if count == 0 {
-            return Ok(Value::integer(original_char as i64)?);
-        }
-        let limit_byte = match &self.objects[index] {
-            Object::Buffer(t) => t.byte_of_char(CharOffset(bound - 1))?.0,
-            _ => bound - 1,
+        let from = if start == Value::NIL { 0 } else { self.regexp_int(start)? };
+        let from = if from < 0 { i64::try_from(chars).map_or(from, |chars| chars + from) } else { from };
+        let Some(from) = usize::try_from(from).ok().filter(|&from| from <= chars) else {
+            return Err(Fault::Signal("args-out-of-range", vec![string, start]));
         };
         let folded = self.regexp_case_fold()?;
-        let source = self.regexp_syntax(None)?;
-        let compiled = match &literal {
-            Some(pattern) => self.regexp_compiled(pattern, multibyte, posix, folded, &source)?,
-            None => self.regexp_compiled_string(args[0], multibyte, posix, folded, &source)?,
+        let source = self.regexp_syntax(Some(string))?;
+        let compiled = self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?;
+        let save = inhibit == Value::NIL && !self.regexp_preserve();
+        let armed = self.arm_regexp_quit();
+        // The string is read where it lies: nothing moves or changes it
+        // while the search borrows the VM.
+        let found = {
+            let input = self.regexp_subject(string)?;
+            let compiled = compiled.borrow();
+            let syntax = syntax::VmSyntax::new(self, source);
+            let byte = input.byte(from);
+            // GNU at_dot compares the text pointer with buffer point; a
+            // standalone string cannot contain that buffer address.
+            let found = regex::re_search(&compiled, &input.bytes, byte, (input.bytes.len() - byte).cast_signed(), &syntax, usize::MAX);
+            match found {
+                Some((at, mut registers)) => {
+                    // The match data's positions are characters of the string.
+                    if save && !input.bytewise {
+                        place_registers(&mut registers, |byte| Ok(input.character(byte)))?;
+                    }
+                    Some((input.character(at), registers))
+                }
+                None => None,
+            }
         };
-        let compiled = compiled.borrow();
+        self.regexp_quit(armed)?;
+        if regex::take_matcher_overflow() {
+            return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
+        }
+        let Some((at, registers)) = found else { return Ok(Value::NIL) };
+        if save {
+            self.regexp_save(&registers, false);
+        }
+        Ok(Value::integer(i64::try_from(at).map_err(|e| Fault::Internal(e.to_string()))?)?)
+    }
+    /// `looking-at' (P) of PATTERN at point, and the searches from point
+    /// for it, as a regexp or as a literal, to BOUND, REPEAT times: for the
+    /// longest match when POSIX. BOUND is `looking-at''s INHIBIT-MODIFY.
+    /// Positions stay bytes until Lisp is to see them: the match data, a
+    /// search's value, and a bound it gave.
+    fn regexp_buffer_search(&mut self, p: Primitive, posix: bool, &[pattern, bound, noerror, repeat]: &[Value; 4]) -> SearchResult<Value> {
+        use Primitive::{LookingAt, ReSearchBackward, SearchBackward, SearchForward};
+        let looking = p == LookingAt;
+        let count = if !looking && repeat != Value::NIL { self.regexp_int(repeat)? } else { 1 };
+        let count = if matches!(p, ReSearchBackward | SearchBackward) { -count } else { count };
+        if !self.regexp_stringp(pattern) {
+            return Err(Fault::Wrong("stringp", pattern));
+        }
+        let buffer = self.regexp_search_buffer()?;
+        let SearchBuffer { index, point: origin, multibyte, .. } = buffer;
+        let (low, high) = (buffer.accessible.start, buffer.accessible.end);
+        let limit = if looking || bound == Value::NIL {
+            if looking || count > 0 { high } else { low }
+        } else {
+            self.regexp_bound(&buffer, bound, count > 0)?
+        };
+        if count == 0 {
+            let point = self.regexp_buffer_char(index, origin)?;
+            return Ok(Value::integer(i64::try_from(point).map_err(|e| Fault::Internal(e.to_string()))?)?);
+        }
+        let folded = self.regexp_case_fold()?;
+        let source = self.regexp_syntax_of(index, None)?;
+        let compiled = if matches!(p, SearchForward | SearchBackward) {
+            self.regexp_compiled_literal(pattern, multibyte, posix, folded, &source)?
+        } else {
+            self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?
+        };
+        let save = (!looking || bound == Value::NIL) && !self.regexp_preserve();
         // What the engine can read: the candidates and the matches, which
         // end at the bound forward and at point backward (GNU's STOP), and
         // a margin for the characters assertions look at on either side.
-        let reach = if p == LookingAt {
-            point_byte..accessible.end
+        let reach = if looking {
+            origin..high
         } else if count > 0 {
-            point_byte..limit_byte
+            origin..limit
         } else {
-            limit_byte..point_byte
+            limit..origin
         };
-        let need = reach.start.saturating_sub(SEARCH_MARGIN).max(accessible.start)
-            ..(reach.end + SEARCH_MARGIN).min(accessible.end);
-        // Compiling may have collected: find the buffer again.
-        let index = self.buffer_index()?;
+        let need = reach.start.saturating_sub(SEARCH_MARGIN).max(low)..(reach.end + SEARCH_MARGIN).min(high);
         let window = self.regexp_buffer_window(index, need);
-        let text = self.regexp_buffer_input(index, window.clone(), base_char);
-        let syntax = syntax::VmSyntax::new(self, source.rebased(window.start));
-        // Match data is saved once, from the last success, after the engine.
-        let (mut matched, mut overflow) = (None, false);
-        let original = text.point;
-        let limit = limit_byte - window.start;
-        let mut point = original;
-        let mut failed = false;
         let armed = self.arm_regexp_quit();
-        for _ in 0..count.unsigned_abs() {
-            let found = if p == LookingAt {
-                regex::re_match(&compiled, text.bytes, point, text.bytes.len(), &syntax, original)
-            } else {
-                regex::re_search(&compiled, text.bytes, point, limit as isize - point as isize, &syntax, original)
-            };
-            // An overflow still keeps an earlier iteration's match data.
-            overflow = regex::take_matcher_overflow();
-            let Some((_, registers)) = found.filter(|_| !overflow) else {
-                failed = true;
-                break;
-            };
-            point = if count > 0 {
-                registers.end[0]
-            } else {
-                registers.start[0]
-            } as usize;
-            matched = Some(registers);
+        // Match data is saved once, from the last success, after the engine.
+        let (mut matched, mut overflow, mut failed) = (None, false, false);
+        let mut point = origin - window.start;
+        let limit = limit - window.start;
+        {
+            let compiled = compiled.borrow();
+            let text = self.regexp_buffer_input(index, window.clone());
+            let syntax = syntax::VmSyntax::new(self, source.rebased(window.start));
+            for _ in 0..count.unsigned_abs() {
+                let found = if looking {
+                    regex::re_match(&compiled, text.bytes, point, text.bytes.len(), &syntax, text.point)
+                } else {
+                    regex::re_search(&compiled, text.bytes, point, limit.cast_signed() - point.cast_signed(), &syntax, text.point)
+                };
+                // An overflow still keeps an earlier iteration's match data.
+                overflow = regex::take_matcher_overflow();
+                let Some((_, registers)) = found.filter(|_| !overflow) else {
+                    failed = true;
+                    break;
+                };
+                point = register(if count > 0 { registers.end[0] } else { registers.start[0] }).expect("a match has its whole span");
+                matched = Some(registers);
+            }
         }
-        let groups = matched
-            .map(|registers| register_spans(&registers, |byte| Ok(text.character(byte)? + base_char)))
-            .transpose()?;
-        if failed && args[2] != Value::NIL && args[2] != Value::TRUE {
+        let character = |vm: &Self, byte: usize| vm.regexp_buffer_char(index, window.start + byte);
+        if save && let Some(registers) = &mut matched {
+            place_registers(registers, |byte| character(self, byte))?;
+        }
+        // A search's value is where it left point: the end of its last
+        // match, which the match data has as a character already.
+        let value = if failed || looking {
+            None
+        } else if save && let Some(registers) = &matched {
+            register(if count > 0 { registers.end[0] } else { registers.start[0] })
+        } else {
+            Some(character(self, point)?)
+        };
+        if failed && noerror != Value::NIL && noerror != Value::TRUE {
             point = limit;
         }
-        let point_char = text.character(point)? + base_char;
-        drop((syntax, text));
         self.regexp_quit(armed)?;
-        if let Some(groups) = groups {
-            if !self.regexp_preserve() && (p != LookingAt || args[1] == Value::NIL) {
-                self.regexp_save(groups, true);
-            }
+        if save && let Some(registers) = &matched {
+            self.regexp_save(registers, true);
         }
         if overflow {
             return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
         }
-        if p == LookingAt {
+        if looking {
             return Ok(if failed { Value::NIL } else { Value::TRUE });
         }
         if failed {
-            if args[2] == Value::NIL {
-                return Err(Fault::Signal("search-failed", vec![self.stack[start]]));
+            if noerror == Value::NIL {
+                return Err(Fault::Signal("search-failed", vec![pattern]));
             }
-            if args[2] == Value::TRUE {
+            if noerror == Value::TRUE {
                 return Ok(Value::NIL);
             }
         }
-        // Recover the buffer after the engine, rather than retaining its index.
-        let index = self.buffer_index()?;
         match self.objects.entry_mut(index) {
             Object::Buffer(t) => t.point = ByteOffset(point + window.start),
             Object::ByteBuffer(t) => t.point = ByteOffset(point + window.start),
             _ => unreachable!("buffer_index validates"),
         }
-        if failed {
-            Ok(Value::NIL)
-        } else {
-            Ok(Value::integer(point_char as i64)?)
+        match value {
+            Some(position) => Ok(Value::integer(i64::try_from(position).map_err(|e| Fault::Internal(e.to_string()))?)?),
+            None => Ok(Value::NIL),
         }
     }
     pub(super) fn regexp_call(
@@ -1212,23 +1319,39 @@ impl Vm {
     }
 }
 
-thread_local! {
-    /// The quit signal of the VM whose search runs on this thread, while
-    /// a C-g may stop its matcher (`Vm::arm_regexp_quit`).
-    static REGEXP_QUIT: std::cell::Cell<*const crate::QuitSignal> = const { std::cell::Cell::new(std::ptr::null()) };
+/// What the matcher's quit probe reads while a search runs on this thread
+/// (`Vm::arm_regexp_quit`): one cell, set and cleared once a search.
+#[derive(Clone, Copy)]
+struct Armed {
+    /// The quit signal of the VM whose search runs, while a C-g may stop
+    /// its matcher; null otherwise.
+    quit: *const crate::QuitSignal,
     /// The user signals `debug-on-event' named when that search began
     /// (`Vm::debug_event_mask`): no Lisp runs inside a match to change it.
-    static REGEXP_DEBUG_EVENTS: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
-    /// For the search's extent, what an inspection reads: the matcher touches
-    /// neither, and the search runs no Lisp.
-    static REGEXP_FRAMES: std::cell::Cell<Option<(*const crate::backtrace::Backtrace, *const Vec<String>)>> = const { std::cell::Cell::new(None) };
+    debug_events: u8,
+    /// For the search's extent, what an inspection reads: the matcher
+    /// touches neither, and the search runs no Lisp.
+    frames: Option<(*const crate::backtrace::Backtrace, *const Vec<String>)>,
+    /// Whether this thread's matcher polls `regexp_quit_probe`: installed
+    /// at the thread's first armed search, and left.
+    probing: bool,
+}
+impl Armed {
+    /// No search armed.
+    const fn idle(probing: bool) -> Self {
+        Self { quit: std::ptr::null(), debug_events: 0, frames: None, probing }
+    }
+}
+thread_local! {
+    static ARMED: std::cell::Cell<Armed> = const { std::cell::Cell::new(Armed::idle(false)) };
 }
 
 /// The matcher's quit probe (romacs_regex::host): a C-g the host
 /// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
+    let armed = ARMED.with(std::cell::Cell::get);
     // An inspection leaves the match alone: only a real quit stops it.
-    if crate::host::inspect_pending() && let Some((backtrace, symbols)) = REGEXP_FRAMES.with(std::cell::Cell::get) {
+    if crate::host::inspect_pending() && let Some((backtrace, symbols)) = armed.frames {
         let generation = crate::host::inspect_generation();
         // SAFETY: set for the extent of one search by the VM that owns them
         // (`ArmedQuit`); nothing changes them while it matches.
@@ -1237,8 +1360,7 @@ fn regexp_quit_probe() -> bool {
     }
     // SAFETY: set only for the extent of one search by the VM that owns the
     // signal (`ArmedQuit`), which outlives the search.
-    REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).due() } })
-        || crate::host::user_signal_waiting(REGEXP_DEBUG_EVENTS.with(std::cell::Cell::get))
+    (!armed.quit.is_null() && unsafe { (*armed.quit).due() }) || crate::host::user_signal_waiting(armed.debug_events)
 }
 
 /// A search's armed quit probe, disarmed when dropped.
@@ -1246,9 +1368,7 @@ pub(crate) struct ArmedQuit(bool);
 impl Drop for ArmedQuit {
     fn drop(&mut self) {
         if self.0 {
-            REGEXP_QUIT.with(|signal| signal.set(std::ptr::null()));
-            REGEXP_DEBUG_EVENTS.with(|events| events.set(0));
-            REGEXP_FRAMES.with(|frames| frames.set(None));
+            ARMED.with(|armed| armed.set(Armed::idle(true)));
         }
     }
 }
@@ -1261,18 +1381,23 @@ impl Vm {
     /// whatever it is, since handle_user_signal clears it.
     fn arm_regexp_quit(&self) -> ArmedQuit {
         let reached = self.native_quit_reached();
-        let presses = reached && std::sync::Arc::strong_count(&self.quit) > 1 && self.quit_variables()[1] == Value::NIL;
-        let debug = if reached { self.debug_event_mask() } else { 0 };
+        let inhibit = self.slots[self.quit_slots[1]].value;
+        let presses = reached && std::sync::Arc::strong_count(&self.quit) > 1 && (inhibit == Value::NIL || inhibit == Value::UNBOUND);
+        let debug_events = if reached { self.debug_event_mask() } else { 0 };
         let inspected = crate::host::inspect_enabled();
-        let armed = presses || debug != 0 || inspected;
-        if armed {
-            let quit = if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() };
-            REGEXP_QUIT.with(|signal| signal.set(quit));
-            REGEXP_DEBUG_EVENTS.with(|events| events.set(debug));
-            if inspected { REGEXP_FRAMES.with(|frames| frames.set(Some((&raw const self.backtrace, &raw const self.symbol_names)))); }
+        if !(presses || debug_events != 0 || inspected) {
+            return ArmedQuit(false);
+        }
+        let armed = Armed {
+            quit: if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() },
+            debug_events,
+            frames: inspected.then_some((&raw const self.backtrace, &raw const self.symbol_names)),
+            probing: true,
+        };
+        if !ARMED.with(|cell| cell.replace(armed)).probing {
             regex::host::set_quit_probe(Some(regexp_quit_probe));
         }
-        ArmedQuit(armed)
+        ArmedQuit(true)
     }
     /// After an ARMED search: the host's C-g or a debug event, if the
     /// matcher may have stopped for it, as `quit'.

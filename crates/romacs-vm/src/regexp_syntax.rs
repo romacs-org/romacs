@@ -232,8 +232,9 @@ impl<'a> VmSyntax<'a> {
         // A fresh identity per call keeps the engine's TLS caches from
         // confusing separate VMs or table contents.
         static NEXT: AtomicUsize = AtomicUsize::new(1);
-        // A subject without `syntax-table' properties reads the table alone.
-        let subject = source.subject.filter(|s| vm.has_syntax_properties(s.object));
+        // A source names a subject only when it has `syntax-table'
+        // properties to read (`Vm::regexp_syntax_source').
+        let subject = source.subject;
         let reader = subject.and_then(|s| match vm.object_if(s.object)? {
             Object::Buffer(t) => Some(t.properties.reader("syntax-table")),
             Object::String(s) | Object::RawString(s) => Some(s.properties.reader("syntax-table")),
@@ -334,78 +335,88 @@ impl Vm {
     fn regexp_standard_syntax(&mut self) -> Value {
         let slot = self.search_slots().standard_syntax;
         if self.slots[slot].value == Value::NIL {
-            let purpose = self.intern("syntax-table");
-            // This symbol is interned during primitive registration. Defer its
-            // predefined metadata with the table to keep VM startup heap-free.
-            let purpose_slot = purpose.index(7).unwrap() - 1;
-            if self.slots[purpose_slot].plist == Value::NIL {
-                let property = self.intern("char-table-extra-slots");
-                // A fresh (0): the shared whitespace descriptor here would
-                // let a later `put' on the symbol rewrite every whitespace
-                // syntax entry (syntax.c syms_of_syntax's Fput).
-                let tail = self.alloc_cons(Value::integer(0).unwrap(), Value::NIL);
-                let plist = self.alloc_cons(property, tail);
-                self.slots[purpose_slot].plist = plist;
-            }
-            let mut table = CharTable::new(purpose);
-            let whitespace = self.regexp_syntax_entry(SyntaxClass::Whitespace.code(), Value::NIL);
-            table.initialize(0, whitespace).expect("no extra slots");
-            let word = self.regexp_syntax_entry(SyntaxClass::Word.code(), Value::NIL);
-            let symbol = self.regexp_syntax_entry(SyntaxClass::Symbol.code(), Value::NIL);
-            let punctuation = self.regexp_syntax_entry(SyntaxClass::Punctuation.code(), Value::NIL);
-            // Populate the ordinary mutable table, not a lookup-time Unicode
-            // override. Word/symbol membership is exact for the exported GNU
-            // defaults; nonword Unicode classes are conservatively punctuation.
-            // Full Unicode delimiter/whitespace syntax remains a separate port.
-            for &(from, to, membership) in unicode_membership::WORD_RANGES {
-                if to < 128 {
-                    continue;
-                }
-                let entry = match membership {
-                    1 => word,
-                    2 => symbol,
-                    _ => punctuation,
-                };
-                table
-                    .set_range(from.max(128) as usize, to as usize, entry)
-                    .expect("valid Unicode membership range");
-            }
-            for code in 0..128 {
-                let matching = match code {
-                    40 => 41,
-                    41 => 40,
-                    91 => 93,
-                    93 => 91,
-                    123 => 125,
-                    125 => 123,
-                    _ => 0,
-                };
-                let entry = self.regexp_syntax_entry(
-                    regex::standard_syntax_class_for_code(code).code(),
-                    if matching == 0 {
-                        Value::NIL
-                    } else {
-                        Value::integer(matching).unwrap()
-                    },
-                );
-                table.set(code as usize, entry).expect("ASCII index");
-            }
-            self.slots[slot].value = self.allocate_object(Object::CharTable(Box::new(table)));
+            self.make_standard_syntax(slot);
         }
         self.slots[slot].value
     }
+    /// The standard syntax table, made into SLOT at its first use.
+    #[cold]
+    fn make_standard_syntax(&mut self, slot: usize) {
+        let purpose = self.intern("syntax-table");
+        // This symbol is interned during primitive registration. Defer its
+        // predefined metadata with the table to keep VM startup heap-free.
+        let purpose_slot = purpose.index(7).unwrap() - 1;
+        if self.slots[purpose_slot].plist == Value::NIL {
+            let property = self.intern("char-table-extra-slots");
+            // A fresh (0): the shared whitespace descriptor here would
+            // let a later `put' on the symbol rewrite every whitespace
+            // syntax entry (syntax.c syms_of_syntax's Fput).
+            let tail = self.alloc_cons(Value::integer(0).unwrap(), Value::NIL);
+            let plist = self.alloc_cons(property, tail);
+            self.slots[purpose_slot].plist = plist;
+        }
+        let mut table = CharTable::new(purpose);
+        let whitespace = self.regexp_syntax_entry(SyntaxClass::Whitespace.code(), Value::NIL);
+        table.initialize(0, whitespace).expect("no extra slots");
+        let word = self.regexp_syntax_entry(SyntaxClass::Word.code(), Value::NIL);
+        let symbol = self.regexp_syntax_entry(SyntaxClass::Symbol.code(), Value::NIL);
+        let punctuation = self.regexp_syntax_entry(SyntaxClass::Punctuation.code(), Value::NIL);
+        // Populate the ordinary mutable table, not a lookup-time Unicode
+        // override. Word/symbol membership is exact for the exported GNU
+        // defaults; nonword Unicode classes are conservatively punctuation.
+        // Full Unicode delimiter/whitespace syntax remains a separate port.
+        for &(from, to, membership) in unicode_membership::WORD_RANGES {
+            if to < 128 {
+                continue;
+            }
+            let entry = match membership {
+                1 => word,
+                2 => symbol,
+                _ => punctuation,
+            };
+            table
+                .set_range(from.max(128) as usize, to as usize, entry)
+                .expect("valid Unicode membership range");
+        }
+        for code in 0..128 {
+            let matching = match code {
+                40 => 41,
+                41 => 40,
+                91 => 93,
+                93 => 91,
+                123 => 125,
+                125 => 123,
+                _ => 0,
+            };
+            let entry = self.regexp_syntax_entry(
+                regex::standard_syntax_class_for_code(code).code(),
+                if matching == 0 {
+                    Value::NIL
+                } else {
+                    Value::integer(matching).unwrap()
+                },
+            );
+            table.set(code as usize, entry).expect("ASCII index");
+        }
+        self.slots[slot].value = self.allocate_object(Object::CharTable(Box::new(table)));
+    }
     fn regexp_current_syntax(&mut self) -> SearchResult<Value> {
-        let i = self.buffer_index()?;
-        let table = match &self.objects[i] {
+        let index = self.buffer_index()?;
+        Ok(self.buffer_syntax_table(index))
+    }
+    /// The syntax table of the buffer at object INDEX, the standard one by
+    /// default.
+    pub(crate) fn buffer_syntax_table(&mut self, index: usize) -> Value {
+        let table = match &self.objects[index] {
             Object::Buffer(t) => t.syntax_table,
             Object::ByteBuffer(t) => t.syntax_table,
             _ => unreachable!("buffer_index validates"),
         };
-        Ok(if table == Value::NIL {
+        if table == Value::NIL {
             self.regexp_standard_syntax()
         } else {
             table
-        })
+        }
     }
     /// The current buffer's syntax table, the standard one by default.
     pub(crate) fn current_syntax_table(&mut self) -> std::result::Result<Value, crate::prim::Fault> {
@@ -434,15 +445,13 @@ impl Vm {
         value
     }
     fn regexp_syntax_table(&self, table: Value) -> SearchResult<&CharTable> {
+        // The purpose symbol: the search slots have it once a search ran.
+        let purpose = match &self.regexp_cache.slots {
+            Some(slots) => Some(slots.syntax_table),
+            None => self.names.get("syntax-table").copied(),
+        };
         match self.object_if(table) {
-            Some(Object::CharTable(t))
-                if self
-                    .names
-                    .get("syntax-table")
-                    .is_some_and(|&slot| t.purpose() == Value::reference(slot + 1, 7)) =>
-            {
-                Ok(t)
-            }
+            Some(Object::CharTable(t)) if purpose.is_some_and(|slot| t.purpose() == Value::reference(slot + 1, 7)) => Ok(t),
             _ => Err(Fault::Wrong("syntax-table-p", table)),
         }
     }
@@ -459,6 +468,13 @@ impl Vm {
     }
     fn entry_class(entry: Option<(Value, Value)>) -> SyntaxClass {
         entry.and_then(|(n, _)| n.integer_value()).and_then(SyntaxClass::from_code).unwrap_or(SyntaxClass::Whitespace)
+    }
+    /// The entries the memo holds of TABLE's ASCII characters, each
+    /// `Value::UNBOUND` where it holds none: for a reader that borrows the
+    /// VM after [`Self::keep_syntax_memo`].
+    pub(crate) fn syntax_memo_entries(&self, table: Value) -> Option<&[Value; 128]> {
+        let memo = &self.regexp_cache.syntax;
+        memo.entries.as_ref().filter(|_| memo.table == table && memo.writes == crate::char_table::writes())
     }
     /// Whether the memo holds for TABLE as it is now.
     fn syntax_memo_holds(&self, table: Value) -> bool {
@@ -538,13 +554,21 @@ impl Vm {
     /// The current syntax table and SUBJECT's syntax-table properties (the
     /// current buffer's when None) for one engine call.
     pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<SyntaxSource> {
+        let index = self.buffer_index()?;
+        self.regexp_syntax_of(index, subject)
+    }
+    /// [`Self::regexp_syntax`] with the current buffer at object INDEX.
+    pub(super) fn regexp_syntax_of(&mut self, index: usize, subject: Option<Value>) -> SearchResult<SyntaxSource> {
         self.regexp_standard_syntax();
-        let current = self.regexp_current_syntax()?;
-        let object = subject.unwrap_or(self.slots[self.buffer_slot].value);
-        let base = match self.object_if(object) {
-            Some(Object::Buffer(t)) => t.accessible().start.0,
-            Some(Object::ByteBuffer(t)) => t.restriction.start.0,
+        let current = self.buffer_syntax_table(index);
+        let start = |object: &Object| match object {
+            Object::Buffer(t) => t.accessible().start.0,
+            Object::ByteBuffer(t) => t.restriction.start.0,
             _ => 0,
+        };
+        let (object, base) = match subject {
+            Some(subject) => (subject, self.object_if(subject).map_or(0, start)),
+            None => (self.slots[self.buffer_slot].value, start(&self.objects[index])),
         };
         self.regexp_syntax_source(current, object, base)
     }
@@ -560,8 +584,10 @@ impl Vm {
         };
         self.regexp_syntax_source(table, buffer, base)
     }
-    fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
-        // What the memo holds for was checked when it was made.
+    /// Keep the memo for the syntax table CURRENT, which this call reads:
+    /// what it holds for was checked when it was made, and it is made
+    /// afresh when it holds for another table or another state of this one.
+    pub(super) fn regexp_syntax_memo(&mut self, current: Value) -> SearchResult<()> {
         if self.syntax_memo_holds(current) {
             if self.regexp_cache.syntax.entries.is_none() {
                 let mut entries = [Value::UNBOUND; 128];
@@ -579,6 +605,15 @@ impl Vm {
             let serial = self.char_table_serial(current);
             self.regexp_cache.syntax = SyntaxMemo { table: current, serial, writes: crate::char_table::writes(), entries: None };
         }
+        Ok(())
+    }
+    /// [`Self::regexp_syntax_memo`] for a syntax scan, which reads a table
+    /// the memo refuses entry by entry, as it reads one the memo is new to.
+    pub(crate) fn keep_syntax_memo(&mut self, table: Value) {
+        let _ = self.regexp_syntax_memo(table);
+    }
+    fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
+        self.regexp_syntax_memo(current)?;
         // parse-sexp-lookup-properties: the subject's `syntax-table'
         // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
         // A subject without them reads the table alone (`VmSyntax::new'),
@@ -590,11 +625,13 @@ impl Vm {
         // The binding where the search runs: `syntax-propertize' sets it
         // buffer-locally, and a treesit `#match?' searches its parser's
         // buffer, which need not be current.
-        let slot = self.search_slots().lookup_properties;
         let current_buffer = self.slots[self.buffer_slot].value;
         let lookup = match self.object_if(object) {
-            Some(Object::Buffer(_) | Object::ByteBuffer(_)) if object != current_buffer => self.value_in_buffer(slot, object),
-            _ => self.variable_value(slot),
+            Some(Object::Buffer(_) | Object::ByteBuffer(_)) if object != current_buffer => {
+                let slot = self.search_slots().lookup_properties.symbol(0);
+                self.value_in_buffer(slot, object)
+            }
+            _ => self.search_values(|slots| &mut slots.lookup_properties).map(|[lookup]| lookup),
         }
         .map_err(Fault::Internal)?;
         let subject = (lookup != Value::NIL).then_some(PropertySubject { object, base });

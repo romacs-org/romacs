@@ -962,6 +962,17 @@ static NEXT_CALL: std::sync::LazyLock<u16> = std::sync::LazyLock::new(|| {
 });
 
 impl Forwarded {
+    /// FWD's value where its storage alone gives it: a Boolean, an
+    /// integer, an object once its initial value is made.
+    #[inline]
+    pub(super) fn stored(&self, fwd: Fwd) -> Option<Value> {
+        match fwd {
+            Fwd::Bool(i) => Some(if self.bools[i as usize] { Value::TRUE } else { Value::NIL }),
+            Fwd::Int(i) => Value::integer(self.ints[i as usize]).ok(),
+            Fwd::Obj(i) => Some(self.objects[i as usize]).filter(|&value| value != Value::UNBOUND),
+            Fwd::Buffer(_) | Fwd::Fence(_) => None,
+        }
+    }
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
     pub(super) fn debug_on_next_call(&self) -> bool { self.bools[*NEXT_CALL as usize] }

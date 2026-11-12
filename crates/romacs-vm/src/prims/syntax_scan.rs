@@ -28,8 +28,7 @@ fn matching_paren(cx, character: Value) { cx.matching_paren(character) }}
 
 defsubr! { name = "forward-comment", gnu = "syntax.c:2436", effect = Global,
 fn forward_comment(cx, count: Value) -> Step {
-    let function = cx.intern("forward-comment-function");
-    let function = cx.variable_value(function)?.unwrap_or(Value::NIL);
+    let function = cx.forward_comment_function()?;
     if function != Value::NIL {
         return Ok(Step::Call { f: function, args: vec![count], then: returned, saved: vec![] });
     }
@@ -67,17 +66,24 @@ fn returned(_cx: &mut Leaf<'_>, value: Value, _saved: &[Value]) -> Next {
 }
 
 fn start(cx: &mut Leaf<'_>, op: Op, args: &[Value]) -> Next {
-    let mut saved = vec![Value::integer(op.code()).expect("operation"); 1];
-    saved.extend(args);
-    saved.resize(ARGS, Value::NIL);
-    run(cx, saved)
+    let mut saved = [Value::NIL; ARGS];
+    saved[0] = Value::integer(op.code()).expect("operation");
+    saved[1..=args.len()].copy_from_slice(args);
+    run(cx, &saved)
 }
 
-fn run(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
-    saved.truncate(ARGS);
+/// Run the scan the registers SAVED hold. Only a stop for Lisp, which has
+/// them wait in a continuation, moves them off the stack.
+fn run(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
+    let saved = &saved[..ARGS];
     let int = |n: i64| Value::integer(n).expect("buffer position");
-    match cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7], saved[8])? {
-        Outcome::Done(value) => Ok(Step::Done(value)),
+    let outcome = cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7], saved[8])?;
+    if let Outcome::Done(value) = outcome {
+        return Ok(Step::Done(value));
+    }
+    let mut saved = saved.to_vec();
+    match outcome {
+        Outcome::Done(_) => unreachable!("returned above"),
         Outcome::Propertize(arg, charpos, memory) => {
             saved[8] = memory;
             // parse_sexp_propertize: safe_calln, then GNU's two checks.
@@ -102,7 +108,7 @@ fn run(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
 fn propertized(cx: &mut Leaf<'_>, _value: Value, saved: &[Value]) -> Next {
     let int = |v: Value| v.integer_value().expect("saved position");
     cx.syntax_propertize_check(int(saved[ARGS]), int(saved[ARGS + 1]))?;
-    run(cx, saved.to_vec())
+    run(cx, saved)
 }
 
 fn answered(cx: &mut Leaf<'_>, ppss: Value, saved: &[Value]) -> Next {
@@ -127,7 +133,7 @@ fn answered(cx: &mut Leaf<'_>, ppss: Value, saved: &[Value]) -> Next {
     };
     let value = if start.integer_value().is_some() { start } else { saved[ARGS] };
     let answer = cx.cons(saved[ARGS], value);
-    let mut saved = saved.to_vec();
+    let mut saved = saved[..ARGS].to_vec();
     saved[7] = cx.cons(answer, saved[7]);
-    run(cx, saved)
+    run(cx, &saved)
 }

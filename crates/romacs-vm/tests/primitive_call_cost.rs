@@ -62,9 +62,10 @@ fn a_cached_pattern_costs_no_copy_and_no_translation_table() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 400)";
-    // 4,056 and 4,545 with the syntax memo; 4,525 and 5,004 before it;
-    // 5,299 and 6,066 before either.
-    for (body, bound) in [("(looking-at \"[ \\t]*(def\")", 4350.0), ("(string-match \"b+\" \"aabbcc\")", 4850.0)] {
+    // 3,124 and 4,063 with variables read where they were found and
+    // positions kept in bytes; 4,056 and 4,545 with the syntax memo; 4,525
+    // and 5,004 before it; 5,299 and 6,066 before either.
+    for (body, bound) in [("(looking-at \"[ \\t]*(def\")", 3500.0), ("(string-match \"b+\" \"aabbcc\")", 4400.0)] {
         let cost = per_call_in(&mut vm, buffer, body);
         assert!(cost < bound, "{body} costs {cost:.0} instructions a call");
     }
@@ -85,14 +86,30 @@ fn the_syntax_memo_follows_every_change_to_a_table() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
-    // 2,898 with the memo; 3,720 before.
+    // 2,179 walking bytes from point; 2,898 with the memo; 3,720 before.
     let cost = per_call_in(&mut vm, buffer, "(progn (goto-char 5) (skip-syntax-forward \"^w\"))");
-    assert!(cost < 3200.0, "skip-syntax-forward costs {cost:.0} instructions a call");
+    assert!(cost < 2500.0, "skip-syntax-forward costs {cost:.0} instructions a call");
     // Pinned GNU's answers to the same form.
     assert_eq!(
         eval(&mut vm, "(with-temp-buffer (insert \"a-b c\") (let* ((r nil) (note (lambda () (setq r (cons (list (progn (goto-char 1) (skip-syntax-forward \"w\") (point)) (progn (goto-char 1) (and (looking-at \"\\\\sw+\") (match-end 0)))) r)))) (table (lambda (parent) (let ((tb (make-char-table 'syntax-table nil))) (set-char-table-parent tb parent) tb))) (parent (funcall table (standard-syntax-table))) (child (funcall table parent)) (other (funcall table (standard-syntax-table))) (old (syntax-table))) (set-syntax-table child) (funcall note) (modify-syntax-entry ?- \"w\" child) (funcall note) (aset child ?- (cons 2 nil)) (funcall note) (setcar (aref child ?-) 1) (funcall note) (aset child ?- nil) (modify-syntax-entry ?- \"w\" parent) (funcall note) (set-char-table-parent child other) (funcall note) (garbage-collect) (funcall note) (set-syntax-table parent) (funcall note) (set-syntax-table old) (funcall note) (nreverse r)))"),
         "((2 2) (4 4) (4 4) (2 2) (4 4) (2 2) (2 2) (4 4) (2 2))"
     );
+}
+
+/// A syntax scan that calls no Lisp reads its variables where they were
+/// found, keeps its registers on the stack and records nothing for a
+/// rerun: what each call paid besides the scan.
+#[test]
+fn a_scan_pays_little_besides_its_text() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
+    // 3,914 and 4,034 here; in the full binary 11,487 and 11,730 a call
+    // before, 4,342 and 4,461 after (pinned GNU 633 and 642).
+    for (body, bound) in [("(progn (goto-char 24) (forward-comment 1))", 4600.0), ("(scan-sexps 16 1)", 4700.0)] {
+        let cost = per_call_in(&mut vm, buffer, body);
+        assert!(cost < bound, "{body} costs {cost:.0} instructions a call");
+    }
 }
 
 /// A search reads the variable itself, not whatever its name is interned

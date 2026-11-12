@@ -9,8 +9,9 @@ use crate::syntax_scan::{self as scan, Halt, ParseState, Pos, Scanner};
 use std::collections::BTreeMap;
 
 enum Body<'a> {
-    /// The text, its str, and a reader of its `syntax-table' properties.
-    Multibyte(&'a crate::text::Text, crate::properties::KeyReader<'a>),
+    /// The text and, when the scan honours them, a reader of its
+    /// `syntax-table` properties.
+    Multibyte(&'a crate::text::Text, Option<crate::properties::KeyReader<'a>>),
     Unibyte(&'a crate::bytes::ByteBuffer),
 }
 
@@ -20,6 +21,16 @@ thread_local! {
     static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The characters every `View` on this thread passed without a read.
     static PASSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The syntax-table entries this thread's scans read from a table.
+    static TABLE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The syntax reads this thread's scans kept for a rerun.
+    static RECORDED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The syntax-table entries this thread's scans have read from a table, and
+/// the syntax reads they have kept for a rerun.
+#[cfg(test)]
+pub(crate) fn scan_work() -> (usize, usize) {
+    (TABLE_READS.with(std::cell::Cell::get), RECORDED.with(std::cell::Cell::get))
 }
 
 /// The current buffer as `crate::syntax_scan::Text`.
@@ -34,9 +45,12 @@ struct View<'a> {
     body: Body<'a>,
     table: Value,
     properties: bool,
-    /// Memo of the ASCII codes this scan has read: a scan reads a few,
-    /// and each read walks the table and its parents.
-    ascii: [std::cell::Cell<Option<i32>>; 128],
+    /// The entries of the table's ASCII characters the VM holds between
+    /// calls (`Vm::keep_syntax_memo`), which a scan reads instead of
+    /// walking the table and its parents.
+    entries: Option<&'a [Value; 128]>,
+    /// Memo of the ASCII codes this scan has read, each `UNREAD` until then.
+    ascii: [std::cell::Cell<i32>; 128],
     replay: Vec<i32>,
     read: std::cell::RefCell<Vec<i32>>,
     /// Whether the scan can stop to call Lisp, which reruns it from `read'.
@@ -54,8 +68,18 @@ fn buffer_text(vm: &Vm, index: usize) -> &crate::text::Text {
     }
 }
 
+/// No `syntax-ppss` answer yet, as on every scan that never stops: one
+/// map for all of them.
+static UNANSWERED: BTreeMap<i64, i64> = BTreeMap::new();
+
+/// What `View::ascii` holds for a character not read yet: no syntax code,
+/// which is a class and flags in the low 24 bits.
+const UNREAD: i32 = i32::MIN;
+
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
 fn entry_code(vm: &Vm, table: Value, c: u32) -> i32 {
+    #[cfg(test)]
+    TABLE_READS.with(|n| n.set(n.get() + 1));
     let entry = vm.char_table_get(table, c as usize).unwrap_or(Value::NIL);
     cons_code(vm, entry)
 }
@@ -69,13 +93,20 @@ impl<'a> View<'a> {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
-                Body::Multibyte(text, text.properties.reader("syntax-table"))
+                Body::Multibyte(text, properties.then(|| text.properties.reader("syntax-table")))
             }
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
         };
-        let ascii = std::array::from_fn(|_| std::cell::Cell::new(None));
-        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default(), record: true, last: std::cell::Cell::new((usize::MAX, 0)) }
+        Self {
+            vm, body, table, properties,
+            entries: vm.syntax_memo_entries(table),
+            // One value throughout, which fills as one block: a closure
+            // called for each slot, or a tag stored in each, cost more
+            // than a short scan.
+            ascii: [const { std::cell::Cell::new(UNREAD) }; 128],
+            replay: Vec::new(), read: std::cell::RefCell::default(), record: false, last: std::cell::Cell::new((usize::MAX, 0)),
+        }
     }
     fn len(&self) -> usize {
         match self.body {
@@ -85,7 +116,7 @@ impl<'a> View<'a> {
     }
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
-            Body::Multibyte(_, ref reader) => reader.get(ByteOffset(byte)),
+            Body::Multibyte(_, ref reader) => reader.as_ref()?.get(ByteOffset(byte)),
             Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
         }
     }
@@ -147,12 +178,23 @@ impl scan::Text for View<'_> {
             Some(&syntax) => syntax,
             None => self.live_syntax(at),
         };
+        #[cfg(test)]
+        RECORDED.with(|n| n.set(n.get() + 1));
         read.push(syntax);
         syntax
     }
     fn table_syntax(&self, c: u32) -> i32 {
         let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, self.table, c) };
-        memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, self.table, c); memo.set(Some(code)); code })
+        let read = memo.get();
+        if read != UNREAD {
+            return read;
+        }
+        let code = match self.entries {
+            Some(entries) if entries[c as usize] != Value::UNBOUND => cons_code(self.vm, entries[c as usize]),
+            _ => entry_code(self.vm, self.table, c),
+        };
+        memo.set(code);
+        code
     }
     fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
         let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
@@ -165,7 +207,7 @@ impl scan::Text for View<'_> {
         let (mut pos, mut last) = (at, None);
         while pos.char < limit && pos.byte < len {
             // Only where the table alone gives the syntax.
-            let unset_until = if self.properties { reader.unset_until(ByteOffset(pos.byte)) } else { usize::MAX };
+            let unset_until = reader.as_ref().map_or(usize::MAX, |reader| reader.unset_until(ByteOffset(pos.byte)));
             let room = (unset_until.saturating_sub(pos.byte)).min(usize::try_from(limit - pos.char).unwrap_or(usize::MAX));
             if room == 0 {
                 break;
@@ -329,6 +371,11 @@ impl Leaf<'_> {
         let symbol = self.intern(name);
         Ok(self.variable_value(symbol)?.unwrap_or(Value::NIL))
     }
+    /// `forward-comment-function', which replaces `forward-comment' when set.
+    pub(crate) fn forward_comment_function(&mut self) -> std::result::Result<Value, Fault> {
+        let function = self.vm.forward_comment_function().map_err(Fault::Error)?;
+        Ok(if function == Value::UNBOUND { Value::NIL } else { function })
+    }
     fn fixnum(&self, v: Value) -> std::result::Result<i64, Fault> {
         v.integer_value().ok_or(Fault::Wrong("fixnump", v))
     }
@@ -392,7 +439,7 @@ impl Leaf<'_> {
         let opt = |n: i64| if n < 0 { Value::NIL } else { int(n) };
         let mut levels = Value::NIL;
         for start in state.levelstarts.iter().rev() { levels = self.cons(int(start.unwrap_or(-1)), levels); }
-        let syntax_table = self.intern("syntax-table");
+        let syntax_table = self.vm.syntax_table_symbol();
         let items = [
             int(state.depth),
             opt(state.prevlevelstart),
@@ -419,8 +466,11 @@ impl Leaf<'_> {
     fn syntax_bounds(&self, index: usize) -> std::result::Result<(Pos, Pos, Pos), Fault> {
         match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
+                // The text's own ends are known without a search for them,
+                // which would also displace the one position it remembers.
                 let at = |byte: ByteOffset| -> std::result::Result<Pos, Fault> {
-                    Ok(Pos { char: b.char_of_byte(byte).map_err(Fault::Error)?.0 as i64 + 1, byte: byte.0 })
+                    let before = if byte.0 == 0 { 0 } else if byte.0 == b.len_bytes() { b.len_chars() } else { b.char_of_byte(byte).map_err(Fault::Error)?.0 };
+                    Ok(Pos { char: before as i64 + 1, byte: byte.0 })
                 };
                 let range = b.accessible();
                 Ok((at(range.start)?, at(range.end)?, at(b.point)?))
@@ -430,6 +480,13 @@ impl Leaf<'_> {
                 Ok((at(b.restriction.start), at(b.restriction.end), at(b.point)))
             }
             _ => Err(Fault::Error("buffer required".into())),
+        }
+    }
+    fn state_at(&self, index: usize) -> &crate::bytes::BufferState {
+        match &self.vm.objects[index] {
+            data::Object::Buffer(b) => &b.state,
+            data::Object::ByteBuffer(b) => &b.state,
+            _ => unreachable!("buffer_index validates"),
         }
     }
     fn buffer_state_mut(&mut self, index: usize) -> &mut crate::bytes::BufferState {
@@ -442,7 +499,7 @@ impl Leaf<'_> {
     /// The current buffer's CHARS_MODIFF.
     pub(crate) fn syntax_chars_modiff(&mut self) -> std::result::Result<i64, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        Ok(self.buffer_state_mut(index).modification.chars_modiff as i64)
+        Ok(self.state_at(index).modification.chars_modiff as i64)
     }
     pub(crate) fn syntax_set_point(&mut self, charpos: i64) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -481,7 +538,7 @@ impl Leaf<'_> {
             Op::ParsePartialSexp if memory.is_some() => {
                 let memory = memory.as_ref().expect("rerun");
                 let target = if args[2] == Value::NIL { i64::MIN } else { int(args[2]) };
-                let syntax_table = self.intern("syntax-table");
+                let syntax_table = self.vm.syntax_table_symbol();
                 let commentstop = if args[5] == Value::NIL { 0 } else if args[5] == syntax_table { -1 } else { 1 };
                 let state = memory_state(&memory[MEMORY_STATE..]);
                 parse = Some((int(memory[3]), int(memory[4]), target, args[3] != Value::NIL, commentstop, state));
@@ -503,7 +560,7 @@ impl Leaf<'_> {
                     return Err(Fault::Signal(self.intern("args-out-of-range"), data));
                 }
                 let state = self.internalize_parse_state(args[4])?;
-                let syntax_table = self.intern("syntax-table");
+                let syntax_table = self.vm.syntax_table_symbol();
                 let commentstop = if args[5] == Value::NIL { 0 } else if args[5] == syntax_table { -1 } else { 1 };
                 parse = Some((from, to, target, args[3] != Value::NIL, commentstop, state));
             }
@@ -511,15 +568,17 @@ impl Leaf<'_> {
         }
         let (flags, options) = self.syntax_options(memory.as_ref().map(|memory| int(memory[5])))?;
         let properties = options.propertize_done.is_some();
-        let mut ppss = BTreeMap::new();
+        let mut answered = BTreeMap::new();
         let mut tail = answers;
         while let Some((answer, rest)) = self.pair(tail) {
             let (pos, value) = self.pair(answer).expect("saved syntax-ppss answer");
-            ppss.insert(pos.integer_value().expect("position"), value.integer_value().expect("position"));
+            answered.insert(pos.integer_value().expect("position"), value.integer_value().expect("position"));
             tail = rest;
         }
-        let table = self.vm.current_syntax_table()?;
+        let ppss = if answers == Value::NIL { &UNANSWERED } else { &answered };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let table = self.vm.buffer_syntax_table(index);
+        self.vm.keep_syntax_memo(table);
         if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
             let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
             if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
@@ -533,13 +592,16 @@ impl Leaf<'_> {
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
         let (cached, modiff) = {
-            let state = self.buffer_state_mut(index);
+            let state = self.state_at(index);
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
         let mut view = View::new(self.vm, index, table, properties);
         // Only a stop for Lisp reads the syntax a scan recorded, and a
-        // stopped parse goes on where it stopped instead.
-        view.record = !matches!(op, Op::ParsePartialSexp) && (properties || options.comment_use_syntax_ppss);
+        // stopped parse goes on where it stopped instead. A rerun records
+        // from its start; a first run, which seldom stops, only once it
+        // has (below).
+        let records = !matches!(op, Op::ParsePartialSexp) && (properties || options.comment_use_syntax_ppss);
+        view.record = records && memory.is_some();
         // A rerun scans from the first run's start, whatever the call did
         // to point or the restriction.
         let mut suspended = None;
@@ -558,30 +620,42 @@ impl Leaf<'_> {
                 (at(0), at(1), at(2))
             }
         };
-        let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: cached, modiff };
-        let result: std::result::Result<Result_, scan::Stopped> = match op {
-            Op::ForwardComment => {
-                let count = args[0].integer_value().expect("checked");
-                scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(Into::into)
-            }
-            Op::ScanLists | Op::ScanSexps => {
-                let int = |v: Value| v.integer_value().expect("checked");
-                let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
-                scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
-                    .map(Result_::Lists).map_err(Into::into)
-            }
-            Op::ParsePartialSexp => {
-                let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
-                if let Some(suspended) = suspended {
-                    scanner.resume(suspended, to, target, stopbefore, commentstop).map(Result_::Parse)
-                } else {
-                    let start = scan::Text::pos(&view, from);
-                    scanner.parse(&mut state, start, to, target, stopbefore, commentstop).map(|()| Result_::Parse(state))
+        let scan = |view: &View<'_>, suspended: Option<scan::Suspended>| {
+            let mut scanner = Scanner { text: view, begv, zv, options, ppss, defun_start: cached, modiff };
+            let result: std::result::Result<Result_, scan::Stopped> = match op {
+                Op::ForwardComment => {
+                    let count = args[0].integer_value().expect("checked");
+                    scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(Into::into)
                 }
-            }
-            Op::BackwardPrefixChars => scanner.backward_prefix_chars(point).map(Result_::Prefix).map_err(Into::into),
+                Op::ScanLists | Op::ScanSexps => {
+                    let int = |v: Value| v.integer_value().expect("checked");
+                    let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
+                    scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
+                        .map(Result_::Lists).map_err(Into::into)
+                }
+                Op::ParsePartialSexp => {
+                    let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
+                    if let Some(suspended) = suspended {
+                        scanner.resume(suspended, to, target, stopbefore, commentstop).map(Result_::Parse)
+                    } else {
+                        let start = scan::Text::pos(view, from);
+                        scanner.parse(&mut state, start, to, target, stopbefore, commentstop).map(|()| Result_::Parse(state))
+                    }
+                }
+                Op::BackwardPrefixChars => scanner.backward_prefix_chars(point).map(Result_::Prefix).map_err(Into::into),
+            };
+            (result, scanner.defun_start)
         };
-        let written = scanner.defun_start.filter(|&cache| Some(cache) != cached);
+        let (mut result, mut defun_start) = scan(&view, suspended);
+        let stopped_for_lisp = matches!(&result, Err(scan::Stopped { halt: Halt::Propertize(..) | Halt::Ppss(_), .. }));
+        if records && !view.record && stopped_for_lisp {
+            // The stop's rerun replays what this scan read: scan again,
+            // keeping it. Nothing ran in between, so it reads and stops
+            // as it just did.
+            view.record = true;
+            (result, defun_start) = scan(&view, None);
+        }
+        let written = defun_start.filter(|&cache| Some(cache) != cached);
         let read = view.read.take();
         drop(view);
         let memory = |leaf: &mut Self, suspended: Option<Box<scan::Suspended>>| {
@@ -680,18 +754,12 @@ impl Leaf<'_> {
     /// The variables a scan obeys, from SAVED (a rerun's flags) or read
     /// now, as flags and as the engine's options.
     fn syntax_options(&mut self, saved: Option<i64>) -> std::result::Result<(i64, scan::Options), Fault> {
-        const FLAGS: [&str; 6] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments", "comment-end-can-be-escaped",
-            "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start", "comment-use-syntax-ppss"];
-        let flags = match saved {
-            Some(flags) => flags,
-            None => {
-                let mut flags = 0;
-                for (bit, name) in FLAGS.iter().enumerate() {
-                    if self.syntax_var(name)? != Value::NIL { flags |= 1 << bit; }
-                }
-                flags
-            }
-        };
+        // `crate::regexp::SCAN_VARIABLES': six flags, then `syntax-propertize--done'.
+        let [flag_values @ .., done] = self.vm.scan_variables().map_err(Fault::Error)?;
+        let set = |value: Value| value != Value::NIL && value != Value::UNBOUND;
+        let flags = saved.unwrap_or_else(|| {
+            flag_values.iter().enumerate().fold(0, |flags, (bit, &value)| if set(value) { flags | 1 << bit } else { flags })
+        });
         let flag = |bit: usize| flags & (1 << bit) != 0;
         let options = scan::Options {
             ignore_comments: flag(1),
@@ -699,11 +767,7 @@ impl Leaf<'_> {
             multibyte_syntax_as_symbol: flag(3),
             open_paren_in_column_0_is_defun_start: flag(4),
             comment_use_syntax_ppss: flag(5),
-            propertize_done: if flag(0) {
-                Some(self.syntax_var("syntax-propertize--done")?.integer_value().unwrap_or(-1))
-            } else {
-                None
-            },
+            propertize_done: flag(0).then(|| done.integer_value().unwrap_or(-1)),
         };
         Ok((flags, options))
     }
