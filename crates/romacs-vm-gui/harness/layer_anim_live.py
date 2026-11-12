@@ -172,8 +172,9 @@ def main():
             (home / 'config' / 'romacs').mkdir(parents=True)
             (home / 'config' / 'romacs' / 'init.el').write_text((args.init.read_text() if args.init else INIT)
                                                                  + (CHROME_STATE if args.chrome else '')
-                                                                 + (RETHEME.replace('THEME', args.theme_switch).replace('STATE', str(root / 'theme-state'))
-                                                                    .replace('DELAY', str(RESIZE_S * args.slowdown / 2)) if args.theme_switch else '')
+                                                                 + (re.sub('THEME|STATE|DELAY', lambda m: {'THEME': args.theme_switch, 'STATE': str(root / 'theme-state'),
+                                                                                                          'DELAY': str(RESIZE_S * args.slowdown / 2)}[m.group(0)], RETHEME)
+                                                                    if args.theme_switch else '')
                                                                  + ('(setq inhibit-startup-screen t)\n(blink-cursor-mode -1)\n' if args.idle_draws is not None else ''))
             chrome_state, stats = root / 'chrome-state', out / 'frame-stats.txt'
             if stats.exists():
