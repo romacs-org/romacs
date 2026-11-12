@@ -9,10 +9,13 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::*;
+
+#[path = "script_fixture.rs"]
+mod script_fixture;
+use script_fixture::write_script;
 
 /// A synthetic editor: a script that reports a release version, plus the dump
 /// GNU would load beside it.
@@ -35,10 +38,7 @@ impl Fixture {
         let dir = tempfile::tempdir().expect("tempdir");
         let executable = dir.path().join("emacs");
         let pdmp = dir.path().join("emacs.pdmp");
-        fs::write(&executable, format!("#!/bin/sh\nprintf '%s' '{version}'\n"))
-            .expect("write executable");
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
-            .expect("make the fixture executable");
+        write_script(&executable, format!("#!/bin/sh\nprintf '%s' '{version}'\n").as_bytes());
         fs::write(&pdmp, dump_bytes(fingerprint)).expect("write dump");
         Self {
             _dir: dir,
@@ -95,12 +95,10 @@ impl InstalledFixture {
         let bin = dir.path().join("bin");
         fs::create_dir_all(&bin).expect("bin dir");
         let versioned = bin.join("emacs-31.1.1");
-        fs::write(&versioned, format!("#!/bin/sh\nprintf '%s' '{version}'\n"))
-            .expect("write executable");
-        fs::set_permissions(&versioned, fs::Permissions::from_mode(0o755))
-            .expect("make the fixture executable");
+        let script = format!("#!/bin/sh\nprintf '%s' '{version}'\n");
+        write_script(&versioned, script.as_bytes());
         // `make install` links the unversioned name to the versioned one.
-        fs::copy(&versioned, bin.join("emacs")).expect("install symlink stand-in");
+        write_script(&bin.join("emacs"), script.as_bytes());
         let libexec = dir.path().join("libexec/emacs/31.1.1/x86_64-pc-linux-gnu");
         fs::create_dir_all(&libexec).expect("libexec dir");
         let pdmp = libexec.join(format!("emacs-{}.pdmp", hex(&fingerprint)));
@@ -237,7 +235,7 @@ fn byte_provenance_does_not_gate_the_release() {
 
     let mut script = fs::read(&changed.executable).expect("read executable");
     script.extend_from_slice(b"# a post-build edit that keeps the release\n");
-    fs::write(&changed.executable, &script).expect("rewrite executable");
+    write_script(&changed.executable, &script);
     let mut dump = fs::read(&changed.pdmp).expect("read dump");
     let last = dump.len() - 1;
     dump[last] ^= 0xff;
@@ -670,16 +668,10 @@ fn both_readers_treat_the_opt_out_as_exact() {
 /// A stand-in for `romacs --version` reporting `revision`.
 fn port_stub(dir: &Path, name: &str, revision: &str) -> PathBuf {
     let path = dir.join(name);
-    fs::write(
+    write_script(
         &path,
-        format!("#!/bin/sh\nprintf '%s\\n' 'Romacs 0.0.15\nGit commit: {revision}'\n"),
-    )
-    .expect("write port stub");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
-    }
+        format!("#!/bin/sh\nprintf '%s\\n' 'Romacs 0.0.15\nGit commit: {revision}'\n").as_bytes(),
+    );
     path
 }
 
