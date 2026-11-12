@@ -39,6 +39,9 @@ possible; say so where you do.
   each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
   deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
   lowered floors with the change. Raising a floor is a deliberate commit.
+- A host query or effect (files, environment, clocks, processes) outside
+  `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
+  comment lines directly above it; the `host_boundary_lint` test checks each.
 - `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
   smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines, every
   rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
@@ -51,9 +54,7 @@ possible; say so where you do.
   --absolute` holds the trunk to that file at a checkpoint, where `lower`
   records the drops. The file merges by its meaning, each side's raise added:
   `tools/derived setup` installs the merge driver once per repository, and
-  `python3 tools/lib/smells.py resolve` does the same by hand. The same setup
-  installs the driver that merges the host boundary allow-list entry by
-  entry (`tools/lib/host_allow.py`).
+  `python3 tools/lib/smells.py resolve` does the same by hand.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

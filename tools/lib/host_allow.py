@@ -2,7 +2,6 @@
 """Turn the host boundary allow-list into HOST comments at its sites.
 
     host_allow.py convert [--root DIR]
-    host_allow.py merge BASE OURS THEIRS
 
 The host boundary lint (crates/romacs-vm/tests/host_boundary_lint.rs) read
 its exceptions from a list, crates/romacs-vm/tests/host_boundary_allow.txt,
@@ -22,10 +21,6 @@ An entry it cannot place is printed, and the list stays: its line is gone,
 or several lines of its file share its mark and its item does not tell them
 apart. Place those by hand (the lint names each uncovered site), then delete
 the list. Delete this tool when no branch forked before the comments is open.
-
-merge is git's driver for the list while it lasts: it merges the list's
-entries, keyed by their first four words, so two branches conflict only where
-they change one entry differently. `tools/derived setup` installs it.
 """
 import argparse
 import re
@@ -276,57 +271,7 @@ def convert(root, listed):
     return failed
 
 
-KEY = 4
-
-
-def keyed(text):
-    """{key: line} of the list TEXT; ValueError on a key listed twice."""
-    out = {}
-    for line in text.splitlines():
-        if line.strip() and not line.startswith('#'):
-            key = tuple(line.split()[:KEY])
-            if key in out:
-                raise ValueError(f'{" ".join(key)} is listed twice')
-            out[key] = line
-    return out
-
-
-def merged(base, ours, theirs):
-    """(text, conflicts): the three-way merge of three lists' texts, entry by
-    entry, under OURS's comment lines and in the order the lint writes, and
-    the keys the sides changed differently. Such an entry keeps each side's
-    line it has, which the lint then reports (listed twice, or stale)."""
-    b, o, t = keyed(base), keyed(ours), keyed(theirs)
-    out = [line for line in ours.splitlines() if line.startswith('#')]
-    conflicts = []
-    for key in sorted(set(b) | set(o) | set(t)):
-        was, mine, yours = b.get(key), o.get(key), t.get(key)
-        if mine != was and yours != was and mine != yours:
-            conflicts.append(' '.join(key))
-            out.extend(line for line in (mine, yours) if line is not None)
-        elif (line := yours if mine == was else mine) is not None:
-            out.append(line)
-    return '\n'.join(out) + '\n', conflicts
-
-
-def merge_files(base, ours, theirs):
-    """Write the merge over OURS: 0, or 1 when the sides changed an entry
-    differently, so git leaves the file unmerged with both its lines in it.
-    1, leaving OURS, when a side lists a key twice."""
-    try:
-        text, conflicts = merged(*(Path(p).read_text() for p in (base, ours, theirs)))
-    except (OSError, ValueError) as error:
-        print(f'host_allow: {error}', file=sys.stderr)
-        return 1
-    Path(ours).write_text(text)
-    for key in conflicts:
-        print(f'host_allow: {key} changed differently on the two sides', file=sys.stderr)
-    return 1 if conflicts else 0
-
-
 def main(argv):
-    if argv[:1] == ['merge']:
-        return merge_files(*argv[1:]) if len(argv) == 4 else 2
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('action', choices=('convert',))
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])
