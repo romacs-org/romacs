@@ -26,45 +26,8 @@ set -u
 
 usage() {
   echo "usage: $0 [--if-gnu] EDITOR [fingerprint|exhaustive]" >&2
-  echo "       $0 --port ROMACS-BINARY" >&2
   exit 2
 }
-
-# --port: attest THIS PORT's binary, the other half of the pair.
-#
-# WHY THIS IS A DIFFERENT PREDICATE, NOT THE SAME ONE (ledger 214).  A parity
-# number is a statement about a PAIR, and both halves should travel with it.
-# But GNU and this port are pinned in opposite ways and must not share a
-# predicate:
-#
-#   GNU is PINNED.  There is one right answer, ledger/parity-reference.toml records
-#   it, and anything else is REFUSED.
-#
-#   This port is NOT pinnable.  It changes every commit; there is no constant
-#   to record.  Recording a port hash in the manifest would mean re-pinning on
-#   every commit, which is how a pin becomes noise people delete.
-#
-# So the port predicate is CORRESPONDENCE, not equality: can this binary be
-# placed on the history of the tree being measured, and where?  The binary
-# already knows -- crates/romacs/build.rs embeds VERGEN_GIT_SHA and
-# VERGEN_GIT_DIRTY, and `romacs --version' prints both, for 8ms.
-#
-# The verdicts, and why only one of them refuses:
-#
-#   * built from HEAD, built clean, tree clean -- it corresponds.  Say so.
-#   * built from an ANCESTOR of HEAD, or built dirty, or the tree is dirty --
-#     BRANDED, not refused.  Building, measuring and then committing is the
-#     normal order of work, and a harness that refuses it is a harness people
-#     route around.  What was missing was never permission; it was the RECORD.
-#   * built from a commit that is not on this tree's history at all -- REFUSED.
-#     That binary cannot be talking about this tree.
-#
-# This closes the hole scripts/l205-provenance.sh leaves: that script proves
-# what a binary was built FROM (the dos-codepage docstring, an empty *scratch*)
-# and cannot say whether it matches the tree you are measuring.  Reproduced
-# while writing this: the binary that took this entry's own sweep numbers
-# reports `bfe815c13 (dirty)' against a HEAD of 5a12d613f, and provenance
-# passes it without a word.
 
 # --if-gnu: attest only when the editor IS a GNU Emacs, and say so otherwise.
 #
@@ -83,56 +46,6 @@ only_if_gnu=0
 if [ "${1:-}" = --if-gnu ]; then
   only_if_gnu=1
   shift
-fi
-
-if [ "${1:-}" = --port ]; then
-  shift
-  [ "$#" -ge 1 ] || usage
-  port_bin="$1"
-  port_root="$(cd "$(dirname "$0")/.." && pwd)"
-  [ -x "$port_bin" ] ||
-    { echo "port reference: the PORT BINARY could not be run: $port_bin" >&2; exit 3; }
-  port_version="$("$port_bin" --version 2> /dev/null)" ||
-    { echo "port reference: $port_bin could not report its version" >&2; exit 3; }
-  port_sha="$(printf '%s\n' "$port_version" |
-    sed -n 's/^Git commit: \([0-9a-f]\{40\}\).*/\1/p')"
-  if [ -z "$port_sha" ]; then
-    echo "port reference: $port_bin reports no source revision, so a number taken" >&2
-    echo "  with it cannot be tied to any tree.  Rebuild it inside the git checkout." >&2
-    exit 3
-  fi
-  case "$port_version" in
-    *"(dirty)"*) port_built=dirty ;;
-    *"(worktree state unknown)"*) port_built=unknown ;;
-    *) port_built=clean ;;
-  esac
-  port_head="$(git -C "$port_root" rev-parse HEAD 2> /dev/null)" || port_head=
-  if [ -z "$port_head" ]; then
-    printf 'neo=%s built=%s tree=no-git place=UNPLACEABLE\n' "${port_sha:0:11}" "$port_built"
-    exit 0
-  fi
-  if [ -z "$(git -C "$port_root" status --porcelain 2> /dev/null)" ]; then
-    port_tree=clean
-  else
-    port_tree=dirty
-  fi
-  if [ "$port_sha" = "$port_head" ]; then
-    port_place=HEAD
-  elif git -C "$port_root" merge-base --is-ancestor "$port_sha" "$port_head" 2> /dev/null; then
-    port_place="behind-$(git -C "$port_root" rev-list --count "$port_sha".."$port_head")"
-  else
-    {
-      echo "port reference REFUSED: $port_bin was built from $port_sha,"
-      echo "  which is NOT on the history of this tree (HEAD $port_head)."
-      echo "  That binary cannot be talking about the tree being measured, so a"
-      echo "  number scored with it is not a number about this tree.  Rebuild with"
-      echo "    cargo build --release -p romacs-vm-gui"
-    } >&2
-    exit 3
-  fi
-  printf 'neo=%s built=%s tree=%s place=%s\n' \
-    "${port_sha:0:11}" "$port_built" "$port_tree" "$port_place"
-  exit 0
 fi
 
 [ "$#" -ge 1 ] || usage
