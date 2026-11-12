@@ -902,3 +902,25 @@ fn a_collections_record_reads_its_time_and_what_it_left_live() {
     let (_, with_list, _) = collected(&mut vm, "(setq held (make-list 1000000 nil))");
     assert!(with_list - objects >= 1_000_000, "{objects} {with_list}");
 }
+
+/// What a signal's `signal-hook-function` call is compiled to is request
+/// code, which a collection retires once it has run: the signal's data it
+/// quotes is garbage then. A Romacs session sets the hook (its usage log),
+/// so code kept forever held every signal's data, caught ones too.
+#[test]
+fn a_signal_hook_call_keeps_nothing_alive() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let mut eval = |source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval("(progn (defvar sh-seen 0) (defun sh-hook (_symbol _data) (setq sh-seen (1+ sh-seen))) t)");
+    let strings = "(progn (garbage-collect) (nth 2 (assq 'strings (garbage-collect))))";
+    let before: i64 = eval(strings).parse().unwrap();
+    assert_eq!(eval("(let ((signal-hook-function #'sh-hook) (i 0))
+                       (while (< i 2000)
+                         (condition-case nil (signal 'error (list (format \"datum %d\" i))) (error nil))
+                         (setq i (1+ i)))
+                       sh-seen)"),
+               "2000");
+    let after: i64 = eval(strings).parse().unwrap();
+    assert!(after - before < 100, "the signals' data died: {before} live strings before, {after} after");
+}
