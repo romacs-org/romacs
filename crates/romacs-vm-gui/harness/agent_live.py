@@ -2316,31 +2316,43 @@ def board_keys(args, base):
             a.eval(f'(with-selected-window {board} (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
             a.keys('-k', 'Return')
-            time.sleep(1)
+
+        def settled(read, want, seconds=15):
+            """READ's value once it is WANT, or its last after SECONDS: a
+            loaded host runs the key later than it is typed."""
+            end = time.time() + seconds
+            value = read()
+            while value != want and time.time() < end:
+                time.sleep(0.2)
+                value = read()
+            return value
 
         steps = {}
         open_board()
         ret_on('^transcripts  ')
-        steps['project_without_session'] = parity_live.read_sexp(a.eval(
+        steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            '(list buffer-read-only (plist-get romacs-agent-history--item :path)))')) + [shown()]
+            '(list buffer-read-only (plist-get (bound-and-true-p romacs-agent-history--item) :path)))')) + [shown()],
+            ['t', str(codex_file), 'nil'])
         open_board()
         ret_on('^work  ')
-        steps['project_with_session'] = [showing(), shown()]
+        steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
             f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
             '(romacs-agent-board-rows (hash-table-values romacs-agent--sessions) nil (romacs-agent-board--view))) '
             ':children))'))
         open_board()
         ret_on('◇ +[0-9]+ more')
-        steps['more'] = [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
-                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')]
+        steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
+                                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
+                                ['t', 't', 'nil'])
         # The newest thread forgotten after the board was drawn.
         a.eval(f'(progn (remhash {lisp_text(sids[1])} romacs-agent--sessions) t)')
         ret_on('say two')
-        steps['gone'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
+        steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
+                                ['t', 'That thread is gone: the board is drawn again'])
         ret_on('^work  ')
-        steps['after_gone'] = showing()
+        steps['after_gone'] = settled(showing, sids[0])
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
         result['ok'] = (steps['project_without_session'] == ['t', str(codex_file), 'nil']
                         and steps['project_with_session'] == [sids[1], 'nil'] and steps['nested'] == 1
