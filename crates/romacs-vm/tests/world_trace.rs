@@ -165,19 +165,21 @@ fn the_build_time_is_baked_at_its_one_site() {
 
 /// `emacs-build-system` names the build host, as a dumped GNU's names its
 /// dump's: the machine's name read there is baked, so a renamed host keeps
-/// the world. Read anywhere else it is a keyed fact.
+/// the world (a restored process reads its own, `forget_system_name`).
+/// Read first anywhere else, it is a keyed fact.
 #[test]
 fn the_build_host_is_baked_at_its_one_site() {
     let dir = scratch("baked-host");
-    let version = write(&dir.join("version.el"), "(defconst emacs-build-system (system-name))\n(defconst emacs-other-host (system-name))\n");
+    let version = write(&dir.join("version.el"), "(defconst emacs-build-system (system-name))\n");
+    let other = write(&dir.join("other.el"), "(defconst other-host (system-name))\n");
+    let reads = |trace: &Json| items(trace, "records", "p-read").iter().filter(|r| r["what"] == "system-name")
+        .map(|r| r["allowed"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    let keyed = |trace: &Json| items(trace, "records", "host").iter().filter(|r| r["fact"] == "system-name").count();
     let (_, trace) = build(&[version]);
-    let reads: Vec<_> = items(&trace, "records", "p-read").iter().filter(|r| r["what"] == "system-name")
-        .map(|r| (r["allowed"].as_str().unwrap(), r["site"]["line"].as_u64().unwrap())).collect();
-    assert_eq!(reads, [("baked", 1)], "{trace}");
-    let keyed: Vec<_> = items(&trace, "records", "host").iter().filter(|r| r["fact"] == "system-name")
-        .map(|r| r["site"]["line"].as_u64().unwrap()).collect();
-    assert_eq!(keyed, [2], "{trace}");
+    assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 0), "{trace}");
     assert!(refusals(&trace).is_empty(), "{trace}");
+    let (_, trace) = build(&[other]);
+    assert_eq!((reads(&trace), keyed(&trace)), (vec![], 1), "{trace}");
 }
 
 #[test]
