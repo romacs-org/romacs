@@ -2076,6 +2076,8 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
+        // HOST(slot:exec-path, slot:initial-environment, slot:process-environment): declares the
+        // environment specials by name; reads no slot
         vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
         // C specials are special before their symbols are first interned, so
         // already-read forms compile their bindings dynamically.
@@ -2156,6 +2158,7 @@ impl Vm {
         let ignore = vm.intern("ignore");
         vm.declare_special_raw("pre-redisplay-function", ignore);
         vm.declare_special_raw("this-command-keys-shift-translated", Value::NIL);
+        // HOST(delayed-variable): declares the variable; reads no slot
         vm.declare_special_raw("transient-mark-mode", Value::NIL);
         vm.declare_special_raw("standard-input", Value::TRUE);
         for name in ["print-length", "print-level", "print-escape-nonascii", "print-escape-multibyte", "print-escape-control-characters", "print-circle", "print-escape-newlines", "menu-bar-mode", "truncate-lines"] {
@@ -3728,6 +3731,7 @@ impl Vm {
     /// whose variable became local) restores through set_default_internal,
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
         let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
