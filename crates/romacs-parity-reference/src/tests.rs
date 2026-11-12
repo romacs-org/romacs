@@ -156,17 +156,14 @@ fn a_matching_editor_attests_at_both_depths() {
 fn the_stamp_carries_the_reference_and_the_depth() {
     let fixture = Fixture::new("31.0.90", pinned_fingerprint());
     let manifest = fixture.manifest();
-    let attested = attest_against(
-        &fixture.executable,
-        AttestationDepth::Fingerprint,
-        &manifest,
-    )
-    .expect("attestation should pass");
-    let stamp = ReferenceUse::Attested(attested).stamp();
-    assert_eq!(
-        stamp,
-        "gnu=31.0.90 fingerprint=000102030405 mirror=00000000000 attest=fingerprint"
-    );
+    for depth in [AttestationDepth::Fingerprint, AttestationDepth::Exhaustive] {
+        let attested =
+            attest_against(&fixture.executable, depth, &manifest).expect("attestation should pass");
+        assert_eq!(
+            ReferenceUse::Attested(attested).stamp(),
+            format!("gnu=31.0.90 fingerprint=000102030405 mirror=00000000000 attest={depth}")
+        );
+    }
 
     let unpinned = ReferenceUse::Unpinned {
         executable: fixture.executable.clone(),
@@ -196,6 +193,10 @@ fn a_different_release_is_refused_by_its_version() {
         &manifest,
     )
     .expect_err("a different release must be refused");
+    assert!(
+        attest_against(&rebuilt.executable, AttestationDepth::Exhaustive, &manifest).is_err(),
+        "a different release must be refused at the exhaustive depth too"
+    );
     match &error {
         AttestationError::Mismatch {
             field,
@@ -375,7 +376,7 @@ fn the_parser_refuses_rather_than_skips() {
     parse_manifest(&base).expect("the baseline must parse");
 
     // Each of these is a way a pin could silently stop meaning what it says.
-    let corruptions: [(&str, String); 7] = [
+    let corruptions: [(&str, String); 9] = [
         (
             "a line the format does not define",
             format!("{base}[table]\n"),
@@ -393,6 +394,14 @@ fn the_parser_refuses_rather_than_skips() {
         (
             "a truncated digest",
             base.replace(&"d".repeat(64), &"d".repeat(63)),
+        ),
+        (
+            "a non-hex fingerprint",
+            base.replace(&"b".repeat(64), &"z".repeat(64)),
+        ),
+        (
+            "a truncated fingerprint",
+            base.replace(&"b".repeat(64), &"b".repeat(63)),
         ),
         (
             "an unrecognised schema",
