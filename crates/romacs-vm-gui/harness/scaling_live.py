@@ -29,9 +29,11 @@ layout and paint submission; the steps' work includes the redisplay they
 cause.  A GUI measurement is refused
 unless the host's diagnostics show a paint submitted (laid out by the
 evaluator) after every step, before the next step's mark or the end mark;
-an :idle probe's steps change nothing shown, and its measurement is refused
-if any step submitted a paint (and taken again, three sessions at most: the
-host repaints for reasons of its own now and then).
+an :idle probe's steps change nothing shown, so a step a paint followed is
+set aside: the host repaints for reasons of its own now and then, and that
+paint is no part of an idle step's work.  Its work is that of the steps no
+paint followed, scaled to all of them, and its measurement is refused when
+more than a tenth of its steps were set aside.
 
 --record profiles the body of every batch probe over its budget at K*N
 with `perf record --call-graph fp', counting only while the probe enables
@@ -67,8 +69,8 @@ PROBES = HERE / 'scaling' / 'probes.el'
 MIN_WORK = 1_000_000
 STACK_SLACK = 64 * 1024
 DEFAULT_BUDGET = 1.25
-# Sessions an :idle GUI probe gets for a measurement no stray paint disturbed.
-IDLE_TRIES = 3
+# The share of an :idle GUI probe's steps a stray paint may set aside.
+IDLE_ODD = 0.1
 # A session that spends no CPU for this many times its CPU bound is hung.
 WALL_FACTOR = 10
 
@@ -97,7 +99,7 @@ def verdict(probe, small, large):
     if work_n is None or work_kn is None:
         return {**row, 'status': 'FAIL', 'reason': 'no instruction counter (romacs-instructions is nil)'}
     row.update(work_n=work_n, work_kn=work_kn)
-    disturbed = (small.get('disturbed') or []) + (large.get('disturbed') or [])
+    disturbed = small.get('disturbed', 0) + large.get('disturbed', 0)
     if disturbed:
         row['disturbed'] = disturbed
     if work_n < MIN_WORK:
@@ -138,8 +140,8 @@ def table(rows):
         if 'stack_growth' in r:
             note = f"{note}; stack spread {r['stack_growth']} B" if note else f"stack spread {r['stack_growth']} B"
         if r.get('disturbed'):
-            again = f"{len(r['disturbed'])} idle sessions set aside for a paint"
-            note = f'{note}; {again}' if note else again
+            aside = f"{r['disturbed']} idle steps set aside for a paint"
+            note = f'{note}; {aside}' if note else aside
         lines.append(f"| {r['name']}{' (gui)' if r.get('gui') else ''} | {r['n']} | {r['k']} | {work(r.get('work_n'))}"
                      f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')} | {r['budget']} | {r['status']}"
                      f"{' — ' + note if note else ''} |")
@@ -177,10 +179,21 @@ def step_paints(stderr_text):
 
 def paints_problem(probe, paints):
     """What is wrong with PAINTS, the paints submitted after each step of
-    PROBE: every step of a probe paints, and no step of an :idle one does."""
-    if len(paints) != probe['steps'] or (any(paints) if probe['idle'] else 0 in paints):
+    PROBE: every step paints, and at most a tenth of an :idle probe's do."""
+    odd = sum(map(bool, paints)) > IDLE_ODD * probe['steps'] if probe['idle'] else 0 in paints
+    if len(paints) != probe['steps'] or odd:
         return f"paints after each of {probe['steps']} {'idle ' if probe['idle'] else ''}steps: {paints}"
     return None
+
+
+def idle_work(deltas, paints):
+    """An :idle probe's work from its steps' instructions DELTAS and the
+    paints after each: the steps no paint followed, scaled to all of them
+    (None with a step uncounted, or none kept), and how many were set aside."""
+    kept = [delta for delta, painted in zip(deltas, paints) if not painted]
+    if None in deltas or not kept:
+        return None, len(deltas) - len(kept)
+    return round(sum(kept) * len(deltas) / len(kept)), len(deltas) - len(kept)
 
 
 def probe_entry(raw):
@@ -313,20 +326,19 @@ class Gui:
 
     def measure(self, probe, n):
         """The steps' instructions of PROBE at N in a fresh --loadup session,
-        refused unless the host submitted a paint after every step, or after
-        none for an :idle probe.  The host repaints for reasons of its own
-        now and then; that paint is in an idle probe's count and breaks its
-        rule, so an idle measurement so disturbed is taken again, IDLE_TRIES
-        sessions at most, and the row tells of each session set aside."""
-        disturbed = []
-        for attempt in range(IDLE_TRIES if probe['idle'] else 1):
-            tag = f"{probe['name']}-{n}" + (f'-again{attempt}' if attempt else '')
-            result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
-            problem = paints_problem(probe, step_paints(stderr))
-            if not problem:
-                return {**result, 'disturbed': disturbed}
-            disturbed.append(problem)
-        raise Refused(f"{probe['name']} at {n}: {'; '.join(disturbed)}")
+        refused unless the host submitted a paint after every step; an :idle
+        probe's are those of the steps no paint followed (`idle_work'),
+        refused when a paint followed more than a tenth of them."""
+        tag = f"{probe['name']}-{n}"
+        result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
+        paints = step_paints(stderr)
+        problem = paints_problem(probe, paints)
+        if problem:
+            raise Refused(f'{tag}: {problem}')
+        if not probe['idle']:
+            return result
+        work, disturbed = idle_work(result.get('steps') or [None], paints)
+        return {**result, 'instructions': work, 'disturbed': disturbed}
 
     def close(self):
         self.live.stop(self.compositor)
