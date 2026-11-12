@@ -409,9 +409,9 @@ mod tests {
             vm.flatten_table(last);
             let reader = vm.char_table_reader(last);
             let read: Vec<Value> = (0..2 * PAGES).map(|page| reader.get(u32::try_from(1000 + page * PAGE).unwrap()).unwrap()).collect();
-            (vm.flat_table(last).unwrap().pages.get(), read)
+            (vm.flat_table(last).map(|view| view.pages.get()), read)
         });
-        assert_eq!(pages, PAGES);
+        assert_eq!(pages, Some(PAGES));
         assert!(read.iter().all(|&value| value == Value::integer(i64::try_from(3 * VIEWS - 1).unwrap()).unwrap()));
     }
 
