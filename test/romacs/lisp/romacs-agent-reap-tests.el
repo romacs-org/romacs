@@ -21,6 +21,7 @@ DELAY), `stopped' each session stopped."
           (romacs-agent-tools--reaping (make-hash-table :test #'equal))
           (romacs-agent-reap-after '(("review" . 300)))
           (review (romacs-agent--make :id "r" :harness 'codex :state 'idle :unit "romacs-agent-r"
+                                      :dir (make-temp-file "romacs-reap-" t)
                                       :last-time (- (float-time) 1000)
                                       :options '(:parent "lead" :role "review")))
           (lane (romacs-agent--make :id "l" :harness 'claude :state 'idle :unit "romacs-agent-l"
@@ -32,7 +33,7 @@ DELAY), `stopped' each session stopped."
                 (lambda (delay _repeat function session &rest _)
                   (when (eq function #'romacs-agent-tools--reap) (push (list session delay) scheduled))))
                ((symbol-function 'romacs-agent-stop) (lambda (s) (push s stopped))))
-       ,@body)))
+       (unwind-protect (progn ,@body) (delete-directory (romacs-agent-dir review) t)))))
 
 (ert-deftest romacs-agent-reap-a-reviewer-after-its-turn ()
   (romacs-agent-reap-tests--with
@@ -93,11 +94,10 @@ DELAY), `stopped' each session stopped."
       (unwind-protect
           (cl-letf (((symbol-function 'romacs-agent--input) (lambda (_s text &rest _) (push text written)))
                     ((symbol-function 'romacs-agent-resume) (lambda (s) (push s resumed)))
-                    ((symbol-function 'romacs-agent--continue) (lambda (s) (push s continued) s))
-                    ((symbol-function 'romacs-agent--set-stopped)
-                     (lambda (s v) (setf (romacs-agent-stopped s) v))))
+                    ((symbol-function 'romacs-agent--continue) (lambda (s) (push s continued) s)))
             ;; Stopping, its harness still attached: kept for after.
-            (setf (romacs-agent-connection review) process (romacs-agent-stopped review) t
+            (romacs-agent--set-stopped review t)
+            (setf (romacs-agent-connection review) process
                   (romacs-agent-driver-state review) '(:ready t))
             (romacs-agent-send review "one more")
             (should-not written)
@@ -120,10 +120,11 @@ DELAY), `stopped' each session stopped."
 
 (ert-deftest romacs-agent-reap-a-stopped-socket-left-is-ended ()
   (let* ((root (make-temp-file "romacs-stopped-" t))
-         (session (romacs-agent--make :id "ssssssss-1111-4000-8000-000000000000" :harness 'claude :state 'detached :dir root :stopped t :journal-start 0
+         (session (romacs-agent--make :id "ssssssss-1111-4000-8000-000000000000" :harness 'claude :state 'detached :dir root :journal-start 0
                                       :host-socket (expand-file-name "gone.sock" root))))
     (unwind-protect
         (progn (write-region "" nil (expand-file-name "journal.jsonl" root))
+               (romacs-agent--set-stopped session t)
                (romacs-agent--attach session 0)
                (should (eq (romacs-agent-state session) 'ended))
                ;; An earlier run's journaled exit replays first: still ended.
@@ -168,7 +169,7 @@ DELAY), `stopped' each session stopped."
           ;; Its supervisor journaled no end, yet it ended: not detached,
           ;; nothing looked for again.
           (should (eq (romacs-agent-state session) 'ended))
-          (should (= (romacs-agent-reattaching session) 0))
+          (should (= (gethash session romacs-agent--reattaching 0) 0))
           ;; A restart knows.
           (romacs-agent--write-json (expand-file-name "manifest.json" root)
                                     (romacs-mcp--object "id" "tttttttt-0000-4000-8000-000000000000" "harness" "claude"

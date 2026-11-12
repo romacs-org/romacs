@@ -196,10 +196,7 @@ the id as :request.")
   compacting
   ;; What runs under it, for its views: its harness's own subagents by tool
   ;; id, then those and its delegated tasks as rows and as a line.
-  subagents children-rows children-summary
-  ;; Whether this editor stopped its harness (`romacs-agent-stop'): an end,
-  ;; not a lost attachment, though its supervisor journals none.
-  stopped)
+  subagents children-rows children-summary)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -2317,11 +2314,19 @@ with MESSAGE."
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
     (and host (gethash "harness" host))))
 
+(defun romacs-agent-stopped (session)
+  "Whether this editor stopped SESSION's harness (`romacs-agent-stop'): an
+end, not a lost attachment, though its supervisor journals none.  Its
+mark is a file in its directory, kept for a restart, and no field of its
+record: a record an earlier definition made reads it the same."
+  (when-let* ((dir (romacs-agent-dir session)))
+    (file-exists-p (expand-file-name "stopped" dir))))
+
 (defun romacs-agent--set-stopped (session stopped)
-  "Mark SESSION STOPPED by this editor, or not, for a restart too."
-  (setf (romacs-agent-stopped session) stopped)
-  (let ((file (expand-file-name "stopped" (romacs-agent-dir session))))
-    (if stopped (with-temp-file file) (when (file-exists-p file) (delete-file file)))))
+  "Mark SESSION STOPPED by this editor, or not."
+  (when-let* ((dir (romacs-agent-dir session)))
+    (let ((file (expand-file-name "stopped" dir)))
+      (if stopped (with-temp-file file) (when (file-exists-p file) (delete-file file))))))
 
 (defun romacs-agent-stop (session)
   "End SESSION: its unit stops, ending the harness and everything it started.
@@ -2437,7 +2442,6 @@ neither callback runs after it."
                                        (list :path (gethash "path" imported) :size (gethash "size" imported))))
                       :harness-session (gethash "harnessSession" manifest)
                       :cancelled (file-exists-p (expand-file-name "cancelled" dir))
-                      :stopped (file-exists-p (expand-file-name "stopped" dir))
                       ;; Should attaching fail, the journal is read from its start.
                       :journal-start 0
                       :cwd (gethash "cwd" manifest) :title (gethash "title" manifest)
