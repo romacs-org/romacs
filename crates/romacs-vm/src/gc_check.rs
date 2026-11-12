@@ -97,7 +97,7 @@ impl Vm {
             let own = id.value().index_if(7).and_then(|n| n.checked_sub(1)).is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
             if !own { for &(key, value) in &entry.properties { values.extend([key, value]); } }
         }
-        let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
+        let active = !self.stack.at_rest();
         code.extend((0..self.request_code.live.len()).filter(|&id| self.request_code.live[id] && (active || self.request_code.permanent[id])));
         self.source_code_roots(&mut code);
         for engine in &mut self.suspended {

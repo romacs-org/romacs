@@ -1,0 +1,11 @@
+error: unused variable: `everything_above_compiled`
+  --> tests/threaded_core/fail/control.rs:23:13
+   |
+23 |         let everything_above_compiled = ();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_everything_above_compiled`
+   |
+note: the lint level is defined here
+  --> tests/threaded_core/fail/control.rs:21:12
+   |
+21 |     #[deny(unused_variables)]
+   |            ^^^^^^^^^^^^^^^^

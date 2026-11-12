@@ -1,0 +1,10 @@
+error[E0599]: no method named `value` found for struct `Next` in the current scope
+  --> tests/threaded_core/fail/read_through_successor.rs:11:41
+   |
+11 |         r.window(&mut e)[pc.a()] = next.value();
+   |                                         ^^^^^ method not found in `Next`
+   |
+  ::: tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Next(*const Inst);
+   | ---------------------- method `value` not found for this struct

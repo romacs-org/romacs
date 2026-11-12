@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `e` as mutable more than once at a time
+  --> tests/threaded_core/fail/engine_write_under_window.rs:11:9
+   |
+10 |         let regs = r.window(&mut e);
+   |                             ------ first mutable borrow occurs here
+11 |         e.budget -= 1;
+   |         ^ second mutable borrow occurs here
+12 |         regs[pc.a()] = Value::NIL;
+   |         ------------ first borrow later used here

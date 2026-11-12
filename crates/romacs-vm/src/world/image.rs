@@ -81,7 +81,7 @@ impl Vm {
             ("suspended", self.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
-            ("suspended_stacks", self.suspended_stacks.is_empty()),
+            ("suspended_stacks", self.stack.depth() == 0),
             ("running_engines", self.running_engines == 0),
             ("gc_holds", self.gc_holds == 0),
             ("unwinding", self.unwinding == 0),
@@ -203,7 +203,7 @@ mod tests {
             change(&mut vm);
             vm.world_quiescent().unwrap_err()
         };
-        assert!(refusal(|vm| vm.suspended_stacks.push(vec![])).contains("suspended_stacks"));
+        assert!(refusal(|vm| vm.stack.suspend()).contains("suspended_stacks"));
         assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
         assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
         assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));

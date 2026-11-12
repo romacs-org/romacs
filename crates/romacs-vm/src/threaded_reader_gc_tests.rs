@@ -12,9 +12,9 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
     let function = vm.intern("collecting-reader");
     let value = vm.list_value(&[Value::NIL]);
     vm.external_roots.push(value);
-    vm.stack = vec![value, function];
+    *vm.stack.test_vec() = vec![value, function];
     let ptr = vm.stack.as_ptr();
-    let capacity = vm.stack.capacity();
+    let capacity = vm.stack.test_vec().capacity();
     let before = vm.heap_stats().collections;
     let result = vm.reader_call(function, &[value]).unwrap();
     assert!(
@@ -23,9 +23,9 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
     );
     assert_ne!(result, value, "fixture must force forwarding");
     assert_eq!(vm.external_roots, vec![result]);
-    assert_eq!(vm.stack, vec![result, function]);
+    assert_eq!(*vm.stack, [result, function]);
     assert_eq!(vm.stack.as_ptr(), ptr);
-    assert_eq!(vm.stack.capacity(), capacity);
+    assert_eq!(vm.stack.test_vec().capacity(), capacity);
     assert_eq!(vm.cons_pair(result).unwrap().0.as_integer().unwrap(), 42);
 }
 
@@ -252,7 +252,7 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     let caught = vm.catching(|vm| vm.eval_source_raw("(let ((keep (list 1 2))) (eval '(read-from-minibuffer \"P: \")) keep)"));
     assert!(caught.is_err(), "the host panic propagates");
     assert!(vm.suspended.is_empty(), "no suspended engine outlives the panic");
-    assert!(vm.suspended_stacks.is_empty() && vm.stack.is_empty());
+    assert!(vm.stack.at_rest());
     assert!(vm.external_roots.is_empty());
     assert_eq!((vm.running_engines, vm.gc_holds, vm.rooted_write), (0, 0, false));
     assert!(vm.signal_handlers.is_empty());

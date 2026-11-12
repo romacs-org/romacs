@@ -1,0 +1,16 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/threaded_core/fail/forged_next.rs:11:18
+   |
+11 |         go(e, r, Next(std::ptr::null()))
+   |                  ^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Next(*const Inst);
+   |                        ^^^^^^^^^^^ private field
+help: consider making the field publicly accessible
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Next(pub *const Inst);
+   |                        +++

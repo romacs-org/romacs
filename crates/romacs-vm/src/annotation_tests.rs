@@ -11,14 +11,14 @@ fn keymap_query_preserves_the_threaded_register_allocation() {
     let map = vm.list_value(&[tag]);
     vm.annotated_mut(buffer).unwrap().local_keymap = map;
     let property = Value::reference(vm.slot("local-map") + 1, 7);
-    vm.stack.clear();
-    vm.stack.shrink_to_fit();
+    vm.stack.test_vec().clear();
+    vm.stack.test_vec().shrink_to_fit();
     let registers = vm.stack.as_ptr();
-    let capacity = vm.stack.capacity();
+    let capacity = vm.stack.test_vec().capacity();
     assert_eq!(vm.keymap_at_point(property).unwrap(), map);
     // A native leaf call cannot invalidate the interpreter's cached registers.
     assert_eq!(vm.stack.as_ptr(), registers);
-    assert_eq!(vm.stack.capacity(), capacity);
+    assert_eq!(vm.stack.test_vec().capacity(), capacity);
     assert!(vm.stack.is_empty());
 }
 
@@ -210,24 +210,24 @@ fn notmuch_buffer_queries_use_the_interval_index() {
     assert_eq!(vm.annotated(buffer).unwrap().intervals.len(), 6673);
     for i in [0, 1, 3336, 6672] {
         let at = Value::integer(i as i64 * 100 + 26).unwrap();
-        vm.stack.push(at);
+        vm.stack.test_vec().push(at);
         let result = vm
             .annotation_primitive(Primitive::OverlaysAt, 0, 1)
             .unwrap();
-        vm.stack.clear();
+        vm.stack.test_vec().clear();
         assert_eq!(vm.list_values(result).unwrap(), [overlays[i]]);
-        vm.stack
+        vm.stack.test_vec()
             .extend([at, Value::integer(i as i64 * 100 + 30).unwrap()]);
         let result = vm
             .annotation_primitive(Primitive::OverlaysIn, 0, 2)
             .unwrap();
-        vm.stack.clear();
+        vm.stack.test_vec().clear();
         assert_eq!(vm.list_values(result).unwrap(), [overlays[i]]);
-        vm.stack.push(at);
+        vm.stack.test_vec().push(at);
         let next = vm
             .annotation_primitive(Primitive::NextOverlayChange, 0, 1)
             .unwrap();
-        vm.stack.clear();
+        vm.stack.test_vec().clear();
         assert_eq!(next.as_integer().unwrap(), i as i64 * 100 + 51);
     }
     let b = vm.annotated_mut(buffer).unwrap();
@@ -345,11 +345,11 @@ fn identical_overlay_property_ties_keep_the_newest_identity_after_compaction() {
             buffer,
         )
         .unwrap();
-        vm.stack.extend([Value::integer(2).unwrap(), key]);
+        vm.stack.test_vec().extend([Value::integer(2).unwrap(), key]);
         let winner = vm
             .annotation_primitive(Primitive::GetCharProperty, 0, 2)
             .unwrap();
-        vm.stack.clear();
+        vm.stack.test_vec().clear();
         assert_eq!(
             winner.as_integer().unwrap(),
             i,
@@ -365,11 +365,11 @@ fn identical_overlay_property_ties_keep_the_newest_identity_after_compaction() {
             .max_by_key(|v| v.index(0).unwrap())
             .unwrap();
         assert_ne!(newest, overlay);
-        vm.stack.extend([Value::integer(2).unwrap(), key]);
+        vm.stack.test_vec().extend([Value::integer(2).unwrap(), key]);
         let winner = vm
             .annotation_primitive(Primitive::GetCharProperty, 0, 2)
             .unwrap();
-        vm.stack.clear();
+        vm.stack.test_vec().clear();
         assert_eq!(winner.as_integer().unwrap(), i, "newest overlay after GC");
     }
 }

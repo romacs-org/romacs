@@ -350,7 +350,7 @@ impl Vm {
         // suspended frame or caller below holds its Values in traced storage
         // unless it holds collection (`Vm::may_collect`). Only an outermost
         // request retires request code, so only one collects for its count.
-        let outermost = self.suspended_stacks.is_empty();
+        let outermost = self.stack.depth() == 0;
         if self.may_collect(0)
             && self.stack.is_empty()
             && (self.collection_due()

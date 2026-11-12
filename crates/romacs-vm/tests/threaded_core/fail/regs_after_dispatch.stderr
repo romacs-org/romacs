@@ -1,0 +1,25 @@
+error[E0382]: borrow of moved value: `r`
+  --> tests/threaded_core/fail/regs_after_dispatch.rs:11:17
+   |
+ 9 |     pub(super) fn body(e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+   |                                        ----- move occurs because `r` has type `audited::Regs`, which does not implement the `Copy` trait
+10 |         let out = go(e, r, pc.next());
+   |                         - value moved here
+11 |         let _ = &mut r;
+   |                 ^^^^^^ value borrowed here after move
+   |
+note: consider changing this parameter type in function `go` to borrow instead if owning the value isn't necessary
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) fn go(e: Eng<'_, '_>, r: Regs, to: Next) -> Value {
+   |               -- in this function   ^^^^ this parameter takes ownership of the value
+note: if `audited::Regs` implemented `Clone`, you could clone the value
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Regs(*mut Value);
+   | ^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+   |
+  ::: tests/threaded_core/fail/regs_after_dispatch.rs:10:25
+   |
+10 |         let out = go(e, r, pc.next());
+   |                         - you could clone this value

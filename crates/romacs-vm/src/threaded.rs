@@ -5,6 +5,9 @@
 //! every live register pointer is rebased before dispatch resumes. Code arrays
 //! and functions keep address-stable buffers; GC forwards their Value operands
 //! only at wait points. No pointer escapes the VM's retained Program lifetime.
+//! The hot handlers hold no `unsafe`: they run over the audited core's
+//! capabilities (`threaded_audited.rs`, `threaded_hot.rs`), on code made only
+//! by `code::validate` (`threaded_code.rs`), in files `Registers` owns.
 use super::*;
 #[path = "threaded_signal.rs"]
 mod signal_handlers;
@@ -17,6 +20,8 @@ pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_for
 pub(crate) use lend::test_requests::collect_now;
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
+#[cfg(test)]
+use crate::registers::FILE_START;
 use lend::{Nested, Orch, Pc, Write};
 #[cfg(test)]
 #[path = "error_signal_tests.rs"]
@@ -26,6 +31,13 @@ mod error_signal_tests;
 mod inline_tests;
 #[path = "traversal.rs"]
 mod traversal;
+#[path = "threaded_audited.rs"]
+mod audited;
+#[path = "threaded_hot.rs"]
+mod hot;
+#[path = "threaded_code.rs"]
+mod code;
+use code::Code;
 #[cfg(test)]
 #[path = "global_read_tests.rs"]
 mod global_read_tests;
@@ -51,9 +63,21 @@ mod control_tests {
     #[test]
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn hot_handlers_are_fetch_aligned() {
-        for handler in [mov, jump, unless, mul, add, sub, inc, dec, less, equal] {
+        use audited::*;
+        let typed: [Handler; 19] = [
+            t_mov, t_mov_wide, t_constant, t_constant_wide, t_unless, t_unless_wide, t_jump, t_car, t_cdr,
+            t_add, t_sub, t_inc, t_dec, t_less, t_greater, t_equal, t_null, t_consp, t_eq,
+        ];
+        for handler in typed.into_iter().chain([mul as Handler]) {
             assert_eq!((handler as usize) % 64, 0);
         }
+    }
+
+    /// The typed handlers' bytes and the branch field took no room: an
+    /// instruction is two 64-byte lines, as the measured build's was.
+    #[test]
+    fn inst_is_128_bytes() {
+        assert_eq!(std::mem::size_of::<Inst>(), 128);
     }
 
     /// Rows left to the primitive, on purpose: each does its work in the
@@ -106,8 +130,9 @@ mod control_tests {
                 right: InlineOperand::Nil,
             }));
         }
-        program.code.push(instructions[..2].to_vec());
-        program.code.push(instructions[2..].to_vec());
+        let end = lower(&vm, Op::ResumeExit);
+        program.code.push(Code::for_test(instructions[..2].to_vec(), end));
+        program.code.push(Code::for_test(instructions[2..].to_vec(), end));
         program.retire_code(&[false, true]);
         assert!(program.inline_bodies[..2].iter().all(Option::is_none));
         assert_eq!(program.free_entries, [0, 1]);
@@ -126,10 +151,11 @@ mod control_tests {
         );
         // Past half free, retiring closes the tables and keeps no free list.
         let dead = 3 * SPARE_SITES;
-        program.code.insert(0, vec![instructions[0]; dead]);
-        for (site, inst) in program.code[0].iter_mut().enumerate() {
+        let mut body = vec![instructions[0]; dead];
+        for (site, inst) in body.iter_mut().enumerate() {
             inst.site = site + 1;
         }
+        program.code.insert(0, Code::for_test(body, end));
         program.entries.resize(dead + 1, entry);
         program.inline_bodies.resize(dead + 1, None);
         program.retire_code(&[false, true, true]);
@@ -233,8 +259,9 @@ mod control_tests {
         let mut vm = Vm::new();
         let code = vec![lower(&vm, Op::Return(0))];
         let mut regs = [Value::NIL];
+        let end = lower(&vm, Op::ResumeExit);
         let mut e = empty_engine(&mut vm);
-        e.code.push(code);
+        e.code.push(Code::for_test(code, end));
         e.regs = regs.as_mut_ptr();
         e.controls.push(Control {
             kind: ControlKind::Protect { end: 0 },
@@ -392,7 +419,7 @@ mod control_tests {
 // control restored the call-free loop without changing its retired instructions.
 // The empty ELF sections set alignment without executing padding in the handler.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-core::arch::global_asm!(
+::core::arch::global_asm!(
     ".pushsection .text.vm2.mul,\"ax\",@progbits",
     ".p2align 6",
     ".popsection",
@@ -405,9 +432,6 @@ core::arch::global_asm!(
     ".pushsection .text.vm2.equal,\"ax\",@progbits",
     ".p2align 6",
     ".popsection",
-    ".pushsection .text.vm2.mov,\"ax\",@progbits",
-    ".p2align 6",
-    ".popsection",
     ".pushsection .text.vm2.add,\"ax\",@progbits",
     ".p2align 6",
     ".popsection",
@@ -415,12 +439,6 @@ core::arch::global_asm!(
     ".p2align 6",
     ".popsection",
     ".pushsection .text.vm2.less,\"ax\",@progbits",
-    ".p2align 6",
-    ".popsection",
-    ".pushsection .text.vm2.jump,\"ax\",@progbits",
-    ".p2align 6",
-    ".popsection",
-    ".pushsection .text.vm2.unless,\"ax\",@progbits",
     ".p2align 6",
     ".popsection",
 );
@@ -434,12 +452,21 @@ struct Inst {
     observed_handler: Handler,
     a: usize,
     b: usize,
-    c: usize,
+    c: u32,
+    /// A branch's distance to its target, zero on every other instruction
+    /// (`code::validate`).
+    branch: i32,
     d: usize,
-    e: usize,
+    e: u32,
+    /// `a`, `b` and `d` as bytes, for a typed handler's window (`bytes`).
+    a8: u8,
+    b8: u8,
+    d8: u8,
     value: Value,
     op: Op,
     site: usize,
+    /// A direct call's kernel, or the kernel a typed handler is the fast
+    /// path of (`audited::legacy`).
     kernel: Handler,
 }
 type PrimitiveCall = fn(&mut Vm, Primitive, usize, usize) -> Result<Value>;
@@ -622,7 +649,7 @@ impl InlineBody {
 const SPARE_SITES: usize = 1 << 14;
 #[derive(Default)]
 pub(super) struct Program {
-    code: Vec<Vec<Inst>>,
+    code: Vec<Code>,
     entries: Vec<EntryCache>,
     inline_bodies: Vec<Option<InlineBody>>,
     free_entries: Vec<usize>,
@@ -648,7 +675,7 @@ impl Program {
     }
     #[cfg(test)]
     pub(super) fn code_is_empty(&self) -> bool {
-        self.code.iter().all(Vec::is_empty) && self.entries.len() == self.free_entries.len()
+        self.code.iter().all(Code::is_none) && self.entries.len() == self.free_entries.len()
     }
     /// Drop the lowered code an idle program caches; it is lowered again on
     /// first use. The per-site tables keep room for SPARE_SITES at most, so a
@@ -666,7 +693,7 @@ impl Program {
         self.free_entries.shrink_to(SPARE_SITES);
     }
     pub(super) fn code_len(&self) -> usize {
-        self.code.iter().map(Vec::len).sum()
+        self.code.iter().map(|code| code.len()).sum()
     }
     #[cfg(test)]
     pub(super) fn sites(&self) -> usize {
@@ -676,7 +703,7 @@ impl Program {
     /// and the functions its entry caches enter: for verify's reference
     /// marker (gc_check.rs), apart from `trace_function'.
     pub(super) fn lowered_values(&self, id: usize, value: &mut impl FnMut(Value), function: &mut impl FnMut(usize)) {
-        for inst in self.code.get(id).into_iter().flatten() {
+        for inst in self.code.get(id).into_iter().flat_map(|code| code.iter()) {
             let mut copy = *inst;
             copy.visit_values(&mut |v| value(*v));
             let entry = self.entries[inst.site];
@@ -695,7 +722,7 @@ impl Program {
         let Some(code) = self.code.get(id) else {
             return;
         };
-        for inst in code {
+        for inst in code.iter() {
             values.push(inst.value);
             let mut op = inst.op;
             op.visit_values(&mut |v| values.push(*v));
@@ -708,7 +735,7 @@ impl Program {
     }
     pub(super) fn release_entry(&mut self, id: usize) {
         if let Some(code) = self.code.get_mut(id) {
-            for inst in std::mem::take(code) {
+            for inst in std::mem::replace(code, Code::none()).iter() {
                 self.inline_bodies[inst.site] = None;
                 self.entries[inst.site].world_version = 0;
                 self.entries[inst.site].target = Value::UNBOUND;
@@ -724,7 +751,7 @@ impl Program {
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
         for (id, &live) in marks[..self.code.len()].iter().enumerate() {
             // Writing an empty slot would dirty a forked worker's pages.
-            if !live && !self.code[id].is_empty() {
+            if !live && !self.code[id].is_none() {
                 self.release_entry(id);
             }
         }
@@ -737,10 +764,10 @@ impl Program {
         let old = std::mem::take(&mut self.entries);
         let old_inline = std::mem::take(&mut self.inline_bodies);
         self.free_entries = Vec::new();
-        for inst in self.code.iter_mut().flatten() {
-            let entry = old[inst.site];
-            self.inline_bodies.push(old_inline[inst.site]);
-            inst.site = self.entries.len();
+        for site in self.code.iter_mut().flat_map(Code::sites_mut) {
+            let entry = old[*site];
+            self.inline_bodies.push(old_inline[*site]);
+            *site = self.entries.len();
             self.entries.push(entry);
         }
     }
@@ -756,17 +783,17 @@ impl Program {
 /// it for that long, so the collector reads and rewrites it in place, with no
 /// pointer into the engine's frame and no copy. The instruction and entry
 /// buffers themselves do not move, so the addresses a suspended handler holds
-/// stay good; its registers stay in `Vm::stack` or `Vm::suspended_stacks`.
+/// stay good; its registers stay where they are in `Vm::stack` (`Registers`).
 pub(super) struct Suspended {
-    code: Vec<Vec<Inst>>,
+    code: Vec<Code>,
     entries: Vec<EntryCache>,
     rest: RestStack,
     apply_function: Option<Value>,
     controls: Vec<Control>,
     escape: Option<Escape>,
     frames: Vec<Frame>,
-    /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack`
-    /// until something sets them aside.
+    /// Where its registers are: file FILE of `Vm::stack` (`Registers::file`),
+    /// the current one until something sets them aside.
     file: usize,
     /// The running activation's function, or `K_FUNCTION` in a continuation.
     function: usize,
@@ -797,12 +824,12 @@ impl Suspended {
         }
     }
     pub(super) fn code_len(&self) -> usize {
-        self.code.iter().map(Vec::len).sum()
+        self.code.iter().map(|code| code.len()).sum()
     }
     /// The Values its code and entry caches hold, each instruction read on a
     /// copy: what a mark's threads may do while they work.
     pub(super) fn code_values(&self, value: &mut impl FnMut(Value)) {
-        for inst in self.code.iter().flatten() {
+        for inst in self.code.iter().flat_map(|code| code.iter()) {
             let mut copy = *inst;
             copy.visit_values(&mut |v| value(*v));
         }
@@ -836,28 +863,28 @@ impl Suspended {
     }
 }
 impl Vm {
-    /// Each register file's traced end, in file order (`suspended_stacks`, then
-    /// `stack`): its engine's top, or the whole file for one no engine owns (a
+    /// Each register file's traced end, in file order (`Registers::files`):
+    /// its engine's top, or the whole file for one no engine owns (a
     /// kernel's, or the stack outside any engine). Read while every engine is
     /// suspended, as in a collection (`may_collect(0)`).
     pub(crate) fn register_tops(&self) -> Vec<usize> {
-        let mut tops: Vec<Option<usize>> = vec![None; self.suspended_stacks.len() + 1];
+        let mut tops: Vec<Option<usize>> = vec![None; self.stack.depth() + 1];
         for record in &self.suspended {
             debug_assert!(tops[record.file].is_none(), "one engine to a register file");
             tops[record.file] = Some(record.top(self.register_file(record.file), &self.functions));
         }
         tops.into_iter().enumerate().map(|(i, top)| top.unwrap_or(self.register_file(i).len())).collect()
     }
-    /// Register file I, in file order: `suspended_stacks[i]`, then `stack`.
-    /// A record's `file` always names one (`suspend_code`).
+    /// Register file I, in file order (`Registers::file`). A record's
+    /// `file` always names one (`suspend_code`).
     fn register_file(&self, i: usize) -> &[Value] {
-        self.suspended_stacks.get(i).unwrap_or(&self.stack)
+        self.stack.file(i)
     }
     /// Every register slot a collection traces, file by file: each from 0 to
     /// its traced end (`register_tops`). Every Value in them is valid.
     pub(crate) fn register_roots(&self) -> Vec<&[Value]> {
         let tops = self.register_tops();
-        self.suspended_stacks.iter().chain(std::iter::once(&self.stack)).zip(tops).map(|(f, t)| &f[..t]).collect()
+        self.stack.files().zip(tops).map(|(f, t)| &f[..t]).collect()
     }
     /// Before marking: NIL over every slot an engine wrote above its top since
     /// the last collection, and its `stack_used` down to the top, so no stale
@@ -866,7 +893,7 @@ impl Vm {
         #[cfg(test)]
         let mut cleared = 0;
         for record in &mut self.suspended {
-            let file = self.suspended_stacks.get_mut(record.file).unwrap_or(&mut self.stack);
+            let file = self.stack.file_mut(record.file);
             let top = record.top(file, &self.functions);
             let end = record.stack_used.clamp(top, file.len());
             file[top..end].fill(Value::NIL);
@@ -891,7 +918,7 @@ impl Vm {
         let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
         let mut rows = Vec::new();
         for (engine, record) in self.suspended.iter().enumerate() {
-            let base = self.suspended_stacks.get(record.file).unwrap_or(&self.stack).as_ptr() as usize;
+            let base = self.stack.file(record.file).as_ptr() as usize;
             let start = |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
             let code_of = |code: usize| if code == K_FUNCTION { Value::NIL } else { number(code) };
             let row = |kind, code: usize, regs| [number(engine), kind, code_of(code), number(record.file), number(start(regs))];
@@ -905,9 +932,9 @@ impl Vm {
         self.list_value(&rows)
     }
 }
-fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
-    for inst in code.iter_mut().flatten() {
-        inst.visit_values(visit);
+fn visit_code(code: &mut [Code], visit: &mut impl FnMut(&mut Value)) {
+    for code in code {
+        code.visit_values(visit);
     }
 }
 impl Inst {
@@ -1418,7 +1445,7 @@ impl RestStack {
 }
 pub(super) struct Engine<'a> {
     pub(super) vm: &'a mut Vm,
-    code: Vec<Vec<Inst>>,
+    code: Vec<Code>,
     rest: RestStack,
     /// The highest slot of the file written since the last collection, or
     /// since the engine began: frame entry, a continuation's layout and
@@ -1624,7 +1651,7 @@ impl Vm {
                 _ => return None,
             };
             let args = backtrace::Arguments::Registers {
-                stack: self.suspended_stacks.len(),
+                stack: self.stack.depth(),
                 offset: r.add(start).offset_from(self.stack.as_ptr()) as usize,
                 count: argc,
             };
@@ -1725,13 +1752,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         vm.execution_fatal = true;
         return Err(error);
     }
-    // Taking a file over the current one would free a running engine's.
-    assert!(vm.stack.is_empty(), "a nested run's caller set its registers aside");
     let mut program = std::mem::take(&mut vm.execution);
     if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
         program = spare;
     }
-    program.code.resize_with(vm.functions.len(), Vec::new);
+    program.code.resize_with(vm.functions.len(), Code::none);
     if let Err(error) = lower_function(
         vm,
         &mut program.code,
@@ -1747,12 +1772,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let width = vm.functions[function].regs;
     debug_assert!(args.len() <= width.max(1), "an entry passes at most its function's registers");
     let size = width.max(args.len()).checked_add(WINDOW).ok_or("register storage overflow")?.next_power_of_two();
-    vm.stack = std::mem::take(&mut program.registers);
-    // A spare file comes back all NIL, as long as its last run grew it.
-    if vm.stack.len() < size.max(FILE_START) {
-        vm.stack.resize(size.max(FILE_START), Value::NIL);
-    }
-    vm.stack[..args.len()].copy_from_slice(args);
+    vm.stack.enter(std::mem::take(&mut program.registers), size, args);
     let regs = vm.stack.as_mut_ptr();
     let limit = file_limit(&vm.stack);
     let mark = vm.dynamic.len();
@@ -1823,10 +1843,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         None
     };
     // SAFETY: storage and lowered code satisfy the module invariants above.
+    let entry = engine.code[engine.function].entry();
     let mut value = match quit {
         Some(value) => value,
-        // SAFETY: REGS is the new engine's first frame, and a null PC enters its function's code (`next`).
-        None => unsafe { next(Eng::lend(&mut engine, gc.by_ref()), regs, std::ptr::null()) },
+        // SAFETY: REGS is the new engine's first frame, and ENTRY its function's first instruction.
+        None => unsafe { next(Eng::lend(&mut engine, gc.by_ref()), regs, entry) },
     };
     // Unoptimized Rust does not perform sibling-call elimination. Drive the
     // exact same handlers one at a time in dev builds, keeping debug safe.
@@ -1860,15 +1881,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     engine.vm.signal_handlers.truncate(handler_mark);
     engine.vm.trace_leave(backtrace_mark);
-    // Only entered frames can have written values. Clear that prefix, not all
-    // reserved frames; retaining zeroed storage avoids reinitializing it.
-    engine.vm.stack[..engine.stack_used].fill(Value::NIL);
-    // A file a deep run grew is kept for the next, up to a cap; past it, cut
-    // back, not dropped: an empty file means "no program" to the spares.
-    if engine.vm.stack.len() > SPARE_CAP {
-        engine.vm.stack.truncate(FILE_START);
-        engine.vm.stack.shrink_to_fit();
-    }
+    // Only entered frames can have written values: clear that prefix, not
+    // the whole file (`Registers::leave`).
+    let registers = engine.vm.stack.leave(engine.stack_used);
     engine.rest.values.clear();
     engine.rest.activations.clear();
     engine.vm.execution = Program {
@@ -1877,7 +1892,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         entries: std::mem::take(&mut engine.entries),
         inline_bodies: std::mem::take(&mut engine.inline_bodies),
         free_entries: std::mem::take(&mut engine.free_entries),
-        registers: std::mem::take(&mut engine.vm.stack),
+        registers,
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
     engine.vm.rooted_write = rooted_write;
@@ -1904,7 +1919,7 @@ fn unwind_lent<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, n: usize) {
 }
 fn lower_function(
     vm: &mut Vm,
-    code: &mut Vec<Vec<Inst>>,
+    code: &mut Vec<Code>,
     entries: &mut Vec<EntryCache>,
     inline_bodies: &mut Vec<Option<InlineBody>>,
     free_entries: &mut Vec<usize>,
@@ -1912,10 +1927,10 @@ fn lower_function(
 ) -> Result<()> {
     // A variable watcher can compile functions while this engine is
     // suspended at a write, with no resize after it.
-    if id >= code.len() { code.resize_with(vm.functions.len().max(id + 1), Vec::new); }
-    if code[id].is_empty() {
+    if id >= code.len() { code.resize_with(vm.functions.len().max(id + 1), Code::none); }
+    if code[id].is_none() {
         vm.materialize_image_function(id)?;
-        code[id] = vm.functions[id]
+        let body = vm.functions[id]
             .code
             .iter()
             .copied()
@@ -1967,12 +1982,8 @@ fn lower_function(
                 inst
             })
             .collect();
-        // Branches hold their distance, so they need no code table.
-        for (at, inst) in code[id].iter_mut().enumerate() {
-            if let Op::Jump(to) | Op::Unless(_, to) = inst.op {
-                inst.c = (to as isize - at as isize) as usize;
-            }
-        }
+        code[id] = code::validate(&vm.functions[id], body, lower(vm, Op::ResumeExit))
+            .map_err(|refusal| format!("invalid lowered code in function {id}: {refusal}"))?;
     }
     Ok(())
 }
@@ -1983,8 +1994,12 @@ fn lower(vm: &Vm, op: Op) -> Inst {
         a: 0,
         b: 0,
         c: 0,
+        branch: 0,
         d: 0,
         e: 0,
+        a8: 0,
+        b8: 0,
+        d8: 0,
         value: Value::NIL,
         op,
         site: 0,
@@ -1992,22 +2007,25 @@ fn lower(vm: &Vm, op: Op) -> Inst {
     };
     match op {
         Op::Const(a, v) => {
-            i.handler = constant;
             i.a = a;
             i.value = v;
+            code::bytes(&mut i, audited::t_constant, audited::t_constant_wide);
         }
         Op::Move(a, b) => {
-            i.handler = mov;
             i.a = a;
             i.b = b;
+            code::bytes(&mut i, audited::t_mov, audited::t_mov_wide);
         }
         Op::Sealed(a, b, d, e) => {
             i.a = a;
             i.b = b;
             i.d = d;
-            i.e = e;
+            i.e = code::narrow(e);
             i.value = sealed::target(&vm.symbol_names[b], e).expect("sealed call of a byte-op primitive");
             i.handler = kernel(i.value, e).unwrap_or(sealed_call);
+            if let Some(typed) = code::typed_kernel(i.value, e) {
+                code::kernel_bytes(&mut i, typed);
+            }
         }
         Op::Global(a, b) => {
             // Two plain-looking variables whose value is the buffer's.
@@ -2023,7 +2041,7 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = closure;
             i.a = a;
             i.b = b;
-            i.c = c;
+            i.c = code::narrow(c);
         }
         Op::SetGlobal(a, b) => {
             i.handler = assign_global;
@@ -2062,7 +2080,7 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = read_late;
             i.a = a;
             i.b = b;
-            i.c = c;
+            i.c = code::narrow(c);
         }
         Op::LateForwarded(a, b) => {
             i.handler = late_forwarded;
@@ -2073,16 +2091,13 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = write_late;
             i.a = a;
             i.b = b;
-            i.c = c;
+            i.c = code::narrow(c);
         }
-        Op::Jump(a) => {
-            i.handler = jump;
+        // Their targets are `Inst::branch` (`code::validate`).
+        Op::Jump(_) => i.handler = audited::t_jump,
+        Op::Unless(a, _) => {
             i.a = a;
-        }
-        Op::Unless(a, b) => {
-            i.handler = unless;
-            i.a = a;
-            i.b = b;
+            code::bytes(&mut i, audited::t_unless, audited::t_unless_wide);
         }
         Op::Return(a) => {
             i.handler = ret;
@@ -2092,16 +2107,16 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = call;
             i.a = a;
             i.b = b;
-            i.c = c;
+            i.c = code::narrow(c);
             i.d = d;
         }
         Op::Direct(a, b, c, d, e) => {
             i.handler = direct;
             i.a = a;
             i.b = b;
-            i.c = c;
+            i.c = code::narrow(c);
             i.d = d;
-            i.e = e;
+            i.e = code::narrow(e);
             // A kernel serves the primitive the cell holds now; `direct_kernel`
             // runs it only while the site cache still holds that primitive.
             let target = vm.slots[b].function;
@@ -2243,12 +2258,8 @@ unsafe fn observe_then(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Va
 /// instruction of the function running in it: the registers and constants
 /// its operands name lie in that frame and code, as lowering checked.
 unsafe fn next(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    // A null pc is used only at entry, never stored in an instruction/frame.
-    let pc = if pc.is_null() {
-        e.code[e.function].as_ptr()
-    } else {
-        pc
-    };
+    // A tail call, or in a debug build a return to the driver's trampoline
+    // (`Engine::resume`), since there the frames would pile up.
     #[cfg(debug_assertions)]
     {
         let mut e = e;
@@ -2507,34 +2518,6 @@ unsafe fn write_late(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Valu
 /// R is the running engine's current frame (`Engine::regs`) and PC an
 /// instruction of the function running in it: the registers and constants
 /// its operands name lie in that frame and code, as lowering checked.
-unsafe fn constant(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe {
-        *r.add((*pc).a) = (*pc).value;
-        advance(e, r, pc)
-    }
-}
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    // SAFETY: a section of this binary's own text, laid out by the
-    // `global_asm!` above; it holds only this handler's code.
-    unsafe(link_section = ".text.vm2.mov")
-)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
-unsafe fn mov(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe {
-        *r.add((*pc).a) = *r.add((*pc).b);
-        advance(e, r, pc)
-    }
-}
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
 unsafe fn read_cell(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
@@ -2559,49 +2542,6 @@ unsafe fn write_cell(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Valu
         }
         e.vm.write_capture_cell(v.payload() as usize, *r.add((*pc).b));
         advance(e, r, pc)
-    }
-}
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    // SAFETY: a section of this binary's own text, laid out by the
-    // `global_asm!` above; it holds only this handler's code.
-    unsafe(link_section = ".text.vm2.jump")
-)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
-unsafe fn jump(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe {
-        let to = pc.offset((*pc).c.cast_signed());
-        if to <= pc {
-            e.budget -= 1;
-            if e.budget < 0 {
-                return poll_resume(e, r, to);
-            }
-        }
-        next(e, r, to)
-    }
-}
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    // SAFETY: a section of this binary's own text, laid out by the
-    // `global_asm!` above; it holds only this handler's code.
-    unsafe(link_section = ".text.vm2.unless")
-)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
-unsafe fn unless(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe {
-        if *r.add((*pc).a) == Value::NIL {
-            next(e, r, pc.offset((*pc).c.cast_signed()))
-        } else {
-            advance(e, r, pc)
-        }
     }
 }
 /// # Safety
@@ -2685,7 +2625,7 @@ unsafe fn direct_kernel(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let i = &*pc;
-        let cache = e.vm.caches.get_unchecked(i.c);
+        let cache = e.vm.caches.get_unchecked(i.c as usize);
         if cache.version == e.vm.slots.get_unchecked(i.b).version && cache.target == i.value {
             (i.kernel)(e, r, pc)
         } else {
@@ -2702,7 +2642,7 @@ unsafe fn direct_kernel(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
 /// its operands name lie in that frame and code, as lowering checked.
 unsafe fn sealed_call(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe { invoke(e, r, pc, (*pc).value, (*pc).d, (*pc).e) }
+    unsafe { invoke(e, r, pc, (*pc).value, (*pc).d, (*pc).e as usize) }
 }
 /// Check the prospective activation, independently of register storage.
 /// The common case (limit >= 100, depth and native stack within bounds) is
@@ -2740,10 +2680,6 @@ fn depth_room_cold(e: &mut Engine<'_>, attempted: usize) -> bool {
 /// continuation's layout is written in the file before anything covers it,
 /// and a 256-register view of a window never leaves it.
 pub(crate) const WINDOW: usize = 256;
-/// A new register file's slots.
-const FILE_START: usize = 4096;
-/// A file longer than this is cut back to `FILE_START` when its engine ends.
-const SPARE_CAP: usize = 131_072;
 /// The address `WINDOW` slots before FILE's end: the furthest a window may end.
 fn file_limit(file: &[Value]) -> usize {
     (file.as_ptr() as usize + std::mem::size_of_val(file)).saturating_sub(WINDOW * std::mem::size_of::<Value>())
@@ -2812,7 +2748,7 @@ unsafe fn trace_call<const LISP: bool>(e: &mut Engine<'_>, r: *mut Value, pc: *c
             e.vm.backtrace.copied(std::slice::from_raw_parts(r.add(start), argc))
         } else {
             backtrace::Arguments::Registers {
-                stack: e.vm.suspended_stacks.len(),
+                stack: e.vm.stack.depth(),
                 offset: r.add(start).offset_from(e.vm.stack.as_ptr()) as usize,
                 count: argc,
             }
@@ -2970,7 +2906,7 @@ unsafe fn enter_apply(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, start:
 /// its operands name lie in that frame and code, as lowering checked.
 unsafe fn call(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe { invoke(e, r, pc, *r.add((*pc).b), (*pc).c, (*pc).d) }
+    unsafe { invoke(e, r, pc, *r.add((*pc).b), (*pc).c as usize, (*pc).d) }
 }
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
@@ -2987,7 +2923,7 @@ unsafe fn direct(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
         // Nothing may allocate, collect, or invoke Lisp between here and entry.
         if entry.world_version != 0
             && entry.world_version == e.vm.world_version
-            && entry.simple_arity == i.e
+            && entry.simple_arity == i.e as usize
         {
             #[cfg(test)]
             {
@@ -3014,8 +2950,8 @@ unsafe fn direct(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
                 return advance(e, r, pc);
             }
             let new = r.add(width);
-            std::ptr::copy(r.add(i.d), new, i.e);
-            return enter_frame(e, r, pc, new, entry.function, None, entry.target, i.d, i.e);
+            std::ptr::copy(r.add(i.d), new, i.e as usize);
+            return enter_frame(e, r, pc, new, entry.function, None, entry.target, i.d, i.e as usize);
         }
         #[cfg(test)]
         if entry.world_version != 0 && entry.world_version != e.vm.world_version {
@@ -3037,7 +2973,7 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         // Function-cell equality is an authoritative guard, including redefinition
         // back to the original primitive; never assume a sealed symbol table.
         let slot = en.vm.slots.get_unchecked(i.b);
-        let cache = en.vm.caches.get_unchecked_mut(i.c);
+        let cache = en.vm.caches.get_unchecked_mut(i.c as usize);
         if cache.version != slot.version {
             if en.vm.macros.contains(&i.b) && !en.vm.expanding.contains(&i.b) {
                 return fail(
@@ -3054,7 +2990,7 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         }
         // An autoload cell is resolved from its symbol, which it must name.
         if target.tag() == 7 || target.tag() == 3 && (en.vm.autoload_object(target) || lambda_list(en, target)) {
-            return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e);
+            return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e as usize);
         }
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
         if !matches!(target.tag(), 4 | 6) {
@@ -3064,9 +3000,9 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         // Refresh an invalidated speculation lazily; ineligible closures retain
         // the existing function-id cache instead of resolving on every call.
         if target.tag() == 4 && en.entries[i.site].world_version != 0 {
-            return resolve_entry(e, r, pc, target, i.d, i.e);
+            return resolve_entry(e, r, pc, target, i.d, i.e as usize);
         }
-        invoke(e, r, pc, target, i.d, i.e)
+        invoke(e, r, pc, target, i.d, i.e as usize)
     }
 }
 #[inline(always)]
@@ -3241,7 +3177,7 @@ unsafe fn resolve_entry(
                 // particular environment as the cache key or copy its captures.
                 target: Value::UNBOUND,
                 function,
-                entry: en.code.get_unchecked(function).as_ptr(),
+                entry: en.code.get_unchecked(function).entry(),
                 primitive: None,
                 simple_arity: {
                     let f = &en.vm.functions[function];
@@ -3523,7 +3459,7 @@ unsafe fn enter_frame_marked(
         en.regs = new;
         en.function = function;
         en.dynamic = en.vm.dynamic.len();
-        let pc = en.code.get_unchecked(function).as_ptr();
+        let pc = en.code.get_unchecked(function).entry();
         en.budget -= 1;
         if en.budget < 0 {
             return poll_resume(e, new, pc);
@@ -3566,8 +3502,12 @@ const fn k_inst(handler: Handler) -> Inst {
         a: K_RES,
         b: 0,
         c: 0,
+        branch: 0,
         d: 0,
         e: 0,
+        a8: 0,
+        b8: 0,
+        d8: 0,
         value: Value::NIL,
         op: Op::Return(K_RES),
         // Never an entry-cache index: K_CODE calls do not use the site caches.
@@ -3803,7 +3743,7 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
         if e.vm.region_collect { e.budget = 0; }
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
+        e.code.resize_with(e.vm.functions.len(), Code::none);
         // The nested run had a file of its own, so this one did not move.
         let r = e.regs;
         // SAFETY: R is this engine's current frame, in the register stack, and
@@ -4590,7 +4530,7 @@ fn grow_registers(e: &mut Engine<'_>, r: *mut Value, need: usize) -> Option<*mut
     let current = offset(r);
     let regs = offset(e.regs);
     let frames: Vec<usize> = e.frames.iter().map(|frame| offset(frame.regs)).collect();
-    e.vm.stack.resize(size, Value::NIL);
+    e.vm.stack.grow(size);
     e.limit = file_limit(&e.vm.stack);
     let base = e.vm.stack.as_mut_ptr();
     for (frame, offset) in e.frames.iter_mut().zip(frames) {
@@ -5214,7 +5154,7 @@ unsafe fn list(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
         let mut tail = Value::NIL;
-        for at in (0..i.e).rev() {
+        for at in (0..i.e as usize).rev() {
             tail = e.vm.alloc_cons(*r.add(i.d + at), tail);
         }
         *r.add(i.a) = tail;
@@ -5596,7 +5536,7 @@ unsafe fn make_closure(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let i = &*pc;
-        let captures = e.vm.functions[e.function].sites[i.c].iter().map(|&reg| *r.add(reg)).collect();
+        let captures = e.vm.functions[e.function].sites[i.c as usize].iter().map(|&reg| *r.add(reg)).collect();
         *r.add(i.a) = e.vm.alloc_closure(Closure { function: i.b, captures, metadata: vec![], document: Value::NIL });
     }
 }
@@ -5960,9 +5900,17 @@ mod register_tests {
             if name == "plist-get" {
                 continue;
             }
+            // A sealed call of a typed op takes the typed handler, the kernel
+            // its other cases (`kernel_bytes`).
             let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
-            assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler),
+            let typed = code::typed_kernel(sealed.value, argc);
+            let kernel = if typed.is_some() { sealed.kernel } else { sealed.handler };
+            assert!(std::ptr::fn_addr_eq(direct.kernel, kernel),
                 "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
+            assert!(typed.is_some() || !matches!(name, "car" | "cdr" | "null"), "{name} has a typed handler");
+            if let Some(typed) = typed {
+                assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
+            }
         }
     }
 
@@ -6187,13 +6135,13 @@ mod register_tests {
         let function = vm.intern("reader-probe");
         let value = vm.list_value(&[Value::NIL]);
         vm.external_roots.push(value);
-        vm.stack = vec![value, function];
+        *vm.stack.test_vec() = vec![value, function];
         let registers = vm.stack.as_ptr();
         let collections = vm.gc_stats.collections;
         let result = vm.reader_call(function, &[value]).unwrap();
         assert_eq!(vm.cons_pair(result).unwrap().0.as_integer().unwrap(), 42);
         assert_eq!(vm.external_roots, vec![result]);
-        assert_eq!(vm.stack, vec![result, function]);
+        assert_eq!(*vm.stack, [result, function]);
         assert_eq!(vm.stack.as_ptr(), registers);
         assert!(vm.gc_stats.collections > collections);
     }

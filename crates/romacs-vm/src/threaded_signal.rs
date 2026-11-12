@@ -219,7 +219,7 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
         let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
         let depth = e.vm.propagated_eval_depth.take();
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
+        e.code.resize_with(e.vm.functions.len(), Code::none);
         let escaped = match (result, replacement) {
             (_, Some(escape)) => { e.escape = Some(escape); true }
             (Err(error), None) => {

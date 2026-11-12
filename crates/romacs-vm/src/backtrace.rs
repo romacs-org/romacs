@@ -7,10 +7,10 @@ use super::*;
 /// keeps a pointer to the caller's pushed values (bytecode.c `Bcall`).
 pub(super) enum Arguments {
     /// The caller's argument registers: OFFSET..OFFSET+COUNT of the register
-    /// stack at suspension depth STACK (`Vm::suspended_stacks` index; the live
-    /// stack is at `suspended_stacks.len()`). Nothing writes them while the
-    /// callee runs; widening keeps offsets; collection forwards them as
-    /// registers; a nested run sets the whole stack aside unmoved.
+    /// file STACK (`Registers::file`; the live one is at `Registers::depth`).
+    /// Nothing writes them while the callee runs; widening keeps offsets;
+    /// collection forwards them as registers; a nested run sets the whole
+    /// stack aside unmoved.
     Registers { stack: usize, offset: usize, count: usize },
     /// Copied into `Backtrace::arguments`: a call through `apply`, whose
     /// spread window a nested `apply` reuses while the callee runs.
@@ -250,8 +250,7 @@ impl Vm {
         match &self.backtrace.frames[index].args {
             Arguments::Copied(range) => &self.backtrace.arguments[range.clone()],
             &Arguments::Registers { stack, offset, count } => {
-                let stack = self.suspended_stacks.get(stack).unwrap_or(&self.stack);
-                &stack[offset..offset + count]
+                &self.stack.file(stack)[offset..offset + count]
             }
         }
     }
@@ -260,7 +259,7 @@ impl Vm {
         match &self.backtrace.frames.get(index)?.args {
             Arguments::Copied(range) => self.backtrace.arguments.get(range.clone()),
             &Arguments::Registers { stack, offset, count } => {
-                self.suspended_stacks.get(stack).unwrap_or(&self.stack).get(offset..offset.checked_add(count)?)
+                self.stack.file(stack).get(offset..offset.checked_add(count)?)
             }
         }
     }

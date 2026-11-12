@@ -108,6 +108,7 @@ mod insdel;
 mod indirect;
 use romacs_brand as brand;
 mod gc;
+mod registers;
 mod gc_check;
 mod gc_mark;
 mod table;
@@ -1306,9 +1307,6 @@ pub struct Vm {
     command_point: (i64, Value),
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     change_prepared: bool,
-    /// The register file natives borrow for their arguments, reused across
-    /// calls (`Vm::with_kernel_stack'): empty between them.
-    kernel_stack: Vec<Value>,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
@@ -1635,7 +1633,8 @@ pub struct Vm {
     completion_walks: u64,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
-    stack: Vec<Value>,
+    /// The register files, the running engine's current (`registers.rs`).
+    stack: registers::Registers,
     external_roots: Vec<Value>,
     /// alloc.c's `finalizers': every finalizer not yet found unreachable.
     /// Not roots; the collector dooms those it does not reach.
@@ -1652,9 +1651,6 @@ pub struct Vm {
     /// interrupt naming the job waits (`threaded::isolate_quit'), so
     /// finalizers and `post-gc-hook' never take it.
     aftermath_runs: usize,
-    /// Register stacks of engines suspended across a nested run, traced and
-    /// forwarded in place: their frames keep raw pointers into them.
-    suspended_stacks: Vec<Vec<Value>>,
     /// Suspended engines' own state, owned here until they resume: traced and
     /// forwarded in place, and dropped with the engine by a caught panic.
     suspended: Vec<threaded::Suspended>,
@@ -1684,7 +1680,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     standard_case_tables,
     command_point,
     change_prepared,
-    kernel_stack,
     change_slots,
     case_symbols_slot,
     print_number_index,
@@ -1761,7 +1756,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     deferred_writes,
     gc_stress,
     allocation,
-    suspended_stacks,
     gc_floor,
     job_budget,
     gc_retained_payload,
@@ -1880,7 +1874,6 @@ impl Vm {
             standard_case_tables: [Value::NIL; 4],
             command_point: (0, Value::NIL),
             change_prepared: false,
-            kernel_stack: Vec::new(),
             change_slots: None,
             case_symbols_slot: usize::MAX,
             print_number_index: 0,
@@ -2034,14 +2027,13 @@ impl Vm {
             completion_walks: 0,
             completion_case_memo: None,
             caches: vec![],
-            stack: vec![],
+            stack: registers::Registers::new(),
             external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             unwinding: 0,
             aftermath_runs: 0,
-            suspended_stacks: vec![],
             suspended: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,

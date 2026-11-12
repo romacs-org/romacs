@@ -1,0 +1,34 @@
+error[E0505]: cannot move out of `e` because it is borrowed
+  --> tests/threaded_core/fail/window_across_dispatch.rs:11:22
+   |
+ 9 |     pub(super) fn body(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+   |                        ----- binding `e` declared here
+10 |         let regs = r.window(&mut e);
+   |                             ------ borrow of `e` occurs here
+11 |         let out = go(e, r, pc.next());
+   |                      ^ move out of `e` occurs here
+12 |         regs[pc.a()] = out;
+   |         ------------ borrow later used here
+   |
+note: if `Eng<'_, '_>` implemented `Clone`, you could clone the value
+  --> tests/threaded_core/fail/../support.rs
+   |
+   | struct Eng<'x, 'a>(&'x mut Engine<'a>);
+   | ^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+   |
+  ::: tests/threaded_core/fail/window_across_dispatch.rs:10:34
+   |
+10 |         let regs = r.window(&mut e);
+   |                                  - you could clone this value
+
+error[E0505]: cannot move out of `r` because it is borrowed
+  --> tests/threaded_core/fail/window_across_dispatch.rs:11:25
+   |
+ 9 |     pub(super) fn body(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+   |                                            ----- binding `r` declared here
+10 |         let regs = r.window(&mut e);
+   |                    - borrow of `r` occurs here
+11 |         let out = go(e, r, pc.next());
+   |                         ^ move out of `r` occurs here
+12 |         regs[pc.a()] = out;
+   |         ------------ borrow later used here

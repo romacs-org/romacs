@@ -1,0 +1,16 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/threaded_core/fail/forged_regs.rs:11:15
+   |
+11 |         go(e, Regs(std::ptr::null_mut()), pc.next())
+   |               ^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Regs(*mut Value);
+   |                        ^^^^^^^^^^ private field
+help: consider making the field publicly accessible
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Regs(pub *mut Value);
+   |                        +++

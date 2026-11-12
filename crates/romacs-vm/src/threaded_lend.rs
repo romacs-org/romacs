@@ -94,7 +94,7 @@ impl Engine<'_> {
             controls: std::mem::take(&mut self.controls),
             escape: self.escape.take(),
             frames: std::mem::take(&mut self.frames),
-            file: self.vm.suspended_stacks.len(),
+            file: self.vm.stack.depth(),
             function: self.function,
             regs: self.regs,
             stack_used: std::mem::take(&mut self.stack_used),
@@ -152,7 +152,7 @@ impl Engine<'_> {
         self.vm.resume_stack();
         self.resume_code();
         self.vm.end_nested_execution();
-        self.code.resize_with(self.vm.functions.len(), Vec::new);
+        self.code.resize_with(self.vm.functions.len(), Code::none);
         out
     }
 }

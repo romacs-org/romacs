@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `e` as immutable because it is also borrowed as mutable
+  --> tests/threaded_core/fail/file_read_under_window.rs:11:21
+   |
+10 |         let regs = r.window(&mut e);
+   |                             ------ mutable borrow occurs here
+11 |         let first = e.vm.stack[0];
+   |                     ^ immutable borrow occurs here
+12 |         regs[pc.a()] = first;
+   |         ------------ mutable borrow later used here
