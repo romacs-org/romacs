@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the recording oracle: GNU Emacs at the pin in parity-reference.toml,
+# Build the recording oracle: GNU Emacs at the pin in ledger/parity-reference.toml,
 # installed into a prefix named by that revision (R228).
 #
 #   tools/build-gnu-oracle.sh            # then: export ROMACS_GNU_ORACLE=$ROOT/$PIN/bin/emacs
@@ -13,12 +13,12 @@
 # clone's git HEAD; tools/lib/gnu_oracle.py reads it back from the binary.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
-PIN=$(sed -n 's/^mirror_commit = "\(.*\)"$/\1/p' "$repo/parity-reference.toml")
+PIN=$(sed -n 's/^mirror_commit = "\(.*\)"$/\1/p' "$repo/ledger/parity-reference.toml")
 REF=${GNU_REF:-https://github.com/emacs-mirror/emacs.git}
 ROOT=${GNU_ORACLE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/gnu-emacs-pin}
 mkdir -p "$ROOT"
 PREFIX=$ROOT/$PIN
-[ ${#PIN} -eq 40 ] || { echo "no mirror_commit in parity-reference.toml" >&2; exit 1; }
+[ ${#PIN} -eq 40 ] || { echo "no mirror_commit in ledger/parity-reference.toml" >&2; exit 1; }
 [ -d "$ROOT/src" ] || git clone -q --no-checkout "$REF" "$ROOT/src"
 cd "$ROOT/src"
 git checkout -q --detach "$PIN"

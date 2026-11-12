@@ -17,7 +17,7 @@ import unittest
 spec = importlib.util.spec_from_file_location('census', _source := Path(__file__).resolve().parents[1] / 'lisp-census', loader=importlib.machinery.SourceFileLoader('census', str(_source)))
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
-BINARY = Path(os.environ.get('CENSUS_BIN') or Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'target'))) / 'release/romacs-vm-census')
+BINARY = Path(os.environ.get('CENSUS_BIN') or Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'ledger/parity-reference.toml').is_file()) / 'target'))) / 'release/romacs-vm-census')
 NOT_SPLIT = {'form_count': None, 'status': 'not_split'}
 
 

@@ -363,7 +363,7 @@ fn a_workers_fontification_is_the_sessions() {
         (isolate-kill-all)))",
         module = root.join("lisp/romacs/romacs-fontify.el").display().to_string(),
         el = root.join("lisp/gnu/subr.el").display().to_string(),
-        c = root.join("gnu-tests/test/manual/etags/c-src/emacs/src/keyboard.c").display().to_string());
+        c = root.join("test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c").display().to_string());
     let (ok, out, err) = batch(&script, Path::new("/"));
     assert!(ok, "batch failed: {err}");
     let out = out.trim();

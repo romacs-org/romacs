@@ -21,6 +21,9 @@
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
+;;   :ready  a GUI probe's condition for its next step, besides the host's
+;;           redisplay of the step before: the chain waits for it, as it
+;;           does for the redisplay, rather than for a time.
 ;;   :gap    how often, in seconds, a GUI probe looks for its step's
 ;;           redisplay (default 0.1).
 ;;   :stack  also report how much native stack the body keeps
@@ -40,13 +43,14 @@
   "The probes, newest first: (NAME . PLIST).")
 
 (defmacro scaling-probe (name &rest plist)
-  "Define probe NAME from PLIST, its :setup and :body forms made functions."
-  (let ((setup (plist-get plist :setup)) (body (plist-get plist :body)))
+  "Define probe NAME from PLIST, its :setup, :body and :ready forms made functions."
+  (let ((setup (plist-get plist :setup)) (body (plist-get plist :body)) (ready (plist-get plist :ready)))
     `(setf (alist-get ',name scaling-probes)
            (list ,@(cl-loop for (key value) on plist by #'cddr
-                            unless (memq key '(:setup :body)) append (list key value))
+                            unless (memq key '(:setup :body :ready)) append (list key value))
                  :setup (lambda (n) (ignore n) ,setup)
-                 :body (lambda (n it &optional i) (ignore n it i) ,body)))))
+                 :body (lambda (n it &optional i) (ignore n it i) ,body)
+                 ,@(and ready `(:ready (lambda () ,ready)))))))
 
 (defvar scaling-stack-marks nil
   "`romacs-native-stack-room' at each `scaling-stack-mark' of a body.")
@@ -462,8 +466,8 @@ closures over a mutable variable (each a closure and a cell)."
 ;; code retires, and the next step takes their sites and cache slots back.
 ;; A session no key has reached has no `romacs--idle-collect' (the lazy
 ;; lisp/romacs/vm/keyboard.el) and shows a startup message, so the probe supplies
-;; the one and clears the other.  A step with no collection after the last ends the session,
-;; which fails the measure.  Retirement that scanned its free lists, or
+;; the one and clears the other.  Each step waits (:ready) for a collection
+;; after the last, however long a loaded host takes to reach one.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
   "`gcs-done' when the last `gc-retired-code' step ended.")
@@ -588,7 +592,8 @@ step, before the next step or the count's end."
   (let* ((plist (scaling--probe name))
          (steps (or (plist-get plist :steps) 1))
          (body (plist-get plist :body))
-         (gap (or (plist-get plist :gap) 0.1)) it start)
+         (gap (or (plist-get plist :gap) 0.1))
+         (ready (or (plist-get plist :ready) #'always)) it start)
     (setq blink-cursor-mode nil)
     (run-with-idle-timer
      0.5 nil
@@ -602,7 +607,9 @@ step, before the next step or the count's end."
           (setq start (romacs-instructions))
           (let ((step nil) (laid-out nil) (i 0))
             (setq laid-out (lambda ()
-                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
+                             (if (and (romacs--redisplay-since-mark) (funcall ready))
+                                 (funcall step)
+                               (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))

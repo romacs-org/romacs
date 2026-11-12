@@ -88,13 +88,25 @@ def cursor_pixels(png: Path, rows: int, rgb=(0x90, 0x99, 0xd9), tol=12) -> int:
 
 
 def wait_prompt(log: Path, text: str, timeout: float, seen: int) -> int:
-    """VM2 only: block until a prompt paint showing TEXT has RENDERED (the
-    evaluator waited for the renderer). Synchronisation, not evidence."""
+    """VM2 only: block until a prompt paint showing TEXT has RENDERED: drawn
+    as it was painted, or a later `prompt-drawn' (or drawn prompt paint) of
+    its presentation or one after it, since the evaluator never waits for
+    the renderer. Synchronisation, not evidence."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         lines = log.read_text(errors='replace').splitlines()
+        painted = None
         for n, line in enumerate(lines[seen:], seen):
-            if '"prompt-paint"' in line and json.loads(line).get('minibuffer') == text:
+            if not line.startswith('{'):
+                continue
+            record = json.loads(line)
+            if record.get('diagnostic') == 'prompt-paint' and record.get('minibuffer') == text:
+                if record.get('drawn'):
+                    return n + 1
+                painted = record['presentation']
+            elif painted is not None and record.get('presentation', 0) >= painted and (
+                    record.get('diagnostic') == 'prompt-drawn'
+                    or record.get('diagnostic') == 'prompt-paint' and record.get('drawn')):
                 return n + 1
         time.sleep(.05)
     raise TimeoutError(f'no prompt paint showing {text!r}')

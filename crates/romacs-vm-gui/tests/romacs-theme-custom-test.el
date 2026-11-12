@@ -5,7 +5,7 @@
 ;; lisp/romacs/romacs-theme.el's themes under GNU's Custom, in a `--loadup'
 ;; session, which starts in the stock theme `default'
 ;; (gnu_completion.rs `romacs_theme_lisp_tests_pass').  The colour engine
-;; and palettes alone: test/romacs-lisp/romacs-theme-test.el.
+;; and palettes alone: test/romacs/romacs-test/romacs-theme-test.el.
 
 (require 'romacs-theme)
 

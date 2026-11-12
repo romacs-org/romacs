@@ -279,8 +279,9 @@ def main():
               'classic': args.classic, 'scale': args.scale, 'slowdown': args.slowdown, 'checks': {}}
     checks = report['checks']
     comp = kb = proc = None
+    tmp = None
     try:
-        with tempfile.TemporaryDirectory(prefix='chr-', dir=os.environ.get('XDG_RUNTIME_DIR')) as tmp:
+        with tempfile.TemporaryDirectory(prefix='chr-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as tmp:
             root = Path(tmp)
             root.chmod(0o700)
             home, config, notes = root / 'home', root / 'config', root / 'notes'
@@ -468,14 +469,12 @@ def main():
         report.update(status='FAIL', error=repr(error))
     finally:
         for p in (proc, kb, comp):
-            if p is not None and p.poll() is None:
-                p.terminate()
-                try:
-                    p.wait(5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-        (out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
-        print(json.dumps(report))
+            live.stop(p)
+        try:
+            (out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+            print(json.dumps(report))
+        finally:
+            live.remove_root(tmp)
     return 0 if report.get('status') == 'PASS' else 1
 
 

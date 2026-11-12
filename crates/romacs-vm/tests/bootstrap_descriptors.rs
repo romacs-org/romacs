@@ -119,7 +119,7 @@ fn eval_and_compile_runs_source_body_once() {
 // (lisp/emacs-lisp/byte-run.el, `(list 'quote (eval (cons 'progn body) ...))`).
 // GNU 32.0.50: `(macroexpand-all '(eval-and-compile (setq bt (1+ bt))))` with bt
 // 0 gives `'1`, bt is 1 after expansion, evaluating the expansion gives 1 and bt
-// stays 1 (transcript in reference/lisp-oracle/VM-GAPS.md, VM2-BOOT1 withdrawn).
+// stays 1 (VM2-BOOT1 withdrawn).
 // This used to assert the opposite (deferral to execution), which held only
 // because lisp/emacs-lisp/byte-run.el had been edited in place.
 fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
@@ -142,8 +142,7 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
 // (lisp/subr.el:256) destructures with `pcase-dolist`, which GNU autoloads from
 // pcase.el. This test used to pass against an in-place rewrite of subr.el
 // (plain `dolist` + `car-safe`, ledger row VM2-BOOT2, withdrawn). GNU 32.0.50
-// answers `(nil 9 (nil))` and `nil` for the two calls below (transcript in
-// reference/lisp-oracle/VM-GAPS.md, gap G4). VM2 cannot reach pcase yet:
+// answers `(nil 9 (nil))` and `nil` for the two calls below. VM2 cannot reach pcase yet:
 // subr.el stops at form 139 (radix reader, G1), so pcase-dolist is unbound,
 // and `eval_source` (which compiles the body eagerly, unlike GNU's lazy
 // `defun`) already signals on the definition. Measured 2026-10-20 on the

@@ -273,7 +273,10 @@ mod tests {
         vm.install_lisp_prelude().unwrap();
         vm.eval_source("(progn (setq font-encoding-alist '((\"[bc]\" . hit)))
           (setq long-name (make-string 300000 ?a))
-          (defun font-of (name) (romacs--font-encoding name)))").unwrap();
+          (defun font-of (name) (romacs--font-encoding name))
+          ;; Settle the poll the string's allocation asked for: it would
+          ;; answer the inspection at the call's first tick instead.
+          (garbage-collect))").unwrap();
         let depth = vm.backtrace.frames.len();
         crate::host::inspect_enable(true);
         crate::host::inspect_request();

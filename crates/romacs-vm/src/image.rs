@@ -410,6 +410,16 @@ impl Vm {
         self.image = Some(image);
         Ok(())
     }
+    /// V's car and cdr when it is a cons of this VM's own table, read in
+    /// place: the case a list walk meets, kept small enough to inline
+    /// into it. None for anything else, which `cons_pair` reads.
+    #[inline]
+    pub(crate) fn private_cons(&self, v: Value) -> Option<(Value, Value)> {
+        if v.tag() != 3 { return None; }
+        let index = usize::try_from(v.payload()).ok()?;
+        if index & IMAGE != 0 { return None; }
+        self.conses.get(index).copied()
+    }
     #[inline(always)]
     pub(crate) fn cons_pair(&self, v: Value) -> Result<(Value, Value)> {
         let index = v.index(3)?;

@@ -365,8 +365,9 @@ def main():
               'captures': [], 'checks': [], 'scope': 'private software-rendered native keyboard; shell text projection'}
     compositor = keyboard = process = None
     background_pid = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='term-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='term-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home = root / 'home'
@@ -615,16 +616,13 @@ def main():
             if command_line.startswith(b'sleep\x007777\x00'):
                 os.kill(background_pid, 9)
         for child in (process, keyboard, compositor):
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=8)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=8)
-        (output / 'report.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
-        (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
-        print(json.dumps(report, ensure_ascii=False))
+            live.stop(child)
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
+            (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
+            print(json.dumps(report, ensure_ascii=False))
+        finally:
+            live.remove_root(temporary)
     return 0 if report.get('status') == 'PASS' else 1
 
 

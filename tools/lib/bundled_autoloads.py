@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the bundled packages' autoloads with GNU's `loaddefs-generate'.
 
-The scanned directories are the roots LISP-BUNDLED.json declares and their
+The scanned directories are the roots lisp/bundled.json declares and their
 package subdirectories, in load-path order.  A root's own files are Romacs's
 runtime Lisp: preloaded ones' autoloads are no-ops once they load, and the
 rest (romacs-mcp, romacs-shaders...) load on demand like a package's.  Each
@@ -21,7 +21,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-LAYOUT = 'LISP-BUNDLED.json'
+LAYOUT = 'lisp/bundled.json'
 OUTPUT = '=loaddefs.el'
 SECTION = '\n\f\n;;; Generated autoloads from '
 END = '\f\n;;; End of scraped data'

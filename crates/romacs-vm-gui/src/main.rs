@@ -15,6 +15,15 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
+/// Write VALUE to stderr as one line, in one write. `eprintln!("{}", value)`
+/// hands serde's pieces to unbuffered stderr a syscall apiece: thousands for
+/// a scene dump, which under load held the evaluator for seconds a paint.
+fn diagnostic_line(value: &serde_json::Value) {
+    use std::io::Write;
+    let mut line = serde_json::to_vec(value).unwrap_or_default();
+    line.push(b'\n');
+    let _ = std::io::stderr().lock().write_all(&line);
+}
 
 use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
@@ -155,7 +164,7 @@ mod lent_tests {
             shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
             shared.presentation += 1;
         });
-        let (presentation, observed) = live.take_retired().expect("the settled presentation retired");
+        let [(presentation, observed)] = live.take_retired()[..] else { panic!("the settled presentation retired") };
         assert_eq!((presentation, observed), (7, now));
         assert_eq!(trace.completed(presentation, observed).len(), 1);
         let second = trace.sequence();
@@ -163,6 +172,39 @@ mod lent_tests {
         live.submitted(9, now);
         trace.submitted(9, paint(), now, 0);
         assert_eq!(trace.completed(9, now).len(), 1);
+    }
+
+    /// A prompt settles the loop's traced paint and leaves its own undrawn;
+    /// that one renders before the loop takes the first retirement. Both
+    /// retire, in order, so the trace completes its keys and takes the next
+    /// paint (the second overwrote the first, and the next submission
+    /// asserted).
+    #[test]
+    fn two_retirements_before_the_loop_looks_both_reach_the_trace() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let now = Instant::now();
+        let (mut trace, mut live) = (latency::Trace::default(), presentation::Presentation::new());
+        let paint = || latency::Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
+        let first = trace.sequence();
+        trace.push(latency::Key { sequence: first, received: Some(now), start: now, ready: now, command_ns: 0, diagnostic_ns: 0, reply_ns: 0 });
+        host.borrow_mut().presentation = 7;
+        live.submitted(7, now);
+        trace.submitted(7, paint(), now, 0);
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
+            shared.presentation = 8;
+            shared.in_flight = Some((8, now));
+        });
+        assert_eq!(live.in_flight(), Some((8, now)), "the prompt's undrawn paint is the loop's now");
+        live.completed(8, now);
+        let retired = live.take_retired();
+        assert_eq!(retired.iter().map(|r| r.0).collect::<Vec<_>>(), vec![7, 8]);
+        let samples: usize = retired.into_iter().map(|(p, at)| trace.completed(p, at).len()).sum();
+        assert_eq!(samples, 1, "the traced key completes with its paint");
+        trace.submitted(9, paint(), now, 0);
     }
 
     /// A prompt that painted into a window the compositor does not draw
@@ -189,7 +231,7 @@ mod lent_tests {
         });
         assert_eq!(live.in_flight(), Some((7, since)));
         live.completed(8, Instant::now());
-        let (retired, at) = live.take_retired().unwrap();
+        let [(retired, at)] = live.take_retired()[..] else { panic!("the prompt's render retired the loop's paint") };
         assert_eq!(retired, 7);
         trace.completed(retired, at);
         assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
@@ -935,13 +977,18 @@ fn activate(sender: &PaintSender, presentation: u64, pending: &mut std::collecti
 /// How a paint waits for its render before it says so.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Wait {
-    /// Submit only; the live loop sees the render later.
+    /// Submit only; the live loop sees the render later. Every live
+    /// paint: the evaluator never waits for drawing.
     No,
-    /// Rendered within 30 s, or an error: the oracle transport.
+    /// Rendered within 30 s, or an error: the oracle transport, a test
+    /// protocol that never runs live, whose reply to a command promises the
+    /// frame drawn.
     Rendered,
-    /// The live session's first frame: rendered within 30 s, or left in
-    /// flight undrawn (its window hidden as it starts). Its lines and the
-    /// `ready' reply follow the render, as harnesses expect.
+    /// The live session's first frame, at startup only: rendered within
+    /// 30 s, or left in flight undrawn (its window hidden as it starts). The
+    /// `ready' reply follows it, and launchers and harnesses type once ready:
+    /// keys sent before the window is up and focused are the compositor's
+    /// to drop. No wait after startup is of this kind.
     Bounded,
 }
 
@@ -974,9 +1021,7 @@ fn paint(
         if after <= before || !moved || current.display()? != "\"g1a-gc-witness\"" {
             return Err("forced collector did not preserve the rooted witness".into());
         }
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
+        crate::diagnostic_line(&json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
             "collections_before":before,"collections_after":after,"witness_moved":moved})
         );
     }
@@ -1001,7 +1046,7 @@ fn paint(
             channel(color.b)
         )
     };
-    if diagnostics() { eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
         "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() })); }
@@ -1035,19 +1080,15 @@ fn paint(
     };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
-    if diagnostics() { eprintln!(
-        "{}",
-        json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
     ); }
-    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
-        "{}",
-        json!({"diagnostic":"submitted-scene", "presentation":presentation,
+    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { crate::diagnostic_line(&json!({"diagnostic":"submitted-scene", "presentation":presentation,
         "vscroll_px":snapshot.windows.first().map(|w|w.snapshot.vscroll_px),"glyphs":glyphs})
     ); }
     if tracing() {
-        eprintln!("{}", json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
+        crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
             "layout_ns":layout_ns,"diagnostics_prepare_ns":diagnostics_prepare_ns,"submit_ns":submit_ns,
             "activation_ns":activation_ns,"wait_render_ns":wait_render_ns,
             "activation_and_render_ns":activation_ns + wait_render_ns,
@@ -1061,9 +1102,7 @@ fn paint(
     let layout_apply_ns = apply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
     let mode_line_start = tracing().then(Instant::now);
     for message in vm.take_display_diagnostics() {
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
+        crate::diagnostic_line(&json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
         );
     }
     if tracing() {
@@ -1160,7 +1199,7 @@ fn paint_prompt(
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
-        eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
+        crate::diagnostic_line(&json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
     Ok((count, ends))
 }
@@ -1383,8 +1422,10 @@ fn evaluate(
     };
     title::consider(&mut vm, sender, &host);
     let mut live_presentation = presentation::Presentation::new();
-    if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
-        // Not drawn (hidden as it starts): the loop waits for it, stalled.
+    if live && host.borrow().window_shown() {
+        // In flight, drawn or not: the loop retires it when it sees it drawn
+        // (a `paint' line, and the first-paint phase), or tells it stalled
+        // when its window is hidden as it starts.
         live_presentation.submitted(previous.presentation, first_submitted);
     }
     startup::mark_phase("first-paint");
@@ -1444,7 +1485,7 @@ fn evaluate(
                 // Each pressed key's enqueue time on CLOCK_MONOTONIC, for
                 // latency to a point outside the editor (terminal_latency_live.py).
                 if let Some(at) = received && matches!(command::unwrap_event(event.clone()), InputEvent::Key { pressed: true, .. }) {
-                    eprintln!("{}", json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
+                    crate::diagnostic_line(&json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
                 }
                 // read_char's timer_stop_idle: Emacs is idle until a key arrives.
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
@@ -1504,7 +1545,7 @@ fn evaluate(
                     let fast_start = Instant::now();
                     let fast = vm.terminal_passthrough_key(&key);
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
+                        crate::diagnostic_line(&json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
                     }
                     match fast {
                         Ok(true) => continue,
@@ -1551,7 +1592,7 @@ fn evaluate(
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
-                    eprintln!("{}",json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
+                    crate::diagnostic_line(&json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
                         "queue_ns":received.map(|t| command_start.duration_since(t).as_nanos()),
                         "command_ns":command_ns,"snapshot_ns":snapshot_ns,
                         "key_to_paint_complete_ns":if live { None } else { received.map(|t| t.elapsed().as_nanos()) },
@@ -1598,11 +1639,11 @@ fn evaluate(
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
-                    if diagnostics() { eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
+                    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
@@ -1616,9 +1657,10 @@ fn evaluate(
                 }
             }
             // Here, or in a prompt that settled it first (`Lent').
-            if let Some((presentation, observed)) = live_presentation.take_retired()
-                && let Some(trace) = &mut key_trace {
-                for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
+            for (presentation, observed) in live_presentation.take_retired() {
+                if let Some(trace) = &mut key_trace {
+                    for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
+                }
             }
             // Pixels landed, a parse a window waits on did, or a publication
             // left images to send: paint again.
@@ -1651,7 +1693,7 @@ fn evaluate(
                         trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
                     }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-snapshot","presentation":presentation,
                             "units":"ns","snapshot_ns":snapshot_ns}));
                     }
                 } else {

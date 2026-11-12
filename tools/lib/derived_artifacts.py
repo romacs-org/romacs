@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 ARTIFACTS = (
-    json.loads((Path(__file__).resolve().parents[2] / 'LISP-BUNDLED.json').read_text())['autoloads'],
+    json.loads((Path(__file__).resolve().parents[2] / 'lisp/bundled.json').read_text())['autoloads'],
 )
 GENERATORS = (
     (sys.executable, 'tools/lib/bundled_autoloads.py'),

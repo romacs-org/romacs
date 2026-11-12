@@ -2,11 +2,11 @@
 """The parity ratchet: GNU-suite passes and Lisp-census loads are floors.
 
 The gate's Rust suites say nothing about behaviour against GNU. The numbers the
-project is judged by -- how many of GNU's own ERT tests pass (gnu-tests/run.py)
+project is judged by -- how many of GNU's own ERT tests pass (test/gnu/run.py)
 and how many of GNU's Lisp files load (tools/lisp-census, WARM and COLD) --
 were protected only by lanes choosing to re-measure. This makes them floors.
 
-parity-ratchet.json (repo root) records, per unit, the exact MEMBERS behind each
+ledger/parity-ratchet.json (repo root) records, per unit, the exact MEMBERS behind each
 number: per GNU test file the deftests that pass, per census mode the GNU files
 that load. A count is the length of its member list.
 
@@ -37,7 +37,7 @@ that load. A count is the length of its member list.
         fast: gnu-files:<the characterised files> and census-cold (seconds);
         gate: every unit the gate runs. Builds the binaries unless given.
     parity_ratchet.py record [--lower UNIT --because TEXT]...
-        The ONLY writer of parity-ratchet.json. Measures every unit twice on a
+        The ONLY writer of ledger/parity-ratchet.json. Measures every unit twice on a
         clean tree and refuses unless both runs agree, every census file was
         measured and romacs reported tests. Refuses to drop any recorded member
         unless that unit is named with --lower and a reason, which is kept in
@@ -82,7 +82,10 @@ import time
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 DEFAULT_ROOT = TOOLS.parents[1]
-RATCHET_NAME = 'parity-ratchet.json'
+RATCHET_NAME = 'ledger/parity-ratchet.json'
+# Where a revision from before the records moved into ledger/ keeps the
+# ratchet; it goes once no open branch reaches back past the move.
+RATCHET_BEFORE = 'parity-ratchet.json'
 GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SOURCE = pathlib.Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
 CHARACTERISED = ('src/fns-tests.el', 'src/data-tests.el', 'lisp/subr-tests.el')
@@ -126,7 +129,7 @@ def emacs() -> str:
 # Measurement: the GNU suite
 
 def suite_files(root: pathlib.Path) -> list[str]:
-    return load_module(root / 'gnu-tests' / 'run.py', 'gnu_tests_run').suite_files()
+    return load_module(root / 'test/gnu' / 'run.py', 'gnu_tests_run').suite_files()
 
 
 def shard(files: list[str], spec: str) -> list[str]:
@@ -151,7 +154,7 @@ def measure_gnu(root: pathlib.Path, files: list[str], binary: str, jobs: int) ->
         out = pathlib.Path(tmp) / 'out'
         started = time.monotonic()
         for attempt in (1, 2):
-            p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run',
+            p = subprocess.run([sys.executable, str(root / 'test/gnu' / 'run.py'), 'run',
                                 '--harness', 'mini', '--bootstrap', 'ert', '--bin', binary,
                                 '--jobs', str(jobs), '--out', str(out), *files],
                                cwd=root, capture_output=True, text=True)
@@ -164,7 +167,7 @@ def measure_gnu(root: pathlib.Path, files: list[str], binary: str, jobs: int) ->
             shutil.rmtree(out, ignore_errors=True)
         seconds = time.monotonic() - started
         if p.returncode not in (0, 1) or not (out / 'summary.json').is_file():
-            raise Refusal(EXIT_NOT_MEASURED, f'gnu-tests/run.py did not measure (exit {p.returncode}):\n'
+            raise Refusal(EXIT_NOT_MEASURED, f'test/gnu/run.py did not measure (exit {p.returncode}):\n'
                           + (p.stderr or p.stdout)[-3000:])
         rows = [json.loads(line) for line in (out / 'results.jsonl').read_text().splitlines() if line.strip()]
     if sha256_file(binary) != digest:
@@ -212,7 +215,7 @@ def measure_real_ert(root: pathlib.Path, members: dict[str, list[str]], binary: 
                       '(tools/lib/gnu_oracle.py); it is never recorded as a guess')
     with tempfile.TemporaryDirectory(prefix='parity-real-ert-') as tmp:
         out = pathlib.Path(tmp) / 'out'
-        p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run', '--harness', 'real',
+        p = subprocess.run([sys.executable, str(root / 'test/gnu' / 'run.py'), 'run', '--harness', 'real',
                             '--bootstrap', 'ert',
                             '--ert-adapter', 'romacs-batch',
                             '--bin', binary, '--jobs', str(jobs), '--out', str(out), *files],
@@ -372,7 +375,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
 # A reduced-harness pass (romacs-mini-ert, NOT GNU ert.el) is not evidence of
 # capability until something shows it can fail. Each passing member gets a
 # CLASS, derived -- never hand-written -- from the probe evidence in
-# gnu-tests/MEMBER-EVIDENCE.json and the facts this measurement observed:
+# test/gnu/MEMBER-EVIDENCE.json and the facts this measurement observed:
 #
 #   GENUINE           probe: breaking the subject breaks the test in both engines
 #                     (or, for core special forms, every caught condition checked
@@ -400,7 +403,7 @@ BATCH_REAL_LABEL = 'gnu-ert: GNU ert.el with Romacs batch adapter, pinned GNU or
 
 
 def load_evidence(root: pathlib.Path) -> dict:
-    sys.path.insert(0, str(root / 'gnu-tests/tools'))
+    sys.path.insert(0, str(root / 'test/gnu/tools'))
     from member_evidence import load
     try:
         return load(root)
@@ -911,10 +914,10 @@ def measure_unit(root: pathlib.Path, unit: str, gnu_ert: str | None, census: str
 UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
-FINGERPRINTED = ('lisp/gnu', 'lisp/romacs', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
-                 'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'tools/lisp-census',
-                 'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
-                 'parity-reference.toml',
+FINGERPRINTED = ('lisp/gnu', 'lisp/romacs', 'test/gnu/test', 'test/gnu/harness', 'test/gnu/tools', 'test/gnu/baseline',
+                 'test/gnu/run.py', 'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml', 'tools/lisp-census',
+                 'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'test/gnu/member-evidence-policy.json',
+                 'ledger/parity-reference.toml',
                  RATCHET_NAME)
 
 
@@ -929,7 +932,7 @@ def input_fingerprint(root: pathlib.Path) -> str:
         for q in paths:
             h.update(f'{q.relative_to(root)}\0'.encode() + hashlib.sha256(q.read_bytes()).digest())
     if os.environ.get('ROMACS_MEMBER_EVIDENCE') or os.environ.get('ROMACS_VACUITY_RECEIPT'):
-        sys.path.insert(0, str(root / 'gnu-tests/tools'))
+        sys.path.insert(0, str(root / 'test/gnu/tools'))
         from vacuity_binding import evidence_paths
         receipt, members = evidence_paths()
         for name, path in (('ROMACS_MEMBER_EVIDENCE', members), ('ROMACS_VACUITY_RECEIPT', receipt)):
@@ -1175,11 +1178,12 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['lisp/gnu', 'lisp/romacs', 'gnu-tests', 'tools', 'parity-reference.toml']
+    measured = ['lisp/gnu', 'lisp/romacs', 'test/gnu', 'crates/romacs-gnu-tests', 'tools', 'ledger/parity-reference.toml',
+                'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
-    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp/gnu', 'lisp/romacs', 'gnu-tests/test',
-                                    'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'tools').splitlines()
+    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp/gnu', 'lisp/romacs', 'test/gnu/test',
+                                    'test/gnu/baseline', 'test/gnu/harness', 'test/gnu/tools', 'tools').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored
 
@@ -1332,7 +1336,7 @@ def cmd_record(args) -> int:
     data = {
         'schema': 2,
         'about': 'Parity floors. Written ONLY by `python3 tools/lib/parity_ratchet.py record`; checked in the gate '
-                 '(gnu-tests/runner/tests/parity_ratchet.rs, crates/romacs-vm/tests/parity_ratchet.rs) and by '
+                 '(crates/romacs-gnu-tests/tests/parity_ratchet.rs, crates/romacs-vm/tests/parity_ratchet.rs) and by '
                  'tools/check-derived. gnu_suite.passed counts REDUCED-harness passes (romacs-mini-ert, NOT GNU '
                  'ert.el); gnu_suite.real_ert counts passes under GNU ert.el; gnu_suite.honest.counted counts GENUINE '
                  'members whose file loaded. A lost protected member fails; a gain fails until recorded; the '
@@ -1393,9 +1397,9 @@ def cmd_record(args) -> int:
 # here, in the same reviewed commit. That is the point: the gate cannot stop
 # running the ratchet without someone saying so.
 GATE_TESTS = {
-    'gnu-tests/runner/tests/candidate_ratchet.rs':
-        '446697cc777e43bbaf3899b9dddb6e350a54776c8edae25c696daf0cdd7caba6',
-    'gnu-tests/runner/tests/parity_ratchet.rs':
+    'crates/romacs-gnu-tests/tests/candidate_ratchet.rs':
+        'acf39d25ecd84cca5062beec6c26e1a87f34b5fe7fb29c44711f8954b4234ba2',
+    'crates/romacs-gnu-tests/tests/parity_ratchet.rs':
         '0d0510b28388df37f84b5d18d9af80b7aa7d7e4e1d58fb71647d13d402b123d0',
     'crates/romacs-vm/tests/parity_ratchet.rs':
         'b2f22060e362c29c46467bc7edd1950bdeb6075eb8d425c13c686105642d4ac9',
@@ -1464,12 +1468,13 @@ def lowering_problems(old: dict, new: dict, label: str, merge: bool = False) -> 
 
 
 def ratchet_at(root: pathlib.Path, rev: str) -> dict | None:
-    """The ratchet file at REV, or None when REV has no such file."""
-    p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', f'{rev}:{RATCHET_NAME}'],
-                       capture_output=True, text=True)
-    if p.returncode:
-        return None
-    return json.loads(git(root, 'cat-file', 'blob', p.stdout.strip()))
+    """The ratchet file at REV, at its path then or now, or None when REV has none."""
+    for name in (RATCHET_NAME, RATCHET_BEFORE):
+        p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', f'{rev}:{name}'],
+                           capture_output=True, text=True)
+        if not p.returncode:
+            return json.loads(git(root, 'cat-file', 'blob', p.stdout.strip()))
+    return None
 
 
 def candidate_problems(old: dict, new: dict, label: str) -> list[str]:
@@ -1624,7 +1629,7 @@ def main(argv=None) -> int:
     r.add_argument('--repeat', type=int, default=2)
     r.add_argument('--lower', action='append')
     r.add_argument('--because', action='append')
-    r.add_argument('--out', help='write the recorded file here instead of parity-ratchet.json (a proposal for review)')
+    r.add_argument('--out', help='write the recorded file here instead of ledger/parity-ratchet.json (a proposal for review)')
     sub.choices['verify'].add_argument('--base', help='compare against this revision (default: merge-base with master)')
     sub.choices['verify'].add_argument('--candidate', action='store_true',
                                       help='static no-member-loss/no-lowering check; no probe or evidence replay')

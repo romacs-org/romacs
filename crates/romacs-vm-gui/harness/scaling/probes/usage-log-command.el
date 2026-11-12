@@ -12,7 +12,10 @@
                   (puthash (format "command-%d fundamental-mode" i) (vector 1 60 60 0) romacs-usage-log--slow)
                   (puthash (format "command-%d error" i) t romacs-usage-log--traced)
                   (puthash (format "command-%d scaling-usage-error" i) 0 romacs-usage-log--captured))
-                (dotimes (_ n) (run-at-time 3600 nil #'ignore))
+                ;; Each due before the last, so each is queued at the
+                ;; head: timer.el walks the queue past every earlier
+                ;; timer, so N of one time are quadratic to queue.
+                (dotimes (i n) (run-at-time (+ 3600 (- n i)) nil #'ignore))
                 (mapcar #'intern (scaling--names "scaling-usage" 200)))
   :body (let ((signal-hook-function #'romacs-usage-log--signal) (romacs-usage-log-slow-loop-ms 0))
           (setq romacs-usage-log--pending nil)

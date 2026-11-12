@@ -3,7 +3,7 @@
 #
 # The check targets run bundled Lisp packages' ERT suites on a prebuilt host, with
 # the targets and variables of GNU's test/Makefile.in.  GNU's own suites run under
-# gnu-tests/.
+# test/gnu/.
 PYTHON ?= python3
 BASE ?=
 GATE_ARGS ?= $(if $(ROMACS_GNU_ORACLE),--oracle $(ROMACS_GNU_ORACLE))

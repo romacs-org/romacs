@@ -3,7 +3,7 @@
 
     lisp_oracle.py check [--root DIR]
         Every GNU Git path at the pin must be byte-identical and present.
-        LISP-GENERATED.json separately declares retained generated GNU support
+        ledger/lisp-generated.json separately declares retained generated GNU support
         by exact path, SHA-256 and pinned generator/source references. These
         are snapshots, not pristine Git blobs or a regeneration claim. No
         undeclared .el file (even ignored or without .git), or other non-ignored
@@ -37,8 +37,8 @@ import subprocess
 import sys
 
 GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
-PIN_FILE = 'LISP-PIN.json'
-GENERATED_FILE = 'LISP-GENERATED.json'
+PIN_FILE = 'ledger/lisp-pin.json'
+GENERATED_FILE = 'ledger/lisp-generated.json'
 GNU_SOURCE = os.environ.get('LISP_ORACLE_GNU', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / ''))
 LOCAL_LISP = 'lisp/gnu'
 
@@ -180,7 +180,7 @@ def check(root, gnu, pin):
     for p in absent:
         problems.append(f'ABSENT {p}: GNU ships it at the pin; lisp/gnu/ is GNU\'s whole tree (re-extract it)')
 
-    # LISP-PIN.json records the pin and GNU's own tree id for lisp/; both must
+    # ledger/lisp-pin.json records the pin and GNU's own tree id for lisp/; both must
     # agree with GNU's object store, so the record cannot drift from the pin.
     if pin_file.exists():
         want_tree = git('rev-parse', pin + ':lisp', cwd=gnu).strip()

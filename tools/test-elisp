@@ -25,7 +25,7 @@ def main():
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error('--timeout must be positive')
-    files = args.files or sorted((ROOT / 'test/romacs-lisp').glob('*-test.el'))
+    files = args.files or sorted((ROOT / 'test/romacs/romacs-test').glob('*-test.el'))
     if not files:
         parser.error('No Elisp test files selected')
     files = [p.resolve() for p in files]

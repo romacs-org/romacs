@@ -1,6 +1,6 @@
 //! The censuses of GNU's DEFUNs a Romacs session leaves undefined
-//! (DEFUN-CENSUS.tsv at the repository root) and of its DEFVARs left
-//! unbound (DEFVAR-CENSUS.tsv): every DEFUN in GNU's src/*.c at the Lisp
+//! (ledger/defun-census.tsv at the repository root) and of its DEFVARs left
+//! unbound (ledger/defvar-census.tsv): every DEFUN in GNU's src/*.c at the Lisp
 //! pin (crates/romacs-vm/tests/fixtures/gnu_defun_arity.json) is either
 //! fboundp in the session's world, as the GUI's loadup makes it, or has
 //! one line in its census, and every DEFVAR there (fixtures/
@@ -81,12 +81,12 @@ mod tests {
 
     #[test]
     fn every_gnu_defun_is_defined_or_in_the_census() {
-        check_census("DEFUN-CENSUS.tsv", undefined(gnu_names("gnu_defun_arity.json", "arity"), "fboundp"));
+        check_census("ledger/defun-census.tsv", undefined(gnu_names("gnu_defun_arity.json", "arity"), "fboundp"));
     }
 
     #[test]
     fn every_gnu_defvar_is_bound_or_in_the_census() {
-        check_census("DEFVAR-CENSUS.tsv", undefined(gnu_names("gnu_defvars.json", "defvars"), "boundp"));
+        check_census("ledger/defvar-census.tsv", undefined(gnu_names("gnu_defvars.json", "defvars"), "boundp"));
     }
 
     /// The census at FILE against the MISSING names: blessed, or checked.

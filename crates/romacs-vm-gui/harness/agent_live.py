@@ -962,7 +962,7 @@ def gnosis(args, base):
         a.up()
         a.codex_instance()
         a.eval('(setq romacs-agent-default-provider "claude")')
-        helpers = Path(__file__).resolve().parents[3] / 'test/lisp/gnosis/gnosis-test-helpers.el'
+        helpers = Path(__file__).resolve().parents[3] / 'test/packages/gnosis/gnosis-test-helpers.el'
         ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
         with RomacsMcp.for_server(a, agent_tools=True) as mcp:
             offered = [t for t in mcp.tools() if t.startswith('gnosis_')]
@@ -1409,6 +1409,7 @@ def mcp_tour(args, base):
                 'romacs_option_save': {'name': 'kill-ring-max', 'value': '62'},
                 'romacs_orchestrator_capabilities': {},
                 'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
+                'romacs_task_list': {},
             }
             answered, errors, protocol, silent = {}, {}, {}, []
 
@@ -1438,13 +1439,16 @@ def mcp_tour(args, base):
                     errors[name] = text[:200]
                 return text
 
-            for name in [n for n in names if n not in ('romacs_task_status', 'romacs_task_cancel', 'romacs_restart_request')]:
+            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_cancel')
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',)]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
-            for name in ('romacs_task_status', 'romacs_task_cancel'):
+            # The task this caller delegated: its status, a message to it, its end.
+            for name in on_task:
                 if name in names:
-                    call(name, {'instance': mcp.identity(), 'taskId': task or 'none'})
+                    call(name, {'instance': mcp.identity(), 'taskId': task or 'none',
+                                **({'message': 'say again'} if name == 'romacs_task_send' else {})})
             observed = mcp.call('romacs_observe')
             listed = mcp.call('romacs_observe', buffers=True)
             private = mcp.call('romacs_observe', buffers=True, private=True)
@@ -1465,8 +1469,10 @@ def mcp_tour(args, base):
                         and friend not in json.dumps(observed['buffers'])
                         and '*tour*' in listed['buffers'] and friend not in listed['buffers']
                         and friend in private['buffers']
-                        # Gnosis's refuse without a session or database (none here).
-                        and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request')
+                        # Gnosis's refuse without a session or database (none here); romacs_task_watch
+                        # without a running unit or a calling task.
+                        and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
+                                                                  'romacs_task_watch')
                                 for n in errors)
                         and task is not None)
         return result

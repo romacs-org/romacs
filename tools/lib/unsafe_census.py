@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unsafe Rust census, with per-crate ratchets (UNSAFE-FLOORS.json).
+"""Unsafe Rust census, with per-crate ratchets (ledger/unsafe-floors.json).
 
 Scope: every .rs file Git tracks or would track (untracked files that are not
 ignored count too) inside a Cargo package directory, credited to the nearest
@@ -30,7 +30,7 @@ doc comment counts too. A trailing comment after code, or a SAFETY comment
 above the start of a multi-line statement whose `unsafe` begins a later
 line, does not count: put the comment on the line above the keyword.
 
-The ratchet. UNSAFE-FLOORS.json records, per crate, `sites` and
+The ratchet. ledger/unsafe-floors.json records, per crate, `sites` and
 `undocumented`. `check` fails when a crate's count rises above its floor, and
 also when a floor is slack (the crate now has fewer), so a deletion is
 recorded in the same change: run `lower`, which only ever lowers floors and
@@ -58,7 +58,7 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-FLOORS = Path('UNSAFE-FLOORS.json')
+FLOORS = Path('ledger/unsafe-floors.json')
 KINDS = ('block', 'fn', 'impl', 'trait', 'extern', 'attr', 'other')
 PENDING = 'unsafe_op_in_unsafe_fn_pending'
 
@@ -275,7 +275,7 @@ def lint_problems(root, pending, counts):
 
 
 def problems(root, floors=None, counts=None):
-    """Why ROOT's unsafe census breaks UNSAFE-FLOORS.json, one line each."""
+    """Why ROOT's unsafe census breaks ledger/unsafe-floors.json, one line each."""
     floors = floors if floors is not None else json.loads((Path(root) / FLOORS).read_text())
     counts = counts if counts is not None else census(root)
     recorded = floors.get('crates', {})
@@ -305,7 +305,7 @@ def lowered(floors, counts):
 
 
 def dump(floors):
-    """FLOORS as UNSAFE-FLOORS.json text: one line per crate, so lanes that
+    """FLOORS as ledger/unsafe-floors.json text: one line per crate, so lanes that
     lower different crates merge cleanly."""
     crates = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(floor)}' for crate, floor in floors['crates'].items())
     pending = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(reason)}'
@@ -347,7 +347,7 @@ def merged_entries(base, ours, theirs):
 
 
 def merge_files(base, ours, theirs):
-    """Git's merge driver for UNSAFE-FLOORS.json (tools/derived setup installs
+    """Git's merge driver for ledger/unsafe-floors.json (tools/derived setup installs
     it): write the merge over OURS. 1, leaving OURS, when a side does not
     parse: git then reports the conflict as it would without a driver."""
     try:

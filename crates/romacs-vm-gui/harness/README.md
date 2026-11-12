@@ -95,8 +95,7 @@ Implementation-time checks:
   reached; the harness correctly returned exit 1 / `pass: false` with
   `binary stdout closed (exit=1)`. This is only a fail-closed launch preflight.
 * The integrated worker subsequently built the real binary and ran all three
-  live variants successfully; see `../evidence/current-oracle-live/summary.json` and
-  `../README.md` for the exact commands, movement proof, and diagnostic limits.
+  live variants successfully; see `../README.md` for the exact commands, movement proof, and diagnostic limits.
   This harness does not invoke Cargo, a full gate, or Git publication.
 
 # Package parity: pinned GNU beside `--loadup`
@@ -347,7 +346,7 @@ The workloads, and how each is counted, are in the script's docstring:
   workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
-  not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
+  not comparable with `test/gnu/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
 * session, real commands and keys in a GUI session on headless labwc:
   dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,

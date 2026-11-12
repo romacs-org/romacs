@@ -27,7 +27,7 @@ class Runner(unittest.TestCase):
     def test_discovery_takes_tracked_unittest_files_outside_the_lisp_trees(self):
         case = 'import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n'
         for path in ('tools/test_a.py', 'scripts/b_test.py', 'scripts/test-c.py',
-                     'test/lisp/test_gnu.py', 'lisp/gnu/test_d.py', 'tools/test_tool.py'):
+                     'test/gnu/test/lisp/test_gnu.py', 'lisp/gnu/test_d.py', 'tools/test_tool.py'):
             self.write(path, case if path != 'tools/test_tool.py' else 'print("a tool")\n')
         self.assertEqual(python_tests.test_files(self.root),
                          ['scripts/b_test.py', 'scripts/test-c.py', 'tools/test_a.py'])

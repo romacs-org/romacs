@@ -170,8 +170,9 @@ impl scan::Text for View<'_> {
             if room == 0 {
                 break;
             }
-            let (count, whole) = text.with_text_from(ByteOffset(pos.byte), |piece| {
-                let bytes = &piece.as_bytes()[..piece.len().min(room)];
+            let (count, whole) = {
+                let piece = text.chunk_from(pos.byte);
+                let bytes = &piece[..piece.len().min(room)];
                 let mut read = self.record.then(|| self.read.borrow_mut());
                 let count = bytes.iter().position(|&byte| {
                     let plain = byte < 0x80 && scan::comment_plain(self.table_syntax(u32::from(byte)));
@@ -182,7 +183,7 @@ impl scan::Text for View<'_> {
                     !plain
                 });
                 (count.unwrap_or(bytes.len()), count.is_none())
-            });
+            };
             // ASCII: as many characters as bytes.
             pos = Pos { char: pos.char + i64::try_from(count).expect("a run inside the text"), byte: pos.byte + count };
             if !whole {

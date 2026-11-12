@@ -21,6 +21,16 @@ class KeyTests(unittest.TestCase):
                 key = group[2:-2]
                 self.assertTrue(len(key[-1]) == 1 or key[0] == '-k', group)
 
+    def test_press_counts_each_key_once(self):
+        # Engine.press waits for the session's input count to pass these:
+        # one event per character or pressed keysym, none for a modifier.
+        # (Measured in pinned GNU and Romacs for every journey key.)
+        counts = [parity_live.inputs(g) for g in (parity_live.C('n'), parity_live.M('>'), parity_live.T('the'),
+                                                  parity_live.K('Return'), parity_live.C('space'))]
+        self.assertEqual(counts, [1, 1, 3, 1, 1])
+        for group in layout_journey_live.DOWN + layout_journey_live.KEYS:
+            self.assertGreater(parity_live.inputs(group), 0, group)
+
 
 if __name__ == '__main__':
     unittest.main()

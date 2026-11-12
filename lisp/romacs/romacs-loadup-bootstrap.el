@@ -10,7 +10,7 @@
 ;; adaptation is commented where it happens.
 ;;
 ;; This is the regime for package suites (Gnosis, emacs-hermes) and for
-;; GNU's own test suite (gnu-tests/run.py, the gnu-ert regime), which
+;; GNU's own test suite (test/gnu/run.py, the gnu-ert regime), which
 ;; assume a dumped GNU Emacs.
 
 ;;; Code:

@@ -193,14 +193,31 @@ def judge(oracle: str, spec: Path, capture: Path, report: Path, *, reject: bool)
     return record
 
 
+# How long a process ending is given before it counts as hung: a loaded
+# host has taken over ten seconds to end a session, a hang takes forever.
+HANG = 120
+
+
+def remove_root(path) -> None:
+    """Remove PATH, a session's private directory (its runtime dir, HOME,
+    sockets), once its processes are stopped: a `TemporaryDirectory' that
+    removed itself as its `with' ended raced the compositor and the session
+    still writing into it (ENOTEMPTY). Opened with `delete=False', it is
+    removed here, in the `finally' after the stops."""
+    if path is not None:
+        shutil.rmtree(path)
+
+
 def stop(proc) -> None:
+    """End PROC, if it runs: SIGTERM, then SIGKILL once it has had HANG
+    seconds to go."""
     if proc is not None and proc.poll() is None:
         proc.terminate()
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=HANG)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=HANG)
 
 
 def capture(path: Path, env: dict, args, proc) -> None:

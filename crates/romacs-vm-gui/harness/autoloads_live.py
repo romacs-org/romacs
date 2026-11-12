@@ -94,8 +94,9 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='autoloads-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='autoloads-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             home, work, config = [root / name for name in ('home', 'work', 'config')]
@@ -205,7 +206,10 @@ def main():
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
-        (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        try:
+            (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+        finally:
+            live.remove_root(temporary)
     print(report['status'])
     return 0 if report['status'] == 'PASS' else 1
 

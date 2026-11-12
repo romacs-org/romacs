@@ -20,6 +20,10 @@ if CANDIDATE.exists():
     SOURCE = CANDIDATE
 SOURCE = Path(os.environ.get('NEOMACS_SLOT_TEST_SOURCE', str(SOURCE)))
 # S1 keeps all scope and cache effects in scratch; no systemd job is launched.
+# How long a child may take to start, answer or end before a test calls it
+# hung: a loaded host takes seconds, a hang takes forever.  Every wait below
+# is for a condition; none is a measure of speed.
+HANG = 120
 def load_runner(source=SOURCE) -> Any:
     spec = importlib.util.spec_from_file_location('runner', source, loader=SourceFileLoader('runner', str(source)))
     assert spec is not None and spec.loader is not None
@@ -211,7 +215,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--s1-tests':
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     try:
                         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
-                        self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                        self.assertTrue(select.select([process.stdout], [], [], HANG)[0])
                         self.assertIn('unit', json.loads(process.stdout.readline()))
                         old = load_runner(OLD_SOURCE)
                         old.STATE = state
@@ -219,7 +223,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--s1-tests':
                             self.assertEqual(len(old.records()), 1)
                         process.stdin.write('release\n')
                         process.stdin.flush()
-                        self.assertEqual(process.wait(timeout=2), 0)
+                        self.assertEqual(process.wait(timeout=HANG), 0)
                         with old.transaction():
                             self.assertEqual(old.records(), [])
                     finally:
@@ -300,11 +304,11 @@ if len(sys.argv) > 1 and sys.argv[1] == '--s1-tests':
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 try:
                     assert process.stdout is not None
-                    readable, _, _ = select.select([process.stdout], [], [], 10)
+                    readable, _, _ = select.select([process.stdout], [], [], HANG)
                     self.assertTrue(readable)
                     unit = json.loads(process.stdout.readline())['unit']
                     process.send_signal(signal.SIGTERM)
-                    self.assertEqual(process.wait(timeout=10), 130)
+                    self.assertEqual(process.wait(timeout=HANG), 130)
                     root = Path(directory)
                     self.assertFalse((root / (unit + '.scope.alive')).exists())
                     self.assertFalse(list((root / 'queue').glob('*.json')))
@@ -330,7 +334,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--s1-tests':
                 count = 0
                 try:
                     while pending:
-                        readable, _, _ = select.select(list(pending), [], [], 20)
+                        readable, _, _ = select.select(list(pending), [], [], HANG)
                         self.assertTrue(readable, 'mixed scheduler admission stalled')
                         for stream in readable:
                             process = pending.pop(stream)
@@ -340,7 +344,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--s1-tests':
                             self.assertLessEqual(sum(t['active'] for t in tickets), 2)
                             process.stdin.write('release\n')
                             process.stdin.flush()
-                            rc = process.wait(timeout=10)
+                            rc = process.wait(timeout=HANG)
                             self.assertEqual(rc, 0, process.stderr.read())
                             count += 1
                     self.assertEqual(count, 6)
@@ -506,7 +510,13 @@ if len(sys.argv) > 1 and sys.argv[1] == 'child':
                 assert kwargs['env']['CARGO_PROFILE_RELEASE_LTO'] == 'off'
             with open(Path(root) / 'events', 'a') as stream:
                 stream.write(json.dumps([lane, 'start', time.monotonic(), kwargs['env']['CARGO_TARGET_DIR'], kwargs['env']['CARGO_BUILD_JOBS']]) + '\n')
-            time.sleep(float(duration))
+            if duration == 'gate':
+                # Held until the test has seen what must happen meanwhile.
+                deadline = time.monotonic() + HANG
+                while not (Path(root) / 'release').exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+            else:
+                time.sleep(float(duration))
             with open(Path(root) / 'events', 'a') as stream:
                 stream.write(json.dumps([lane, 'end', time.monotonic()]) + '\n')
             return 7 if lane == 'error-one' else 0
@@ -542,23 +552,30 @@ with tempfile.TemporaryDirectory(prefix='neomacs-slot-test-', dir=os.environ['TM
     bridges = [(root / f'bridge.{n}').open('a') for n in (1, 2)]
     for bridge in bridges:
         fcntl.flock(bridge, fcntl.LOCK_SH)
-    payload = subprocess.Popen(['flock', '--shared', str(root / 'bridge.1'), 'flock', '--shared', str(root / 'bridge.2'), 'sh', '-c', 'touch "$1"; sleep 1', 'sh', str(root / 'ready')])
-    for _ in range(100):
-        if (root / 'ready').exists():
-            break
-        time.sleep(.01)
-    assert (root / 'ready').exists()
-    for bridge in bridges:
-        bridge.close()
-    for n in (1, 2):
-        assert subprocess.call(['flock', '--nonblock', '--exclusive', str(root / f'bridge.{n}'), 'true']) == 1
-    assert payload.wait(timeout=5) == 0
+    # The payload holds its locks until released, however slowly this test runs.
+    payload = subprocess.Popen(['flock', '--shared', str(root / 'bridge.1'), 'flock', '--shared', str(root / 'bridge.2'), 'sh', '-c',
+                                'touch "$1"; while [ ! -e "$2" ]; do sleep .01; done', 'sh', str(root / 'ready'), str(root / 'unlock')])
+    try:
+        deadline = time.monotonic() + HANG
+        while not (root / 'ready').exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert (root / 'ready').exists()
+        for bridge in bridges:
+            bridge.close()
+        for n in (1, 2):
+            assert subprocess.call(['flock', '--nonblock', '--exclusive', str(root / f'bridge.{n}'), 'true']) == 1
+    finally:
+        # Reaped before the directory, and its unlock file, goes.
+        (root / 'unlock').touch()
+        code = payload.wait(timeout=HANG)
+    assert code == 0
     for n in (1, 2):
         assert subprocess.call(['flock', '--nonblock', '--exclusive', str(root / f'bridge.{n}'), 'true']) == 0
     children = []
-    # beta-one's slot frees 5 s before alpha-one's, more than a loaded host's
-    # child start-up can take: error-one takes it while alpha-two waits for its lane.
-    for lane, duration in [('alpha-one', '6'), ('alpha-two', '.2'), ('beta-one', '1'), ('error-one', '.1')]:
+    # alpha-one holds its slot until error-one has run: error-one takes the
+    # slot beta-one frees while alpha-two waits for its lane, however long a
+    # loaded host takes to start each child.
+    for lane, duration in [('alpha-one', 'gate'), ('alpha-two', '.2'), ('beta-one', '1'), ('error-one', '.1')]:
         import select
         ready, notify = os.pipe()
         try:
@@ -568,12 +585,17 @@ with tempfile.TemporaryDirectory(prefix='neomacs-slot-test-', dir=os.environ['TM
         finally:
             os.close(notify)
         try:
-            assert select.select([ready], [], [], 10)[0], 'child did not register a ticket'
+            assert select.select([ready], [], [], HANG)[0], 'child did not register a ticket'
             assert os.read(ready, 1) == b'1'
         finally:
             os.close(ready)
-    codes = [p.wait(timeout=30) for p in children]
-    events = [json.loads(line) for line in (root / 'events').read_text().splitlines()]
+    recorded = lambda: [json.loads(line) for line in (root / 'events').read_text().splitlines()] if (root / 'events').exists() else []
+    deadline = time.monotonic() + HANG
+    while ['error-one', 'end'] not in [row[:2] for row in recorded()] and time.monotonic() < deadline:
+        time.sleep(.01)
+    (root / 'release').touch()
+    codes = [p.wait(timeout=HANG) for p in children]
+    events = recorded()
     starts = [row for row in events if row[1] == 'start']
     assert [row[0] for row in starts] == ['alpha-one', 'beta-one', 'error-one', 'alpha-two'], events
     first_end = next(row[2] for row in events if row[:2] == ['alpha-one', 'end'])

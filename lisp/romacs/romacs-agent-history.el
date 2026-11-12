@@ -118,9 +118,14 @@ result, an injected context)."
                   files)))))
     files))
 
+(defun romacs-agent-history--claude-find (dir id)
+  "Claude Code's transcript of session ID under DIR, in whichever
+project it was run, or nil."
+  (car (file-expand-wildcards (expand-file-name (format "projects/*/%s.jsonl" id) dir))))
+
 (defun romacs-agent-history--claude-describe (objects path)
-  "A Claude Code transcript's description from its head's OBJECTS, or nil
-while they name no prompt."
+  "A Claude Code transcript's description from its head's OBJECTS, its
+:title nil while they name no prompt; nil while they name no directory."
   (let ((cwd nil) (title nil))
     (cl-loop for line in objects
              when (and (equal (gethash "type" line) "user") (not (eq (gethash "isSidechain" line) t))) do
@@ -129,7 +134,7 @@ while they name no prompt."
                (setq title (romacs-agent-history--title
                             (romacs-agent-history--prompt (gethash "content" (gethash "message" line))))))
              until title)
-    (when (and cwd title)
+    (when cwd
       (list :harness 'claude :id (file-name-base path) :cwd cwd :title title))))
 
 (defun romacs-agent-history--claude-events (objects)
@@ -200,6 +205,10 @@ while they name no prompt."
               (when (>= count limit) (throw 'enough nil)))))))
     files))
 
+(defun romacs-agent-history--codex-find (dir id)
+  "Codex's rollout of thread ID under DIR, whatever day it began, or nil."
+  (car (file-expand-wildcards (expand-file-name (format "sessions/*/*/*/rollout-*-%s.jsonl" id) dir))))
+
 (defun romacs-agent-history--codex-prompt (payload)
   "The user's typed text in a Codex event PAYLOAD, or nil."
   (pcase (gethash "type" payload)
@@ -207,6 +216,7 @@ while they name no prompt."
     ("item_completed" (romacs-agent--text-of (gethash "content" (gethash "item" payload))))))
 
 (defun romacs-agent-history--codex-describe (objects path)
+  "As `romacs-agent-history--claude-describe', for a Codex rollout."
   (let ((thread nil) (cwd nil) (title nil))
     (cl-loop for line in objects
              for payload = (gethash "payload" line)
@@ -218,7 +228,7 @@ while they name no prompt."
              until title)
     (setq thread (or thread (and (string-match "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'" path)
                                  (match-string 1 path))))
-    (when (and (romacs-agent--uuid-p thread) cwd title)
+    (when (and (romacs-agent--uuid-p thread) cwd)
       (list :harness 'codex :id thread :cwd cwd :title title))))
 
 (defun romacs-agent-history--codex-input (payload)
@@ -322,7 +332,8 @@ first instance of that harness, run with the default directory)."
                     (nreverse places)))))
 
 (defun romacs-agent-history--describe (path size mtime harness)
-  "PATH's description, read from its head once per SIZE and MTIME."
+  "PATH's description, read from its head once per SIZE and MTIME: from
+a longer head while it names no title."
   (let ((cached (gethash path romacs-agent-history--descriptions)))
     (if (and cached (eql (car cached) size) (equal (cadr cached) mtime))
         (cddr cached)
@@ -332,7 +343,7 @@ first instance of that harness, run with the default directory)."
                                      (romacs-agent-history--read path 0 (min size (car heads))
                                                                  (romacs-agent-history--get harness :keep))
                                      path))
-          (setq heads (and (not description) (> size (car heads)) (cdr heads))))
+          (setq heads (and (not (plist-get description :title)) (> size (car heads)) (cdr heads))))
         (puthash path (cons size (cons mtime description)) romacs-agent-history--descriptions)
         description))))
 
@@ -363,7 +374,7 @@ T3 ran it: its first prompt is then T3's preamble."
                                     (lambda (a b) (> (nth 2 a) (nth 2 b))))))
                    (cl-loop for (path size mtime) in (seq-take files romacs-agent-history-limit)
                             for description = (romacs-agent-history--describe path size mtime harness)
-                            when description
+                            when (plist-get description :title)
                             collect (append (let ((title (and titles
                                                               (gethash (romacs-agent-t3-title-key (car t3) (plist-get description :id))
                                                                        titles))))
@@ -373,6 +384,19 @@ T3 ran it: its first prompt is then T3's preamble."
                                             (list :path path :size size :mtime mtime
                                                   :provider provider :config-dir config-dir)
                                             description))))))
+
+(defun romacs-agent-history-find (harness config-dir id)
+  "HARNESS's conversation ID kept in CONFIG-DIR (nil: its default), as
+an item of the listing (`romacs-agent-history-list'), the description
+nil when its head names no prompt; nil when no transcript has it."
+  (let ((path (and (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) id)
+                   (funcall (romacs-agent-history--get harness :find) (romacs-agent--home harness config-dir) id))))
+    (when path
+      (let* ((attributes (file-attributes path))
+             (size (file-attribute-size attributes))
+             (mtime (float-time (file-attribute-modification-time attributes))))
+        (append (list :path path :size size :mtime mtime :harness harness :id id :config-dir config-dir)
+                (romacs-agent-history--describe path size mtime harness))))))
 
 (defun romacs-agent-history-items ()
   "The listed transcripts no Romacs session continues, newest first."

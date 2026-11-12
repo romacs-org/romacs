@@ -34,6 +34,7 @@ class RealPinControls(unittest.TestCase):
         cls.root = Path(cls.scratch.name)
         shutil.copytree(ROOT / 'lisp/gnu', cls.root / 'lisp/gnu')
         for name in (ORACLE.PIN_FILE, ORACLE.GENERATED_FILE):
+            (cls.root / name).parent.mkdir(exist_ok=True)
             shutil.copyfile(ROOT / name, cls.root / name)
         cls.pristine = ORACLE.local_path(next(p for p in sorted(cls.pinned) if p.endswith('.el')))
         cls.support = 'lisp/gnu/international/uni-old-name.el'

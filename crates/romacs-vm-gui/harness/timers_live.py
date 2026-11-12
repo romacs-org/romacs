@@ -148,8 +148,9 @@ def session(binary, args, output, name, report, trace, init=None, extra_env=None
     TRACE) on INIT and EXTRA_ENV, logging to OUTPUT/NAME.stderr: yields
     (env, state, process, log)."""
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='timers-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='timers-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             env, state, work, config = session_env(root, args, init)
@@ -179,6 +180,7 @@ def session(binary, args, output, name, report, trace, init=None, extra_env=None
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
+        live.remove_root(temporary)
 
 
 def keys(env, *parts):

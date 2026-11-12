@@ -81,8 +81,10 @@ def chord(env, modifier, key):
 
 
 def drawn_prompts(text):
-    """Prompt paints the renderer drew before the prompt went on."""
-    return text.count('"diagnostic":"prompt-paint","drawn":true')
+    """Prompt paints the renderer drew: those drawn at once, and those a
+    read later saw drawn (prompt.rs `settle_drawn'); the prompt never waits
+    for drawing."""
+    return text.count('"diagnostic":"prompt-paint","drawn":true') + text.count('"diagnostic":"prompt-drawn"')
 
 
 def grab(env, path):
@@ -153,8 +155,9 @@ def run(args, output, report):
             report['failures'].append(name)
 
     compositor = keyboard = process = None
+    temporary = None
     try:
-        with tempfile.TemporaryDirectory(prefix='hidden-live-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='hidden-live-', delete=False) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             env, state, work, config = tl.session_env(root, args)
@@ -222,6 +225,7 @@ def run(args, output, report):
         live.stop(process)
         live.stop(keyboard)
         live.stop(compositor)
+        live.remove_root(temporary)
 
 
 def main():

@@ -22,8 +22,6 @@
 **/__pycache__/
 *.py[cod]
 *.elc
-# Imported bytecode fixtures are intentional test inputs.
-!/test/**/*.elc
 *.eln
 *.profraw
 *.profdata

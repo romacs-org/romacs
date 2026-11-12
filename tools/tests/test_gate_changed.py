@@ -17,7 +17,7 @@ class ChangedFilter(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.repo = Path(temp.name)
-        self.git('init', '-q', '-b', 'master')
+        self.git('init', '-q', '-b', 'beta')
         self.write('README.md')
         self.git('add', '.')
         self.git('commit', '-q', '-m', 'base')
@@ -68,6 +68,13 @@ class ChangedFilter(unittest.TestCase):
         self.write('crates/romacs-vm/tests/quit_async.rs')
         self.assertIsNone(changed_filter(self.repo))
         self.assertIn('binary_id(romacs-vm::quit_async)', changed_filter(self.repo, 'trunk'))
+
+    def test_a_clone_without_the_local_trunk_uses_origins(self):
+        self.git('checkout', '-q', '-b', 'lane')
+        self.git('update-ref', 'refs/remotes/origin/beta', 'beta')
+        self.git('branch', '-q', '-D', 'beta')
+        self.write('crates/romacs-vm/tests/quit_async.rs')
+        self.assertIn('binary_id(romacs-vm::quit_async)', changed_filter(self.repo))
 
     def test_paths_select_as_the_same_change_in_a_repository_does(self):
         names = ['crates/romacs-vm/src/source_cache/prepared.rs', 'crates/romacs-vm/tests/quit_async.rs', 'doc/x.org']

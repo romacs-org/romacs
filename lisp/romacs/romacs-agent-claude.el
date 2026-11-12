@@ -541,7 +541,8 @@ answers in its input, and for the session when asked."
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
   :native-id-p #'romacs-agent--uuid-p
-  :history '(:files romacs-agent-history--claude-files :keep romacs-agent-history--claude-keep
+  :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
+             :keep romacs-agent-history--claude-keep
              :describe romacs-agent-history--claude-describe :events romacs-agent-history--claude-events))
 
 (provide 'romacs-agent-claude)

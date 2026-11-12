@@ -581,6 +581,7 @@ instances) is derived again when it changes.")
       given) called once the rollback is journaled and before that run;
       a `user-error' when it cannot;
   :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
+      :find (DIRECTORY ID), the transcript of conversation ID or nil,
       :keep, :describe and :events (`romacs-agent-history').
 
 Defining it again replaces it."
@@ -1825,11 +1826,20 @@ waiting."
        (cl-loop for (key . name) in romacs-agent--option-keys
                 when (gethash name object) append (list key (gethash name object)))))
 
-(defconst romacs-agent--editor-variables
-  '("ROMACS_RUNTIME_ROOT" "ROMACS_LISP_DIR" "ROMACS_USAGE_LOG" "ROMACS_GUI_FONT" "ROMACS_GUI_FONT_SIZE")
-  "The editor's own launch variables: they describe this editor's run (its
-build, its usage log, its font), so no harness or command it runs
-inherits them.")
+(defun romacs-agent--editor-variable-p (name)
+  "Whether NAME is one of the editor's own variables, ROMACS_*: each
+describes this editor's run (its build, sources, usage log, font), so no
+harness or command it runs inherits one.  A rule, not a list: a new
+launch variable is covered as it is added.  Nothing a harness runs reads
+one of the editor's (its relay and supervisor read none)."
+  (string-prefix-p "ROMACS_" name))
+
+(defun romacs-agent--editor-variables ()
+  "The names of the editor's own variables its environment holds now."
+  (cl-loop for entry in process-environment
+           when (and (string-match "\\`\\([^=]+\\)=" entry)
+                     (romacs-agent--editor-variable-p (match-string 1 entry)))
+           collect (match-string 1 entry)))
 
 (defconst romacs-agent-git-variables '("GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE")
   "What points git at another repository than the directory it runs in:
@@ -1846,7 +1856,7 @@ orchestrator's, git's repository pointers, and every harness's own (its configur
 what it sets for the commands it runs): a harness parent's would
 otherwise reach any child, a Claude Code parent's a Codex child too.  A
 session's own configuration variable is given again, by `env'."
-  (delete-dups (append romacs-agent--editor-variables romacs-agent-orchestrator-variables romacs-agent-git-variables
+  (delete-dups (append (romacs-agent--editor-variables) romacs-agent-orchestrator-variables romacs-agent-git-variables
                        (cl-loop for (_ . driver) in romacs-agent--drivers
                                 append (cons (plist-get driver :config-variable) (plist-get driver :scrub))))))
 
@@ -1859,7 +1869,8 @@ under it never changes the editor's."
     (copy-sequence
      (cl-remove-if (lambda (entry)
                      (let ((end (string-search "=" entry)))
-                       (and end (gethash (substring entry 0 end) dropped))))
+                       (and end (or (gethash (substring entry 0 end) dropped)
+                                    (romacs-agent--editor-variable-p (substring entry 0 end))))))
                    process-environment))))
 
 (defun romacs-agent--environment-arguments ()
@@ -1892,8 +1903,10 @@ to it."
     ;; Arguments (paths, a directory) go out as UTF-8, whatever the locale:
     ;; the supervisor reads UTF-8.  The harness gets the editor's
     ;; environment but for the editor's own launch variables.
-    (if (zerop (let ((coding-system-for-write 'utf-8-unix)
-                     (process-environment (romacs-agent--harness-environment)))
+    (if (zerop (let* ((coding-system-for-write 'utf-8-unix)
+                      ;; Named from the editor's environment, before it is cleared.
+                      (dropped (romacs-agent--dropped-variables))
+                      (process-environment (romacs-agent--harness-environment)))
                  (apply #'call-process "systemd-run" nil nil nil
                       (append (list "--user" "--quiet" "--collect" (concat "--unit=" unit)
                                     "--slice=romacs-agents.slice"
@@ -1901,7 +1914,7 @@ to it."
                               (mapcar (lambda (p) (concat "--property=" p)) romacs-agent-unit-properties)
                               ;; Nor from the user manager's own environment.
                               (list (concat "--property=UnsetEnvironment="
-                                            (string-join (romacs-agent--dropped-variables) " ")))
+                                            (string-join dropped " ")))
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
@@ -1941,6 +1954,16 @@ or its configuration directory missing."
     (romacs-agent--check-config-dir (plist-get instance :name) (plist-get instance :config-dir))
     instance))
 
+(defun romacs-agent--instance-options (instance options)
+  "A session's start OPTIONS on INSTANCE: what they ask for, else the
+instance's model and effort (the effort only when it fits the model)."
+  (append (and (not (plist-get options :model)) (plist-get instance :model)
+               (list :model (plist-get instance :model)))
+          (and (not (plist-get options :effort)) (plist-get instance :effort)
+               (romacs-agent--effort-fits-p instance (plist-get options :model) (plist-get instance :effort))
+               (list :effort (plist-get instance :effort)))
+          options))
+
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
   "Start a session working in the project directory CWD under instance
@@ -1957,14 +1980,7 @@ Interactively, open the chat without sending an initial prompt."
          (session (progn
                     (romacs-agent--create
                      :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
-                     ;; What the start asks for, else the instance's defaults.
-                     :options (append (and (not (plist-get options :model)) (plist-get instance :model)
-                                           (list :model (plist-get instance :model)))
-                                      (and (not (plist-get options :effort)) (plist-get instance :effort)
-                                           (romacs-agent--effort-fits-p instance (plist-get options :model)
-                                                                        (plist-get instance :effort))
-                                           (list :effort (plist-get instance :effort)))
-                                      options)
+                     :options (romacs-agent--instance-options instance options)
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                      ;; The project's name until the first prompt names it.
                      :title (or title (file-name-nondirectory (directory-file-name (expand-file-name cwd))))
@@ -1999,41 +2015,65 @@ known, with its private directory."
     (romacs-agent--index session)
     session))
 
-(defun romacs-agent-import (harness thread transcript cwd title provider config-dir)
+(defun romacs-agent--conversation (harness config-dir thread)
+  "The session going on with HARNESS's conversation THREAD in CONFIG-DIR,
+known or recorded (and loaded then), or nil.  Sessions are named by the
+conversation's identity: one directory per conversation, so every server
+finds the one that goes on with it.  Sessions imported before took
+THREAD itself as their id."
+  (let ((legacy (expand-file-name thread (romacs-agent--state-root))))
+    (or (romacs-agent--native-session harness config-dir thread)
+        (romacs-agent--load (expand-file-name (romacs-agent--import-id harness config-dir thread)
+                                              (romacs-agent--state-root)))
+        (and (file-directory-p legacy) (romacs-agent--load legacy)
+             (romacs-agent--native-session harness config-dir thread)))))
+
+(defun romacs-agent-import (harness thread transcript cwd title provider config-dir &optional options)
   "A session going on with HARNESS's own conversation THREAD, kept in its
 TRANSCRIPT, in CWD, titled TITLE, under instance PROVIDER run with
-CONFIG-DIR (nil: the harness's default).  A persistent harness resumes
-THREAD at once; a per-turn one with its first message.  Romacs only
-reads TRANSCRIPT."
+CONFIG-DIR (nil: the harness's default), started with OPTIONS as
+`romacs-agent-start' takes them (a delegated task's :parent, :wake and
+:request among them).  A persistent harness resumes THREAD at once; a
+per-turn one with its first message.  Romacs only reads TRANSCRIPT.  A
+session already going on with THREAD is continued, OPTIONS unused.  An
+import that fails before its supervisor starts leaves nothing behind:
+its directory would otherwise tell every later import that another
+Romacs is resuming THREAD.  Once started, the supervisor owns it."
   (unless (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) thread)
     (user-error "Not a conversation id: %s" thread))
   (romacs-agent--check-config-dir provider config-dir)
-  ;; Named by the conversation's identity: one directory per conversation,
-  ;; so every server finds the one that goes on with it.  Sessions imported
-  ;; before took THREAD itself as their id.
-  (let* ((id (romacs-agent--import-id harness config-dir thread))
-         (dir (expand-file-name id (romacs-agent--state-root)))
-         (legacy (expand-file-name thread (romacs-agent--state-root)))
-         (existing (or (romacs-agent--native-session harness config-dir thread)
-                       (romacs-agent--load dir)
-                       (and (file-directory-p legacy) (romacs-agent--load legacy)
-                            (romacs-agent--native-session harness config-dir thread)))))
+  (let ((id (romacs-agent--import-id harness config-dir thread))
+        (existing (romacs-agent--conversation harness config-dir thread)))
     (if existing
         (romacs-agent--continue existing)
       (make-directory (romacs-agent--state-root) t)
-      ;; Made once: a second server importing it meanwhile is told so.
-      (condition-case nil (make-directory dir)
-        (file-already-exists (user-error "Another Romacs is resuming this conversation: try again")))
-      (let ((session (romacs-agent--create
-                      :id id :harness harness :provider provider :config-dir config-dir :cwd cwd :title title
-                      :harness-session thread
-                      :imported (list :path transcript :size (file-attribute-size (file-attributes transcript))))))
-        (if (romacs-agent--per-turn-p session)
-            (progn (setf (romacs-agent-state session) 'idle)
-                   (romacs-agent--manifest session nil))
-          (romacs-agent--launch session (romacs-agent--argv session t))
-          (romacs-agent--attach session 50))
-        session))))
+      (let ((dir (expand-file-name id (romacs-agent--state-root))) (session nil))
+        ;; Made once: a second server importing it meanwhile is told so.
+        (condition-case nil (make-directory dir)
+          (file-already-exists (user-error "Another Romacs is resuming this conversation: try again")))
+        (unwind-protect
+            (progn
+              (setq session (romacs-agent--create
+                             :id id :harness harness :provider provider :config-dir config-dir :cwd cwd :title title
+                             :harness-session thread :options options
+                             :imported (list :path transcript :size (file-attribute-size (file-attributes transcript)))))
+              (if (romacs-agent--per-turn-p session)
+                  (romacs-agent--manifest session nil)
+                (let ((argv (romacs-agent--argv session t)))
+                  ;; Its supervisor's from here.
+                  (setq dir nil)
+                  (romacs-agent--launch session argv)
+                  (romacs-agent--attach session 50)))
+              (setq dir nil)
+              (when (romacs-agent--per-turn-p session) (setf (romacs-agent-state session) 'idle))
+              session)
+          ;; Failed before: no session, no request naming it, and no
+          ;; directory claiming one.
+          (when dir
+            (remhash id romacs-agent--sessions)
+            (when (plist-get options :request)
+              (remhash (cons (plist-get options :parent) (plist-get options :request)) romacs-agent--requests))
+            (delete-directory dir t)))))))
 
 (defun romacs-agent-fork (session)
   "Start a session going on from SESSION's conversation as it stands, in
@@ -2380,4 +2420,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-codex)
 (require 'romacs-agent-ui)
 (require 'romacs-agent-tools)
+(require 'romacs-agent-watch)
 ;;; romacs-agent.el ends here

@@ -569,7 +569,8 @@ line an earlier `codex exec' run journaled)."
   :events #'romacs-agent--codex-events
   :input-events #'romacs-agent--codex-input-events
   :native-id-p #'romacs-agent--uuid-p
-  :history '(:files romacs-agent-history--codex-files :keep romacs-agent-history--codex-keep
+  :history '(:files romacs-agent-history--codex-files :find romacs-agent-history--codex-find
+             :keep romacs-agent-history--codex-keep
              :describe romacs-agent-history--codex-describe :events romacs-agent-history--codex-events))
 
 (provide 'romacs-agent-codex)
