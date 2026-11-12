@@ -545,6 +545,12 @@ class BaseCountsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(base='no-such-branch')
 
+    def test_a_clone_without_the_local_trunk_uses_origins(self):
+        self.commit(6)                                    # a rise of one over the trunk's 5
+        self.git('update-ref', 'refs/remotes/origin/trunk', 'trunk')
+        self.git('branch', '-q', '-D', 'trunk')
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
+
 
 class CargoSettingsTest(unittest.TestCase):
     def settings(self, home, **env):
