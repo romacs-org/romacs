@@ -45,7 +45,7 @@
 (defvar-local romacs-agent-board--all-history nil "Every project's transcripts show, not its newest few.")
 
 (defun romacs-agent-board--view ()
-  "The board's view, from its buffer's choices, as `romacs-agent-board-rows' takes it."
+  "The board's view, from its buffer's choices, for `romacs-agent-board-rows'."
   (list :settled romacs-agent-board--settled :words romacs-agent-board--words
         :folds (or romacs-agent-board--folds (setq romacs-agent-board--folds (make-hash-table :test #'equal)))
         :all-history romacs-agent-board--all-history))
@@ -599,7 +599,8 @@ every word typed, the board following as they are typed."
 (defun romacs-agents ()
   "Show the agent board over the frame: every agent thread by project,
 those that want you first, then the newest, with what each delegated
-folded under it.  Its keys act on the thread at point; \\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
+folded under it.  Its keys act on the thread at point;
+\\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
 \\{romacs-agent-board-mode-map}"
   (interactive)
   (romacs-agent-restore)

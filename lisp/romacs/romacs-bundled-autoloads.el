@@ -48,7 +48,8 @@ Interactively, open the chat without sending an initial prompt.
 (autoload 'romacs-agents "romacs-agent-board"
 "Show the agent board over the frame: every agent thread by project,
 those that want you first, then the newest, with what each delegated
-folded under it.  Its keys act on the thread at point; \\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
+folded under it.  Its keys act on the thread at point;
+\\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
 \\{romacs-agent-board-mode-map}" t)
 (defalias 'romacs-agent-switch #'romacs-agents)
 (defalias 'romacs-agent-switch-chat #'romacs-agents)

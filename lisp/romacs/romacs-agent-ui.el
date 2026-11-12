@@ -46,6 +46,7 @@
 
 ;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 
+(declare-function romacs-agents "romacs-agent-board" ())
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
