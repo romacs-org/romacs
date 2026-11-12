@@ -86,6 +86,20 @@ class DerivedTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_setup_installs_the_hook_that_keeps_the_trunk_to_the_queue(self):
+        shutil.copytree(ROOT / 'tools/hooks', self.root / 'tools/hooks')
+        git(self.root, 'config', '--local', '--unset', 'core.hooksPath')
+        run(self.root, sys.executable, 'tools/derived', 'setup')
+        moved = git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', check=False)
+        self.assertNotEqual(moved.returncode, 0)
+        self.assertIn('moves only through the merge queue', moved.stdout)
+        git(self.root, 'update-ref', 'refs/heads/lane', 'HEAD')          # any other branch moves
+        git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', env={**os.environ, 'ROMACS_LAND': '1'})
+        queue = Path(self.tmp.name) / 'romacs-merge'                    # the queue, by its script's name
+        queue.write_text("import subprocess\nsubprocess.run(['git', 'update-ref', '-d', 'refs/heads/beta'], check=True)\n")
+        run(self.root, sys.executable, str(queue))
+        self.assertNotEqual(git(self.root, 'rev-parse', '--verify', '-q', 'beta', check=False).returncode, 0)
+
     def test_a_fresh_tree_passes(self):
         result = check_derived(self.root)
         self.assertEqual(result.returncode, 0, result.stdout)

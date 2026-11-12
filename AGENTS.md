@@ -231,3 +231,18 @@ standalone Cargo execution without it.
   owned paths. Push, publication, activation, service restarts, and real mail
   require explicit authorization.
 - Report what changed, what actually ran, its result, and any remaining limit.
+
+## Landing work
+
+- `beta` is the development branch. `master` holds releases only: a release
+  fast-forwards it to a fully checked `beta` commit and tags it.
+- Never commit to, merge into or reset `beta` or `master`. A local
+  reference-transaction hook refuses it (`tools/hooks/`, installed by
+  `tools/derived setup`).
+- Work on your own branch in its own worktree, started from `beta`, and merge
+  `beta` in as it moves.
+- A branch lands through the merge queue: signed commits, the full check, then
+  a submitted request. The queue merges requests onto `beta` in order and
+  reruns what each merge changes.
+- A session without the queue's tools leaves its branch committed and checked,
+  and reports the branch name.

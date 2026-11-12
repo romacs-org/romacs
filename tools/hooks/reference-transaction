@@ -1,0 +1,25 @@
+#!/bin/sh
+# Only the merge queue (romacs-merge) and a release move the development and
+# release branches; a release sets ROMACS_LAND=1.  Any other session works on
+# its own branch in its own worktree and lands it through the merge queue.
+# `tools/derived setup` installs this hook.
+[ "$1" = prepared ] || exit 0
+[ -n "${ROMACS_LAND:-}" ] && exit 0
+# The merge queue itself: an ancestor running python with romacs-merge as its
+# script.  A command line merely naming it elsewhere does not count.
+pid=$PPID
+for _ in 1 2 3 4 5 6; do
+  set -- $(tr '\0' '\n' < /proc/$pid/cmdline 2>/dev/null | head -2)
+  case "${1##*/}" in
+    python*) [ "${2##*/}" = romacs-merge ] && exit 0 ;;
+  esac
+  pid=$(awk '{print $4}' /proc/$pid/stat 2>/dev/null); [ -n "$pid" ] && [ "$pid" -gt 1 ] || break
+done
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/beta|refs/heads/master|refs/heads/work/daily-driver)
+      echo "romacs: $ref moves only through the merge queue (a branch in its own worktree, checked, then submitted); master only at a release." >&2
+      exit 1 ;;
+  esac
+done
+exit 0
