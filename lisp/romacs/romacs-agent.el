@@ -2520,10 +2520,13 @@ started: a request repeated after a lost reply finds its session.")
      (unless (process-live-p (romacs-agent-connection session))
        ;; Its harness runs and this editor is where its relay is led, yet
        ;; it is not attached here: attached now, so the relay's next try
-       ;; stays (a supervisor attached elsewhere refuses).
-       (when (and (not (romacs-agent-cancelled session)) (file-exists-p (romacs-agent-host-socket session)))
-         (romacs-agent--attach session 0))
-       (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer))))))
+       ;; stays (a supervisor attached elsewhere refuses).  With no
+       ;; supervisor listening, no editor can attach it: the relay stays,
+       ;; served, rather than turned away to come back for ever.
+       (when (and (not (romacs-agent-cancelled session))
+                  (file-exists-p (romacs-agent-host-socket session))
+                  (processp (romacs-agent--attach session 0)))
+         (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer)))))))
    (romacs-mcp--object)))
 
 (provide 'romacs-agent)
