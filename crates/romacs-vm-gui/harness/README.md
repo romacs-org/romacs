@@ -430,6 +430,29 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+## The render thread at rest (`rest_live.py`)
+
+What the render thread draws, and why, while nothing on screen changes.
+Under `ROMACS_DIAGNOSTICS=1` it writes its frame counters as `frame-stats`
+lines on stderr (`render_thread/frame_stats.rs`): frames planned and
+presented per demand reason (`redisplay` for dirty content, `platform_redraw`
+for a redraw nothing of ours asked for, an effect's own name beside
+`redisplay` while it animates), redraw requests and events, the scenes the
+evaluator sent (`scene_commits`) and loop wakeups; one line a second while
+they move, none once they rest, so the last line holds the totals. The
+harness holds one `--loadup` session in four states by real keys and takes
+each state's frames from those lines: idle with the blink off (no frame,
+the main thread under 1% of a core), GNU's blink (two frames a second), an
+agent chat whose turn runs (its clock, one frame a second) and the same
+with a timer 20 times a second that changes nothing. A frame that answers
+no scene of the evaluator's, or names another reason, fails its state. Source `romacs-gpu-env.sh` first to run it on the real GPU, where
+effects the software renderer suppresses can stand.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/rest_live.py --binary BIN --output DIR \
+  [--seconds 6] [--tools LABWC-DIR]   # about 1 minute
+```
+
 ## Typing while background work allocates (`gc_typing_live.py`)
 
 Key latency against collections: one isolated `-Q --loadup` session with
