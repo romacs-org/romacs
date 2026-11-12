@@ -357,6 +357,24 @@ then begins initialization, in the directory the process started in."
   (set-locale-environment nil)
   (setq before-init-time (current-time) after-init-time nil
         command-line-default-directory default-directory))
+;; Romacs computed `project-list-file' against the working directory until
+;; it took its per-user value (`romacs-loadup-delayed-init-variables'), so a
+;; session started in the home directory kept its list at ~/projects.eld.
+(defun romacs--migrate-project-list (old new)
+  "Copy the project list OLD to NEW when NEW does not exist and OLD is a readable file.
+OLD stays where it is.  The interactive startup takes this step once the
+per-user directory names NEW (lisp/romacs/romacs-gui-loadup.el); a batch
+session does not, as its startup also runs in a world build, which may
+write no file.  A failure is said and leaves both files as they were."
+  (when (and (not (file-exists-p new))
+             (file-regular-p old)
+             (file-readable-p old))
+    (condition-case err
+        (progn
+          (make-directory (file-name-directory new) t)
+          (copy-file old new nil t))
+      (file-error
+       (message "Project list not copied from %s: %s" old (error-message-string err))))))
 ;; The steps of startup.el's `command-line' a batch session takes in each
 ;; process.  `romacs--startup-phase' marks their extent: a world build may
 ;; read per-process host facts only inside it, and a VM restored from a
