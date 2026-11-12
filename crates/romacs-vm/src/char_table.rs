@@ -2,7 +2,11 @@
 //! Native nodes have stable identities, independent of the moving Lisp heap.
 use super::*;
 use std::sync::{Arc, Mutex};
+mod flat;
 mod literal;
+pub(crate) use flat::{FlatTables, TableReader};
+#[cfg(test)]
+mod flat_tests;
 #[cfg(test)]
 mod literal_tests;
 
@@ -15,6 +19,10 @@ mod tests {
     thread_local! {
         /// Calls of `wrote` on this thread.
         pub(super) static WROTE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Reads of one character that descended a table's nodes, on this thread.
+        pub(super) static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Reads of a row of characters (`flat`), on this thread.
+        pub(super) static ROW_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     /// The calls of `wrote` that WRITE makes.
@@ -758,6 +766,30 @@ fn wrote(_stored: &CharTableSlot) {
     tests::WROTE.with(|n| n.set(n.get() + 1));
 }
 
+/// Every read of one character that descends a table's nodes passes here,
+/// and every read of a row of them (`flat`) by `row_read`: the tests count
+/// both, since a reader of many characters is to read rows.
+#[inline]
+fn read() {
+    #[cfg(test)]
+    tests::READS.with(|n| n.set(n.get() + 1));
+}
+#[inline]
+fn row_read() {
+    #[cfg(test)]
+    tests::ROW_READS.with(|n| n.set(n.get() + 1));
+}
+/// The reads of one character, and of a row, so far on this thread.
+#[cfg(test)]
+pub(crate) fn reads() -> [usize; 2] {
+    [&tests::READS, &tests::ROW_READS].map(|count| count.with(std::cell::Cell::get))
+}
+/// The writes to char tables' contents so far on this thread.
+#[cfg(test)]
+pub(crate) fn writes_here() -> usize {
+    tests::WROTE.with(std::cell::Cell::get)
+}
+
 /// The writes to char tables' contents so far in this process, all tables
 /// counted together: what is derived from a table's contents (the syntax
 /// summaries) keys on it with the table's serial, so a write
@@ -808,6 +840,7 @@ pub(super) fn collector_visit_node(
 /// INDEX's value in the table of ROOT, ASCII and DEFAULT (the default for
 /// nil) and the inclusive character range of its slot.
 fn span(root: &CharTableNodeHandle, ascii: &CharTableSlot, default: Value, index: usize) -> Result<(Value, usize, usize)> {
+    read();
     if index >= CharTable::LEN { return Err("index out of range".into()); }
     let (value, from, to) = match ascii {
         _ if index >= 128 => {

@@ -482,7 +482,7 @@ fn completion_flex_cost_gotoh(cx, pat: Value, str: Value) {
         return Ok(Value::NIL);
     }
     let folded = |cx: &mut Leaf<'_>, chars: Vec<u32>| -> std::result::Result<Vec<u32>, Fault> {
-        if fold { chars.into_iter().map(|c| cx.case_mapping_character(c, true)).collect() } else { Ok(chars) }
+        if fold { cx.case_mapping_characters(&chars, true) } else { Ok(chars) }
     };
     let pattern = folded(cx, pattern.chars().collect())?;
     let candidate = folded(cx, candidate.chars().collect())?;

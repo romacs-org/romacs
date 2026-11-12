@@ -627,11 +627,11 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let lookup = |table, code| self.vm.regexp_table_class(table, code);
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let lookup = |table: &crate::char_table::TableReader<'_>, code| table.get(code).ok().map(|entry| self.vm.syntax_entry_class(entry));
             Ok(codes.iter().zip(defaults).map(|(&code, &default)| {
-                let class = lookup(table, code)
-                    .or_else(|| standard.and_then(|t| lookup(t, code)))
+                let class = lookup(&table, code)
+                    .or_else(|| lookup(&standard, code))
                     .unwrap_or(match default { 1 => SyntaxClass::Word, 2 => SyntaxClass::Symbol, _ => SyntaxClass::Punctuation });
                 class == SyntaxClass::Word || (symbols && class == SyntaxClass::Symbol)
             }).collect())
@@ -645,13 +645,22 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let code_of = |table: Value, code: u32| self.vm.char_table_get(table, code as usize).ok()
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let code_of = |table: &crate::char_table::TableReader<'_>, code: u32| table.get(code).ok()
                 .and_then(|entry| self.vm.cons_pair(entry).ok()).and_then(|(n, _)| n.integer_value());
             Ok(codes.iter().map(|&code| {
-                let entry = code_of(table, code).or_else(|| standard.and_then(|t| code_of(t, code)));
+                let entry = code_of(&table, code).or_else(|| code_of(&standard, code));
                 entry.is_some_and(|n| (n >> 20) & 1 != 0)
             }).collect())
+        }
+        /// TABLE, a buffer's syntax table or nil, and the standard syntax
+        /// table once it is made, each ready to read flat: a reader of
+        /// what is no table gives no entry.
+        fn syntax_tables(&mut self, table: Value) -> [Value; 2] {
+            let standard = self.vm.names.get("#:vm2-standard-syntax").map_or(Value::NIL, |&slot| self.vm.slots[slot].value);
+            self.vm.flatten_table(table);
+            self.vm.flatten_table(standard);
+            [table, standard]
         }
         pub fn make_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
             self.vm.make_lisp_string(bytes, multibyte)
@@ -1899,6 +1908,8 @@ mod leaf {
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
+    mod string_compare;
+    pub(crate) use string_compare::Span;
     mod modification;
     mod buffer_lifecycle;
     mod editor_mark;

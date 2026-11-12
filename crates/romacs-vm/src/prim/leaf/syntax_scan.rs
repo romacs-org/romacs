@@ -32,10 +32,11 @@ thread_local! {
 struct View<'a> {
     vm: &'a Vm,
     body: Body<'a>,
-    table: Value,
+    table: crate::char_table::TableReader<'a>,
     properties: bool,
-    /// Memo of the ASCII codes this scan has read: a scan reads a few,
-    /// and each read walks the table and its parents.
+    /// The codes of the ASCII characters this scan has read: an entry is
+    /// a cons a program may alter without writing the table, so its code
+    /// is read from it once a scan, during which no program runs.
     ascii: [std::cell::Cell<Option<i32>>; 128],
     replay: Vec<i32>,
     read: std::cell::RefCell<Vec<i32>>,
@@ -55,9 +56,8 @@ fn buffer_text(vm: &Vm, index: usize) -> &crate::text::Text {
 }
 
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
-fn entry_code(vm: &Vm, table: Value, c: u32) -> i32 {
-    let entry = vm.char_table_get(table, c as usize).unwrap_or(Value::NIL);
-    cons_code(vm, entry)
+fn entry_code(vm: &Vm, table: &crate::char_table::TableReader<'_>, c: u32) -> i32 {
+    cons_code(vm, table.get(c).unwrap_or(Value::NIL))
 }
 fn cons_code(vm: &Vm, entry: Value) -> i32 {
     if entry.tag() != 3 { return scan::SWHITESPACE; }
@@ -74,7 +74,8 @@ impl<'a> View<'a> {
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
         };
-        let ascii = std::array::from_fn(|_| std::cell::Cell::new(None));
+        let table = vm.char_table_reader(table);
+        let ascii = [const { std::cell::Cell::new(None) }; 128];
         Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default(), record: true, last: std::cell::Cell::new((usize::MAX, 0)) }
     }
     fn len(&self) -> usize {
@@ -151,8 +152,8 @@ impl scan::Text for View<'_> {
         syntax
     }
     fn table_syntax(&self, c: u32) -> i32 {
-        let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, self.table, c) };
-        memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, self.table, c); memo.set(Some(code)); code })
+        let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, &self.table, c) };
+        memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, &self.table, c); memo.set(Some(code)); code })
     }
     fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
         let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
@@ -202,7 +203,7 @@ impl View<'_> {
         let c = self.char_at(at);
         if self.properties {
             if let Some(value) = self.property(at.byte) {
-                if self.vm.is_syntax_table(value) { return entry_code(self.vm, value, c); }
+                if self.vm.is_syntax_table(value) { return cons_code(self.vm, self.vm.char_table_get(value, c as usize).unwrap_or(Value::NIL)); }
                 if value.tag() == 3 { return cons_code(self.vm, value); }
             }
         }
@@ -518,7 +519,7 @@ impl Leaf<'_> {
             ppss.insert(pos.integer_value().expect("position"), value.integer_value().expect("position"));
             tail = rest;
         }
-        let table = self.vm.current_syntax_table()?;
+        let table = self.syntax_table_to_read()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
             let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
@@ -764,6 +765,13 @@ impl Leaf<'_> {
         Ok(plist)
     }
 
+    /// The current buffer's syntax table, its flat view made current
+    /// (`crate::char_table::flat`) for the readers this call makes of it.
+    fn syntax_table_to_read(&mut self) -> std::result::Result<Value, Fault> {
+        let table = self.vm.current_syntax_table()?;
+        self.vm.flatten_table(table);
+        Ok(table)
+    }
     /// Fchar_syntax.
     pub fn char_syntax(&mut self, character: Value) -> super::super::Out {
         let mut c = self.syntax_character(character)?;
@@ -771,16 +779,16 @@ impl Leaf<'_> {
         if matches!(self.vm.objects[index], data::Object::ByteBuffer(_)) && (128..256).contains(&c) {
             c += crate::lstring::BYTE8_OFFSET;
         }
-        let table = self.vm.current_syntax_table()?;
-        let code = entry_code(self.vm, table, c) & 0xff;
+        let table = self.syntax_table_to_read()?;
+        let code = entry_code(self.vm, &self.vm.char_table_reader(table), c) & 0xff;
         let spec = scan::SYNTAX_CODE_SPEC.get(code as usize).copied().unwrap_or(b' ');
         Ok(Value::integer(i64::from(spec)).expect("character"))
     }
     /// Fmatching_paren.
     pub fn matching_paren(&mut self, character: Value) -> super::super::Out {
         let c = self.syntax_character(character)?;
-        let table = self.vm.current_syntax_table()?;
-        let entry = self.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
+        let table = self.syntax_table_to_read()?;
+        let entry = self.vm.char_table_reader(table).get(c).map_err(Fault::Error)?;
         Ok(match cons_code(self.vm, entry) & 0xff {
             scan::SOPEN | scan::SCLOSE => self.pair(entry).map_or(Value::NIL, |(_, matching)| matching),
             _ => Value::NIL,
