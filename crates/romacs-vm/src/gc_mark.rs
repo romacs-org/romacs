@@ -342,9 +342,12 @@ impl Marking {
     /// why the borrow is not in the type; `dead_objects' and `sweep' check
     /// shape and marks (`holds') before they read, where a violation would
     /// otherwise become a sweep through freed memory or of the live heap.
-    pub(super) unsafe fn new(vm: &mut Vm, n: usize) -> Self {
+    ///
+    /// MINOR: the mark is a minor collection's, to which every old entry
+    /// counts as reached already.
+    pub(super) unsafe fn new(vm: &mut Vm, n: usize, minor: bool) -> Self {
         // SAFETY: the caller's.
-        let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(), vm.closures.raw(), vm.cells.raw(), vm.objects.raw()) };
+        let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(minor), vm.closures.raw(minor), vm.cells.raw(minor), vm.objects.raw(minor)) };
         Self {
             conses, closures, cells, objects,
             verify: vm.gc_stress.verify, n, batch: Mutex::default(),
@@ -957,7 +960,7 @@ mod tests {
     /// A marking of VM's tables for a test that leaves them to it.
     fn marking_of(vm: &mut Vm, n: usize) -> Marking {
         // SAFETY: each test leaves the tables alone until the marking is dropped.
-        unsafe { Marking::new(vm, n) }
+        unsafe { Marking::new(vm, n, false) }
     }
 
     /// A stop ends a thread's walk down a long list at its next chunk.

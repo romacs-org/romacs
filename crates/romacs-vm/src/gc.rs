@@ -1619,9 +1619,9 @@ impl Vm {
     }
     /// A minor collection: what was made since the last collection and is
     /// no longer reached is freed, and nothing old is read but what may name
-    /// the young. Old entries start marked (`Table::mark_old`), so the mark,
-    /// the weak rounds and the sweep are a full collection's over the young
-    /// alone. Read again, whatever their age: the entries stored into since
+    /// the young. To its mark every old entry counts as reached
+    /// (`Table::raw`), so the mark, the weak rounds and the sweep are a full
+    /// collection's over the young alone. Read again, whatever their age: the entries stored into since
     /// the last collection; every buffer and char table, for the text
     /// properties and nodes written since, which no entry's colour records
     /// (`crate::epoch`); the symbol slots written since (`Slots`), those of
@@ -1644,11 +1644,11 @@ impl Vm {
         let mut lap = Lap::start();
         self.clear_collection_caches();
         let mut again: Vec<Value> = roots.to_vec();
-        again.extend(self.conses.mark_old(|_| false).into_iter().map(|i| Value::reference(i, 3)));
-        again.extend(self.closures.mark_old(|_| false).into_iter().map(|i| Value::reference(i, 4)));
-        again.extend(self.cells.mark_old(|_| false).into_iter().map(|i| Value::reference(i, 5)));
+        again.extend(self.conses.read_again(|_| false).into_iter().map(|i| Value::reference(i, 3)));
+        again.extend(self.closures.read_again(|_| false).into_iter().map(|i| Value::reference(i, 4)));
+        again.extend(self.cells.read_again(|_| false).into_iter().map(|i| Value::reference(i, 5)));
         let shared = |object: &data::Object| matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_));
-        again.extend(self.objects.mark_old(shared).into_iter().map(|i| Value::reference(i + 1, 0)));
+        again.extend(self.objects.read_again(shared).into_iter().map(|i| Value::reference(i + 1, 0)));
         for table in [self.conses.logged(), self.closures.logged(), self.cells.logged(), self.objects.logged()] {
             again.extend_from_slice(table);
         }
@@ -1811,7 +1811,7 @@ impl Vm {
         // SAFETY: from here to the sweep the collection grows, shrinks,
         // sweeps and re-marks no table but through MARKING (`verify_mark'
         // hands its own on), and its scan and sweep check that first.
-        let marking = unsafe { gc_mark::Marking::new(self, n) };
+        let marking = unsafe { gc_mark::Marking::new(self, n, minor_changed.is_some()) };
         let mut own = gc_mark::Worker::default();
         // All a mark wants of the VM but to read it, while nothing else asks.
         let mut host = if until_key { self.host_input.take() } else { None };
