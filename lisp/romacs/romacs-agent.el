@@ -1668,6 +1668,14 @@ Return whether anything changes."
   (and (not (romacs-agent--per-turn-p session)) (not (eq (romacs-agent-state session) 'ended))
        (process-live-p (romacs-agent-connection session))))
 
+(defun romacs-agent--harness-unseen-p (session)
+  "Whether SESSION's persistent harness may run with no attachment here:
+its supervisor still listens.  A selection only recorded would leave it
+on the old one, and only a new harness is sure to take it."
+  (and (not (romacs-agent--per-turn-p session)) (not (eq (romacs-agent-state session) 'ended))
+       (not (process-live-p (romacs-agent-connection session)))
+       (when-let* ((socket (romacs-agent-host-socket session))) (file-exists-p socket))))
+
 (defun romacs-agent--harness-free-p (session)
   "Whether nothing stands between SESSION's harness and a new selection:
 no turn runs, a per-turn harness's run has retired, and a supervisor that
@@ -1698,14 +1706,19 @@ next message goes."
   "Put SESSION's armed selection in effect."
   (let* ((switch (romacs-agent-pending-selection session))
          (select (romacs-agent--harness-get session :select))
-         (how (cond ((not (romacs-agent--harness-live-p session)) nil)
+         (how (cond ;; Only a supervisor under a unit can be stopped surely: one
+                    ;; started without keeps the selection armed until it is
+                    ;; attached again (`romacs-agent--settle' then).
+                    ((romacs-agent--harness-unseen-p session) (if (romacs-agent-unit session) 'restart 'wait))
+                    ((not (romacs-agent--harness-live-p session)) nil)
                     ;; Another instance's directory: only a new harness has it.
                     ((not (equal (or (plist-get switch :provider) (romacs-agent-provider session))
                                  (romacs-agent-provider session)))
                      'restart)
                     (select (funcall select session (plist-get switch :model) (plist-get switch :effort)))
                     (t 'restart))))
-    (cond ((null how) (romacs-agent--commit-switch session))
+    (cond ((eq how 'wait))
+          ((null how) (romacs-agent--commit-switch session))
           ((eq how 'restart) (romacs-agent--restart session))
           (t (setf (romacs-agent-pending-selection session)
                    (append (list :state 'applying :waiting (mapcar #'car how)

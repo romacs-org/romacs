@@ -228,6 +228,26 @@
         (should (equal (gethash "type" (gethash "note" record)) "selection")))
       (should (= (romacs-agent-seq session) 8)))))
 
+(ert-deftest romacs-agent-select-an-unseen-harness-restarts ()
+  ;; Its attachment lost while its supervisor still listens: the harness
+  ;; runs on unseen, so the selection restarts it rather than being only
+  ;; recorded (the next turn would run on the old model).
+  (romacs-agent-select-tests--with (:state 'idle :options '(:model "a") :caught-up t :unit "romacs-agent-s")
+    (write-region "" nil (romacs-agent-host-socket session))
+    (let ((restarted nil))
+      (cl-letf (((symbol-function 'romacs-agent--restart) (lambda (_session) (setq restarted t))))
+        (should (romacs-agent-select session "b" nil))
+        (should restarted)
+        (should (equal (plist-get (romacs-agent-options session) :model) "a"))
+        ;; Started without a unit, nothing can stop it surely: armed until
+        ;; it is attached again.
+        (setq restarted nil)
+        (setf (romacs-agent-unit session) nil (romacs-agent-pending-selection session) nil)
+        (should (romacs-agent-select session "c" nil))
+        (should-not restarted)
+        (should (eq (plist-get (romacs-agent-pending-selection session) :state) 'armed))
+        (should (equal (plist-get (romacs-agent-options session) :model) "a"))))))
+
 (ert-deftest romacs-agent-select-replayed-note-only-draws ()
   ;; A replay's selection neither changes the options nor writes anything.
   (romacs-agent-select-tests--with (:state 'idle :options '(:model "now") :context-window 1000)
