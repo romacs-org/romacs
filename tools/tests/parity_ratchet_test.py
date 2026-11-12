@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The parity ratchet's own tests (run in the gate by
-gnu-tests/runner/tests/parity_ratchet.rs).
+crates/romacs-gnu-tests/tests/parity_ratchet.rs).
 
     ROMACS_GNU_ERT=<adapter> python3 tools/tests/parity_ratchet_test.py -v
 """
@@ -933,14 +933,14 @@ class Wiring(unittest.TestCase):
         return pr.wiring(root)
 
     def test_a_dropped_shard_is_refused(self):
-        problems = self.mutated('gnu-tests/runner/tests/parity_ratchet.rs',
+        problems = self.mutated('crates/romacs-gnu-tests/tests/parity_ratchet.rs',
                                 lambda t: t.replace(f'"gnu-shard:{pr.GATE_SHARDS}/{pr.GATE_SHARDS}"',
                                                     f'"gnu-shard:{pr.GATE_SHARDS - 1}/{pr.GATE_SHARDS}"'))
         self.assertTrue(any('parity_ratchet.rs was edited' in p for p in problems), problems)
 
     def test_a_compiled_out_test_file_is_refused(self):
         for spelling in ('#![cfg(any())]\n', '#! [cfg(any())]\n', '#!/*x*/[cfg(any())]\n'):
-            problems = self.mutated('gnu-tests/runner/tests/parity_ratchet.rs', lambda t: spelling + t)
+            problems = self.mutated('crates/romacs-gnu-tests/tests/parity_ratchet.rs', lambda t: spelling + t)
             self.assertTrue(problems, spelling)
 
     def test_a_shard_without_its_test_attribute_is_refused(self):
@@ -955,7 +955,7 @@ class Wiring(unittest.TestCase):
 
 
 PIN_SHA = 'a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8'
-FNS_BASELINE = ROOT / 'gnu-tests' / 'baseline' / 'src' / 'fns-tests.el.json'
+FNS_BASELINE = ROOT / 'test/gnu' / 'baseline' / 'src' / 'fns-tests.el.json'
 # Until a deliberate re-record of the 565 GNU baselines with the
 # pinned binary, run.py refuses every one of them (they were recorded by the
 # distro /usr/bin/emacs-32.0.50), so nothing can be measured at all.
@@ -964,7 +964,7 @@ BASELINES_PINNED = json.loads(FNS_BASELINE.read_text())['gnu'].get('sha256') == 
 
 def assert_distro_baseline_refused(case, refusal):
     case.assertEqual(refusal.status, pr.EXIT_NOT_MEASURED)
-    case.assertIn('gnu-tests/baseline/src/fns-tests.el.json', str(refusal))
+    case.assertIn('test/gnu/baseline/src/fns-tests.el.json', str(refusal))
     case.assertIn(PIN_SHA, str(refusal))
 
 
@@ -1128,7 +1128,7 @@ class NothingMeasured(unittest.TestCase):
 
     def test_sealed_evidence_must_match_measured_executable(self):
         from unittest.mock import patch
-        sys.path.insert(0, str(ROOT / 'gnu-tests/tools'))
+        sys.path.insert(0, str(ROOT / 'test/gnu/tools'))
         import vacuity_binding
         binary = '/bin/true'
         def measured(command, **kwargs):

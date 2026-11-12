@@ -55,7 +55,7 @@ const CRATES: &[&str] = &[
     "crates/romacs-layout-input",
     "crates/romacs-display-protocol",
     "crates/romacs-regex",
-    "gnu-tests/runner",
+    "crates/romacs-gnu-tests",
 ];
 const BOUNDARY: &str = "crates/romacs-vm/src/host.rs";
 const ALLOW: &str = "crates/romacs-vm/tests/host_boundary_allow.txt";

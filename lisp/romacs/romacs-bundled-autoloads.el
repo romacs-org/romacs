@@ -130,6 +130,11 @@ only sessions whose chat is open.
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
 
 
+;;; Generated autoloads from romacs-agent-watch.el
+
+(register-definition-prefixes "romacs-agent-watch" '("romacs-agent-watch-"))
+
+
 ;;; Generated autoloads from romacs-agent-worktree.el
 
 (register-definition-prefixes "romacs-agent-worktree" '("romacs-agent-worktree-"))
