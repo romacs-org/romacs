@@ -304,7 +304,9 @@ fn render_frame_window_contents_reserved(
             render.emacs_frame_id,
             present_mapping.presentation(),
         );
-        surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)?
+        romacs_display_protocol::meter::spent(crate::render_thread::frame_cost::ACQUIRE, || {
+            surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)
+        })?
     };
 
     // Placed here, after the surface is in hand: `sample_pane_layout`

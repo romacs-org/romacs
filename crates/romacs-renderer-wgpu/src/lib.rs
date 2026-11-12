@@ -6,6 +6,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod gpu_policy;
+pub mod cost;
 pub mod diagnostics;
 pub(crate) mod frame_post;
 pub mod glyph_atlas;

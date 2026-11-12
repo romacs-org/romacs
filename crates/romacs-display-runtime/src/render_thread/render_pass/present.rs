@@ -15,7 +15,7 @@
 
 use super::{RenderApp, RenderedFrameSurface};
 use crate::render_thread::frame_sched::SubmissionResult;
-use crate::render_thread::{frame_stats, surface_readback};
+use crate::render_thread::{frame_cost, frame_stats, surface_readback};
 
 impl RenderApp {
     /// Render and present one top-level frame window, preserving the precise
@@ -37,12 +37,7 @@ impl RenderApp {
         self.refresh_frame_opacity();
         use crate::render_thread::frame_sched::RenderWork;
         let compositor_only_hint = matches!(plan.work, RenderWork::CompositeOnly { .. });
-        let class = match plan.work {
-            RenderWork::None => "none",
-            RenderWork::CompositeOnly { .. } => "composite",
-            RenderWork::RepaintLayers { .. } => "repaint",
-            RenderWork::RebuildScene => "rebuild",
-        };
+        let class = plan.work.class();
         let presentation = self
             .frame_windows
             .get(emacs_frame_id)
@@ -62,7 +57,11 @@ impl RenderApp {
                 reasons,
             )
         });
-        self.render_frame_window_impl(emacs_frame_id, compositor_only_hint)
+        let result = romacs_display_protocol::meter::spent(frame_cost::FRAME, || {
+            self.render_frame_window_impl(emacs_frame_id, compositor_only_hint)
+        });
+        frame_cost::say(presentation.get(), class, result);
+        result
     }
 
     fn render_frame_window_impl(
@@ -253,7 +252,9 @@ impl RenderApp {
                 emacs_frame_id,
                 Some(frame.presentation_id),
             );
-            renderer.queue().present(output);
+            romacs_display_protocol::meter::spent(frame_cost::PRESENT, || {
+                renderer.queue().present(output);
+            });
         }
         romacs_display_protocol::present_trace::record(
             romacs_display_protocol::present_trace::Stage::Present,

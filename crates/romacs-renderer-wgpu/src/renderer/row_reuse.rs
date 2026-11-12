@@ -365,6 +365,8 @@ pub(crate) struct RowReuseStats {
     pub rows_reused_shifted: usize,
     /// Rows whose damage said reusable but a defensive key failed.
     pub reuse_bails: usize,
+    /// Rows the pass had no damage record for, tessellated unconsidered.
+    pub rows_unmarked: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -420,17 +422,19 @@ pub(super) trait RowTessellator {
 
 enum RowPlan {
     Tessellate { bailed: bool },
+    /// No damage record names the row: reuse has nothing to go by.
+    Unmarked,
     Splice { dy: f32 },
 }
 
 fn classify(chunk: &RowChunk, ctx: &ReusePassCtx<'_>, cache: &RowReuseCache) -> RowPlan {
     let tess = |bailed| RowPlan::Tessellate { bailed };
 
-    let Some(damage) = ctx.damage else {
-        return tess(false);
-    };
-    let Some(info) = damage.row(chunk.key.window_id, chunk.key.row) else {
-        return tess(false);
+    let Some(info) = ctx
+        .damage
+        .and_then(|damage| damage.row(chunk.key.window_id, chunk.key.row))
+    else {
+        return RowPlan::Unmarked;
     };
     let dvpos = match info.damage {
         RowDamage::New => return tess(false),
@@ -553,12 +557,14 @@ pub(super) fn assemble_rows_with_reuse(
                     ));
                 }
             }
-            RowPlan::Tessellate { bailed } => {
+            RowPlan::Tessellate { .. } | RowPlan::Unmarked => {
                 let marks = out.lens();
                 let tessellation = tessellator.tessellate(chunk, &mut out);
                 stats.rows_tessellated += 1;
-                if bailed {
-                    stats.reuse_bails += 1;
+                match plan {
+                    RowPlan::Tessellate { bailed: true } => stats.reuse_bails += 1,
+                    RowPlan::Unmarked => stats.rows_unmarked += 1,
+                    _ => {}
                 }
                 if let Some(capture) =
                     capture_after_tessellation(chunk, ctx, tessellation, &out, marks)

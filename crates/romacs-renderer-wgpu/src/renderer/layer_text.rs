@@ -182,6 +182,13 @@ impl WgpuRenderer {
         stats.rows_reused_verbatim += reuse_stats.rows_reused_verbatim;
         stats.rows_reused_shifted += reuse_stats.rows_reused_shifted;
         stats.row_reuse_bails += reuse_stats.reuse_bails;
+        crate::cost::add(crate::cost::ROWS, chunks.len());
+        crate::cost::add(crate::cost::ROWS_TESSELLATED, reuse_stats.rows_tessellated);
+        crate::cost::add(
+            crate::cost::ROWS_REUSED,
+            reuse_stats.rows_reused_verbatim + reuse_stats.rows_reused_shifted,
+        );
+        crate::cost::add(crate::cost::ROWS_UNMARKED, reuse_stats.rows_unmarked);
 
         TextGlyphBatches {
             mask_data: out.mask,

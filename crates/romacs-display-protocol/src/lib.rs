@@ -25,6 +25,7 @@ pub mod image_diagnostic;
 pub mod input_progress;
 pub mod interaction_projection;
 pub mod menu;
+pub mod meter;
 pub mod model;
 pub mod modifier_policy;
 pub mod motion_spec;
