@@ -524,6 +524,9 @@ asked first: nil drops the message."
   (let ((deliver (lambda () (when (or (null valid) (funcall valid))
                               (romacs-agent-send session text delivered valid)))))
     (if (romacs-agent--per-turn-p session) (funcall deliver)
+      ;; A parent whose harness was stopped or ended is resumed to take it.
+      (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
+        (romacs-agent--continue session))
       (romacs-agent--when-attached session deliver))))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
@@ -569,6 +572,73 @@ its parent again."
     (when (plist-get (romacs-agent-options session) :parent) (romacs-agent-tools--wake session))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--wake-missed)
+
+;;; Reaping finished tasks
+
+(defcustom romacs-agent-reap-after '(("review" . 300))
+  "How long a delegated task may sit idle after a turn before its harness
+is stopped, by role: an alist of a role (a string, or t for any other)
+and seconds.  Its conversation stays: a message to it (romacs_task_send)
+resumes it.  Stopping a task ends what its harness started too, so a
+lane that waits on its own child processes is better left out."
+  :type '(alist :key-type (choice string (const :tag "Any other role" t)) :value-type number)
+  :group 'romacs-agent)
+
+(defun romacs-agent-tools--reap-delay (session)
+  "Seconds SESSION may sit idle, or nil to keep it: a session with a role
+was delegated (a user's own has none), whoever delegated it."
+  (when-let* ((role (plist-get (romacs-agent-options session) :role)))
+    (cdr (or (assoc role romacs-agent-reap-after) (assq t romacs-agent-reap-after)))))
+
+(defvar romacs-agent-tools--reaping (make-hash-table :test #'equal)
+  "Tasks whose look is scheduled: a replay's many ends schedule one.")
+
+(defun romacs-agent-tools--reap-later (session &optional delay)
+  "Look at SESSION once it may have sat idle long enough to be reaped:
+after DELAY seconds, by default its role's time."
+  (when-let* ((delay (or delay (romacs-agent-tools--reap-delay session)))
+              ((not (gethash (romacs-agent-id session) romacs-agent-tools--reaping))))
+    (puthash (romacs-agent-id session) t romacs-agent-tools--reaping)
+    (run-at-time delay nil #'romacs-agent-tools--reap session)))
+
+(defun romacs-agent-tools--idle-p (session)
+  "Whether SESSION's harness runs and has nothing to do: no turn, nothing
+waiting to be sent or written and not yet journaled back, no question
+unanswered."
+  (and (eq (romacs-agent-state session) 'idle)
+       (null (romacs-agent-queue session))
+       (<= (romacs-agent-requests session) (romacs-agent-inputs session))
+       (zerop (hash-table-count (romacs-agent-approvals session)))
+       (or (process-live-p (romacs-agent-connection session)) (romacs-agent-unit session))))
+
+(defun romacs-agent-tools--reap (session)
+  "Stop SESSION's harness when it has sat idle its role's time since its
+last record; when it has not yet, look again then."
+  (remhash (romacs-agent-id session) romacs-agent-tools--reaping)
+  (when-let* (((eq (romacs-agent-get (romacs-agent-id session)) session))
+              ((not (romacs-agent-cancelled session)))
+              (delay (romacs-agent-tools--reap-delay session))
+              ;; Its replay not yet over, what it does is not yet known.
+              ((or (romacs-agent--per-turn-p session) (romacs-agent-caught-up session)
+                   (not (process-live-p (romacs-agent-connection session)))
+                   (progn (romacs-agent-tools--reap-later session delay) nil)))
+              ((romacs-agent-tools--idle-p session)))
+    (let ((left (- (+ (or (romacs-agent-last-time session) 0) delay) (float-time))))
+      (if (> left 0)
+          (romacs-agent-tools--reap-later session left)
+        (romacs-agent-stop session)))))
+
+(defun romacs-agent-tools--reap-on-event (session event)
+  ;; A turn's end: its task may be done.
+  (when (eq (plist-get event :type) 'done) (romacs-agent-tools--reap-later session)))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--reap-on-event)
+
+(defun romacs-agent-tools--reap-restored ()
+  "After a restart: look at every task that may be idle already."
+  (mapc #'romacs-agent-tools--reap-later (romacs-agent-sessions)))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--reap-restored)
 
 (defun romacs-agent-tools--wait (child timeout-ms arrived)
   "A deferred answer: CHILD's task record once its turn ends, asks for an
