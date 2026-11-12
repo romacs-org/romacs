@@ -61,8 +61,10 @@ class Refusals(unittest.TestCase):
     def test_a_tenth_of_the_steps_may_be_odd(self):
         disturbed = {'readings': readings(*[QUIET] * 9, STEP)}
         self.assertIsNone(d.refusal(IDLE, disturbed, 10))
+        # The figures are the rule-keeping steps': the painted one is in none.
         row = d.verdict(IDLE, disturbed, 10, {})
-        self.assertEqual((row['odd'], row['figures']['frames_submitted'], row['figures']['display_instructions_p90']), ([9], 0, 500))
+        self.assertEqual((row['odd'], row['figures']['frames_submitted'], row['figures']['display_instructions_p90']), ([9], 0, 100))
+        self.assertEqual(len(row['steps']), 10)
         self.assertIn('steps [8, 9]', d.refusal(IDLE, {'readings': readings(*[QUIET] * 8, STEP, STEP)}, 10))
 
 
@@ -76,8 +78,9 @@ class Bars(unittest.TestCase):
         self.assertEqual((row['status'], row['over']), ('PASS', []))
         self.assertEqual(d.overall([row]), 'PASS')
 
-    def test_counts_are_held_as_measured_and_instructions_with_a_margin(self):
-        self.assertEqual((self.bars['windows_rebuilt'], self.bars['display_conses'], self.bars['frames_submitted']), (1, 7, 1))
+    def test_counts_are_held_as_measured_and_instructions_and_conses_with_a_margin(self):
+        self.assertEqual((self.bars['windows_rebuilt'], self.bars['band_expansions'], self.bars['frames_submitted']), (1, 2, 1))
+        self.assertEqual((self.bars['display_conses'], d.ceiling('display_conses', 7439), d.ceiling('layouts', 2)), (8, 8190, 2))
         self.assertEqual((self.bars['display_instructions'], self.bars['display_instructions_p90']), (550, 550))
         self.assertEqual((d.ceiling('step_instructions', 5_234_567), d.ceiling('step_instructions', 0)), (5_760_000, 0))
 

@@ -426,11 +426,14 @@ def prepare_world(romacs, env, cwd):
     return round(time.time() - started, 3) if done.returncode == 0 else None
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=()):
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=(), check=False):
     """`romacs-vm-gui --loadup ARGS' on INIT, as ~/.config/romacs/init.el
     unless INIT is None, from a world prepared first (`prepare_world', its
     seconds in `world_seconds'), as a user's HOME holds one; CLS as
-    `gnu_engine'."""
+    `gnu_engine'.  With CHECK, `romacs-display-check' is on: every window
+    redisplay reuses is also built in full, which a harness that measures
+    must not ask for, and one that asks reads `check-mismatches' from
+    `romacs--display-stats' before it ends."""
     (home / '.config/romacs').mkdir()
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
@@ -439,10 +442,8 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    # Every reused window is checked against a full build of its text; a
-    # difference is a `display-check:' line in the engine's log.
-    check = ('--eval', '(setq romacs-display-check t)')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup', *check, *args], root, lisp, env, timeout).start(tools)
+    checked = ('--eval', '(setq romacs-display-check t)') if check else ()
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *checked, *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 

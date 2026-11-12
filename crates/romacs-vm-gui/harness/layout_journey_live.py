@@ -153,7 +153,7 @@ def main():
     usage = root / 'usage.jsonl'
     env.update(ROMACS_USAGE_LOG=str(usage), JOURNEY_PROSE=PROSE, JOURNEY_TREE=str(tree), JOURNEY_REPO=str(repo))
     report = {'romacs': str(args.romacs), 'scenes': [], 'errors': [], 'refusals': []}
-    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools)
+    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools, check=True)
     try:
         for scene in SCENE_NAMES:
             mode = engine.ask(f'(progn (journey-{scene}) (redisplay) (symbol-name major-mode))', timeout=120)
@@ -163,8 +163,8 @@ def main():
             report['scenes'].append({'scene': scene, 'mode': mode, 'after-C-n': moved,
                                      'end': engine.ask('(list (window-point) (window-start) (buffer-size))')})
         engine.ask('(progn (romacs-usage-log-flush) t)')
-        # `romacs-display-check' is on (`romacs_engine'): the windows redisplay
-        # answered from their last snapshot, and those a full build contradicted.
+        # `romacs-display-check' is on: the windows redisplay answered from
+        # their last snapshot, and those a full build contradicted.
         report['reused'], report['stale'] = engine.ask(
             "(let ((stats (romacs--display-stats))) (list (cdr (assq 'windows-reused stats)) (cdr (assq 'check-mismatches stats))))")
     finally:

@@ -1,16 +1,20 @@
 //! What redisplay did, counted (`romacs--display-stats`): the cycles the
 //! evaluator ran, the instructions and conses spent inside them, the
-//! windows a cycle reused or rebuilt, the bands it expanded, what it asked
-//! of the layout host besides a paint's own layout, and the frames it
-//! submitted. Plain counters, always on: a cycle pays two reads of the
-//! thread's instruction counter for them.
+//! windows a snapshot reused or rebuilt, the bands it expanded, what this
+//! evaluator asked of the layout host besides a paint's own layout, and
+//! the frames it submitted. Plain counters, always on: a cycle pays two
+//! reads of the thread's instruction counter for them.
 //!
 //! A cycle is what the host brackets with `Vm::redisplay_begin` and
 //! `Vm::redisplay_done`: the frame's freeze, its comparison with the frame
 //! on screen, and the layout, submission and layout application of a frame
-//! that changed. A cycle that fails keeps its bracket open, and the next
-//! begin starts over; a cycle begun inside another (Lisp a redisplay runs
-//! reading input) ends the outer one's count where it began.
+//! that changed. Only the cycles, their instructions and their conses are
+//! the bracket's; every other count is taken where the work is done, in a
+//! cycle or outside one (a snapshot a test takes, a layout
+//! `window-text-pixel-size` asks). A cycle that fails keeps its bracket
+//! open, and the next begin starts over. A cycle begun inside another
+//! (Lisp a redisplay runs reading input) takes the bracket: it is counted,
+//! and the outer one is not.
 use crate::{Result, Value, Vm};
 
 /// The counts `romacs--display-stats` reports, in order.
@@ -28,9 +32,12 @@ pub(crate) struct DisplayStats {
     conses: u64,
     /// Windows a snapshot answered from the last one (`Vm::reuse_shown`).
     pub(crate) reused: u64,
-    /// Windows a snapshot built in full.
+    /// Windows a snapshot set out to build in full: one whose build fails
+    /// counts.
     pub(crate) rebuilt: u64,
-    /// Mode lines, header lines and status bars expanded (`Vm::mode_line_band`).
+    /// Mode lines, header lines and status bars expanded
+    /// (`Vm::mode_line_band`): twice for a window whose reuse the bands'
+    /// own Lisp undid, since its full build expands them again.
     pub(crate) bands: u64,
     /// Reused windows the reuse check found different (`Vm::check_reuse`).
     pub(crate) mismatches: u64,
@@ -64,8 +71,9 @@ impl Vm {
     }
     /// Every count since the VM started, in NAMES' order. The layout host's
     /// answers and the frames submitted are this thread's host calls
-    /// (`crate::host_calls`): a paint lays its frame out with the engine
-    /// itself, so `layout.lay_out` counts only what redisplay asked besides.
+    /// (`crate::host_calls`), whoever made them: a paint lays its frame out
+    /// with the engine itself, so `layout.lay_out` counts what redisplay's
+    /// questions and Lisp's (`window-text-pixel-size`) asked besides.
     fn display_counts(&self) -> [u64; COUNTS] {
         let stats = &self.display_state.stats;
         let calls = romacs_display_protocol::call_count::of;
@@ -83,7 +91,8 @@ impl Vm {
         let counted = crate::host::thread_instructions().is_some();
         let mut list = Value::NIL;
         for i in (0..COUNTS).rev() {
-            // A restored world's thread starts its host calls over.
+            // A restored image's thread starts its host calls over: those
+            // three read 0 until they pass the image's base, or a reset.
             let count = if i == INSTRUCTIONS && !counted { Value::NIL }
                 else { Value::integer(i64::try_from(now[i].saturating_sub(base[i])).map_err(|e| e.to_string())?)? };
             let name = self.intern(NAMES[i]);

@@ -17,7 +17,8 @@ use romacs_layout_input::{Extend, Face, FaceRun, WindowSnapshot};
 
 /// What a reused snapshot and the full build can differ in, in the order
 /// told; a cause's index is its bit in `DisplayState::check_told`.
-const CAUSES: [&str; 9] = ["text", "raw bytes", "face runs", "line ends", "start", "point", "stretches", "images", "line numbers"];
+const CAUSES: [&str; 10] = ["text", "raw bytes", "face runs", "line ends", "start", "point", "stretches", "images", "line numbers", "full build"];
+const NO_BUILD: usize = 9;
 
 /// At most this much of a text or a list is quoted in a diagnostic.
 const QUOTED: usize = 48;
@@ -73,20 +74,22 @@ fn differences(reused: &WindowSnapshot, rebuilt: &ShownText, faces: &[Face]) -> 
 }
 
 impl Vm {
-    /// Whether `romacs-display-check` is on.
+    /// Whether `romacs-display-check` is on: its value outside any buffer.
     fn display_check(&mut self) -> bool {
         let slot = self.slot("romacs-display-check");
-        !matches!(self.variable_value(slot), Ok(Value::NIL | Value::UNBOUND) | Err(_))
+        !matches!(self.slots[slot].value, Value::NIL | Value::UNBOUND)
     }
     /// Under `romacs-display-check`, compare REUSED, the snapshot reuse
     /// answered for WINDOW at HEIGHT, with the window's text built in full
     /// now: a difference is counted, and each cause told once per window.
-    /// Runs no Lisp, and leaves the window's records as they are.
+    /// Runs no Lisp, and leaves what the window last showed as recorded;
+    /// the build may add the faces it merges to the window's table, as any
+    /// build does.
     pub(super) fn check_reuse(&mut self, window: Value, height: u32, reused: &WindowSnapshot) {
         if !self.display_check() { return; }
         let found = match self.full_text(window, height) {
             Ok(rebuilt) => differences(reused, &rebuilt, &rebuilt.faces.published()),
-            Err(error) => vec![(0, format!("no full build: {error}"))],
+            Err(error) => vec![(NO_BUILD, error)],
         };
         if found.is_empty() { return; }
         self.display_state.stats.mismatches += 1;

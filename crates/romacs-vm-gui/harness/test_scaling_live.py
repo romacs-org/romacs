@@ -58,6 +58,14 @@ class Verdict(unittest.TestCase):
         self.assertEqual(deep['status'], 'FAIL')
         self.assertIn('native stack', deep['reason'])
 
+    def test_an_idle_session_set_aside_for_a_paint_is_on_the_row(self):
+        probe = {**PROBE, 'gui': True, 'idle': True}
+        r = s.verdict(probe, {'instructions': 10**7, 'disturbed': ['paints after each of 1 idle steps: [1]']},
+                      {'instructions': 10**7, 'disturbed': []})
+        self.assertEqual((r['status'], len(r['disturbed'])), ('PASS', 1))
+        self.assertIn('1 idle sessions set aside for a paint', s.table([r]))
+        self.assertNotIn('disturbed', row(10**7, 4 * 10**7))
+
     def test_overall_needs_rows(self):
         self.assertEqual(s.overall([]), 'FAIL')
 

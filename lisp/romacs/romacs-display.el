@@ -17,7 +17,8 @@ and compare the two: text, face runs, start, point, stretches, images and
 line numbers.  A difference is an input the reuse missed; it is counted
 \(`check-mismatches' in `romacs--display-stats') and logged once per window
 and cause as a display diagnostic.  For tests: it costs a full build of
-every reused window.")
+every reused window, and that work is in what `romacs--display-stats'
+counts (instructions, conses, measures).")
 
 (provide 'romacs-display)
 ;;; romacs-display.el ends here

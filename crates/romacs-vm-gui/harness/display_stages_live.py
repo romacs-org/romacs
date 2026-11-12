@@ -16,25 +16,26 @@ anything, so a step's figures are differences of two readings:
   display_conses        conses made inside redisplay
   windows_rebuilt       windows redisplay built in full
   band_expansions       mode lines, header lines and status bars expanded
-  layouts               layouts redisplay asked of the layout host besides
-                        a paint's own
+  layouts               layouts asked of the layout host besides a paint's
+                        own: redisplay's, and any the step's own Lisp asked
   frames_submitted      frames sent to the renderer
 
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
 (`display_instructions_p90': the streamed deltas that add a row).  A step is odd when it broke
 its scenario's rule: a scenario that changes what the frame shows submits a
-frame in every step, and one that changes nothing submits none (the host
-repaints for reasons of its own now and then, and the order statistics
-leave such a step out).  A measurement is refused when the thread has no
-instruction counter, when a step ran no redisplay, or when more than a
-tenth of the steps are odd.  Each step's counts, `collections' among them,
+frame in every step, and one that changes nothing submits none.  The host
+repaints for reasons of its own now and then, so the figures are taken over
+the steps that kept the rule, and the report names the odd ones.  A
+measurement is refused when the thread has no instruction counter, when a
+step ran no redisplay, or when more than a tenth of the steps are odd.  Each step's counts, `collections' among them,
 are in the report.
 
 The bars file maps each scenario to a ceiling per figure; a figure over its
 ceiling, or a scenario or figure without one, fails.  --write-bars FILE
-writes the bars this run would pass: counts as measured, instruction
-figures a tenth higher, so that work which removes cost lowers them.
+writes the bars this run would pass: windows, bands, layouts and frames as
+counted, instructions and conses a tenth higher, so that work which removes
+cost lowers them.
 
 --record profiles each scenario's steps with `perf record', enabled by the
 session at its first step and disabled after its last reading, and writes
@@ -69,9 +70,10 @@ COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'ins
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
           'frames_submitted': 'frames-submitted'}
 # The figures whose 90th percentile is held too (a whole step's varies
-# with the timers that poll for its redisplay), the margin --write-bars
-# gives an instruction figure, and the share of steps that may be odd.
+# with the timers that poll for its redisplay), the figures --write-bars
+# gives a margin and that margin, and the share of steps that may be odd.
 PEAKS = ('display_instructions',)
+MARGINED = ('instructions', 'conses')
 MARGIN = 1.10
 ODD = 0.1
 
@@ -135,7 +137,9 @@ def verdict(scenario, result, wanted, bars):
     if problem:
         return {**row, 'status': 'FAIL', 'reason': problem}
     deltas = steps(result['readings'])
-    row.update(chars=result.get('chars'), figures=figures(deltas), odd=odd_steps(scenario, deltas), steps=deltas)
+    odd = odd_steps(scenario, deltas)
+    kept = [d for i, d in enumerate(deltas) if i not in odd]
+    row.update(chars=result.get('chars'), figures=figures(kept), odd=odd, steps=deltas)
     if scenario['name'] not in bars:
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['over'] = over(row['figures'], bars[scenario['name']])
@@ -147,9 +151,10 @@ def verdict(scenario, result, wanted, bars):
 
 
 def ceiling(figure, value):
-    """The bar --write-bars sets for FIGURE measured at VALUE: a count as
-    it is, an instruction figure its margin higher, to three digits."""
-    if 'instructions' not in figure or value <= 0:
+    """The bar --write-bars sets for FIGURE measured at VALUE: instructions
+    and conses their margin higher, to three digits, any other count as
+    it is."""
+    if not any(kind in figure for kind in MARGINED) or value <= 0:
         return value
     raised = value * MARGIN
     unit = 10 ** max(0, math.floor(math.log10(raised)) - 2)
@@ -216,7 +221,7 @@ def measure(gui, scenario, args):
     prefix, env, data = recording(args.output, gui.home, name) if args.record else ((), {}, None)
     # No paint diagnostics: a step costs what it costs a session in use.
     result, _ = gui.session(name, lambda out: f'(display-stages-start (quote {name}) "{out}" {args.steps})',
-                            loads=(SCENARIOS,), env={'ROMACS_DIAGNOSTICS': '0', **env}, prefix=prefix)
+                            loads=(SCENARIOS,), env={'ROMACS_DIAGNOSTICS': '0', **env}, prefix=prefix, wait=args.timeout)
     if data:
         callgraph(data, args.timeout)
     return result
@@ -227,9 +232,7 @@ def run(binary, home, selected, bars, args):
     rows = []
     with tempfile.TemporaryDirectory(prefix='stages-', dir=runtime) as temporary:
         Path(temporary).chmod(0o700)
-        # A session gets the whole timeout: scaling's GUI probes get a fifth.
-        gui = scaling.Gui(home, Path(temporary), args.timeout * 5)
-        gui.binary = binary
+        gui = scaling.Gui(binary, home, Path(temporary), args.timeout)
         try:
             for scenario in selected:
                 try:

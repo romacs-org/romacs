@@ -1,6 +1,6 @@
 {
  "plain-idle": {
-  "step_instructions": 660000,
+  "step_instructions": 654000,
   "display_instructions": 355000,
   "display_conses": 0,
   "windows_rebuilt": 0,
@@ -10,48 +10,48 @@
   "display_instructions_p90": 359000
  },
  "chat-idle": {
-  "step_instructions": 5340000,
-  "display_instructions": 5040000,
-  "display_conses": 7439,
+  "step_instructions": 5360000,
+  "display_instructions": 5050000,
+  "display_conses": 8190,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 0,
-  "display_instructions_p90": 5080000
+  "display_instructions_p90": 5070000
  },
  "chat-tick": {
-  "step_instructions": 33700000,
-  "display_instructions": 32700000,
-  "display_conses": 7457,
+  "step_instructions": 34200000,
+  "display_instructions": 33200000,
+  "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 1,
   "layouts": 2,
   "frames_submitted": 0,
-  "display_instructions_p90": 32800000
+  "display_instructions_p90": 33200000
  },
  "chat-collected": {
-  "step_instructions": 188000000,
-  "display_instructions": 38300000,
-  "display_conses": 7597,
+  "step_instructions": 189000000,
+  "display_instructions": 38800000,
+  "display_conses": 8360,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 0,
-  "display_instructions_p90": 38400000
+  "display_instructions_p90": 38900000
  },
  "cursor-move": {
-  "step_instructions": 5820000,
+  "step_instructions": 5600000,
   "display_instructions": 5120000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 1,
-  "display_instructions_p90": 5190000
+  "display_instructions_p90": 5150000
  },
  "typed": {
-  "step_instructions": 10100000,
-  "display_instructions": 9210000,
+  "step_instructions": 9860000,
+  "display_instructions": 9220000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -60,17 +60,17 @@
   "display_instructions_p90": 9260000
  },
  "append-unseen": {
-  "step_instructions": 5390000,
+  "step_instructions": 5380000,
   "display_instructions": 5020000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 0,
-  "display_instructions_p90": 5040000
+  "display_instructions_p90": 5020000
  },
  "typed-elements": {
-  "step_instructions": 24400000,
+  "step_instructions": 24200000,
   "display_instructions": 23600000,
   "display_conses": 0,
   "windows_rebuilt": 1,
@@ -80,23 +80,23 @@
   "display_instructions_p90": 23700000
  },
  "chat-stream-1k": {
-  "step_instructions": 38300000,
-  "display_instructions": 36600000,
-  "display_conses": 7457,
+  "step_instructions": 38600000,
+  "display_instructions": 36900000,
+  "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 1,
-  "display_instructions_p90": 106000000
+  "display_instructions_p90": 107000000
  },
  "chat-stream-10k": {
-  "step_instructions": 95800000,
-  "display_instructions": 94100000,
-  "display_conses": 7457,
+  "step_instructions": 96100000,
+  "display_instructions": 94600000,
+  "display_conses": 8210,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 1,
-  "display_instructions_p90": 616000000
+  "display_instructions_p90": 617000000
  }
 }

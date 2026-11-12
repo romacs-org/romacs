@@ -97,6 +97,9 @@ def verdict(probe, small, large):
     if work_n is None or work_kn is None:
         return {**row, 'status': 'FAIL', 'reason': 'no instruction counter (romacs-instructions is nil)'}
     row.update(work_n=work_n, work_kn=work_kn)
+    disturbed = (small.get('disturbed') or []) + (large.get('disturbed') or [])
+    if disturbed:
+        row['disturbed'] = disturbed
     if work_n < MIN_WORK:
         return {**row, 'status': 'FAIL', 'reason': f'body does {work_n} instructions at N, under {MIN_WORK}'}
     if work_kn <= 0:
@@ -134,6 +137,9 @@ def table(rows):
             note = f"{note}; known: {r['known']}" if note else f"known: {r['known']}"
         if 'stack_growth' in r:
             note = f"{note}; stack spread {r['stack_growth']} B" if note else f"stack spread {r['stack_growth']} B"
+        if r.get('disturbed'):
+            again = f"{len(r['disturbed'])} idle sessions set aside for a paint"
+            note = f'{note}; {again}' if note else again
         lines.append(f"| {r['name']}{' (gui)' if r.get('gui') else ''} | {r['n']} | {r['k']} | {work(r.get('work_n'))}"
                      f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')} | {r['budget']} | {r['status']}"
                      f"{' — ' + note if note else ''} |")
@@ -256,9 +262,9 @@ def run_batch_probe(binary, home, probe, timeout):
 class Gui:
     """A private headless labwc for --wayland sessions."""
 
-    def __init__(self, home, runtime, timeout):
+    def __init__(self, binary, home, runtime, timeout):
         import live_oracle as live
-        self.live, self.home, self.runtime, self.timeout = live, home, runtime, timeout
+        self.live, self.binary, self.home, self.runtime, self.timeout = live, binary, home, runtime, timeout
         (runtime / 'config').mkdir()
         (runtime / 'config' / 'rc.xml').write_text(live.RC_XML)
         self.env = private_env(home, {'XDG_RUNTIME_DIR': str(runtime), 'ROMACS_DIAGNOSTICS': '1',
@@ -280,11 +286,12 @@ class Gui:
         subprocess.run([randr or 'wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1600x1000'],
                        env=self.env, check=True, timeout=15, stdout=subprocess.DEVNULL)
 
-    def session(self, tag, form, loads=(), env=None, prefix=()):
+    def session(self, tag, form, loads=(), env=None, prefix=(), wait=None):
         """A fresh --loadup session named TAG that loads the probes and LOADS
         and evaluates FORM of a file name, which writes that file and ends
         the session: what it wrote, as JSON, and the session's stderr.
-        Refused unless it exits 0 having written the file."""
+        Refused unless it exits 0 having written the file within WAIT
+        seconds (a fifth of the batch sessions' bound unless given)."""
         out = self.home / 'tmp' / f'{tag}.json'
         stderr = self.home / f'{tag}.stderr'
         argv = [*prefix, str(self.binary), '-Q', '--loadup', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
@@ -294,7 +301,7 @@ class Gui:
             proc = subprocess.Popen(argv, env={**self.env, **(env or {})}, cwd=self.home, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=log)
             try:
-                proc.wait(timeout=self.timeout / 5)
+                proc.wait(timeout=wait or self.timeout / 5)
             except subprocess.TimeoutExpired:
                 raise Refused(f'{tag}: GUI session timed out') from None
             finally:
@@ -310,15 +317,16 @@ class Gui:
         none for an :idle probe.  The host repaints for reasons of its own
         now and then; that paint is in an idle probe's count and breaks its
         rule, so an idle measurement so disturbed is taken again, IDLE_TRIES
-        sessions at most."""
-        problem = None
+        sessions at most, and the row tells of each session set aside."""
+        disturbed = []
         for attempt in range(IDLE_TRIES if probe['idle'] else 1):
             tag = f"{probe['name']}-{n}" + (f'-again{attempt}' if attempt else '')
             result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
             problem = paints_problem(probe, step_paints(stderr))
             if not problem:
-                return result
-        raise Refused(f"{probe['name']} at {n}: {problem}")
+                return {**result, 'disturbed': disturbed}
+            disturbed.append(problem)
+        raise Refused(f"{probe['name']} at {n}: {'; '.join(disturbed)}")
 
     def close(self):
         self.live.stop(self.compositor)
@@ -330,8 +338,7 @@ def run_gui_probes(binary, home, probes, timeout):
     rows = []
     with tempfile.TemporaryDirectory(prefix='scaling-', dir=runtime) as temporary:
         Path(temporary).chmod(0o700)
-        gui = Gui(home, Path(temporary), timeout)
-        gui.binary = binary
+        gui = Gui(binary, home, Path(temporary), timeout)
         try:
             for probe in probes:
                 try:
