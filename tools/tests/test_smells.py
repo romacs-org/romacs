@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """tools/lib/smells.py: what counts as each smell, the lint census's dedup and
 attribution, and the floors ratchet in both directions."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -246,6 +248,81 @@ def rise(what, have, had, over=1):
             f"; remove {over}, or set its floor in ledger/smell-floors.json {over} above the merge-base's")
 
 
+class ClippyTreeTest(unittest.TestCase):
+    """A checkout's clippy tree names its checkout, and goes when the checkout does."""
+
+    def setUp(self):
+        self.base, self.home = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.base)
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def tree(self, checkout, device=None):
+        tree = smells.clippy_tree(self.base, checkout)
+        tree.mkdir()
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        smells.record_owner(tree, checkout)
+        if device is not None:
+            (tree / smells.DEVICE).write_text(str(device))
+        return tree
+
+    def prune(self):
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
+                mock.patch.object(sys, 'argv', ['smells.py', 'prune']), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(smells.main(), 0)
+        return sorted(p.name for p in self.base.iterdir() if not p.name.endswith('.lock'))
+
+    def test_only_a_tree_whose_checkout_is_gone_is_pruned(self):
+        live, gone = self.home / 'live', self.home / 'gone'
+        live.mkdir(), gone.mkdir()
+        kept = [self.tree(live), self.base / 'legacy']
+        kept[1].mkdir()
+        self.tree(gone)
+        gone.rmdir()
+        self.assertEqual(self.prune(), sorted(p.name for p in kept))
+
+    def test_a_recorded_path_is_read_exactly(self):
+        for name in ('live\n', 'cr\r', 'crlf\r\n'):
+            checkout = self.home / name
+            checkout.mkdir()
+            tree = self.tree(checkout)
+            self.assertEqual(smells.owner(tree)[0], str(checkout.resolve()))
+            self.assertEqual(self.prune(), [tree.name])
+            checkout.rmdir()
+            self.assertEqual(self.prune(), [])
+
+    def test_a_checkout_whose_disk_is_away_is_kept(self):
+        mount = self.home / 'mnt'
+        tree = self.tree(mount / 'repo', device=smells.os.stat(self.home).st_dev + 1)
+        self.assertEqual(self.prune(), [tree.name], 'the mount point is left, on another device')
+        shutil.rmtree(mount)
+        self.assertEqual(self.prune(), [tree.name], 'no mount point at all')
+
+    def test_a_directory_not_named_for_its_recorded_checkout_is_kept(self):
+        foreign = self.base / 'archive'
+        foreign.mkdir()
+        (foreign / smells.OWNER).write_text(str(self.home / 'gone'))
+        self.assertEqual(self.prune(), ['archive'])
+
+    def test_a_tree_in_use_is_kept(self):
+        gone = self.home / 'gone'
+        tree = self.tree(gone)
+        with smells.tree_lock(self.base, tree.name) as held:
+            smells.fcntl.flock(held, smells.fcntl.LOCK_EX)
+            self.assertEqual(self.prune(), [tree.name])
+        self.assertEqual(self.prune(), [])
+
+    def test_running_clippy_records_the_checkout(self):
+        checkout = self.home / 'repo'
+        checkout.mkdir()
+        done = subprocess.CompletedProcess([], 0, stdout='')
+        with mock.patch.dict(os.environ, {'ROMACS_CLIPPY_TARGET_DIR': str(self.base)}), \
+                mock.patch.object(smells.subprocess, 'run', return_value=done) as run:
+            smells.run_clippy(checkout)
+        tree = smells.clippy_tree(self.base, checkout)
+        self.assertEqual((tree / smells.OWNER).read_text(), str(checkout.resolve()))
+        self.assertEqual(run.call_args.kwargs['env']['CARGO_TARGET_DIR'], str(tree))
+
+
 class MergeBaseTest(unittest.TestCase):
     """rises(floors, the merge-base's floors, the merge-base's counts, the tree's counts)."""
 
@@ -467,6 +544,12 @@ class BaseCountsTest(unittest.TestCase):
     def test_no_such_trunk_is_an_error(self):
         with self.assertRaises(ValueError):
             self.check(base='no-such-branch')
+
+    def test_a_clone_without_the_local_trunk_uses_origins(self):
+        self.commit(6)                                    # a rise of one over the trunk's 5
+        self.git('update-ref', 'refs/remotes/origin/trunk', 'trunk')
+        self.git('branch', '-q', '-D', 'trunk')
+        self.assertEqual(self.check(), [rise('lint clippy::doc_markdown', 6, 5)])
 
 
 class CargoSettingsTest(unittest.TestCase):
