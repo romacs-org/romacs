@@ -981,28 +981,51 @@ and the whole line.")
   "TEXT as a header line shows it: each `%' said literally."
   (string-replace "%" "%%" text))
 
-(defun romacs-agent-ui--header-fit (window)
-  "Cut WINDOW's header where its chat's does not fit it: when the header
-is made again, and when WINDOW's width or buffer changed.
+(defvar-local romacs-agent-ui--header-cuts nil
+  "The windows this chat was in when redisplay last looked, each with its
+width then and the header cut to it where the whole does not fit:
+\(WINDOW WIDTH . CUT).")
+
+(defun romacs-agent-ui--header-cut (window width)
+  "Cut this chat's header to WIDTH columns for WINDOW; with no WIDTH,
+WINDOW shows the chat no more.
 The buffer's `header-line-format' is the whole line, and a window wide
 enough shows that.  A narrower one holds the line cut to its own width as
 its `header-line-format' parameter, so two windows of one chat are each cut
-where they end.  The parameter goes once WINDOW is wide enough or shows
-another buffer; a parameter that is not this function's is left alone."
-  (let* ((text (cdr (buffer-local-value 'romacs-agent-ui--header (window-buffer window))))
-         (width (max 1 (window-body-width window)))
-         (cut (and text (> (string-width text) width)
+where they end.  A parameter that is not the cut this chat gave is left
+alone."
+  (let* ((held (cdr (alist-get window romacs-agent-ui--header-cuts)))
+         (text (cdr romacs-agent-ui--header))
+         (cut (and width text (> (string-width text) width)
                    (romacs-agent-ui--header-format (romacs-truncate text width))))
-         (held (window-parameter window 'romacs-agent-header)))
-    (unless (equal-including-properties cut held)
-      (when (eq held (window-parameter window 'header-line-format))
-        (set-window-parameter window 'header-line-format cut))
-      (set-window-parameter window 'romacs-agent-header cut))))
+         (same (equal-including-properties cut held)))
+    (unless (or same (not (eq held (window-parameter window 'header-line-format))))
+      (set-window-parameter window 'header-line-format cut))
+    (setf (alist-get window romacs-agent-ui--header-cuts nil t)
+          (and width (cons width (if same held cut))))))
+
+(defun romacs-agent-ui--header-fit (window)
+  "WINDOW shows this chat or shows it no more, or its width changed: its
+cut of the header is for what it shows now.  A window change function, so
+run before a redisplay with what that redisplay will show (a window's old
+buffer's before its new one's)."
+  (romacs-agent-ui--header-cut window (and (eq (window-buffer window) (current-buffer))
+                                           (max 1 (window-body-width window)))))
+
+(defun romacs-agent-ui--header-recut ()
+  "This chat's header was made again, or its buffer is going: each window
+redisplay last saw it in holds its cut of what the header is now, at the
+width it had then.  Not at the width it has now: inside a
+`save-window-excursion' that is a width, or a buffer, no redisplay shows,
+and nothing tells when it is put back."
+  (pcase-dolist (`(,window ,width . ,_) (copy-sequence romacs-agent-ui--header-cuts))
+    (if (window-live-p window) (romacs-agent-ui--header-cut window width)
+      (setf (alist-get window romacs-agent-ui--header-cuts nil t) nil))))
 
 (defun romacs-agent-ui--header-release ()
   "This chat's buffer is going: no window keeps a cut of its header."
   (setq romacs-agent-ui--header nil)
-  (mapc #'romacs-agent-ui--header-fit (get-buffer-window-list nil nil t)))
+  (romacs-agent-ui--header-recut))
 
 (defun romacs-agent-ui--header-refresh (session &optional force)
   "Make the header of SESSION's chat say what SESSION says now.
@@ -1021,17 +1044,19 @@ glyph changed."
             (setq romacs-agent-ui--header (cons inputs (if same (cdr romacs-agent-ui--header) text)))
             (unless same
               (setq header-line-format (romacs-agent-ui--header-format text))
-              (mapc #'romacs-agent-ui--header-fit (get-buffer-window-list buffer nil t))
+              (romacs-agent-ui--header-recut)
               (force-mode-line-update))))))))
 
 (add-hook 'romacs-agent-changed-functions #'romacs-agent-ui--header-refresh)
 
 (defun romacs-agent-ui--glyphs-changed ()
   "What draws a glyph changed (`romacs-agent-glyphs', the frame's font):
-every session's workers' line and header are made again."
-  (dolist (session (romacs-agent-sessions))
-    (romacs-agent-ui--summarize-children session)
-    (romacs-agent-ui--header-refresh session t)))
+every session's workers' line is made again, and every chat's header, a
+transcript's view's too, whose session is no recorded one."
+  (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
+  (dolist (buffer (buffer-list))
+    (when-let* ((session (buffer-local-value 'romacs-agent-ui--session buffer)))
+      (romacs-agent-ui--header-refresh session t))))
 
 (add-hook 'after-setting-font-hook #'romacs-agent-ui--glyphs-changed)
 

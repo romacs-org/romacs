@@ -90,10 +90,11 @@ a step is the host's load, so `chat-tick' runs what it does as its step."
     buffer))
 
 (defun display-stages--delta (buffer i)
-  "Stream the I-th 20-character delta of the reply into the chat BUFFER."
-  (romacs-agent-ui--render (buffer-local-value 'romacs-agent-ui--session buffer)
-                           (list :type 'delta :text "some streamed words " :message "stream"
-                                 :seq (+ 5002 i) :last t)))
+  "Stream the I-th 20-character delta of the reply into the chat BUFFER, as
+its session raises it: drawn, and every view of the session told."
+  (romacs-agent--raise (buffer-local-value 'romacs-agent-ui--session buffer)
+                       (list :type 'delta :text "some streamed words " :message "stream"
+                             :seq (+ 5002 i) :last t)))
 
 ;; A timer ran and nothing changed: the frame is frozen and compared.
 (display-stages-scenario plain-idle
