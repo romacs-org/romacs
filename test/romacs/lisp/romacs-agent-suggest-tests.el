@@ -7,11 +7,12 @@
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
-(let ((romacs-mcp-call-function romacs-mcp-call-function)
-      (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
-  (require 'romacs-agent)
-  (require 'romacs-agent-claude)
-  (require 'romacs-agent-ui))
+(eval-and-compile
+  (let ((romacs-mcp-call-function romacs-mcp-call-function)
+        (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+    (require 'romacs-agent)
+    (require 'romacs-agent-claude)
+    (require 'romacs-agent-ui)))
 
 (defmacro romacs-agent-suggest-tests--registry (&rest body)
   "BODY with the driver registry its own: what it defines goes with it."
