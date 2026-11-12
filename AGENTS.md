@@ -34,6 +34,11 @@ possible; say so where you do.
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
+- Reach for a safe API before `unsafe`. A new unsafe site needs a stated
+  reason, in its comment or its module's doc, that no crate in `Cargo.lock`
+  covers the call safely: rustix for system calls, memmap2 for mappings,
+  libloading for libraries, the tree-sitter crate for parse trees. Keep what
+  remains in one small safe wrapper per module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
   the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
   each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
