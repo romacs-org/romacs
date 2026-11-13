@@ -43,7 +43,7 @@ list last ended at, from which the next mapping is appended."
         (when key
           ;; GNU reads the table at KEY, which signals for one that is
           ;; no character.
-          (or char (characterp key) (aref table key))
+          (unless (or char (characterp key)) (ignore (aref table key)))
           (let* ((page (or (aref pages (/ key 256))
                            (aset pages (/ key 256) (make-vector 256 nil))))
                  (slot (% key 256))
