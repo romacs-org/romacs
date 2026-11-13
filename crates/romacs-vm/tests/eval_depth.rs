@@ -253,13 +253,13 @@ fn compiler_remaining_stack_guard_is_recoverable() {
 fn gnu_real_compiler_fixtures_survive_on_two_mib() {
     if std::env::var_os("ROMACS_DEPTH_GNU_FIXTURE_CHILD").is_some() {
         std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
-            for (origin, source, line, prefix) in [
-                ("comp-common.el:71", include_str!("../../../lisp/gnu/emacs-lisp/comp-common.el"), 71, "(defconst comp-primitive-type-specifiers"),
-                ("cus-start.el:44", include_str!("../../../lisp/gnu/cus-start.el"), 44, "(let* ((quoter"),
+            for (origin, source, prefix) in [
+                ("comp-common.el", include_str!("../../../lisp/gnu/emacs-lisp/comp-common.el"), "(defconst comp-primitive-type-specifiers"),
+                ("cus-start.el", include_str!("../../../lisp/gnu/cus-start.el"), "(let* ((quoter"),
             ] {
-                let offset: usize = source.split_inclusive('\n').take(line - 1).map(str::len).sum();
+                // The form by its text at a line's start, not by its line: the file's edits move it.
+                let offset = source.find(&format!("\n{prefix}")).unwrap_or_else(|| panic!("DEPTH_GNU_FIXTURE_ID: {origin}")) + 1;
                 let tail = &source[offset..];
-                assert!(tail.starts_with(prefix), "DEPTH_GNU_FIXTURE_ID: {origin}");
                 let mut vm = Vm::new();
                 let end = vm.read_source(tail).unwrap().unwrap().1;
                 let got = vm.compile_source(&tail[..end]);
