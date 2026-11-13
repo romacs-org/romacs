@@ -240,6 +240,8 @@ mod fillarray_char_table;
 mod find_charset;
 #[path = "../fixnums.rs"]
 mod fixnums;
+#[path = "../flat_tables.rs"]
+mod flat_tables;
 #[path = "../floats.rs"]
 mod floats;
 #[path = "../fmakunbound.rs"]
