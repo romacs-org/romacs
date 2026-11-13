@@ -17,6 +17,17 @@ impl Leaf<'_> {
     pub(crate) fn host_input_pending(&mut self) -> bool {
         self.vm.quit_input_pending() || self.vm.host_input_pending()
     }
+
+    /// `romacs--take-key-repeats`: (REPEATS AFTER-PRESS LONGEST-HOLD-MS)
+    /// from the attached host's display, else nil.
+    pub(crate) fn take_key_repeats(&mut self) -> crate::prim::Out {
+        let Some(counts) = self.vm.host_input.as_mut().and_then(|host| host.take_key_repeats()) else { return Ok(Value::NIL) };
+        let int = |n: u64| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).map_err(Fault::Error);
+        let after_press = counts.after_press.iter().map(|&n| int(n)).collect::<std::result::Result<Vec<_>, _>>()?;
+        let after_press = self.vector_from(after_press);
+        let items = [int(counts.repeats)?, after_press, int(counts.longest_hold_ms)?];
+        Ok(items.iter().rev().fold(Value::NIL, |tail, &v| self.cons(v, tail)))
+    }
 }
 
 impl Leaf<'_> {

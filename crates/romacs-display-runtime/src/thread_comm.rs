@@ -15,6 +15,7 @@ use crate::host_types::GuiFrameGeometryHints;
 pub(crate) use frame_opacity::FrameOpacityState;
 use romacs_display_protocol::{
     ImageId, ImageLoadToken,
+    key_repeat_log::KeyRepeatLog,
 };
 pub use romacs_display_protocol::{
     ImageStateEvent, MenuBarItem, PopupMenuItem, TabBarItem, ToolBarImageSource, ToolBarItem,
@@ -474,6 +475,8 @@ pub(crate) const MODEL_REQUEST_ROOM: usize = COMMAND_CHANNEL_CAPACITY / 4;
 pub(crate) struct ThreadComms {
     /// The pointer over the primary window: Render → Emacs.
     pub pointer: Arc<PointerCell>,
+    /// What the render thread saw of native key repeat: Render → Emacs.
+    pub key_repeats: Arc<KeyRepeatLog>,
 
     /// Commands: Emacs → Render
     pub cmd_tx: CommandSender,
@@ -506,6 +509,7 @@ impl ThreadComms {
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         Self {
             pointer: Arc::default(),
+            key_repeats: Arc::default(),
             cmd_tx,
             cmd_rx,
             input_tx,
@@ -520,6 +524,7 @@ impl ThreadComms {
     pub fn split(self) -> (EmacsComms, RenderComms) {
         let emacs = EmacsComms {
             pointer: self.pointer.clone(),
+            key_repeats: Arc::clone(&self.key_repeats),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
             model_renderer: Arc::clone(&self.model_renderer),
@@ -529,6 +534,7 @@ impl ThreadComms {
 
         let render = RenderComms {
             pointer: self.pointer,
+            key_repeats: self.key_repeats,
             input_interrupt: None,
             keep_alive_without_frames: false,
             native_window_waits: None,
@@ -554,6 +560,7 @@ impl Default for ThreadComms {
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
     pub pointer: Arc<PointerCell>,
+    pub key_repeats: Arc<KeyRepeatLog>,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
@@ -577,6 +584,7 @@ pub trait InputInterrupt: Send + Sync {
 /// Render thread communication handle
 pub(crate) struct RenderComms {
     pub pointer: Arc<PointerCell>,
+    pub key_repeats: Arc<KeyRepeatLog>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
     pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,

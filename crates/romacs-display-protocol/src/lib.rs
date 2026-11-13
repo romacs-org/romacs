@@ -24,6 +24,7 @@ pub mod image;
 pub mod image_diagnostic;
 pub mod input_progress;
 pub mod interaction_projection;
+pub mod key_repeat_log;
 pub mod menu;
 pub mod model;
 pub mod modifier_policy;
