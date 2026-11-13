@@ -43,6 +43,19 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
 
 
+;;; Generated autoloads from romacs-agent-board.el
+
+(autoload 'romacs-agents "romacs-agent-board"
+"Show the agent board over the frame: every agent thread by project,
+those that want you first, then the newest, with what each delegated
+folded under it.  Its keys act on the thread at point;
+\\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
+\\{romacs-agent-board-mode-map}" t)
+(defalias 'romacs-agent-switch #'romacs-agents)
+(defalias 'romacs-agent-switch-chat #'romacs-agents)
+(register-definition-prefixes "romacs-agent-board" '("romacs-agent-board-"))
+
+
 ;;; Generated autoloads from romacs-agent-claude.el
 
 (register-definition-prefixes "romacs-agent-claude" '("romacs-agent--claude-"))
@@ -109,25 +122,16 @@ Interactively, open the chat without sending an initial prompt.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
-(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agent-switch-chat) (define-key map "a" #'romacs-agents) map)
+(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agents) (define-key map "a" #'romacs-agents) map)
 "Global prefix map for starting and finding agent sessions.
 \\{romacs-agents-map}")
  (define-key global-map (kbd "C-c C-;") romacs-agents-map)
-(autoload 'romacs-agent-switch "romacs-agent-ui"
-"Switch to agent SESSION, in this window, chosen by what each is doing:
-those that want you first, finished delegated tasks last, each with its
-state, last activity, context, model, project and the start of its last
-reply.  A session with no chat yet gets one.
+(register-definition-prefixes "romacs-agent-ui" '("romacs-agent-"))
 
-(fn SESSION)" t)
-(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
-"Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
-only sessions whose chat is open.
+
+;;; Generated autoloads from romacs-agent-watch.el
 
-(fn SESSION)" t)
-(autoload 'romacs-agents "romacs-agent-ui"
-"Show every agent session, by project." t)
-(register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
+(register-definition-prefixes "romacs-agent-watch" '("romacs-agent-watch-"))
 
 
 ;;; Generated autoloads from romacs-agent-worktree.el
@@ -203,6 +207,11 @@ they are typed: any other key closes it and runs as usual.
 ;;; Generated autoloads from romacs-coding.el
 
 (register-definition-prefixes "romacs-coding" '("default-file-name-coding-system" "romacs-unsafe-coding" "select-safe-coding-system-interactively"))
+
+
+;;; Generated autoloads from romacs-commands.el
+
+(register-definition-prefixes "romacs-commands" '("read-extended-command-1" "romacs-commands-"))
 
 
 ;;; Generated autoloads from romacs-companion.el
@@ -344,6 +353,11 @@ disabled.
 (register-definition-prefixes "romacs-find-file" '("auto-mode-alist" "file-name-history" "find-file-" "romacs-find-file-"))
 
 
+;;; Generated autoloads from romacs-follow.el
+
+(register-definition-prefixes "romacs-follow" '("romacs-follow-"))
+
+
 ;;; Generated autoloads from romacs-fontify.el
 
 (register-definition-prefixes "romacs-fontify" '("romacs-fontify-"))
@@ -400,6 +414,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
 
 
+;;; Generated autoloads from romacs-json.el
+
+(register-definition-prefixes "romacs-json" '("json-read" "romacs-json--"))
+
+
 ;;; Generated autoloads from romacs-keeper.el
 
 (register-definition-prefixes "romacs-keeper" '("romacs-"))
@@ -412,7 +431,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("posn-point"))
 
 
 ;;; Generated autoloads from romacs-landing.el
@@ -427,7 +446,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "project-list-file" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el
@@ -513,6 +532,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
 
 
+;;; Generated autoloads from romacs-mule.el
+
+(register-definition-prefixes "romacs-mule" '("make-translation-table-from-alist" "romacs-mule--translation-map"))
+
+
 ;;; Generated autoloads from romacs-nnheader.el
 
 (register-definition-prefixes "romacs-nnheader" '("romacs-nnheader--find-etc"))
@@ -595,6 +619,44 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-saved-settings.el
 
 (register-definition-prefixes "romacs-saved-settings" '("romacs-saved-settings-"))
+
+
+;;; Generated autoloads from romacs-scanner.el
+
+(autoload 'romacs-scanner-make "romacs-scanner"
+"Return the scanner whose step function is STEP and first state INITIAL.
+STEP is a pure function of a state and a character returning
+(NEW-STATE . MARK); see the commentary of this library.  It is called
+here on every character in every state reachable from INITIAL, and never
+again.
+
+(fn STEP INITIAL)")
+(autoload 'romacs-scanner-scan "romacs-scanner"
+"Run SCANNER over the current buffer's text from START to END.
+Return (STATE . POSITIONS): the state after the last character and the
+positions, in order, of the characters the step function marked.  START
+and END default to the accessible text's ends.  STATE is the state before
+START; nil means SCANNER's first state.
+
+(fn SCANNER &optional START END STATE)")
+(autoload 'romacs-scanner-count "romacs-scanner"
+"Run SCANNER as `romacs-scanner-scan' does; return (STATE . COUNT).
+COUNT is how many characters the step function marked.
+
+(fn SCANNER &optional START END STATE)")
+(autoload 'define-scanner "romacs-scanner"
+"Define NAME as the scanner with step function STEP and first state INITIAL.
+STEP is a pure function of a state and a character that returns
+(NEW-STATE . MARK): the state after the character, and non-nil to mark
+it.  It is given every non-ASCII character as `romacs-scanner-other'.
+The function is run on every character in every reachable state when
+NAME is defined, and never again: a scan reads the resulting table.
+DOCSTRING documents NAME.  Run it with `romacs-scanner-scan' or
+`romacs-scanner-count'.
+
+(fn NAME STEP INITIAL &optional DOCSTRING)" nil t)
+(function-put 'define-scanner 'doc-string-elt 4)
+(register-definition-prefixes "romacs-scanner" '("romacs-scanner-"))
 
 
 ;;; Generated autoloads from romacs-server.el
@@ -1554,6 +1616,17 @@ Optional VALIDATE checks caller ownership before selection and replacement.
 
 ;;; Generated autoloads from gnosis-scheduler.el
 
+(autoload 'gnosis-scheduler-drift "gnosis-scheduler"
+"Return the reviews in DB that today's FSRS schedules differently.
+Replay every reviewed thema from its recorded results and list
+(THEMA-ID . DRIFT) for each with drift, DRIFT as
+`gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
+one whose history does not replay.  The collection is read in two
+queries and each review recomputed once; nothing is written.
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report').
+
+(fn &optional DB)" t)
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
 "Select user-wide desired RETENTION for future accepted reviews.
 Append an immutable configuration snapshot.  Existing due dates and events
@@ -1563,6 +1636,18 @@ require its longest model interval to fit the current year's scheduler
 calendar.  Unsupported values signal `user-error'; intervals are not capped.
 
 (fn RETENTION)" t)
+(autoload 'gnosis-scheduler-fit-parameters "gnosis-scheduler"
+"Return FSRS weights fitted to the effective review history in DB.
+The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area.
+
+(fn &optional DB)" t)
 (register-definition-prefixes "gnosis-scheduler" '("gnosis-scheduler-"))
 
 

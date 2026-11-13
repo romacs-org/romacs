@@ -738,9 +738,23 @@ fn generate_variable_sites(root: &Path, out: &Path) {
 #[path = "build/attribution_tests.rs"]
 mod attribution_tests;
 
+/// Add this checkout to the list, in the Cargo profile directory it is building into
+/// (`target/PROFILE/romacs-build-trees`), of the trees built there. An executable in that
+/// directory assumes the tree compiled into it only when the list names it (host.rs,
+/// `in_build_target`); one carried into another build's directory finds another list.
+fn name_build_tree(root: &Path, out: &Path) {
+    let (Some(profile), Some(tree)) = (out.ancestors().nth(3), root.parent().and_then(Path::parent)) else { return };
+    let (list, line) = (profile.join("romacs-build-trees"), tree.display().to_string());
+    let known = fs::read_to_string(&list).unwrap_or_default();
+    if !known.lines().any(|known| known == line) {
+        fs::write(&list, format!("{known}{line}\n")).unwrap_or_else(|error| panic!("cannot write {}: {error}", list.display()));
+    }
+}
+
 fn main() {
     let root = env::current_dir().unwrap();
     let out = std::path::PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    name_build_tree(&root, &out);
     generate_primitives(&root, &out);
     generate_variable_sites(&root, &out);
     let mut hash = Sha256::new();

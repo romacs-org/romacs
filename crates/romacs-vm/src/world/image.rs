@@ -38,7 +38,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 44] = [
+        let checks: [(&str, bool); 45] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -72,6 +72,7 @@ impl Vm {
             ("execution", self.execution.holds_nothing()),
             ("spare_programs", self.spare_programs.is_empty()),
             ("regexp_cache", self.regexp_cache.is_empty()),
+            ("flat_tables", self.flat_tables.is_empty()),
             ("mode_line_forms", self.mode_line_forms.is_empty()),
             ("lambda_lists", self.lambda_lists.is_empty()),
             ("status_bar_line", self.status_bar_line.is_none()),
@@ -104,6 +105,8 @@ impl Vm {
     pub fn world_reinit(&mut self) {
         // The environment lists, from this process's environment.
         self.environment_snapshot = Some(crate::environment::snapshot());
+        // HOST(slot:process-environment): rebuilds the environment lists from this process
+        // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
@@ -128,6 +131,7 @@ impl Vm {
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
         self.reset_collection_counters();
+        self.forget_system_name();
     }
 }
 
@@ -161,6 +165,9 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    // With the other counters of the process: what the VM stores from now
+    // on is stamped at or above the epoch its last collection ended at.
+    crate::epoch::raise(root.0.allocation.since);
     Some(*root)
 }
 

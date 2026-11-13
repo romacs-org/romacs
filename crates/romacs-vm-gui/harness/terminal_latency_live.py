@@ -32,11 +32,9 @@ usage: terminal_latency_live.py --base PATH --candidate PATH --output DIR
 """
 import argparse
 import json
-import os
 from pathlib import Path
 import statistics
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -92,95 +90,72 @@ def percentile(values, p):
     return ordered[min(len(ordered) - 1, int(round(p * (len(ordered) - 1))))]
 
 
-def session(binary, regime, keys, delay, timeout, log_path):
-    """One session's phases: {phase: {'latency_ns': [...], 'frames_per_key': F}}."""
+def prepare(s):
+    """The reader the terminal runs, and the file the binary visits."""
+    (s.work / 'reader.py').write_text(READER)
+    (s.work / 'original.txt').write_text('Terminal latency sentinel\n')
+
+
+def session(binary, regime, keys, delay, timeout, output, name):
+    """One session's phases, logging to OUTPUT/NAME.stderr: {phase:
+    {'latency_ns': [...], 'frames_per_key': F}}."""
     letters = ''.join(chr(ord('a') + i % 26) for i in range(keys))
-    with tempfile.TemporaryDirectory(prefix='term-lat-') as temporary:
-        root = Path(temporary)
-        root.chmod(0o700)
-        home, work, config = root / 'home', root / 'work', root / 'config'
-        for directory in (home, work, config):
-            directory.mkdir()
-        (work / 'reader.py').write_text(READER)
-        original = work / 'original.txt'
-        original.write_text('Terminal latency sentinel\n')
-        (config / 'rc.xml').write_text(live.RC_XML)
-        env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-               'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-               'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-               'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-               'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-               'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
-               'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': '/bin/sh'}
-        compositor = process = keyboard = None
+    # The terminal in this process, as these journeys always measured it; a
+    # kept terminal is term_keep_live.py's.  (A host copied alone has no
+    # keeper beside it, and a session meant to use one would refuse.)
+    args = ('-Q', *(['--loadup'] if regime == 'loadup' else []), '--eval', '(setq romacs-keeper-enabled nil)',
+            '--trace-latency', 'original.txt')
+    with live.session(binary, output, prefix='term-lat-', args=args, size='1600x1000', prepare=prepare,
+                      env={'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': '/bin/sh'},
+                      log=f'{name}.stderr', compositor_log=f'{name}-compositor.log') as s:
+        env, process, work, log_path = s.env, s.process, s.work, s.log
+
+        def trace():
+            return log_path.read_text(errors='replace')
+
+        def type_keys(*parts, pause=.15):
+            subprocess.run(['/usr/bin/wtype', *parts], env=env, check=True, timeout=600)
+            time.sleep(pause)
+
+        # No scene dumps (they would cost every paint): the first
+        # paint, then the M-x prompt's, then the reader's own file.
+        fio.wait(lambda: '"diagnostic":"paint"' in trace(), timeout, 'first paint', process)
+        time.sleep(1)
+        before = len(trace())
+        type_keys('-M', 'alt', 'x', '-m', 'alt')
         try:
-            with log_path.open('w') as log:
-                compositor = subprocess.Popen([live.LABWC, '-C', str(config)], env=env,
-                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), timeout, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                subprocess.run([live.RANDR, '--output', 'HEADLESS-1', '--custom-mode', '1600x1000'],
-                               env=env, check=True, timeout=15)
-                # A keyboard on the seat before the first modifier is sent.
-                keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
-                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(.3)
-                # The terminal in this process, as these journeys always measured it; a
-                # kept terminal is term_keep_live.py's.  (A host copied alone has no
-                # keeper beside it, and a session meant to use one would refuse.)
-                argv = [str(binary), '-Q'] + (['--loadup'] if regime == 'loadup' else []) + ['--eval', '(setq romacs-keeper-enabled nil)', '--trace-latency', str(original)]
-                process = subprocess.Popen(argv, env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-
-                def trace():
-                    return log_path.read_text(errors='replace')
-
-                def type_keys(*parts, pause=.15):
-                    subprocess.run(['/usr/bin/wtype', *parts], env=env, check=True, timeout=600)
-                    time.sleep(pause)
-
-                # No scene dumps (they would cost every paint): the first
-                # paint, then the M-x prompt's, then the reader's own file.
-                fio.wait(lambda: '"diagnostic":"paint"' in trace(), timeout, 'first paint', process)
-                time.sleep(1)
-                before = len(trace())
-                type_keys('-M', 'alt', 'x', '-m', 'alt')
-                try:
-                    fio.wait(lambda: '"prompt-paint"' in trace()[before:], 5, 'the M-x prompt', process)
-                except AssertionError:
-                    pass  # GNU's minibuffer (--loadup) paints no prompt of the GUI's own
-                type_keys('romacs-term', '-k', 'Return', pause=2)
-                phases = {}
-                for phase in ('typing', 'output'):
-                    out = work / f'{phase}.json'
-                    type_keys(f'python3 reader.py {phase}.json {phase}', '-k', 'Return')
-                    fio.wait(lambda: Path(str(out) + '.ready').exists(), timeout, f'{phase} reader', process)
-                    time.sleep(.5)
-                    start = trace()
-                    offset, first_frame = len(start), last_presentation(start)
-                    type_keys('-d', str(delay), letters, pause=.5)
-                    end = trace()
-                    frames = last_presentation(end) - first_frame
-                    type_keys('-M', 'ctrl', ']', '-m', 'ctrl')
-                    fio.wait(out.exists, timeout, f'{phase} stamps', process)
-                    ingress = [r['monotonic_ns'] for r in records(end[offset:], '"key-ingress"')][:keys]
-                    arrivals = []
-                    for stamp, data in json.loads(out.read_text()):
-                        arrivals.extend((stamp, byte) for byte in bytes.fromhex(data))
-                    got = bytes(b for _, b in arrivals[:keys]).decode(errors='replace')
-                    if got != letters or len(ingress) != keys:
-                        phases[phase] = {'refused': f'{len(ingress)} ingress records; bytes {got[:40]!r}...'}
-                        continue
-                    latency = [t - i for (t, _), i in zip(arrivals, ingress)]
-                    if min(latency) <= 0:
-                        phases[phase] = {'refused': f'a byte arrived before its key: {min(latency)} ns'}
-                        continue
-                    phases[phase] = {'latency_ns': latency, 'frames_per_key': frames / keys,
-                                     'p50_ns': percentile(latency, .5), 'p95_ns': percentile(latency, .95)}
-                return phases
-        finally:
-            for proc in (process, keyboard, compositor):
-                if proc is not None:
-                    live.stop(proc)
+            fio.wait(lambda: '"prompt-paint"' in trace()[before:], 5, 'the M-x prompt', process)
+        except AssertionError:
+            pass  # GNU's minibuffer (--loadup) paints no prompt of the GUI's own
+        type_keys('romacs-term', '-k', 'Return', pause=2)
+        phases = {}
+        for phase in ('typing', 'output'):
+            out = work / f'{phase}.json'
+            type_keys(f'python3 reader.py {phase}.json {phase}', '-k', 'Return')
+            fio.wait(lambda: Path(str(out) + '.ready').exists(), timeout, f'{phase} reader', process)
+            time.sleep(.5)
+            start = trace()
+            offset, first_frame = len(start), last_presentation(start)
+            type_keys('-d', str(delay), letters, pause=.5)
+            end = trace()
+            frames = last_presentation(end) - first_frame
+            type_keys('-M', 'ctrl', ']', '-m', 'ctrl')
+            fio.wait(out.exists, timeout, f'{phase} stamps', process)
+            ingress = [r['monotonic_ns'] for r in records(end[offset:], '"key-ingress"')][:keys]
+            arrivals = []
+            for stamp, data in json.loads(out.read_text()):
+                arrivals.extend((stamp, byte) for byte in bytes.fromhex(data))
+            got = bytes(b for _, b in arrivals[:keys]).decode(errors='replace')
+            if got != letters or len(ingress) != keys:
+                phases[phase] = {'refused': f'{len(ingress)} ingress records; bytes {got[:40]!r}...'}
+                continue
+            latency = [t - i for (t, _), i in zip(arrivals, ingress)]
+            if min(latency) <= 0:
+                phases[phase] = {'refused': f'a byte arrived before its key: {min(latency)} ns'}
+                continue
+            phases[phase] = {'latency_ns': latency, 'frames_per_key': frames / keys,
+                             'p50_ns': percentile(latency, .5), 'p95_ns': percentile(latency, .95)}
+        return phases
 
 
 def verdict(base, candidate, bar):
@@ -225,7 +200,7 @@ def main():
         for who in order:
             binary = args.base if who == 'base' else args.candidate
             phases = session(binary.resolve(), args.regime, args.keys, args.delay, args.timeout,
-                             args.output / f'{who}-{pair}.stderr')
+                             args.output, f'{who}-{pair}')
             runs[who].append(phases)
             print(who, pair, {p: v.get('refused') or (v['p50_ns'], v['p95_ns'], round(v['frames_per_key'], 3)) for p, v in phases.items()}, flush=True)
     report = {'regime': args.regime, 'pairs': args.pairs, 'keys': args.keys, 'delay_ms': args.delay, 'bar': args.bar,

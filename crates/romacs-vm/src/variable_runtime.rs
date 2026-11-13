@@ -127,6 +127,56 @@ mod reclamation_tests {
     }
 }
 use super::*;
+
+#[cfg(test)]
+thread_local! {
+    /// The variables this thread's VMs have read through `Vm::variable_value`.
+    static VARIABLE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The variables this thread's VMs have read through `Vm::variable_value`.
+#[cfg(test)]
+pub(crate) fn variable_reads() -> usize {
+    VARIABLE_READS.with(std::cell::Cell::get)
+}
+
+/// Where one buffer's value of a variable is read from.
+#[derive(Clone, Copy)]
+enum Place {
+    /// A symbol slot's value cell: the variable's own, or the buffer's
+    /// private binding of it.
+    Slot(usize),
+    /// A built-in's native storage.
+    Native(forwarded::Fwd),
+    /// Found at each read: an alias, a per-buffer or a fenced built-in.
+    Each,
+}
+
+/// Variables a primitive reads at every call, and where their values in one
+/// buffer are (`Vm::read_places`): GNU reads a C variable, into which
+/// set-buffer swapped the buffer's binding. A place holds for its buffer
+/// until a local-binding table changes or a collection moves the buffer
+/// (`Forwarded::local_epoch`, as `Vm::eval_limit_local`), and while the
+/// variable's redirect is the one it was found under (an alias, a fence
+/// and a first localization each change it).
+#[derive(Clone, Copy)]
+pub(crate) struct Places<const N: usize> {
+    symbols: [usize; N],
+    buffer: Value,
+    epoch: u64,
+    /// Each variable's redirect when found, and where it was found.
+    found: [(Option<VariableRedirect>, Place); N],
+}
+impl<const N: usize> Places<N> {
+    /// Of the variables at symbol slots SYMBOLS, none found yet.
+    pub(crate) fn new(symbols: [usize; N]) -> Self {
+        Self { symbols, buffer: Value::UNBOUND, epoch: 0, found: [(None, Place::Each); N] }
+    }
+    /// The symbol slot of variable I.
+    pub(crate) fn symbol(&self, i: usize) -> usize {
+        self.symbols[i]
+    }
+}
+
 impl Vm {
     /// GNU eval.c:747: search oldest-first for this exact symbol, without
     /// following aliases. Local bindings are excluded; localized ordinary
@@ -134,6 +184,7 @@ impl Vm {
     /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         self.dynamic.iter().position(|(bound, _, _, let_default)| {
             *bound == slot && (!buffer_forwarded || *let_default)
         })
@@ -148,6 +199,7 @@ impl Vm {
         let symbol = Value::reference(slot + 1, 7);
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
         self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             let (bound, _, owner, let_default) = self.dynamic[at];
             owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
         })
@@ -277,6 +329,7 @@ impl Vm {
         let explicit = self.slots[slot].explicit_local;
         // Assignment within a default binding belongs to that binding in
         // its originating buffer, not to a newly created local entry.
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, localized)| {
             *localized && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
         });
@@ -318,6 +371,8 @@ impl Vm {
         Ok(self.slots[slot].value)
     }
     pub(super) fn variable_value(&mut self, slot: usize) -> Result<Value> {
+        #[cfg(test)]
+        VARIABLE_READS.with(|reads| reads.set(reads.get() + 1));
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             let local = self.variable_binding_slot(base, false)?;
@@ -325,6 +380,62 @@ impl Vm {
         }
         let local = self.variable_binding_slot(slot, false)?;
         Ok(self.slots[local].value)
+    }
+    /// The values of PLACES' variables in the current buffer, each as
+    /// `variable_value` gives it, read where they were found: None when
+    /// the places no longer hold, or one of them is found at each read,
+    /// for [`Self::find_places`].
+    #[inline]
+    pub(crate) fn read_places<const N: usize>(&self, places: &Places<N>) -> Option<[Value; N]> {
+        if places.buffer != self.slots[self.buffer_slot].value || places.epoch != self.forwarded.local_epoch {
+            return None;
+        }
+        // By index: every call of a search or a scan comes through here.
+        let mut values = [Value::NIL; N];
+        let mut i = 0;
+        while i < N {
+            let (redirect, place) = places.found[i];
+            if self.variable_redirects.get(places.symbols[i]).copied().flatten() != redirect {
+                return None;
+            }
+            values[i] = match place {
+                Place::Slot(slot) => self.slots[slot].value,
+                Place::Native(fwd) => self.forwarded.stored(fwd)?,
+                Place::Each => return None,
+            };
+            i += 1;
+        }
+        Some(values)
+    }
+    /// The values of PLACES' variables in the current buffer, each read
+    /// with `variable_value`, and PLACES made theirs there.
+    #[cold]
+    pub(crate) fn find_places<const N: usize>(&mut self, places: &mut Places<N>) -> Result<[Value; N]> {
+        let mut values = [Value::NIL; N];
+        for (i, value) in values.iter_mut().enumerate() {
+            let symbol = places.symbols[i];
+            *value = self.variable_value(symbol)?;
+            // After the read, which resolves a lazy redirect.
+            places.found[i] = (self.variable_redirects.get(symbol).copied().flatten(), self.variable_place(symbol)?);
+        }
+        places.buffer = self.slots[self.buffer_slot].value;
+        places.epoch = self.forwarded.local_epoch;
+        Ok(values)
+    }
+    /// Where `variable_value` reads SLOT's value in the current buffer.
+    fn variable_place(&mut self, slot: usize) -> Result<Place> {
+        use forwarded::Fwd;
+        if self.indirect_variable(slot) != slot {
+            return Ok(Place::Each);
+        }
+        Ok(match self.native_forwarding(slot) {
+            Some(fwd @ (Fwd::Obj(_) | Fwd::Bool(_) | Fwd::Int(_))) => {
+                let local = self.variable_binding_slot(slot, false)?;
+                if local == slot { Place::Native(fwd) } else { Place::Slot(local) }
+            }
+            Some(Fwd::Buffer(_) | Fwd::Fence(_)) => Place::Each,
+            None => Place::Slot(self.variable_binding_slot(slot, false)?),
+        })
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
@@ -391,6 +502,8 @@ impl Vm {
     /// Give the forwarded global built-in at SLOT its local-binding table.
     pub(super) fn promote_forwarded_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
         if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
+            // HOST(dynamic:saved): reads saved values of a localized Boolean, which the fence never
+            // holds
             && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
@@ -422,6 +535,7 @@ impl Vm {
         if base != self.buffer_slot {
             self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
         }
+        // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
         self.dynamic.push(binding);
         let mut local = local;
         let mut value = value;
@@ -578,6 +692,8 @@ impl Vm {
                 Ok(value)
             }
             DefvarBoundp => {
+                // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
+                // checks a fenced variable first (F2)
                 let value = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).map(|(_,v,_,_)| *v).unwrap_or(self.slots[slot].value);
                 Ok(truth(value != Value::UNBOUND))
             }
@@ -598,6 +714,8 @@ impl Vm {
             // saved value written in place, without notification.
             DefvarSetDefault => {
                 let value = self.stack[start+1];
+                // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
+                // variable_primitive checks a fenced variable first (F2)
                 if let Some((_,old,_,_)) = self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot) { *old = value; }
                 else {
                     self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;

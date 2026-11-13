@@ -95,8 +95,7 @@ Implementation-time checks:
   reached; the harness correctly returned exit 1 / `pass: false` with
   `binary stdout closed (exit=1)`. This is only a fail-closed launch preflight.
 * The integrated worker subsequently built the real binary and ran all three
-  live variants successfully; see `../evidence/current-oracle-live/summary.json` and
-  `../README.md` for the exact commands, movement proof, and diagnostic limits.
+  live variants successfully; see `../README.md` for the exact commands, movement proof, and diagnostic limits.
   This harness does not invoke Cargo, a full gate, or Git publication.
 
 # Package parity: pinned GNU beside `--loadup`
@@ -347,7 +346,7 @@ The workloads, and how each is counted, are in the script's docstring:
   workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
-  not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
+  not comparable with `test/gnu/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
 * session, real commands and keys in a GUI session on headless labwc:
   dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,
@@ -430,6 +429,33 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+
+## The render thread at rest (`rest_live.py`)
+
+What the render thread draws, and why, while nothing on screen changes.
+Under `ROMACS_DIAGNOSTICS=1` it writes its frame counters as `frame-stats`
+lines on stderr (`render_thread/frame_stats.rs`): frames planned and
+presented per demand reason (`redisplay` for dirty content, `platform_redraw`
+for a redraw nothing of ours asked for, an effect's own name beside
+`redisplay` while it animates), redraw requests and events, the scenes the
+evaluator sent (`scene_commits`) and loop wakeups; one line a second while
+they move, none once they rest, so the last line holds the totals. The
+harness holds one `--loadup` session in four states by real keys and takes
+each state's frames from those lines: idle with the blink off (no frame,
+the main thread under 1% of a core), GNU's blink (two frames a second), an
+agent chat whose turn runs (its clock, one frame a second) and the same
+with a timer 20 times a second that changes nothing. A frame that answers
+no scene of the evaluator's, or names another reason, fails its state, and
+so does a blink or a clock that draws too little for the time it was held.
+`ROMACS_HARNESS_WLR_ENV` (`KEY=VALUE ...`) is added to the session's
+environment to run the private compositor on a real GPU, where effects the
+software renderer suppresses can stand.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/rest_live.py --binary BIN --output DIR \
+  [--seconds 3..6] [--tools LABWC-DIR]   # about 1 minute
+```
+
 ## Typing while background work allocates (`gc_typing_live.py`)
 
 Key latency against collections: one isolated `-Q --loadup` session with

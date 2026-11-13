@@ -10,7 +10,7 @@
 //! wrote; a build refuses a table newer than [`TABLE_VERSION`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
 use romacs_record::{Error, Handle, HandleAllocator, Reader, Writer};
 
@@ -79,6 +79,10 @@ pub struct Table {
 
 fn fd_number(fd: Option<&OwnedFd>) -> i64 { fd.map_or(-1, |fd| i64::from(fd.as_raw_fd())) }
 
+/// The descriptor a table names by NUMBER, adopted. A resumed keeper
+/// inherits its descriptors across the exec by number, and only
+/// `from_raw_fd` can own a descriptor this image did not open.
+///
 /// # Safety
 /// NUMBER, when not negative, must be an open descriptor nothing else owns.
 unsafe fn fd_owned(number: i64) -> Option<OwnedFd> {
@@ -130,9 +134,9 @@ impl Table {
     /// The table as a flat buffer, and every descriptor it names: those
     /// must stay open across the exec.
     #[must_use]
-    pub fn export(&self, extra: bool) -> (Vec<u8>, Vec<RawFd>) {
+    pub fn export(&self, extra: bool) -> (Vec<u8>, Vec<BorrowedFd<'_>>) {
         let mut fds = Vec::new();
-        let mut number = |fd: Option<&OwnedFd>| { fds.extend(fd.map(AsRawFd::as_raw_fd)); fd_number(fd) };
+        let mut number = |fd| { fds.extend(Option::map(fd, OwnedFd::as_fd)); fd_number(fd) };
         let version = TABLE_VERSION + u16::from(extra);
         let mut w = Writer(TABLE_MAGIC.to_vec()).u16(version).u64(self.epoch).u64(self.allocator.allocated())
             .u64(self.last_attachment).u64(self.idle_ms).i64(number(self.listener.as_ref())).bytes(&self.socket_path).i64(number(self.lock.as_ref()))

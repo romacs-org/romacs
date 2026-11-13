@@ -10,9 +10,19 @@
 //! refused and nothing changes. After it, a new image that still fails to
 //! resume execs back into the old executable, whose descriptor it was
 //! passed, with the same table.
+//!
+//! Three calls stay direct C library calls, as no crate in the lock file
+//! makes them safely: the exec itself (rustix's `execve` is an unsafe
+//! runtime function, and std's `CommandExt::exec` resets the signal mask
+//! and SIGPIPE, which an exec in place must carry over unchanged); the
+//! fallback's `execveat`, likewise, given the C library's `environ`, which
+//! std does not expose; and `close_range` over descriptors nothing owns,
+//! which no safe API can express. The resumed image adopts what it
+//! inherited by number ([`resume`]): only `from_raw_fd` can own a
+//! descriptor this image did not open.
 
 use std::io::{Read, Seek, Write};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -20,17 +30,13 @@ use crate::server::{clear_cloexec, restore_cloexec, Build};
 use crate::table::{Table, TABLE_VERSION};
 
 fn memfd(bytes: &[u8]) -> std::io::Result<std::fs::File> {
-    // SAFETY: a literal name; the result is checked, then owned by the File.
-    let fd = unsafe { libc::memfd_create(c"romacs-keeper-table".as_ptr(), libc::MFD_CLOEXEC) };
-    if fd < 0 { return Err(std::io::Error::last_os_error()); }
-    // SAFETY: memfd_create just returned FD, owned by nothing else.
-    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut file = std::fs::File::from(rustix::fs::memfd_create(c"romacs-keeper-table", rustix::fs::MemfdFlags::CLOEXEC)?);
     file.write_all(bytes)?;
     file.rewind()?;
     Ok(file)
 }
 
-fn export(table: &Table, build: Build) -> (Vec<u8>, Vec<RawFd>) { table.export(build.table > TABLE_VERSION) }
+fn export(table: &Table, build: Build) -> (Vec<u8>, Vec<BorrowedFd<'_>>) { table.export(build.table > TABLE_VERSION) }
 
 /// Ask the binary at PATH whether it can resume from TABLE.
 ///
@@ -73,7 +79,7 @@ pub fn exec(table: &Table, build: Build, path: &Path) {
     let (bytes, fds) = export(table, build);
     let (Ok(file), Ok(old)) = (memfd(&bytes), std::fs::File::open("/proc/self/exe")) else { return };
     let (carried, back) = (file.as_raw_fd(), old.as_raw_fd());
-    let kept: Vec<RawFd> = fds.into_iter().chain([carried, back]).collect();
+    let kept: Vec<BorrowedFd<'_>> = fds.into_iter().chain([file.as_fd(), old.as_fd()]).collect();
     clear_cloexec(&kept);
     let words = [c_string(path.as_os_str().as_bytes()), c_string(b"--resume"), c_string(carried.to_string().as_bytes()),
                 c_string(b"--fallback"), c_string(back.to_string().as_bytes())];
@@ -120,8 +126,11 @@ pub unsafe fn resume(table_fd: RawFd, fallback: Option<RawFd>, build: Build) -> 
     // SAFETY: the caller's contract covers the descriptors the table names.
     match read.and_then(|_| unsafe { Table::import(&bytes, build.table) }) {
         Ok(table) => {
-            let kept = table.export(false).1;
-            restore_cloexec(&kept);
+            let kept: Vec<RawFd> = {
+                let fds = table.export(false).1;
+                restore_cloexec(&fds);
+                fds.iter().map(AsRawFd::as_raw_fd).collect()
+            };
             drop(file);
             close_all_but(kept);
             Ok(table)

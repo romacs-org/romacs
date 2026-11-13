@@ -8,7 +8,8 @@ repository.workspace = true
 description = "Flat, versioned records between Romacs's processes: header, hello, handles, shared regions"
 
 [dependencies]
-libc.workspace = true
+memmap2.workspace = true
+rustix = { workspace = true, features = ["fs", "net"] }
 
 [lints]
 workspace = true

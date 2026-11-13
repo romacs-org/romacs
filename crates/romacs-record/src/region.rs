@@ -15,7 +15,10 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+
+use memmap2::{MmapOptions, MmapRaw};
+use rustix::fs::{MemfdFlags, SealFlags};
 
 use crate::{Error, Reader, Writer};
 
@@ -36,7 +39,7 @@ impl Span {
 }
 
 const ALIGN: u64 = 8;
-const SEALS: libc::c_int = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
+const SEALS: SealFlags = SealFlags::SHRINK.union(SealFlags::GROW).union(SealFlags::SEAL);
 
 /// Which bytes of a region of CAPACITY are in use: spans allocated in a
 /// ring and freed in any order. Pure bookkeeping, no memory.
@@ -89,46 +92,27 @@ impl Ring {
     }
 }
 
-/// A shared mapping, unmapped on drop.
-struct Mapping {
-    base: *mut u8,
-    len: usize,
-}
+/// A shared mapping of a whole region, unmapped on drop. Bytes cross it
+/// only by copies through raw pointers ([`RegionWriter::put`],
+/// [`RegionReader::copy`]): another process may write it at any time, so
+/// no reference into it is ever formed.
+struct Mapping(MmapRaw);
 
 impl Mapping {
-    fn new(fd: BorrowedFd<'_>, len: usize, protection: libc::c_int) -> io::Result<Self> {
-        // SAFETY: a fresh shared mapping of LEN bytes of a descriptor the
-        // caller holds, at an address the kernel picks; no existing memory
-        // is touched. The file is sealed against shrinking, so every page
-        // stays backed for the mapping's life.
-        let base = unsafe { libc::mmap(std::ptr::null_mut(), len, protection, libc::MAP_SHARED, fd.as_raw_fd(), 0) };
-        if base == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self { base: base.cast(), len })
+    /// LEN bytes of FD, shared; WRITABLE or read-only. The file is sealed
+    /// against shrinking, so every page stays backed for the mapping's life.
+    fn new(fd: BorrowedFd<'_>, len: usize, writable: bool) -> io::Result<Self> {
+        let mut options = MmapOptions::new();
+        options.len(len);
+        let raw = if writable { options.map_raw(fd.as_raw_fd()) } else { options.map_raw_read_only(fd.as_raw_fd()) };
+        raw.map(Self)
     }
 
     /// SPAN's offset and length when it lies inside the mapping.
     fn place(&self, span: Span) -> Option<(usize, usize)> {
         let (offset, len) = (usize::try_from(span.offset).ok()?, usize::try_from(span.len).ok()?);
-        (offset.checked_add(len)? <= self.len).then_some((offset, len))
+        (offset.checked_add(len)? <= self.0.len()).then_some((offset, len))
     }
-}
-
-impl Drop for Mapping {
-    fn drop(&mut self) {
-        // SAFETY: BASE and LEN are exactly what mmap returned for this
-        // mapping, and no reference into it exists: the region's methods
-        // copy bytes in and out and return none.
-        unsafe { libc::munmap(self.base.cast(), self.len) };
-    }
-}
-
-fn seals(fd: BorrowedFd<'_>) -> io::Result<libc::c_int> {
-    // SAFETY: F_GET_SEALS reads flags of a descriptor the caller holds and
-    // takes no pointer.
-    let seals = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GET_SEALS) };
-    if seals < 0 { Err(io::Error::last_os_error()) } else { Ok(seals) }
 }
 
 /// The side that makes a region and puts payloads in it.
@@ -148,20 +132,10 @@ impl RegionWriter {
         if capacity == 0 || !(capacity as u64).is_multiple_of(ALIGN) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "region capacity must be a positive multiple of 8"));
         }
-        // SAFETY: the name is a NUL-terminated literal that memfd_create
-        // only reads; the flags take no pointer.
-        let fd = unsafe { libc::memfd_create(c"romacs-region".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: memfd_create just returned FD, open and owned by no one else.
-        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let fd = rustix::fs::memfd_create(c"romacs-region", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)?;
         std::fs::File::from(fd.try_clone()?).set_len(capacity as u64)?;
-        // SAFETY: F_ADD_SEALS takes this descriptor and an integer.
-        if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, SEALS) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let map = Mapping::new(fd.as_fd(), capacity, libc::PROT_READ | libc::PROT_WRITE)?;
+        rustix::fs::fcntl_add_seals(&fd, SEALS)?;
+        let map = Mapping::new(fd.as_fd(), capacity, true)?;
         Ok(Self { fd, map, ring: Ring { capacity: capacity as u64, head: 0, live: VecDeque::new() } })
     }
 
@@ -177,8 +151,10 @@ impl RegionWriter {
         // that overlap no live span, so the destination is LEN mapped,
         // writable bytes; BYTES is ordinary memory and cannot overlap a
         // shared mapping this struct owns alone in this process. No
-        // reference into the mapping is formed.
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.map.base.add(offset), len) };
+        // reference into the mapping is formed. No crate copies into
+        // memory another process shares without this: a safe slice of it
+        // would claim an exclusivity the reader's process can break.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.map.0.as_mut_ptr().add(offset), len) };
         Some(span)
     }
 
@@ -213,15 +189,15 @@ impl RegionReader {
     /// `PermissionDenied` for an unsealed descriptor, `InvalidData` for an
     /// empty one, or the system's refusal to map it.
     pub fn open(fd: BorrowedFd<'_>) -> io::Result<Self> {
-        let needed = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW;
-        if seals(fd).map_or(true, |seals| seals & needed != needed) {
+        let needed = SealFlags::SHRINK | SealFlags::GROW;
+        if rustix::fs::fcntl_get_seals(fd).map_or(true, |seals| !seals.contains(needed)) {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "region descriptor is not sealed against resizing"));
         }
         let len = usize::try_from(std::fs::File::from(fd.try_clone_to_owned()?).metadata()?.len()).map_err(io::Error::other)?;
         if len == 0 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "region is empty"));
         }
-        Ok(Self { map: Mapping::new(fd, len, libc::PROT_READ)? })
+        Ok(Self { map: Mapping::new(fd, len, false)? })
     }
 
     /// The bytes of SPAN, copied out. The caller then acknowledges SPAN to
@@ -236,9 +212,11 @@ impl RegionReader {
         // mapped and backed (the file cannot shrink), and the destination
         // is a fresh allocation of that capacity. The source is read
         // through a raw pointer, never a reference, since another process
-        // may write it; whatever bytes arrive are plain u8.
+        // may write it; whatever bytes arrive are plain u8. No crate reads
+        // memory another process writes without this: a safe slice of it
+        // would promise bytes that cannot change under it.
         unsafe {
-            std::ptr::copy_nonoverlapping(self.map.base.add(offset), bytes.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping(self.map.0.as_ptr().add(offset), bytes.as_mut_ptr(), len);
             bytes.set_len(len);
         }
         Ok(bytes)
@@ -285,11 +263,7 @@ mod tests {
 
     #[test]
     fn an_unsealed_descriptor_is_refused() {
-        // SAFETY: a literal name; the result is checked and owned below.
-        let fd = unsafe { libc::memfd_create(c"unsealed".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
-        assert!(fd >= 0);
-        // SAFETY: FD was just returned open and is owned here alone.
-        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let fd = rustix::fs::memfd_create(c"unsealed", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING).unwrap();
         std::fs::File::from(fd.try_clone().unwrap()).set_len(4096).unwrap();
         assert_eq!(RegionReader::open(fd.as_fd()).err().map(|e| e.kind()), Some(io::ErrorKind::PermissionDenied));
     }

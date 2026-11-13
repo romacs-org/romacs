@@ -46,8 +46,10 @@ frozen snapshots.
 | What a session loads, in order | `lisp/romacs/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
-| GNU's test suite, pinned, and its runner | `gnu-tests/` (pin and exclusions in `ledger/`) |
-| Romacs's Lisp test suites and benchmarks | `test/` (`make check`) |
+| GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
+| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`tools/test-elisp`) |
+| Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
+| Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
 | Decisions checks enforce | `ledger/`: pins, smell and unsafe floors, censuses, the parity ratchet, `divergences/` |
 | Where Romacs differs from GNU, and why | `ledger/divergences/<ID>.md` |
@@ -62,7 +64,7 @@ frozen snapshots.
 - `romacs-display-protocol`, `romacs-layout-input`, `romacs-layout`,
   `romacs-face`, `romacs-font` and `romacs-regex` hold no evaluator and are
   tested without a VM.
-- GNU's files under `lisp/gnu/` and `gnu-tests/test/` are byte-identical to
+- GNU's files under `lisp/gnu/` and `test/gnu/test/` are byte-identical to
   the pin, less its declared exclusions; `tools/check-derived` verifies it.
 - A deliberate difference from GNU is one file in `ledger/divergences/`.
 

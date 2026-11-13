@@ -620,6 +620,36 @@ impl KeyReader<'_> {
         self.run.set((start, start + run.len as usize, value));
         value
     }
+    /// The end of a stretch from AT over which the key has no value: AT
+    /// itself when it has one there, `usize::MAX` when none follows the
+    /// key's last run.  The stretch may end before the next value.
+    pub fn unset_until(&self, at: ByteOffset) -> usize {
+        if self.get(at).is_some() {
+            return at.0;
+        }
+        let (start, end, _) = self.run.get();
+        if start <= at.0 && at.0 < end { end } else { usize::MAX }
+    }
+}
+
+/// The runs of a range seen through a few keys ([`Properties::key_runs`]):
+/// each run's bytes and the values of those keys its characters have.
+pub(crate) struct KeyRuns<'a> {
+    layers: Vec<(&'a str, &'a Tree)>,
+    at: ByteOffset,
+    end: ByteOffset,
+}
+impl<'a> Iterator for KeyRuns<'a> {
+    type Item = (Range<ByteOffset>, Vec<(&'a str, Value)>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let at = self.at;
+        if at >= self.end {
+            return None;
+        }
+        let values = self.layers.iter().filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| (*key, r.value))).collect();
+        self.at = self.layers.iter().fold(self.end, |next, (_, root)| next.min(root.change_after(at, next)));
+        Some((at..self.at, values))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -634,45 +664,54 @@ pub(crate) struct Properties {
 }
 romacs_snapshot::snapshot_struct!(Properties { layers, stamp, syntax_changes });
 
-/// Byte ranges where the `syntax-table' property changed, or `all' once
-/// there are too many to keep.
+/// Byte ranges where the `syntax-table' property changed, as the text's
+/// bytes lie until its next edit: apart while they are few, then as their
+/// hull (lowest start to highest end), one range that each later change
+/// widens. A count never makes it `all', which is every property replaced.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SyntaxChanges {
     pub ranges: Vec<Range<usize>>,
     pub all: bool,
+    /// Whether the ranges are one hull.
+    pub hull: bool,
 }
-romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all });
+romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all, hull });
 impl SyntaxChanges {
-    /// Note RANGE in SLOT, making the log there if it has none.
+    /// The ranges kept apart.
+    const KEPT: usize = 64;
+    /// Note RANGE in SLOT, making the log there if it has none. A range
+    /// that starts where the last one ends continues it.
     fn note(slot: &mut Option<Box<Self>>, range: Range<usize>) {
-        let changes = slot.get_or_insert_default();
-        if changes.all {
-            return;
+        let Self { ranges, all: false, hull } = &mut **slot.get_or_insert_default() else { return };
+        let join = |a: &Range<usize>, b: &Range<usize>| a.start.min(b.start)..a.end.max(b.end);
+        match ranges.last_mut() {
+            Some(last) if *hull => *last = join(last, &range),
+            Some(last) if last.end == range.start => last.end = range.end,
+            _ => ranges.push(range),
         }
-        if changes.ranges.len() == 64 {
-            changes.ranges.clear();
-            changes.all = true;
-        } else {
-            changes.ranges.push(range);
+        if ranges.len() > Self::KEPT {
+            *ranges = ranges.iter().cloned().reduce(|a, b| join(&a, &b)).into_iter().collect();
+            *hull = true;
         }
     }
 }
 
 impl Properties {
-    /// The `syntax-table' changes since the last take.
-    /// Whether `syntax-table' changed since the last take.
+    /// Whether the log holds a change.
     pub(crate) fn has_syntax_changes(&self) -> bool {
         self.syntax_changes.is_some()
     }
+    /// The log since the last take.
     pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
         self.syntax_changes.take().map(|changes| *changes).unwrap_or_default()
     }
     /// No properties at all, as a new store, the change noted.
     pub(crate) fn reset(&mut self) {
-        let mut changes = self.syntax_changes.take();
-        if self.layers.contains_key("syntax-table") {
-            changes.get_or_insert_default().all = true;
-        }
+        let changes = if self.layers.contains_key("syntax-table") {
+            Some(Box::new(SyntaxChanges { all: true, ..SyntaxChanges::default() }))
+        } else {
+            self.syntax_changes.take()
+        };
         *self = Self { syntax_changes: changes, ..Self::new() };
     }
     pub fn properties_keys(&self) -> Vec<String> {
@@ -694,19 +733,19 @@ impl Properties {
     /// a run ends only where one of KEYS changes, and holds those of KEYS
     /// its characters have.  Costs the runs of KEYS, not of every property.
     pub fn runs_of(&self, range: Range<ByteOffset>, keys: &[String]) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
-        let layers: Vec<(&str, &Tree)> =
-            keys.iter().filter_map(|key| Some((key.as_str(), self.layers.get(key)?.as_deref()?))).collect();
-        let mut runs = Vec::new();
-        let mut at = range.start;
-        while at < range.end {
-            let values = layers
-                .iter()
-                .filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| ((*key).to_owned(), r.value)))
-                .collect();
-            runs.push((at, values));
-            at = layers.iter().fold(range.end, |next, (_, root)| next.min(root.change_after(at, range.end)));
-        }
-        runs
+        self.key_runs(range, keys.iter().map(String::as_str))
+            .map(|(run, values)| (run.start, values.into_iter().map(|(key, value)| (key.to_owned(), value)).collect()))
+            .collect()
+    }
+    /// [`Self::runs_of`], one run at a time: a caller that stops early pays
+    /// for the runs it read.
+    pub fn key_runs<'a, 'k>(&'a self, range: Range<ByteOffset>, keys: impl IntoIterator<Item = &'k str>) -> KeyRuns<'a> {
+        let layers = keys
+            .into_iter()
+            .filter_map(|key| self.layers.get_key_value(key))
+            .filter_map(|(key, root)| Some((key.as_str(), root.as_deref()?)))
+            .collect();
+        KeyRuns { layers, at: range.start, end: range.end }
     }
     /// Whether any text has the property KEY.
     pub fn has_key(&self, key: &str) -> bool {
@@ -750,12 +789,11 @@ impl Properties {
             .map(|r| r.value)
     }
     /// Replacement preserves the insertion stamp at already-present positions.
+    /// A `syntax-table' put is a change where a run had another value (as
+    /// `eq') or none.
     pub fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
         if range.start >= range.end {
             return;
-        }
-        if key == "syntax-table" {
-            SyntaxChanges::note(&mut self.syntax_changes, range.start.0..range.end.0);
         }
         if self.stamp == u32::MAX {
             // Dense rank compression preserves all ordering and merge decisions;
@@ -794,7 +832,11 @@ impl Properties {
         let (a, b) = Tree::split(root.take(), range.start.0, &mut work);
         let (b, c) = Tree::split(b, range.end.0 - range.start.0, &mut work);
         let mut replacement = None;
-        b.unwrap().walk(0, &mut |_, r| {
+        let logged = key == "syntax-table";
+        b.unwrap().walk(range.start.0, &mut |at, r| {
+            if logged && r.observed() != Some(value) {
+                SyntaxChanges::note(&mut self.syntax_changes, at..at + r.len as usize);
+            }
             replacement = Tree::concat(
                 replacement.take(),
                 Tree::uniform(
@@ -808,6 +850,7 @@ impl Properties {
         });
         *root = Tree::concat(Tree::concat(a, replacement, &mut work), c, &mut work);
     }
+    /// A `syntax-table` remove is a change where a run held a value.
     pub fn remove(&mut self, range: Range<ByteOffset>, key: &str) {
         let Some(root) = self.layers.get_mut(key) else {
             return;
@@ -819,11 +862,15 @@ impl Properties {
         if start >= end {
             return;
         }
-        if key == "syntax-table" {
-            SyntaxChanges::note(&mut self.syntax_changes, start..end);
-        }
         let (a, b) = Tree::split(root.take(), start, &mut work);
-        let (_, c) = Tree::split(b, end - start, &mut work);
+        let (b, c) = Tree::split(b, end - start, &mut work);
+        if key == "syntax-table" && let Some(b) = &b {
+            b.walk(start, &mut |at, r| {
+                if r.stamp != 0 {
+                    SyntaxChanges::note(&mut self.syntax_changes, at..at + r.len as usize);
+                }
+            });
+        }
         *root = Tree::concat(
             Tree::concat(
                 a,
@@ -1048,5 +1095,141 @@ impl Properties {
             + self.syntax_changes.as_ref().map_or(0, |changes| {
                 size_of::<SyntaxChanges>() + changes.ranges.capacity() * size_of::<Range<usize>>()
             })
+    }
+}
+
+/// What a property primitive's plan asks of the properties it changes: a
+/// string's, or a text body's, which records what is stored.
+pub(crate) trait Store {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value);
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str);
+    fn reset(&mut self);
+    fn keys(&self) -> Vec<String>;
+}
+impl Store for Properties {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { Properties::put(self, range, key, value); }
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { Properties::remove(self, range, key); }
+    fn reset(&mut self) { Properties::reset(self); }
+    fn keys(&self) -> Vec<String> { self.properties_keys() }
+}
+impl Store for BodyProperties {
+    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { BodyProperties::put(self, range, key, value); }
+    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { BodyProperties::remove(self, range, key); }
+    fn reset(&mut self) { self.store.reset(); }
+    fn keys(&self) -> Vec<String> { self.store.properties_keys() }
+}
+
+/// How a collection reads a text body's properties (`BodyProperties`).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Reading {
+    /// The epoch the VM's last collection ended at (`crate::epoch`).
+    pub(crate) since: u64,
+    /// Every property is read, as a full collection, a compaction's rewrite
+    /// and verify's reference walk do; else only what was stored since.
+    pub(crate) whole: bool,
+}
+
+/// Values kept before a record gives up and the body is read whole.
+const WRITTEN_LIMIT: usize = 64 << 10;
+
+/// A text body's properties, with a record of what was stored into them.
+/// A body is shared by a buffer and its indirect buffers and belongs to no
+/// table entry alone, so no entry's colour says it was stored into: the
+/// record is here, in the storage, and a minor collection reads it in place
+/// of every property of every buffer. It hands out the properties to read
+/// only (`Deref`), and each method that can store a Value records it, so a
+/// store that records nothing does not compile. A string's properties need
+/// none of this: its entry is dirtied.
+///
+/// The record is kept by epoch (`crate::epoch`), which any VM's collection
+/// in the process advances: a store cannot tell whether its own VM has
+/// collected since the last one, so it never drops what is recorded. The
+/// collector, which knows the epoch its VM's last collection ended at,
+/// reads what was recorded since and drops what was recorded before.
+#[derive(Clone)]
+pub(crate) struct BodyProperties {
+    store: Properties,
+    /// The Values stored that can name a heap entry, oldest first.
+    written: Vec<Value>,
+    /// The epochs `written` was recorded in, ascending, and where each one's
+    /// Values begin.
+    epochs: Vec<u64>,
+    starts: Vec<usize>,
+    /// The epoch at which everything last counted as stored: when the body
+    /// was made, its properties replaced whole, or its record given up.
+    all_at: u64,
+}
+romacs_snapshot::snapshot_struct!(BodyProperties { store, written, epochs, starts, all_at });
+
+impl std::ops::Deref for BodyProperties {
+    type Target = Properties;
+    #[inline]
+    fn deref(&self) -> &Properties {
+        &self.store
+    }
+}
+
+impl BodyProperties {
+    /// STORE as a body's properties: all of it counts as just stored.
+    pub(crate) fn new(store: Properties) -> Self {
+        Self { store, written: Vec::new(), epochs: Vec::new(), starts: Vec::new(), all_at: crate::epoch::born() }
+    }
+    /// VALUES are about to be stored.
+    fn record(&mut self, values: impl IntoIterator<Item = Value>) {
+        let now = crate::epoch::born();
+        // Everything counts as stored in this epoch already.
+        if self.all_at == now { return; }
+        if self.epochs.last() != Some(&now) {
+            self.epochs.push(now);
+            self.starts.push(self.written.len());
+        }
+        self.written.extend(values.into_iter().filter(|v| matches!(v.tag(), 0 | 3..=5) && *v != Value::NIL));
+        if self.written.len() > WRITTEN_LIMIT {
+            (self.written, self.epochs, self.starts, self.all_at) = (Vec::new(), Vec::new(), Vec::new(), now);
+        }
+    }
+    pub fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
+        self.record([value]);
+        self.store.put(range, key, value);
+    }
+    pub fn inherit_inserted(&mut self, range: Range<ByteOffset>, inherited: &[(String, Value)]) {
+        self.record(inherited.iter().map(|&(_, value)| value));
+        self.store.inherit_inserted(range, inherited);
+    }
+    pub fn copy_into(&mut self, at: ByteOffset, source: &Properties) {
+        self.record(source.to_map().into_values().flat_map(BTreeMap::into_values));
+        self.store.copy_into(at, source);
+    }
+    pub fn remove(&mut self, range: Range<ByteOffset>, key: &str) {
+        self.store.remove(range, key);
+    }
+    pub fn replace(&mut self, range: Range<ByteOffset>, inserted: usize) -> usize {
+        self.store.replace(range, inserted)
+    }
+    pub fn resize_character(&mut self, range: Range<ByteOffset>, inserted: usize) {
+        self.store.resize_character(range, inserted);
+    }
+    pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
+        self.store.take_syntax_changes()
+    }
+    /// The collector's visit, as READING says. What was recorded before the
+    /// VM's last collection is dropped: that collection kept it. What was
+    /// recorded since is visited, by a whole reading too: a compaction
+    /// rewrites those Values, and one removed since it was stored is kept
+    /// until the next collection. Nothing recorded since is dropped here:
+    /// a mark a key press abandons has consumed nothing.
+    pub(crate) fn visit_values(&mut self, reading: Reading, visit: &mut impl FnMut(&mut Value)) {
+        let stale = self.epochs.partition_point(|&epoch| epoch < reading.since);
+        if stale > 0 {
+            let from = self.starts.get(stale).copied().unwrap_or(self.written.len());
+            self.written.drain(..from);
+            self.epochs.drain(..stale);
+            self.starts.drain(..stale);
+            self.starts.iter_mut().for_each(|start| *start -= from);
+        }
+        self.written.iter_mut().for_each(&mut *visit);
+        if reading.whole || self.all_at >= reading.since {
+            self.store.visit_values(visit);
+        }
     }
 }

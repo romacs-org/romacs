@@ -15,6 +15,15 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
+/// Write VALUE to stderr as one line, in one write. `eprintln!("{}", value)`
+/// hands serde's pieces to unbuffered stderr a syscall apiece: thousands for
+/// a scene dump, which under load held the evaluator for seconds a paint.
+fn diagnostic_line(value: &serde_json::Value) {
+    use std::io::Write;
+    let mut line = serde_json::to_vec(value).unwrap_or_default();
+    line.push(b'\n');
+    let _ = std::io::stderr().lock().write_all(&line);
+}
 
 use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
@@ -111,9 +120,9 @@ mod lent_tests {
         host.borrow_mut().presentation = 7;
         let mut live = presentation::Presentation::new();
         live.submitted(7, Instant::now());
-        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
-        queue.push_back(InputEvent::WindowClose { emacs_frame_id: 0 });
-        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        let (mut width, mut height) = (10, 20);
+        queue(&host).push_back(InputEvent::WindowClose { emacs_frame_id: 0 });
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         let (seen, closed) = lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
             let seen = (shared.presentation, shared.in_flight.map(|(p, _)| p), shared.pending.len());
@@ -126,9 +135,35 @@ mod lent_tests {
         });
         assert_eq!(seen, (7, Some(7), 1), "the read starts from the loop's state");
         assert!(closed);
-        assert_eq!((queue.len(), host.borrow().presentation, width, height), (1, 8, 30, 40));
+        let queued = queue(&host).len();
+        assert_eq!((queued, host.borrow().presentation, width, height), (1, 8, 30, 40));
         assert!(live.in_flight().is_none(), "the settled presentation is no longer in flight");
         assert_eq!(host.borrow().in_flight, None);
+    }
+
+    /// A key a read took from the channel outside any lend (an
+    /// `input-pending-p` in a redisplay, the look at the host a collection
+    /// takes when it ends) stays queued: the next Lisp the loop lends to reads
+    /// it, and the loop then dispatches it. Each lend used to replace the
+    /// host's queue with the loop's own, so keys typed during a collection
+    /// in a redisplay never reached the command loop.
+    #[test]
+    fn a_key_a_read_took_outside_a_lend_stays_queued() {
+        use romacs_display_runtime::host_types::FrontendKey;
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let key = |c| InputEvent::Key { key: FrontendKey::Character(c), modifiers: 0, pressed: true, emacs_frame_id: 1 };
+        queue(&host).push_back(key('a'));
+        let (mut live, mut width, mut height) = (presentation::Presentation::new(), 10, 20);
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
+        let (seen, _) = lent.run(&host, |_| {
+            let mut queue = queue(&host);
+            let seen = queue.len();
+            queue.push_back(key('b'));
+            seen
+        });
+        assert_eq!(seen, 1, "the lent Lisp reads the key taken before it");
+        let remaining: Vec<_> = queue(&host).drain(..).filter_map(crate::native::translate).collect();
+        assert_eq!(remaining, [romacs_vm::CommandEvent::Character('a' as i64), romacs_vm::CommandEvent::Character('b' as i64)]);
     }
 
     /// A presentation a prompt settled inside the loop's Lisp retires as one
@@ -148,14 +183,14 @@ mod lent_tests {
         host.borrow_mut().presentation = 7;
         live.submitted(7, now);
         trace.submitted(7, paint(), now, 0);
-        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
-        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        let (mut width, mut height) = (10, 20);
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
             shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
             shared.presentation += 1;
         });
-        let (presentation, observed) = live.take_retired().expect("the settled presentation retired");
+        let [(presentation, observed)] = live.take_retired()[..] else { panic!("the settled presentation retired") };
         assert_eq!((presentation, observed), (7, now));
         assert_eq!(trace.completed(presentation, observed).len(), 1);
         let second = trace.sequence();
@@ -163,6 +198,39 @@ mod lent_tests {
         live.submitted(9, now);
         trace.submitted(9, paint(), now, 0);
         assert_eq!(trace.completed(9, now).len(), 1);
+    }
+
+    /// A prompt settles the loop's traced paint and leaves its own undrawn;
+    /// that one renders before the loop takes the first retirement. Both
+    /// retire, in order, so the trace completes its keys and takes the next
+    /// paint (the second overwrote the first, and the next submission
+    /// asserted).
+    #[test]
+    fn two_retirements_before_the_loop_looks_both_reach_the_trace() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let now = Instant::now();
+        let (mut trace, mut live) = (latency::Trace::default(), presentation::Presentation::new());
+        let paint = || latency::Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
+        let first = trace.sequence();
+        trace.push(latency::Key { sequence: first, received: Some(now), start: now, ready: now, command_ns: 0, diagnostic_ns: 0, reply_ns: 0 });
+        host.borrow_mut().presentation = 7;
+        live.submitted(7, now);
+        trace.submitted(7, paint(), now, 0);
+        let (mut width, mut height) = (10, 20);
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
+        lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
+            shared.presentation = 8;
+            shared.in_flight = Some((8, now));
+        });
+        assert_eq!(live.in_flight(), Some((8, now)), "the prompt's undrawn paint is the loop's now");
+        live.completed(8, now);
+        let retired = live.take_retired();
+        assert_eq!(retired.iter().map(|r| r.0).collect::<Vec<_>>(), vec![7, 8]);
+        let samples: usize = retired.into_iter().map(|(p, at)| trace.completed(p, at).len()).sum();
+        assert_eq!(samples, 1, "the traced key completes with its paint");
+        trace.submitted(9, paint(), now, 0);
     }
 
     /// A prompt that painted into a window the compositor does not draw
@@ -180,8 +248,8 @@ mod lent_tests {
         host.borrow_mut().presentation = 7;
         live.submitted(7, since);
         trace.submitted(7, paint(), since, 0);
-        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
-        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        let (mut width, mut height) = (10, 20);
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
             shared.presentation += 1;
@@ -189,7 +257,7 @@ mod lent_tests {
         });
         assert_eq!(live.in_flight(), Some((7, since)));
         live.completed(8, Instant::now());
-        let (retired, at) = live.take_retired().unwrap();
+        let [(retired, at)] = live.take_retired()[..] else { panic!("the prompt's render retired the loop's paint") };
         assert_eq!(retired, 7);
         trace.completed(retired, at);
         assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
@@ -209,8 +277,8 @@ mod lent_tests {
         host.borrow_mut().presentation = 3;
         let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![], status_bar: Default::default() };
         let mut live = presentation::Presentation::new();
-        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
-        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        let (mut width, mut height) = (10, 20);
+        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         // The callback's prompt: one presentation, then a dismissal that changes nothing.
         lent.run(&host, |_| host.borrow_mut().presentation += 1);
         assert!(live.ready(), "the prompt's presentation left no repaint scheduled");
@@ -550,8 +618,11 @@ const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
   --loadup              run GNU's loadup chain; a live launch boots from its world
   --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
-  --world-build         make the world a live --loadup launch would boot from
-                        usable, with no window, and exit (what an installer runs)
+  --world-build         make the worlds a live --loadup launch and a --batch
+                        session would boot from usable, with no window, and
+                        exit (what an installer runs); before --batch, the
+                        batch world alone (an installation's, in
+                        --world-store EXECUTABLE.worlds)
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
@@ -570,7 +641,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
-  ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
+  ROMACS_DIAGNOSTICS=1  print each paint, message, the render thread's frame counters
+                        and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
 ";
@@ -690,6 +762,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
+            "--batch" if world_build => {
+                if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
+                let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+                return batch::prepare(store).map(|()| None);
+            }
             "--batch" => {
                 use_collector_threads();
                 return batch::run(args.collect(), quick, world_store).map(|()| None);
@@ -756,17 +833,16 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
     // --world-build: the world this launch would boot from, made usable
-    // (built here, or waited for), with no window; then exit. What an
-    // installer runs so a user's first launch restores. A batch session's
-    // world is not built here: the first session in this store boots from
-    // source and prepares it in the background (batch.rs), as GNU's batch
-    // startup costs no install step.
+    // (built here, or waited for), with no window, and a batch session's
+    // beside it (batch.rs); then exit. What an installer runs so a user's
+    // first launch and first batch session restore.
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        let base = world::open(store, width, height, floor)?;
+        let base = world::open(store.clone(), width, height, floor)?;
         world::prepare(&base, width, height, floor)?;
+        batch::prepare_beside(store);
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }
@@ -924,7 +1000,14 @@ fn reply(value: Json) -> Result<(), String> {
     writeln!(out, "{value}").map_err(|e| e.to_string())?;
     out.flush().map_err(|e| e.to_string())
 }
-fn activate(sender: &PaintSender, presentation: u64, pending: &mut std::collections::VecDeque<InputEvent>) -> Result<(), String> {
+/// The loop's one input queue, the prompt host's (`prompt::Shared`): every
+/// read takes its keys from here and leaves what it does not use here, so
+/// none is lost wherever the Lisp that reads runs. Borrowed for one step,
+/// never across Lisp.
+fn queue(host: &std::cell::RefCell<prompt::Shared>) -> std::cell::RefMut<'_, std::collections::VecDeque<InputEvent>> {
+    std::cell::RefMut::map(host.borrow_mut(), |shared| &mut shared.pending)
+}
+fn activate(sender: &PaintSender, presentation: u64, host: &std::cell::RefCell<prompt::Shared>) -> Result<(), String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let wait = deadline.saturating_duration_since(std::time::Instant::now());
@@ -938,20 +1021,25 @@ fn activate(sender: &PaintSender, presentation: u64, pending: &mut std::collecti
                 ..
             } if actual == presentation => return Ok(()),
             InputEvent::WindowClose { .. } => return Err("window closed".into()),
-            event => pending.push_back(event),
+            event => queue(host).push_back(event),
         }
     }
 }
 /// How a paint waits for its render before it says so.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Wait {
-    /// Submit only; the live loop sees the render later.
+    /// Submit only; the live loop sees the render later. Every live
+    /// paint: the evaluator never waits for drawing.
     No,
-    /// Rendered within 30 s, or an error: the oracle transport.
+    /// Rendered within 30 s, or an error: the oracle transport, a test
+    /// protocol that never runs live, whose reply to a command promises the
+    /// frame drawn.
     Rendered,
-    /// The live session's first frame: rendered within 30 s, or left in
-    /// flight undrawn (its window hidden as it starts). Its lines and the
-    /// `ready' reply follow the render, as harnesses expect.
+    /// The live session's first frame, at startup only: rendered within
+    /// 30 s, or left in flight undrawn (its window hidden as it starts). The
+    /// `ready' reply follows it, and launchers and harnesses type once ready:
+    /// keys sent before the window is up and focused are the compositor's
+    /// to drop. No wait after startup is of this kind.
     Bounded,
 }
 
@@ -964,7 +1052,7 @@ fn paint(
     force_gc: bool,
     floor: Option<usize>,
     shown: Frame,
-    pending: &mut std::collections::VecDeque<InputEvent>,
+    host: &std::cell::RefCell<prompt::Shared>,
     wait: Wait,
     timings: &mut Option<latency::Paint>,
 ) -> Result<Shown, String> {
@@ -984,9 +1072,7 @@ fn paint(
         if after <= before || !moved || current.display()? != "\"g1a-gc-witness\"" {
             return Err("forced collector did not preserve the rooted witness".into());
         }
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
+        crate::diagnostic_line(&json!({"diagnostic":"gc-between-snapshot-and-paint","presentation":presentation,
             "collections_before":before,"collections_after":after,"witness_moved":moved})
         );
     }
@@ -1011,7 +1097,7 @@ fn paint(
             channel(color.b)
         )
     };
-    if diagnostics() { eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
         "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() })); }
@@ -1034,7 +1120,7 @@ fn paint(
     images.borrow_mut().retire_surfaces(sender)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
-    if wait != Wait::No { activate(sender, presentation, pending)?; }
+    if wait != Wait::No { activate(sender, presentation, host)?; }
     let activation_ns = activation_start.elapsed().as_nanos();
     let wait_start = Instant::now();
     let render = || sender.wait_for_render(presentation, std::time::Duration::from_secs(30));
@@ -1045,19 +1131,15 @@ fn paint(
     };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
-    if diagnostics() { eprintln!(
-        "{}",
-        json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
+    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
     ); }
-    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
-        "{}",
-        json!({"diagnostic":"submitted-scene", "presentation":presentation,
+    if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { crate::diagnostic_line(&json!({"diagnostic":"submitted-scene", "presentation":presentation,
         "vscroll_px":snapshot.windows.first().map(|w|w.snapshot.vscroll_px),"glyphs":glyphs})
     ); }
     if tracing() {
-        eprintln!("{}", json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
+        crate::diagnostic_line(&json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
             "layout_ns":layout_ns,"diagnostics_prepare_ns":diagnostics_prepare_ns,"submit_ns":submit_ns,
             "activation_ns":activation_ns,"wait_render_ns":wait_render_ns,
             "activation_and_render_ns":activation_ns + wait_render_ns,
@@ -1071,9 +1153,7 @@ fn paint(
     let layout_apply_ns = apply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
     let mode_line_start = tracing().then(Instant::now);
     for message in vm.take_display_diagnostics() {
-        eprintln!(
-            "{}",
-            json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
+        crate::diagnostic_line(&json!({"diagnostic":"mode-line","presentation":presentation,"message":message})
         );
     }
     if tracing() {
@@ -1170,7 +1250,7 @@ fn paint_prompt(
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
-        eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
+        crate::diagnostic_line(&json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
     Ok((count, ends))
 }
@@ -1376,7 +1456,6 @@ fn evaluate(
     }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
-    let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
     let first_submitted = Instant::now();
@@ -1388,13 +1467,15 @@ fn evaluate(
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
         Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {
-        paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &mut pending,
+        paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &host,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
     title::consider(&mut vm, sender, &host);
     let mut live_presentation = presentation::Presentation::new();
-    if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
-        // Not drawn (hidden as it starts): the loop waits for it, stalled.
+    if live && host.borrow().window_shown() {
+        // In flight, drawn or not: the loop retires it when it sees it drawn
+        // (a `paint' line, and the first-paint phase), or tells it stalled
+        // when its window is hidden as it starts.
         live_presentation.submitted(previous.presentation, first_submitted);
     }
     startup::mark_phase("first-paint");
@@ -1410,27 +1491,30 @@ fn evaluate(
     }); }
     loop {
         if live {
-            terminate(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })?;
+            terminate(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })?;
             // Background callbacks are Lisp the loop runs, and may prompt.
-            let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
+            let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
             let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
             if changed? { live_presentation.changed(); }
-            if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+            if closed && close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                 return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
             }
         }
+        // This pass handles the input that arrived before it, and any a read
+        // inside it took from the channel; later input waits for the next.
         let available = sender.input().len();
-        let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
+        presentation::admit(&mut queue(&host), sender.input().try_iter(), available);
         loop {
             // read_char returns the quit character for a quit still pending
             // (keyboard.c:4102), ahead of the keys typed meanwhile.
-            if live && vm.take_quit_key() { batch.push_front(quit::quit_key()); }
+            if live && vm.take_quit_key() { queue(&host).push_front(quit::quit_key()); }
             // read_char takes Lisp's unread queues before host input: a key
             // Lisp read and pushed back (sit-for in a timer) starts the next
             // command, which the Lisp command loop reads.
             let unread = live && command::unread_pending(&mut vm)?;
             let event = if unread { None } else {
-                match batch.pop_front() { Some(event) => Some(event), None => break }
+                let next = queue(&host).pop_front();
+                match next { Some(event) => Some(event), None => break }
             };
             let (received, command_start);
             // A command to run, and the host key starting it if one does.
@@ -1443,7 +1527,7 @@ fn evaluate(
                 if matches!(event, InputEvent::WindowClose { .. }) {
                     // A server's closed window may report its end twice.
                     if !host.borrow().window_shown() { continue; }
-                    if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                    if !live || close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     continue;
@@ -1454,7 +1538,7 @@ fn evaluate(
                 // Each pressed key's enqueue time on CLOCK_MONOTONIC, for
                 // latency to a point outside the editor (terminal_latency_live.py).
                 if let Some(at) = received && matches!(command::unwrap_event(event.clone()), InputEvent::Key { pressed: true, .. }) {
-                    eprintln!("{}", json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
+                    crate::diagnostic_line(&json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
                 }
                 // read_char's timer_stop_idle: Emacs is idle until a key arrives.
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
@@ -1486,12 +1570,12 @@ fn evaluate(
                 // Its callbacks may read input: they get the keys queued
                 // ahead, as a command does.
                 if live && let InputEvent::Model { id, event } = &event {
-                    let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
                     vm.enter_busy();
                     let (result, closed) = lent.run(&host, |_| vm.run_model_event(*id, event));
                     vm.leave_busy();
                     if let Err(error) = result { echo::show(&mut vm, &error)?; }
-                    if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                    if closed && close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     live_presentation.changed();
@@ -1514,7 +1598,7 @@ fn evaluate(
                     let fast_start = Instant::now();
                     let fast = vm.terminal_passthrough_key(&key);
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
+                        crate::diagnostic_line(&json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
                     }
                     match fast {
                         Ok(true) => continue,
@@ -1530,16 +1614,16 @@ fn evaluate(
                     _ => None,
                 };
                 let key = native::translate(event);
-                if let (Some(_), Some(raw)) = (&key, raw) { batch.push_front(raw); }
+                if let (Some(_), Some(raw)) = (&key, raw) { queue(&host).push_front(raw); }
                 key.map(Some)
             };
             if let Some(first) = translated {
                 let outcome = if live {
-                    let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
                     vm.enter_busy();
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
                     vm.leave_busy();
-                    if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                    if closed && close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     outcome
@@ -1557,11 +1641,11 @@ fn evaluate(
                     title::consider(&mut vm, sender, &host);
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
-                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &host, Wait::Rendered, &mut paint_timings)?;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
-                    eprintln!("{}",json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
+                    crate::diagnostic_line(&json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
                         "queue_ns":received.map(|t| command_start.duration_since(t).as_nanos()),
                         "command_ns":command_ns,"snapshot_ns":snapshot_ns,
                         "key_to_paint_complete_ns":if live { None } else { received.map(|t| t.elapsed().as_nanos()) },
@@ -1608,11 +1692,11 @@ fn evaluate(
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
-                    if diagnostics() { eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
+                    if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
@@ -1626,9 +1710,10 @@ fn evaluate(
                 }
             }
             // Here, or in a prompt that settled it first (`Lent').
-            if let Some((presentation, observed)) = live_presentation.take_retired()
-                && let Some(trace) = &mut key_trace {
-                for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
+            for (presentation, observed) in live_presentation.take_retired() {
+                if let Some(trace) = &mut key_trace {
+                    for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
+                }
             }
             // Pixels landed, a parse a window waits on did, or a publication
             // left images to send: paint again.
@@ -1649,7 +1734,7 @@ fn evaluate(
                     return Ok(None)
                 };
                 let presentation = next_presentation(&host)?;
-                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
+                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &host, Wait::No, &mut paint_timings)?;
                 // The evaluator's part: the frame's snapshot, layout and
                 // submission; the render thread draws it meanwhile.
                 vm.redisplay_done(snapshot_start.elapsed());
@@ -1661,7 +1746,7 @@ fn evaluate(
                         trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
                     }
                     if tracing() {
-                        eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
+                        crate::diagnostic_line(&json!({"diagnostic":"latency-snapshot","presentation":presentation,
                             "units":"ns","snapshot_ns":snapshot_ns}));
                     }
                 } else {
@@ -1672,14 +1757,14 @@ fn evaluate(
                 }
             }
             if vm.deferred_parse_done() { live_presentation.changed(); }
-            if pending.is_empty() && sender.input().is_empty() {
+            if queue(&host).is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
                 // after any ran, redisplay and check again before blocking.
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
                 let auto_save = retired || live_presentation.in_flight().is_none()
                     || live_presentation.stalled(presentation::render_stall());
-                let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
+                let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
                 // Timers run Lisp as commands do (an agent's tool call is one):
                 // busy, so C-g and a call's deadline reach it.
                 let (idle, closed) = lent.run(&host, |_| {
@@ -1688,7 +1773,7 @@ fn evaluate(
                     vm.leave_busy();
                     idle
                 });
-                if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                if closed && close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                     return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                 }
                 let idle = idle.unwrap_or_else(|error| {
@@ -1703,7 +1788,7 @@ fn evaluate(
                 // An event the idle pass took from the channel to see it
                 // (`input-pending-p', an idle collection giving way to a
                 // key) is queued here now: read it rather than wait.
-                if !pending.is_empty() { continue; }
+                if !queue(&host).is_empty() { continue; }
                 // read_char's wait_reading_process_output also selects on
                 // the processes: one ready wakes the loop to read it.
                 let processes = vm.process_wait_fds();
@@ -1712,9 +1797,9 @@ fn evaluate(
                 // A user signal `debug-on-event' names sets `quit-flag': its
                 // quit key runs into the debugger.
                 vm.take_debug_event();
-                if vm.take_quit_key() { pending.push_back(quit::quit_key()); continue; }
+                if vm.take_quit_key() { queue(&host).push_back(quit::quit_key()); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
-                    terminal_wait::Wake::Input(event) => pending.push_back(event),
+                    terminal_wait::Wake::Input(event) => queue(&host).push_back(event),
                     terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
                 }
@@ -1743,7 +1828,7 @@ fn evaluate(
         let lost = images.borrow().must_repaint(sender.as_ref());
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {
             let presentation = next_presentation(&host)?;
-            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &host, Wait::Rendered, &mut paint_timings)?;
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,
@@ -1765,7 +1850,7 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 /// A native close: GUI quit, lent like any Lisp the loop runs, whose
 /// confirmation may read input. Whether to shut down.
 fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
-    terminate(vm, host, Lent { queue: &mut *lent.queue, live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
+    terminate(vm, host, Lent { live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     // A server's window is a resource of the session: closing it ends the
     // session only when Lisp says so (lisp/romacs/romacs-server.el).
     if host.borrow().server.is_some() {
@@ -1785,16 +1870,16 @@ fn terminate(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>
     lent.run(host, |_| vm.eval_source(&format!("(kill-emacs {signal})"))).0.map(|_| ())
 }
 
-/// The outer loop's input state, lent to the prompt host (prompt.rs) for
-/// every piece of Lisp the loop runs (a command, a timer, a background
-/// callback, a close), since any of them may read input mid-way: the keys
-/// queued ahead and the presentation in flight. What the Lisp did not
-/// consume, and what its reads settled or saw (a resize, a close), come
-/// back; a read that presented a prompt leaves the frame to repaint, even
+/// The outer loop's presentation state, lent to the prompt host
+/// (prompt.rs) for every piece of Lisp the loop runs (a command, a timer, a
+/// background callback, a close), since any of them may read input mid-way:
+/// the presentation in flight and the frame's size. The keys queued ahead
+/// need no lending: the loop's one queue is the host's (`prompt::Shared`),
+/// where any read, inside a lend or not, finds and leaves them. What the
+/// reads settled or saw (a resize, a close) comes back; a read that presented a prompt leaves the frame to repaint, even
 /// when the Lisp changed nothing else. A read that redisplays without the
 /// in-flight presentation waits for one the renderer has already passed.
 struct Lent<'a> {
-    queue: &'a mut std::collections::VecDeque<InputEvent>,
     live: &'a mut presentation::Presentation,
     width: &'a mut u32,
     height: &'a mut u32,
@@ -1805,7 +1890,6 @@ impl Lent<'_> {
     fn run<T>(self, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, run: impl FnOnce(&mut presentation::Presentation) -> T) -> (T, bool) {
         let before = {
             let mut shared = host.borrow_mut();
-            shared.pending = std::mem::take(self.queue);
             shared.in_flight = self.live.in_flight();
             shared.presentation
         };
@@ -1818,7 +1902,6 @@ impl Lent<'_> {
             *self.live = presentation::Presentation::new();
             shared.presentation += 1;
         }
-        *self.queue = std::mem::take(&mut shared.pending);
         if shared.presentation != before { self.live.changed(); }
         if let Some((settled, at)) = shared.settled.take() { self.live.completed(settled, at); }
         self.live.lent_back(shared.in_flight.take());

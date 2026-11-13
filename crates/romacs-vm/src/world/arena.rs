@@ -49,6 +49,13 @@
 //! collection (`trim`). Outside world binaries nothing installs it; when
 //! its range cannot be reserved it hands every request to the system
 //! allocator.
+//!
+//! With `ROMACS_HEAP_FILE=1`, the thread that adopts an image, which then
+//! runs the VM, takes its later blocks from the production allocator's file
+//! heap instead (`romacs_allocator::file_heap`), in address space of its
+//! own, outside both arenas; a fork that thread asks to be lazy copies no
+//! page-table entry of them (`start_heap_file`).
+use romacs_allocator::file_heap;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
@@ -149,6 +156,8 @@ const STEPS: [&str; 6] = ["", "no arena", "adopted already", "address-space limi
 static ADOPTED: AtomicBool = AtomicBool::new(false);
 /// A restored process's allocator for every block outside the arenas.
 const PLATFORM: romacs_allocator::PlatformAllocator = romacs_allocator::PLATFORM_ALLOCATOR;
+/// Whether the file heap this process asked for started (`start_heap_file`); unset when it asked for none.
+static HEAP_FILE: std::sync::OnceLock<Result<(), file_heap::Refused>> = std::sync::OnceLock::new();
 
 /// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
@@ -472,6 +481,8 @@ unsafe fn unplace(at: usize, len: usize, placed: i32) {
 unsafe fn start() -> u8 {
     unsafe { take_inventory() };
     unsafe { reserve_window() };
+    // HOST(libc::getenv): the world allocator reads whether it runs in a builder at its first
+    // allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
@@ -480,6 +491,8 @@ unsafe fn start() -> u8 {
     let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
         let mut random = 0usize;
+        // HOST(libc::getrandom): the world allocator picks a random arena address at its first
+        // allocation; no Lisp value depends on it
         let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
         if read != size_of::<usize>() as isize {
             break;
@@ -509,10 +522,14 @@ unsafe fn start() -> u8 {
 /// sparse, so only pages the arena touched hold blocks. -1 when there is
 /// none: a builder without one cannot publish (`write_image`).
 unsafe fn backing_file(reserve: usize) -> i32 {
+    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+    // allocation, before host.rs can run; no Lisp value depends on it
     let fd = unsafe { libc::open(c"/dev/shm".as_ptr(), libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC, 0o600) };
     if fd < 0 {
         return -1;
     }
+    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+    // allocation, before host.rs can run; no Lisp value depends on it
     if unsafe { libc::ftruncate(fd, reserve as i64) } != 0 {
         unsafe { libc::close(fd) };
         return -1;
@@ -600,7 +617,11 @@ fn overlaps(at: usize, len: usize, other: usize, other_len: usize) -> bool {
 unsafe fn map_image_fd(fd: i32) -> Restore {
     let mut bytes = [0u8; size_of::<Header>()];
     let read = unsafe { libc::pread(fd, bytes.as_mut_ptr().cast(), bytes.len(), 0) };
+    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
+    // launcher checked that image
     let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
+    // launcher checked that image
     if read != bytes.len() as isize || unsafe { libc::fstat(fd, &mut stat) } != 0 {
         return Restore::Unreadable;
     }
@@ -658,7 +679,27 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     BASE.store(base, Ordering::Release);
     ADOPTED.store(true, Ordering::Release);
     unlock();
+    start_heap_file(reserve);
     Restore::Mapped
+}
+
+/// With `ROMACS_HEAP_FILE=1`, start the file heap, LEN bytes as an arena
+/// has, for the calling thread: the one that adopted the image, which runs
+/// the VM.
+fn start_heap_file(len: usize) {
+    // HOST(std::env::var_os): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
+    // the image is adopted; not through host.rs, so that a process that asks for none records no
+    // host read; no world holds it, and Lisp sees it only through romacs--arena-census
+    if std::env::var_os("ROMACS_HEAP_FILE").is_some_and(|asked| asked == "1") {
+        let _ = HEAP_FILE.set(file_heap::start(len));
+    }
+}
+
+/// The file heap's counts, when this process asked for one
+/// (`ROMACS_HEAP_FILE`) as it adopted its image; or why it was refused.
+#[must_use]
+pub fn heap_file() -> Option<Result<file_heap::Stats, file_heap::Refused>> {
+    HEAP_FILE.get().map(|started| started.map(|()| file_heap::stats()))
 }
 
 /// The executable's load segments, as the kernel loaded it: where it
@@ -725,6 +766,8 @@ unsafe fn shadow_executable(old: usize) -> bool {
         return false;
     }
     let undo = || { unsafe { libc::munmap((old + low) as *mut libc::c_void, span) }; false };
+    // HOST(libc::file): the world allocator maps its own executable read-only where an image
+    // expects it; no Lisp value depends on it
     let fd = unsafe { libc::open(c"/proc/self/exe".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
     if fd < 0 {
         return undo();
@@ -931,7 +974,8 @@ pub fn may_reserve() -> bool {
 /// Give the system the whole pages between FROM and TO bytes past BASE, the
 /// spare capacity of a reserved table, whose contents are unused. SAFETY:
 /// those bytes are within one allocation the caller owns, and nothing reads
-/// or holds them: the pages come back zeroed.
+/// or holds them: the pages come back zeroed, or, in the file heap
+/// (`start_heap_file`), as the heap's file last held them.
 pub(crate) unsafe fn release_spare(base: *mut u8, from: usize, to: usize) {
     let start = (base as usize + from).next_multiple_of(PAGE);
     let end = (base as usize + to) / PAGE * PAGE;
@@ -1153,6 +1197,8 @@ unsafe fn copy_extents(from: i32, to: i32, len: usize) -> std::io::Result<()> {
         unsafe { copy_range(from, to, data, end) }?;
         at = end;
     }
+    // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+    // opened through host
     if unsafe { libc::ftruncate(to, len as i64) } != 0 {
         return Err(last());
     }
@@ -1166,6 +1212,8 @@ unsafe fn copy_range(from: i32, to: i32, start: i64, end: i64) -> std::io::Resul
     let mut at = start;
     while at < end {
         let (mut input, mut output) = (at, at);
+        // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+        // opened through host
         let n = unsafe { libc::copy_file_range(from, &mut input, to, &mut output, (end - at) as usize, 0) };
         if n > 0 {
             at += n as isize as i64;

@@ -5,12 +5,23 @@
 //! (`--batch`, a test, a worker VM) calls the same code itself. A [`Spec`]
 //! carries everything the child's start depends on, whole: nothing is
 //! inherited from the spawner but what the spec names.
+//!
+//! Descriptors, the pty, the pidfd and the reaping of a failed start go
+//! through rustix. Four things stay direct C library calls, because no
+//! crate in the lock file covers them safely: `fork` and everything the
+//! child does before its `execve` ([`Plan::child`]); `waitid` with
+//! `WNOWAIT` over any child ([`wait`]), whose answer must name the pid,
+//! which rustix's `WaitIdStatus` does not give; and a signal that rustix's
+//! `Signal` cannot name ([`signal`]): realtime signals and 0.
 
 use std::ffi::CString;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 
 use romacs_record::{Error, Reader, Writer};
+use rustix::io::Errno;
+use rustix::process::{Pid, Signal};
+use rustix::pty::OpenptFlags;
 
 use crate::proto::count;
 
@@ -105,41 +116,36 @@ fn os<T: PartialOrd + Default>(result: T) -> io::Result<T> {
     if result < T::default() { Err(io::Error::last_os_error()) } else { Ok(result) }
 }
 
-fn owned(fd: RawFd) -> OwnedFd {
-    // SAFETY: every caller passes a descriptor a system call just returned
-    // to it, open and owned by nothing else.
-    unsafe { OwnedFd::from_raw_fd(fd) }
+/// Retry CALL while a signal interrupts it.
+fn restarting<T>(mut call: impl FnMut() -> rustix::io::Result<T>) -> io::Result<T> {
+    loop {
+        match call() {
+            Err(Errno::INTR) => {}
+            result => return result.map_err(io::Error::from),
+        }
+    }
 }
 
-fn pair(make: impl FnOnce(&mut [RawFd; 2]) -> libc::c_int) -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [-1; 2];
-    os(make(&mut fds))?;
-    Ok((owned(fds[0]), owned(fds[1])))
-}
+fn pid(raw: i32) -> io::Result<Pid> { Pid::from_raw(raw).ok_or_else(|| io::ErrorKind::InvalidInput.into()) }
 
-fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    // SAFETY: pipe2 writes two descriptors into the array it is given.
-    pair(|fds| unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) })
-}
+fn pipe() -> io::Result<(OwnedFd, OwnedFd)> { Ok(rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC)?) }
 
 fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
-    // SAFETY: socketpair writes two descriptors into the array it is given.
-    pair(|fds| unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr()) })
+    use rustix::net::{AddressFamily, SocketFlags, SocketType};
+    Ok(rustix::net::socketpair(AddressFamily::UNIX, SocketType::STREAM, SocketFlags::CLOEXEC, None)?)
 }
 
-/// A pty's master and slave, sized.
+/// A pty's master and slave, sized: what `openpty` does, close-on-exec.
+/// The master is opened as the C library's `posix_openpt` opens it, not by
+/// rustix's `openpt`, which reports a full pty table (`ENOSPC`) as `EAGAIN`.
+/// As `openpty`, a size the slave refuses is no failure.
 fn pty(size: (u16, u16)) -> io::Result<(OwnedFd, OwnedFd)> {
-    let window = libc::winsize { ws_col: size.0, ws_row: size.1, ws_xpixel: 0, ws_ypixel: 0 };
-    // SAFETY: openpty writes two descriptors through the first two
-    // pointers and only reads the window size; name and termios are null.
-    let (master, slave) = pair(|fds| unsafe {
-        let (first, second) = fds.split_at_mut(1);
-        libc::openpty(first.as_mut_ptr(), second.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null(), &raw const window)
-    })?;
-    for fd in [&master, &slave] {
-        // SAFETY: F_SETFD sets a flag on a descriptor owned here.
-        os(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) })?;
-    }
+    use rustix::fs::{Mode, OFlags};
+    let master = rustix::fs::open(c"/dev/ptmx", OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC, Mode::empty())?;
+    rustix::pty::grantpt(&master)?;
+    rustix::pty::unlockpt(&master)?;
+    let slave = rustix::pty::ioctl_tiocgptpeer(&master, OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+    let _ = rustix::termios::tcsetwinsize(&slave, rustix::termios::Winsize { ws_row: size.1, ws_col: size.0, ws_xpixel: 0, ws_ypixel: 0 });
     Ok((master, slave))
 }
 
@@ -197,38 +203,32 @@ pub fn spawn(spec: &Spec) -> io::Result<Child> {
     // SAFETY: fork in a possibly threaded process: the child runs only
     // `Plan::child`, which makes system calls alone (no allocation, no
     // lock, no unwinding) on memory prepared above, and ends in execve or
-    // _exit.
-    let pid = os(unsafe { libc::fork() })?;
-    if pid == 0 {
+    // _exit. No crate in the lock file forks safely: rustix's fork is part
+    // of its unstable runtime API, and std's spawn cannot hand the child
+    // exactly the spec (its descriptors by number, its controlling pty).
+    let raw = os(unsafe { libc::fork() })?;
+    if raw == 0 {
         plan.child();
     }
     drop((failure, theirs));
-    // SAFETY: pidfd_open takes a pid and flags. PID is this process's
-    // unreaped child, so the number cannot have been reused.
-    let pidfd = os(unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) }).and_then(|fd| RawFd::try_from(fd).map(owned).map_err(io::Error::other));
+    let child = pid(raw)?;
+    // PID is this process's unreaped child, so the number cannot have been reused.
+    let pidfd = rustix::process::pidfd_open(child, rustix::process::PidfdFlags::empty()).map_err(io::Error::from);
     // The pipe closes at the exec: end of file is success, four bytes are
     // the child's errno, and anything else is a failure of the report.
     let mut errno = [0u8; 4];
-    let reported = loop {
-        // SAFETY: reading up to four bytes into a four-byte buffer.
-        match unsafe { libc::read(report.as_raw_fd(), errno.as_mut_ptr().cast(), 4) } {
-            0 => break Ok(()),
-            4 => break Err(io::Error::from_raw_os_error(i32::from_ne_bytes(errno))),
-            -1 if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => {}
-            -1 => break Err(io::Error::last_os_error()),
-            _ => break Err(io::ErrorKind::UnexpectedEof.into()),
-        }
+    let reported = match restarting(|| rustix::io::read(&report, &mut errno)) {
+        Ok(0) => Ok(()),
+        Ok(4) => Err(io::Error::from_raw_os_error(i32::from_ne_bytes(errno))),
+        Ok(_) => Err(io::ErrorKind::UnexpectedEof.into()),
+        Err(error) => Err(error),
     };
     match (reported, pidfd) {
-        (Ok(()), Ok(pidfd)) => Ok(Child { pid, pidfd, fds: ours }),
+        (Ok(()), Ok(pidfd)) => Ok(Child { pid: raw, pidfd, fds: ours }),
         (reported, pidfd) => {
-            // SAFETY: killing and reaping this process's own child; a null
-            // status pointer is allowed, and the wait is retried when a
-            // signal interrupts it.
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-                while libc::waitpid(pid, std::ptr::null_mut(), 0) < 0 && *libc::__errno_location() == libc::EINTR {}
-            }
+            // Kill and reap this process's own child.
+            let _ = rustix::process::kill_process(child, Signal::KILL);
+            let _ = restarting(|| rustix::process::waitpid(Some(child), rustix::process::WaitOptions::empty()));
             Err(reported.err().or(pidfd.err()).unwrap_or_else(|| io::ErrorKind::Other.into()))
         }
     }
@@ -249,6 +249,16 @@ struct Plan<'a> {
 impl Plan<'_> {
     /// Become the program, or write the errno of what failed to the report
     /// pipe and exit.
+    ///
+    /// Between `fork` and `execve` in a process that may have threads, only
+    /// async-signal-safe calls are allowed. The session, the directory and
+    /// the umask go through rustix, whose calls are plain system calls. The
+    /// rest are direct C library calls: the descriptor moves work on raw
+    /// numbers this child cannot hold as owned or borrowed descriptors
+    /// (dropping one closes it, and the numbers are moved and refilled
+    /// here), and rustix's signal disposition, signal mask and `execve`
+    /// calls are unsafe runtime functions, its resource limits a closed
+    /// enum where the spec carries a number.
     fn child(&self) -> ! {
         let mut report = self.failure;
         macro_rules! fail { ($errno:expr) => {{
@@ -257,6 +267,7 @@ impl Plan<'_> {
             libc::_exit(127)
         }}; }
         macro_rules! check { ($call:expr) => { if $call < 0 { fail!(*libc::__errno_location()) } }; }
+        macro_rules! safely { ($call:expr) => { if let Err(error) = $call { fail!(error.raw_os_error()) } }; }
         // SAFETY: after fork, in the child: system calls only, on values
         // prepared before the fork and descriptors this process owns. The
         // pointers given to execve are NUL-terminated strings and
@@ -265,7 +276,7 @@ impl Plan<'_> {
             for signal in 1..=64 {
                 libc::signal(signal, libc::SIG_DFL);
             }
-            if self.spec.setsid { check!(libc::setsid()); }
+            if self.spec.setsid { safely!(rustix::process::setsid()); }
             // Above every target, so no dup2 below overwrites a source.
             let failure = libc::fcntl(self.failure, libc::F_DUPFD_CLOEXEC, self.floor);
             check!(failure);
@@ -293,8 +304,8 @@ impl Plan<'_> {
                 low = next + 1;
             }
             libc::close_range((failure + 1).cast_unsigned(), u32::MAX, 0);
-            check!(libc::chdir(self.cwd.as_ptr()));
-            libc::umask(self.spec.umask);
+            safely!(rustix::process::chdir(self.cwd.as_c_str()));
+            rustix::process::umask(rustix::fs::Mode::from_raw_mode(self.spec.umask));
             for &(resource, soft, hard) in &self.spec.limits {
                 check!(libc::setrlimit(resource as _, &libc::rlimit { rlim_cur: soft, rlim_max: hard }));
             }
@@ -364,6 +375,10 @@ pub enum Whom<'a> {
 /// A child's change of state, if one is pending: its pid and new status.
 /// Never blocks. With [`Whom::Child`] and [`Whom::Pid`] the change is
 /// consumed, and an exit reaps the child.
+///
+/// A direct `waitid`: the peek over any child must learn the pid it found,
+/// and rustix's `WaitIdStatus` does not carry one. One call serves all
+/// three, so a wait has one mechanism.
 #[must_use]
 pub fn wait(whom: Whom<'_>) -> Option<(i32, Status)> {
     let (kind, id, peek) = match whom {
@@ -396,12 +411,29 @@ pub fn wait(whom: Whom<'_>) -> Option<(i32, Status)> {
 /// # Errors
 /// The system's refusal; `ESRCH` once the process is gone.
 pub fn signal(pidfd: &OwnedFd, group: Option<i32>, signal: i32) -> io::Result<()> {
-    // SAFETY: both calls take integers and a null siginfo. The pidfd names
-    // one process for good; the group call is made by the unreaped
-    // leader's parent, so the pid still names that group.
+    // The pidfd names one process for good; the group call is made by the
+    // unreaped leader's parent, so the pid still names that group.
+    match (Signal::from_named_raw(signal), group) {
+        (Some(named), Some(leader)) => Ok(rustix::process::kill_process_group(pid(leader)?, named)?),
+        (Some(named), None) => Ok(rustix::process::pidfd_send_signal(pidfd, named)?),
+        (None, group) => signal_by_number(pidfd.as_fd(), group, signal),
+    }
+}
+
+/// [`signal`] for a number rustix's safe `Signal` does not name: a
+/// realtime signal, or 0, which only asks whether the process is there.
+/// rustix makes one only by an unsafe constructor, so the system calls are
+/// made directly.
+fn signal_by_number(pidfd: std::os::fd::BorrowedFd<'_>, group: Option<i32>, signal: i32) -> io::Result<()> {
+    // A leader is a pid, as for a named signal: never 0, which would name
+    // the keeper's own group.
+    let group = group.map(pid).transpose()?;
+    // SAFETY: both calls take integers and a null siginfo, no memory of
+    // this process. The pidfd names one process for good; the group's
+    // leader is the caller's unreaped child.
     os(unsafe {
         match group {
-            Some(leader) => libc::kill(-leader, signal),
+            Some(leader) => libc::kill(-leader.as_raw_nonzero().get(), signal),
             None => libc::c_int::from(libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), 0) < 0).wrapping_neg(),
         }
     }).map(drop)

@@ -10,9 +10,10 @@
 
 use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+
+use rustix::fs::{Mode, OFlags};
 
 /// Run WITH on a short name for PATH, made through a descriptor of its
 /// directory that lives as long as the call.
@@ -21,7 +22,7 @@ fn through_directory<T>(path: &Path, with: impl FnOnce(PathBuf) -> io::Result<T>
     let (Some(directory), Some(name)) = (directory, path.file_name()) else {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} is not a socket's path", path.display())));
     };
-    let directory = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_PATH | libc::O_DIRECTORY).open(directory)?;
+    let directory = rustix::fs::open(directory, OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?;
     with(Path::new("/proc/self/fd").join(directory.as_raw_fd().to_string()).join(name))
 }
 

@@ -390,6 +390,103 @@ fn g3a_surviving_parent_does_not_retain_peak_child_storage() {
     yes(&mut vm, "(and (window-live-p (selected-window)) (window-live-p keep))");
 }
 
+/// An overlay change redisplays the windows showing the overlay's buffer
+/// and no other: each buffer's windows read that buffer's own overlay
+/// revision. One process-wide count made a highlight moved in any buffer,
+/// shown or not, rebuild every window on the frame.
+#[test]
+fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (insert "alpha beta\n")
+                          (setq a (selected-window))
+                          (set-window-new-pixel a 288)
+                          (setq b (split-window-internal a 288 nil 0.5))
+                          (setq other (get-buffer-create "other") hidden (get-buffer-create "hidden"))
+                          (dolist (buffer (list other hidden)) (with-current-buffer buffer (insert "gamma delta\n")))
+                          (set-window-buffer b other)
+                          (setq indirect (make-indirect-buffer other "indirect")))"#);
+    vm.frame_snapshot(800, 576).unwrap();
+    vm.frame_snapshot(800, 576).unwrap();
+    // The windows a redisplay after CHANGE rebuilds.
+    let mut rebuilt = |change: &str| {
+        run(&mut vm, change);
+        let before = vm.window_rebuilds();
+        vm.frame_snapshot(800, 576).unwrap();
+        vm.window_rebuilds() - before
+    };
+    assert_eq!(rebuilt("nil"), 0, "nothing changed");
+    // In a buffer no window shows, and in one sharing a shown buffer's text.
+    for buffer in ["hidden", "indirect"] {
+        for change in ["(setq o (make-overlay 1 3 BUFFER))", "(overlay-put o 'face 'bold)", "(move-overlay o 2 4)",
+                       "(with-current-buffer BUFFER (remove-overlays 3 4))", "(delete-overlay o)",
+                       "(progn (overlay-put (make-overlay 1 3 BUFFER) 'face 'bold) (with-current-buffer BUFFER (delete-all-overlays)))"] {
+            let change = change.replace("BUFFER", buffer);
+            assert_eq!(rebuilt(&change), 0, "{change} is shown in no window");
+        }
+    }
+    // In the other window's buffer: that window, and only when the change shows.
+    for (change, windows) in [("(setq o (make-overlay 1 3 other))", 1), ("(overlay-put o 'face 'bold)", 1), ("(overlay-put o 'face 'bold)", 0),
+                              ("(move-overlay o 2 4)", 1), ("(move-overlay o 1 3 hidden)", 1), ("(move-overlay o 2 4)", 0),
+                              ("(move-overlay o 1 3 other)", 1),
+                              // To the buffer and range it has: nothing to show anew (a timer's refresh).
+                              ("(move-overlay o 1 3)", 0), ("(move-overlay o 3 1 other)", 0), ("(overlay-put o 'face 'bold)", 0),
+                              ("(with-current-buffer other (remove-overlays 2 3))", 1),
+                              ("(delete-overlay o)", 1), ("(delete-overlay o)", 0),
+                              ("(overlay-put (make-overlay 1 3 other) 'face 'bold)", 1),
+                              ("(with-current-buffer other (delete-all-overlays))", 1), ("(with-current-buffer other (delete-all-overlays))", 0),
+                              // A value its category gave already, which display reads from the overlay itself.
+                              ("(progn (put 'hidden-text 'invisible t) (overlay-put (setq o (make-overlay 1 3 other)) 'category 'hidden-text))", 1),
+                              ("(overlay-put o 'invisible t)", 1), ("(overlay-put o 'invisible t)", 0),
+                              // Its own nil in place of its category's value.
+                              ("(progn (put 'hidden-text 'face 'bold) (overlay-put o 'evaporate nil))", 0), ("(overlay-put o 'face nil)", 1)] {
+        assert_eq!(rebuilt(change), windows, "{change} in the other window's buffer");
+    }
+    // The overlays of a text whose representation changes are put back in
+    // a new store, and an indirect buffer's are copies of its base's: each
+    // store's revision says it has shown something.
+    assert_eq!(rebuilt("(overlay-put (make-overlay 1 3 hidden) 'face 'bold)"), 0);
+    assert_eq!(rebuilt("(set-window-buffer b hidden)"), 1);
+    assert_eq!(rebuilt("(with-current-buffer hidden (set-buffer-multibyte nil))"), 1);
+    assert_eq!(rebuilt("(with-current-buffer other (setq copy (make-indirect-buffer other \"copy\" t)))"), 0);
+    for buffer in ["hidden", "copy"] {
+        let buffer = run(&mut vm, buffer);
+        assert_ne!(vm.overlay_store(buffer).map(|store| store.overlay_revision), Some(0));
+    }
+}
+
+/// An overlay with no property ranks the others where it overlaps them,
+/// and the ranking is not transitive: deleting or moving one can change
+/// which face shows, so it redisplays the windows on its buffer.
+#[test]
+fn a_propertyless_overlay_that_ranks_faces_redisplays_when_it_goes() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (set-buffer (get-buffer-create "ranked")) (insert "abcdefghij\n")
+                           (set-window-buffer nil (current-buffer))
+                           (setq a (make-overlay 1 6) b (make-overlay 3 7) c (make-overlay 2 6))
+                           (overlay-put a 'priority '(nil . 1)) (overlay-put a 'face '(:foreground "#ff0000"))
+                           (overlay-put b 'face '(:foreground "#0000ff")))"##);
+    // The foreground shown at the character at byte 3 (position 4).
+    let shown = |vm: &mut Vm| {
+        let snapshot = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        let run = snapshot.text.face_runs.iter().find(|run| run.bytes.contains(&3)).expect("a run over position 4");
+        snapshot.faces[run.face.0 as usize].foreground
+    };
+    let mut faces = vec![shown(&mut vm)];
+    for change in ["(delete-overlay c)", "(move-overlay c 2 6)", "(move-overlay c 8 9)", "(move-overlay c 2 6)"] {
+        run(&mut vm, change);
+        let after = shown(&mut vm);
+        // What the window shows rebuilt from nothing.
+        let id = vm.selected_window_id().unwrap();
+        vm.display_state.forget_window(id);
+        assert_eq!(shown(&mut vm), after, "{change} left the window showing an old face");
+        faces.push(after);
+    }
+    assert_ne!(faces[0], faces[1], "the overlay with no property decides the face: {faces:?}");
+}
+
 /// Publishing one window must not invalidate another window's last publication.
 ///
 /// `display_state.previous` held a single shared snapshot, so within one
@@ -958,9 +1055,11 @@ fn whole(snapshot: &romacs_layout_input::WindowSnapshot) -> crate::WindowEnd {
 }
 
 /// Overlay calls that change nothing a window may show leave its record
-/// standing, as GNU's buffer.c calls no modify_overlay for them: a new
-/// overlay (no properties yet), deleting a detached one, and `overlay-put'
-/// of a value `eq' to the one there. A real change still redisplays fully.
+/// standing, as GNU's buffer.c calls no modify_overlay for them: deleting
+/// a detached overlay, and `overlay-put' of a value `eq' to the one there.
+/// A real change still redisplays fully, and so does a new overlay, which
+/// GNU leaves alone while it has no property: it ranks the others' faces
+/// where it overlaps them (`overlay_order::compare_overlays`).
 #[test]
 fn overlay_calls_that_change_nothing_keep_the_window() {
     let mut vm = Vm::new();
@@ -981,7 +1080,7 @@ fn overlay_calls_that_change_nothing_keep_the_window() {
     frame(&mut vm);
     frame(&mut vm);
     let before = walks(&mut vm);
-    for (form, changes) in [("(setq o (make-overlay 1 3))", false), ("(overlay-put o 'face nil)", false),
+    for (form, changes) in [("(setq o (make-overlay 1 3))", true), ("(overlay-put o 'face nil)", false),
                             ("(forward-char 1)", false), ("(overlay-put o 'face 'bold)", true),
                             ("(delete-overlay o)", true), ("(delete-overlay o)", false)] {
         let before = walks(&mut vm);

@@ -566,9 +566,9 @@ impl Vm {
         let send = self.intern("romacs-term-send-key");
         // A keymap or local-map property at point comes first: the
         // character's (`get-char-property'), or the one an insertion there
-        // would inherit (`get-pos-property'), as romacs-keymap--local-map
-        // and keymap.c get_local_map find them.
-        // The reader widens before it looks (romacs-keymap--local-map): a
+        // would inherit (`get-pos-property'), as keymap.c get_local_map
+        // finds them (`Vm::current_active_maps').
+        // The reader widens before it looks: a
         // narrowed buffer goes through the loop.
         let point = match self.object(buffer)? {
             crate::data::Object::Buffer(text) if text.accessible() == (crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(text.as_str().len())) =>

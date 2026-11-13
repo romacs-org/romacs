@@ -22,6 +22,8 @@ import sys
 import tempfile
 import time
 
+from live_oracle import stop
+
 HARNESS = Path(__file__).resolve().parent
 ROOT = HARNESS.parents[2]
 PROBE = HARNESS / 'parity_probe.el'
@@ -158,16 +160,6 @@ def wait(predicate, timeout, what, process=None, interval=.05):
     raise TimeoutError(f'timed out after {timeout}s waiting for {what}')
 
 
-def stop(process):
-    if process is not None and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-
 def ptraceable():
     """For `Popen''s preexec_fn: let a later gdb attach to the child, which
     Yama's ptrace_scope 1 allows only an ancestor (PR_SET_PTRACER_ANY)."""
@@ -270,6 +262,27 @@ class Engine:
     def keys(self, *groups):
         for group in groups:
             subprocess.run([f'{self.tools}/wtype', *group], env=self.env, check=True, timeout=30)
+
+    def press(self, *groups):
+        """Type each of GROUPS as a person does, once the session has read
+        the one before and run what it completes: its input count has
+        passed that group's events while no command runs (`this-command'
+        nil, which the command loop makes it before reading a key; a probe
+        run inside a command's own wait sees it set).  Nothing is typed but
+        the keys, so no wait of a command under test ends early.  `keys'
+        alone races a slow command: a C-g typed into one quits it half done.
+        A key whose command reads keys itself (`read-key') is typed with
+        `keys'; a group ends at a command that signals, as GNU discards the
+        input typed after one (keyboard.c cmd_error)."""
+        for group in groups:
+            ready = f'(and (>= num-nonmacro-input-events {self.ask("num-nonmacro-input-events") + inputs(group)}) (null this-command))'
+            self.keys(group)
+            try:
+                wait(lambda: self.ask(ready), self.timeout, f'{self.name} to run {" ".join(group)[:60]}', self.process, .02)
+            except TimeoutError:
+                # Keys swallowed or an input thread stuck: leave the stacks to read.
+                self.write_stacks()
+                raise
 
     def fit_grid(self):
         """Size the output so the root window's body is GRID columns and lines."""
@@ -516,6 +529,22 @@ def _pressed(key):
     keysym name (`space', `Return') is pressed with `-k', since typed it
     would be its letters, each with the modifier held."""
     return [key] if len(key) == 1 else ['-k', key]
+
+
+def inputs(group):
+    """How many input events GROUP, wtype's arguments, types: a character
+    apiece and a keysym pressed with `-k' one; a modifier held with
+    `-M'/`-m' and a delay none."""
+    count, args = 0, iter(group)
+    for arg in args:
+        if arg in ('-M', '-m', '-d', '-s'):
+            next(args, None)
+        elif arg == '-k':
+            next(args, None)
+            count += 1
+        else:
+            count += len(arg)
+    return count
 
 
 def M(key):

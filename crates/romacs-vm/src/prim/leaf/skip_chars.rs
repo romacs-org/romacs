@@ -100,12 +100,15 @@ impl Leaf<'_> {
         };
         let set = CharacterSet::parse(string)?;
         let source = if set.classes != 0 { Some(self.vm.word_motion_syntax()?) } else { None };
-        let tables = if set.upper || set.lower { (self.current_case_mapping(true)?, self.current_case_mapping(false)?) } else { (Value::NIL, Value::NIL) };
+        let tables = if set.upper || set.lower { Some([self.case_table(true)?, self.case_table(false)?]) } else { None };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = source.map(|source| crate::regexp::VmSyntax::new(self.vm, source));
         let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex::SyntaxLookup);
-        let leaf = &*self;
-        let case = |code: u32, down: bool| leaf.case_of(if down { tables.0 } else { tables.1 }, code, down);
+        let tables = tables.map(|tables| tables.map(|table| table.reader(self.vm)));
+        let case = |code: u32, down: bool| {
+            let [downcase, upcase] = tables.as_ref().expect("a set with [:upper:] or [:lower:] found its case tables");
+            if down { downcase.of(code) } else { upcase.of(code) }
+        };
         let (start, at) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
