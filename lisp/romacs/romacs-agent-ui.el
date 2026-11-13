@@ -976,7 +976,7 @@ takes it: the other keys are the actions menu's (?)."
 
 (defun romacs-agent-ui--accept-key ()
   (or romacs-agent-ui--accept-key
-      (setq romacs-agent-ui--accept-key (romacs-agent-ui--key 'romacs-agent-chat-accept-suggestion))))
+      (setq romacs-agent-ui--accept-key (romacs-agent-ui--key 'completion-at-point))))
 
 (defun romacs-agent-ui--suggestion ()
   "The prompt this chat's harness predicts, while it is to be offered."
@@ -1052,7 +1052,9 @@ whoever wrote last and whatever the session's state."
     ;; The composer's: the transcript's are on its text
     ;; (`romacs-agent-chat-transcript-map').
     (define-key map (kbd "RET") #'romacs-agent-chat-return)
-    (define-key map (kbd "TAB") #'romacs-agent-chat-accept-suggestion)
+    ;; Completion (the predicted prompt, `romacs-agent-ui--suggestion-capf'),
+    ;; as M-TAB and C-M-i complete anywhere.
+    (define-key map (kbd "TAB") #'completion-at-point)
     ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
     ;; has the same action; stopping and resuming are in the actions menu.
     (define-key map (kbd "C-j") #'newline)
@@ -1094,6 +1096,13 @@ The transcript is read-only, its keys its own:
   (setq-local scroll-conservatively 101)
   ;; The hint shows exactly while the composer is empty.
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
+  ;; The predicted prompt is a completion: completing takes it, and as it
+  ;; is typed completion-preview-mode shows the rest, as fish does (the
+  ;; composer is prose: after any character, a space too).  Empty, the
+  ;; composer shows it as its hint: no preview over it.
+  (add-hook 'completion-at-point-functions #'romacs-agent-ui--suggestion-capf nil t)
+  (setq-local completion-preview-minimum-symbol-length nil)
+  (add-hook 'completion-preview-inhibit-functions #'romacs-agent-ui--composer-empty-p nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
   ;; The composer moves as text arrives: the tray goes with it.
@@ -1240,15 +1249,16 @@ nest under SOURCE's calls."
   (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--deliver (lambda (text images) (romacs-agent-send romacs-agent-ui--session text nil nil images))))
 
-(defun romacs-agent-chat-accept-suggestion ()
-  "Take the prompt predicted in the empty composer as its text, to edit or
-send; anywhere else, indent as TAB does."
-  (interactive nil romacs-agent-chat-mode)
-  (let ((suggestion (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--suggestion))))
-    (if (not suggestion)
-        (call-interactively #'indent-for-tab-command)
-      (goto-char (point-max))
-      (insert suggestion))))
+(defun romacs-agent-ui--suggestion-capf ()
+  "Complete the composer's text, empty or typed, to the prompt its harness
+predicts, while that text begins it and point is at its end: never in the
+transcript, nor into the middle of what is written."
+  (when-let* ((suggestion (romacs-agent-ui--suggestion))
+              ((markerp romacs-agent-ui--end))
+              ((eobp))
+              (start (marker-position romacs-agent-ui--end))
+              ((string-prefix-p (buffer-substring-no-properties start (point)) suggestion)))
+    (list start (point) (list suggestion) :exclusive 'no)))
 
 (defun romacs-agent-ui--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: whatever it inherited
