@@ -77,7 +77,7 @@ fn refusing() -> bool {
 /// (`Mode::Record`).
 pub fn enter_record() {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0,
+        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0, dump: false,
         site: None, records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Record));
@@ -157,6 +157,9 @@ pub enum Fact<'a> {
     /// The machine's live load: memory and load averages change at every
     /// read, so no world is keyed on them.
     Machine,
+    /// The machine's name: keyed, except where GNU bakes it as the build
+    /// host (`BAKED_HOST`).
+    SystemName,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -184,6 +187,9 @@ pub const P_ENV: [&str; 17] = [
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
 /// the world was built, as a dumped GNU's is its dump time.
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
+/// The baked site of the machine's name: `emacs-build-system` is the host
+/// the world was built on, as a dumped GNU's is its dump's.
+const BAKED_HOST: (&str, &str) = ("/version.el", "(defconst emacs-build-system");
 /// jit-lock.el's default for `jit-lock-stealth-load' only asks whether
 /// `load-average' works, and a dumped GNU keeps the dump's answer.
 const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-load");
@@ -192,9 +198,8 @@ const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-l
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
 /// fact or fenced variable the form may read, the variable it sets, which is
 /// fenced once the form ends).
-const RESEED: [(&str, &str, &str, Option<&str>); 7] = [
+const RESEED: [(&str, &str, &str, Option<&str>); 6] = [
     ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
-    ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
      Some("find-function-C-source-directory")),
     // It asks only whether exec-path is bound: its standard value is the
@@ -356,6 +361,11 @@ pub(crate) fn layer_timers_allowed() -> bool {
     LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
+/// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
+pub(crate) fn at_baked_host() -> bool {
+    with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
+}
+
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
 pub(crate) fn reseed_output() -> Option<&'static str> {
     reseed_entry().and_then(|(_, output)| output)
@@ -370,8 +380,9 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
         Fact::Machine if site.is_some_and(|s| s.at(BAKED_LOAD)) => Class::B,
+        Fact::SystemName if site.is_some_and(|s| s.at(BAKED_HOST)) => Class::B,
         Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors | Fact::Machine => Class::P,
-        Fact::Other => Class::K,
+        Fact::SystemName | Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
 }
@@ -380,6 +391,8 @@ struct Build {
     pinned: Pinned,
     phase: Phase,
     startups: usize,
+    /// The build ends at GNU's dump point (`end_at_dump_point`).
+    dump: bool,
     site: Option<Rc<Site>>,
     records: Vec<Json>,
     refusals: Vec<Json>,
@@ -410,7 +423,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 /// Start recording a build on this thread, in `Phase::Init`.
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned, phase: Phase::Init, startups: 0, site: None,
+        pinned, phase: Phase::Init, startups: 0, dump: false, site: None,
         records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Build));
@@ -426,6 +439,18 @@ pub fn leave_build() -> Option<Json> {
 /// The VM is made: the recipe starts.
 pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
+}
+
+/// This build ends at GNU's dump point, as loadup.el does under
+/// `dump-mode`: the chain leaves its startup steps to each restored
+/// process (`romacs--dumping`). A no-op outside a build.
+pub fn end_at_dump_point() {
+    with_build(|b| b.dump = true);
+}
+
+/// Whether this process builds a world that ends at GNU's dump point.
+pub(crate) fn dumping() -> bool {
+    refusing() && with_build(|b| b.dump).unwrap_or(false)
 }
 
 /// How many startup runs a build has begun.
@@ -1751,7 +1776,12 @@ pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
 pub fn system_name() -> io::Result<String> {
     let result = std::fs::read_to_string("/proc/sys/kernel/hostname");
     if building() {
-        host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        let baked = with_build(|b| class(Fact::SystemName, b.site.as_deref()) == Class::B).unwrap_or(false);
+        if baked && refusing() {
+            p_read(Fact::SystemName, "system-name".into());
+        } else {
+            host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        }
     }
     result
 }
@@ -2662,12 +2692,14 @@ pub fn fork_isolate() -> io::Result<i32> {
 /// `twin.rs`): 0 in the child, else the child's pid. The child has the
 /// caller's thread alone, so a lock another thread held stays held in it:
 /// the allocator's is held across the fork (`arena::across_fork`), and the
-/// child takes no other lock and ends with `exit_at_once`. It dies with the
-/// forking thread, even one that ends without unwinding (`_exit`), and ends
-/// at once if that thread was gone before it could ask.
+/// child takes no other lock and ends with `exit_at_once`. It reads only
+/// what the forking thread itself wrote, which is what lets the fork be a
+/// lazy one where the heap is in a file (`romacs_allocator::file_heap`). It
+/// dies with the forking thread, even one that ends without unwinding
+/// (`_exit`), and ends at once if that thread was gone before it could ask.
 pub(crate) fn fork_threaded() -> io::Result<i32> {
     let parent = std::process::id();
-    let pid = crate::world::arena::across_fork(fork)?;
+    let pid = crate::world::arena::across_fork(|| romacs_allocator::file_heap::lazily(fork))?;
     if pid == 0 && (set_parent_death_signal(libc::SIGKILL).is_err() || std::os::unix::process::parent_id() != parent) {
         exit_at_once(0);
     }

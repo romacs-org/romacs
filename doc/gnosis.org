@@ -1372,6 +1372,38 @@ generate questions automatically.  It requires an existing source ID.
 Finish or cancel any open =*Gnosis NEW*= draft before starting another;
 creation commands will not overwrite it.
 
+*** Creating Themata from an Agent
+
+Agents create themata in batches through Romacs's MCP server, with the
+=gnosis_cards_create= tool (=gnosis-agent-content-create= from Lisp).
+Agent sessions started in Romacs reach the same server.  One call takes
+1 to 500 cards, each ={type, question, answer [], choices [], hints [],
+parathema, rubric, aliases [], tags [], key}=: =choices= for =mcq= and
+=mc-cloze=, =hints= for =basic=, =double=, =cloze= and =agent-eval=, and
+=rubric= for =agent-eval=.  A card is saved as the editor saves it, so a
+=double= card makes two themata and each type's own rules apply; tags
+must be ones Org can keep, so the editor can open the card again.  Model
+cards have their own agent tools.  Gnosis has no decks; tags organise
+themata.  Creation does not wait for a review in progress: it only adds
+new themata.
+
+A call is all or none: every card is checked first, and with any card
+invalid nothing is written.  Each card's result says why it is invalid,
+by its position in the call.  With =dry-run= the call reports what each
+card would make and writes nothing.  A card's =key=, or when it has none
+a hash of everything but its tags, is stored with what it made, so a
+retried call reports those cards as =exists= with their IDs instead of
+making them again.  A key names one card across every call, so a key
+reused for another card reports the first.  A retry that changes only a
+card's tags is reported =exists= unchanged.  Outer whitespace in a
+card's text is trimmed.  A card is made only if the editor could open it
+and save it again unchanged; text it reads as Org structure, such as an
+answer line starting with =- =, an Org heading, a table or an unindented
+source block, makes the card invalid, and the error names the field and
+what the editor would keep; resubmitting that kept value works.  A call
+whose combined draft cannot be read back at all holds Gnosis for longer,
+since each of its themata is then checked alone.
+
 ** Editing Themata
 
 To edit an existing thema, use =M-x gnosis-edit-thema= or press =e=
