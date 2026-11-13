@@ -18,6 +18,7 @@ mod char_table;
 mod graphics;
 mod width_rule;
 mod map_keymap;
+mod where_is;
 #[cfg(test)]
 mod map_keymap_tests;
 mod charset;

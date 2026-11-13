@@ -1887,6 +1887,7 @@ mod leaf {
     mod map_keymap;
     mod keymap_copy;
     mod active_keymaps;
+    mod where_is;
     mod category;
     mod fileio;
     mod filelock;

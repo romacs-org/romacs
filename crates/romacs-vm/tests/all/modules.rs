@@ -734,6 +734,8 @@ mod vertical_motion;
 mod vm_unsupported_named;
 #[path = "../where_is.rs"]
 mod where_is;
+#[path = "../where_is_native.rs"]
+mod where_is_native;
 #[path = "../width_rule_oracle.rs"]
 mod width_rule_oracle;
 #[path = "../window_body.rs"]
