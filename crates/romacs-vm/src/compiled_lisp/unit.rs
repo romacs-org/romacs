@@ -627,7 +627,7 @@ impl Install<'_> {
             })
         }).collect::<Result<Vec<_>>>()?;
         for (pending, &id) in bodies.into_iter().zip(&ids) {
-            Arc::get_mut(&mut vm.functions[id]).expect("a function just installed is private").pending = Some(Box::new(pending));
+            Arc::get_mut(vm.functions.change(id)).expect("a function just installed is private").pending = Some(Box::new(pending));
         }
         vm.claim_caches(&cache_ids);
         Ok(ids[entry])

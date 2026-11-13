@@ -28,6 +28,16 @@ pub(crate) fn count_copied(n: usize) {
 pub(crate) fn copied_bytes() -> usize {
     COPIED.with(|c| c.get())
 }
+#[cfg(test)]
+thread_local! {
+    /// Byte positions this thread's texts converted to characters.
+    static CHAR_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The byte positions this thread's texts have converted so far.
+#[cfg(test)]
+pub(crate) fn char_conversions() -> usize {
+    CHAR_CONVERSIONS.with(std::cell::Cell::get)
+}
 
 #[derive(Clone, Default)]
 struct ChunkCursor {
@@ -92,7 +102,7 @@ pub struct TextBody {
     cold_order: std::cell::RefCell<std::collections::VecDeque<usize>>,
     #[cfg(test)]
     scanned_bytes: std::cell::Cell<usize>,
-    pub(crate) properties: Properties,
+    pub(crate) properties: crate::properties::BodyProperties,
     #[cfg(test)]
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -341,7 +351,7 @@ impl Text {
                 cold_order: std::cell::RefCell::new(std::collections::VecDeque::new()),
                 #[cfg(test)]
                 scanned_bytes: std::cell::Cell::new(0),
-                properties: Properties::new(),
+                properties: crate::properties::BodyProperties::new(Properties::new()),
                 #[cfg(test)]
                 coordinate_steps: std::cell::Cell::new(0),
                 #[cfg(test)]
@@ -443,7 +453,7 @@ impl Text {
         text.syntax_table = b.syntax_table;
         text.category_table = b.category_table;
         text.restriction = map(b.restriction.start)..map(b.restriction.end);
-        text.properties = Properties::from_map(&properties);
+        text.properties = crate::properties::BodyProperties::new(Properties::from_map(&properties));
         for (&at, values) in &properties {
             if at.0 < text.len_bytes() {
                 let width = text.as_str()[at.0..].chars().next().unwrap().len_utf8();
@@ -683,8 +693,8 @@ impl TextBody {
             self.syntax.get_mut().touch(start, end);
         }
     }
-    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.properties.visit_values(visit);
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
+        self.properties.visit_values(reading, visit);
         self.treesit.visit_values(visit);
     }
     /// The bytes from AT to the end of its rope chunk (or the tail), for a
@@ -926,6 +936,8 @@ impl TextBody {
         Ok(ByteOffset(chunk.byte + at))
     }
     pub fn char_of_byte(&self, b: ByteOffset) -> Result<CharOffset> {
+        #[cfg(test)]
+        CHAR_CONVERSIONS.with(|c| c.set(c.get() + 1));
         if b.0 > self.bytes_len {
             return Err("index out of range".into());
         }
@@ -1081,6 +1093,17 @@ impl TextBody {
         } else {
             Err("index out of range".into())
         }
+    }
+    /// Byte AT of the text, None at or past its end: read where
+    /// `character_at` reads, in the tail or the cached chunk.
+    #[inline]
+    pub(crate) fn byte_at(&self, at: usize) -> Option<u8> {
+        let prefix = self.bytes_len - self.tail.len();
+        if at >= prefix {
+            return self.tail.as_bytes().get(at - prefix).copied();
+        }
+        let chunk = self.chunk_for_byte(at);
+        chunk.text.as_bytes().get(at - chunk.byte).copied()
     }
     #[inline]
     pub fn character_at(&self, b: ByteOffset) -> Result<Option<i64>> {

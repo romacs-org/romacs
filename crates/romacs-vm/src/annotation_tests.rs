@@ -15,7 +15,7 @@ fn keymap_query_preserves_the_threaded_register_allocation() {
     vm.stack.shrink_to_fit();
     let registers = vm.stack.as_ptr();
     let capacity = vm.stack.capacity();
-    assert_eq!(vm.keymap_at_point(property).unwrap(), map);
+    assert!(vm.keymap_at_point(property).is_ok_and(|found| found == map));
     // A native leaf call cannot invalidate the interpreter's cached registers.
     assert_eq!(vm.stack.as_ptr(), registers);
     assert_eq!(vm.stack.capacity(), capacity);

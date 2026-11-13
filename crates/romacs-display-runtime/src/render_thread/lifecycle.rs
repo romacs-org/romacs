@@ -199,7 +199,7 @@ impl RenderApp {
                         event_loop.owned_display_handle(),
                     );
                     let proxy = event_loop.create_proxy();
-                    match super::gpu_startup::PendingGpu::start(window.clone(), descriptor, proxy) {
+                    match super::gpu_startup::PendingGpu::start(window.clone(), descriptor, proxy, &mut self.gpu_workers) {
                         Ok(pending) => {
                             self.gpu_startup = Some(pending);
                             self.observe_pending_content(phys);
@@ -254,7 +254,7 @@ impl RenderApp {
                 return;
             }
         if let Some(pending) = self.gpu_startup.take() {
-            match pending.poll(&event_loop.create_proxy()) {
+            match pending.poll(&event_loop.create_proxy(), &mut self.gpu_workers) {
                 Ok(super::gpu_startup::GpuPoll::Pending(pending)) => {
                     self.gpu_startup = Some(pending)
                 }
@@ -1002,8 +1002,9 @@ impl RenderApp {
                 *width = self.pending_content_size.width;
                 *height = self.pending_content_size.height;
             }
-            // A later successful attempt cannot prove this detached worker
-            // finished. Keep the process-finalizer bypass for the whole run.
+            // The run reports its GPU startup as cancelled.  Only the reply
+            // is dropped: the worker's thread stays in `gpu_workers`, joined
+            // when the app ends, never left inside a driver at exit.
             self.gpu_startup_cancelled
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             drop(pending);
@@ -1015,6 +1016,7 @@ impl RenderApp {
         // retain only GPU objects; wgpu-core owns the descriptor's independent
         // OwnedDisplayHandle until its backend instances have been destroyed.
         self.cancel_gpu_startup();
+        self.gpu_workers.join_all();
         self.startup_commands.clear();
         // Explicitly drop wgpu resources while the Wayland connection is still alive.
         // Without this, RenderApp's implicit drop happens AFTER the event loop's

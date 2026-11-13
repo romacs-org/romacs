@@ -157,6 +157,38 @@ mod model_tests {
         assert!(scanned > 0 && scanned < 4 * 6000, "{scanned}");
     }
 
+    /// The current buffer's fresh resolutions and the character
+    /// conversions SOURCE costs, run in a multibyte buffer already current.
+    fn resolutions_and_conversions(vm: &mut Vm, source: &str) -> (usize, usize) {
+        let (resolved, converted) = (vm.buffer_resolutions, crate::text::char_conversions());
+        vm.eval_source_raw(source).unwrap();
+        (vm.buffer_resolutions - resolved, crate::text::char_conversions() - converted)
+    }
+
+    /// `eobp` and `bobp` compare point with the accessible bounds, and a
+    /// character loop finds the current buffer once, not per call: the
+    /// buffer is resolved once per value of its slot, and resolved again
+    /// after a kill or a collection.
+    #[test]
+    fn point_primitives_resolve_the_current_buffer_once() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(set-buffer (get-buffer-create \"once\")) (insert (make-string 400 ?é)) (goto-char 200) (eobp)").unwrap();
+        let (resolved, converted) = resolutions_and_conversions(&mut vm, "(dotimes (_ 200) (eobp) (bobp))");
+        assert_eq!((resolved, converted), (0, 0), "eobp and bobp");
+        let (resolved, _) = resolutions_and_conversions(&mut vm,
+            "(goto-char (point-min)) (while (not (eobp)) (char-after) (forward-char 1))");
+        assert_eq!(resolved, 0, "a char-after and forward-char loop over 400 characters");
+        let (resolved, _) = resolutions_and_conversions(&mut vm,
+            "(with-temp-buffer (insert \"x\") (eobp) (eobp)) (eobp) (eobp)");
+        assert!(resolved <= 4, "one resolution per buffer made current, not per call: {resolved}");
+        vm.collect(&mut []);
+        let (resolved, _) = resolutions_and_conversions(&mut vm, "(eobp) (eobp)");
+        assert_eq!(resolved, 1, "a collection may move the buffer: resolved again, once");
+        let killed = vm.eval_source("(let ((k (current-buffer))) (kill-buffer k) (list (buffer-live-p (current-buffer)) (eq (current-buffer) k) (eobp)))")
+            .and_then(crate::Local::display);
+        assert_eq!(killed.as_deref(), Ok("(t nil t)"), "killing the current buffer makes another current");
+    }
+
     #[test]
     fn killed_buffer_loses_symbol_local_bindings() {
         let mut vm = Vm::new();
@@ -614,6 +646,7 @@ impl Vm {
         retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
         state.kill();
+        self.resolved_buffer = None;
         *self.objects.entry_mut(index) = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             Object::Buffer(b) => {
@@ -672,13 +705,39 @@ impl Vm {
         let current = self.slots[self.buffer_slot].value;
         current == Value::NIL || matches!(self.object_if(current), Some(Object::Buffer(_)))
     }
+    /// The current buffer's object index: nil makes `*scratch*` current, a
+    /// killed buffer signals. Resolved once per value of the slot.
+    #[inline]
     pub(super) fn buffer_index(&mut self) -> Result<usize> {
+        if let Some((value, index)) = self.resolved_buffer
+            && value == self.slots[self.buffer_slot].value
+        {
+            #[cfg(any(test, debug_assertions))]
+            self.verify_resolved_buffer(value, index);
+            return Ok(index);
+        }
+        self.resolve_buffer()
+    }
+    #[inline(never)]
+    fn resolve_buffer(&mut self) -> Result<usize> {
+        #[cfg(test)]
+        { self.buffer_resolutions += 1; }
         if self.slots[self.buffer_slot].value == Value::NIL {
             self.slots[self.buffer_slot].value = self.create_named_buffer("*scratch*", false)?;
         }
         let v = self.slots[self.buffer_slot].value;
         self.require_live_buffer(v)?;
-        Ok(v.index(0)? - 1)
+        let index = v.index(0)? - 1;
+        self.resolved_buffer = Some((v, index));
+        Ok(index)
+    }
+    /// The record still says what resolving afresh would: a missed drop
+    /// (a kill, a moving collection) fails here, in every test build.
+    #[cfg(any(test, debug_assertions))]
+    fn verify_resolved_buffer(&self, value: Value, index: usize) {
+        let live = matches!(self.objects.get(index), Some(Object::Buffer(b)) if b.state.live)
+            || matches!(self.objects.get(index), Some(Object::ByteBuffer(b)) if b.state.live);
+        assert!(live && value.index(0).ok() == Some(index + 1), "the resolved current buffer is stale");
     }
     pub(super) fn ensure_buffer_writable(&mut self) -> Result<()> {
         self.buffer_index()?;
@@ -1803,6 +1862,23 @@ fn text_properties(vm: &Vm, object: Value) -> std::borrow::Cow<'_, properties::P
     }
 }
 
+/// Change PROPERTIES over RANGE as CHANGE says; FACES are a face change's
+/// combined faces, run by run.
+fn install_change(properties: &mut impl properties::Store, change: Change, range: std::ops::Range<ByteOffset>,
+                  faces: Vec<(std::ops::Range<ByteOffset>, Value)>) {
+    match change {
+        Change::Reset => properties.reset(),
+        Change::Add(pairs) => for &(key, value) in pairs.iter() { properties.put(range.clone(), key, value); },
+        Change::Remove(keys) => for key in keys { properties.remove(range.clone(), key); },
+        Change::Face { .. } => for (run, face) in faces { properties.put(run, Key::FACE, face); },
+        Change::Set(pairs) => {
+            properties.clear(range.clone());
+            // The newest key reads first; GNU keeps PROPERTIES' own order.
+            for &(key, value) in pairs.iter().rev() { properties.put(range.clone(), key, value); }
+        }
+    }
+}
+
 impl Vm {
     /// The pending change of a property primitive: what textprop.c's
     /// `add_text_properties_1` (Add, Put), `set_text_properties` (Set) and
@@ -1990,33 +2066,22 @@ impl Vm {
             Change::Face { face, append } => self.combined_faces(plan.object, plan.range.clone(), face, append),
             _ => Vec::new(),
         };
-        let range = plan.range;
-        let install = |properties: &mut properties::Properties| match plan.change {
-            Change::Reset => properties.reset(),
-            Change::Add(pairs) => for &(key, value) in pairs.iter() { properties.put(range.clone(), key, value); },
-            Change::Remove(keys) => for key in keys { properties.remove(range.clone(), key); },
-            Change::Face { .. } => for (run, face) in faces { properties.put(run, Key::FACE, face); },
-            Change::Set(pairs) => {
-                properties.clear(range.clone());
-                // The newest key reads first; GNU keeps PROPERTIES' own order.
-                for &(key, value) in pairs.iter().rev() { properties.put(range.clone(), key, value); }
-            }
-        };
+        let (change, range) = (plan.change, plan.range);
         match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => {
-                install(&mut buffer.properties);
+                install_change(&mut buffer.properties, change, range, faces);
                 self.display_state.version += 1;
             }
-            Object::String(string) | Object::RawString(string) => install(&mut string.properties),
+            Object::String(string) | Object::RawString(string) => install_change(&mut string.properties, change, range, faces),
             Object::Bytes(bytes) => {
                 let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
-                install(&mut string.properties);
+                install_change(&mut string.properties, change, range, faces);
                 *self.objects.entry_mut(index) = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
             }
             Object::ByteBuffer(buffer) => {
                 let mut properties = properties::Properties::from_map(&buffer.properties);
                 if buffer.had_intervals { properties.mark_intervals(); }
-                install(&mut properties);
+                install_change(&mut properties, change, range, faces);
                 buffer.had_intervals |= properties.has_intervals();
                 buffer.properties = properties.to_map();
                 self.display_state.version += 1;

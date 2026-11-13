@@ -91,17 +91,20 @@
     (error "Review event identity conflicts with retained evidence"))
   (gnosis-scheduler--event-result row))
 
-(defun gnosis-scheduler--config-retention (db config-id)
-  "Return supported desired retention for CONFIG-ID in DB."
-  (or (caar
-       (gnosis-sqlite-select
-        db "SELECT desired_retention FROM scheduler_config
-             WHERE id = ? AND algorithm = ? AND model = ?
-               AND implementation = ? AND parameters = ?"
-        (list config-id gnosis-fsrs--algorithm gnosis-fsrs--model
-              gnosis-fsrs--implementation
-              gnosis-fsrs-default-parameters)))
-      (error "Unsupported scheduler config")))
+(defun gnosis-scheduler--model-config (db config-id)
+  "Return (RETENTION . CURRENT) for CONFIG-ID in DB, or signal.
+CONFIG-ID must be the FSRS model with today's default parameters, under
+any implementation of it: memory states depend on the parameters, not
+on which implementation computed them.  CURRENT is non-nil when it names
+today's implementation."
+  (pcase (car (gnosis-sqlite-select
+               db "SELECT desired_retention, implementation FROM scheduler_config
+                    WHERE id = ? AND algorithm = ? AND model = ? AND parameters = ?"
+               (list config-id gnosis-fsrs--algorithm gnosis-fsrs--model
+                     gnosis-fsrs-default-parameters)))
+    (`(,retention ,implementation)
+     (cons retention (equal implementation gnosis-fsrs--implementation)))
+    (_ (error "Unsupported scheduler config"))))
 
 (defun gnosis-scheduler--compute-result
     (event-id thema-id outcome reviewed-at-us review-day state retention)
@@ -150,8 +153,7 @@ REVIEWED-AT-US, REVIEW-DAY, and RETENTION complete the evidence."
    db
    "INSERT INTO review_events VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-   (mapcar (lambda (key) (plist-get result key))
-           gnosis-scheduler--event-keys)))
+   (gnosis-scheduler--evidence result)))
 
 (defun gnosis-scheduler--update-state (db result)
   "Update DB current projection from accepted RESULT."
@@ -170,15 +172,9 @@ REVIEWED-AT-US, REVIEW-DAY, and RETENTION complete the evidence."
                 (plist-get result :thema-id))))
     (error "Scheduler state projection disappeared")))
 
-(defun gnosis-scheduler--evidence-equal-p (expected actual)
-  "Return non-nil when EXPECTED and ACTUAL event evidence agree."
-  (cl-every
-   (lambda (key)
-     (let ((left (plist-get expected key)) (right (plist-get actual key)))
-       (if (and (floatp left) (floatp right))
-           (< (abs (- left right)) 1.0e-6)
-         (equal left right))))
-   gnosis-scheduler--event-keys))
+(defun gnosis-scheduler--evidence (result)
+  "Return RESULT's event evidence in review-events column order."
+  (mapcar (lambda (key) (plist-get result key)) gnosis-scheduler--event-keys))
 
 (defun gnosis-scheduler--state-result (thema-id state)
   "Return THEMA-ID scheduler plist decoded from replay STATE."
@@ -232,48 +228,126 @@ Each row is (THEMA-ID DUE-DAY SUSPENDED)."
    thema-id (list (gnosis-scheduler-active-config db)
                   nil nil nil nil due-day 0 0 suspended)))
 
+(defun gnosis-scheduler--config-table (configs)
+  "Return a table of CONFIGS by identity, for replay.
+CONFIGS is a list of (ID RETENTION PARAMETERS); PARAMETERS nil means the
+model's defaults."
+  (let ((table (make-hash-table :test #'eql)))
+    (pcase-dolist (`(,id ,retention ,parameters) configs)
+      (puthash id (cons retention parameters) table))
+    table))
+
+(defun gnosis-scheduler--configs (db)
+  "Return DB's configurations of the FSRS model, as a replay table.
+Any implementation or parameters of the model replay: an event's
+recorded result is its state, and `gnosis-scheduler--drift' reports what
+today's FSRS would schedule differently."
+  (gnosis-scheduler--config-table
+   (gnosis-sqlite-select
+    db "SELECT id, desired_retention, parameters FROM scheduler_config
+         WHERE algorithm = ? AND model = ?"
+    (list gnosis-fsrs--algorithm gnosis-fsrs--model))))
+
+(defun gnosis-scheduler--replay-step (state row configs)
+  "Return the scheduler STATE after event ROW under CONFIGS.
+CONFIGS is a replay table (`gnosis-scheduler--config-table').
+STATE is (CONFIG STABILITY DIFFICULTY LAST-REVIEWED-AT-US LAST-REVIEW-DAY
+DUE-DAY REPS LAPSES SUSPENDED).  ROW must continue STATE: its prior memory
+is STATE's, its counts and timing follow on, and its due day is its
+calendar interval after its review day.  Its stored posterior is taken as
+recorded; it is not recomputed, so history stays valid across FSRS
+implementations and parameters of the model."
+  (pcase-let* ((`(,_config ,stability ,difficulty ,last-at ,last-day ,_due
+                           ,reps ,lapses ,suspended)
+                state)
+               (`(,_id ,_thema ,config ,at ,day ,rating ,elapsed
+                       ,prior-stability ,prior-difficulty ,posterior-stability
+                       ,posterior-difficulty ,raw-interval ,interval ,due
+                       ,reps-before ,reps-after ,lapses-before ,lapses-after
+                       ,new-p)
+                row)
+               (memory-p (and stability t)))
+    (unless (and (gethash config configs)
+                 (memql rating '(1 3))
+                 (eql prior-stability stability)
+                 (eql prior-difficulty difficulty)
+                 (or (null last-at) (> at last-at))
+                 (= elapsed (if memory-p
+                                (gnosis-scheduler--days-between last-day day)
+                              0))
+                 (gnosis-fsrs--finite-number-p posterior-stability)
+                 (> posterior-stability 0)
+                 (gnosis-fsrs--finite-number-p posterior-difficulty)
+                 (<= 1 posterior-difficulty 10)
+                 (= interval (max 1 (round raw-interval)))
+                 (= due (gnosis-scheduler--add-days day interval))
+                 (= reps-before reps) (= reps-after (1+ reps))
+                 (= lapses-before lapses)
+                 (= lapses-after (+ lapses (if (= rating 1) 1 0)))
+                 (= new-p (if (zerop reps) 1 0)))
+      (error "Review event does not replay"))
+    (list config posterior-stability posterior-difficulty at day due
+          reps-after lapses-after suspended)))
+
+(defconst gnosis-scheduler--drift-tolerance 1.0e-4
+  "Relative difference from today's FSRS that replay reports.")
+
+(defun gnosis-scheduler--drift (row config)
+  "Return how today's FSRS differs from event ROW's recorded result.
+CONFIG is ROW's configuration, (RETENTION . PARAMETERS).  Return a list
+of (KEY RECORDED COMPUTED) for each of stability, difficulty and raw
+interval that differs by more than `gnosis-scheduler--drift-tolerance',
+relative to the recorded value, or ((:error MESSAGE)) when today's FSRS
+refuses the event; nil when they agree."
+  (condition-case err
+      (let ((computed (gnosis-fsrs-transition
+                       (and (nth 7 row)
+                            (list :stability (nth 7 row) :difficulty (nth 8 row)))
+                       (nth 6 row) (if (= 1 (nth 5 row)) 'failure 'success)
+                       (car config) (cdr config))))
+        (cl-loop for (key recorded) in (list (list :stability (nth 9 row))
+                                             (list :difficulty (nth 10 row))
+                                             (list :raw-interval-days (nth 11 row)))
+                 for value = (plist-get computed key)
+                 when (> (abs (- value recorded))
+                         (* gnosis-scheduler--drift-tolerance (abs recorded)))
+                 collect (list key recorded value)))
+    (error (list (list :error (error-message-string err))))))
+
 (defun gnosis-scheduler-replay (baseline events configs suspended)
-  "Replay BASELINE and EVENTS using CONFIGS and current SUSPENDED fact."
+  "Replay BASELINE and EVENTS under CONFIGS with current SUSPENDED fact.
+CONFIGS is a replay table (`gnosis-scheduler--config-table'); config 1
+starts every baseline.  The state is built from each event's recorded
+result.  Each event is also recomputed with today's FSRS under its own
+configuration, and `:drift' lists (EVENT-ID . DIFFERENCES) for those it
+schedules differently (see `gnosis-scheduler--drift'); drift is reported,
+not rejected."
   (unless (and (= (length baseline) 4) (memq suspended '(0 1))
                (cl-every #'integerp baseline)
                (>= (nth 2 baseline) 0) (>= (nth 3 baseline) 0))
     (error "Invalid scheduler replay baseline"))
   (gnosis-scheduler--day-time (nth 1 baseline))
-  (unless (cdr (assoc 1 configs))
+  (unless (gethash 1 configs)
     (error "Replay config missing"))
-  (let* ((thema-id (nth 0 baseline))
-         (initial (list 1 nil nil nil nil (nth 1 baseline)
-                        (nth 2 baseline) (nth 3 baseline) suspended))
-         (final
-          (cl-reduce
-           (lambda (state row)
-             (unless (and (= (length row) 19)
-                          (= thema-id (nth 1 row))
-                          (gnosis-scheduler--event-id-p (nth 0 row)))
-               (error "Incomplete scheduler replay event"))
-             (let* ((config-id (nth 2 row))
-                    (retention (cdr (assoc config-id configs)))
-                    (outcome (pcase (nth 5 row)
-                               (1 'failure) (3 'success)
-                               (_ (error "Invalid replay rating"))))
-                    (input-state (cons config-id (cdr state)))
-                    (expected (gnosis-scheduler--compute-result
-                               (nth 0 row) thema-id outcome (nth 3 row)
-                               (nth 4 row) input-state
-                               (or retention (error "Replay config missing"))))
-                    (actual (gnosis-scheduler--event-result row)))
-               (unless (gnosis-scheduler--evidence-equal-p expected actual)
-                 (error "Review event does not replay"))
-               (list config-id (plist-get expected :stability)
-                     (plist-get expected :difficulty) (nth 3 row) (nth 4 row)
-                     (plist-get expected :due-day)
-                     (plist-get expected :reps-after)
-                     (plist-get expected :lapses-after) suspended)))
-           events :initial-value initial)))
-    (gnosis-scheduler--state-result thema-id final)))
+  (let ((thema-id (nth 0 baseline))
+        (state (list 1 nil nil nil nil (nth 1 baseline)
+                     (nth 2 baseline) (nth 3 baseline) suspended))
+        drift)
+    (dolist (row events)
+      (unless (and (= (length row) 19)
+                   (= thema-id (nth 1 row))
+                   (gnosis-scheduler--event-id-p (nth 0 row)))
+        (error "Incomplete scheduler replay event"))
+      (setq state (gnosis-scheduler--replay-step state row configs))
+      (when-let* ((differences (gnosis-scheduler--drift
+                                row (gethash (nth 2 row) configs))))
+        (push (cons (nth 0 row) differences) drift)))
+    (append (gnosis-scheduler--state-result thema-id state)
+            (list :drift (nreverse drift)))))
 
-(defun gnosis-scheduler-replay-thema (thema-id suspended &optional db)
-  "Replay THEMA-ID using current SUSPENDED fact and optional DB."
+(defun gnosis-scheduler-replay-thema (thema-id suspended &optional db configs)
+  "Replay THEMA-ID using current SUSPENDED fact and optional DB.
+CONFIGS is DB's replay table, read when nil."
   (let* ((db (or db (gnosis--ensure-db)))
          (baseline (car (gnosis-sqlite-select
                          db "SELECT * FROM scheduler_baseline WHERE thema_id = ?"
@@ -281,19 +355,86 @@ Each row is (THEMA-ID DUE-DAY SUSPENDED)."
          (events (gnosis-sqlite-select
                   db "SELECT * FROM review_events WHERE thema_id = ?
                        AND event_id NOT IN (SELECT event_id FROM review_voids)
-                       ORDER BY reviewed_at_us, event_id" (list thema-id)))
-         (configs (gnosis-sqlite-select
-                   db "SELECT id, desired_retention FROM scheduler_config
-                        WHERE algorithm = ? AND model = ?
-                          AND implementation = ? AND parameters = ?"
-                   (list gnosis-fsrs--algorithm gnosis-fsrs--model
-                         gnosis-fsrs--implementation
-                         gnosis-fsrs-default-parameters))))
+                       ORDER BY reviewed_at_us, event_id" (list thema-id))))
     (unless baseline (error "Scheduler baseline does not exist"))
     (gnosis-scheduler-replay baseline events
-                             (mapcar (lambda (row) (cons (car row) (cadr row)))
-                                     configs)
+                             (or configs (gnosis-scheduler--configs db))
                              suspended)))
+
+(defun gnosis-scheduler--drift-report (drift reviewed)
+  "Report DRIFT, as `gnosis-scheduler-drift' returns it, over REVIEWED themata.
+Count the themata that schedule differently and those whose history does
+not replay, and list both in a read-only buffer when there are any."
+  (let* ((value (lambda (n) (propertize (number-to-string n) 'face 'gnosis-scheduler-report-value)))
+         (broken (seq-filter (lambda (thema) (eq :error (car (cadr thema)))) drift))
+         (differ (seq-difference drift broken)))
+    (if (null drift)
+        (message "%s" (propertize (format "All %d reviewed themata replay as today's FSRS schedules them"
+                                          reviewed)
+                                  'face 'gnosis-scheduler-report-note))
+      (with-current-buffer (get-buffer-create "*Gnosis Drift*")
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (pcase-dolist (`(,id . ,events) differ)
+            (insert (format "Thema %s\n" id))
+            (pcase-dolist (`(,event . ,differences) events)
+              (insert (format "  review %s\n" (substring event 0 12)))
+              (pcase-dolist (`(,key ,recorded ,computed) differences)
+                (insert (if (eq key :error)
+                            (format "    today's FSRS refuses it: %s\n" recorded)
+                          (format "    %s %s, today %s\n" (substring (symbol-name key) 1)
+                                  recorded computed))))))
+          (pcase-dolist (`(,id (:error ,message)) broken)
+            (insert (format "Thema %s does not replay: %s\n" id message)))
+          (goto-char (point-min))
+          (special-mode))
+        (display-buffer (current-buffer)))
+      (message "%s of %d reviewed themata schedule differently under today's FSRS; %s do not replay"
+               (funcall value (length differ)) reviewed (funcall value (length broken))))))
+
+;;;###autoload
+(defun gnosis-scheduler-drift (&optional db)
+  "Return the reviews in DB that today's FSRS schedules differently.
+Replay every reviewed thema from its recorded results and list
+\(THEMA-ID . DRIFT) for each with drift, DRIFT as
+`gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
+one whose history does not replay.  The collection is read in two
+queries and each review recomputed once; nothing is written.
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report')."
+  (interactive)
+  (let* ((db (or db (gnosis--ensure-db)))
+         (configs (gnosis-scheduler--configs db))
+         (events (make-hash-table :test #'eql))
+         (themata (gnosis-sqlite-select
+                   db "SELECT b.thema_id, b.due_day, b.reps, b.lapses, s.suspended
+                         FROM scheduler_baseline AS b
+                         JOIN scheduler_state AS s ON s.thema_id = b.thema_id
+                        WHERE b.thema_id IN
+                              (SELECT thema_id FROM review_events
+                                WHERE event_id NOT IN (SELECT event_id FROM review_voids))
+                        ORDER BY b.thema_id"))
+         drift)
+    ;; Newest first per thema, reversed when replayed.
+    (dolist (row (gnosis-sqlite-select
+                  db "SELECT e.* FROM review_events AS e
+                       LEFT JOIN review_voids AS v ON v.event_id = e.event_id
+                      WHERE v.event_id IS NULL
+                      ORDER BY e.reviewed_at_us, e.event_id"))
+      (push row (gethash (nth 1 row) events)))
+    (pcase-dolist (`(,id ,due ,reps ,lapses ,suspended) themata)
+      (when-let* ((result
+                   (condition-case err
+                       (plist-get (gnosis-scheduler-replay
+                                   (list id due reps lapses)
+                                   (reverse (gethash id events)) configs suspended)
+                                  :drift)
+                     (error (list (list :error (error-message-string err)))))))
+        (push (cons id result) drift)))
+    (setq drift (nreverse drift))
+    (when (called-interactively-p 'interactive)
+      (gnosis-scheduler--drift-report drift (length themata)))
+    drift))
 
 (defun gnosis-scheduler-rebuild-state (thema-id suspended &optional db)
   "Rebuild THEMA-ID projection with current SUSPENDED fact in optional DB."
@@ -308,6 +449,12 @@ Each row is (THEMA-ID DUE-DAY SUSPENDED)."
                (plist-get result :last-reviewed-at-us)
                (plist-get result :last-review-day) (plist-get result :due-day)
                (plist-get result :reps) (plist-get result :lapses) suspended))
+        (when-let* ((drift (plist-get result :drift)))
+          (display-warning
+           'gnosis
+           (format "Thema %s: %d review(s) schedule differently under today's FSRS; \
+state kept from the recorded results (see `gnosis-scheduler-replay-thema')"
+                   thema-id (length drift))))
         result))))
 
 (defun gnosis-scheduler--validate-review
@@ -356,26 +503,31 @@ config recording that retention, created only when CREATE is non-nil."
                      FROM scheduler_state WHERE thema_id = ?"
                (list thema-id)))))
     (unless state (error "Scheduler state does not exist"))
-    (gnosis-scheduler--config-retention db (car state))
+    (gnosis-scheduler--model-config db (car state))
     (let ((latest (caar (gnosis-sqlite-select
                          db "SELECT MAX(reviewed_at_us) FROM review_events WHERE thema_id = ?"
                          (list thema-id))))
           (config (gnosis-scheduler-active-config db)))
       (when (and latest (<= reviewed-at-us latest))
         (error "Review precedes retained history, including voids"))
-      (let* ((base (gnosis-scheduler--config-retention db config))
-             (result (gnosis-scheduler--compute-result
-                      event-id thema-id outcome reviewed-at-us review-day
-                      (cons config (cdr state)) base))
-             ;; FSRS stability does not depend on desired retention.
+      (let* ((active (gnosis-scheduler--model-config db config))
+             (base (car active))
+             (first (gnosis-scheduler--compute-result
+                     event-id thema-id outcome reviewed-at-us review-day
+                     (cons config (cdr state)) base))
+             ;; FSRS stability does not depend on desired retention, so the
+             ;; first pass decides it, whatever configuration it named.
              (exam (gnosis-exam-review-retention
-                    db thema-id review-day base (plist-get result :stability))))
-        (if (null exam)
-            result
-          (gnosis-scheduler--compute-result
-           event-id thema-id outcome reviewed-at-us review-day
-           (cons (gnosis-scheduler--retention-config db exam create) (cdr state))
-           exam))))))
+                    db thema-id review-day base (plist-get first :stability))))
+        (if (and (null exam) (cdr active))
+            first
+          ;; One configuration for the retention used, under today's
+          ;; implementation: found, or made only when CREATE.
+          (let ((retention (or exam base)))
+            (gnosis-scheduler--compute-result
+             event-id thema-id outcome reviewed-at-us review-day
+             (cons (gnosis-scheduler--retention-config db retention create) (cdr state))
+             retention)))))))
 
 (defun gnosis-scheduler-preview-review
     (event-id thema-id outcome reviewed-at-us review-day)
@@ -416,11 +568,8 @@ Retained retries are unchanged."
             (when (and config (not (= config (plist-get result :config-id))))
               (user-error "Retention changed; cancel and reveal this question again"))
             (when (and preview
-                       (not (equal
-                             (mapcar (lambda (key) (plist-get preview key))
-                                     gnosis-scheduler--event-keys)
-                             (mapcar (lambda (key) (plist-get result key))
-                                     gnosis-scheduler--event-keys))))
+                       (not (equal (gnosis-scheduler--evidence preview)
+                                   (gnosis-scheduler--evidence result))))
               (user-error "Schedule changed; cancel and reveal this question again"))
             (gnosis-scheduler--insert-event db result)
             (gnosis-scheduler--update-state db result)
@@ -466,8 +615,10 @@ calendar.  Unsupported values signal `user-error'; intervals are not capped."
   (let ((db (gnosis--ensure-db)))
     (gnosis-sqlite-with-transaction db
       (let* ((active (gnosis-scheduler-active-config db))
-             (old (gnosis-scheduler--config-retention db active)))
-        (if (= old retention) active
+             (old (gnosis-scheduler--model-config db active)))
+        ;; The same retention under an earlier implementation still takes
+        ;; a new config, under today's.
+        (if (and (= (car old) retention) (cdr old)) active
           (let ((id (1+ (caar (gnosis-sqlite-select db "SELECT MAX(id) FROM scheduler_config")))))
             (gnosis-sqlite-execute
              db "INSERT INTO scheduler_config VALUES (?, ?, ?, ?, ?, ?)"
@@ -503,6 +654,68 @@ rebuild only from the baseline and effective, non-void review events."
           (gnosis-sqlite-execute db "INSERT INTO review_voids VALUES (?, ?)" (list correction-id event-id))
           (gnosis-scheduler-rebuild-state id (gnosis-get 'suspended 'scheduler-state `(= thema-id ,id)) db)))
         event-id))))
+
+;;; Fitting weights to the review history
+
+(defface gnosis-scheduler-report-value '((t :inherit bold))
+  "Face for the numbers of the scheduler's fit and drift reports.")
+
+(defface gnosis-scheduler-report-note '((t :inherit shadow))
+  "Face for the defaults and notes of the scheduler's reports.")
+
+(defun gnosis-scheduler--fit-report (fit)
+  "Return the echo-area report of FIT, a `gnosis-scheduler-fit-parameters' result."
+  (let ((value (lambda (x) (propertize (format "%s" x) 'face 'gnosis-scheduler-report-value)))
+        (days (lambda (weights)
+                (mapconcat (lambda (w) (format "%.2f" w)) (substring weights 0 4) " "))))
+    (concat "FSRS fit from " (funcall value (plist-get fit :items)) " delayed reviews: "
+            (pcase (plist-get fit :fitted)
+              ('none (propertize "too little history; the defaults stand"
+                                 'face 'gnosis-scheduler-report-note))
+              ('initial-stability
+               (concat "initial stabilities "
+                       (funcall value (funcall days (plist-get fit :parameters)))
+                       " days "
+                       (propertize (format "(defaults %s)"
+                                           (funcall days gnosis-fsrs-default-parameters))
+                                   'face 'gnosis-scheduler-report-note)))
+              ('all (funcall value "every weight fitted"))))))
+
+;;;###autoload
+(defun gnosis-scheduler-fit-parameters (&optional db)
+  "Return FSRS weights fitted to the effective review history in DB.
+The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area."
+  (interactive)
+  (let* ((db (or db (gnosis--ensure-db)))
+         (fit (romacs-fsrs-compute-parameters
+               (gnosis-sqlite-select
+                db "SELECT e.thema_id, e.rating, e.elapsed_days
+                      FROM review_events AS e
+                      JOIN scheduler_baseline AS b ON b.thema_id = e.thema_id
+                     WHERE b.reps = 0
+                       AND e.event_id NOT IN (SELECT event_id FROM review_voids)
+                     ORDER BY e.reviewed_at_us, e.event_id")))
+         (weights (plist-get fit :parameters))
+         (kept (lambda (from)
+                 (cl-loop for i from from below (length weights)
+                          always (< (abs (- (aref weights i)
+                                            (aref gnosis-fsrs-default-parameters i)))
+                                    1e-6))))
+         (result (list :parameters weights
+                       :items (plist-get fit :items)
+                       :fitted (cond ((funcall kept 0) 'none)
+                                     ((funcall kept 4) 'initial-stability)
+                                     (t 'all)))))
+    (when (called-interactively-p 'interactive)
+      (message "%s" (gnosis-scheduler--fit-report result)))
+    result))
 
 (provide 'gnosis-scheduler)
 ;;; gnosis-scheduler.el ends here

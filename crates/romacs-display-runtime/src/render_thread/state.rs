@@ -840,6 +840,8 @@ pub(super) struct RenderApp {
 
     pub(super) gpu: Option<RenderGpuContext>,
     pub(super) gpu_startup: Option<super::gpu_startup::PendingGpu>,
+    /// Every GPU startup worker's thread, joined when the app is dropped.
+    pub(super) gpu_workers: super::gpu_startup::GpuWorkers,
     /// Last usable editor area for recreating a window during GPU startup.
     pub(super) pending_content_size: super::startup::InitialWindowSize,
     pub(super) gpu_startup_cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -1081,6 +1083,7 @@ impl RenderApp {
             clipboard: Err("clipboard is unavailable before display initialization".to_owned()),
             gpu: None,
             gpu_startup: None,
+            gpu_workers: Default::default(),
             pending_content_size: super::startup::InitialWindowSize { width, height },
             gpu_startup_cancelled: Default::default(),
             startup_error: None,
