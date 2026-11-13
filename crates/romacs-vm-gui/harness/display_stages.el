@@ -148,6 +148,7 @@ stderr, and write the readings to OUT as JSON."
      0.5 nil
      (lambda ()
        (setq it (funcall (plist-get plist :setup)))
+       (scaling--quiet)
        (garbage-collect)
        (run-with-timer
         1.0 nil
