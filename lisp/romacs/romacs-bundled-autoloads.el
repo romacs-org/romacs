@@ -436,7 +436,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "project-list-file" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el

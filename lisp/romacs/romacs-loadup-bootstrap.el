@@ -39,6 +39,13 @@ and the reader use by default.")
 (load "version.el" nil t t)
 (load "widget.el" nil t t)
 (load "custom.el" nil t t)
+;; GNU preloads no project.el: `project-list-file' takes its standard
+;; value when the library first loads, after startup named the per-user
+;; directory.  The chain loads it (flymake's `(require 'project)'), so the
+;; variable is bound first, which its defcustom keeps, and delayed, which
+;; startup computes in each process (startup.el:1479).
+(defvar project-list-file nil)
+(push 'project-list-file custom-delayed-init-variables)
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
 ;; mule.el's translation tables, built over Lisp vectors
@@ -285,16 +292,6 @@ Custom delayed, gets its record's position as `variable-documentation'."
                                  (file-name-sans-extension (substring (car entry) (length root)))))
                           load-history))))
 
-;; startup.el command-line (startup.el:1479): variables whose standard value
-;; depends on the runtime (user-mail-address and friends) get it once the
-;; preloaded files are in.  Romacs does not run command-line in this
-;; bootstrap, so it takes this one step itself, in batch.  A session that
-;; starts in another context evaluates the same list again in its own
-;; (lisp/romacs/romacs-gui-loadup.el).
-(defvar romacs-loadup-delayed-init-variables
-  (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
-  "The preloaded variables whose standard value depends on the runtime, in load order.
-These are `custom-delayed-init-variables' as the preloaded files left it.")
 ;; The locale step changes the language and coding state the chain left; a
 ;; later step, as a VM restored from a world takes in its own process,
 ;; starts again from that state, as a fresh process starts from its dump's.
@@ -371,6 +368,24 @@ then begins initialization, in the directory the process started in."
   (set-locale-environment nil)
   (setq before-init-time (current-time) after-init-time nil
         command-line-default-directory default-directory))
+;; Romacs computed `project-list-file' against the working directory until
+;; it took its per-user value (`romacs-loadup-delayed-init-variables'), so a
+;; session started in the home directory kept its list at ~/projects.eld.
+(defun romacs--migrate-project-list (old new)
+  "Copy the project list OLD to NEW when NEW does not exist and OLD is a readable file.
+OLD stays where it is.  The interactive startup takes this step once the
+per-user directory names NEW (lisp/romacs/romacs-gui-loadup.el); a batch
+session does not, as its startup also runs in a world build, which may
+write no file.  A failure is said and leaves both files as they were."
+  (when (and (not (file-exists-p new))
+             (file-regular-p old)
+             (file-readable-p old))
+    (condition-case err
+        (progn
+          (make-directory (file-name-directory new) t)
+          (copy-file old new nil t))
+      (file-error
+       (message "Project list not copied from %s: %s" old (error-message-string err))))))
 ;; The steps of startup.el's `command-line' a batch session takes in each
 ;; process.  `romacs--startup-phase' marks their extent: a world build may
 ;; read per-process host facts only inside it, and a VM restored from a
@@ -409,7 +424,6 @@ and `after-init-time' its clock."
   "The per-process startup steps this session took last.
 A session that takes its own after the chain's sets it to them
 \(lisp/romacs/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
-(romacs-batch-startup)
 ;; startup.el normal-top-level (startup.el:843): the initial frame's faces
 ;; for its background mode and display type.  It reads no per-process fact
 ;; in batch, and GNU calls it idempotent, so it is loadup's, not startup's:
@@ -420,12 +434,6 @@ A session that takes its own after the chain's sets it to them
   '((cl-extra "emacs-lisp/cl-extra.el"
      (setq cl--random-state (cl--make-random-state (cl--random-time)))
      "GNU dumps no cl- library but cl-preloaded, so each process seeds the state from its clock when cl-extra loads")
-    (project "progmodes/project.el"
-     ;; As loadup loads it: before startup names the per-user directory,
-     ;; which is still subr.el's nil, so the file is the working directory's.
-     (let ((user-emacs-directory nil))
-       (custom-reevaluate-setting 'project-list-file))
-     "GNU dumps no project.el; loadup loads it (flymake-log's eager expansion), so each process computes the file against its own working directory")
     (find-func "emacs-lisp/find-func.el"
      (setq find-function-C-source-directory
            (let ((dir (expand-file-name "src" source-directory)))
@@ -499,6 +507,29 @@ definitions (`romacs--world-reseed-all')."
 
 ;; Saved settings stay out of the user's init, in every launch of this chain.
 (require 'romacs-saved-settings)
+
+;; startup.el command-line (startup.el:1479): variables whose standard value
+;; depends on the runtime (user-mail-address and friends) get it once the
+;; preloaded files are in.  Romacs does not run command-line in this
+;; bootstrap, so it takes this one step itself, in batch.  A session that
+;; starts in another context evaluates the same list again in its own
+;; (lisp/romacs/romacs-gui-loadup.el).
+;; `project-list-file' is delayed for project.el, which the chain loads: a
+;; chain that stops loading it must drop the delay, or the variable keeps nil.
+(unless (featurep 'project)
+  (error "The chain no longer loads project.el: drop `project-list-file' from the delayed variables"))
+(defvar romacs-loadup-delayed-init-variables
+  (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
+  "The preloaded variables whose standard value depends on the runtime, in load order.
+These are `custom-delayed-init-variables' as the preloaded files left it.")
+;; loadup.el's end (loadup.el:607-680): a dump stops here, and a process
+;; that does not dump evaluates `top-level', whose startup takes the
+;; per-process steps.  A batch world is built so (`romacs--dumping'): it
+;; holds loadup alone, nothing of its builder's HOME, per-user directory or
+;; locale, and each restored process takes the steps itself
+;; (`romacs-world-restart').
+(unless (romacs--dumping)
+  (romacs-batch-startup))
 
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

@@ -130,6 +130,7 @@ impl Vm {
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
         self.reset_collection_counters();
+        self.forget_system_name();
     }
 }
 

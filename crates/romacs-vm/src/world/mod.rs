@@ -179,7 +179,8 @@ impl Vm {
     }
 
     /// A top-level FORM of a loaded file ends: a re-seed form's variable is
-    /// fenced from here (root 4); in a layer, a definition that read a
+    /// fenced from here (root 4); the build host's form leaves `system-name`
+    /// to be read again; in a layer, a definition that read a
     /// per-process fact is kept for restore to evaluate again
     /// (`romacs--world-reseed-forms`), and its variable fenced (root 7).
     pub(crate) fn world_form_done(&mut self, form: &crate::Form) {
@@ -189,6 +190,12 @@ impl Vm {
         if let Some(name) = host::reseed_output() {
             let slot = self.slot(name);
             self.fence_variable(slot, Root::Reseed);
+        }
+        // The build host is baked, unrecorded, into `emacs-build-system'
+        // only: `system-name' does not keep it, so a later reader in the
+        // build asks the host, and its read is keyed.
+        if host::at_baked_host() {
+            self.forget_system_name();
         }
         if let Some((kind, name, cut)) = host::layer_form_done() {
             self.record_reseed_form(kind, &name, form, cut);

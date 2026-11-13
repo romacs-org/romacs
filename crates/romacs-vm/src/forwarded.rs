@@ -1152,6 +1152,14 @@ impl Vm {
         self.forwarded.ints[done] = 0;
         self.forwarded.objects[elapsed] = Value::UNBOUND;
     }
+    /// GNU `init_editfns`, at each process's start: `system-name` names this
+    /// process's host, read again at its next read. An image keeps the host
+    /// it was built on only as `emacs-build-system`.
+    pub(crate) fn forget_system_name(&mut self) {
+        if let Some(Fwd::Obj(i)) = self.forwarded.lookup("system-name") {
+            self.forwarded.objects[i as usize] = Value::UNBOUND;
+        }
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A fenced built-in variable is the forwarding the fence keeps; a
