@@ -672,6 +672,15 @@ impl Program {
     pub(super) fn sites(&self) -> usize {
         self.entries.len()
     }
+    /// Make the entry cache of function ID's first instruction name TARGET,
+    /// which no call does when TARGET is a heap entry: whether ID has
+    /// lowered code here.
+    #[cfg(test)]
+    pub(super) fn plant_entry(&mut self, id: usize, target: Value) -> bool {
+        let Some(site) = self.code.get(id).and_then(|code| code.first()).map(|inst| inst.site) else { return false };
+        self.entries[site].target = target;
+        true
+    }
     /// What function ID's lowered code holds, each instruction read on a copy,
     /// and the functions its entry caches enter: for verify's reference
     /// marker (gc_check.rs), apart from `trace_function'.
@@ -808,6 +817,18 @@ impl Suspended {
         }
         for entry in &self.entries {
             value(entry.target);
+        }
+    }
+    /// What a minor collection reads of its lowered code: that of the
+    /// functions CHANGED since the last collection, the rest naming only
+    /// what a collection promoted. An entry cache names no heap entry: a
+    /// call fills one with a primitive, or with nothing for a closure
+    /// (`resolve_entry`), so a minor reads none. Verify's reference walk
+    /// reads them all, and reports one that names what a minor freed.
+    pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
+        for inst in changed.iter().filter_map(|&id| self.code.get(id)).flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
         }
     }
     /// Whether a cleanup of this engine is running: an escape's or a normal

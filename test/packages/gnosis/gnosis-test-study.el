@@ -287,7 +287,7 @@
                      (gnosis-get 'config-id 'scheduler-state `(= thema-id ,new-id)))))
         (gnosis-sqlite-close gnosis-db)
         (setq gnosis-db (gnosis-sqlite-open gnosis-test--db-file))
-        (should (= 0.8 (gnosis-scheduler--config-retention gnosis-db (gnosis-scheduler-active-config))))))))
+        (should (= 0.8 (car (gnosis-scheduler--model-config gnosis-db (gnosis-scheduler-active-config)))))))))
 
 (ert-deftest gnosis-study-backup-keeps-evidence-content-export-does-not ()
   (gnosis-test-study

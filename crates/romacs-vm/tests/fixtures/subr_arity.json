@@ -994,8 +994,7 @@
     {
       "name": "where-is-internal",
       "source": "(subr-arity (symbol-function 'where-is-internal))",
-      "expected": "(1 . 5)",
-      "romacs_representation": "lisp"
+      "expected": "(1 . 5)"
     },
     {
       "name": "reject-'car",

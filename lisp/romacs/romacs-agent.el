@@ -139,6 +139,12 @@ approve) always comes to the user."
   :type '(choice (const :tag "Allow every tool call" allow) (const :tag "Ask" ask))
   :group 'romacs-agent)
 
+(defcustom romacs-agent-suggestions t
+  "Whether a chat's empty composer offers the prompt its harness predicts
+the user sends next, when its driver can ask for one (:suggestions).  A
+harness asks at its launch; the composer stops showing them at once."
+  :type 'boolean :group 'romacs-agent)
+
 (defvar romacs-agent-input-functions nil
   "Functions called with a session and a request id once a user's message
 is written to its harness: before the harness has acted on it, whenever
@@ -324,10 +330,15 @@ loading it would undo that one's changes; merge it first")
   ;; What its views show, kept as its events arrive: the harness's permission
   ;; mode, the tokens of its last prompt and its model's window, the last
   ;; record's time, when the running turn began, whether the title is
-  ;; generated (the first prompt replaces it), and the last turn end its
-  ;; chat has shown.
+  ;; generated (the first prompt replaces it), the last turn end its
+  ;; chat has shown (nil, recorded before these were kept: every turn end
+  ;; it catches up with), and the turn activity the user settled (nil:
+  ;; none), both kept in its manifest.
   permission-mode context-used context-window last-time turn-start
-  title-auto (seen-seq 0)
+  title-auto (seen-seq 0) settled-seq
+  ;; The seq of the prompt whose turn presented a plan, and the tool its
+  ;; running turn called last.
+  planned-seq activity
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
   ;; bytes the harness had written before this session went on with it.
@@ -427,8 +438,24 @@ never one of the user's own (questions)."
 Its run's, kept in the driver's state."
   (plist-get (romacs-agent-driver-state session) :asks))
 
+(defun romacs-agent-suggestion (session)
+  "The prompt SESSION's harness predicts the user sends next, or nil: given
+after a turn's end, gone when the next turn starts or the run ends.  Its
+run's, kept in the driver's state, and offered only while SESSION is idle:
+one stopped, ended or detached takes no prompt from it."
+  (and (eq (romacs-agent-state session) 'idle)
+       (plist-get (romacs-agent-driver-state session) :suggestion)))
+
 (defun romacs-agent--set-asks (session asks)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :asks asks)))
+
+(defun romacs-agent-questions (session)
+  "The asks of SESSION's run (`romacs-agent-asks') that put questions to
+the user, not a tool call to approve."
+  (plist-get (romacs-agent-driver-state session) :questions))
+
+(defun romacs-agent--set-questions (session questions)
+  (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
 (defun romacs-agent--auto-p (event)
   "Whether approval EVENT is Romacs's to answer: a tool call, under the
@@ -739,6 +766,9 @@ instances) is derived again when it changes.")
       up, or nil to wait for an answer; absent, it is ready at launch.
       Messages wait until ready;
   :resume-environment ENTRIES   added to its environment on a resume;
+  :suggestions WORDS   optional: the words its command line asks for a
+      predicted next prompt by (`romacs-agent--suggestion-words'), each a
+      `suggestion' event (:text) after a turn's end;
   :native-id-p (STRING)   whether STRING can name its conversation;
   :forks (SESSION)   present when a session can start from another's
       conversation as it stands, by the harness's own fork (its options'
@@ -1120,6 +1150,11 @@ brief."
     (append (when-let* ((model (plist-get options :model))) (list model-flag model))
             (when-let* ((effort (plist-get options :effort))) (list effort-flag effort)))))
 
+(defun romacs-agent--suggestion-words (session)
+  "The words SESSION's command line asks for predicted prompts by, while
+`romacs-agent-suggestions' is on: its driver's :suggestions."
+  (and romacs-agent-suggestions (romacs-agent--harness-get session :suggestions)))
+
 (defun romacs-agent--line (session object &optional journal)
   "Write OBJECT as one line to SESSION's harness; JOURNAL, when given, is
 what the journal keeps of it.  A detached session whose supervisor still
@@ -1312,8 +1347,9 @@ itself, so the turn goes on whatever becomes of this server."
                   (setf (romacs-agent-driver-state session) state)))
     ;; Whether the turn is a compaction (/compact, or /compact INSTRUCTIONS);
     ;; a steer into a running one leaves it so.
+    ;; A turn starting makes its last prediction moot.
     ('input (setf (romacs-agent-driver-state session)
-                  (plist-put (romacs-agent-driver-state session) :compact-turn
+                  (plist-put (plist-put (romacs-agent-driver-state session) :suggestion nil) :compact-turn
                              (or (and (eq (romacs-agent-state session) 'running)
                                       (plist-get (romacs-agent-driver-state session) :compact-turn))
                                  (let ((case-fold-search t))
@@ -1321,6 +1357,7 @@ itself, so the turn goes on whatever becomes of this server."
                                                         (or (plist-get event :text) ""))
                                         t)))))
             (setf (romacs-agent-state session) 'running
+                  (romacs-agent-activity session) nil
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
@@ -1338,19 +1375,36 @@ itself, so the turn goes on whatever becomes of this server."
                  (when (romacs-agent--live-p session)
                    (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
                 (t (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
+                   (when (plist-get event :questions)
+                     (romacs-agent--set-questions session (cons (plist-get event :request-id)
+                                                               (romacs-agent-questions session))))
                    (setf (romacs-agent-state session) 'waiting-approval))))
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
+    ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
+             (setf (romacs-agent-activity session) (plist-get event :name))))
+    ;; A plan presented, by any harness: its turn's.
+    ('plan (setf (romacs-agent-planned-seq session) (romacs-agent-input-seq session)))
+    ;; The prompt predicted next: only between turns (one arriving after
+    ;; the next prompt is about the turn before), as the journal says, so
+    ;; one replayed to a session attaching again, detached till then, counts.
+    ('suggestion (when (and (memq (romacs-agent-state session) '(idle detached))
+                            (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
+                   (setf (romacs-agent-driver-state session)
+                         (plist-put (romacs-agent-driver-state session) :suggestion (plist-get event :text)))))
     ;; Its harness would not go into plan mode: the session is not in it.
     ('plan-refused (when (romacs-agent--live-p session)
                      (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
     ('answered (romacs-agent--set-asks session (remove (plist-get event :request-id) (romacs-agent-asks session)))
+               (romacs-agent--set-questions session (remove (plist-get event :request-id) (romacs-agent-questions session)))
                ;; Still waiting on the user while one of theirs waits.
                (setf (romacs-agent-state session) (if (romacs-agent-asks session) 'waiting-approval 'running)))
     ;; A turn's end: what it asked the user is moot.
     ;; A live report only: one replayed may be another instance's, before a move.
     ('rate-limit (when (romacs-agent-caught-up session) (romacs-agent--note-room session event)))
     ('done (romacs-agent--set-asks session nil)
+           (romacs-agent--set-questions session nil)
            (setf (romacs-agent-state session) 'idle
+                 (romacs-agent-activity session) nil
                  (romacs-agent-reply session) (plist-get event :text)
                  (romacs-agent-failed session) (plist-get event :error)
                  (romacs-agent-limited session)
@@ -1445,6 +1499,42 @@ other; empty for none."
 (defun romacs-agent--update-manifest (session)
   "Write SESSION's title back to its manifest."
   (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false))
+
+(defun romacs-agent-activity-seq (session)
+  "The seq of SESSION's last turn activity: its last prompt or turn end."
+  (max (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
+
+(defun romacs-agent-unseen-p (session)
+  "Whether SESSION's last turn end is one its chat has not shown."
+  (let ((seen (romacs-agent-seen-seq session)))
+    (and seen (> (romacs-agent-done-seq session) seen))))
+
+(defun romacs-agent-settled-p (session)
+  "Whether the user settled SESSION since its last turn activity: new
+activity, a prompt from anyone or a turn's end, unsettles it."
+  (let ((settled (romacs-agent-settled-seq session)))
+    (and settled (>= settled (romacs-agent-activity-seq session)))))
+
+(defun romacs-agent-mark-seen (session)
+  "SESSION's last turn end has been shown, in its manifest too."
+  (unless (eql (romacs-agent-seen-seq session) (romacs-agent-done-seq session))
+    (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session))
+    (romacs-agent--manifest-put session "seenSeq" (romacs-agent-seen-seq session))))
+
+(defun romacs-agent--seen-caught-up (session)
+  "SESSION was recorded before its turn ends were kept as seen: what it
+caught up with counts as seen, not news."
+  (unless (romacs-agent-seen-seq session) (romacs-agent-mark-seen session)))
+
+(defun romacs-agent-settle (session &optional undo)
+  "Acknowledge SESSION: its last turn is seen and it is settled until its
+next activity, in its manifest too.  UNDO: it is no longer settled."
+  (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session)
+        (romacs-agent-settled-seq session) (and (not undo) (romacs-agent-activity-seq session)))
+  (romacs-agent--manifest-put session "seenSeq" (romacs-agent-seen-seq session)
+                              "settledSeq" (or (romacs-agent-settled-seq session) :null))
+  ;; Its views follow, as they follow its events.
+  (romacs-agent--raise session (list :type 'settled)))
 
 (defun romacs-agent--note-end (session)
   "Keep SESSION's turn end for its parent, when it has one."
@@ -1671,6 +1761,7 @@ byte FROM (a record's start) when given."
                    (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
+                 (romacs-agent--seen-caught-up session)
                  (romacs-agent--allow-tool-calls session)
                  (romacs-agent--step session)
                  ;; A selection a restart found armed, with no turn to end.
@@ -2185,6 +2276,8 @@ waiting."
                        "unit" (or (romacs-agent-unit session) :null)
                        "options" (romacs-agent--options-object (romacs-agent-options session))
                        "switch" (romacs-agent--switch-object session)
+                       "seenSeq" (or (romacs-agent-seen-seq session) :null)
+                       "settledSeq" (or (romacs-agent-settled-seq session) :null)
                        "hostSocket" (romacs-agent-host-socket session))))
 
 (defconst romacs-agent--option-keys
@@ -2743,6 +2836,8 @@ neither callback runs after it."
                                                          (or (gethash "title" manifest) ""))
                                       (eq auto t)))
                       :dir dir :unit (gethash "unit" manifest)
+                      :seen-seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
+                      :settled-seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))
                       :host-socket (gethash "hostSocket" manifest) :state 'detached)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
@@ -2761,6 +2856,8 @@ neither callback runs after it."
                          'detached)
                         (t 'unstarted))))
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
+        ;; Replayed already, unless attached (its replay ends `attached').
+        (unless (romacs-agent-connection session) (romacs-agent--seen-caught-up session))
         session))))
 
 ;;;###autoload

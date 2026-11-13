@@ -77,7 +77,7 @@ fn refusing() -> bool {
 /// (`Mode::Record`).
 pub fn enter_record() {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0,
+        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0, dump: false,
         site: None, records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Record));
@@ -157,6 +157,9 @@ pub enum Fact<'a> {
     /// The machine's live load: memory and load averages change at every
     /// read, so no world is keyed on them.
     Machine,
+    /// The machine's name: keyed, except where GNU bakes it as the build
+    /// host (`BAKED_HOST`).
+    SystemName,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -184,6 +187,9 @@ pub const P_ENV: [&str; 17] = [
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
 /// the world was built, as a dumped GNU's is its dump time.
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
+/// The baked site of the machine's name: `emacs-build-system` is the host
+/// the world was built on, as a dumped GNU's is its dump's.
+const BAKED_HOST: (&str, &str) = ("/version.el", "(defconst emacs-build-system");
 /// jit-lock.el's default for `jit-lock-stealth-load' only asks whether
 /// `load-average' works, and a dumped GNU keeps the dump's answer.
 const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-load");
@@ -192,9 +198,8 @@ const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-l
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
 /// fact or fenced variable the form may read, the variable it sets, which is
 /// fenced once the form ends).
-const RESEED: [(&str, &str, &str, Option<&str>); 7] = [
+const RESEED: [(&str, &str, &str, Option<&str>); 6] = [
     ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
-    ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
      Some("find-function-C-source-directory")),
     // It asks only whether exec-path is bound: its standard value is the
@@ -356,6 +361,11 @@ pub(crate) fn layer_timers_allowed() -> bool {
     LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
+/// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
+pub(crate) fn at_baked_host() -> bool {
+    with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
+}
+
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
 pub(crate) fn reseed_output() -> Option<&'static str> {
     reseed_entry().and_then(|(_, output)| output)
@@ -370,8 +380,9 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
         Fact::Machine if site.is_some_and(|s| s.at(BAKED_LOAD)) => Class::B,
+        Fact::SystemName if site.is_some_and(|s| s.at(BAKED_HOST)) => Class::B,
         Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors | Fact::Machine => Class::P,
-        Fact::Other => Class::K,
+        Fact::SystemName | Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
 }
@@ -380,6 +391,8 @@ struct Build {
     pinned: Pinned,
     phase: Phase,
     startups: usize,
+    /// The build ends at GNU's dump point (`end_at_dump_point`).
+    dump: bool,
     site: Option<Rc<Site>>,
     records: Vec<Json>,
     refusals: Vec<Json>,
@@ -410,7 +423,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 /// Start recording a build on this thread, in `Phase::Init`.
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
-        pinned, phase: Phase::Init, startups: 0, site: None,
+        pinned, phase: Phase::Init, startups: 0, dump: false, site: None,
         records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Build));
@@ -426,6 +439,18 @@ pub fn leave_build() -> Option<Json> {
 /// The VM is made: the recipe starts.
 pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
+}
+
+/// This build ends at GNU's dump point, as loadup.el does under
+/// `dump-mode`: the chain leaves its startup steps to each restored
+/// process (`romacs--dumping`). A no-op outside a build.
+pub fn end_at_dump_point() {
+    with_build(|b| b.dump = true);
+}
+
+/// Whether this process builds a world that ends at GNU's dump point.
+pub(crate) fn dumping() -> bool {
+    refusing() && with_build(|b| b.dump).unwrap_or(false)
 }
 
 /// How many startup runs a build has begun.
@@ -1751,7 +1776,12 @@ pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
 pub fn system_name() -> io::Result<String> {
     let result = std::fs::read_to_string("/proc/sys/kernel/hostname");
     if building() {
-        host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        let baked = with_build(|b| class(Fact::SystemName, b.site.as_deref()) == Class::B).unwrap_or(false);
+        if baked && refusing() {
+            p_read(Fact::SystemName, "system-name".into());
+        } else {
+            host_fact("system-name", match &result { Ok(name) => json!(name), Err(e) => errno(e) });
+        }
     }
     result
 }
@@ -3299,19 +3329,39 @@ fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A request the evaluator has not answered. Two relaxed loads per poll.
+/// Which thread answers inspections: the evaluator's, the one that started
+/// listening (or, in a test, the one that raised the request).  Every VM in
+/// the process polls, worker VMs too, and only that thread's may answer, so
+/// a worker's backtrace is never taken for the evaluator's.  A count, not a
+/// thread id: each registration takes the next one, and the thread keeps
+/// its own copy, so the check is two relaxed loads.
+static INSPECT_TARGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+thread_local! {
+    static INSPECT_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Make the current thread the one that answers inspections.
+fn inspect_target_here() {
+    let token = INSPECT_TARGET.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    INSPECT_HERE.with(|here| here.set(token));
+}
+
+/// A request this thread's evaluator has not answered. Two relaxed loads per
+/// poll; whose thread answers is read only while a request waits.
 #[inline(always)]
 pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+        && INSPECT_HERE.with(std::cell::Cell::get) == INSPECT_TARGET.load(Relaxed)
 }
 /// Whether a listener runs, so that a native loop should poll for requests.
 pub fn inspect_enabled() -> bool {
     INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
-/// Raise a request, as a client does.
+/// Raise a request, as a client does, for this thread's evaluator to answer.
 #[cfg(test)]
 pub fn inspect_request() {
+    inspect_target_here();
     INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 /// Whether native loops poll for requests, as a listener makes them.
@@ -3470,6 +3520,7 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
         None => None,
     };
     *inspect_lock(&INSPECT_LISTENER) = Some(InspectListener { path, identity: (meta.dev(), meta.ino()), stop, store });
+    inspect_target_here();
     INSPECT_ENABLED.store(true, SeqCst);
     Ok(())
 }

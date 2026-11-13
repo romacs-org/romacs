@@ -62,33 +62,34 @@ fn where_is_differential_oracle() {
     }
 }
 
+/// The walk over the keymaps calls no Lisp; a menu item's `:filter` runs
+/// when a sequence found is looked up again.  What the lookup holds then
+/// (its arguments and the filters' results) survives a collection there.
 #[test]
-fn where_is_traced_frames_survive_callback_collection() {
+fn where_is_survives_a_collection_in_a_menu_filter() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     vm.eval_source(
-        "(fset 'wi-map-keymap (symbol-function 'map-keymap))
-      (fset 'map-keymap (lambda (fn map)
-        (wi-map-keymap (lambda (key binding)
-          (let ((i 0)) (while (< i 12000) (cons i i) (setq i (1+ i))))
-          (garbage-collect) (funcall fn key binding)) map)))",
+        "(defun wi-churn (definition)
+           (let ((i 0)) (while (< i 12000) (cons i i) (setq i (1+ i))))
+           (garbage-collect) definition)",
     )
     .unwrap();
     let before = vm.heap_stats().collections;
     let result = vm
         .eval_source(
             "(let ((m (make-sparse-keymap)) (p (make-sparse-keymap)))
-      (define-key p [97] 'wi-target)
-      (define-key m [120] p) (define-key m [121] p) (define-key p [122] m)
-      (define-key m [remap wi-old] 'wi-target) (define-key m [98] 'wi-old)
-      (where-is-internal 'wi-target (list m)))",
+      (define-key p [97] (list 'menu-item \"A\" 'wi-target :filter 'wi-churn))
+      (define-key m [120] p) (define-key m [121] p)
+      (define-key m [98] (list 'menu-item \"B\" 'wi-target :filter 'wi-churn))
+      (list (where-is-internal 'wi-target (list m)) (where-is-internal 'wi-target (list m) t)))",
         )
         .and_then(|v| v.display());
-    assert_eq!(result.as_deref(), Ok("([121 97] [120 97] [98])"));
+    assert_eq!(result.as_deref(), Ok("(([98] [121 97] [120 97]) [98])"));
     assert!(
         vm.heap_stats().collections > before + 3,
-        "callbacks must collect while traversal state is live"
+        "the filters must collect while the lookup is suspended"
     );
 }
 
