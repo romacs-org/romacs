@@ -1881,6 +1881,13 @@ mod leaf {
             }
             Ok(self.vm.make_lisp_string(bytes, multibyte))
         }
+        /// The current buffer's text from character position START to END as
+        /// one run of bytes in GNU's internal form, and whether the buffer is
+        /// multibyte, for a scan (prims/scanner.rs). None when the positions
+        /// are not in order within the accessible text.
+        pub fn scan_region<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> std::result::Result<Option<R>, Fault> {
+            self.vm.with_region_bytes(start, end, scan).map_err(Fault::Error)
+        }
     }
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
     // module, so it sees `vm`.

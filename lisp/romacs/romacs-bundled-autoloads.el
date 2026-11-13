@@ -611,6 +611,44 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-saved-settings" '("romacs-saved-settings-"))
 
 
+;;; Generated autoloads from romacs-scanner.el
+
+(autoload 'romacs-scanner-make "romacs-scanner"
+"Return the scanner whose step function is STEP and first state INITIAL.
+STEP is a pure function of a state and a character returning
+(NEW-STATE . MARK); see the commentary of this library.  It is called
+here on every character in every state reachable from INITIAL, and never
+again.
+
+(fn STEP INITIAL)")
+(autoload 'romacs-scanner-scan "romacs-scanner"
+"Run SCANNER over the current buffer's text from START to END.
+Return (STATE . POSITIONS): the state after the last character and the
+positions, in order, of the characters the step function marked.  START
+and END default to the accessible text's ends.  STATE is the state before
+START; nil means SCANNER's first state.
+
+(fn SCANNER &optional START END STATE)")
+(autoload 'romacs-scanner-count "romacs-scanner"
+"Run SCANNER as `romacs-scanner-scan' does; return (STATE . COUNT).
+COUNT is how many characters the step function marked.
+
+(fn SCANNER &optional START END STATE)")
+(autoload 'define-scanner "romacs-scanner"
+"Define NAME as the scanner with step function STEP and first state INITIAL.
+STEP is a pure function of a state and a character that returns
+(NEW-STATE . MARK): the state after the character, and non-nil to mark
+it.  It is given every non-ASCII character as `romacs-scanner-other'.
+The function is run on every character in every reachable state when
+NAME is defined, and never again: a scan reads the resulting table.
+DOCSTRING documents NAME.  Run it with `romacs-scanner-scan' or
+`romacs-scanner-count'.
+
+(fn NAME STEP INITIAL &optional DOCSTRING)" nil t)
+(function-put 'define-scanner 'doc-string-elt 4)
+(register-definition-prefixes "romacs-scanner" '("romacs-scanner-"))
+
+
 ;;; Generated autoloads from romacs-server.el
 
 (autoload 'romacs-server-start "romacs-server"

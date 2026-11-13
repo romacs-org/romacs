@@ -637,6 +637,34 @@ impl Vm {
             _ => unreachable!("buffer_index validates"),
         }
     }
+    /// The current buffer's text from character position START to END as
+    /// one run of bytes in GNU's internal form, as a search reads it, and
+    /// whether the buffer is multibyte. None when the positions are not in
+    /// order within the accessible text.
+    pub(crate) fn with_region_bytes<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> Result<Option<R>> {
+        let index = self.buffer_index()?;
+        let (_, base_char, chars, _) = self.regexp_buffer_frame(index).map_err(|_| String::from("buffer text unavailable"))?;
+        let (Ok(first), Ok(last)) = (usize::try_from(start), usize::try_from(end)) else { return Ok(None) };
+        if first < base_char || last > base_char + chars || first > last { return Ok(None); }
+        let multibyte = matches!(self.objects[index], Object::Buffer(_));
+        // Positions count from one, and BASE_CHAR is at least one.
+        let byte = |vm: &Self, position: usize| -> Result<usize> {
+            Ok(match &vm.objects[index] {
+                Object::Buffer(t) => t.byte_of_char(CharOffset(position - 1))?.0,
+                _ => position - 1,
+            })
+        };
+        let (from, to) = (byte(self, first)?, byte(self, last)?);
+        let window = self.regexp_buffer_window(index, from..to);
+        // The window's bytes themselves: a search's input also places point
+        // in its window, and a scan's window need not hold point.
+        let bytes = match &self.objects[index] {
+            Object::Buffer(t) => t.search_bytes(window.clone()),
+            Object::ByteBuffer(t) => &t.bytes[window.clone()],
+            _ => unreachable!("buffer_index validates"),
+        };
+        Ok(Some(scan(&bytes[from - window.start..to - window.start], multibyte)))
+    }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
     }
