@@ -526,8 +526,6 @@ mod primh_map_keymap;
 mod primh_mapc;
 #[path = "../primh_mapcan.rs"]
 mod primh_mapcan;
-#[path = "../primitive_call_cost.rs"]
-mod primitive_call_cost;
 #[path = "../primitive_gc_boundary.rs"]
 mod primitive_gc_boundary;
 #[path = "../primitive_registry.rs"]

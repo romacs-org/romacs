@@ -439,7 +439,8 @@ const CELLS: &[(&str, Behind)] = &[
     ("lib.rs:Vm.variable_read_probes", Plain),
     // A reader borrowing its tree, so no collection runs while it holds the run it read.
     ("properties.rs:KeyReader.run", Passing),
-    ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:StringMatcher.patterns", Plain),
+    ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:CachedPattern.used", Plain),
+    ("regexp.rs:StringMatcher.patterns", Plain),
     ("regexp_syntax.rs:VmSyntax.ascii", Plain),
     ("subprocess.rs:Reaper.state", Plain),
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),

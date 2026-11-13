@@ -2,7 +2,19 @@
 //! thread's instruction count (`romacs-instructions`): a loop making the
 //! call, less the same loop without it, at two lengths. A machine without
 //! the counter fails these tests: they never pass unmeasured.
+//!
+//! Each test runs alone (`alone`), in an executable of its own
+//! (`all/standalone.txt`): a search's syntax memo keys on the char-table
+//! writes of the whole process, so another test's write renews it in the
+//! middle of a measurement.
 use romacs_vm::Vm;
+
+/// Held for a whole test, so no other test of this file writes a char table
+/// while it measures.
+fn alone() -> std::sync::MutexGuard<'static, ()> {
+    static ALONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ALONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn eval(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{source}: {e}"))
@@ -35,6 +47,7 @@ fn per_call_in(vm: &mut Vm, wrap: &str, body: &str) -> f64 {
 /// instructions a call.
 #[test]
 fn bitwise_on_fixnums_stays_in_machine_words() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     for body in ["(logand i 1023)", "(logior i 1 2)", "(logxor i 5)", "(lognot i)", "(ash i 2)", "(ash i -1)", "(logcount i)"] {
@@ -59,6 +72,7 @@ fn bitwise_on_fixnums_stays_in_machine_words() {
 /// by slot. Each of those was paid on every call.
 #[test]
 fn a_cached_pattern_costs_no_copy_and_no_translation_table() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 400)";
@@ -83,6 +97,7 @@ fn a_cached_pattern_costs_no_copy_and_no_translation_table() {
 /// table for the buffer.
 #[test]
 fn the_syntax_memo_follows_every_change_to_a_table() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
@@ -101,6 +116,7 @@ fn the_syntax_memo_follows_every_change_to_a_table() {
 /// rerun: what each call paid besides the scan.
 #[test]
 fn a_scan_pays_little_besides_its_text() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
@@ -119,6 +135,7 @@ fn a_scan_pays_little_besides_its_text() {
 /// new symbol, and panicked while there was none.
 #[test]
 fn a_search_reads_its_variables_not_their_names() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     assert_eq!(eval(&mut vm, "(string-match \"A\" \"a\")"), "0");
@@ -134,6 +151,7 @@ fn a_search_reads_its_variables_not_their_names() {
 /// element (lisp/romacs/romacs-compile.el).
 #[test]
 fn proper_list_p_reads_each_cons_once() {
+    let _alone = alone();
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let mut cost = |n: usize| -> f64 {
