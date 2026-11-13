@@ -347,7 +347,7 @@ def merged_entries(base, ours, theirs):
 
 
 def merge_files(base, ours, theirs):
-    """Git's merge driver for ledger/unsafe-floors.json (tools/derived setup installs
+    """Git's merge driver for ledger/unsafe-floors.json (tools/git-setup installs
     it): write the merge over OURS. 1, leaving OURS, when a side does not
     parse: git then reports the conflict as it would without a driver."""
     try:

@@ -181,7 +181,7 @@ def session(engine, binary, theme, args, out):
             env.update(notmuch_fixture.environment(root / 'store'), TS_NOTMUCH=str(SITE_LISP))
         if engine == 'gnu':
             # The packages Romacs bundles (gnosis among them), on GNU's
-            # `load-path' with Romacs's generated autoloads, as
+            # `load-path' with Romacs's bundled autoloads, as
             # gnosis_parity_live.py gives them.
             bundled = ' '.join(f'"{ROOT / "lisp/romacs" / d}"' for d in ('gnosis', 'emacs-lisp', '', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket'))
             packages = (f'(setq load-path (append (list {bundled}) load-path))\n'

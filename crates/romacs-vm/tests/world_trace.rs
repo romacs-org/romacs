@@ -152,6 +152,18 @@ fn reseed_forms_restate_their_gnu_sources() {
     }
 }
 
+/// A space-named buffer made beside another of its name (a temporary buffer
+/// inside a temporary buffer) takes the counter's name in a build, which
+/// fences the random state: GNU's random name only spares the search.
+#[test]
+fn a_nested_temporary_buffer_is_named_without_the_random_state() {
+    let dir = scratch("nested-temp");
+    let file = write(&dir.join("nested.el"), "(get-buffer-create \" rx\")\n(defvar nested-name (generate-new-buffer-name \" rx\"))\n");
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(trace["refusals"], json!([]), "{trace}");
+    assert_eq!(eval(&mut vm, "nested-name"), "\" rx<2>\"");
+}
+
 #[test]
 fn the_build_time_is_baked_at_its_one_site() {
     let dir = scratch("baked");

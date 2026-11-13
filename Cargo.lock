@@ -3890,6 +3890,7 @@ dependencies = [
  "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
+ "romacs-vm-test-modules",
  "ropey",
  "rustc-hash 2.1.3",
  "rustix",
@@ -3936,6 +3937,10 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
 ]
+
+[[package]]
+name = "romacs-vm-test-modules"
+version = "0.0.20"
 
 [[package]]
 name = "ropey"

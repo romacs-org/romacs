@@ -424,6 +424,8 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
 pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = vec![dir.to_owned()];
     roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/romacs")));
+    // The bundled layout, which the bundled autoloads' scan reads.
+    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
@@ -523,6 +525,16 @@ mod tests {
             "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
         assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// The bundled autoloads' scan reads the layout beside lisp/romacs, which a
+    /// confined build reads only inside its roots.
+    #[test]
+    fn a_build_reads_the_bundled_trees_and_their_layout() {
+        let roots = build_roots(std::path::Path::new("/r/lisp/gnu"));
+        for path in ["/r/lisp/gnu", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
+            assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
+        }
     }
 
     #[test]
