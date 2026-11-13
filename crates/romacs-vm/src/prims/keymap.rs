@@ -84,23 +84,27 @@ defsubr! { name = "copy-keymap", gnu = "keymap.c:1018", effect = Global,
 fn copy_keymap(cx, keymap: Value) { cx.copy_keymap(keymap, 0) }}
 
 // A `lookup-key' walk that may stop for a menu item's `:filter', which runs
-// as get_keyelt runs it (menu_item_eval_property: errors give nil), through
-// the Lisp helper `romacs--menu-filter'.  SAVED is [KEYMAP KEY ACCEPT-DEFAULT],
+// through `filter_call'.  SAVED is [KEYMAP KEY ACCEPT-DEFAULT],
 // FIXED values of the caller's, then each (item . result) the filters gave:
 // each result joins SAVED and the walk restarts, so the pairs stay rooted
 // across the call.  Err is the call to make, THEN its continuation.
-fn walk(cx: &mut Leaf<'_>, saved: &[Value], fixed: usize, then: crate::prim::Then) -> std::result::Result<std::result::Result<Value, Step>, Fault> {
+pub(super) fn walk(cx: &mut Leaf<'_>, saved: &[Value], fixed: usize, then: crate::prim::Then) -> std::result::Result<std::result::Result<Value, Step>, Fault> {
     let filters = saved[3 + fixed..].chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
     match cx.lookup_key_walk(saved[0], saved[1], saved[2] != Value::NIL, filters)? {
         Ok(binding) => Ok(Ok(binding)),
         Err((item, filter, object)) => {
-            let helper = cx.intern("romacs--menu-filter");
-            let (f, args) = if cx.fboundp(helper) { (helper, vec![filter, object]) } else { (filter, vec![object]) };
             let mut saved = saved.to_vec();
             saved.push(item);
-            Ok(Err(Step::Call { f, args, then, saved }))
+            Ok(Err(filter_call(cx, filter, object, then, saved)))
         }
     }
+}
+// The call that applies a menu item's FILTER to OBJECT, as get_keyelt does
+// (menu_item_eval_property: an error gives nil), through the prelude's
+// `romacs--menu-filter'.
+pub(super) fn filter_call(cx: &mut Leaf<'_>, filter: Value, object: Value, then: crate::prim::Then, saved: Vec<Value>) -> Step {
+    let f = cx.intern("romacs--menu-filter");
+    Step::Call { f, args: vec![filter, object], then, saved }
 }
 // SAVED with a filter's RESULT, for STEP to walk again.
 fn filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value], step: fn(&mut Leaf<'_>, &[Value]) -> Next) -> Next {
@@ -311,8 +315,8 @@ fn lossage_size(cx; optional arg: Value) {
 }}
 
 // The count of keymap changes, which keymap.c keeps implicitly as the
-// validity of its where_is_cache: `where-is-internal' (lisp/romacs/vm/prelude.el)
-// rebuilds its reverse map when this moves.
+// validity of its where_is_cache: `where-is-internal' (src/where_is.rs)
+// fills its reverse map again when this moves.
 defsubr! { name = "romacs--keymap-generation", gnu = "keymap.c:2505", effect = Reads,
 fn romacs_keymap_generation(cx) {
     Value::integer((cx.keymap_generation() & 0x0fff_ffff_ffff_ffff) as i64).map_err(Fault::Error)

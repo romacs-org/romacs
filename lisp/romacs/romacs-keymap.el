@@ -11,8 +11,7 @@
 ;; `local-map' properties and the local and global maps, so the policy
 ;; stays those variables and properties.
 ;;
-;; Adapted from GNU src/keyboard.c (`posn-point',
-;; `menu_item_eval_property').
+;; Adapted from GNU src/keyboard.c (`posn-point').
 
 ;;; Code:
 
@@ -23,12 +22,6 @@ POSITION is a list of the form returned by `event-start' and `event-end'."
       (let ((posn (nth 1 position)))
         (cond ((consp posn) (car posn))
               ((integerp posn) posn)))))
-
-(defun romacs--menu-filter (filter definition)
-  "Apply a menu item's FILTER to its DEFINITION, as keymap lookup does.
-Errors give nil (keyboard.c menu_item_eval_property)."
-  (let ((inhibit-redisplay t))
-    (condition-case nil (eval (list filter (list 'quote definition)) nil) (error nil))))
 
 (provide 'romacs-keymap)
 ;;; romacs-keymap.el ends here

@@ -7,7 +7,7 @@
 //! forks a child from the state it starts from. In the child, after the
 //! caches a collection drops are dropped (rule M1):
 //! - **the twin's mark:** the collector's own mark (`Vm::mark_only`) with
-//!   every weak entry kept (M2), and, to a fixpoint, every marker and overlay
+//!   every weak entry kept and every undo list whole (M2), and, to a fixpoint, every marker and overlay
 //!   anchored in a buffer it reached and every private symbol with a local
 //!   binding there (M8: what a table walk can hand Lisp is live). Everything
 //!   the reference marker reaches must be in it (`check_reachable`, a floor),
@@ -189,10 +189,13 @@ fn child_marks(vm: &mut Vm, roots: &[Value]) -> Result<Vec<u8>, String> {
 /// TWIN, the twin's marks, must be exactly the closure the collection's own
 /// mark finds from ROOTED (the roots and the M8 extras) when every entry of
 /// each weak table the closure reaches is a root too: keeping weak entries
-/// (M2) is all that may add to that mark. The closure is found from the
-/// collection's own marks alone, each adding the entries of the weak tables
-/// it reached first, so no mark of TWIN's vouches for itself. Leaves the
-/// tables marked with the closure; its marks, one per level of weak tables.
+/// (M2) is all that may add to that mark. A buffer's undo list is weak to
+/// the collection's own mark in the same way, and is a root here with them.
+/// The closure is found from the collection's own marks alone, each adding
+/// the entries of the weak tables and the undo lists of the buffers it
+/// reached first, so no mark of TWIN's vouches for itself. Leaves the tables
+/// marked with the closure; its marks, one per level of weak tables and
+/// buffers.
 fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, String> {
     let mut roots = rooted.to_vec();
     let mut promoted = std::collections::HashSet::new();
@@ -206,7 +209,13 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
                 && vm.objects.marked(i) && !promoted.contains(&i))
             .map(|(i, _)| i)
             .collect();
-        if reached.is_empty() {
+        // A buffer's undo list is weak to the collection's own mark as a
+        // weak table's entries are, and the twin's keeps it whole.
+        let buffers: Vec<usize> = vm.objects.iter().enumerate()
+            .filter(|&(i, object)| matches!(object, Object::Buffer(_) | Object::ByteBuffer(_)) && vm.objects.marked(i) && !promoted.contains(&i))
+            .map(|(i, _)| i)
+            .collect();
+        if reached.is_empty() && buffers.is_empty() {
             break marks(vm);
         }
         for i in reached {
@@ -214,6 +223,10 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
             if let Object::HashTable(table) = &vm.objects[i] {
                 roots.extend(table.entries().flat_map(|(_, key, value)| [key, value]));
             }
+        }
+        for i in buffers {
+            promoted.insert(i);
+            roots.push(vm.own_undo_list(i));
         }
     };
     for t in 0..4 {
@@ -498,6 +511,27 @@ mod tests {
         twin[0][entry] = false;
         twin[0][cons(reached)] = false;
         assert!(bound(&mut vm, &roots, &twin).is_err_and(|e| e.contains("left unmarked")));
+    }
+
+    /// A buffer's undo list past its limits, with a marker nothing else
+    /// holds: to the collection's own mark the list is weak, and it decides a
+    /// cut. The twin's mark keeps the whole list, as it keeps weak entries,
+    /// so the reference walk's floor and the bound both hold for it.
+    #[test]
+    fn an_undo_list_past_its_limits_is_whole_to_the_twin() {
+        let mut vm = quiet_vm();
+        vm.eval_source_raw("(progn (set-buffer (get-buffer-create \"undo\")) \
+            (setq undo-limit 40 undo-strong-limit 80 undo-outer-limit 100000) \
+            (let ((buffer-undo-list t)) (insert \"x\")) \
+            (setq buffer-undo-list (list (cons (point-marker) 1) '(1 . 2) nil '(3 . 4) nil '(5 . 6) nil '(7 . 8))) nil)").unwrap();
+        let report = child_marks(&mut vm, &[]);
+        assert!(report.is_ok(), "{report:?}");
+        let twin = twin_marks(&mut vm, &[]);
+        vm.clear_marks();
+        vm.mark_only(&[], false);
+        let plain = marks(&vm);
+        let count = |marks: &[Vec<bool>; 4]| marks[0].iter().filter(|&&marked| marked).count();
+        assert!(count(&plain) < count(&twin), "the plain mark leaves the cut's conses, and the twin's does not");
     }
 
     /// A weak table reached only through another's entry is a level of its own.
