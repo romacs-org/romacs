@@ -128,8 +128,8 @@
   "layouts": 1,
   "frames_submitted": 1,
   "chars_fontified": 22500,
-  "lines_laid": 0,
-  "rows_wrapped": 0,
+  "lines_laid": 2,
+  "rows_wrapped": 2,
   "display_instructions_p90": 1470000000
  },
  "fontify-typed-org-folded": {
@@ -141,8 +141,8 @@
   "layouts": 3,
   "frames_submitted": 1,
   "chars_fontified": 43,
-  "lines_laid": 0,
-  "rows_wrapped": 0,
+  "lines_laid": 3,
+  "rows_wrapped": 3,
   "display_instructions_p90": 162000000
  },
  "fontify-unfold-org": {
@@ -154,8 +154,8 @@
   "layouts": 3,
   "frames_submitted": 1,
   "chars_fontified": 6004,
-  "lines_laid": 0,
-  "rows_wrapped": 0,
+  "lines_laid": 10,
+  "rows_wrapped": 10,
   "display_instructions_p90": 1070000000
  },
  "fontify-typed-elisp": {
@@ -167,8 +167,8 @@
   "layouts": 2,
   "frames_submitted": 1,
   "chars_fontified": 133,
-  "lines_laid": 0,
-  "rows_wrapped": 0,
+  "lines_laid": 1,
+  "rows_wrapped": 1,
   "display_instructions_p90": 44100000
  }
 }
