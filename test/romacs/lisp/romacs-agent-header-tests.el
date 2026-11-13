@@ -17,6 +17,7 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
+  (require 'romacs-agent-claude)
   (require 'romacs-agent-ui))
 
 (defconst romacs-agent-header-tests--id "11111111-2222-4333-8444-555555555555")
@@ -31,6 +32,7 @@ string, an overlay."
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-ui--children-changed (make-hash-table :test #'eq))
           (romacs-agent-ui--children-timer nil)
+          (romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key))
           (session (romacs-agent--make :id romacs-agent-header-tests--id :harness 'claude :provider "claude" :state 'idle :caught-up t
                                        :model "claude-opus-5-5" :permission-mode "bypassPermissions"
                                        :options (list :effort "high")
@@ -62,8 +64,12 @@ string, an overlay."
              (setf (romacs-agent-buffer session) chat)
              (romacs-agent-ui--header-refresh session)
              (romacs-agent-ui--composer-update)
+             ;; Its views know its state, as a chat's do once it is shown.
+             (romacs-agent-ui--announce session)
              (setq written 0)
              ,@body)
+         ;; A batch a test started runs with it, never after it.
+         (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
          (when (buffer-live-p chat) (kill-buffer chat))))))
 
 ;; What runs before a redisplay: a batch session has no host to run it.
@@ -264,6 +270,40 @@ string, an overlay."
       (should (timerp romacs-agent-ui--children-timer))
       (flush))))
 
+(ert-deftest romacs-agent-header-of-a-chat-opened-after-its-turn ()
+  ;; A chat opened on a session whose last turn no one has seen: its
+  ;; journal's replay draws that turn's end in the chat, shown, which sees
+  ;; it.  The replay's events are its own, so the header is made after it.
+  (let* ((dir (make-temp-file "romacs-header-" t))
+         (romacs-agent-glyphs nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key))
+         (romacs-agent-ui--children-changed (make-hash-table :test #'eq))
+         (romacs-agent-ui--children-timer nil)
+         (session (romacs-agent--make :id romacs-agent-header-tests--id :harness 'claude :provider "claude"
+                                      :state 'idle :dir dir :input-seq 1 :done-seq 2
+                                      :host-socket "/nonexistent/romacs-agent.sock"))
+         (buffer nil))
+    (unwind-protect
+        (save-window-excursion
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region (concat (romacs-agent--json (romacs-mcp--object "seq" 1 "t" 1.0 "in" (romacs-mcp--object "prompt" "hi")))
+                                  "\n"
+                                  (romacs-agent--json (romacs-mcp--object "seq" 2 "t" 2.0 "out"
+                                                                          (romacs-mcp--object "type" "result" "result" "ok")))
+                                  "\n")
+                          nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+          (should (eq (romacs-agent-ui--state-key session) 'completed))
+          (cl-letf (((symbol-function 'romacs-agent--manifest-put) #'ignore))
+            (setq buffer (romacs-agent-show session)))
+          (should (eq (romacs-agent-ui--state-key session) 'idle))
+          (with-current-buffer buffer
+            (should (stringp header-line-format))
+            (should-not (string-search "Completed" header-line-format))))
+      (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-directory dir t))))
+
 (ert-deftest romacs-agent-header-unchanged-is-not-written ()
   (romacs-agent-header-tests--with
     (let ((shown header-line-format))
@@ -275,6 +315,8 @@ string, an overlay."
       (romacs-agent-ui--header-refresh session)
       (should (eq header-line-format shown))
       (should (= written 0))
+      ;; Its views were told its state already: the board's batch waits on nothing.
+      (should-not (timerp romacs-agent-ui--children-timer))
       ;; Made again, it reads the same: not written.
       (setq romacs-agent-ui--header nil)
       (romacs-agent-ui--header-refresh session)

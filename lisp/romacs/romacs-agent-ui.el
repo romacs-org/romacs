@@ -1393,7 +1393,10 @@ and a running turn's live rule ticks."
       (with-current-buffer buffer
         (romacs-agent-ui--replay session)
         (romacs-agent-ui--composer-update)
-        (romacs-agent-ui--summarize-children session)))
+        (romacs-agent-ui--summarize-children session)
+        ;; What the replay drew, seen here, and the rows just made: its
+        ;; events went to the replay alone.
+        (romacs-agent-ui--header-show)))
     (pop-to-buffer buffer)
     (goto-char (point-max))
     ;; The replay carried the window's start along with the transcript's
@@ -1445,7 +1448,9 @@ harness's own transcript it was imported from, when it was."
                    ;; The scratch copy's turn data, for the footers it draws.
                    (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
                    ;; With no supervisor, no event reached the session: its
-                   ;; harness's subagents are known from here.
+                   ;; harness's subagents are known from here.  The state it
+                   ;; notes as its views' is told them by the batch that
+                   ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
