@@ -185,6 +185,16 @@ string, an overlay."
                 (setf (romacs-agent-connection session) process)
                 (romacs-agent--sentinel process "finished\n"))
               (should (shows "  Detached"))
+              ;; Stopped here, its supervisor not answering: ended, which
+              ;; no event says.
+              (write-region "" nil (expand-file-name "stopped" dir) nil 'silent)
+              (romacs-agent--attach session 0)
+              (should (shows "  Ended"))
+              (delete-file (expand-file-name "stopped" dir))
+              ;; No journal: its supervisor never started.
+              (delete-file (expand-file-name "journal.jsonl" dir))
+              (romacs-agent--attach session 0)
+              (should (shows "  Never started"))
               ;; A selection its harness is restarted for: waiting, then in
               ;; effect and the harness resuming, then nothing waiting.
               (setf (romacs-agent-pending-selection session)
