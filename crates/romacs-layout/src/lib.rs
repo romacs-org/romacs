@@ -197,7 +197,11 @@ impl LayoutEngine {
         // moves no glyph, is the last one's windows with their cursors
         // placed anew and the bars painted again.
         let moved = !reusable && self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.windows_lay_out_like(snapshot, false)
-            && (last.snapshot.tab_bar.is_some(), last.snapshot.status_bar.is_some()) == (snapshot.tab_bar.is_some(), snapshot.status_bar.is_some()));
+            && (last.snapshot.tab_bar.is_some(), last.snapshot.status_bar.is_some()) == (snapshot.tab_bar.is_some(), snapshot.status_bar.is_some())
+            // A face table that grew moves the ids of the bands' faces,
+            // which come after the table's: a frame like another needs only
+            // the faces both show agree.
+            && last.snapshot.windows.iter().zip(&snapshot.windows).all(|(a, b)| a.snapshot.faces.len() == b.snapshot.faces.len()));
         if moved {
             let last = self.last.as_mut().expect("compared above");
             let bars = last.snapshot.tab_bar != snapshot.tab_bar || last.snapshot.status_bar != snapshot.status_bar;

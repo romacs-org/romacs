@@ -379,3 +379,19 @@ fn edits_under_a_label_inside_a_line_lay_out_as_whole() {
         both(&mut engine, &frame(vec![window.clone()]), step as u64 + 1);
     }
 }
+
+/// Point moves while the face table grows (another window shows a new
+/// face): the bands' faces, numbered after the table's, move, so the
+/// frame is laid out again rather than its windows' glyphs kept.
+#[test]
+fn point_moves_while_the_face_table_grows_lay_out_as_whole() {
+    let mut engine = LayoutEngine::new().unwrap();
+    let mut rng = Rng(41);
+    let mut window = snapshot(&mut rng, 1);
+    window.mode_line = Some(TextSlice { utf8: "-:--  band".into(), face_runs: vec![], raw: vec![], extends: vec![] });
+    window.point_byte = 0;
+    both(&mut engine, &frame(vec![window.clone()]), 1);
+    window.faces.push(face("Liberation Serif", 18.0));
+    window.point_byte = window.text.utf8.char_indices().nth(1).map_or(0, |c| c.0);
+    both(&mut engine, &frame(vec![window]), 2);
+}
