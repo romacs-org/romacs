@@ -57,8 +57,9 @@ The same sequence on every run and engine."
   "Characters drawn half the time, so that mappings collide on them.")
 
 (defun romacs-mule-tests--side (state lists)
-  "One side of a mapping: a character, a sequence of them, nothing, or one
-of LISTS, which mappings share and builders append to."
+  "One side of a mapping: a character, a sequence of them, nothing, or,
+where LISTS is non-nil, one of those lists, which mappings share and
+builders append to."
   (let ((char (lambda ()
                 (let ((from (if (= 0 (romacs-mule-tests--random state 2))
                                 romacs-mule-tests--first-characters
@@ -70,17 +71,24 @@ of LISTS, which mappings share and builders append to."
       ((or 7 8) (vector (funcall char) (funcall char)))
       (9 (vector (funcall char) (funcall char) (funcall char)))
       (10 (if (= 0 (romacs-mule-tests--random state 2)) nil []))
-      ((or 11 12 13) (aref lists (romacs-mule-tests--random state (length lists))))
+      ((or 11 12 13)
+       (if lists
+           (aref lists (romacs-mule-tests--random state (length lists)))
+         (vector (funcall char) (funcall char))))
       (_ (string (funcall char) ?z)))))
 
 (defun romacs-mule-tests--alist (seed)
   "An alist of up to 40 mappings drawn from SEED, and the lists it shares.
-Each call builds them afresh: a builder may append to the lists."
+Each call builds them afresh: a builder may append to the lists.  A
+list is only ever what a mapping maps to, and only for one seed in
+five: the builder appends to it and then signals, as it cannot be
+mapped back, so the other four seeds in five build both tables whole."
   (let* ((state (list seed))
          (lists (vector (list (cons [?x] ?y)) (list (cons [?a ?q] ?r) (cons [?b] ?s))))
+         (shared (and (= 0 (romacs-mule-tests--random state 5)) lists))
          (alist nil))
     (dotimes (_ (romacs-mule-tests--random state 41))
-      (push (cons (romacs-mule-tests--side state lists) (romacs-mule-tests--side state lists)) alist))
+      (push (cons (romacs-mule-tests--side state nil) (romacs-mule-tests--side state shared)) alist))
     (cons alist lists)))
 
 (defun romacs-mule-tests--fresh-outcome (builder seed)
@@ -102,11 +110,12 @@ Each call builds them afresh: a builder may append to the lists."
 (ert-deftest romacs-mule-translation-tables-are-gnus ()
   "`make-translation-table-from-alist' builds GNU's tables.
 Over 1,500 generated alists (characters and sequences on either side,
-empty sides, strings, lists two mappings share, characters mapped twice
-and sequences sharing a first character) and ucs-normalize.el's Hangul,
-both tables hold what GNU's own definition gives: every entry, the
-lookup lengths, the reverse table, and what it appended to the lists
-given to it.  Each builder gets its own copy of an alist."
+empty sides, strings, characters mapped twice and sequences sharing a
+first character; in one alist of five, lists two mappings share, which
+end in GNU's signal) and ucs-normalize.el's Hangul, the outcome is what
+GNU's own definition gives: every entry of both tables, the lookup
+lengths, the reverse table, the signal, and what was appended to the
+lists given.  Each builder gets its own copy of an alist."
   (let ((gnu (romacs-mule-tests--gnu 'make-translation-table-from-alist)))
     (dotimes (seed 1500)
       (should (equal (romacs-mule-tests--fresh-outcome #'make-translation-table-from-alist seed)
