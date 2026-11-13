@@ -1,6 +1,7 @@
 ;;; romacs-agent-attach-tests.el --- Images in the composer and transcript -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
@@ -685,7 +686,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
   "A process of another HOME has no record of a live session: its route stays."
-  (let* ((root (file-name-as-directory (make-temp-file "sweep" t)))
+  (let* ((root (file-name-as-directory (romacs-test-socket-directory "sweep")))
          (routes (expand-file-name "route/" root))
          (socket (expand-file-name "s.sock" root))
          (server nil))

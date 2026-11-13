@@ -55,8 +55,14 @@ const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) 
 /// code it compiled retires too. A key press arriving while it still
 /// marks abandons it (`Vm::collect_garbage_until_key'): the key is read
 /// at once, and the collection waits for the next quiet moment.
+/// The pass is `read_char`'s wait (`Vm::eval_as_wait`): a C-g that ends it,
+/// typed as it began or left by a timer (`with-local-quit`), is the next
+/// key read, and the pass counts as having run.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
-    let (ran, rest) = vm.eval_source(if auto_save { IDLE_AUTO_SAVE } else { IDLE })?.cons_pair()?;
+    let Some(value) = vm.eval_as_wait(if auto_save { IDLE_AUTO_SAVE } else { IDLE })? else {
+        return Ok(Idle { ran: true, message: false, delay: None });
+    };
+    let (ran, rest) = value.cons_pair()?;
     let ran = !ran.is_nil();
     let (message, rest) = rest.cons_pair()?;
     let message = !message.is_nil();
@@ -655,6 +661,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A C-g that ends the loop's idle pass is the next key read, as GNU's
+    /// `read_char` returns the quit character: one a timer's Lisp took
+    /// (isearch's lazy highlight quits under `with-local-quit`, which leaves
+    /// `quit-flag` set for later), one that stops the idle auto-save, and one
+    /// already waiting as the pass begins, raised before any of its Lisp.
+    #[test]
+    fn a_quit_a_timer_left_is_the_next_key() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(quit_left_body).unwrap().join().unwrap();
+    }
+    fn quit_left_body() {
+        let mut vm = Vm::new();
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        vm.eval_source("(setq timer-list nil timer-idle-list nil romacs-gc-idle-delay nil)
+                        (run-with-idle-timer 0 nil (lambda () (with-local-quit (signal 'quit nil))))").unwrap();
+        vm.enter_busy();
+        let pass = idle(&mut vm, false);
+        vm.leave_busy();
+        assert!(pass.as_ref().is_ok_and(|pass| pass.ran), "the pass ran, and its quit is no error: {pass:?}");
+        assert!(vm.take_quit_key(), "the quit is the next key");
+        // A C-g during the idle auto-save stops the save, which GNU keeps
+        // quittable (fileio.c Fdo_auto_save), and is the next key too.
+        vm.eval_source("(defvar saved nil)
+                        (fset 'romacs--idle-auto-save
+                              (lambda () (let ((n 0)) (while (< n 400) (sleep-for 0.005) (setq n (1+ n))))
+                                (setq saved t)))").unwrap();
+        let signal = vm.quit_signal();
+        vm.enter_busy();
+        let presser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            signal.interrupt()
+        });
+        let pass = idle(&mut vm, true);
+        assert!(presser.join().unwrap(), "the busy pass took the press");
+        vm.leave_busy();
+        assert!(pass.is_ok(), "the save's quit is no error: {pass:?}");
+        assert_eq!(vm.eval_source("saved").unwrap().display().unwrap(), "nil", "the C-g stopped the save");
+        assert!(vm.take_quit_key(), "the quit that stopped the save is the next key");
+        vm.eval_source("(fset 'romacs--idle-auto-save #'ignore)").unwrap();
+        vm.enter_busy();
+        assert!(vm.quit_signal().interrupt(), "the busy pass takes the press");
+        let pass = idle(&mut vm, false);
+        vm.leave_busy();
+        assert!(pass.is_ok(), "a quit raised as the pass begins is no error: {pass:?}");
+        assert!(vm.take_quit_key(), "the quit waiting as the pass began is the next key");
     }
 
     #[test]

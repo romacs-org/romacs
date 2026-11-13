@@ -817,6 +817,7 @@ impl Leaf<'_> {
             ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
             ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
             ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
+            ("log-overflows", int(stats.log_overflows)),
             ("bytes", int(bytes as u64)), ("char-table-writes", int(crate::char_table::writes())),
         ];
         let mut plist = Value::NIL;
