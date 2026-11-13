@@ -1350,9 +1350,18 @@ impl AnnotatedBuffer {
     /// Every Value the buffer holds; of its text's properties, what READING
     /// says (`BodyProperties`).
     pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
+        self.visit_values_but(reading, None, f);
+    }
+    /// A live buffer's undo list is weak, unless it is its base's and so not in
+    /// its slot; a dead buffer's is held like the rest of it (`mark_buffer`).
+    pub(crate) fn owns_undo_list(&self) -> bool {
+        self.state.live && self.base == Value::NIL
+    }
+    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
-        self.per_buffer.visit_values(f);
+        self.per_buffer.visit_values_but(skip, f);
         self.text.visit_view_values(f);
         // An indirect buffer holds its base alive; the text they share is
         // the base's to visit, once, as collection rewrites what it visits.

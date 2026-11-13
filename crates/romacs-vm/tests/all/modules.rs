@@ -710,6 +710,8 @@ mod traversal;
 mod treesit;
 #[path = "../truncate_numeric.rs"]
 mod truncate_numeric;
+#[path = "../undo_collection.rs"]
+mod undo_collection;
 #[path = "../unibyte_insert.rs"]
 mod unibyte_insert;
 #[path = "../unibyte_local_map.rs"]
