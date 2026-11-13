@@ -1532,6 +1532,17 @@ Optional VALIDATE checks caller ownership before selection and replacement.
 
 ;;; Generated autoloads from gnosis-scheduler.el
 
+(autoload 'gnosis-scheduler-drift "gnosis-scheduler"
+"Return the reviews in DB that today's FSRS schedules differently.
+Replay every reviewed thema from its recorded results and list
+(THEMA-ID . DRIFT) for each with drift, DRIFT as
+`gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
+one whose history does not replay.  The collection is read in two
+queries and each review recomputed once; nothing is written.
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report').
+
+(fn &optional DB)" t)
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
 "Select user-wide desired RETENTION for future accepted reviews.
 Append an immutable configuration snapshot.  Existing due dates and events
@@ -1541,6 +1552,18 @@ require its longest model interval to fit the current year's scheduler
 calendar.  Unsupported values signal `user-error'; intervals are not capped.
 
 (fn RETENTION)" t)
+(autoload 'gnosis-scheduler-fit-parameters "gnosis-scheduler"
+"Return FSRS weights fitted to the effective review history in DB.
+The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area.
+
+(fn &optional DB)" t)
 (register-definition-prefixes "gnosis-scheduler" '("gnosis-scheduler-"))
 
 
