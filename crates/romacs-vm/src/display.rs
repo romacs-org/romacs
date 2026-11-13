@@ -2495,19 +2495,19 @@ impl Vm {
         outcome
     }
     /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
-    /// the current buffer, which a window shows. The walk over unfontified
-    /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
-    /// lisp/romacs/vm/prelude.el), so nothing is held across them; a signal is
-    /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic. False when `fontification-functions` is nil,
-    /// so no Lisp ran.
-    fn fontify_range(&mut self, start: usize, end: usize) -> Result<bool> {
+    /// the current buffer, which WINDOW shows. The walk over the positions
+    /// the display iterator would call at and the calls are Lisp
+    /// (`romacs--redisplay-fontify`, lisp/romacs/vm/prelude.el), so nothing
+    /// is held across them; a signal is logged there and never ends
+    /// redisplay, and any other failure becomes a display diagnostic. False
+    /// when `fontification-functions` is nil, so no Lisp ran.
+    fn fontify_range(&mut self, window: Value, start: usize, end: usize) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
             return Ok(false);
         }
-        let args = [Value::integer(start as i64)?, Value::integer(end as i64)?];
-        let call = "(lambda (start end) (romacs--redisplay-fontify start end))";
+        let args = [window, Value::integer(start as i64)?, Value::integer(end as i64)?];
+        let call = "(lambda (window start end) (romacs--redisplay-fontify window start end))";
         if let Err(error) = self.call_prepared_source_raw(call, &args) {
             self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
         }
@@ -2534,7 +2534,7 @@ impl Vm {
         let mut tries = 1;
         while let Some((start, end)) = range {
             let shown = self.window_text_state(root)?;
-            let ran = self.fontify_range(start, end)?;
+            let ran = self.fontify_range(self.slots[root].value, start, end)?;
             let w = self.window(self.slots[root].value)?;
             if !w.live() {
                 return Ok(false);

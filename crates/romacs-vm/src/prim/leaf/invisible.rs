@@ -149,6 +149,35 @@ impl Leaf<'_> {
         0
     }
 
+    /// `invisible_kind` of the `invisible` char property at POS of BUFFER,
+    /// the current buffer, as WINDOW shows it.
+    pub(crate) fn shown_invisible_kind(&mut self, buffer: Value, window: Value, pos: i64) -> std::result::Result<u8, Fault> {
+        let (byte, key) = (self.buffer_byte(buffer, pos)?, self.intern("invisible"));
+        let property = self.vm.window_char_property(buffer, byte, key, window).map_err(Fault::Error)?.0;
+        self.invisible_kind(property)
+    }
+    /// `handle_invisible_prop`'s loop over BUFFER, the current buffer, as
+    /// WINDOW shows it, from POS in hidden text: the first shown position
+    /// after it, at most END, adjacent stretches merged, and whether one
+    /// passed asks for an ellipsis (or ELLIPSIS already did). It steps only
+    /// where `invisible` or an overlay may change (`Vm::next_keys_change`).
+    pub(crate) fn skip_hidden(&mut self, buffer: Value, window: Value, (mut pos, end): (i64, i64), mut ellipsis: bool)
+        -> std::result::Result<(i64, bool), Fault> {
+        let key = self.intern("invisible");
+        let keys = self.vm.deciding_keys(key).map_err(Fault::Error)?;
+        for steps in 1u32.. {
+            if steps.is_multiple_of(1024) { self.vm.native_poll()?; }
+            pos = self.vm.next_keys_change(buffer, (pos, end), &keys).map_err(Fault::Error)?;
+            if pos >= end { break; }
+            match self.shown_invisible_kind(buffer, window, pos)? {
+                0 => break,
+                2 => ellipsis = true,
+                _ => {}
+            }
+        }
+        Ok((pos, ellipsis))
+    }
+
     pub fn invisible_property(&mut self, pos: Value) -> super::super::Out {
         // GNU deliberately treats negative fixnums, floats and bignums as
         // property values, not positions (FIXNATP, rather than INTEGERP).

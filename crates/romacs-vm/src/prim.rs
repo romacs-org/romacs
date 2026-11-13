@@ -1934,6 +1934,7 @@ mod leaf {
     mod flight;
     mod host_calls;
     mod display_stats;
+    mod fontify_stops;
     mod compiled_lisp;
     mod casetab;
     mod casing;

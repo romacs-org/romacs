@@ -22,6 +22,8 @@ anything, so a step's figures are differences of two readings:
   lines_laid            display lines the layout engine laid out, some
                         row of them wrapped (the rest it had kept)
   rows_wrapped          rows the layout engine wrapped
+  chars_fontified       characters `jit-lock' asked its functions for, in
+                        a scenario that counts them (fontification's)
 
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
@@ -74,6 +76,8 @@ BARS = HERE / 'display_stages_bars.json'
 COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'instructions', 'display_conses': 'conses',
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
+# Figures only the scenarios that count them have.
+OPTIONAL = {'chars_fontified': 'fontified-chars'}
 # The figures whose 90th percentile is held too (a whole step's varies
 # with the timers that poll for its redisplay), the figures held under a
 # ceiling and the margin --write-bars gives them, and the share of steps
@@ -98,8 +102,10 @@ def quantile(values, share):
 
 
 def figures(deltas):
-    """A scenario's figures from its steps' counts."""
-    out = {figure: quantile([d[count] for d in deltas], .5) for figure, count in COUNTS.items()}
+    """A scenario's figures from its steps' counts, with the optional ones
+    its steps counted."""
+    counted = {**COUNTS, **{figure: count for figure, count in OPTIONAL.items() if all(count in d for d in deltas)}}
+    out = {figure: quantile([d[count] for d in deltas], .5) for figure, count in counted.items()}
     out.update({f'{figure}_p90': quantile([d[COUNTS[figure]] for d in deltas], .9) for figure in PEAKS})
     return out
 
