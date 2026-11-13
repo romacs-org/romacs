@@ -171,7 +171,7 @@ impl Vm {
         #[cfg(test)]
         request_code::artifact_fault(request_code::ArtifactFault::Remapped);
         for (id, function) in ids.into_iter().zip(a.functions) {
-            self.functions[id] = Arc::new(function);
+            self.functions.set(id, Arc::new(function));
         }
         // The stored functions use the reserved slots: they own them now.
         self.claim_caches(&cache_ids);

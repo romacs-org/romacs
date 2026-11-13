@@ -26,9 +26,11 @@
 ;;           does for the redisplay, rather than for a time.
 ;;   :gap    how often, in seconds, a GUI probe looks for its step's
 ;;           redisplay (default 0.1).
-;;   :idle   a GUI probe whose steps change nothing shown: the measurement
-;;           is refused if a step submits a paint, where any other probe's
-;;           is refused unless every step does.
+;;   :idle   a GUI probe whose steps change nothing shown: each step's
+;;           instructions are reported apart, and the harness counts the
+;;           steps no paint followed (the host repaints for reasons of its
+;;           own now and then), where any other probe's measurement is
+;;           refused unless every step paints.
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -225,7 +227,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (setenv "XDG_STATE_HOME" (make-temp-file "scaling-state-" t))
   (require 'romacs-agent))
 
-;; The home page over N projects of one session each, and over N roots in one project.
+;; The agent board over N projects of one session each, and over N roots in one project.
 (defun scaling--agent-sessions (n project)
   (scaling--agent)
   (clrhash romacs-agent--sessions)
@@ -234,7 +236,12 @@ comment and string syntax, its summaries made by one parse to the end."
                                  :title (format "session %d" i) :cwd (funcall project i)
                                  :last-time (+ 1e9 i) :state 'idle :turns 1)))
       (puthash (romacs-agent-id s) s romacs-agent--sessions)))
-  (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+  (scaling--agent-board))
+
+(defun scaling--agent-board ()
+  "The agent board's buffer, not shown."
+  (require 'romacs-agent-board)
+  (romacs-agent-board--buffer))
 
 ;; The harnesses' history: N Claude Code transcripts in one configuration
 ;; directory, listed (stat only) once described, and listed and described anew.
@@ -582,14 +589,18 @@ scaling_live.py --record profiles a probe's body alone this way."
   "Append PLIST as a JSON line to stderr, among the host's paint diagnostics."
   (write-region (concat (json-encode plist) "\n") nil "/dev/stderr" t 'silent))
 
+(defun scaling--differences (readings)
+  "The differences of consecutive READINGS as a vector, nil where one is nil."
+  (vconcat (cl-mapcar (lambda (before after) (and before after (- after before))) readings (cdr readings))))
+
 (defun scaling-gui-start (name n out)
   "Run GUI probe NAME at size N in this session, then exit.
 Once the session is idle, set the probe up; then run its steps from a chain
 of timers, each after the host's redisplay of the step before: a paint still
 being drawn holds the next one back, so no fixed time means the step was
 laid out.  Count the instructions from before the first step to after the
-last step's layout; write (:name :n :instructions) to OUT as JSON and kill
-Emacs.  Stderr marks the start, each step and the end among the paint
+last step's layout; write (:name :n :instructions), and for an :idle probe
+each step's instructions (:steps), to OUT as JSON and kill Emacs.  Stderr marks the start, each step and the end among the paint
 diagnostics, so the harness can check a paint was submitted after each
 step, before the next step or the count's end."
   (require 'json)
@@ -597,7 +608,8 @@ step, before the next step or the count's end."
          (steps (or (plist-get plist :steps) 1))
          (body (plist-get plist :body))
          (gap (or (plist-get plist :gap) 0.1))
-         (ready (or (plist-get plist :ready) #'always)) it start)
+         (idle (plist-get plist :idle))
+         (ready (or (plist-get plist :ready) #'always)) it start readings)
     (setq blink-cursor-mode nil)
     (run-with-idle-timer
      0.5 nil
@@ -615,6 +627,8 @@ step, before the next step or the count's end."
                                  (funcall step)
                                (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
+                         ;; An :idle probe's steps are counted one by one.
+                         (when idle (push (romacs-instructions) readings))
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))
                                     (funcall body n it i) (setq i (1+ i))
@@ -623,8 +637,10 @@ step, before the next step or the count's end."
                            (let ((end (romacs-instructions)))
                              (scaling--mark (list :scaling "end"))
                              (with-temp-file out
-                               (insert (json-encode (list :name (symbol-name name) :n n
-                                                          :instructions (and start end (- end start))))))
+                               (insert (json-encode
+                                        `(:name ,(symbol-name name) :n ,n
+                                          :instructions ,(and start end (- end start))
+                                          ,@(and idle (list :steps (scaling--differences (nreverse readings))))))))
                              (kill-emacs 0)))))
             (funcall step))))))))
 

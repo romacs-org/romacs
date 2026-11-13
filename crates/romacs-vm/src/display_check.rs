@@ -125,8 +125,10 @@ impl Vm {
         let modiff = state.map_or(0, |state| state.modiff);
         let start = self.marker_position_value(start).ok().and_then(Value::integer_value).unwrap_or(0);
         let point = self.window_point_value(window).ok().and_then(Value::integer_value).unwrap_or(0);
-        format!("of {name:?} (start {start}, point {point}, modiff {modiff}, overlays {}, collections {})",
-            self.display_state.overlays, self.gc_stats.collections)
+        // The buffer's own overlay revision, as the window's key reads it.
+        let overlays = self.overlay_store(buffer).map_or(0, |store| store.overlay_revision);
+        format!("of {name:?} (start {start}, point {point}, modiff {modiff}, overlays {overlays}, collections {})",
+            self.gc_stats.collections)
     }
 }
 
