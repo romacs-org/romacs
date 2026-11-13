@@ -211,11 +211,9 @@
   (romacs-agent-children-tests--with
     (child 'running)
     (romacs-agent-ui--summarize-children parent)
-    (with-temp-buffer
-      (let ((romacs-agent-ui--session parent))
-        (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made at redisplay")))
-                  ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned at redisplay"))))
-          (should (string-search "Working" (romacs-agent-ui--header-line))))))))
+    (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made for the header")))
+              ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned for the header"))))
+      (should (string-search "Working" (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs parent)))))))
 
 (ert-deftest romacs-agent-children-menu-rows-open-children ()
   (romacs-agent-children-tests--with
