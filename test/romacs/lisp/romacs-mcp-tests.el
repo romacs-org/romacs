@@ -1,5 +1,6 @@
 ;;; romacs-mcp-tests.el --- Native MCP regressions -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'romacs-test-socket)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-mcp-companion)
@@ -65,7 +66,7 @@
       (should (stringp wire)))))
 
 (ert-deftest romacs-mcp-stable-boot-and-owned-socket ()
-  (let* ((root (make-temp-file "romacs-mcp-ert-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-ert-"))
          (socket (expand-file-name "mcp" root))
          (boot (gethash "instance" (romacs-mcp-identity))))
     (unwind-protect
@@ -85,7 +86,7 @@
       (delete-directory root t))))
 
 (ert-deftest romacs-mcp-refuse-existing-node-and-symlink ()
-  (let* ((root (make-temp-file "romacs-mcp-node-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-node-"))
          (socket (expand-file-name "mcp" root)))
     (unwind-protect
         (progn
@@ -100,7 +101,7 @@
   "A socket left by a dead listener is reclaimed; a live one is refused.
 Like GNU `server-start', which deletes a leftover socket unless
 `server-running-p' can connect to it."
-  (let* ((root (make-temp-file "romacs-mcp-stale-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-stale-"))
          (socket (expand-file-name "mcp" root))
          live)
     (unwind-protect
@@ -132,7 +133,7 @@ Like GNU `server-start', which deletes a leftover socket unless
   "Only a refused connection proves a socket stale.
 A live listener whose socket cannot be connected to (permission denied)
 keeps its node."
-  (let* ((root (make-temp-file "romacs-mcp-stale-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-stale-"))
          (socket (expand-file-name "mcp" root))
          (live (make-network-process
                 :name "romacs-mcp-ert-live" :family 'local
@@ -151,7 +152,7 @@ keeps its node."
 
 (ert-deftest romacs-mcp-reclaim-reads-only-the-failure-reason ()
   "A socket path containing \"refused\" does not make a denial look stale."
-  (let* ((root (make-temp-file "romacs-mcp-stale-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-stale-"))
          (socket (expand-file-name "refused" root))
          (live (make-network-process
                 :name "romacs-mcp-ert-live" :family 'local
@@ -172,7 +173,7 @@ keeps its node."
   "A node replaced right after its type check is not deleted.
 The replacement, a regular file, also refuses connections, so only
 checking type, owner and deletion identity on one stat keeps it."
-  (let* ((root (make-temp-file "romacs-mcp-stale-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-stale-"))
          (socket (expand-file-name "mcp" root))
          (file-attributes-fn (symbol-function 'file-attributes))
          replaced)
@@ -200,7 +201,7 @@ checking type, owner and deletion identity on one stat keeps it."
 
 (ert-deftest romacs-mcp-reclaim-never-deletes-a-successor ()
   "A socket that another editor replaced after the probe is not deleted."
-  (let* ((root (make-temp-file "romacs-mcp-stale-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-stale-"))
          (socket (expand-file-name "mcp" root))
          successor identity)
     (cl-flet ((replace-after-probe (stale)
@@ -239,7 +240,7 @@ checking type, owner and deletion identity on one stat keeps it."
   "Accepted, rejected and stopped connections leave no buffer behind.
 Like GNU `server-start', the listener has a filter, so
 `server_accept_connection' gives accepted connections none."
-  (let* ((root (make-temp-file "romacs-mcp-buffers-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-buffers-"))
          (socket (expand-file-name "mcp" root))
          (line (concat (json-serialize
                         (romacs-mcp--object
@@ -312,7 +313,7 @@ A connection accepted by an earlier version of this library, whose
 listener had no filter, adopted any existing buffer named like the
 listener, as `server_accept_connection' uses `get-buffer-create'.
 Like `delete-process', retiring it must leave that buffer alone."
-  (let* ((root (make-temp-file "romacs-mcp-adopt-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-adopt-"))
          (socket (expand-file-name "mcp" root))
          (buffers (list (generate-new-buffer "romacs-mcp <1>")
                         (generate-new-buffer "romacs-mcp <2>")))

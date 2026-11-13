@@ -13,6 +13,10 @@
   (require 'romacs-agent-tools)
   (require 'romacs-agent-ui))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 (defmacro romacs-agent-picker--with (bindings &rest body)
   "BODY in a private state directory, with `root' its temporary root and
 `program' an executable there; BINDINGS, of `let*', see them."

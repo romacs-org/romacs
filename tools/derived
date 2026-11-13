@@ -22,8 +22,6 @@ def setup(root):
     git(root, 'config', '--local', 'merge.romacs-floors.driver', 'python3 -B tools/lib/smells.py merge %O %A %B')
     git(root, 'config', '--local', 'merge.romacs-unsafe-floors.name', 'Merge the unsafe floors as exact counts')
     git(root, 'config', '--local', 'merge.romacs-unsafe-floors.driver', 'python3 -B tools/lib/unsafe_census.py merge %O %A %B')
-    git(root, 'config', '--local', 'merge.romacs-host-allow.name', 'Merge the host allow-list entry by entry')
-    git(root, 'config', '--local', 'merge.romacs-host-allow.driver', 'python3 -B tools/lib/host_allow.py merge %O %A %B')
     git(root, 'config', '--local', 'alias.merge-derived', '!python3 tools/derived merge')
     hooks_path = git(root, 'config', 'core.hooksPath', check=False).stdout.strip()
     if hooks_path:
