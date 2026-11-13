@@ -12,7 +12,11 @@ motion: C-f, C-n and C-p run GNU's next-line and previous-line over a
 mixed buffer (long continued lines, short and empty lines, non-ASCII
 text).  The point after each command must equal pinned GNU's on a
 terminal frame (`emacs -Q -nw' over a pty, private HOME) whose window
-continues lines after as many columns as the native window does.
+continues lines after as many columns as the native window does.  Over a
+tall buffer the same comparison runs down past several windows and back:
+the window scrolls under Romacs's `scroll-conservatively' 101 and GNU's
+default 0, and only point is compared, which neither setting moves
+(scroll_invisible_live compares the window starts under both).
 
 keys: a timer runs `sit-for' (as simple.el's M-x suggestion does) and C-b
 typed during it, which sit-for reads and pushes back onto
@@ -76,60 +80,26 @@ TALL_KEYS = [('f', b'\x06')] * 6 + [('n', b'\x0e')] * 90 + [('p', b'\x10')] * 90
 
 @contextlib.contextmanager
 def session(binary, args, output, tools, init, files=()):
-    """A native --loadup session on ARGS in a private compositor: yields
-    (process, env, work directory, state file, report display record)."""
-    with tempfile.TemporaryDirectory(prefix='lines-live-') as temporary:
-        root = Path(temporary)
-        root.chmod(0o700)
-        home, work, config = [root / name for name in ('home', 'work', 'config')]
-        for directory in (home, work, config):
-            directory.mkdir()
-        for file in files:
-            shutil.copyfile(file, work / file.name)
-        state = work / 'lines-state.el'
-        (home / 'config/romacs').mkdir(parents=True)
-        (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
-        (config / 'rc.xml').write_text(live.RC_XML)
-        path = os.environ.get('PATH', '/usr/bin:/bin')
-        env = {'PATH': f'{tools}:{path}' if tools else path,
-               'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-               'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-               'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-               'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-               'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-               'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
-        for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GATE_FONTCONFIG'):
-            if key in os.environ:
-                env[key] = os.environ[key]
-        if 'ROMACS_GATE_FONTCONFIG' in env:
-            env['FONTCONFIG_FILE'] = env['ROMACS_GATE_FONTCONFIG']
-        compositor = keyboard = process = None
-        log_path = output / 'binary.stderr'
-        try:
-            with (output / 'compositor.log').open('w') as compositor_log, log_path.open('w') as log:
-                compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
-                                              env=env, stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                socket = root / env['WAYLAND_DISPLAY']
-                assert 'DISPLAY' not in env and socket.is_socket() and socket.parent == root
-                display = {'wayland_display': env['WAYLAND_DISPLAY'], 'wayland_socket': str(socket)}
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
-                               env=env, check=True, timeout=15)
-                # A held key gives the seat a keyboard before the client starts.
-                keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
-                time.sleep(.3)
-                process = subprocess.Popen([str(binary), '--loadup', '--trace-scene', *args], env=env, cwd=work,
-                                           stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-                child_env = Path(f'/proc/{process.pid}/environ').read_bytes().split(b'\0')
-                display['client_wayland_display'] = next((e.decode() for e in child_env if e.startswith(b'WAYLAND_DISPLAY=')), None)
-                display['client_has_display'] = any(e.startswith(b'DISPLAY=') for e in child_env)
-                yield process, env, work, state, display
-        finally:
-            live.stop(process)
-            live.stop(keyboard)
-            live.stop(compositor)
+    """A native --loadup session (live.session) on ARGS: yields (process,
+    env, work directory, state file, report display record)."""
+    state = None
 
+    def prepare(s):
+        nonlocal state
+        for file in files:
+            shutil.copyfile(file, s.work / file.name)
+        state = s.work / 'lines-state.el'
+        (s.home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
+
+    with live.session(binary, output, prefix='lines-live-', args=('--loadup', '--trace-scene', *args),
+                      tools=tools, prepare=prepare) as s:
+        socket = s.root / s.env['WAYLAND_DISPLAY']
+        assert 'DISPLAY' not in s.env and socket.is_socket()
+        child_env = Path(f'/proc/{s.process.pid}/environ').read_bytes().split(b'\0')
+        display = {'wayland_display': s.env['WAYLAND_DISPLAY'], 'wayland_socket': str(socket),
+                   'client_wayland_display': next((e.decode() for e in child_env if e.startswith(b'WAYLAND_DISPLAY=')), None),
+                   'client_has_display': any(e.startswith(b'DISPLAY=') for e in child_env)}
+        yield s.process, s.env, s.work, state, display
 
 def records(state):
     return state.read_text().splitlines() if state.exists() else []
@@ -428,7 +398,8 @@ RETURN_INIT = INIT + '''(setq initial-major-mode 'fundamental-mode)
         unread-post-input-method-events (list ?a))))
 (run-with-timer 3 nil (lambda ()
   (lines-live-record '(sit-start))
-  (lines-live-record (list 'sit-end (sit-for 6)))))
+  ;; Long enough for a loaded host's key to arrive; the key ends it.
+  (lines-live-record (list 'sit-end (sit-for 600)))))
 '''
 
 
@@ -446,7 +417,7 @@ def check_return(args, report, check):
         time.sleep(.5)
         typed = time.monotonic()
         subprocess.run(['wtype', '-M', 'ctrl', 'b', '-m', 'ctrl'], env=env, check=True, timeout=20)
-        fio.wait(lambda: len(replies()) >= 1, 5, 'the key typed during sit-for as a command', process)
+        fio.wait(lambda: len(replies()) >= 1, args.timeout, 'the key typed during sit-for as a command', process)
         unread = {'records': records(state), 'reply': replies()[0], 'seconds': round(time.monotonic() - typed, 2)}
         report['unread'] = unread
         check('a key sit-for read in a timer runs as the next command, with no other key',
@@ -455,13 +426,13 @@ def check_return(args, report, check):
         time.sleep(.5)
         for count, key in enumerate([['-k', 'Return'], ['-M', 'ctrl', 'j', '-m', 'ctrl']], 2):
             subprocess.run(['wtype', *key], env=env, check=True, timeout=20)
-            fio.wait(lambda: len(replies()) >= count, 10, f'command {count}', process)
+            fio.wait(lambda: len(replies()) >= count, args.timeout, f'command {count}', process)
         time.sleep(.5)
         shown = replies()[1:]
         start = len(records(state))
         subprocess.run(['wtype', '-k', 'F8'], env=env, check=True, timeout=20)
         try:
-            fio.wait(lambda: any(r.startswith('(post self-insert-command 99') for r in records(state)[start:]), 5, 'the queued events', process)
+            fio.wait(lambda: any(r.startswith('(post self-insert-command 99') for r in records(state)[start:]), args.timeout, 'the queued events', process)
         except AssertionError:
             pass
         later = records(state)[start:]

@@ -28,6 +28,7 @@ tracing-subscriber.workspace = true
 alacritty_terminal = { git = "https://github.com/alacritty/alacritty.git", rev = "29dc55375da817d53540f4caefbe708703c57b07", default-features = false }
 
 [dev-dependencies]
+rustix = { workspace = true, features = ["process"] }
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-test-fonts.workspace = true
 wgpu.workspace = true

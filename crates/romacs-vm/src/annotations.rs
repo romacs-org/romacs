@@ -753,6 +753,7 @@ impl Vm {
             self.fence_property(symbol, None, crate::world::Access::Write, None);
         }
         let slot = self.plist_owner_mut(symbol)?;
+        self.command_set.plist_written(slot);
         self.slots[slot].plist = plist;
         Ok(plist)
     }
@@ -806,6 +807,7 @@ impl Vm {
             self.fence_property(symbol, Some(key), crate::world::Access::Write, Some(value));
         }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
+        self.command_set.plist_written(owner);
         loop {
             let plist = self.slots[owner].plist;
             let mut walk = TailWalk::new(plist);
@@ -949,12 +951,12 @@ impl Vm {
         };
         Ok(pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
     }
-    fn annotation_base(&self, raw: &[(String, Value)], key: Value) -> Result<Option<Value>> {
+    fn annotation_base(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Option<Value>> {
         let name = self.annotation_symbol_name(key)?;
-        if let Some((_, v)) = raw.iter().find(|(k, _)| k == name) {
+        if let Some((_, v)) = raw.iter().find(|(k, _)| k.as_ref() == name) {
             return Ok(Some(*v));
         }
-        if let Some((_, category)) = raw.iter().find(|(k, _)| k == "category") {
+        if let Some((_, category)) = raw.iter().find(|(k, _)| k.as_ref() == "category") {
             let plist = self.annotation_symbol_plist(*category)?;
             // GNU category nil, unlike directly stored nil, does not mask aliases/defaults.
             return Ok(self
@@ -963,22 +965,40 @@ impl Vm {
         }
         Ok(None)
     }
-    pub(super) fn annotation_resolve(&self, raw: &[(String, Value)], key: Value) -> Result<Value> {
+    /// KEY's aliases in `char-property-alias-alist`: `assq`, stopping at
+    /// KEY's entry and copying nothing of the others.
+    fn annotation_aliases(&self, key: Value) -> Result<Vec<Value>> {
+        let mut tail = self.annotation_variable("char-property-alias-alist");
+        for _ in 0..=self.list_limit() {
+            if tail == Value::NIL {
+                return Ok(Vec::new());
+            }
+            let (entry, rest) = self.cons_pair(tail)?;
+            let (alias_key, aliases) = self.cons_pair(entry)?;
+            if alias_key == key {
+                return self.list_values(aliases);
+            }
+            tail = rest;
+        }
+        Err("circular list".into())
+    }
+    /// The names of KEY's aliases, which decide
+    /// [`Self::annotation_resolve`] of KEY where neither KEY nor `category`
+    /// gives it.
+    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
+        self.annotation_aliases(key)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect()
+    }
+    /// The name KEY's own property layer has.
+    pub(super) fn annotation_key_name(&self, key: Value) -> Result<&str> {
+        self.annotation_symbol_name(key)
+    }
+    pub(super) fn annotation_resolve(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }
-        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
-            let (alias_key, aliases) = self.cons_pair(entry)?;
-            if alias_key == key {
-                for alias in self.list_values(aliases)? {
-                    if let Some(v) = self
-                        .annotation_base(raw, alias)?
-                        .filter(|v| *v != Value::NIL)
-                    {
-                        return Ok(v);
-                    }
-                }
-                break;
+        for alias in self.annotation_aliases(key)? {
+            if let Some(v) = self.annotation_base(raw, alias)?.filter(|v| *v != Value::NIL) {
+                return Ok(v);
             }
         }
         Ok(self
@@ -1182,8 +1202,14 @@ pub(crate) struct AnnotatedBuffer {
     pub(crate) indirect: Vec<Value>,
     /// Overlays inserted into this buffer's tree so far (Overlay::inserted).
     pub overlay_insertions: u64,
+    /// What names the state of this buffer's overlays to the windows
+    /// showing it: the display's overlay count at their last change
+    /// (`Vm::overlay_changed`), 0 while none has shown anything. A value is
+    /// given once, so it is another's neither after `buffer-swap-text` nor
+    /// in the store `set-buffer-multibyte` makes.
+    pub overlay_revision: u64,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions });
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions, overlay_revision });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1200,6 +1226,7 @@ impl From<Text> for AnnotatedBuffer {
             base: Value::NIL,
             indirect: Vec::new(),
             overlay_insertions: 0,
+            overlay_revision: 0,
         }
     }
 }
@@ -1322,16 +1349,27 @@ impl AnnotatedBuffer {
         }
         true
     }
-    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
+    /// Every Value the buffer holds; of its text's properties, what READING
+    /// says (`BodyProperties`).
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
+        self.visit_values_but(reading, None, f);
+    }
+    /// A live buffer's undo list is weak, unless it is its base's and so not in
+    /// its slot; a dead buffer's is held like the rest of it (`mark_buffer`).
+    pub(crate) fn owns_undo_list(&self) -> bool {
+        self.state.live && self.base == Value::NIL
+    }
+    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
-        self.per_buffer.visit_values(f);
+        self.per_buffer.visit_values_but(skip, f);
         self.text.visit_view_values(f);
         // An indirect buffer holds its base alive; the text they share is
         // the base's to visit, once, as collection rewrites what it visits.
         f(&mut self.base);
         for buffer in &mut self.indirect { f(buffer); }
-        if self.base == Value::NIL { self.text.visit_values(f); }
+        if self.base == Value::NIL { self.text.visit_values(reading, f); }
         self.intervals.visit_values(f);
         for v in self.evaporating.values_mut() {
             f(v);

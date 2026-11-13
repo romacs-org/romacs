@@ -199,7 +199,7 @@ impl RenderApp {
                         event_loop.owned_display_handle(),
                     );
                     let proxy = event_loop.create_proxy();
-                    match super::gpu_startup::PendingGpu::start(window.clone(), descriptor, proxy) {
+                    match super::gpu_startup::PendingGpu::start(window.clone(), descriptor, proxy, &mut self.gpu_workers) {
                         Ok(pending) => {
                             self.gpu_startup = Some(pending);
                             self.observe_pending_content(phys);
@@ -230,7 +230,6 @@ impl RenderApp {
         // serviced against a clock read taken after the work it gates.
         let now = romacs_display_protocol::frame_time::observe_platform_now();
         super::frame_stats::count(&super::frame_stats::EVENT_LOOP_WAKEUPS);
-        super::frame_stats::maybe_log_snapshot(now);
         if !self.lifecycle_flags.about_to_wait_seen {
             tracing::info!(
                 "Render thread entered about_to_wait: primary_window_exists={} frame_windows={}",
@@ -254,7 +253,7 @@ impl RenderApp {
                 return;
             }
         if let Some(pending) = self.gpu_startup.take() {
-            match pending.poll(&event_loop.create_proxy()) {
+            match pending.poll(&event_loop.create_proxy(), &mut self.gpu_workers) {
                 Ok(super::gpu_startup::GpuPoll::Pending(pending)) => {
                     self.gpu_startup = Some(pending)
                 }
@@ -499,6 +498,11 @@ impl RenderApp {
         if let Some(busy) = self.busy_toast.deadline() {
             let busy = busy.into_instant();
             deadline = Some(deadline.map_or(busy, |d| d.min(busy)));
+        }
+        // Last, so the line counts this pass's requests.
+        if let Some(stats) = self.stats_lines.service(now) {
+            let stats = stats.into_instant();
+            deadline = Some(deadline.map_or(stats, |d| d.min(stats)));
         }
         match deadline {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
@@ -1002,8 +1006,9 @@ impl RenderApp {
                 *width = self.pending_content_size.width;
                 *height = self.pending_content_size.height;
             }
-            // A later successful attempt cannot prove this detached worker
-            // finished. Keep the process-finalizer bypass for the whole run.
+            // The run reports its GPU startup as cancelled.  Only the reply
+            // is dropped: the worker's thread stays in `gpu_workers`, joined
+            // when the app ends, never left inside a driver at exit.
             self.gpu_startup_cancelled
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             drop(pending);
@@ -1015,6 +1020,7 @@ impl RenderApp {
         // retain only GPU objects; wgpu-core owns the descriptor's independent
         // OwnedDisplayHandle until its backend instances have been destroyed.
         self.cancel_gpu_startup();
+        self.gpu_workers.join_all();
         self.startup_commands.clear();
         // Explicitly drop wgpu resources while the Wayland connection is still alive.
         // Without this, RenderApp's implicit drop happens AFTER the event loop's

@@ -414,8 +414,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "truncate-partial-width-windows", gnu: "xdisp.c:38768", kind: Kind::Lisp(Init::Fixnum(50)) },
     CVariable { name: "tty-erase-char", gnu: "keyboard.c:13948", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "underline-minimum-offset", gnu: "xdisp.c:39302", kind: Kind::Int(1) },
-    CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
-    CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
@@ -653,6 +651,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "signal-hook-function", gnu: "eval.c:4487", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_INT that subr.el reads.
     CVariable { name: "undo-limit", gnu: "undo.c:437", kind: Kind::Int(160_000) },
+    CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
+    CVariable { name: "undo-outer-limit-function", gnu: "undo.c:476", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
     // Variable harness (R216 task 2) and DIVERGENCES.md VM2-VARALIAS1: the
     // per-buffer kind. buffer.c:4898 default 70, predicate Qintegerp.
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
@@ -735,6 +736,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     // auto-save reads and resets it; files.el and gnosis read it.
     CVariable { name: "buffer-saved-size", gnu: "buffer.c:5465", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    // HOST(delayed-variable): declares the variable; reads no slot
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
@@ -1086,10 +1088,12 @@ impl PerBuffer {
             *value = None;
         }
     }
-    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+    /// Every Value it holds, passing over slot SKIP.
+    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
-        for v in self.0.iter_mut().flatten() {
-            visit(v);
+        let skip = skip.map(usize::from);
+        for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
+            if let Some(v) = v { visit(v); }
         }
     }
 }
@@ -1417,6 +1421,11 @@ impl Vm {
         let buffer = self.per_buffer_owner(buffer, i);
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
     }
+    /// BUFFER's own undo slot, for a collection, which neither fills a slot
+    /// nor follows an indirect buffer's to its base (`Vm::undo_round`).
+    pub(crate) fn own_undo_list(&self, buffer: usize) -> Value {
+        self.per_buffer(buffer).and_then(|locals| locals.get(self.undo_list_slot)).unwrap_or(Value::NIL)
+    }
     /// The buffer whose slot I buffer BUFFER reads and writes: its own,
     /// but an indirect buffer's undo list is its base's, as GNU's
     /// set_buffer_internal_2 hands the one list between them (Bug#18180).
@@ -1429,7 +1438,7 @@ impl Vm {
             _ => buffer,
         }
     }
-    fn undo_list_index(&mut self) -> u16 {
+    pub(crate) fn undo_list_index(&mut self) -> u16 {
         if self.undo_list_slot == u16::MAX {
             let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
             self.undo_list_slot = i;
@@ -1610,6 +1619,7 @@ impl Vm {
     /// GNU `let_shadows_buffer_binding_p`: a `let` of SLOT's default made
     /// while BUFFER was current is in effect.
     fn let_shadows_buffer_binding(&self, slot: usize, buffer: Value) -> bool {
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         self.dynamic.iter().any(|&(bound, _, owner, let_default)| bound == slot && let_default && owner == buffer)
     }
     /// GNU `set_internal` (data.c:1806): setting per-buffer variable I with
@@ -1806,6 +1816,7 @@ const FILEIO_SPECIALS: [(&str, &str); 17] = [
     ("write-region-annotate-functions", "fileio.c:6899"),
     ("write-region-post-annotation-function", "fileio.c:6925"),
     // Initially nil; cus-start.el's delayed initializer chooses the default.
+    // HOST(delayed-variable): declares the variable; reads no slot
     ("temporary-file-directory", "filelock.c:814"),
 ];
 

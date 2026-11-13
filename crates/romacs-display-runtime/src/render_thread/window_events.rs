@@ -252,6 +252,7 @@ impl RenderApp {
             // work class renders fully.
             let result = self.render_frame_window_hinted(emacs_fid, &plan);
             let finished = romacs_display_protocol::frame_time::observe_platform_now();
+            super::frame_stats::count_drawn(&plan, result);
             if emacs_fid == self.frame_windows.primary_event_frame_id()
                 && self.scene != super::state::SceneDraw::Drawn
             {

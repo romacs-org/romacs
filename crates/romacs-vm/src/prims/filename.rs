@@ -1,6 +1,7 @@
 //! GNU dired.c:379 and fileio.c:2046, C-owned filename operations.
 //! Lisp file-name handlers and substitute-env-in-file-name stay Lisp-owned.
 use super::*;
+use crate::prim::leaf::Span;
 
 fn refusal(message: &str) -> Fault {
     Fault::Error(format!("VM2 {message} is unsupported"))
@@ -323,20 +324,18 @@ fn excludable(cx: &mut Leaf<'_>, candidate: &Candidate, file_bytes: usize, ignor
     -> std::result::Result<bool, Fault> {
     if candidate.directoryp && matches!(candidate.name.as_slice(), b"." | b"..") { return Ok(true); }
     if candidate.name.len() <= file_bytes { return Ok(false); }
-    let name: Vec<u32> = super::string_compare::codes(&cx.string_view(candidate.value)?);
+    let name = super::string_compare::chars(cx, candidate.value)?;
     for &extension in ignored {
         let bytes = cx.string_bytes(extension)?;
-        let mut codes = super::string_compare::codes(&cx.string_view(extension)?);
-        if candidate.directoryp {
-            // Only an extension ending in a slash names directories.
-            if bytes.len() < 2 || bytes[bytes.len() - 1] != b'/' { continue; }
-            codes.pop();
-        }
+        // Only an extension ending in a slash names directories.
+        if candidate.directoryp && (bytes.len() < 2 || bytes[bytes.len() - 1] != b'/') { continue; }
+        let chars = super::string_compare::chars(cx, extension)? - usize::from(candidate.directoryp);
         let length = bytes.len() - usize::from(candidate.directoryp);
         if candidate.name.len() < length { continue; }
         let tail = if fold {
-            let Some(skip) = name.len().checked_sub(codes.len()) else { continue };
-            super::string_compare::compare(cx, &name[skip..], &codes, true)?.0 == std::cmp::Ordering::Equal
+            let Some(skip) = name.checked_sub(chars) else { continue };
+            let (tail, extension) = (Span { text: candidate.value, start: skip, end: name }, Span { text: extension, start: 0, end: chars });
+            cx.compare_text(tail, extension, true)?.0 == std::cmp::Ordering::Equal
         } else {
             candidate.name[candidate.name.len() - length..] == bytes[..length]
         };

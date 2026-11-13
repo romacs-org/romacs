@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,12 @@ class BatchAdapter(unittest.TestCase):
                                         or os.environ.get('ROMACS_FORCE_ORACLE_PATH'))['path']
         self.ert = run.ROOT / 'lisp/gnu/emacs-lisp/ert.el'
         self.adapter = run.ROOT / 'lisp/romacs/romacs-ert-batch.el'
+
+    def fill(self, source):
+        """SOURCE with GNU-ERT and ADAPTER replaced by the files' names in
+        one pass: a checkout path holding either word is not rewritten."""
+        values = {'GNU-ERT': json.dumps(str(self.ert)), 'ADAPTER': json.dumps(str(self.adapter))}
+        return re.sub('GNU-ERT|ADAPTER', lambda m: values[m.group(0)], source)
 
     def evaluate(self, source):
         result = subprocess.run([self.binary, '-Q', '--batch', '--eval', source],
@@ -50,7 +57,8 @@ class BatchAdapter(unittest.TestCase):
       (let ((expected (adapt (adapter-read-definition GNU-ERT))))
         (prin1 (list (= replacements 1)
                      (equal expected (adapter-read-definition ADAPTER))))))))
-'''.replace('GNU-ERT', json.dumps(str(self.ert))).replace('ADAPTER', json.dumps(str(self.adapter)))
+'''
+        source = self.fill(source)
         self.assertEqual(self.evaluate(source), '(t t)')
 
     def test_adapter_rejects_interactive_use_and_keeps_batch_runner_identity(self):
@@ -74,7 +82,8 @@ class BatchAdapter(unittest.TestCase):
                              (error 'rejected)))))
       (prin1 (list (eq batch (symbol-function 'ert-run-tests-batch))
                    (eq runtime-guard 'rejected) (not adapter-body-ran))))))
-'''.replace('GNU-ERT', json.dumps(str(self.ert))).replace('ADAPTER', json.dumps(str(self.adapter)))
+'''
+        source = self.fill(source)
         self.assertEqual(self.evaluate(source), '(t t t)')
 
     def test_actual_gnu_assertions_errors_and_temp_buffer_cleanup(self):

@@ -50,10 +50,16 @@ const FIELDS: &[(&str, Class)] = &[
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
     ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    // The current buffer as last resolved: a collection and a kill clear it,
+    // and a slot holding another value resolves afresh (buffer.rs).
+    ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
+    // Copies of char tables' entries, dropped at every collection
+    // (`clear_collection_caches`) and every char-table write.
+    ("flat_tables", Cache),
     // An entry goes when the value it was converted from dies (gc.rs), and
     // a moving collection rewrites that value.
     ("mode_line_forms", Cache),
@@ -123,13 +129,13 @@ const FIELDS: &[(&str, Class)] = &[
     ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
-    ("completion_walks", Free), ("completion_case_memo", Free),
+    ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     ("stack", Root), ("external_roots", Root),
     // Not roots: the collector dooms those it does not reach.
     ("finalizers", Cache),
     ("doomed_finalizers", Root),
-    ("post_gc_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
+    ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
@@ -419,6 +425,10 @@ const CELLS: &[(&str, Behind)] = &[
     // `CharTableNode` is private to that file.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
     ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
+    // A char table's view, filled under a shared borrow with copies of the
+    // table's entries; the VM drops its views as every collection starts
+    // (`clear_collection_caches`), so no mark ever finds one.
+    ("char_table/flat.rs:FlatTable.planes", Passing), ("char_table/flat.rs:Plane", Passing),
     ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
     ("data.rs:LispString.cursors", Plain), ("data.rs:LispString.scanned", Plain), ("data.rs:LispString.flag_scanned", Plain),
     ("display.rs:FaceTable.faces", Plain), ("display.rs:FaceTable.index", Plain), ("display.rs:FaceTable.over", Plain),
@@ -451,14 +461,14 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
     ("compiled_lisp/mod.rs:Configured.identity", Plain),
-    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
+    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
     // The scanner's test text: syntax codes and positions, no Value.
     ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
     ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
-    ("treesit/native.rs:Tree.1", Plain),
+    ("treesit/native.rs:Tree.0", Plain), ("treesit/native.rs:Tree.1", Plain),
 ];
 
 /// How many rows are `Held`. It only falls: a new one fails, and a gone one

@@ -188,8 +188,6 @@ pub(crate) struct PatternCache {
     /// first search and kept: a search reads the variable itself, as
     /// GNU's reads its C variable, whatever its name is interned as later.
     slots: Option<SearchSlots>,
-    /// What the last search learned of its syntax table.
-    syntax: syntax::SyntaxMemo,
 }
 #[derive(Clone, Copy)]
 struct SearchSlots {
@@ -271,7 +269,8 @@ impl Vm {
     /// syntax table, as `\<' and `\b' read a string.
     pub(crate) fn ascii_word_syntax(&mut self) -> std::result::Result<[bool; 128], prim::Fault> {
         let source = self.regexp_syntax(None).map_err(|fault| self.regexp_fault(fault))?;
-        Ok(std::array::from_fn(|c| self.regexp_table_class(source.table(), c as u32) == Some(regex::SyntaxClass::Word)))
+        let table = self.char_table_reader(source.table());
+        Ok(std::array::from_fn(|c| table.get(u32::try_from(c).expect("an ASCII code")).is_ok_and(|entry| self.syntax_entry_class(entry) == regex::SyntaxClass::Word)))
     }
 
     /// Whether STRING matches every pattern of MATCHER, in order.
@@ -350,7 +349,6 @@ impl Vm {
     /// syntax.c's clear_regexp_cache after `modify-syntax-entry'. A
     /// collection, which moves the tables, drops the patterns kept for one.
     pub(crate) fn clear_regexp_cache(&mut self, only_tables: bool) {
-        self.regexp_cache.syntax.forget();
         self.regexp_cache.retain(|e| only_tables && e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
     }
 
@@ -636,6 +634,34 @@ impl Vm {
             },
             _ => unreachable!("buffer_index validates"),
         }
+    }
+    /// The current buffer's text from character position START to END as
+    /// one run of bytes in GNU's internal form, as a search reads it, and
+    /// whether the buffer is multibyte. None when the positions are not in
+    /// order within the accessible text.
+    pub(crate) fn with_region_bytes<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> Result<Option<R>> {
+        let index = self.buffer_index()?;
+        let (_, base_char, chars, _) = self.regexp_buffer_frame(index).map_err(|_| String::from("buffer text unavailable"))?;
+        let (Ok(first), Ok(last)) = (usize::try_from(start), usize::try_from(end)) else { return Ok(None) };
+        if first < base_char || last > base_char + chars || first > last { return Ok(None); }
+        let multibyte = matches!(self.objects[index], Object::Buffer(_));
+        // Positions count from one, and BASE_CHAR is at least one.
+        let byte = |vm: &Self, position: usize| -> Result<usize> {
+            Ok(match &vm.objects[index] {
+                Object::Buffer(t) => t.byte_of_char(CharOffset(position - 1))?.0,
+                _ => position - 1,
+            })
+        };
+        let (from, to) = (byte(self, first)?, byte(self, last)?);
+        let window = self.regexp_buffer_window(index, from..to);
+        // The window's bytes themselves: a search's input also places point
+        // in its window, and a scan's window need not hold point.
+        let bytes = match &self.objects[index] {
+            Object::Buffer(t) => t.search_bytes(window.clone()),
+            Object::ByteBuffer(t) => &t.bytes[window.clone()],
+            _ => unreachable!("buffer_index validates"),
+        };
+        Ok(Some(scan(&bytes[from - window.start..to - window.start], multibyte)))
     }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))

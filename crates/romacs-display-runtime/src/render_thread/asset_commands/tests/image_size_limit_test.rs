@@ -7,7 +7,7 @@ use romacs_display_protocol::{ImageNativeExtent, ImageSizeLimit, OversizedImage}
 
 fn fixture(name: &str) -> String {
     romacs_infra::workspace_root()
-        .join("test/data/image")
+        .join("test/gnu/test/data/image")
         .join(name)
         .to_str()
         .expect("utf8 fixture path")

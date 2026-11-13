@@ -177,6 +177,9 @@ impl Vm {
         }).collect();
         overlays.sort_by_key(|&(_, start, _, inserted)| (start, std::cmp::Reverse(inserted)));
         per_buffer.reset_visit();
+        // Its list is its base's (`per_buffer_owner'): a copy of the head
+        // would hold the history as it stands now, past any cut.
+        per_buffer.clear_local(self.undo_list_index());
         let mark = per_buffer.editor_mark();
         let Object::Buffer(to) = self.objects.entry_mut(arena(buffer)?) else { return Err("buffer required".into()) };
         to.per_buffer = per_buffer;
@@ -253,7 +256,8 @@ impl Vm {
             b.evaporating.insert(start, copy);
         }
         b.intervals.insert(copy, start, end, &b.anchors);
-        self.note_overlay_insertion(buffer, copy)
+        self.note_overlay_insertion(buffer, copy)?;
+        self.overlay_changed(copy)
     }
 
     /// Fkill_buffer (buffer.c:2019): killing a base buffer kills its
