@@ -1,9 +1,11 @@
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 #[test]
 fn quote_nesting_is_bounded_in_child_process() {
  for shape in ["cycle", "deep"] {
   let status=std::process::Command::new(std::env::current_exe().unwrap())
-   .args(["--exact", "quote_nesting_child", "--nocapture"])
+   .args(["--exact", &own_test::name(module_path!(), "quote_nesting_child"), "--nocapture"])
    .env("ROMACS_PRINT_DEPTH_CHILD",shape).status().unwrap();
   assert!(status.success(), "quote nesting must signal instead of aborting: {shape}: {status}");
  }

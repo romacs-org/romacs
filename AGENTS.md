@@ -30,6 +30,10 @@ possible; say so where you do.
   `substitute-command-keys` or `help-key-binding`, mode-line and status text in
   named faces that inherit theme faces. A command that only makes sense in a mode
   declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
+- Romacs's own Lisp byte-compiles on the pinned GNU Emacs with no new warning: the
+  check's Lisp tier holds each touched file of `lisp/romacs/` to its base. GNU does
+  not know what only Romacs has, so declare it where it is used: `declare-function`
+  for a primitive, naming its Rust file, and `defvar` for a variable.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
@@ -158,6 +162,10 @@ The gates, small and whole for each side:
 The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
+- romacs-vm's whole suite: each `tests/FILE.rs` is also the module `FILE` of one test target, `all`
+  (`crates/romacs-vm/tests/all/`), so a check builds one executable, not one a file. The gates build and
+  run what `python3 tools/lib/test_modules.py targets romacs-vm` prints, and a test is `FILE::TEST_NAME`
+  there. After adding, renaming or deleting a test file, run `python3 tools/lib/test_modules.py write`.
 - Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
@@ -237,3 +245,18 @@ standalone Cargo execution without it.
   owned paths. Push, publication, activation, service restarts, and real mail
   require explicit authorization.
 - Report what changed, what actually ran, its result, and any remaining limit.
+
+## Landing work
+
+- `beta` is the development branch. `master` holds releases only: a release
+  fast-forwards it to a fully checked `beta` commit and tags it.
+- Never commit to, merge into or reset `beta` or `master`. A local
+  reference-transaction hook refuses it (`tools/hooks/`, installed by
+  `tools/derived setup`).
+- Work on your own branch in its own worktree, started from `beta`, and merge
+  `beta` in as it moves.
+- A branch lands through the merge queue: signed commits, the full check, then
+  a submitted request. The queue merges requests onto `beta` in order and
+  reruns what each merge changes.
+- A session without the queue's tools leaves its branch committed and checked,
+  and reports the branch name.

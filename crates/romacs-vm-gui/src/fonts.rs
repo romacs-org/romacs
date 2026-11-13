@@ -235,8 +235,8 @@ impl Display {
             max_width: i64::from(metrics.max_width),
             space_width: i64::from(metrics.space_width),
             average_width: i64::from(metrics.average_width),
-            otf: romacs_font::probe::otf_capability(&entity.file, entity.index & 0xffff)
-                .map_or_else(Default::default, |otf| (otf_table(otf.gsub), otf_table(otf.gpos))),
+            otf: std::sync::Arc::new(romacs_font::probe::otf_capability(&entity.file, entity.index & 0xffff)
+                .map_or_else(Default::default, |otf| (otf_table(otf.gsub), otf_table(otf.gpos)))),
         })
     }
     fn char_font_uncached(&mut self, face: &romacs_vm::FaceFont, ch: char) -> Option<(OpenedFont, u32)> {
@@ -592,6 +592,26 @@ mod tests {
         assert_eq!(printed(&mut vm, "(list (find-font (font-spec :family \"NoSuchFontXYZ\")) (font-info \"NoSuchFontXYZ-12\")
             (and (member \"PlemolJP Console NF\" (font-family-list)) t))"), "(nil nil t)");
         assert_eq!(printed(&mut vm, "(equal (font-xlfd-name (font-at 1 nil \"a\\u03bb\")) (frame-parameter nil 'font))"), "t");
+    }
+
+    /// font.c `font_open_entity`: a font opened again at its size is the
+    /// object opened first, until `clear-font-cache`. So asking for one
+    /// is a lookup: `char-displayable-p` (`internal-char-font`) in a header
+    /// line, evaluated at every redisplay, made a whole font-object each
+    /// time (its names and OpenType tables), the most garbage an idle
+    /// session made.
+    #[test]
+    fn a_font_opened_again_is_the_same_object() {
+        let mut vm = displayed();
+        vm.open_display();
+        assert_eq!(printed(&mut vm, "(let* ((first (car (internal-char-font nil ?a))) (before (memory-use-counts)))
+            (dotimes (_ 50) (internal-char-font nil 955))
+            (list (eq first (car (internal-char-font nil 955)))
+                  (< (- (car (memory-use-counts)) (car before)) 200)
+                  (= (nth 4 (memory-use-counts)) (nth 4 before))
+                  (progn (clear-font-cache) (eq first (car (internal-char-font nil ?a))))
+                  (equal (font-xlfd-name first) (font-xlfd-name (car (internal-char-font nil ?a))))))"),
+                   "(t t t nil t)");
     }
 
     /// xfaces.c Fface_font: on the display every face names the font

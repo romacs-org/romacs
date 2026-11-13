@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-mcp-companion)
+(require 'romacs-test-socket)
 
 (defvar romacs-mcp-test-reply-effect nil)
 
@@ -36,7 +37,7 @@ Return nil if the server closes the connection without replying."
   ;; error reply for the request, not a silent disconnect, and the
   ;; connection stays usable.  A raw byte, as in undecodable process
   ;; output, is sent as U+FFFD.
-  (let* ((root (make-temp-file "romacs-mcp-reply-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-reply-"))
          (socket (expand-file-name "mcp" root))
          (instance (gethash "instance" (romacs-mcp-identity)))
          (romacs-mcp-tools (copy-sequence romacs-mcp-tools))
@@ -99,7 +100,7 @@ Return nil if the server closes the connection without replying."
   ;; A request just under the input limit whose ID alone is near that
   ;; limit must not produce an error reply over the output limit.  The ID
   ;; is not echoed; the connection stays usable.
-  (let* ((root (make-temp-file "romacs-mcp-id-" t))
+  (let* ((root (romacs-test-socket-directory "romacs-mcp-id-"))
          (socket (expand-file-name "mcp" root))
          (output (list ""))
          client)

@@ -276,6 +276,7 @@ impl Vm {
             let Object::Overlay(o) = self.object_mut(v)? else { unreachable!() };
             o.start = Some(a);
             o.end = Some(b);
+            self.overlay_changed(v)?;
         }
         Ok(())
     }
@@ -426,20 +427,22 @@ impl Vm {
         if anchor.is_some() { self.note_referrer(buffer, v.index(0)? - 1); }
         Ok(v)
     }
-    /// Whether overlay primitive P with ARGS changes what a window may show,
-    /// as GNU's modify_overlay calls tell redisplay (buffer.c): a new
-    /// overlay has no properties yet, deleting a detached one changes
-    /// nothing, and `overlay-put' changes something only with a value not
-    /// `eq' to the one there. Moving or removing overlays always counts.
-    fn changes_overlays(&self, p: Primitive, args: &[Value]) -> bool {
-        use Primitive::*;
-        match (p, args) {
-            (MakeOverlay, _) => false,
-            (DeleteOverlay, [overlay, ..]) => !matches!(self.overlay_range(*overlay), Ok(None)),
-            (OverlayPut, [overlay, prop, value, ..]) => self.overlay_get(*overlay, *prop).map_or(true, |old| old != *value),
-            (MoveOverlay | RemoveOverlays | DeleteOverlay | OverlayPut, _) => true,
-            _ => false,
-        }
+    /// OVERLAY changed what the windows on its buffer may show (GNU's
+    /// `modify_overlay`, buffer.c): that buffer's overlay revision takes a
+    /// value no buffer's has had. An overlay in no buffer shows nothing.
+    /// One with no property counts as GNU's does not: it still ranks the
+    /// others where it overlaps them, and the ranking is not transitive
+    /// (`overlay_order::compare_overlays`), so making, moving or deleting
+    /// it can change which face shows.
+    pub(crate) fn overlay_changed(&mut self, overlay: Value) -> Result<()> {
+        let o = self.overlay(overlay)?;
+        if o.buffer == Value::NIL { return Ok(()); }
+        let buffer = o.buffer;
+        self.display_state.overlays += 1;
+        let revision = self.display_state.overlays;
+        // A buffer with no store yet (unibyte, never shown) shows nothing.
+        if let Ok(store) = self.overlay_store_mut(buffer) { store.overlay_revision = revision; }
+        Ok(())
     }
     pub(crate) fn overlay_range(&self, v: Value) -> Result<Option<(u32, u32)>> {
         let o = self.overlay(v)?;
@@ -453,6 +456,7 @@ impl Vm {
         )))
     }
     pub(crate) fn delete_overlay_object(&mut self, v: Value) -> Result<()> {
+        self.overlay_changed(v)?;
         let source = self.overlay(v)?;
         let o = Overlay {
             buffer: source.buffer,
@@ -516,7 +520,8 @@ impl Vm {
                 .any(|&(k, v)| k == Value::reference(slot + 1, 7) && v != Value::NIL)
         });
         // itree_node_set_region reinserts a node whose start moves.
-        let reinserted = o.buffer != buffer || self.overlay_range(v)?.is_none_or(|(old, _)| old != start);
+        let old = if o.buffer == buffer { self.overlay_range(v)? } else { None };
+        let reinserted = old.is_none_or(|(old, _)| old != start);
         if o.buffer == buffer {
             let target = self.overlay_store_mut(buffer)?;
             target.intervals.remove(o.start.unwrap(), &target.anchors);
@@ -549,6 +554,9 @@ impl Vm {
             self.note_referrer(buffer, v.index(0)? - 1);
         }
         if reinserted { self.note_overlay_insertion(buffer, v)?; }
+        // A move to the buffer and the range it has shows nothing new: its
+        // order among the others stays too.
+        if old != Some((start, end)) { self.overlay_changed(v)?; }
         if evaporates {
             self.evaporate_overlay(v)?;
         }
@@ -876,9 +884,6 @@ impl Vm {
         if (p as usize) < MakeMarker as usize {
             return self.text_annotation_primitive(p, start, n);
         }
-        if self.changes_overlays(p, &self.stack[start..start + n]) {
-            self.display_state.overlays += 1;
-        }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {
             Some(self.stack[start..start + n].to_vec())
@@ -1051,7 +1056,12 @@ impl Vm {
             }
             OverlayGet => self.overlay_get(x, args[1]),
             OverlayPut => {
-                self.overlay(x)?;
+                // Foverlay_put: nothing a window shows changes while the
+                // value is `eq' both to the overlay's own, which display
+                // reads for some properties, and to the one the overlay
+                // gave, through its category when it had none of its own.
+                let own = self.overlay(x)?.properties.iter().find(|(k, _)| *k == args[1]).map_or(Value::NIL, |&(_, v)| v);
+                let changed = own != args[2] || self.overlay_get(x, args[1]).map_or(true, |old| old != args[2]);
                 let Object::Overlay(o) = self.object_mut(x)? else {
                     unreachable!()
                 };
@@ -1060,6 +1070,7 @@ impl Vm {
                 } else {
                     o.properties.push((args[1], args[2]));
                 }
+                if changed { self.overlay_changed(x)?; }
                 let buffer = self.overlay(x)?.buffer;
                 let slot = args[1].index(7).ok().and_then(|i| i.checked_sub(1));
                 if slot.is_some_and(|i| self.names.get("evaporate") == Some(&i))
