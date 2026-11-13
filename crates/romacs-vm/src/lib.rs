@@ -109,6 +109,9 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod functions;
+mod epoch;
+mod slots;
 mod gc_mark;
 mod table;
 mod handle;
@@ -1582,7 +1585,7 @@ pub struct Vm {
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
-    slots: Vec<Slot>,
+    slots: slots::Slots,
     specials: NameSet<String>,
     /// Bumped whenever a symbol stops being special or an uninterned one's
     /// declaration changes: with the size of `specials', which an insertion
@@ -1591,7 +1594,7 @@ pub struct Vm {
     /// Per slot, `slot_is_special''s last answer and the key it held under
     /// (`Vm::special_key'), for the late bindings' check at each `let'.
     special_cache: Vec<u64>,
-    functions: Vec<Arc<Function>>,
+    functions: functions::Functions,
     request_code: request_code::RequestCode,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
@@ -2021,11 +2024,11 @@ impl Vm {
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::default(),
             generated_slots: HashMap::default(),
-            slots: vec![],
+            slots: slots::Slots::default(),
             specials: NameSet::default(),
             special_changes: 0,
             special_cache: Vec::new(),
-            functions: vec![],
+            functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
@@ -2669,7 +2672,7 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
-        self.functions[id] = Arc::new(function);
+        self.functions.set(id, Arc::new(function));
         Ok(())
     }
     fn expr(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {

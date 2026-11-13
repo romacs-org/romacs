@@ -1866,12 +1866,14 @@ enum PlanOp {
     Clear(std::ops::Range<ByteOffset>),
 }
 
-fn apply_plan_ops(properties: &mut properties::Properties, ops: Vec<PlanOp>) {
+/// Change PROPERTIES as a plan's APPLY says.
+fn install_plan(properties: &mut impl properties::Store, apply: PlanApply) {
+    let PlanApply::Ops(ops) = apply else { return properties.reset() };
     for op in ops {
         match op {
             PlanOp::Put(range, key, value) => properties.put(range, &key, value),
             PlanOp::Remove(range, key) => properties.remove(range, &key),
-            PlanOp::Clear(range) => for key in properties.properties_keys() { properties.remove(range.clone(), &key) },
+            PlanOp::Clear(range) => for key in properties.keys() { properties.remove(range.clone(), &key) },
         }
     }
 }
@@ -2053,25 +2055,22 @@ impl Vm {
             self.slots[self.buffer_slot].value = current;
             result?;
         }
-        let install = |properties: &mut properties::Properties| match plan.apply {
-            PlanApply::Reset => properties.reset(),
-            PlanApply::Ops(ops) => apply_plan_ops(properties, ops),
-        };
+        let apply = plan.apply;
         match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => {
-                install(&mut buffer.properties);
+                install_plan(&mut buffer.properties, apply);
                 self.display_state.version += 1;
             }
-            Object::String(string) | Object::RawString(string) => install(&mut string.properties),
+            Object::String(string) | Object::RawString(string) => install_plan(&mut string.properties, apply),
             Object::Bytes(bytes) => {
                 let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
-                install(&mut string.properties);
+                install_plan(&mut string.properties, apply);
                 *self.objects.entry_mut(index) = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
             }
             Object::ByteBuffer(buffer) => {
                 let mut properties = properties::Properties::from_map(&buffer.properties);
                 if buffer.had_intervals { properties.mark_intervals(); }
-                install(&mut properties);
+                install_plan(&mut properties, apply);
                 buffer.had_intervals |= properties.has_intervals();
                 buffer.properties = properties.to_map();
                 self.display_state.version += 1;
