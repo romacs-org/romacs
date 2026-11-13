@@ -107,10 +107,14 @@ fn an_installed_batch_world_serves_any_home() {
     let _ = std::fs::remove_dir_all(&root);
     let (bin, a, b) = (root.join("bin"), root.join("home-a"), root.join("home-b"));
     for dir in [&bin, &a, &b] { std::fs::create_dir_all(dir).unwrap(); }
-    // An installation: the executable in a directory of its own.
+    // An installation as tools/package-release lays one out: PREFIX/bin/
+    // holds the executable, and PREFIX/share/romacs the runtime tree it
+    // finds there (host::runtime_root), here this checkout's.
     let exe = bin.join("romacs-vm-gui");
     std::fs::hard_link(env!("CARGO_BIN_EXE_romacs-vm-gui"), &exe)
         .or_else(|_| std::fs::copy(env!("CARGO_BIN_EXE_romacs-vm-gui"), &exe).map(drop)).unwrap();
+    std::fs::create_dir_all(root.join("share")).unwrap();
+    std::os::unix::fs::symlink(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."), root.join("share/romacs")).unwrap();
     let installed = bin.join("romacs-vm-gui.worlds");
     let command = |home: &std::path::Path, lang: &str| {
         let mut command = std::process::Command::new(&exe);
@@ -120,6 +124,8 @@ fn an_installed_batch_world_serves_any_home() {
             .env("USER", "builder").env("LOGNAME", "builder").env("NAME", "A Builder").env("SHELL", "/bin/sh")
             .env_remove("XDG_CONFIG_HOME").env_remove("LC_ALL").env_remove("LC_CTYPE")
             .env_remove("LC_MESSAGES").env_remove("LANGUAGE").env_remove("ROMACS_WORLD")
+            // The tree the installation finds, not one the environment names.
+            .env_remove("ROMACS_RUNTIME_ROOT").env_remove("ROMACS_LISP_DIR")
             .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY");
         command
     };
