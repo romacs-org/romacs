@@ -99,7 +99,7 @@ const FIELDS: &[(&str, Class)] = &[
     // and before any heap Value names it, with no collection between
     // (frozen.rs), so no store.
     ("regions", Rescanned),
-    ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("inotify", Free),
+    ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("keeper", Free), ("inotify", Free),
     ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
