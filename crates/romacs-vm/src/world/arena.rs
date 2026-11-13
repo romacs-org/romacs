@@ -685,10 +685,11 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
 
 /// With `ROMACS_HEAP_FILE=1`, start the file heap, LEN bytes as an arena
 /// has, for the calling thread: the one that adopted the image, which runs
-/// the VM. The switch is read from the environment itself, not through the
-/// host, so that a process that asks for none reads nothing the host
-/// records.
+/// the VM.
 fn start_heap_file(len: usize) {
+    // HOST(std::env::var_os): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
+    // the image is adopted; not through host.rs, so that a process that asks for none records no
+    // host read; invisible to Lisp
     if std::env::var_os("ROMACS_HEAP_FILE").is_some_and(|asked| asked == "1") {
         let _ = HEAP_FILE.set(file_heap::start(len));
     }
