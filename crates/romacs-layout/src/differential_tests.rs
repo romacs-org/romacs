@@ -368,9 +368,9 @@ fn edits_under_a_label_inside_a_line_lay_out_as_whole() {
     for step in 0..30usize {
         let text = &mut window.text.utf8;
         let at = 5 + (step * 37) % 400;
-        let at = (at..).find(|&at| text.is_char_boundary(at)).unwrap();
-        if step % 2 == 0 { text.insert_str(at, "more "); } else { text.replace_range(at..at + 1, ""); }
-        let inside = (900..).find(|&at| window.text.utf8.is_char_boundary(at)).unwrap();
+        let at = (at..=text.len()).find(|&at| text.is_char_boundary(at)).unwrap_or(text.len());
+        if step % 2 == 0 { text.insert_str(at, "more "); } else { text.replace_range(at..=at, ""); }
+        let inside = (900..=window.text.utf8.len()).find(|&at| window.text.utf8.is_char_boundary(at)).unwrap();
         let tail = window.text.utf8.rfind('\n').unwrap() + 1;
         let width = 3 + step % 3;
         window.line_numbers = Some(LineNumbers { columns: 4, face: FaceHandle(0), current: FaceHandle(0),
