@@ -3561,3 +3561,14 @@ pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String
     effect(|| format!("keeper {}", bytes(client.path()))).map_err(|e| e.to_string())?;
     client.reconnect()
 }
+
+/// Have CLIENT's keeper exec the binary at PROGRAM in place, and find it
+/// again where it listens.
+///
+/// # Errors
+/// A refused effect, the keeper's refusal of PROGRAM, or no keeper of the
+/// same epoch after it, in words.
+pub fn keeper_exec(client: &mut romacs_keeper::Client, program: &Path) -> Result<(), String> {
+    effect(|| format!("keeper {} exec {}", bytes(client.path()), bytes(program))).map_err(|e| e.to_string())?;
+    client.exec(program)
+}
