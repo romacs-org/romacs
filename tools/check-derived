@@ -22,16 +22,15 @@ def main():
     ratchet = subprocess.run([sys.executable, 'tools/lib/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     arity = subprocess.run([sys.executable, 'tools/lib/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
     defvars = subprocess.run([sys.executable, '-B', 'tools/lib/gnu_defvars.py', 'check', '--root', str(root)], cwd=root)
-    icons = subprocess.run([sys.executable, '-B', 'tools/lib/icon_font.py', 'check', '--root', str(root)], cwd=root)
     fonts = subprocess.run([sys.executable, '-B', 'tools/lib/bundled_fonts.py', 'check', '--root', str(root)], cwd=root)
     grammars = subprocess.run([sys.executable, '-B', 'tools/lib/treesit_grammars.py', 'check', '--root', str(root)], cwd=root)
     unsafe = subprocess.run([sys.executable, '-B', 'tools/lib/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
     smells = subprocess.run([sys.executable, '-B', 'tools/lib/smells.py', 'check', '--root', str(root)], cwd=root)
     names = subprocess.run([sys.executable, '-B', 'tools/lib/divergence_index.py', '--names'], cwd=root)
     tree = subprocess.run([sys.executable, '-B', 'tools/lib/lisp_tree.py', 'check', str(root)], cwd=root)
-    if generated.returncode or tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode or names.returncode or tree.returncode:
+    if generated.returncode or tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode or names.returncode or tree.returncode:
         return 1
-    print('check-derived: ok, no generated file is tracked; the Python unit tests pass; lisp/gnu and test/gnu/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors, the smell floors, the divergence file names and the Lisp trees\' names verified')
+    print('check-derived: ok, no generated file is tracked; the Python unit tests pass; lisp/gnu and test/gnu/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the bundled fonts, the bundled grammars\' sources, the unsafe floors, the smell floors, the divergence file names and the Lisp trees\' names verified')
     return 0
 
 

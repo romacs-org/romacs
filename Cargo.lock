@@ -3662,6 +3662,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-icon-font"
+version = "0.0.20"
+dependencies = [
+ "allsorts",
+ "kurbo",
+ "svgtypes",
+]
+
+[[package]]
 name = "romacs-imaging"
 version = "0.0.20"
 dependencies = [
@@ -3704,6 +3713,7 @@ version = "0.0.20"
 dependencies = [
  "romacs-display-protocol",
  "romacs-font",
+ "romacs-icon-font",
  "romacs-layout-input",
  "romacs-vm",
 ]
@@ -3921,6 +3931,7 @@ dependencies = [
  "romacs-face",
  "romacs-font",
  "romacs-grammars",
+ "romacs-icon-font",
  "romacs-imaging",
  "romacs-keeper",
  "romacs-layout",
