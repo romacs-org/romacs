@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -86,22 +87,38 @@ class DerivedTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def plain_session(self, *args, land=None):
+        """git ARGS as a session outside the merge queue: the checks run under the
+        queue's own process tree, which the hook lets through, so the command is
+        started orphaned (setsid -f), with ROMACS_LAND only as LAND says."""
+        env = {k: v for k, v in os.environ.items() if k != 'ROMACS_LAND'}
+        if land is not None:
+            env['ROMACS_LAND'] = land
+        out = Path(self.tmp.name) / 'plain'
+        status = out.with_suffix('.status')
+        status.unlink(missing_ok=True)
+        subprocess.run(['setsid', '-f', 'sh', '-c', 'git "$@" > "$OUT" 2>&1; echo $? > "$OUT.status"', 'sh', *args],
+                       cwd=self.root, env={**env, 'OUT': str(out)}, check=True)
+        for _ in range(300):
+            if status.exists() and status.read_text().endswith('\n'):
+                return int(status.read_text()), out.read_text()
+            time.sleep(0.05)
+        self.fail(f'git {args} never finished')
+
     def test_setup_installs_the_hook_that_keeps_the_trunk_to_the_queue(self):
         shutil.copytree(ROOT / 'tools/hooks', self.root / 'tools/hooks')
         git(self.root, 'config', '--local', '--unset', 'core.hooksPath')
         run(self.root, sys.executable, 'tools/derived', 'setup')
-        moved = git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', check=False)
-        self.assertNotEqual(moved.returncode, 0)
-        self.assertIn('moves only through the merge queue', moved.stdout)
-        git(self.root, 'update-ref', 'refs/heads/lane', 'HEAD')          # any other branch moves
-        refused = git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', check=False,
-                      env={**os.environ, 'ROMACS_LAND': '0'})
-        self.assertNotEqual(refused.returncode, 0)
-        named = git(self.root, '-c', 'review.note=x pack-refs', 'update-ref', 'refs/heads/beta', 'HEAD', check=False)
-        self.assertNotEqual(named.returncode, 0, 'a value naming pack-refs is not the command')
-        git(self.root, 'update-ref', 'refs/heads/beta', 'HEAD', env={**os.environ, 'ROMACS_LAND': '1'})
-        git(self.root, 'pack-refs', '--all')                             # storage only: beta is loose here
-        git(self.root, 'gc', '-q')
+        code, said = self.plain_session('update-ref', 'refs/heads/beta', 'HEAD')
+        self.assertNotEqual(code, 0)
+        self.assertIn('moves only through the merge queue', said)
+        self.assertEqual(self.plain_session('update-ref', 'refs/heads/lane', 'HEAD')[0], 0)  # any other branch moves
+        self.assertNotEqual(self.plain_session('update-ref', 'refs/heads/beta', 'HEAD', land='0')[0], 0)
+        named = self.plain_session('-c', 'review.note=x pack-refs', 'update-ref', 'refs/heads/beta', 'HEAD')
+        self.assertNotEqual(named[0], 0, 'a value naming pack-refs is not the command')
+        self.assertEqual(self.plain_session('update-ref', 'refs/heads/beta', 'HEAD', land='1')[0], 0)
+        self.assertEqual(self.plain_session('pack-refs', '--all')[0], 0)  # storage only: beta is loose here
+        self.assertEqual(self.plain_session('gc', '-q')[0], 0)
         self.assertEqual(git(self.root, 'rev-parse', 'beta').stdout, git(self.root, 'rev-parse', 'HEAD').stdout)
         queue = Path(self.tmp.name) / 'romacs-merge'                    # the queue, by its script's name
         queue.write_text("import subprocess\nsubprocess.run(['git', 'update-ref', '-d', 'refs/heads/beta'], check=True)\n")
