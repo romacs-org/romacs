@@ -221,7 +221,8 @@ struct MarkState {
     undo: undo::UndoDecided,
     /// A mark that keeps every weak entry (a mark twin's) holds undo lists
     /// whole too: what it leaves unmarked must be dead while Lisp runs on,
-    /// and no list is cut for it.
+    /// and no list is cut for it.  So does a minor's: it applies no undo
+    /// edits, and the next full collection decides the lists.
     undo_strong: bool,
     /// `lambda_lists` keys whose entry is not traced yet: each is traced
     /// once, by the round that finds its list live, and those left at the
@@ -1890,7 +1891,8 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Roots);
         let untraced_lists = self.lambda_lists.keys().copied().collect();
         let reading = properties::Reading { since: self.allocation.since, whole: true };
-        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, reading, undo_strong: keep_weak, ..MarkState::default() };
+        let undo_strong = keep_weak || matches!(r#for, MarkFor::Minor);
+        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, reading, undo_strong, ..MarkState::default() };
         state.region_marks[0] = true;
         if minor_changed.is_some() { self.minor_keeps(&mut state); }
         // GNU dooms finalizers once, after the roots and before the weak
@@ -2221,6 +2223,25 @@ mod tests {
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
         vm.collect(&mut []);
         assert_eq!(vm.eval_source_raw("(equal (car minor-list) '(4))").unwrap(), Value::TRUE, "and a full after it finds the heap whole");
+    }
+
+    /// A minor holds undo lists whole: deciding one (a dead marker's entry,
+    /// a cut at the limits) takes edits only a full collection applies, so a
+    /// minor leaves the lists to the next full.  A young entry for a marker
+    /// nothing holds survives a minor with every cons of its list.
+    #[test]
+    fn a_minor_holds_undo_lists_whole() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(progn (set-buffer (get-buffer-create \"minor-undo\")) (setq buffer-undo-list nil) (insert \"abcdefghij\"))").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(progn (let ((m (copy-marker 5))) (delete-region 3 8)) (setq minor-undo-before (prin1-to-string buffer-undo-list)))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        // Printed, so the comparison holds none of the list's conses.
+        let whole = vm.eval_source_raw("(equal (prin1-to-string buffer-undo-list) minor-undo-before)").unwrap();
+        assert_eq!(whole, Value::TRUE, "the minor left the undo list as it was");
+        vm.collect(&mut []);
+        assert_eq!(vm.eval_source_raw("(listp buffer-undo-list)").unwrap(), Value::TRUE, "and a full after it decides it");
     }
 
     /// With minors on, allocation alone brings them: each frees the garbage
