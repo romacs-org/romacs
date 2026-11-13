@@ -224,12 +224,20 @@ impl Vm {
 mod tests {
     use super::*;
 
+    /// One process, one inspection target: these tests take turns at it.
+    static INSPECTION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn inspection() -> std::sync::MutexGuard<'static, ()> {
+        INSPECTION.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Redisplay reaches the display iterator without `quittable_motion`,
     /// through the route the host's layout takes. A press waits for it, and
     /// an inspection is answered inside it. The same press ends a motion
     /// Lisp asked for: the iterator does poll here.
     #[test]
     fn redisplay_keeps_a_quit_pending_and_answers_inspection() {
+        let _turn = inspection();
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         let signal = std::sync::Arc::new(QuitSignal::new());
@@ -251,6 +259,7 @@ mod tests {
     /// activation shows the leaf's frame, and leaves nothing behind.
     #[test]
     fn an_inspection_inside_a_site_leaf_shows_its_frame() {
+        let _turn = inspection();
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         vm.eval_source("(progn (insert (make-string 8000 ?x)) (put-text-property 1 8000 'display \"d\")
@@ -269,6 +278,7 @@ mod tests {
     /// a leaf reaches records the leaf's frame first.
     #[test]
     fn an_inspection_inside_a_leafs_search_shows_its_frame() {
+        let _turn = inspection();
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         vm.eval_source("(progn (setq font-encoding-alist '((\"[bc]\" . hit)))
@@ -293,6 +303,7 @@ mod tests {
     /// polls, for a motion that wants a quit and for an inspection.
     #[test]
     fn a_property_walk_over_many_runs_polls() {
+        let _turn = inspection();
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         let signal = std::sync::Arc::new(QuitSignal::new());

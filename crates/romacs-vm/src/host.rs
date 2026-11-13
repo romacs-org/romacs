@@ -20,7 +20,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::fs::{File, FileType, Metadata};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +28,14 @@ use std::rc::Rc;
 use std::time::{Instant, SystemTime};
 
 pub use std::fs::OpenOptions;
+pub use sys::Passwd;
+
+mod sys;
+
+/// rustix's error, as std's.
+fn os(error: rustix::io::Errno) -> io::Error {
+    error.into()
+}
 
 /// How the boundary treats host access. Per thread: tests run VMs on
 /// parallel threads, and some callers have no `Vm`.
@@ -600,11 +608,15 @@ fn flight_path(path: &Path) -> Option<PathBuf> {
 /// wrote (`crate::flight::stat`).
 fn retime(path: &Path, seconds: i64, nanos: i64, follow: bool) -> io::Result<()> {
     let name = path_c_string(path)?;
-    let stamp = libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ };
-    let flags = if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW };
-    // SAFETY: NAME is a NUL-terminated path and the two timespecs a live
-    // local array, which utimensat only reads.
-    status(unsafe { libc::utimensat(libc::AT_FDCWD, name.as_ptr(), [stamp, stamp].as_ptr(), flags) })
+    utimensat(&name, rustix::fs::Timespec { tv_sec: seconds, tv_nsec: nanos }, !follow)
+}
+
+/// utimensat: both of PATH's times set to STAMP, a symlink's own under
+/// NOFOLLOW.
+fn utimensat(path: &CStr, stamp: rustix::fs::Timespec, nofollow: bool) -> io::Result<()> {
+    let flags = if nofollow { rustix::fs::AtFlags::SYMLINK_NOFOLLOW } else { rustix::fs::AtFlags::empty() };
+    let times = rustix::fs::Timestamps { last_access: stamp, last_modification: stamp };
+    rustix::fs::utimensat(rustix::fs::CWD, path, &times, flags).map_err(os)
 }
 
 /// FILE's modification time set to SECONDS and NANOS, as `retime` does.
@@ -704,13 +716,75 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
-/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
-/// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
-/// (an unpacked release tarball, wherever it lives), else [`build_root`].
+/// The generation of runtime tree this executable was built for: the tree's own
+/// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
+/// raised when the tree's layout or its contract with the executable changes
+/// so that one cannot run on the other.
+const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
+
+/// The file beside an executable that names its runtime tree, for one that
+/// was copied out of its build: one line, a directory, relative to the file's
+/// own directory or absolute.
+pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
+
+/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/), found from where the
+/// executable is, never from where it was once built:
+///   1. `ROMACS_RUNTIME_ROOT`, said outright (the Nix wrapper sets it);
+///   2. `share/romacs` beside the executable's `bin/` (an installation, or an
+///      unpacked release, wherever it lives), or the executable's own
+///      directory when the tree was laid out around it (a test install);
+///   3. the tree [`RUNTIME_RECORD`] beside the executable names (a copy of a
+///      development build);
+///   4. the tree it was built in, while it still sits in that build's Cargo
+///      target directory.
+///
+/// The tree found must be one of this executable's generation. With none
+/// found, or a wrong one, the process says which and why and ends: loading
+/// another tree's Lisp and data into this executable fails later, and
+/// far from the cause.
+///
+/// It is found once, the first time it is asked for, and is the session's
+/// from then on: a target directory cleaned or a variable changed under a
+/// running session moves nothing and ends nothing. A build that records what
+/// it reads has the session's tree in its record, read again as it is now:
+/// the variable that may have chosen it and its generation. A tree that has
+/// stopped being this executable's refuses that build; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from)
-        .or_else(|| installed_root(&current_exe().ok()?))
-        .unwrap_or_else(build_root)
+    static FOUND: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let root = FOUND.get_or_init(|| located_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    }));
+    if building() {
+        let _ = getenv("ROMACS_RUNTIME_ROOT");
+        if let Err(why) = runtime_tree(root) {
+            refuse("runtime-tree", json!({"path": path_json(root), "why": why}));
+        }
+    }
+    root.clone()
+}
+
+/// [`runtime_root`], or why there is none.
+fn located_runtime() -> Result<PathBuf, String> {
+    let exe = current_exe().ok();
+    let (root, from) = if let Some(dir) = getenv("ROMACS_RUNTIME_ROOT") {
+        (PathBuf::from(dir), "ROMACS_RUNTIME_ROOT")
+    } else if let Some(root) = exe.as_deref().and_then(installed_root) {
+        (root, "share/romacs beside the executable")
+    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp/gnu"))) {
+        (root.to_path_buf(), "the executable's own directory")
+    } else if let Some(root) = exe.as_deref().and_then(recorded_root) {
+        (root, "named beside the executable")
+    } else if exe.as_deref().is_some_and(|exe| in_build_target(exe, &build_root())) {
+        (build_root(), "the tree this executable was built in")
+    } else {
+        let exe = exe.map_or_else(|| "this executable".to_owned(), |exe| exe.display().to_string());
+        return Err(format!("{exe} is neither installed (no share/romacs beside its bin/, no tree around it), nor in its build's target directory, and names no tree"));
+    };
+    runtime_tree(&root).map_err(|why| format!("{} ({from}) {why}", root.display()))?;
+    Ok(root)
 }
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
@@ -718,6 +792,57 @@ pub fn runtime_root() -> PathBuf {
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
     probe(Probe::IsDir, root.join("lisp/gnu")).then_some(root)
+}
+
+/// The tree [`RUNTIME_RECORD`] beside EXE names, when there is such a file.
+fn recorded_root(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let text = read_to_string(dir.join(RUNTIME_RECORD)).ok()?;
+    let named = text.lines().next().map(str::trim).filter(|line| !line.is_empty())?;
+    let tree = dir.join(named);          // an absolute name replaces DIR
+    // The directory's own name, as file names under it are compared with it.
+    Some(canonicalize(&tree).unwrap_or(tree))
+}
+
+/// The file in a Cargo profile directory (`target/PROFILE`) that lists the
+/// trees built into it, one a line: this crate's build script adds its own.
+pub const BUILD_TREES: &str = "romacs-build-trees";
+
+/// Whether EXE is in a Cargo profile directory (or its `deps` or `examples`)
+/// that TREE was built into, by that directory's own list. An executable
+/// carried into another build's target directory finds a list without its
+/// tree, and one carried anywhere else finds none: it has left its build,
+/// and the tree compiled into it is no longer its own to assume.
+///
+/// Decided, not missed: the list says which checkouts built into a
+/// directory, not which directory built this executable. One carried into
+/// a pooled target that also built the same checkout path is taken for that
+/// directory's own, and assumes that same path. Naming the build's directory
+/// in the executable would close that, and would make one tree build a
+/// different executable in every target directory; checks key their results
+/// on the executable, so that was the dearer loss. What a checkout holds
+/// after a build is not this rule's to judge either: Lisp edited under a
+/// build is meant to be picked up.
+fn in_build_target(exe: &Path, tree: &Path) -> bool {
+    let Some(dir) = exe.parent() else { return false };
+    let profile = match dir.file_name().and_then(OsStr::to_str) {
+        Some("deps" | "examples") => dir.parent().unwrap_or(dir),
+        _ => dir,
+    };
+    read_to_string(profile.join(BUILD_TREES)).is_ok_and(|built| built.lines().any(|line| Path::new(line) == tree))
+}
+
+/// Whether ROOT is a runtime tree of this executable's generation, or why not.
+fn runtime_tree(root: &Path) -> Result<(), String> {
+    if !probe(Probe::IsDir, root.join("lisp/gnu")) || !probe(Probe::IsDir, root.join("etc")) {
+        return Err("is not a Romacs runtime tree (it has no lisp/gnu or no etc)".into());
+    }
+    let wanted = RUNTIME_EPOCH.trim();
+    match read_to_string(root.join("etc/romacs-runtime-epoch")) {
+        Ok(found) if found.trim() == wanted => Ok(()),
+        Ok(found) => Err(format!("is a runtime tree of generation {}, and this executable was built for generation {wanted}", found.trim())),
+        Err(_) => Err(format!("is a runtime tree from before generations (no etc/romacs-runtime-epoch), and this executable was built for generation {wanted}")),
+    }
 }
 
 /// The checkout this crate was built from: a compile-time path that no
@@ -1029,20 +1154,14 @@ impl Input {
 
     /// Whether the file carries an extended (POSIX or NFSv4) ACL.
     pub fn has_acl(&self) -> bool {
-        use std::os::fd::AsRawFd;
         crate::flight::checked("has-acl", || self.3.what(), || [c"system.posix_acl_access", c"system.nfs4_acl"].iter().any(|attribute| {
-            let size = unsafe { libc::fgetxattr(self.0.as_raw_fd(), attribute.as_ptr(), std::ptr::null_mut(), 0) };
-            size >= 0
+            rustix::fs::fgetxattr(&self.0, *attribute, &mut [0u8; 0][..]).is_ok()
         }), |&b| u64::from(b))
     }
 
     /// close(2), with its error.
     pub fn close(self) -> io::Result<()> {
-        use std::os::fd::IntoRawFd;
-        if unsafe { libc::close(self.0.into_raw_fd()) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        sys::close_owned(self.0.into())
     }
 }
 
@@ -1197,18 +1316,14 @@ pub enum Ids {
 
 /// faccessat: whether IDS may access PATH in MODE.
 pub fn access(path: &CStr, mode: i32, ids: Ids) -> io::Result<()> {
-    let flags = match ids { Ids::Effective => libc::AT_EACCESS, Ids::Real => 0 };
-    let result = crate::flight::checked("access", || String::from_utf8_lossy(path.to_bytes()).into_owned(), || status(unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, flags) }), |r| crate::flight::outcome(r, |()| 0));
+    let flags = match ids { Ids::Effective => rustix::fs::AtFlags::EACCESS, Ids::Real => rustix::fs::AtFlags::empty() };
+    let access = || rustix::fs::accessat(rustix::fs::CWD, path, rustix::fs::Access::from_bits_retain(mode as u32), flags).map_err(os);
+    let result = crate::flight::checked("access", || String::from_utf8_lossy(path.to_bytes()).into_owned(), access, |r| crate::flight::outcome(r, |()| 0));
     if building() {
         let observed = match &result { Ok(()) => json!("ok"), Err(e) => errno(e) };
         probed(&format!("access {mode} {ids:?}"), Path::new(OsStr::from_bytes(path.to_bytes())), observed);
     }
     result
-}
-
-/// A C call's 0-or-error result.
-fn status(result: libc::c_int) -> io::Result<()> {
-    if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
 /// A filesystem's size and free space (statvfs(3)), in fragments of
@@ -1225,15 +1340,8 @@ pub struct FsUsage {
 
 pub fn statvfs(path: &CStr) -> io::Result<FsUsage> {
     let result = crate::flight::value("statvfs", || {
-        let mut usage = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-        match unsafe { libc::statvfs(path.as_ptr(), usage.as_mut_ptr()) } {
-            0 => {
-                // SAFETY: statvfs filled the struct, as its 0 says.
-                let u = unsafe { usage.assume_init() };
-                Ok(FsUsage { block: u.f_bsize, fragment: u.f_frsize, blocks: u.f_blocks, free: u.f_bfree, available: u.f_bavail })
-            }
-            _ => Err(io::Error::last_os_error()),
-        }
+        rustix::fs::statvfs(path).map_err(os)
+            .map(|u| FsUsage { block: u.f_bsize, fragment: u.f_frsize, blocks: u.f_blocks, free: u.f_bfree, available: u.f_bavail })
     });
     if building() {
         let observed = match &result {
@@ -1248,14 +1356,9 @@ pub fn statvfs(path: &CStr) -> io::Result<FsUsage> {
 /// The type of the filesystem holding PATH: statfs's `f_type`, a magic
 /// number of linux/magic.h. A keyed probe.
 pub fn filesystem_type(path: &Path) -> io::Result<u32> {
-    let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| {
-        let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
-        match unsafe { libc::statfs(name.as_ptr(), buf.as_mut_ptr()) } {
-            // f_type is a signed word; the magic numbers are 32 bits.
-            0 => Ok(unsafe { buf.assume_init() }.f_type as u32),
-            _ => Err(io::Error::last_os_error()),
-        }
-    }), |r| crate::flight::outcome(r, |&t| u64::from(t)));
+    // f_type is a signed word; the magic numbers are 32 bits.
+    let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| rustix::fs::statfs(&*name).map_err(os).map(|s| s.f_type as u32)),
+                                        |r| crate::flight::outcome(r, |&t| u64::from(t)));
     if building() {
         if let Err(e) = &result { confined(path, e); }
         probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
@@ -1291,18 +1394,20 @@ pub fn directory_flags(directory: &Path) -> io::Result<u32> {
 pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
     const NAME: &CStr = c"system.posix_acl_access";
     let result = (|| {
-        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        let name = path_c_string(path)?;
         loop {
-            let size = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), std::ptr::null_mut(), 0) };
-            if size < 0 {
-                let error = io::Error::last_os_error();
-                return if error.raw_os_error() == Some(libc::ENODATA) { Ok(None) } else { Err(error) };
+            let size = match rustix::fs::getxattr(&*name, NAME, &mut [0u8; 0][..]) {
+                Ok(size) => size,
+                Err(rustix::io::Errno::NODATA) => return Ok(None),
+                Err(error) => return Err(os(error)),
+            };
+            let mut value = vec![0u8; size];
+            match rustix::fs::getxattr(&*name, NAME, &mut value[..]) {
+                Ok(read) => { value.truncate(read); return Ok(Some(value)); }
+                // The attribute grew between the two calls: ask its size again.
+                Err(rustix::io::Errno::RANGE) => {}
+                Err(error) => return Err(os(error)),
             }
-            let mut value = vec![0u8; size as usize];
-            let read = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), value.as_mut_ptr().cast(), value.len()) };
-            if read >= 0 { value.truncate(read as usize); return Ok(Some(value)); }
-            // The attribute grew between the two calls: ask its size again.
-            if io::Error::last_os_error().raw_os_error() != Some(libc::ERANGE) { return Err(io::Error::last_os_error()); }
         }
     })();
     if building() {
@@ -1314,19 +1419,10 @@ pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
 }
 
 fn read_directory_flags(directory: &Path) -> io::Result<u32> {
+    use rustix::fs::OFlags;
     let name = path_c_string(directory)?;
-    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    // The kernel reads and writes an int, whatever the request's size says.
-    let mut flags: libc::c_int = 0;
-    use std::os::fd::AsRawFd;
-    match unsafe { libc::ioctl(fd.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) } {
-        0 => Ok(flags as u32),
-        _ => Err(io::Error::last_os_error()),
-    }
+    let fd = rustix::fs::open(&*name, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC, rustix::fs::Mode::empty()).map_err(os)?;
+    rustix::fs::ioctl_getflags(&fd).map(|flags| flags.bits()).map_err(os)
 }
 
 fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
@@ -1351,9 +1447,9 @@ pub(crate) fn keep_flags_reader() -> io::Result<()> {
 /// `system.posix_acl_access' form.
 pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
     effect(|| format!("set ACL of {}", bytes(path)))?;
-    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    let name = path_c_string(path)?;
     let result = crate::flight::checked("set-acl", || bytes(path),
-                                     || status(unsafe { libc::setxattr(name.as_ptr(), c"system.posix_acl_access".as_ptr(), value.as_ptr().cast(), value.len(), 0) }),
+                                     || rustix::fs::setxattr(&*name, c"system.posix_acl_access", value, rustix::fs::XattrFlags::empty()).map_err(os),
                                      |r| crate::flight::outcome(r, |()| 0));
     changed(&result, path, false);
     result
@@ -1362,14 +1458,14 @@ pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
 /// sync(2): every pending disk update, the whole system's.
 pub fn sync_all() -> io::Result<()> {
     effect(|| "sync".into())?;
-    unsafe { libc::sync() };
+    rustix::fs::sync();
     Ok(())
 }
 
 /// Close this process's standard stream FD (0, 1 or 2).
 pub fn close_standard_stream(fd: i32) -> io::Result<()> {
     effect(|| format!("close standard stream {fd}"))?;
-    status(unsafe { libc::close(fd) })
+    sys::close(fd)
 }
 
 // Replay.
@@ -1511,7 +1607,7 @@ pub fn pid() -> u32 {
 }
 
 pub fn uid() -> u32 {
-    let uid = unsafe { libc::getuid() };
+    let uid = rustix::process::getuid().as_raw();
     if building() {
         host_fact("uid", json!(uid));
     }
@@ -1522,7 +1618,7 @@ pub fn uid() -> u32 {
 /// ends, and exit now if PARENT is gone already. A child of a session
 /// thread then never outlives the session.
 pub fn die_with_parent(parent: u32) {
-    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    let _ = rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM));
     if std::os::unix::process::parent_id() != parent {
         std::process::exit(1);
     }
@@ -1544,17 +1640,14 @@ pub enum Priority {
 /// starts afterwards inherit it, so a process calls it at the start of
 /// main. Best effort.
 pub fn lower_priority(priority: Priority) {
-    const IOPRIO_WHO_PROCESS: libc::c_long = 1;
     const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
     let (nice, io) = match priority {
         Priority::Idle => (19, IOPRIO_CLASS_IDLE << 13),
         Priority::Worker => (10, (IOPRIO_CLASS_BE << 13) | 7),
     };
-    unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, nice);
-        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, io);
-    }
+    let _ = rustix::process::setpriority_process(None, nice);
+    sys::set_io_priority(io);
 }
 
 /// Name the calling thread NAME (the kernel keeps 15 bytes). On a
@@ -1563,11 +1656,11 @@ pub fn lower_priority(priority: Priority) {
 pub fn set_thread_name(name: &str) -> io::Result<()> {
     effect(|| "thread-name".into())?;
     let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    status(unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr()) })
+    rustix::thread::set_name(&name).map_err(os)
 }
 
 pub fn euid() -> u32 {
-    let euid = unsafe { libc::geteuid() };
+    let euid = rustix::process::geteuid().as_raw();
     if building() {
         host_fact("euid", json!(euid));
     }
@@ -1575,7 +1668,7 @@ pub fn euid() -> u32 {
 }
 
 pub fn gid() -> u32 {
-    let gid = unsafe { libc::getgid() };
+    let gid = rustix::process::getgid().as_raw();
     if building() {
         host_fact("gid", json!(gid));
     }
@@ -1583,7 +1676,7 @@ pub fn gid() -> u32 {
 }
 
 pub fn egid() -> u32 {
-    let egid = unsafe { libc::getegid() };
+    let egid = rustix::process::getegid().as_raw();
     if building() {
         host_fact("egid", json!(egid));
     }
@@ -1592,39 +1685,14 @@ pub fn egid() -> u32 {
 
 // User database.
 
-/// A passwd entry's fields, as the C library's bytes.
-pub struct Passwd {
-    pub uid: u32,
-    /// pw_name, absent when the entry has none.
-    pub name: Option<Vec<u8>>,
-    pub gecos: Vec<u8>,
-    /// pw_dir, absent when the entry has none.
-    pub dir: Option<Vec<u8>>,
-}
-
-/// The C library's lookup into a BUFFER-byte buffer (so NSS sources count):
-/// the entry, or the status, 0 when there is none.
-fn passwd(buffer: usize, lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, usize, *mut *mut libc::passwd) -> libc::c_int) -> Result<Passwd, i32> {
-    let mut buffer = vec![0 as libc::c_char; buffer];
-    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut found: *mut libc::passwd = std::ptr::null_mut();
-    let status = lookup(&mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found);
-    if status != 0 || found.is_null() {
-        return Err(status);
-    }
-    let bytes = |p: *const libc::c_char| if p.is_null() { Vec::new() } else { unsafe { CStr::from_ptr(p) }.to_bytes().to_vec() };
-    let field = |p: *const libc::c_char| (!p.is_null()).then(|| bytes(p));
-    Ok(Passwd { uid: entry.pw_uid, name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
-}
-
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
-    let result = passwd(buffer, |entry, buffer, size, found| unsafe { libc::getpwuid_r(uid, entry, buffer, size, found) });
+    let result = sys::passwd(Ok(uid), buffer);
     user_db(json!({"uid": uid}), &result);
     result
 }
 
 pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
-    let result = passwd(buffer, |entry, buffer, size, found| unsafe { libc::getpwnam_r(name.as_ptr(), entry, buffer, size, found) });
+    let result = sys::passwd(Err(name), buffer);
     user_db(json!({"name": encoded(name.to_bytes())}), &result);
     result
 }
@@ -1644,15 +1712,7 @@ fn user_db(key: Json, result: &Result<Passwd, i32>) {
 /// getgrgid_r into a BUFFER-byte buffer: the group's name, or the status, 0
 /// when there is none.
 pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
-    let mut buffer = vec![0 as libc::c_char; buffer];
-    let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
-    let mut found = std::ptr::null_mut();
-    let status = unsafe { libc::getgrgid_r(gid, entry.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len(), &mut found) };
-    let result = if status != 0 || found.is_null() || unsafe { (*found).gr_name }.is_null() {
-        Err(status)
-    } else {
-        Ok(unsafe { CStr::from_ptr((*found).gr_name) }.to_bytes().to_vec())
-    };
+    let result = sys::group(Ok(gid), buffer).and_then(|(name, _)| name.ok_or(0));
     if building() {
         let observed = match &result { Ok(name) => encoded(name), Err(status) => json!({"status": status}) };
         record("user-db", json!({"key": {"gid": gid}, "result": observed}));
@@ -1662,11 +1722,7 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
 
 /// The group NAME names: its gid.
 pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
-    let mut buffer = vec![0 as libc::c_char; buffer];
-    let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
-    let mut found = std::ptr::null_mut();
-    let status = unsafe { libc::getgrnam_r(name.as_ptr(), entry.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len(), &mut found) };
-    let result = if status != 0 || found.is_null() { Err(status) } else { Ok(unsafe { (*found).gr_gid }) };
+    let result = sys::group(Err(name), buffer).map(|(_, gid)| gid);
     if building() {
         let observed = match &result { Ok(gid) => json!(gid), Err(status) => json!({"status": status}) };
         record("user-db", json!({"key": {"group": encoded(name.to_bytes())}, "result": observed}));
@@ -1681,14 +1737,7 @@ pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
 pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
     static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let next = || unsafe {
-        let name = if groups { libc::getgrent().as_ref().map(|g| g.gr_name) } else { libc::getpwent().as_ref().map(|p| p.pw_name) };
-        name.map(|name| (!name.is_null()).then(|| CStr::from_ptr(name).to_bytes().to_vec()))
-    };
-    let mut names = Vec::new();
-    unsafe { if groups { libc::setgrent() } else { libc::setpwent() } }
-    while let Some(name) = next() { names.extend(name); }
-    unsafe { if groups { libc::endgrent() } else { libc::endpwent() } }
+    let names = sys::account_names(groups);
     if building() {
         record("user-db", json!({"key": if groups { "groups" } else { "users" }, "result": sha256(&names.join(&0))}));
     }
@@ -1727,17 +1776,14 @@ pub fn processors(set: Processors) -> u64 {
 fn count_processors(set: Processors) -> u64 {
     let name = match set {
         Processors::Current => {
-            let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-            if unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) } == 0 {
-                let count = unsafe { libc::CPU_COUNT(&cpus) };
-                if count > 0 { return count as u64; }
-            }
+            let count = rustix::thread::sched_getaffinity(None).map_or(0, |cpus| cpus.count());
+            if count > 0 { return u64::from(count); }
             libc::_SC_NPROCESSORS_ONLN
         }
         Processors::Online => libc::_SC_NPROCESSORS_ONLN,
         Processors::All => libc::_SC_NPROCESSORS_CONF,
     };
-    u64::try_from(unsafe { libc::sysconf(name) }).ok().filter(|&n| n > 0).unwrap_or(1)
+    u64::try_from(sys::sysconf(name)).ok().filter(|&n| n > 0).unwrap_or(1)
 }
 
 // Performance counters.
@@ -1768,35 +1814,15 @@ thread_local! {
     static INSTRUCTION_COUNTER: std::cell::RefCell<Option<Option<std::os::fd::OwnedFd>>> = const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(target_os = "linux")]
 fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
-    use std::os::fd::FromRawFd;
-    // perf_event_attr, PERF_ATTR_SIZE_VER0: type HARDWARE (0) and size,
-    // config INSTRUCTIONS (1), flags pinned | exclude_kernel | exclude_hv.
-    const PERF_FLAG_FD_CLOEXEC: libc::c_ulong = 8;
-    let mut attr = [0u64; 8];
-    attr[0] = 64 << 32;
-    attr[1] = 1;
-    attr[5] = 1 << 2 | 1 << 5 | 1 << 6;
-    // SAFETY: ATTR is a zeroed PERF_ATTR_SIZE_VER0 struct that outlives the call.
-    let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, attr.as_ptr(), 0, -1, -1, PERF_FLAG_FD_CLOEXEC) };
-    // SAFETY: a non-negative result is a new descriptor this thread owns.
-    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
-    None
+    sys::open_instruction_counter()
 }
 
 /// The counter's value; none once a pinned counter lost its PMU slot,
 /// which the kernel reports as end of file.
 fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
-    use std::os::fd::AsRawFd;
-    let mut count = 0u64;
-    // SAFETY: COUNT is 8 writable bytes; FD is open for the thread's life.
-    let read = unsafe { libc::read(fd.as_raw_fd(), (&raw mut count).cast(), 8) };
-    (read == 8).then_some(count)
+    let mut count = [0u8; 8];
+    (rustix::io::read(fd, &mut count) == Ok(8)).then(|| u64::from_ne_bytes(count))
 }
 
 // Time.
@@ -1804,16 +1830,15 @@ fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
 /// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
 /// /proc's process times.
 pub fn clock_ticks_per_second() -> u64 {
-    u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|&n| n > 0).unwrap_or(100)
+    Some(rustix::param::clock_ticks_per_second()).filter(|&n| n > 0).unwrap_or(100)
 }
 
 /// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
 /// GNU's get_host_uptime reads it; None where the clock is missing.
 pub fn boot_clock() -> Option<std::time::Duration> {
     crate::flight::value("boot-clock", || {
-        let mut t: libc::timespec = unsafe { std::mem::zeroed() };
-        let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
-        ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+        let t = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Boottime).ok()?;
+        Some(std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
     })
 }
 
@@ -1822,26 +1847,24 @@ pub fn boot_clock() -> Option<std::time::Duration> {
 pub fn memory_info() -> Option<[u64; 4]> {
     p_read(Fact::Machine, "memory-info".into());
     crate::flight::value("memory-info", || {
-        let mut si: libc::sysinfo = unsafe { std::mem::zeroed() };
-        if unsafe { libc::sysinfo(&mut si) } != 0 { return None; }
+        let si = rustix::system::sysinfo();
         let unit = u64::from(si.mem_unit);
         Some([si.totalram as u64 * unit, si.freeram as u64 * unit, si.totalswap as u64 * unit, si.freeswap as u64 * unit])
     })
 }
 
-/// getloadavg(3): the 1, 5 and 15 minute averages it has, None on failure.
+/// getloadavg(3): the 1, 5 and 15 minute averages, as glibc derives them
+/// from sysinfo(2)'s fixed-point loads (SI_LOAD_SHIFT, 16 bits).
 pub fn load_average() -> Option<Vec<f64>> {
     p_read(Fact::Machine, "load-average".into());
     crate::flight::value("load-average", || {
-        let mut loads = [0f64; 3];
-        let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
-        (n >= 0).then(|| loads[..n as usize].to_vec())
+        Some(rustix::system::sysinfo().loads.iter().map(|&load| load as f64 / 65536.0).collect())
     })
 }
 
 /// The memory page size in bytes (`getpagesize`).
 pub fn page_size() -> u64 {
-    u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok().filter(|&n| n > 0).unwrap_or(4096)
+    Some(rustix::param::page_size() as u64).filter(|&n| n > 0).unwrap_or(4096)
 }
 
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
@@ -1873,15 +1896,7 @@ pub fn run_time() -> io::Result<std::time::Duration> {
 /// for a process outside the session's own results (a mark twin's child,
 /// `twin.rs`, whose usage starts at its fork).
 pub(crate) fn live_run_time() -> io::Result<std::time::Duration> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    // SAFETY: getrusage writes the whole struct it is given.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: initialized by the successful call above.
-    let usage = unsafe { usage.assume_init() };
-    let part = |t: libc::timeval| std::time::Duration::new(t.tv_sec.max(0) as u64, (t.tv_usec.clamp(0, 999_999) as u32) * 1000);
-    Ok(part(usage.ru_utime) + part(usage.ru_stime))
+    sys::self_usage().map(|(user, system)| user + system)
 }
 
 /// The monotonic clock, for deadlines and measurement.
@@ -1901,25 +1916,7 @@ pub(crate) fn flight_base() -> Instant {
 /// F with every signal blocked on this thread, so threads it starts leave
 /// signals to the threads that handle them.
 pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
-    /// The mask before, put back however F ends.
-    struct Restore(libc::sigset_t);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            // SAFETY: the mask pthread_sigmask filled in below, set back on the
-            // thread it came from; a null old set asks for nothing back.
-            unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &self.0, std::ptr::null_mut()) };
-        }
-    }
-    let mut all = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
-    let mut old = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
-    // SAFETY: both write only the locals they are given; SIG_SETMASK is a valid
-    // `how', so pthread_sigmask has filled OLD before it is read.
-    let _restore = unsafe {
-        libc::sigfillset(all.as_mut_ptr());
-        libc::pthread_sigmask(libc::SIG_SETMASK, all.as_ptr(), old.as_mut_ptr());
-        Restore(old.assume_init())
-    };
-    f()
+    sys::with_signals_blocked(f)
 }
 
 /// When a collection started, for `gc-elapsed'; none in build mode, nor in
@@ -1955,12 +1952,11 @@ pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<
 /// GNU copy-file's fast paths: share SOURCE's extents with DEST, else
 /// copy_file_range until it stops. False leaves the rest to read+write.
 pub fn clone_file(dest: &File, source: &Input) -> bool {
-    use std::os::fd::AsRawFd;
-    if unsafe { libc::ioctl(dest.as_raw_fd(), libc::FICLONE, source.0.as_raw_fd()) } == 0 {
+    if rustix::fs::ioctl_ficlone(dest, &source.0).is_ok() {
         return true;
     }
     const COPY_MAX: usize = (isize::MAX as usize) >> 30 << 30;
-    while unsafe { libc::copy_file_range(source.0.as_raw_fd(), std::ptr::null_mut(), dest.as_raw_fd(), std::ptr::null_mut(), COPY_MAX, 0) } > 0 {}
+    while rustix::fs::copy_file_range(&source.0, None, dest, None, COPY_MAX).is_ok_and(|n| n > 0) {}
     false
 }
 
@@ -2049,9 +2045,8 @@ pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()>
 pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("chmod {}", String::from_utf8_lossy(path.to_bytes())))?;
-    let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
     let name = Path::new(OsStr::from_bytes(path.to_bytes()));
-    let result = crate::flight::checked("chmod", || bytes(name), || status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) }),
+    let result = crate::flight::checked("chmod", || bytes(name), || sys::chmod(path, mode, nofollow),
                                      |r| crate::flight::outcome(r, |()| 0));
     changed(&result, name, false);
     result
@@ -2063,7 +2058,7 @@ pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
     effect(|| format!("rename {}", String::from_utf8_lossy(to.to_bytes())))?;
     let (from_name, to_name) = (Path::new(OsStr::from_bytes(from.to_bytes())), Path::new(OsStr::from_bytes(to.to_bytes())));
     let result = crate::flight::checked("rename", || bytes(to_name),
-                                     || status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) }),
+                                     || rustix::fs::renameat_with(rustix::fs::CWD, from, rustix::fs::CWD, to, rustix::fs::RenameFlags::NOREPLACE).map_err(os),
                                      |r| crate::flight::outcome(r, |()| 0));
     changed(&result, from_name, true);
     changed(&result, to_name, true);
@@ -2076,12 +2071,11 @@ pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::R
     wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("set times {}", String::from_utf8_lossy(path.to_bytes())))?;
     let stamp = match time {
-        Some((seconds, nanos)) => libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ },
-        None => libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_NOW },
+        Some((seconds, nanos)) => rustix::fs::Timespec { tv_sec: seconds, tv_nsec: nanos },
+        None => rustix::fs::Timespec { tv_sec: 0, tv_nsec: rustix::fs::UTIME_NOW },
     };
-    let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
     let name = Path::new(OsStr::from_bytes(path.to_bytes()));
-    let result = crate::flight::checked("set-times", || bytes(name), || status(unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), [stamp, stamp].as_ptr(), flags) }),
+    let result = crate::flight::checked("set-times", || bytes(name), || utimensat(path, stamp, nofollow),
                                      |r| crate::flight::outcome(r, |()| 0));
     changed(&result, name, false);
     result
@@ -2092,14 +2086,7 @@ pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::R
 pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
     effect(|| format!("temporary file {}", bytes(template)))?;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    let mut name = template.as_os_str().as_bytes().to_vec();
-    name.push(0);
-    let fd = unsafe { libc::mkostemp(name.as_mut_ptr().cast(), libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    name.pop();
+    let (name, file) = sys::temp_file(template.as_os_str().as_bytes())?;
     Ok((PathBuf::from(OsString::from_vec(name)), file))
 }
 
@@ -2128,44 +2115,7 @@ pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os:
     let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
     let strings = |list: &[Vec<u8>]| list.iter().map(|b| CString::new(b.as_slice())).collect::<Result<Vec<_>, _>>().map_err(|_| invalid());
     let (argv, env, dir) = (strings(argv)?, strings(env)?, CString::new(dir).map_err(|_| invalid())?);
-    let program = argv.first().ok_or_else(invalid)?;
-    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect::<Vec<_>>();
-    let (argp, envp) = (pointers(&argv), pointers(&env));
-    let ok = |r: libc::c_int| if r == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(r)) };
-    // SAFETY: the actions and attributes are initialized before use and
-    // destroyed after; every pointer passed outlives the call.
-    unsafe {
-        let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
-        ok(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
-        let mut attr = std::mem::MaybeUninit::<libc::posix_spawnattr_t>::uninit();
-        if let Err(error) = ok(libc::posix_spawnattr_init(attr.as_mut_ptr())) {
-            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
-            return Err(error);
-        }
-        let (actions, attr) = (actions.as_mut_ptr(), attr.as_mut_ptr());
-        let prepared = (|| -> io::Result<()> {
-            for (target, fd) in fds.into_iter().enumerate() {
-                ok(libc::posix_spawn_file_actions_adddup2(actions, fd, target as libc::c_int))?;
-            }
-            ok(libc::posix_spawn_file_actions_addchdir_np(actions, dir.as_ptr()))?;
-            let mut defaults: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut defaults);
-            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF, libc::SIGPIPE] {
-                libc::sigaddset(&mut defaults, signal);
-            }
-            ok(libc::posix_spawnattr_setsigdefault(attr, &defaults))?;
-            let mut mask: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut mask);
-            ok(libc::posix_spawnattr_setsigmask(attr, &mask))?;
-            let flags = libc::POSIX_SPAWN_SETSID as libc::c_int | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
-            ok(libc::posix_spawnattr_setflags(attr, flags as libc::c_short))
-        })();
-        let mut pid: libc::pid_t = 0;
-        let spawned = prepared.and_then(|()| ok(libc::posix_spawn(&mut pid, program.as_ptr(), actions, attr, argp.as_ptr(), envp.as_ptr())));
-        libc::posix_spawnattr_destroy(attr);
-        libc::posix_spawn_file_actions_destroy(actions);
-        spawned.map(|()| pid)
-    }
+    sys::spawn(&argv, &env, &dir, fds)
 }
 
 /// A file of a world store, opened for reading: the store's own, never a
@@ -2216,30 +2166,17 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
 /// must be owned by this user or root, and writable by no one else unless
 /// sticky, or another user could swap what lies below it.
 pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::OwnedFd> {
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use rustix::fs::{Mode, OFlags};
     use std::os::unix::ffi::OsStrExt;
     let refuse = |why: String| io::Error::new(io::ErrorKind::PermissionDenied, why);
     if !path.is_absolute() {
         return Err(refuse(format!("{} is not absolute", path.display())));
     }
     let root = PathBuf::from("/");
-    let open = |at: Option<i32>, name: &std::ffi::CStr| -> i32 {
-        let flags = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
-        match at {
-            Some(dir) => unsafe { libc::openat(dir, name.as_ptr(), flags) },
-            None => unsafe { libc::open(name.as_ptr(), flags) },
-        }
-    };
-    let fd = open(None, c"/");
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut dir = unsafe { OwnedFd::from_raw_fd(fd) };
+    let flags = OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let mut dir = rustix::fs::open("/", flags, Mode::empty()).map_err(os)?;
     let unshared = |dir: &OwnedFd, walked: &Path| -> io::Result<()> {
-        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-        if unsafe { libc::fstat(dir.as_raw_fd(), &mut stat) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let stat = rustix::fs::fstat(dir).map_err(os)?;
         if stat.st_uid != euid() && stat.st_uid != 0 {
             return Err(refuse(format!("{} is owned by another user", walked.display())));
         }
@@ -2257,21 +2194,17 @@ pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::Owne
         walked.push(name);
         let name = std::ffi::CString::new(name.as_bytes()).map_err(io::Error::other)?;
         let mut made = false;
-        let mut fd = open(Some(dir.as_raw_fd()), &name);
-        if fd < 0 && create && io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+        let mut next = rustix::fs::openat(&dir, &*name, flags, Mode::empty());
+        if create && matches!(next, Err(rustix::io::Errno::NOENT)) {
             effect(|| format!("make directory {}", walked.display()))?;
-            made = unsafe { libc::mkdirat(dir.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
-            fd = open(Some(dir.as_raw_fd()), &name);
+            made = rustix::fs::mkdirat(&dir, &*name, Mode::from_raw_mode(0o700)).is_ok();
+            next = rustix::fs::openat(&dir, &*name, flags, Mode::empty());
         }
-        if fd < 0 {
-            let error = io::Error::last_os_error();
-            return Err(if error.raw_os_error() == Some(libc::ELOOP) || error.raw_os_error() == Some(libc::ENOTDIR) {
-                refuse(format!("{} is no directory of its own (a symlink?)", walked.display()))
-            } else { error });
-        }
-        let next = unsafe { OwnedFd::from_raw_fd(fd) };
-        if made && unsafe { libc::fchmod(next.as_raw_fd(), 0o700) } != 0 {
-            return Err(io::Error::last_os_error());
+        let next = next.map_err(|error| if matches!(error, rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) {
+            refuse(format!("{} is no directory of its own (a symlink?)", walked.display()))
+        } else { os(error) })?;
+        if made {
+            rustix::fs::fchmod(&next, Mode::from_raw_mode(0o700)).map_err(os)?;
         }
         unshared(&next, &walked)?;
         dir = next;
@@ -2281,65 +2214,42 @@ pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::Owne
 
 /// Whether the directory DIR holds nothing.
 pub fn store_dir_is_empty(dir: std::os::fd::BorrowedFd<'_>) -> io::Result<bool> {
-    use std::os::fd::AsRawFd;
-    let copy = unsafe { libc::fcntl(dir.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
-    if copy < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let stream = unsafe { libc::fdopendir(copy) };
-    if stream.is_null() {
-        unsafe { libc::close(copy) };
-        return Err(io::Error::last_os_error());
-    }
-    let mut empty = true;
-    loop {
-        let entry = unsafe { libc::readdir(stream) };
-        if entry.is_null() {
-            break;
-        }
-        let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+    // A copy shares DIR's offset, as the stream fdopendir made of one did.
+    let copy = rustix::io::fcntl_dupfd_cloexec(dir, 0).map_err(os)?;
+    let mut buffer = Vec::with_capacity(8192);
+    let mut entries = rustix::fs::RawDir::new(&copy, buffer.spare_capacity_mut());
+    while let Some(Ok(entry)) = entries.next() {
+        let name = entry.file_name().to_bytes();
         if name != b"." && name != b".." {
-            empty = false;
-            break;
+            return Ok(false);
         }
     }
-    unsafe { libc::closedir(stream) };
-    Ok(empty)
+    Ok(true)
 }
 
 /// `open_store_file` for NAME in the directory DIR: opened relative to it
 /// (openat), so nothing above is resolved again.
 pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: StoreOpen) -> io::Result<File> {
-    use std::os::fd::{AsRawFd, FromRawFd};
-    let mut flags = libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
-    flags |= match how {
-        StoreOpen::Read => libc::O_RDONLY,
-        StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
-        StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
-        StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
-        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+    use rustix::fs::OFlags;
+    let flags = OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | match how {
+        StoreOpen::Read => OFlags::RDONLY,
+        StoreOpen::Write { create: true, .. } => OFlags::WRONLY | OFlags::CREATE,
+        StoreOpen::Write { create: false, .. } => OFlags::WRONLY,
+        StoreOpen::New => OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL,
+        StoreOpen::Append => OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
-    let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
+    let file = File::from(rustix::fs::openat(dir, &*cname, flags, rustix::fs::Mode::from_raw_mode(0o600)).map_err(os)?);
     regular_and_blocking(file, name, how)
 }
 
 /// FILE, once it is a regular file, with O_NONBLOCK cleared and, for a
 /// truncating write, emptied.
 fn regular_and_blocking(file: File, name: impl std::fmt::Display, how: StoreOpen) -> io::Result<File> {
-    use std::os::fd::AsRawFd;
     if !file.metadata()?.file_type().is_file() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{name} is not a regular file")));
     }
-    let fd = file.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    set_blocking(file.as_fd(), true)?;
     if let StoreOpen::Write { truncate: true, .. } = how {
         file.set_len(0)?;
     }
@@ -2366,50 +2276,43 @@ pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::
 pub fn unset_env(name: &str) {
     // The world markers are read and removed while the process is single
     // threaded, at the start of main.
-    unsafe { std::env::remove_var(name) };
+    sys::remove_env(name);
 }
 
 /// kill(2): SIGNAL to PID, a process group when negative. Signal 0 asks
 /// only whether PID exists and may be signalled.
 pub fn kill(pid: i32, signal: i32) -> io::Result<()> {
     effect(|| format!("signal {signal} to {pid}"))?;
-    status(unsafe { libc::kill(pid, signal) })
+    sys::kill(pid, signal)
 }
 
 /// A pidfd for PID, readable once it exits.
 pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
     effect(|| format!("pidfd {pid}")).ok()?;
-    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
+    rustix::process::pidfd_open(rustix::process::Pid::from_raw(pid)?, rustix::process::PidfdFlags::empty()).ok()
 }
 
 /// A memfd holding BYTES, sealed against writing, shrinking and growing
 /// once written: the backing of a large frozen region (`frozen.rs`), which
 /// another process may map or read knowing the bytes cannot change.
 pub fn sealed_memfd(bytes: &[u8]) -> io::Result<File> {
+    use rustix::fs::MemfdFlags;
     use std::io::Write;
-    use std::os::fd::AsRawFd;
     effect(|| "memfd".into())?;
-    let fd = unsafe { libc::memfd_create(c"romacs-frozen".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
+    let mut file = File::from(rustix::fs::memfd_create(c"romacs-frozen", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING).map_err(os)?);
     file.write_all(bytes)?;
-    status(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, SEALS) })?;
+    rustix::fs::fcntl_add_seals(&file, SEALS).map_err(os)?;
     Ok(file)
 }
 
-const SEALS: libc::c_int = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW;
+const SEALS: rustix::fs::SealFlags = rustix::fs::SealFlags::WRITE.union(rustix::fs::SealFlags::SHRINK).union(rustix::fs::SealFlags::GROW);
 
 /// FILE's bytes, when `sealed_memfd`'s seals are on it; a descriptor another
 /// process sent is refused otherwise, since its bytes could change under
 /// the reader.
 pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
-    use std::os::fd::AsRawFd;
     use std::os::unix::fs::FileExt;
-    let seals = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GET_SEALS) };
-    if seals < 0 || seals & SEALS != SEALS {
+    if !rustix::fs::fcntl_get_seals(file).is_ok_and(|seals| seals.contains(SEALS)) {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "frozen region descriptor is not sealed"));
     }
     let len = usize::try_from(file.metadata()?.len()).map_err(|_| io::Error::other("frozen region too large"))?;
@@ -2423,42 +2326,34 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
 
 /// inotify_init1(2), close-on-exec and nonblocking.
 pub fn inotify_init() -> io::Result<OwnedFd> {
+    use rustix::fs::inotify::CreateFlags;
     effect(|| "inotify".into())?;
-    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-    if fd < 0 { return Err(io::Error::last_os_error()); }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    rustix::fs::inotify::init(CreateFlags::NONBLOCK | CreateFlags::CLOEXEC).map_err(os)
 }
 
 /// inotify_add_watch(2): PATH's watch descriptor on FD with MASK.
 pub fn inotify_add_watch(fd: std::os::fd::BorrowedFd<'_>, path: &CStr, mask: u32) -> io::Result<i32> {
-    use std::os::fd::AsRawFd;
     effect(|| format!("inotify watch {}", path.to_string_lossy()))?;
-    let wd = unsafe { libc::inotify_add_watch(fd.as_raw_fd(), path.as_ptr(), mask) };
-    if wd < 0 { Err(io::Error::last_os_error()) } else { Ok(wd) }
+    rustix::fs::inotify::add_watch(fd, path, rustix::fs::inotify::WatchFlags::from_bits_retain(mask)).map_err(os)
 }
 
 /// inotify_rm_watch(2).
 pub fn inotify_rm_watch(fd: std::os::fd::BorrowedFd<'_>, wd: i32) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    status(unsafe { libc::inotify_rm_watch(fd.as_raw_fd(), wd) })
+    rustix::fs::inotify::remove_watch(fd, wd).map_err(os)
 }
 
 /// The `struct inotify_event' records queued on FD, as their bytes; none
 /// when nothing is queued (FD is nonblocking).
 pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
-    use std::os::fd::AsRawFd;
-    let mut queued: libc::c_int = 0;
-    status(unsafe { libc::ioctl(fd.as_raw_fd(), libc::FIONREAD, &mut queued) })?;
+    let queued = rustix::io::ioctl_fionread(fd).map_err(os)?;
     // One record at least, whatever FIONREAD said, so a read never fails
     // with EINVAL for a buffer too small for the next record.
-    let mut buffer = vec![0u8; (queued.max(0) as usize).max(std::mem::size_of::<libc::inotify_event>() + 256)];
-    let n = unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
-    if n < 0 {
-        let e = io::Error::last_os_error();
-        return if e.kind() == io::ErrorKind::WouldBlock { Ok(Vec::new()) } else { Err(e) };
+    let mut buffer = vec![0u8; (queued as usize).max(std::mem::size_of::<libc::inotify_event>() + 256)];
+    match rustix::io::read(fd, &mut buffer[..]) {
+        Ok(n) => { buffer.truncate(n); Ok(buffer) }
+        Err(rustix::io::Errno::AGAIN) => Ok(Vec::new()),
+        Err(e) => Err(os(e)),
     }
-    buffer.truncate(n as usize);
-    Ok(buffer)
 }
 
 // Isolates (`isolate.rs`): worker processes, their control sockets, the
@@ -2466,50 +2361,43 @@ pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
 
 /// FD nonblocking: a worker's inherited control socket.
 pub fn set_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
-    if flags < 0 { return Err(io::Error::last_os_error()); }
-    status(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }.min(0))
+    set_blocking(fd, false)
+}
+
+/// FD's O_NONBLOCK cleared (BLOCKING) or set, its other status flags kept.
+fn set_blocking(fd: std::os::fd::BorrowedFd<'_>, blocking: bool) -> io::Result<()> {
+    use rustix::fs::OFlags;
+    let flags = rustix::fs::fcntl_getfl(fd).map_err(os)?;
+    let flags = if blocking { flags.difference(OFlags::NONBLOCK) } else { flags.union(OFlags::NONBLOCK) };
+    rustix::fs::fcntl_setfl(fd, flags).map_err(os)
 }
 
 /// A connected pair of close-on-exec, nonblocking `SOCK_SEQPACKET` sockets:
 /// one packet per `send_packet`, received whole or not at all; a full
 /// buffer makes a send fail with `WouldBlock` rather than wait.
 pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
+    use rustix::net::{AddressFamily, SocketFlags, SocketType};
     effect(|| "socketpair".into())?;
-    let mut fds = [0; 2];
-    status(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) })?;
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+    rustix::net::socketpair(AddressFamily::UNIX, SocketType::SEQPACKET, SocketFlags::CLOEXEC | SocketFlags::NONBLOCK, None).map_err(os)
 }
 
 /// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`);
 /// `WouldBlock` when the peer's buffer is full (a bounded queue).
 pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option<std::os::fd::BorrowedFd<'_>>) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
+    use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
     effect(|| "sendmsg".into())?;
-    let mut iov = libc::iovec { iov_base: bytes.as_ptr() as *mut libc::c_void, iov_len: bytes.len() };
-    let space = unsafe { libc::CMSG_SPACE(4) } as usize;
-    let mut control = vec![0u8; space];
-    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
-    msg.msg_iov = &mut iov;
-    msg.msg_iovlen = 1;
-    if let Some(fd) = fd {
-        msg.msg_control = control.as_mut_ptr().cast();
-        msg.msg_controllen = space as _;
-        // SAFETY: the control buffer holds exactly one descriptor header.
-        unsafe {
-            let cmsg = libc::CMSG_FIRSTHDR(&msg);
-            (*cmsg).cmsg_level = libc::SOL_SOCKET;
-            (*cmsg).cmsg_type = libc::SCM_RIGHTS;
-            (*cmsg).cmsg_len = libc::CMSG_LEN(4) as _;
-            std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), fd.as_raw_fd());
-        }
+    let fds = fd.as_slice();
+    let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut control = SendAncillaryBuffer::new(&mut space);
+    if !fds.is_empty() {
+        control.push(SendAncillaryMessage::ScmRights(fds));
     }
     loop {
-        let n = unsafe { libc::sendmsg(socket.as_raw_fd(), &msg, libc::MSG_NOSIGNAL) };
-        if n >= 0 { return Ok(()); }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+        match rustix::net::sendmsg(socket, &[io::IoSlice::new(bytes)], &mut control, SendFlags::NOSIGNAL) {
+            Ok(_) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(os(error)),
+        }
     }
 }
 
@@ -2517,40 +2405,26 @@ pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option
 /// beside it (close-on-exec); None once the peer has closed. A packet the
 /// buffer cannot hold whole is an error, never a prefix.
 pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
-    use std::os::fd::AsRawFd;
+    use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags};
     let mut bytes = vec![0u8; capacity];
-    let mut iov = libc::iovec { iov_base: bytes.as_mut_ptr().cast(), iov_len: capacity };
-    let space = unsafe { libc::CMSG_SPACE(4 * 8) } as usize;
-    let mut control = vec![0u8; space];
-    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
-    msg.msg_iov = &mut iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control.as_mut_ptr().cast();
-    msg.msg_controllen = space as _;
-    let n = loop {
-        let n = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut msg, libc::MSG_CMSG_CLOEXEC) };
-        if n >= 0 { break n as usize; }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
-    };
-    let mut fds = Vec::new();
-    // SAFETY: the kernel filled the control buffer it was given.
-    unsafe {
-        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
-        while !cmsg.is_null() {
-            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
-                let count = ((*cmsg).cmsg_len as usize - libc::CMSG_LEN(0) as usize) / 4;
-                let data = libc::CMSG_DATA(cmsg).cast::<libc::c_int>();
-                for i in 0..count { fds.push(OwnedFd::from_raw_fd(std::ptr::read_unaligned(data.add(i)))); }
-            }
-            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+    let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(8))];
+    let mut control = RecvAncillaryBuffer::new(&mut space);
+    let received = loop {
+        match rustix::net::recvmsg(socket, &mut [io::IoSliceMut::new(&mut bytes)], &mut control, RecvFlags::CMSG_CLOEXEC) {
+            Ok(received) => break received,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(os(error)),
         }
-    }
-    if n == 0 && fds.is_empty() { return Ok(None); }
-    if msg.msg_flags & libc::MSG_TRUNC != 0 {
+    };
+    let fds: Vec<OwnedFd> = control.drain().flat_map(|message| match message {
+        RecvAncillaryMessage::ScmRights(fds) => fds.collect(),
+        _ => Vec::new(),
+    }).collect();
+    if received.bytes == 0 && fds.is_empty() { return Ok(None); }
+    if received.flags.contains(ReturnFlags::TRUNC) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "isolate packet larger than its buffer"));
     }
-    bytes.truncate(n);
+    bytes.truncate(received.bytes);
     Ok(Some((bytes, fds)))
 }
 
@@ -2563,17 +2437,16 @@ const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
 /// process for good, so this never reaches a reused pid: a reaped process
 /// gives `ESRCH`, while its group, still alive without it, is signalled.
 pub fn pidfd_send_signal(pidfd: std::os::fd::BorrowedFd<'_>, signal: i32, group: bool) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
     effect(|| format!("pidfd signal {signal}"))?;
-    let flags = if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 };
-    status(unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), flags) } as libc::c_int)
+    sys::pidfd_send_signal(pidfd, signal, if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 })
 }
 
 /// prctl(PR_SET_PDEATHSIG): SIGNAL once the thread that made this process
 /// exits. The caller checks `parent_pid` after, for a parent gone before.
 pub fn set_parent_death_signal(signal: i32) -> io::Result<()> {
     effect(|| "pdeathsig".into())?;
-    status(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) })
+    let signal = rustix::process::Signal::from_named_raw(signal).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+    rustix::process::set_parent_process_death_signal(Some(signal)).map_err(os)
 }
 
 pub fn parent_pid() -> i32 {
@@ -2601,7 +2474,7 @@ static WAKE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::
 fn wake_isolate_wait() {
     let fd = WAKE_WRITE.load(std::sync::atomic::Ordering::SeqCst);
     // Async-signal-safe; a full pipe already wakes the wait.
-    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+    if fd >= 0 { sys::wake(fd); }
 }
 extern "C" fn note_interrupt(_: libc::c_int) {
     INTERRUPT.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2613,7 +2486,7 @@ extern "C" fn note_terminate(_: libc::c_int) {
     // alarm(2) is async-signal-safe; SIGALRM's default action ends the
     // process, whatever it is blocked in.
     let seconds = TERMINATE_LIMIT.load(Ordering::SeqCst);
-    if first && seconds > 0 { unsafe { libc::alarm(seconds) }; }
+    if first && seconds > 0 { sys::alarm(seconds); }
     wake_isolate_wait();
 }
 
@@ -2625,8 +2498,7 @@ pub fn isolate_wake_fd() -> Option<std::os::fd::RawFd> {
 /// Empty the wake pipe: the flags, not the bytes, say what happened.
 pub fn drain_isolate_wake() {
     if let Some(fd) = isolate_wake_fd() {
-        let mut bytes = [0u8; 64];
-        while unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) } > 0 {}
+        sys::drain(fd);
     }
 }
 
@@ -2639,20 +2511,17 @@ pub fn limit_termination(seconds: u32) {
 
 pub fn catch_isolate_signals() -> io::Result<()> {
     if WAKE_READ.load(std::sync::atomic::Ordering::SeqCst) < 0 {
+        use rustix::pipe::PipeFlags;
+        use std::os::fd::IntoRawFd;
         effect(|| "isolate wake pipe".into())?;
-        let mut fds = [0; 2];
-        status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) })?;
+        let (read, write) = rustix::pipe::pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK).map_err(os)?;
         // For the process's life: a handler may write to it at any time.
-        WAKE_WRITE.store(fds[1], std::sync::atomic::Ordering::SeqCst);
-        WAKE_READ.store(fds[0], std::sync::atomic::Ordering::SeqCst);
+        WAKE_WRITE.store(write.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
+        WAKE_READ.store(read.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
     }
     for (signal, handler) in [(libc::SIGUSR1, note_interrupt as extern "C" fn(libc::c_int)), (libc::SIGTERM, note_terminate)] {
         effect(|| format!("handle signal {signal}"))?;
-        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-        action.sa_sigaction = handler as *const () as usize;
-        action.sa_flags = 0;
-        unsafe { libc::sigemptyset(&mut action.sa_mask) };
-        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+        sys::catch_signal(signal, handler, 0)?;
     }
     Ok(())
 }
@@ -2695,7 +2564,7 @@ extern "C" fn note_user_signal(signal: libc::c_int) {
     // A waiting session wakes to read it, as GNU's select returns on a
     // signal; write(2) is async-signal-safe, and the end is non-blocking.
     let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
-    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+    if fd >= 0 { sys::wake(fd); }
 }
 /// Forget that a user signal arrived: the safepoints stop asking.
 pub fn clear_user_signal_arrival() {
@@ -2718,11 +2587,7 @@ pub fn take_user_signals(mask: u8) -> bool {
 }
 pub fn catch_user_signals() -> io::Result<()> {
     for (signal, _) in USER_SIGNAL_EVENTS {
-        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-        action.sa_sigaction = note_user_signal as *const () as usize;
-        action.sa_flags = libc::SA_RESTART;
-        unsafe { libc::sigemptyset(&mut action.sa_mask) };
-        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+        sys::catch_signal(signal, note_user_signal, libc::SA_RESTART)?;
     }
     Ok(())
 }
@@ -2765,10 +2630,7 @@ pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::
 /// buffered output of it runs, so a forked child leaves nothing it shares
 /// with its parent flushed twice.
 pub fn exit_at_once(code: i32) -> ! {
-    // SAFETY: `_exit' takes only a status; it ends the process at once, and
-    // nothing of this process (destructor, atexit handler, other thread) runs
-    // after it. No safe std call exits without running atexit handlers.
-    unsafe { libc::_exit(code) }
+    sys::exit_at_once(code)
 }
 
 /// This process was forked from a zygote (`fork_isolate`).
@@ -2777,7 +2639,7 @@ static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// The threads of this process other than its main thread and the
 /// caller (/proc/self/task): those a fork from the caller would lose.
 pub fn other_threads() -> io::Result<Vec<i32>> {
-    let (main, caller) = (std::process::id() as i32, unsafe { libc::gettid() });
+    let (main, caller) = (std::process::id() as i32, rustix::thread::gettid().as_raw_nonzero().get());
     let mut others = Vec::new();
     for entry in std::fs::read_dir("/proc/self/task")? {
         let tid = entry?.file_name().to_string_lossy().parse::<i32>().map_err(io::Error::other)?;
@@ -2814,11 +2676,7 @@ pub(crate) fn fork_threaded() -> io::Result<i32> {
 
 fn fork() -> io::Result<i32> {
     effect(|| "fork".into())?;
-    // SAFETY: fork(2) takes no arguments; each caller states what its child
-    // may run (`fork_isolate`, `fork_threaded`).
-    let pid = unsafe { libc::fork() };
-    if pid < 0 { return Err(io::Error::last_os_error()); }
-    Ok(pid)
+    sys::fork()
 }
 
 /// Whether this process is a child forked from a zygote: it ends with
@@ -2838,7 +2696,7 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     TERMINATE.store(false, Ordering::SeqCst);
     TERMINATE_QUIT.store(false, Ordering::SeqCst);
     for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
-        if end >= 0 { unsafe { libc::close(end) }; }
+        if end >= 0 { let _ = sys::close(end); }
     }
     catch_isolate_signals()?;
     INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
@@ -2851,18 +2709,17 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
 
 /// The calling thread's id.
 pub fn thread_id() -> i32 {
-    crate::flight::value("tid", || unsafe { libc::gettid() })
+    crate::flight::value("tid", || rustix::thread::gettid().as_raw_nonzero().get())
 }
 
 /// The processors thread TID may run on: how many, and a digest of which;
 /// None once it is gone.
 pub fn thread_affinity(tid: i32) -> Option<(u32, u64)> {
     use std::hash::{Hash, Hasher};
-    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-    if unsafe { libc::sched_getaffinity(tid, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) } != 0 { return None; }
+    let cpus = rustix::thread::sched_getaffinity(rustix::process::Pid::from_raw(tid)).ok()?;
     let (mut count, mut digest) = (0, std::collections::hash_map::DefaultHasher::new());
-    for cpu in 0..libc::CPU_SETSIZE as usize {
-        let set = unsafe { libc::CPU_ISSET(cpu, &cpus) };
+    for cpu in 0..rustix::thread::CpuSet::MAX_CPU {
+        let set = cpus.is_set(cpu);
         count += u32::from(set);
         set.hash(&mut digest);
     }
@@ -2879,13 +2736,11 @@ pub fn process_pss(pid: i32) -> Option<u64> {
 /// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
 /// write end closes unwritten (false); a termination ends the wait too.
 pub fn await_gate(gate: OwnedFd) -> bool {
-    use std::os::fd::AsRawFd;
-    let mut byte = 0u8;
+    let mut byte = [0u8];
     loop {
-        match unsafe { libc::read(gate.as_raw_fd(), (&raw mut byte).cast(), 1) } {
-            1 => return true,
-            0 => return false,
-            _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted && !terminate_pending() => {}
+        match rustix::io::read(&gate, &mut byte) {
+            Ok(1) => return true,
+            Err(rustix::io::Errno::INTR) if !terminate_pending() => {}
             _ => return false,
         }
     }
@@ -2893,9 +2748,8 @@ pub fn await_gate(gate: OwnedFd) -> bool {
 
 /// Open GATE, the write end `await_gate` waits on: one byte, then closed.
 pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
     effect(|| "gate".into())?;
-    status((unsafe { libc::write(gate.as_raw_fd(), [1u8].as_ptr().cast(), 1) } as libc::c_int).min(0))
+    rustix::io::write(&gate, &[1u8]).map(drop).map_err(os)
 }
 
 /// The process umask, from /proc/self/status (GNU reads it once at
@@ -2918,9 +2772,7 @@ pub fn set_process_name(name: &str) -> io::Result<()> {
 /// `emacs_pipe`: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
-    let mut fds = [0; 2];
-    status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) })?;
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+    rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).map_err(os)
 }
 
 /// The SIGTERM or SIGHUP noted and not yet taken, else 0.
@@ -2934,7 +2786,7 @@ extern "C" fn note_termination(signal: libc::c_int) {
     TERMINATION.store(signal, Ordering::SeqCst);
     let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
     // Only async-signal-safe calls here: the store and write(2).
-    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+    if fd >= 0 { sys::wake(fd); }
 }
 
 /// sysdep.c init_signals's SIGTERM and SIGHUP, for an embedder that ends
@@ -2946,21 +2798,17 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
     let (reader, writer) = pipe()?;
     // The handlers never block: a full pipe already holds a wake. A new
     // pipe's end has no other status flag to keep.
-    status(unsafe { libc::fcntl(std::os::fd::AsRawFd::as_raw_fd(&writer), libc::F_SETFL, libc::O_NONBLOCK) })?;
+    rustix::fs::fcntl_setfl(&writer, rustix::fs::OFlags::NONBLOCK).map_err(os)?;
     TERMINATION_PIPE.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
     std::thread::Builder::new().name("romacs-signals".into()).spawn(move || {
-        let mut byte = 0u8;
-        while unsafe { libc::read(std::os::fd::AsRawFd::as_raw_fd(&reader), (&raw mut byte).cast(), 1) } == 1 {
+        let mut byte = [0u8];
+        while rustix::io::read(&reader, &mut byte) == Ok(1) {
             wake();
         }
     })?;
     for signal in [libc::SIGTERM, libc::SIGHUP] {
         effect(|| format!("handle signal {signal}"))?;
-        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-        action.sa_sigaction = note_termination as *const () as usize;
-        action.sa_flags = libc::SA_RESTART;
-        unsafe { libc::sigemptyset(&mut action.sa_mask) };
-        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+        sys::catch_signal(signal, note_termination, libc::SA_RESTART)?;
     }
     Ok(())
 }
@@ -2981,21 +2829,12 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// thread whose CPU timer fires.) Dropping the sender ends the thread.
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
     effect(|| "cpu profiler sampler".into())?;
-    let mut clock: libc::clockid_t = 0;
-    match unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) } {
-        0 => {}
-        error => return Err(io::Error::from_raw_os_error(error)),
-    }
-    let cpu_time = move || {
-        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
-        (unsafe { libc::clock_gettime(clock, &mut time) } == 0).then_some((time.tv_sec, time.tv_nsec))
-    };
+    let clock = sys::ThreadCpuClock::of_this_thread()?;
+    let cpu_time = move || clock.now();
     // A thread allowed only one CPU shares it with the sampler, which
     // never sees it there: for it, runnable has to stand for running.
     // Read once: an affinity changed later takes a profiler restart.
-    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-    status(unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) })?;
-    let alone = unsafe { libc::CPU_COUNT(&cpus) } == 1;
+    let alone = rustix::thread::sched_getaffinity(None).map_err(os)?.count() == 1;
     let stat = File::open("/proc/thread-self/stat")?;
     // stat's third field, after the parenthesized command name.
     let runnable = move || {
@@ -3060,14 +2899,12 @@ pub fn messages_to_stderr() -> bool {
 
 /// uname's release (editfns.c init_editfns).
 pub fn os_release() -> String {
-    let mut name: libc::utsname = unsafe { std::mem::zeroed() };
-    if unsafe { libc::uname(&mut name) } != 0 { return String::new(); }
-    unsafe { std::ffi::CStr::from_ptr(name.release.as_ptr()) }.to_string_lossy().into_owned()
+    rustix::system::uname().release().to_string_lossy().into_owned()
 }
 
 /// sysconf (_SC_ARG_MAX) / 4, GNU's crude bytes to characters (callproc.c:2249).
 pub fn command_line_max() -> i64 {
-    match unsafe { libc::sysconf(libc::_SC_ARG_MAX) } { n if n > 0 => n as i64 / 4, _ => 4096 }
+    match sys::sysconf(libc::_SC_ARG_MAX) { n if n > 0 => n as i64 / 4, _ => 4096 }
 }
 
 /// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
@@ -3086,42 +2923,27 @@ pub fn daemon() -> Option<&'static str> {
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
 pub fn eventfd() -> io::Result<OwnedFd> {
+    use rustix::event::EventfdFlags;
     effect(|| "eventfd".into())?;
-    let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    rustix::event::eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK).map_err(os)
 }
 
 /// allocate_pty with posix_openpt: the master and the slave's name.
 pub fn allocate_pty() -> io::Result<(OwnedFd, Vec<u8>)> {
+    use rustix::pty::OpenptFlags;
     effect(|| "pty".into())?;
-    let fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let master = unsafe { OwnedFd::from_raw_fd(fd) };
-    if unsafe { libc::grantpt(fd) } != 0 || unsafe { libc::unlockpt(fd) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut name = [0u8; 64];
-    if unsafe { libc::ptsname_r(fd, name.as_mut_ptr().cast(), name.len()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-    Ok((master, name[..len].to_vec()))
+    let master = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC).map_err(os)?;
+    rustix::pty::grantpt(&master).and_then(|()| rustix::pty::unlockpt(&master)).map_err(os)?;
+    let name = rustix::pty::ptsname(&master, Vec::with_capacity(64)).map_err(os)?;
+    Ok((master, name.into_bytes()))
 }
 
 /// The pty slave NAME, opened without becoming the controlling terminal.
 pub fn open_tty(name: &[u8]) -> io::Result<OwnedFd> {
     effect(|| format!("terminal {}", String::from_utf8_lossy(name)))?;
+    use rustix::fs::OFlags;
     let path = std::ffi::CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    rustix::fs::open(&*path, OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC, rustix::fs::Mode::empty()).map_err(os)
 }
 
 // Sockets.
@@ -3139,45 +2961,9 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
 /// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
 /// resolver's reason (`gai_strerror'), or the refusal in build mode.
 pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
     let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
-    // SAFETY: an all-zero addrinfo is the documented "no hints" value.
-    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
-    hints.ai_family = family;
-    hints.ai_socktype = libc::SOCK_DGRAM;
-    if numeric {
-        hints.ai_flags = libc::AI_NUMERICHOST;
-    }
-    let mut res: *mut libc::addrinfo = std::ptr::null_mut();
-    // SAFETY: c_name and hints outlive the call; res is freed below.
-    let ret = unsafe { libc::getaddrinfo(c_name.as_ptr(), std::ptr::null(), &hints, &mut res) };
-    if ret != 0 {
-        // SAFETY: gai_strerror returns a static string for any code.
-        return Err(unsafe { std::ffi::CStr::from_ptr(libc::gai_strerror(ret)) }.to_string_lossy().into_owned());
-    }
-    let mut addresses = Vec::new();
-    let mut entry = res;
-    while !entry.is_null() {
-        // SAFETY: entry is a node of the list getaddrinfo returned; its
-        // address is a sockaddr of its family.
-        let ai = unsafe { &*entry };
-        match ai.ai_family {
-            libc::AF_INET => {
-                let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
-                addresses.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
-            }
-            libc::AF_INET6 => {
-                let sin6 = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in6) };
-                addresses.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
-            }
-            _ => {}
-        }
-        entry = ai.ai_next;
-    }
-    // SAFETY: res came from a successful getaddrinfo and is freed once.
-    unsafe { libc::freeaddrinfo(res) };
-    Ok(addresses)
+    sys::lookup_addresses(&c_name, family, numeric)
 }
 
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {
@@ -3205,85 +2991,102 @@ pub fn connect_local(path: &Path) -> io::Result<std::os::unix::net::UnixStream> 
 /// a close-on-exec stream socket, connected or (EINPROGRESS) connecting.
 pub fn connect_local_nonblocking(path: &Path) -> io::Result<OwnedFd> {
     effect(|| format!("connect {}", bytes(path)))?;
-    let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-    sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
-    let name = path.as_os_str().as_bytes();
-    if name.len() >= sun.sun_path.len() {
+    // sockaddr_un's sun_path holds the name and its NUL.
+    const SUN_PATH: usize = 108;
+    if path.as_os_str().len() >= SUN_PATH {
         return Err(io::Error::from_raw_os_error(libc::ENAMETOOLONG));
     }
-    for (slot, &byte) in sun.sun_path.iter_mut().zip(name) {
-        *slot = byte as libc::c_char;
+    let address = rustix::net::SocketAddrUnix::new(path).map_err(os)?;
+    connect_in_progress(rustix::net::AddressFamily::UNIX, &address)
+}
+
+/// A close-on-exec, nonblocking stream socket of FAMILY to ADDRESS,
+/// connected or (EINPROGRESS, or EINTR, which leaves a nonblocking connect
+/// in progress) connecting.
+fn connect_in_progress(family: rustix::net::AddressFamily, address: &impl rustix::net::addr::SocketAddrArg) -> io::Result<OwnedFd> {
+    use rustix::net::{SocketFlags, SocketType};
+    let socket = rustix::net::socket_with(family, SocketType::STREAM, SocketFlags::NONBLOCK | SocketFlags::CLOEXEC, None).map_err(os)?;
+    match rustix::net::connect(&socket, address) {
+        Ok(()) | Err(rustix::io::Errno::INPROGRESS | rustix::io::Errno::INTR) => Ok(socket),
+        Err(error) => Err(os(error)),
     }
-    let s = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
-    if s < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let socket = unsafe { OwnedFd::from_raw_fd(s) };
-    let len = size_of::<libc::sockaddr_un>() as libc::socklen_t;
-    if unsafe { libc::connect(s, (&sun as *const libc::sockaddr_un).cast(), len) } != 0 {
-        let error = io::Error::last_os_error();
-        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
-            return Err(error);
-        }
-    }
-    Ok(socket)
 }
 
 /// accept4 on the listening socket LISTENER: the connection, close-on-exec,
 /// and the peer's raw address with its length.
 pub fn accept(listener: RawFd) -> io::Result<(OwnedFd, libc::sockaddr_storage, libc::socklen_t)> {
     effect(|| format!("accept on {listener}"))?;
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
-    let fd = unsafe { libc::accept4(listener, sa, &mut len, libc::SOCK_CLOEXEC) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok((unsafe { OwnedFd::from_raw_fd(fd) }, storage, len))
+    sys::accept(listener)
 }
 
 /// connect_network_socket's nonblocking connect: a close-on-exec stream
 /// socket to ADDR, connected or (EINPROGRESS) connecting.
 pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
     effect(|| format!("connect {addr}"))?;
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let len = match addr {
-        SocketAddr::V4(a) => {
-            let sin = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
-            sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port = a.port().to_be();
-            sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) };
-            size_of::<libc::sockaddr_in>()
-        }
-        SocketAddr::V6(a) => {
-            let sin6 = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
-            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port = a.port().to_be();
-            sin6.sin6_flowinfo = a.flowinfo();
-            sin6.sin6_addr = libc::in6_addr { s6_addr: a.ip().octets() };
-            sin6.sin6_scope_id = a.scope_id();
-            size_of::<libc::sockaddr_in6>()
-        }
-    };
-    let s = unsafe { libc::socket(i32::from(storage.ss_family), libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
-    if s < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let socket = unsafe { OwnedFd::from_raw_fd(s) };
-    if unsafe { libc::connect(s, (&storage as *const libc::sockaddr_storage).cast(), len as libc::socklen_t) } != 0 {
-        let error = io::Error::last_os_error();
-        // EINTR leaves a nonblocking connect in progress, as EINPROGRESS does.
-        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
-            return Err(error);
-        }
-    }
-    Ok(socket)
+    let family = match addr { SocketAddr::V4(_) => rustix::net::AddressFamily::INET, SocketAddr::V6(_) => rustix::net::AddressFamily::INET6 };
+    connect_in_progress(family, &addr)
 }
 
 #[cfg(test)]
 mod tests {
 
+    /// A copy of a development build names its tree in a file beside it:
+    /// absolute, or relative to the file. No file, no tree.
+    #[test]
+    fn a_copied_executable_reads_the_tree_named_beside_it() {
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-record-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let exe = dir.join("bin/romacs-vm-gui");
+        assert_eq!(recorded_root(&exe), None);
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "../tree\n").unwrap();
+        assert_eq!(recorded_root(&exe), Some(dir.join("bin/../tree")), "a tree that is not there keeps the name given");
+        std::fs::create_dir_all(dir.join("tree")).unwrap();
+        assert_eq!(recorded_root(&exe), Some(std::fs::canonicalize(dir.join("tree")).unwrap()), "one that is there has its own name, with no parent steps");
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "/somewhere/else\n").unwrap();
+        assert_eq!(recorded_root(&exe), Some(PathBuf::from("/somewhere/else")));
+        std::fs::write(dir.join("bin").join(RUNTIME_RECORD), "\n").unwrap();
+        assert_eq!(recorded_root(&exe), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// Only an executable in a target directory its tree was built into may
+    /// assume that tree. The directory's list decides, not its shape:
+    /// another build's target, and any other directory, give it nothing to
+    /// assume. (Made-up directories only: this test's own executable may
+    /// have been carried off by an archive, with its tree said outright.)
+    #[test]
+    fn only_an_executable_in_a_target_its_tree_built_into_assumes_that_tree() {
+        let tree = build_root();
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-target-{}", std::process::id()));
+        for sub in ["gate/deps", "gate/examples", "gate/.fingerprint", "gate/build"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let places = ["gate/romacs-vm-gui", "gate/deps/some_test-0123456789abcdef", "gate/examples/demo"];
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "a target's shape is no list");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), "/another/checkout\n").unwrap();
+        assert!(places.iter().all(|place| !in_build_target(&dir.join(place), &tree)), "another build's target");
+        std::fs::write(dir.join("gate").join(BUILD_TREES), format!("/another/checkout\n{}\n", tree.display())).unwrap();
+        assert!(places.iter().all(|place| in_build_target(&dir.join(place), &tree)));
+        assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui"), &tree));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// A tree is the executable's own only with its generation: a directory
+    /// that is no tree, a tree with no generation and a tree of another are
+    /// each refused, by name.
+    #[test]
+    fn a_runtime_tree_must_be_of_the_executables_generation() {
+        assert_eq!(runtime_tree(&build_root()), Ok(()));
+        let dir = std::env::temp_dir().join(format!("romacs-runtime-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
+        std::fs::create_dir_all(dir.join("lisp/gnu")).unwrap();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
+        std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("generation 0"));
+        std::fs::write(dir.join("etc/romacs-runtime-epoch"), RUNTIME_EPOCH).unwrap();
+        assert_eq!(runtime_tree(&dir), Ok(()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     /// The build tree is a directory name with no `..` in it, so the
     /// runtime directories built from it are what they expand to.
     #[test]
@@ -3349,20 +3152,6 @@ mod tests {
         std::fs::remove_dir_all(&prefix).unwrap();
     }
 
-    #[test]
-    fn passwd_keeps_absent_fields_absent() {
-        let gecos = c"Full Name";
-        let entry = passwd(16, |entry, _, _, found| {
-            unsafe {
-                (*entry).pw_name = std::ptr::null_mut();
-                (*entry).pw_gecos = gecos.as_ptr().cast_mut();
-                (*entry).pw_dir = std::ptr::null_mut();
-                *found = entry;
-            }
-            0
-        }).ok().unwrap();
-        assert_eq!((entry.name, entry.gecos, entry.dir), (None, b"Full Name".to_vec(), None));
-    }
 }
 
 /// A deadline on one call the host admits (quit.rs `DEADLINE') (an agent's evaluation): out of
@@ -3518,19 +3307,39 @@ fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A request the evaluator has not answered. Two relaxed loads per poll.
+/// Which thread answers inspections: the evaluator's, the one that started
+/// listening (or, in a test, the one that raised the request).  Every VM in
+/// the process polls, worker VMs too, and only that thread's may answer, so
+/// a worker's backtrace is never taken for the evaluator's.  A count, not a
+/// thread id: each registration takes the next one, and the thread keeps
+/// its own copy, so the check is two relaxed loads.
+static INSPECT_TARGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+thread_local! {
+    static INSPECT_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Make the current thread the one that answers inspections.
+fn inspect_target_here() {
+    let token = INSPECT_TARGET.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    INSPECT_HERE.with(|here| here.set(token));
+}
+
+/// A request this thread's evaluator has not answered. Two relaxed loads per
+/// poll; whose thread answers is read only while a request waits.
 #[inline(always)]
 pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+        && INSPECT_HERE.with(std::cell::Cell::get) == INSPECT_TARGET.load(Relaxed)
 }
 /// Whether a listener runs, so that a native loop should poll for requests.
 pub fn inspect_enabled() -> bool {
     INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
-/// Raise a request, as a client does.
+/// Raise a request, as a client does, for this thread's evaluator to answer.
 #[cfg(test)]
 pub fn inspect_request() {
+    inspect_target_here();
     INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 /// Whether native loops poll for requests, as a listener makes them.
@@ -3567,13 +3376,7 @@ fn inspect_reply(answered: bool) -> String {
 
 /// The peer's uid, from the kernel's record of who connected.
 fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
-    use std::os::fd::AsRawFd;
-    let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
-    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    let got = unsafe {
-        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut credentials).cast(), &mut size)
-    };
-    (got == 0).then_some(credentials.uid)
+    rustix::net::sockopt::socket_peercred(stream).ok().map(|credentials| credentials.uid.as_raw())
 }
 
 /// The client's line, within DEADLINE however slowly it comes.
@@ -3608,7 +3411,7 @@ fn inspect_write(stream: &mut std::os::unix::net::UnixStream, mut bytes: &[u8], 
 /// One client: the line `inspect', answered once. STOP ends the wait.
 fn inspect_serve(mut stream: std::os::unix::net::UnixStream, stop: &std::sync::atomic::AtomicBool) {
     use std::sync::atomic::Ordering::SeqCst;
-    if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) { return; }
+    if peer_uid(&stream) != Some(rustix::process::geteuid().as_raw()) { return; }
     let Some((line, length)) = inspect_line(&mut stream, Instant::now() + INSPECT_IO) else { return };
     if &line[..length] != b"inspect\n" { return; }
     let generation = INSPECT_REQUESTED.fetch_add(1, SeqCst) + 1;
@@ -3627,7 +3430,7 @@ fn inspect_store_ready(store: &Path) -> bool {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     if std::fs::DirBuilder::new().recursive(true).mode(0o700).create(store).is_err() { return false; }
     std::fs::symlink_metadata(store).is_ok_and(|meta| {
-        meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0
+        meta.is_dir() && meta.uid() == rustix::process::geteuid().as_raw() && meta.mode() & 0o077 == 0
     })
 }
 
@@ -3695,6 +3498,7 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
         None => None,
     };
     *inspect_lock(&INSPECT_LISTENER) = Some(InspectListener { path, identity: (meta.dev(), meta.ino()), stop, store });
+    inspect_target_here();
     INSPECT_ENABLED.store(true, SeqCst);
     Ok(())
 }
