@@ -618,8 +618,11 @@ const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
   --loadup              run GNU's loadup chain; a live launch boots from its world
   --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
-  --world-build         make the world a live --loadup launch would boot from
-                        usable, with no window, and exit (what an installer runs)
+  --world-build         make the worlds a live --loadup launch and a --batch
+                        session would boot from usable, with no window, and
+                        exit (what an installer runs); before --batch, the
+                        batch world alone (an installation's, in
+                        --world-store EXECUTABLE.worlds)
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
@@ -638,7 +641,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
-  ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
+  ROMACS_DIAGNOSTICS=1  print each paint, message, the render thread's frame counters
+                        and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
 ";
@@ -758,6 +762,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
+            "--batch" if world_build => {
+                if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
+                let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+                return batch::prepare(store).map(|()| None);
+            }
             "--batch" => {
                 use_collector_threads();
                 return batch::run(args.collect(), quick, world_store).map(|()| None);
@@ -814,17 +823,16 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
     // --world-build: the world this launch would boot from, made usable
-    // (built here, or waited for), with no window; then exit. What an
-    // installer runs so a user's first launch restores. A batch session's
-    // world is not built here: the first session in this store boots from
-    // source and prepares it in the background (batch.rs), as GNU's batch
-    // startup costs no install step.
+    // (built here, or waited for), with no window, and a batch session's
+    // beside it (batch.rs); then exit. What an installer runs so a user's
+    // first launch and first batch session restore.
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        let base = world::open(store, width, height, floor)?;
+        let base = world::open(store.clone(), width, height, floor)?;
         world::prepare(&base, width, height, floor)?;
+        batch::prepare_beside(store);
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }

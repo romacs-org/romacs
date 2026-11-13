@@ -47,6 +47,8 @@ foldhash = "0.2"
 # collector's threads (src/gc_mark.rs), which share chunks through a deque.
 rayon = "1.12"
 crossbeam-deque.workspace = true
+# FSRS, the scheduler Anki uses, for Gnosis (src/prims/fsrs.rs).
+fsrs = "=6.6.1"
 # SQLite for sqlite.c's primitives, built from the bundled amalgamation.
 libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 # gnutls.c's TLS client sessions (src/tls.rs), on the ring provider the

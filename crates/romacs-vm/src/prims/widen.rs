@@ -280,12 +280,22 @@ fn suffix_member(cx: &Leaf<'_>, needle: Value, list: Value) -> std::result::Resu
     Ok(false)
 }
 
-// `concat' of the elements of a list: Fmapconcat's Fconcat over its
-// results, which the prelude's `mapconcat' collects (lisp/romacs/vm/prelude.el).
+// `concat' of the elements of a list with SEPARATOR between each two (nil
+// for none): Fmapconcat's Fconcat over its results, which the prelude's
+// `mapconcat' collects (lisp/romacs/vm/prelude.el). The parts are walked
+// once; ASCII strings are joined without building the interleaved list.
 defsubr! { name = "romacs--concat-list", gnu = "fns.c:3484", effect = Pure,
-fn concat_list(cx, parts: Value) {
+fn concat_list(cx, parts: Value; optional separator: Value) {
     let parts = list_elements(cx, parts)?;
-    concat(cx, &parts)
+    let separator = (separator != Value::NIL && cx.string_chars(separator) != Some(0)).then_some(separator);
+    if let Some(result) = cx.concat_ascii_joined(&parts, separator) { return Ok(result); }
+    let Some(separator) = separator else { return concat(cx, &parts) };
+    let mut joined = Vec::with_capacity(2 * parts.len());
+    for (index, &part) in parts.iter().enumerate() {
+        if index > 0 { joined.push(separator); }
+        joined.push(part);
+    }
+    concat(cx, &joined)
 }}
 
 /// The elements of LIST, a proper list a mapping function built.

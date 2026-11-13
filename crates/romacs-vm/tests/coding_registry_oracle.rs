@@ -44,7 +44,10 @@ fn validate_declaration(spec: &Value) {
         "declaration effect stale"
     );
     assert_eq!(spec["gnu_def"], current["gnu"], "declaration gnu stale");
-    assert_eq!(spec["rust"], current["rust"], "declaration rust stale");
+    // The file, not its line: a line moves whenever code above the declaration does, and two
+    // branches that each move it would fail on their merge though neither is wrong.
+    let file = |v: &Value| v.as_str().map(|s| s.rsplit_once(':').map_or(s, |(f, _)| f).to_owned());
+    assert_eq!(file(&spec["rust"]), file(&current["rust"]), "declaration rust stale");
 }
 
 fn replay(spec: &[u8], evidence: &str, count: usize) {

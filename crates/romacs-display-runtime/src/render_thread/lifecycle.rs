@@ -230,7 +230,6 @@ impl RenderApp {
         // serviced against a clock read taken after the work it gates.
         let now = romacs_display_protocol::frame_time::observe_platform_now();
         super::frame_stats::count(&super::frame_stats::EVENT_LOOP_WAKEUPS);
-        super::frame_stats::maybe_log_snapshot(now);
         if !self.lifecycle_flags.about_to_wait_seen {
             tracing::info!(
                 "Render thread entered about_to_wait: primary_window_exists={} frame_windows={}",
@@ -499,6 +498,11 @@ impl RenderApp {
         if let Some(busy) = self.busy_toast.deadline() {
             let busy = busy.into_instant();
             deadline = Some(deadline.map_or(busy, |d| d.min(busy)));
+        }
+        // Last, so the line counts this pass's requests.
+        if let Some(stats) = self.stats_lines.service(now) {
+            let stats = stats.into_instant();
+            deadline = Some(deadline.map_or(stats, |d| d.min(stats)));
         }
         match deadline {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),

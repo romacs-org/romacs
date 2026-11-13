@@ -95,6 +95,9 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; so they follow the display record.
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
+        ;; A list an earlier Romacs kept in the home directory joins the
+        ;; per-user directory that now holds it.
+        (romacs--migrate-project-list (expand-file-name "projects.eld" "~") project-list-file)
         ;; faces.el x-create-frame-with-faces (faces.el:2243), by way of
         ;; `frame-initialize': the frame's display parameters, then every
         ;; face computed for this display, each new-frame default kept.

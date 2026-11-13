@@ -12,7 +12,11 @@ motion: C-f, C-n and C-p run GNU's next-line and previous-line over a
 mixed buffer (long continued lines, short and empty lines, non-ASCII
 text).  The point after each command must equal pinned GNU's on a
 terminal frame (`emacs -Q -nw' over a pty, private HOME) whose window
-continues lines after as many columns as the native window does.
+continues lines after as many columns as the native window does.  Over a
+tall buffer the same comparison runs down past several windows and back:
+the window scrolls under Romacs's `scroll-conservatively' 101 and GNU's
+default 0, and only point is compared, which neither setting moves
+(scroll_invisible_live compares the window starts under both).
 
 keys: a timer runs `sit-for' (as simple.el's M-x suggestion does) and C-b
 typed during it, which sit-for reads and pushes back onto
