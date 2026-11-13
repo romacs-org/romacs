@@ -57,9 +57,9 @@ but the excluded ones, sorted: the order they follow GNU's `load-path' in."
 
 (defun romacs-bundled-autoloads--files (dir)
   "DIR's Lisp files `loaddefs-generate' scans, by library name."
-  (sort (seq-remove (lambda (file)
-                      (equal (file-name-base file) "romacs-bundled-autoloads"))
-                    (directory-files dir t "\\`[^=.].*\\.el\\'"))
+  (sort (cl-remove-if (lambda (file)
+                        (equal (file-name-base file) "romacs-bundled-autoloads"))
+                      (directory-files dir t "\\`[^=.].*\\.el\\'"))
         (lambda (a b)
           (string< (file-name-sans-extension (file-name-nondirectory a))
                    (file-name-sans-extension (file-name-nondirectory b))))))
@@ -110,7 +110,7 @@ notices would go to; the notices are not shown either."
            (dirs (romacs-bundled-autoloads-directories root))
            (files (mapcar #'romacs-bundled-autoloads--files dirs))
            (loaddefs--load-error-files (apply #'append files)))
-      (apply #'append (seq-mapn #'romacs-bundled-autoloads--forms dirs files)))))
+      (apply #'append (cl-mapcar #'romacs-bundled-autoloads--forms dirs files)))))
 
 (dolist (form (romacs-bundled-autoloads-forms
                (expand-file-name "../.." (file-name-directory (or load-file-name buffer-file-name)))))
