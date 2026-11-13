@@ -72,6 +72,8 @@ mod ccl_registry;
 mod change_hooks;
 #[path = "../char_property_queries.rs"]
 mod char_property_queries;
+#[path = "../char_table_access.rs"]
+mod char_table_access;
 #[path = "../char_width_sweep.rs"]
 mod char_width_sweep;
 #[path = "../charset_alias.rs"]

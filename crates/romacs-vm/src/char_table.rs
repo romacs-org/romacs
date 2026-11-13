@@ -416,8 +416,9 @@ impl Vm {
 
     /// GNU UNIPROP_TABLE_P: purpose `char-code-property-table', 5 extras.
     pub(crate) fn is_uniprop_table(&self, t: &CharTable) -> bool {
-        self.names.get("char-code-property-table")
-            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7) && t.extras.len() == 5)
+        // The extras first: a name lookup on every read cost more than the read.
+        t.extras.len() == 5 && self.names.get("char-code-property-table")
+            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7))
     }
 
     /// The codes of VALUE when it is a compressed uniprop block
@@ -569,10 +570,11 @@ impl CharTableNode {
     /// INDEX's raw value under HANDLE and the inclusive character range of
     /// the slot holding it, refusing geometry a lookup cannot trust.
     pub(super) fn checked_span(handle: &CharTableNodeHandle, index: usize) -> Result<(Value, usize, usize)> {
+        // Each node descended into is one level deeper than its parent and
+        // a depth-three node has no children, so the walk ends within four
+        // nodes: a cycle fails the geometry check.
         let mut current = Arc::clone(handle);
-        let mut seen = HashSet::default();
         loop {
-            if !seen.insert(char_table_node_id(&current)) { return Err("cyclic sub-char-table".into()); }
             let (slot, from, width) = {
                 let node = current.lock().unwrap();
                 let offset = index.checked_sub(node.min_char).ok_or("invalid sub-char-table geometry")?;
@@ -624,20 +626,29 @@ impl CharTableNode {
         Ok(())
     }
 
+    /// The nodes `set_range` descends into for FROM..=TO, checked before it
+    /// writes: only a slot the range covers in part is descended, and only
+    /// the slots holding FROM and TO can be, so a write checks its two
+    /// paths, not the table.
     fn validate_geometry(handle: &CharTableNodeHandle, depth: usize, min_char: usize, from: usize, to: usize) -> Result<()> {
-        let slots = {
+        let partial = {
             let node = handle.lock().unwrap();
             if node.depth != depth || node.min_char != min_char { return Err("invalid sub-char-table geometry".into()); }
-            node.slots.clone()
+            let width = Self::WIDTHS[depth];
+            let slot_of = |c: usize| c.checked_sub(min_char).map(|offset| offset / width).filter(|&i| i < node.slots.len());
+            let (first, last) = (slot_of(from), slot_of(to));
+            let child = |i: Option<usize>| i.and_then(|i| match &node.slots[i] {
+                CharTableSlot::Node(child) => Some((i, Arc::clone(child))),
+                CharTableSlot::Value(_) => None,
+            });
+            [child(first), if last == first { None } else { child(last) }]
         };
-        for (i, slot) in slots.iter().enumerate() {
-            if let CharTableSlot::Node(child) = slot {
-                let start = min_char + i * Self::WIDTHS[depth];
-                let end = start + Self::WIDTHS[depth] - 1;
-                if start > to || end < from || (from <= start && end <= to) { continue; }
-                if depth == 3 { return Err("invalid sub-char-table geometry".into()); }
-                Self::validate_geometry(child, depth + 1, start, from, to)?;
-            }
+        for (i, child) in partial.into_iter().flatten() {
+            let start = min_char + i * Self::WIDTHS[depth];
+            let end = start + Self::WIDTHS[depth] - 1;
+            if from <= start && end <= to { continue; }
+            if depth == 3 { return Err("invalid sub-char-table geometry".into()); }
+            Self::validate_geometry(&child, depth + 1, start, from, to)?;
         }
         Ok(())
     }
@@ -655,6 +666,37 @@ impl CharTableNode {
             CharTableSlot::Node(child) => CharTableSlot::Node(Self::deep_copy(child, copies)),
         }).collect();
         copy
+    }
+
+    /// `set_range` for the one character C, checking each node on its path
+    /// as it descends rather than in a pass before: a node it splits is
+    /// new and sound, so a refusal comes before anything is written.
+    fn set_char(handle: &CharTableNodeHandle, c: usize, value: CharTableSlot) -> Result<()> {
+        let (mut current, mut depth, mut min_char) = (Arc::clone(handle), 0, 0);
+        loop {
+            let mut node = current.lock().unwrap();
+            let width = Self::WIDTHS[depth];
+            let i = (c - min_char) / width;
+            if node.depth != depth || node.min_char != min_char || i >= node.slots.len() {
+                return Err("invalid sub-char-table geometry".into());
+            }
+            if depth == 3 {
+                node.store(i, value);
+                return Ok(());
+            }
+            let start = min_char + i * width;
+            let child = match &node.slots[i] {
+                CharTableSlot::Node(child) => Arc::clone(child),
+                CharTableSlot::Value(old) => {
+                    // The split moves OLD into a node no entry has traced yet.
+                    let child = Self::new(depth + 1, start, *old);
+                    node.store(i, CharTableSlot::Node(Arc::clone(&child)));
+                    child
+                }
+            };
+            drop(node);
+            (current, depth, min_char) = (child, depth + 1, start);
+        }
     }
 
     fn set_range(handle: &CharTableNodeHandle, from: usize, to: usize, value: &CharTableSlot) {
@@ -1020,8 +1062,12 @@ impl CharTable {
                 return Ok(());
             }
         }
-        CharTableNode::validate_geometry(&self.root, 0, 0, from, to)?;
-        CharTableNode::set_range(&self.root, from, to, &value);
+        if from == to {
+            CharTableNode::set_char(&self.root, from, value)?;
+        } else {
+            CharTableNode::validate_geometry(&self.root, 0, 0, from, to)?;
+            CharTableNode::set_range(&self.root, from, to, &value);
+        }
         if from < 128 { self.reset_ascii(); }
         Ok(())
     }
