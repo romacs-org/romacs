@@ -125,6 +125,26 @@
     (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
       (should (= (romacs-agent-seen-seq (romacs-agent--load dir)) 5)))))
 
+(ert-deftest romacs-agent-state-never-started-is-seen-in-its-chat ()
+  ;; Its chat shows why, and showing it is seeing it: no news left behind.
+  (romacs-agent-state-tests--recorded (:state 'detached :seen-seq 0)
+    (let ((buffer (generate-new-buffer " *romacs-agent-state-chat*"))
+          (window (selected-window)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (romacs-agent-chat-mode)
+              (setq romacs-agent-ui--session session romacs-agent-ui--end (point-marker)))
+            (setf (romacs-agent-buffer session) buffer)
+            (set-window-buffer window buffer)
+            (let ((romacs-agent-event-functions (list #'romacs-agent-ui--render)))
+              (romacs-agent--raise session '(:type unstarted :seq 1 :text "its supervisor never started")))
+            (should (string-match-p "^! its supervisor never started$"
+                                    (with-current-buffer buffer (buffer-string))))
+            (should-not (romacs-agent-unseen-p session))
+            (should (eq (romacs-agent-ui--state-key session) 'unstarted)))
+        (kill-buffer buffer)))))
+
 (defun romacs-agent-state-tests--journal (dir)
   "A journal in DIR of one turn, its end at seq 2."
   (let ((coding-system-for-write 'utf-8-unix))

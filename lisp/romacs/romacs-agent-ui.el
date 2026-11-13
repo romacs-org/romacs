@@ -684,6 +684,10 @@ or a repeat."
                  (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
                (romacs-agent-ui--footer session event)
                (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
+        ;; Its supervisor never came up: an end, failed, seen as `done' is.
+        ('unstarted
+         (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error)
+         (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ('status
          (unless (member (plist-get event :text) '("requesting" "compacting" "detached" "selection armed"))
            (romacs-agent-ui--line session event (format "  · %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
