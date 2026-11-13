@@ -1,0 +1,12 @@
+[package]
+name = "romacs-vm-test-modules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "romacs-vm's test files as the modules of its one test executable, listed at build time"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

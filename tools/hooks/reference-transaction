@@ -2,7 +2,7 @@
 # Only the merge queue (romacs-merge) and a release move the development and
 # release branches; a release sets ROMACS_LAND=1.  Any other session works on
 # its own branch in its own worktree and lands it through the merge queue.
-# `tools/derived setup` installs this hook.
+# `tools/git-setup` installs this hook.
 [ "$1" = prepared ] || exit 0
 [ "${ROMACS_LAND:-}" = 1 ] && exit 0
 # Packing refs (git pack-refs, run by gc and maintenance) moves a ref between
