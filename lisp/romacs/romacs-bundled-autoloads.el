@@ -88,11 +88,29 @@ as package.el leaves it."
     (nreverse forms)))
 
 (defun romacs-bundled-autoloads-forms (root)
-  "The autoload forms of the bundled packages under ROOT, in order."
-  (let* ((dirs (romacs-bundled-autoloads-directories root))
-         (files (mapcar #'romacs-bundled-autoloads--files dirs))
-         (loaddefs--load-error-files (apply #'append files)))
-    (apply #'append (seq-mapn #'romacs-bundled-autoloads--forms dirs files))))
+  "The autoload forms of the bundled packages under ROOT, in order.
+The scan keeps its state to itself, as a world build, which refuses a
+write to what startup read, needs: in a buffer of its own, it binds the
+coding its reads set, the hooks its buffers' Lisp mode would run or add
+to (it needs Lisp syntax, not the mode's hooks), and the message log its
+notices would go to; the notices are not shown either."
+  (with-temp-buffer
+    ;; Bound here, where none is local, so each binding is the default
+    ;; every scanned buffer sees.
+    (let* ((last-coding-system-used nil)
+           (buffer-file-coding-system buffer-file-coding-system)
+           (emacs-lisp-mode-hook nil)
+           (lisp-data-mode-hook nil)
+           (prog-mode-hook nil)
+           (change-major-mode-after-body-hook nil)
+           (after-change-major-mode-hook nil)
+           (before-change-functions nil)
+           (message-log-max nil)
+           (inhibit-message t)
+           (dirs (romacs-bundled-autoloads-directories root))
+           (files (mapcar #'romacs-bundled-autoloads--files dirs))
+           (loaddefs--load-error-files (apply #'append files)))
+      (apply #'append (seq-mapn #'romacs-bundled-autoloads--forms dirs files)))))
 
 (dolist (form (romacs-bundled-autoloads-forms
                (expand-file-name "../.." (file-name-directory (or load-file-name buffer-file-name)))))
