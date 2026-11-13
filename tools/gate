@@ -471,6 +471,29 @@ def print_notices(run_dir):
             print(f'gate: NOTICE {line}', flush=True)
 
 
+def folded_tests(src):
+    """{(package, file)}: the test files of SRC that are modules of their
+    package's `all` target, which runs their tests (tools/lib/test_modules.py).
+    Each is a test target of its own too, which a run then leaves out."""
+    listed = out(sys.executable, '-B', 'tools/lib/test_modules.py', 'modules', cwd=src).decode()
+    return {tuple(line.split()) for line in listed.splitlines()}
+
+
+def test_targets(metadata, packages, folded):
+    """Cargo's target selection for a build of PACKAGES' tests without the
+    FOLDED test targets: the libraries, the binaries and every other test
+    target by name. Examples, which `cargo test` compiles and never runs,
+    are left out with them. Cargo matches a test's name in every package, so
+    a FOLDED target that shares its name with another package's test is
+    still built; the caller keeps it out of the run."""
+    if not folded:
+        return []
+    names = {target['name'] for package in metadata['packages'] if package['name'] in packages
+             for target in package['targets']
+             if 'test' in target['kind'] and (package['name'], target['name']) not in folded}
+    return ['--lib', '--bins'] + [arg for name in sorted(names) for arg in ('--test', name)]
+
+
 def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
     """Build every workspace test target once, then run disjoint suites."""
     SHORT.mkdir(parents=True, exist_ok=True)
@@ -497,7 +520,7 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         config.write_text('[profile.default]\n'
                           'slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }\n'
                           '[[profile.default.overrides]]\n'
-                          "filter = 'test(=parity_ratchet_census_warm)'\n"
+                          "filter = 'test(/(^|::)parity_ratchet_census_warm$/)'\n"
                           'slow-timeout = { period = "1200s", terminate-after = 1, grace-period = "0s" }\n'
                           '[[profile.default.overrides]]\n'
                           "filter = 'test(=batch_probes_scale_within_their_budgets)'\n"
@@ -509,12 +532,15 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
             sh('cargo', 'metadata', '--format-version', '1', *flags, stdout=f, env=env(src), cwd=src)
         suites.update(workspace_suites(json.loads((run_dir / 'cargo-metadata.json').read_text())))
         pkgs = [a for packages in suites.values() for p in packages for a in ('-p', p)]
+        folded = folded_tests(src)
+        targets = test_targets(json.loads((run_dir / 'cargo-metadata.json').read_text()),
+                               {p for packages in suites.values() for p in packages}, folded)
         features = (['--features', 'romacs-display-runtime/video']
                     if sys.platform == 'linux' and 'romacs-display-runtime' in suites.get('display', [])
                     else [])
         subject_tool = src / 'test/gnu/tools/gate_vacuity.py'
         subject_source = out(sys.executable, '-B', str(subject_tool), 'source', cwd=src, env=env(src))
-        build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *features,
+        build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *targets, *features,
                          '--list-type', 'binaries-only', '--message-format', 'json']
         with open(run_dir / 'all-binaries.json', 'w') as f:
             rc = subprocess.call(build_command, stdout=f, env=env(src), cwd=src)
@@ -528,7 +554,8 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
             binaries = run_dir / f'{suite}-binaries.json'
             # Nextest IDs are PACKAGE for a lib and PACKAGE::TARGET otherwise.
             selected = {k: b for k, b in built['rust-binaries'].items()
-                        if b['binary-id'].split('::', 1)[0] in packages}
+                        if b['binary-id'].split('::', 1)[0] in packages
+                        and tuple(b['binary-id'].split('::', 1)) not in folded}
             if {b['binary-id'].split('::', 1)[0] for b in selected.values()} != set(packages):
                 raise ValueError(f'gate: missing binaries for {suite}')
             binaries.write_text(json.dumps(dict(built, **{'rust-binaries': selected})))
@@ -642,6 +669,14 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
               'romacs-gui-tests::harness_contract')
 
 
+def test_file(binary):
+    """Nextest filter for the tests of the test file BINARY, `PACKAGE::FILE`:
+    its own target, and its module of the package's `all` target
+    (tools/lib/test_modules.py). A run builds one of the two."""
+    package, file = binary.split('::')
+    return f'binary_id({binary}) | (binary_id({package}::all) & test(/^{file}::/))'
+
+
 def changed_filter(wt, base='beta'):
     """Nextest filter for the small gate: `filter_for` what changed since BASE,
     or since origin/BASE in a clone that has only the remote-tracking trunk."""
@@ -669,8 +704,8 @@ def filter_for(names):
         if name.startswith(('doc/', 'tools/tests/')) or name.endswith('.md') or name in ('tools/gate', 'Makefile'):
             continue
         m = re.match(r'crates/([^/]+)/tests/([^/]+)\.rs$', name)
-        if m:                                   # a test binary, or a module of compat_all
-            terms.add(f'binary_id({m[1]}::{m[2]}) | test(/^{m[2]}::/)')
+        if m:
+            terms.add(test_file(f'{m[1]}::{m[2]}'))
             continue
         m = re.match(r'crates/[^/]+/src/(.+)\.rs$', name)
         if not m:
@@ -680,7 +715,7 @@ def filter_for(names):
             return None                           # crate root changed
         leaf = re.sub(r'_test$', '', parts[-1])
         terms.add(f'test(/(^|::){re.escape(leaf)}(_test)?(::|$)/)')
-    return ' | '.join(sorted(terms) + [f'binary_id({binary})' for binary in STRUCTURAL])
+    return ' | '.join(sorted(terms) + [test_file(binary) for binary in STRUCTURAL])
 
 
 def reuse(wt, args, group):
