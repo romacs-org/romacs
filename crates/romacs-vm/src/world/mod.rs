@@ -777,9 +777,14 @@ impl Vm {
 
     /// A use of the random state (root 5).
     pub(crate) fn fence_random(&self) {
-        if self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint() {
+        if self.random_fenced() {
             host::refuse("fence", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
         }
+    }
+
+    /// Whether a use of the random state now refuses the build (root 5).
+    pub(crate) fn random_fenced(&self) -> bool {
+        self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint()
     }
 }
 

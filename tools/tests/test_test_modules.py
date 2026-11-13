@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""tools/lib/test_modules.py: the module list is the directory's files less
-the standalone ones, a stale list is rewritten, and `equal` passes only when
-`all` holds exactly the tests of its files."""
+"""tools/lib/test_modules.py: the modules are the directory's files less the
+standalone ones, and `equal` passes only when `all` holds exactly the tests of
+its files."""
 import shutil
 import sys
 import tempfile
@@ -10,8 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 import test_modules  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def suite(name, tests, kind='test', package='romacs-vm'):
@@ -34,21 +32,9 @@ class TestModulesTest(unittest.TestCase):
             (self.tests / f'{name}.rs').write_text('')
         (self.tests / 'all/standalone.txt').write_text('# why\nalone: it has an allocator of its own\n')
 
-    def test_the_checked_in_list_is_current(self):
-        for name, directory in test_modules.PACKAGES.items():
-            text = test_modules.modules_text(test_modules.package(ROOT, name)[0])
-            self.assertEqual((ROOT / directory / 'tests/all/modules.rs').read_text(), text)
-
     def test_modules_are_the_files_less_the_standalone_ones(self):
         self.assertEqual(test_modules.package(self.root, 'romacs-vm'), (['a', 'b'], {'alone': 'it has an allocator of its own'}))
         self.assertEqual(test_modules.targets(self.root, 'romacs-vm'), ['--lib', '--bins', '--test', 'all', '--test', 'alone'])
-
-    def test_a_stale_list_is_rewritten_once(self):
-        self.assertEqual(test_modules.write(self.root), ['crates/romacs-vm/tests/all/modules.rs'])
-        self.assertEqual(test_modules.write(self.root), [])
-        (self.tests / 'c.rs').write_text('')
-        self.assertEqual(test_modules.write(self.root), ['crates/romacs-vm/tests/all/modules.rs'])
-        self.assertIn('#[path = "../c.rs"]\nmod c;\n', (self.tests / 'all/modules.rs').read_text())
 
     def test_a_standalone_entry_needs_a_file_and_a_reason(self):
         (self.tests / 'all/standalone.txt').write_text('gone: it was here\n')

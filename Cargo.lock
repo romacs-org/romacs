@@ -3690,6 +3690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-keeper"
+version = "0.0.20"
+dependencies = [
+ "libc",
+ "romacs-record",
+ "rustix",
+]
+
+[[package]]
 name = "romacs-layout"
 version = "0.0.20"
 dependencies = [
@@ -3724,6 +3733,14 @@ dependencies = [
  "romacs-infra",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "romacs-record"
+version = "0.0.20"
+dependencies = [
+ "memmap2",
+ "rustix",
 ]
 
 [[package]]
@@ -3865,12 +3882,15 @@ dependencies = [
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",
+ "romacs-keeper",
  "romacs-layout",
  "romacs-layout-input",
  "romacs-logo",
+ "romacs-record",
  "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
+ "romacs-vm-test-modules",
  "ropey",
  "rustc-hash 2.1.3",
  "rustix",
@@ -3895,15 +3915,18 @@ version = "0.0.20"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
+ "libc",
  "romacs-display-protocol",
  "romacs-display-runtime",
  "romacs-face",
  "romacs-font",
  "romacs-grammars",
  "romacs-imaging",
+ "romacs-keeper",
  "romacs-layout",
  "romacs-layout-input",
  "romacs-logo",
+ "romacs-record",
  "romacs-renderer-wgpu",
  "romacs-snapshot",
  "romacs-test-fonts",
@@ -3914,6 +3937,10 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
 ]
+
+[[package]]
+name = "romacs-vm-test-modules"
+version = "0.0.20"
 
 [[package]]
 name = "ropey"
