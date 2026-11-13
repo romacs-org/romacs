@@ -349,6 +349,11 @@ disabled.
 (register-definition-prefixes "romacs-find-file" '("auto-mode-alist" "file-name-history" "find-file-" "romacs-find-file-"))
 
 
+;;; Generated autoloads from romacs-follow.el
+
+(register-definition-prefixes "romacs-follow" '("romacs-follow-gnu-file"))
+
+
 ;;; Generated autoloads from romacs-fontify.el
 
 (register-definition-prefixes "romacs-fontify" '("romacs-fontify-"))
@@ -403,6 +408,11 @@ This function is part of the `fzf' completion style.
 ;;; Generated autoloads from romacs-install-command.el
 
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
+
+
+;;; Generated autoloads from romacs-json.el
+
+(register-definition-prefixes "romacs-json" '("json-read" "romacs-json--"))
 
 
 ;;; Generated autoloads from romacs-key-hint.el
