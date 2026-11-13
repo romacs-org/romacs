@@ -30,9 +30,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -114,71 +112,31 @@ RETIRE_INIT = '''(blink-cursor-mode -1)
 RETIRE_STALL = 30
 
 
-def session_env(root, args, init=None):
-    """A private HOME/XDG tree under ROOT, with init.el (INIT, or the
-    timers' probes) installed: (env, state, config)."""
-    home, work, config = [root / name for name in ('home', 'work', 'config')]
-    for directory in (home, work, config, work / 'gnosis'):
-        directory.mkdir()
-    state = work / 'timers-state.el'
-    (home / 'config/romacs').mkdir(parents=True)
-    (home / 'config/romacs/init.el').write_text(
-        init or INIT.format(state=json.dumps(str(state)), gnosis=json.dumps(str(work / 'gnosis') + '/')))
-    (config / 'rc.xml').write_text(live.RC_XML)
-    path = os.environ.get('PATH', '/usr/bin:/bin')
-    env = {'PATH': f'{args.tools}:{path}' if args.tools else path,
-           'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-           'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-           'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-           'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-           'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-           'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
-           'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '14'}
-    for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GATE_FONTCONFIG'):
-        if key in os.environ:
-            env[key] = os.environ[key]
-    if 'ROMACS_GATE_FONTCONFIG' in env:
-        env['FONTCONFIG_FILE'] = env['ROMACS_GATE_FONTCONFIG']
-    return env, state, work, config
-
-
 @contextlib.contextmanager
 def session(binary, args, output, name, report, trace, init=None, extra_env=None):
-    """A private compositor and `BINARY --loadup' (with --trace-scene when
-    TRACE) on INIT and EXTRA_ENV, logging to OUTPUT/NAME.stderr: yields
-    (env, state, process, log)."""
-    compositor = keyboard = process = None
-    try:
-        with tempfile.TemporaryDirectory(prefix='timers-live-') as temporary:
-            root = Path(temporary)
-            root.chmod(0o700)
-            env, state, work, config = session_env(root, args, init)
-            env.update(extra_env or {})
-            log_path = output / f'{name}.stderr'
-            with (output / f'{name}-compositor.log').open('w') as compositor_log, log_path.open('w') as log:
-                compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
-                                              env=env, stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                socket = root / env['WAYLAND_DISPLAY']
-                assert 'DISPLAY' not in env and socket.is_socket() and socket.parent == root
-                report.setdefault('display', {})[name] = {'wayland_socket': str(socket), 'compositor_pid': compositor.pid}
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
-                               env=env, check=True, timeout=15)
-                # A held key gives the seat a keyboard before the client starts.
-                keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
-                time.sleep(.3)
-                process = subprocess.Popen([str(binary), '--loadup'] + (['--trace-scene'] if trace else []), env=env,
-                                           cwd=work, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-                child_env = Path(f'/proc/{process.pid}/environ').read_bytes().split(b'\0')
-                report['display'][name]['client_wayland_display'] = next(
-                    (e.decode() for e in child_env if e.startswith(b'WAYLAND_DISPLAY=')), None)
-                report['display'][name]['client_has_display'] = any(e.startswith(b'DISPLAY=') for e in child_env)
-                yield env, state, process, log_path
-    finally:
-        live.stop(process)
-        live.stop(keyboard)
-        live.stop(compositor)
+    """A live session (live.session) of `BINARY --loadup' (with --trace-scene
+    when TRACE) on INIT, or the timers' probes, and EXTRA_ENV, logging to
+    OUTPUT/NAME.stderr: yields (env, state, process, log)."""
+    state = None
+
+    def prepare(s):
+        nonlocal state
+        (s.work / 'gnosis').mkdir()
+        state = s.work / 'timers-state.el'
+        (s.home / 'config/romacs/init.el').write_text(
+            init or INIT.format(state=json.dumps(str(state)), gnosis=json.dumps(str(s.work / 'gnosis') + '/')))
+
+    with live.session(binary, output, prefix='timers-live-', args=('--loadup', '--trace-scene') if trace else ('--loadup',),
+                      env={'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '14', **(extra_env or {})},
+                      tools=args.tools, prepare=prepare, log=f'{name}.stderr', compositor_log=f'{name}-compositor.log') as s:
+        socket = s.root / s.env['WAYLAND_DISPLAY']
+        assert 'DISPLAY' not in s.env and socket.is_socket()
+        child_env = Path(f'/proc/{s.process.pid}/environ').read_bytes().split(b'\0')
+        report.setdefault('display', {})[name] = {
+            'wayland_socket': str(socket), 'compositor_pid': s.processes[0].pid,
+            'client_wayland_display': next((e.decode() for e in child_env if e.startswith(b'WAYLAND_DISPLAY=')), None),
+            'client_has_display': any(e.startswith(b'DISPLAY=') for e in child_env)}
+        yield s.env, state, s.process, s.log
 
 
 def keys(env, *parts):

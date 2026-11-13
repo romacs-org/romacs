@@ -1,19 +1,15 @@
 use std::time::{Duration, Instant};
 use romacs_display_runtime::thread_comm::InputEvent;
 
-pub fn take_pending(
-    pending: &mut std::collections::VecDeque<InputEvent>,
-) -> std::collections::vec_deque::IntoIter<InputEvent> {
-    std::mem::take(pending).into_iter()
-}
-
-pub fn take_batch(
-    pending: &mut std::collections::VecDeque<InputEvent>,
+/// A pass's input: the AVAILABLE events of INCOMING that arrived before it
+/// join the loop's QUEUE; later arrivals wait for the next pass, so input
+/// that keeps coming never postpones a dirty presentation.
+pub fn admit(
+    queue: &mut std::collections::VecDeque<InputEvent>,
     incoming: impl Iterator<Item = InputEvent>,
     available: usize,
-) -> std::collections::vec_deque::IntoIter<InputEvent> {
-    pending.extend(incoming.take(available));
-    take_pending(pending)
+) {
+    queue.extend(incoming.take(available));
 }
 
 /// How long a submitted paint may go undrawn before the render counts as
@@ -32,14 +28,16 @@ pub struct Presentation {
     /// The paint submitted and not yet drawn, and when the oldest undrawn
     /// paint it stands for was submitted.
     in_flight: Option<(u64, Instant)>,
-    /// The presentation last retired and when it rendered, until taken.
-    retired: Option<(u64, Instant)>,
+    /// The presentations retired and when each rendered, in order, until
+    /// taken: a prompt's settled paint and the loop's next may both retire
+    /// before the loop takes them, and the trace needs each.
+    retired: Vec<(u64, Instant)>,
     /// The current stall has been reported.
     warned: bool,
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: None, warned: false } }
+    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: Vec::new(), warned: false } }
 
     pub fn changed(&mut self) { self.dirty = true; }
 
@@ -144,14 +142,14 @@ impl Presentation {
     pub fn completed(&mut self, presentation: u64, at: Instant) {
         if let Some((actual, _)) = self.in_flight.filter(|(actual, _)| *actual <= presentation) {
             self.in_flight = None;
-            self.retired = Some((actual, at));
+            self.retired.push((actual, at));
             self.warned = false;
         }
     }
 
-    /// The presentation retired since the last call, and when it rendered:
+    /// The presentations retired since the last call, and when each rendered:
     /// the latency trace's keys for it are complete.
-    pub fn take_retired(&mut self) -> Option<(u64, Instant)> { self.retired.take() }
+    pub fn take_retired(&mut self) -> Vec<(u64, Instant)> { std::mem::take(&mut self.retired) }
 
     /// How long to block for input while a paint is in flight: until it
     /// would count as stalled, so the stall is told when it begins. The
@@ -239,8 +237,9 @@ mod tests {
         let mut pending = std::collections::VecDeque::new();
         let mut presentation = Presentation::new();
         let mut arrivals = std::iter::repeat_with(|| native_key(97));
-        let batch = take_batch(&mut pending, &mut arrivals, 3);
-        assert_eq!(batch.count(), 3);
+        admit(&mut pending, &mut arrivals, 3);
+        assert_eq!(pending.len(), 3);
+        pending.clear();
         presentation.changed();
         pending.push_back(arrivals.next().unwrap());
         let mut submissions = 0;
@@ -261,8 +260,7 @@ mod tests {
         let mut presentation = Presentation::new();
         presentation.submitted(1, Instant::now());
         let collections = vm.heap_stats().collections;
-        let mut pending = ['a' as i64, 'Δ' as i64, 2, 'λ' as i64].into_iter().map(native_key).collect();
-        for event in take_pending(&mut pending) {
+        for event in ['a' as i64, 'Δ' as i64, 2, 'λ' as i64].into_iter().map(native_key) {
             let event = crate::native::translate(event).unwrap();
             let outcome = presentation.command(&mut vm, &mut commands, event).unwrap().unwrap();
             assert!(!outcome.bell, "{outcome:?}");

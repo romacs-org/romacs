@@ -8,7 +8,9 @@ lisp/romacs/romacs-fontify.el snapshots the buffer and a worker fontifies it,
 streaming its properties) or `session' (nil: jit-lock fontifies each
 shown chunk in the session, as GNU's redisplay does).  After --wait
 seconds the harness types --keys F9 keys --gap seconds apart, each moving
-point 50 lines (redisplay scrolls to it and fontifies what it shows).
+point 50 lines (redisplay scrolls to it and fontifies what it shows:
+just enough to show it, under Romacs's `scroll-conservatively' 101, not
+the recentring of GNU's default 0).
 
 Lisp hooks stamp, with `float-time', every `jit-lock-fontify-now' call and
 its duration (the session's own fontification cost, or the cost of putting
@@ -38,7 +40,7 @@ import time
 import perkey_live as perkey
 
 ROOT = Path(__file__).resolve().parents[3]
-FILES = [ROOT / 'gnu-tests/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/gnu/subr.el']
+FILES = [ROOT / 'test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/gnu/subr.el']
 
 # F9 moves point 50 lines: redisplay scrolls to show it and fontifies what
 # comes into view.  (Romacs's `scroll-up-command' refuses text with form

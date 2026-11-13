@@ -15,7 +15,7 @@ fn keymap_query_preserves_the_threaded_register_allocation() {
     vm.stack.shrink_to_fit();
     let registers = vm.stack.as_ptr();
     let capacity = vm.stack.capacity();
-    assert_eq!(vm.keymap_at_point(property).unwrap(), map);
+    assert!(vm.keymap_at_point(property).is_ok_and(|found| found == map));
     // A native leaf call cannot invalidate the interpreter's cached registers.
     assert_eq!(vm.stack.as_ptr(), registers);
     assert_eq!(vm.stack.capacity(), capacity);
@@ -520,4 +520,40 @@ fn refused_append_preserves_text_and_anchor_extent() {
     assert_eq!(buffer.anchors.resolve(end), Some(3));
     assert!(buffer.append_utf8("!"));
     assert_eq!(buffer.anchors.resolve(end), Some(4));
+}
+
+/// `text-property-any`, `text-property-not-all` and
+/// `next-single-property-change` cost the runs of the properties that
+/// decide the one asked about, not the characters nor every other
+/// property's runs: font-lock asks them over whole comments on each key.
+#[test]
+fn single_property_scans_cost_the_deciding_runs() {
+    let mut vm = Vm::new();
+    // 20,000 characters, 2,000 runs of `face', three stretches of `mark'.
+    vm.eval_source_raw(
+        "(progn (set-buffer (get-buffer-create \"scan\")) (insert (make-string 20000 ?x)) \
+           (dotimes (i 2000) (put-text-property (+ 1 (* i 10)) (+ 6 (* i 10)) 'face 'bold)) \
+           (put-text-property 5000 5010 'mark t) (put-text-property 9000 9001 'mark 'other) \
+           (put-text-property 15000 15003 'mark t))",
+    ).unwrap();
+    let probes = |vm: &mut Vm, source: &str, expected: &str| {
+        vm.variable_read_probes.set(0);
+        let value = vm.eval_source_raw(source).unwrap();
+        assert_eq!(vm.display(value).unwrap(), expected, "{source}");
+        vm.variable_read_probes.get()
+    };
+    for (source, expected) in [
+        ("(text-property-any 1 20001 'mark 'absent)", "nil"),
+        ("(text-property-any 1 20001 'mark 'other)", "9000"),
+        ("(text-property-any 5003 20001 'mark t)", "5003"),
+        ("(text-property-not-all 5000 20001 'mark t)", "5010"),
+        ("(text-property-not-all 1 4000 'mark nil)", "nil"),
+        ("(next-single-property-change 1 'mark)", "5000"),
+        ("(next-single-property-change 5010 'mark nil 9000)", "9000"),
+        ("(next-single-property-change 15003 'mark)", "nil"),
+        ("(next-single-property-change 15003 'absent nil 20001)", "20001"),
+    ] {
+        let count = probes(&mut vm, source, expected);
+        assert!(count <= 40, "{source}: {count} symbol reads for at most seven runs of `mark'");
+    }
 }

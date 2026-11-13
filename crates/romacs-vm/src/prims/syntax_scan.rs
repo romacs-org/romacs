@@ -1,12 +1,10 @@
 //! syntax.c's syntax queries and scanning primitives. A scan is a pure
 //! engine run (`crate::syntax_scan`); where GNU calls Lisp in the middle of
 //! one (`internal--syntax-propertize', `syntax-ppss'), the run stops, the
-//! engine performs the call, and the scan runs again from its arguments,
-//! which wait with the answers so far in the continuation's registers.
-//! `parse-partial-sexp' goes on where it stopped, from the state it stopped
-//! in (the scan's memory), reading nothing twice, as GNU's single scan does;
-//! the other scans start again where they started and replay the syntax the
-//! stopped run read, so they reach the stop exactly as GNU's did.
+//! engine performs the call, and the primitive runs again: its arguments
+//! wait with the call's answer in the continuation's registers, and the
+//! scan goes on where it stopped, from the state it stopped in (the scan's
+//! memory), reading nothing twice, as GNU's single scan does.
 use super::*;
 use crate::prim::{SyntaxOp as Op, SyntaxOutcome as Outcome};
 
@@ -58,8 +56,8 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
 defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
 fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
 
-/// Registers: the operation, its six arguments, the `syntax-ppss' answers,
-/// the scan's memory.
+/// Registers: the operation, its six arguments, the last `syntax-ppss`
+/// answer, the scan's memory.
 const ARGS: usize = 9;
 
 fn returned(_cx: &mut Leaf<'_>, value: Value, _saved: &[Value]) -> Next {
@@ -128,6 +126,6 @@ fn answered(cx: &mut Leaf<'_>, ppss: Value, saved: &[Value]) -> Next {
     let value = if start.integer_value().is_some() { start } else { saved[ARGS] };
     let answer = cx.cons(saved[ARGS], value);
     let mut saved = saved.to_vec();
-    saved[7] = cx.cons(answer, saved[7]);
+    saved[7] = cx.cons(answer, Value::NIL);
     run(cx, saved)
 }
