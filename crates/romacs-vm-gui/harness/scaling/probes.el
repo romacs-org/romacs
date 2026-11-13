@@ -589,7 +589,8 @@ scaling_live.py --record profiles a probe's body alone this way."
   "Hide the toasts start-up left (the startup message's): one hides
 `romacs-layer-toast-timeout' after it showed, which on a quick host lands
 in the first steps, redisplays its window in each of them and paints once
-as it goes."
+as it goes.  Called before a setup: the toasts a setup makes are what its
+probe measures (`toasts-clear', `toasts-follow')."
   (when (fboundp 'romacs-layer-toast-clear) (romacs-layer-toast-clear)))
 
 (defun scaling--mark (plist)
@@ -621,8 +622,8 @@ step, before the next step or the count's end."
     (run-with-idle-timer
      0.5 nil
      (lambda ()
-       (setq it (funcall (plist-get plist :setup) n))
        (scaling--quiet)
+       (setq it (funcall (plist-get plist :setup) n))
        (garbage-collect)
        (run-with-timer
         0.5 nil
