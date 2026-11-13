@@ -60,7 +60,7 @@
   "display_instructions_p90": 10900000
  },
  "chat-collected": {
-  "step_instructions": 176000000,
+  "step_instructions": 170000000,
   "display_instructions": 24200000,
   "display_conses": 174,
   "windows_rebuilt": 2,
