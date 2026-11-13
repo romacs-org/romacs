@@ -22,10 +22,17 @@ def setup(root):
     git(root, 'config', '--local', 'merge.romacs-floors.driver', 'python3 -B tools/lib/smells.py merge %O %A %B')
     git(root, 'config', '--local', 'merge.romacs-unsafe-floors.name', 'Merge the unsafe floors as exact counts')
     git(root, 'config', '--local', 'merge.romacs-unsafe-floors.driver', 'python3 -B tools/lib/unsafe_census.py merge %O %A %B')
-    git(root, 'config', '--local', 'merge.romacs-host-allow.name', 'Merge the host allow-list entry by entry')
-    git(root, 'config', '--local', 'merge.romacs-host-allow.driver', 'python3 -B tools/lib/host_allow.py merge %O %A %B')
     git(root, 'config', '--local', 'alias.merge-derived', '!python3 tools/derived merge')
-    print('Installed local drivers and git merge-derived alias; no global config or hooks changed.')
+    hooks_path = git(root, 'config', 'core.hooksPath', check=False).stdout.strip()
+    if hooks_path:
+        print(f'Installed local drivers and git merge-derived alias; core.hooksPath is {hooks_path}, '
+              'so the reference-transaction hook is not installed.')
+        return
+    hook = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip()) / 'hooks/reference-transaction'
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_bytes((Path(__file__).resolve().parent / 'hooks/reference-transaction').read_bytes())
+    hook.chmod(0o755)
+    print(f'Installed local drivers, git merge-derived alias and the hook {hook}; no global config changed.')
 
 
 def require_staged_sources(root):

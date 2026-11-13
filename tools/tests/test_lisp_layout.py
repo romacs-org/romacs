@@ -34,7 +34,7 @@ class LispLayoutTests(unittest.TestCase):
             rf'''(?:\}}/lisp{tree}(?:/|\b)|\$(?:root|ROOT)/lisp{tree}(?:/|\b)|'''
             rf'''(?:ROOT|root)\s*/\s*['"]lisp{tree}(?:/|['"]))'''
         )
-        for directory in ('scripts', 'tools', 'crates', 'gnu-tests/tests'):
+        for directory in ('scripts', 'tools', 'crates', 'test/gnu/tests'):
             for parent, children, files in os.walk(ROOT / directory):
                 children[:] = [name for name in children if name not in ('target', '__pycache__')]
                 for name in files:
@@ -93,10 +93,9 @@ class LispLayoutTests(unittest.TestCase):
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU simple.el', source)
                 elif file == ROOT / 'lisp/romacs/romacs-keymap.el':
-                    # Derived from GNU src/keymap.c and src/keyboard.c, outside lisp/gnu/.
-                    self.assertIn(';; Copyright (C) 1985-1988, 1993-1995, 1998-2026 Free Software', source)
+                    # Derived from GNU src/keyboard.c, outside lisp/gnu/.
                     self.assertIn(';; Copyright (C) 1985-1989, 1993-1997, 1999-2026 Free Software Foundation,', source)
-                    self.assertIn('Adapted from GNU src/keymap.c', source)
+                    self.assertIn('Adapted from GNU src/keyboard.c', source)
                 elif file == ROOT / 'lisp/romacs/romacs-unidata.el':
                     # Derived from admin/unidata/unidata-gen.el, outside lisp/gnu/.
                     self.assertIn(';; Copyright (C) 2008-2026 Free Software Foundation, Inc.', source)

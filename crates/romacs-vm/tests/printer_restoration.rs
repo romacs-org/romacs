@@ -1,6 +1,8 @@
 //! Exact printer witnesses recorded from GNU 45b0f769. No class-only pins.
 use romacs_vm::Vm;
 use sha2::{Digest, Sha256};
+#[path = "support/own_test.rs"]
+mod own_test;
 
 fn cases() -> Vec<(&'static str, String)> {
     let fresh = format!("#^[nil nil test nil {}]", vec!["nil"; 64].join(" "));
@@ -74,7 +76,7 @@ fn property_cycles_without_circle_are_bounded_in_child() {
         return;
     }
     let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "property_cycles_without_circle_are_bounded_in_child", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "property_cycles_without_circle_are_bounded_in_child"), "--nocapture"])
         .env("ROMACS_PROPERTY_CYCLE_CHILD", "1").status().unwrap();
     assert!(status.success(), "property cycle child: {status}");
 }

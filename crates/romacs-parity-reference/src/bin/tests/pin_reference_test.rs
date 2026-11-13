@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "../../script_fixture.rs"]
+mod script_fixture;
+
 fn manifest() -> ReferenceManifest {
     ReferenceManifest {
         schema: "1".to_string(),
@@ -130,17 +133,14 @@ fn a_build_without_a_build_time_is_refused_not_given_the_current_time() {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let wrapper = dir.join("emacs");
-    std::fs::write(
+    script_fixture::write_script(
         &wrapper,
         format!(
             "#!/bin/sh\n[ \"$1 $2 $3\" = '--batch --no-site-file --eval' ] || exit 64\n\
              exec '{gnu}' --batch --no-site-file --eval '(setq emacs-build-time nil)' --eval \"$4\"\n"
-        ),
-    )
-    .unwrap();
-    let mut perm = std::fs::metadata(&wrapper).unwrap().permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
-    std::fs::set_permissions(&wrapper, perm).unwrap();
+        )
+        .as_bytes(),
+    );
     let got = build_time(&wrapper);
     let _ = std::fs::remove_dir_all(&dir);
     let error = got.expect_err("a nil emacs-build-time must be refused, never formatted as now");

@@ -103,6 +103,8 @@ impl Vm {
     pub fn world_reinit(&mut self) {
         // The environment lists, from this process's environment.
         self.environment_snapshot = Some(crate::environment::snapshot());
+        // HOST(slot:process-environment): rebuilds the environment lists from this process
+        // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
@@ -160,6 +162,9 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    // With the other counters of the process: what the VM stores from now
+    // on is stamped at or above the epoch its last collection ended at.
+    crate::epoch::raise(root.0.allocation.since);
     Some(*root)
 }
 

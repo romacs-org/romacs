@@ -4,11 +4,12 @@
 //! the wait is a plain blocking receive on that channel; the redisplay uses
 //! the same layout engine and presentation sequence as the outer loop.
 //!
-//! Shared state is per evaluator thread (Rc/RefCell): the outer loop parks
-//! the rest of its input batch here before it dispatches a command and takes
-//! back whatever the prompt did not consume afterwards, so keys typed ahead of
-//! a prompt reach it in order. A RefCell borrow held across a dispatch would
-//! panic the moment a prompt waits: a re-entry is loud, never silent.
+//! Shared state is per evaluator thread (Rc/RefCell). Its queue is the outer
+//! loop's only one, so keys typed ahead of a prompt reach it in order, and a
+//! key any read took from the channel (an `input-pending-p` in a redisplay,
+//! the look a collection takes) stays queued for the loop. A RefCell borrow
+//! held across a dispatch would panic the moment a prompt waits: a re-entry
+//! is loud, never silent.
 use romacs_display_runtime::paint_host::PaintSender;
 use romacs_display_runtime::thread_comm::InputEvent;
 use romacs_vm::{HostEvent, HostFrame, HostInput};
@@ -20,7 +21,8 @@ use std::time::Duration;
 
 #[derive(Default)]
 pub struct Shared {
-    /// Events received but not yet dispatched (the outer batch's remainder).
+    /// Events received but not yet dispatched: the outer loop's one input
+    /// queue (main.rs `queue`), which every read takes from and adds to.
     pub pending: VecDeque<InputEvent>,
     /// Last presentation id submitted, by either loop.
     pub presentation: u64,
@@ -35,6 +37,9 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
+    /// Under --trace-latency, the key a paint carries until it is drawn:
+    /// its presentation and timings (`KeyPaint`).
+    pub key_paint: Option<KeyPaint>,
     /// The prompt's last painted frame, its selected window, presentation,
     /// window ends and text animations: an unchanged redisplay answers
     /// these again.
@@ -183,20 +188,31 @@ fn forget_window(shared: &mut Shared) {
 }
 
 impl GuiHost {
-    /// Move every queued channel event into `pending`, dropping the ones a
-    /// prompt ignores (releases, activations), so "pending" means a real event.
+    /// Move every queued channel event into `pending`, in order. Each stays
+    /// for whoever handles it: a prompt's read skips what it ignores
+    /// (releases, activations), and the loop takes the clicks on its bars
+    /// that no read returns.
     fn drain(&mut self) {
-        let mut shared = self.shared.borrow_mut();
-        let available = self.sender.input().len();
-        shared.pending.extend(self.sender.input().try_iter().take(available));
-        let kept = std::mem::take(&mut shared.pending)
-            .into_iter()
-            .filter(|event| classify(event).is_some())
-            .collect();
-        shared.pending = kept;
+        take_arrivals(&mut self.shared.borrow_mut(), self.sender.input());
     }
+}
 
+/// The events INPUT holds now, queued in SHARED after those already there.
+fn take_arrivals(shared: &mut Shared, input: &crossbeam_channel::Receiver<InputEvent>) {
+    let available = input.len();
+    shared.pending.extend(input.try_iter().take(available));
+}
 
+/// Whether SHARED's queue holds input a read returns: GNU's
+/// `input-pending-p`, which counts no special event and nothing a read
+/// skips. A closed frame is not repainted, so it counts too.
+fn input_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(|event| classify(event).is_some() && !special(event))
+}
+
+/// Whether SHARED's queue holds a key press that ends idleness.
+fn key_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
 }
 
 /// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
@@ -206,6 +222,52 @@ impl GuiHost {
 pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
     let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
     sender.software_adapter().map(|software| !software || forced())
+}
+
+/// A key read in a prompt and the paint that carries it, timed until the
+/// paint is drawn.
+#[derive(Debug)]
+pub struct KeyPaint {
+    presentation: u64,
+    read: std::time::Instant,
+    started: std::time::Instant,
+    laying: std::time::Instant,
+    submitted: std::time::Instant,
+    snapshot: Duration,
+}
+
+impl KeyPaint {
+    /// The key's latency, DRAWN being the presentation drawn AT (this paint's,
+    /// or a later one that superseded it).
+    fn tell(&self, drawn: u64, at: std::time::Instant) {
+        crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-key-latency","presentation":drawn,"units":"ns",
+            "command_ns":self.started.duration_since(self.read).as_nanos(),"redisplay_ns":self.submitted.duration_since(self.started).as_nanos(),
+            "key_to_render_ns":at.duration_since(self.read).as_nanos(),
+            // command_ns includes snapshot_ns; redisplay_ns is layout_ns and
+            // the submission; render_ns is from submission to drawn.
+            "snapshot_ns":self.snapshot.as_nanos(),"layout_ns":self.submitted.duration_since(self.laying).as_nanos(),
+            "render_ns":at.duration_since(self.submitted).as_nanos()}));
+    }
+}
+
+impl GuiHost {
+    /// Settle the prompt's paint in flight once the renderer has drawn it,
+    /// noting it (`prompt-drawn`, what harnesses wait on for a prompt on
+    /// screen). Never waits. True while a paint is still undrawn.
+    fn settle_drawn(&self) -> bool {
+        let mut shared = self.shared.borrow_mut();
+        let Some((presentation, _)) = shared.in_flight else { return false };
+        if self.sender.wait_for_render(presentation, Duration::ZERO).is_err() { return true; }
+        shared.in_flight = None;
+        let now = std::time::Instant::now();
+        shared.settled = Some((presentation, now));
+        // A key carried by this paint, or by one it superseded: on screen now.
+        if let Some(paint) = shared.key_paint.take_if(|paint| paint.presentation <= presentation) { paint.tell(presentation, now); }
+        if crate::diagnostics() {
+            crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-drawn","presentation":presentation}));
+        }
+        false
+    }
 }
 
 impl HostInput for GuiHost {
@@ -261,22 +323,21 @@ impl HostInput for GuiHost {
 
     fn images_behind(&mut self) -> bool {
         // Not while a paint is in flight (a stalled render is not spun on),
-        // nor with no window to paint.
+        // nor with no window to paint. A paint drawn since (its render woke
+        // this read) is settled first, so the next batch of images goes on.
+        self.settle_drawn();
         let shared = self.shared.borrow();
         self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
     }
 
     fn input_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        // A closed frame is not repainted.
-        shared.closed || shared.pending.iter().any(|event| !special(event))
+        input_waits(&self.shared.borrow())
     }
 
     fn key_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
+        key_waits(&self.shared.borrow())
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
@@ -302,29 +363,22 @@ impl HostInput for GuiHost {
         let laying = std::time::Instant::now();
         let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
         let submitted = std::time::Instant::now();
-        // Synchronous, like the oracle path: the prompt is on screen before
-        // the evaluator blocks for its key. A window the compositor does not
-        // draw never renders it: wait no longer than the paint in flight
-        // may stall, then leave this one in flight in its place. A drawn
-        // paint settles every earlier one.
+        // Handed to the renderer, never waited for: the evaluator goes on to
+        // its key while the frame draws, and a paint not yet drawn is
+        // replaced by this one (the command channel's mailbox). The paint
+        // stays in flight until a read sees it drawn (`settle_drawn'); a
+        // drawn paint settles every earlier one.
         let drawn = {
+            self.settle_drawn();
             let mut shared = self.shared.borrow_mut();
-            if let Some((earlier, _)) = shared.in_flight
-                && self.sender.wait_for_render(earlier, Duration::ZERO).is_ok() {
-                shared.in_flight = None;
-                shared.settled = Some((earlier, std::time::Instant::now()));
-            }
             let since = shared.in_flight.map_or(submitted, |(_, since)| since);
-            let deadline = since + crate::presentation::render_stall();
-            let drawn = self.sender.wait_for_render(presentation, deadline.saturating_duration_since(submitted)).is_ok();
+            let drawn = self.sender.wait_for_render(presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
-        if crate::diagnostics() { eprintln!(
-            "{}",
-            serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
+        if crate::diagnostics() { crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,"drawn":drawn,
                 "minibuffer":frame.frame.windows.iter().chain(frame.frame.children.iter().flat_map(|c| &c.windows))
                     .find(|w| w.snapshot.id == frame.minibuffer).map(|w| w.snapshot.text.utf8.clone()),
@@ -333,16 +387,12 @@ impl HostInput for GuiHost {
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
         ); }
-        // The key's command and hooks ran before this redisplay began.
-        if let Some(read) = self.shared.borrow_mut().key_read.take() {
-            let now = std::time::Instant::now();
-            eprintln!("{}", serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
-                "command_ns":started.duration_since(read).as_nanos(),"redisplay_ns":now.duration_since(started).as_nanos(),
-                "key_to_render_ns":now.duration_since(read).as_nanos(),
-                // command_ns includes snapshot_ns; redisplay_ns is layout_ns, the
-                // wait for the previous frame, and render_ns.
-                "snapshot_ns":frame.snapshot.as_nanos(),"layout_ns":submitted.duration_since(laying).as_nanos(),
-                "render_ns":now.duration_since(submitted).as_nanos()}));
+        // The key's command and hooks ran before this redisplay began; its
+        // latency is told when a paint carrying it is drawn (`settle_drawn').
+        let read = self.shared.borrow_mut().key_read.take();
+        if let Some(read) = read {
+            let paint = KeyPaint { presentation, read, started, laying, submitted, snapshot: frame.snapshot };
+            if drawn { paint.tell(presentation, std::time::Instant::now()); } else { self.shared.borrow_mut().key_paint = Some(paint); }
         }
         Ok(ends)
     }
@@ -354,6 +404,10 @@ impl HostInput for GuiHost {
     fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String> {
         // The descriptors this read watches, through every wait it makes.
         let processes = std::mem::take(&mut self.processes);
+        // A paint drawn while the prompt waited woke the wait as background
+        // work (`PaintSender::on_render'): each read settles it, so nothing
+        // polls for it.
+        self.settle_drawn();
         let event = next_event(&self.shared, self.sender.input(), &self.terminal_ready, timeout, &processes)?;
         if crate::tracing() && matches!(event, HostEvent::Key(_)) {
             self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
@@ -379,6 +433,36 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// Looking for input leaves every event queued, in order: a click on
+    /// the status bar is the loop's though no read returns it, and a key
+    /// release stays ahead of the key after it. Only what a read returns
+    /// is input. The look used to drop every event a prompt ignores.
+    #[test]
+    fn looking_for_input_keeps_every_event() {
+        use romacs_display_runtime::host_types::FrontendKey;
+        use romacs_display_runtime::thread_comm::{PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let click = InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x: 17.0, y: 765.0, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button: 1, pressed: false, modifiers: 0 } });
+        let key = |pressed| InputEvent::Key { key: FrontendKey::Character('a'), modifiers: 0, pressed, emacs_frame_id: 1 };
+        let (sender, input) = crossbeam_channel::unbounded();
+        let mut shared = Shared::default();
+        sender.send(click).unwrap();
+        sender.send(key(false)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(!input_waits(&shared) && !key_waits(&shared), "a click and a release are no input");
+        sender.send(key(true)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(input_waits(&shared) && key_waits(&shared));
+        let kinds: Vec<_> = shared.pending.iter().map(|event| match event {
+            InputEvent::PositionedPointer(_) => "click",
+            InputEvent::Key { pressed: false, .. } => "release",
+            InputEvent::Key { pressed: true, .. } => "key",
+            _ => "other",
+        }).collect();
+        assert_eq!(kinds, ["click", "release", "key"]);
     }
 
     /// A queued special event is not input: only an event a read returns is.

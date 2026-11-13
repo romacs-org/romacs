@@ -111,3 +111,32 @@ fn a_search_reads_its_variables_not_their_names() {
         "(0 0)"
     );
 }
+
+/// `proper-list-p` walks a list reading each cons once, with the cycle
+/// check `safe-length` has: the guard a mapping loop in place pays per
+/// element (lisp/romacs/romacs-compile.el).
+#[test]
+fn proper_list_p_reads_each_cons_once() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let mut cost = |n: usize| -> f64 {
+        let form = format!("(let ((l (make-list {n} 1))) (proper-list-p l) \
+            (let ((a (romacs-instructions))) (dotimes (_ 20) (proper-list-p l)) (and a (- (romacs-instructions) a))))");
+        let text = eval(&mut vm, &form);
+        text.parse().unwrap_or_else(|_| panic!("no instruction counter (romacs-instructions gave {text})"))
+    };
+    let per_element = (cost(20_000) - cost(2_000)) / (20.0 * 18_000.0);
+    // 38 when written; 198 when each cons was read twice through calls the walk
+    // could not inline. Pinned GNU's is 14.
+    assert!(per_element < 50.0, "proper-list-p costs {per_element:.1} instructions an element");
+    assert_eq!(eval(&mut vm, "(list (proper-list-p nil) (proper-list-p '(1 2 3)) (proper-list-p '(1 . 2)) (proper-list-p 5) \
+        (let ((c (list 1 2 3))) (setcdr (cdr (cdr c)) c) (proper-list-p c)) \
+        (let ((c (list 1 2 3))) (setcdr (cdr (cdr c)) (cdr c)) (proper-list-p c)) \
+        (safe-length '(1 2 . 3)) (let ((c (list 1 2))) (setcdr (cdr c) c) (safe-length c)))"),
+        "(0 3 nil nil nil nil 2 2)");
+    // Where the tortoise moves shows in the counts on a cycle: GNU's for a
+    // self-cycle after one cons, and for a ring just past the first move.
+    assert_eq!(eval(&mut vm, "(list (let ((c (list 0 1))) (setcdr (cdr c) (cdr c)) (safe-length c)) \
+        (let ((c (make-list 4097 1))) (setcdr (nthcdr 4096 c) c) (safe-length c)))"),
+        "(4097 12289)");
+}

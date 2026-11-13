@@ -50,9 +50,10 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              configuration directories two sessions.
   logging    a server keeps its own session record: errors with their
              functions, slow commands, its end.
-  home_keys  RET on the home page's other lines, real keys: a project
-             opens its newest, "more" shows every transcript, the help
-             line says how to reach a row.
+  board_keys  the agent board by real keys: RET on a project opens its
+             first row (a transcript where it has no thread), "more" shows
+             every transcript, a thread gone since the board was drawn is
+             said so and the board drawn again.
   chat_view  a chat keeps its transcript in view as turns come in.
   children   what runs under a session, in its header and C-c C-o menu,
              by real keys.
@@ -325,9 +326,11 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The home page names each session's instance.
-        home = parity_live.read_sexp(a.eval('(with-temp-buffer (romacs-agents-mode) (romacs-agent-ui--home) '
-                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
+        # The board names each session's instance.
+        home = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
+                                            '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
+                                            'nil (romacs-agent-board--view)) 120) '
+                                            '(buffer-substring-no-properties (point-min) (point-max))))'))
         shown = sorted({p for p in ('claude2', 'claude') if any(line.split('  ')[-1].startswith(p) or f' {p} ·' in line or line.rstrip().endswith(p) for line in home.splitlines())})
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
@@ -962,7 +965,7 @@ def gnosis(args, base):
         a.up()
         a.codex_instance()
         a.eval('(setq romacs-agent-default-provider "claude")')
-        helpers = Path(__file__).resolve().parents[3] / 'test/lisp/gnosis/gnosis-test-helpers.el'
+        helpers = Path(__file__).resolve().parents[3] / 'test/packages/gnosis/gnosis-test-helpers.el'
         ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
         with RomacsMcp.for_server(a, agent_tools=True) as mcp:
             offered = [t for t in mcp.tools() if t.startswith('gnosis_')]
@@ -2261,14 +2264,13 @@ def real(args, base):
         a.close()
 
 
-def home_keys(args, base):
-    """RET on the home page's lines that are no row, as real keys: on a
-    project, its newest session (by last activity, not by start, a
-    delegated one too) or, with
-    none, its newest transcript opens; on "◇ N more", every transcript is
-    shown; elsewhere a hint says n and p reach a row, and nothing opens; a
-    project whose newest session is gone since the page was drawn says so
-    and draws it again."""
+def board_keys(args, base):
+    """The agent board by real keys (C-c C-; a, RET): on a project, its
+    first row opens, the thread that wants the user most, else the newest
+    (a delegated one folds under its parent) or, with no thread, its
+    newest transcript; on "◇ N more", every transcript is shown and the
+    board stays; a thread gone since the board was drawn is said so, and
+    the board is drawn again."""
     a = Agents(args, base, 'hk')
     try:
         a.up()
@@ -2289,56 +2291,84 @@ def home_keys(args, base):
             until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 30, f'{prompt} answered')
             a.idle(sid)
             sids.append(sid)
-        # The third, delegated by the first (its row under the first's), is
-        # the most recently active; then the second.
+        # The third, delegated by the first, folds under it; of the two
+        # threads left, the second was active last.
         a.eval(f'(progn (setf (romacs-agent-options {a.s(sids[2])}) '
-               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) t)')
+               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) '
+               f'(romacs-agent--index {a.s(sids[2])}) t)')
         for sid, at in zip(sids, (now - 30, now - 20, now - 10)):
             a.eval(f'(progn (setf (romacs-agent-last-time {a.s(sid)}) {at}) t)')
-        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) (romacs-agents) '
-               '(delete-other-windows) t)')
+        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) t)')
         a.keyboard_ready()
-        shown = lambda: a.eval('(buffer-name (window-buffer (selected-window)))').strip('"')
+        board = '(get-buffer-window "*romacs-agents*" t)'
+        shown = lambda: a.eval(f'(and {board} (frame-visible-p (window-frame {board})) t)')
         # The session whose chat the selected window shows, if any.
         showing = lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
             '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
+        def open_board():
+            # A key typed as a layer hides or shows can be lost on a loaded
+            # host (seen: no command ran for it): keys must reach the frame,
+            # then the board, before one is relied on.
+            a.keyboard_ready()
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
+            until(lambda: shown() == 't', 15, 'board shown')
+            def moved():
+                before = a.log().count('"native_command":"romacs-agent-board-next"')
+                a.keys('-k', 'n')
+                time.sleep(.3)
+                return a.log().count('"native_command":"romacs-agent-board-next"') > before
+            until(moved, 30, 'keys reach the board')
+
         def ret_on(regexp):
-            """Point to the home page's line REGEXP matches; RET there."""
-            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+            """Point to the board's line REGEXP matches; RET there."""
+            a.eval(f'(with-selected-window {board} (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
             a.keys('-k', 'Return')
-            time.sleep(1)
+
+        def settled(read, want, seconds=15):
+            """READ's value once it is WANT, or its last after SECONDS: a
+            loaded host runs the key later than it is typed."""
+            end = time.time() + seconds
+            value = read()
+            while value != want and time.time() < end:
+                time.sleep(0.2)
+                value = read()
+            return value
 
         steps = {}
+        open_board()
         ret_on('^transcripts  ')
-        steps['project_without_session'] = parity_live.read_sexp(a.eval(
+        steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            '(list buffer-read-only (plist-get romacs-agent-history--item :path)))'))
+            '(list buffer-read-only (plist-get (bound-and-true-p romacs-agent-history--item) :path)))')) + [shown()],
+            ['t', str(codex_file), 'nil'])
+        open_board()
         ret_on('^work  ')
-        steps['project_with_session'] = showing()
+        steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
-            f'(mapcar (function romacs-agent-id) (gethash {lisp_text(sids[0])} (cdr (romacs-agent-ui--tree))))'))
-        ret_on('◇ [0-9]+ more')
-        steps['more'] = [shown(), a.eval('romacs-agents--all-history'),
-                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search "more  (h shows all)" (buffer-string)) t))')]
-        ret_on('^RET open')
-        steps['help_line'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
-        # The newest session forgotten after the page was drawn.
-        a.eval(f'(progn (remhash {lisp_text(sids[2])} romacs-agent--sessions) t)')
+            f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
+            '(romacs-agent-board-rows (hash-table-values romacs-agent--sessions) nil (romacs-agent-board--view))) '
+            ':children))'))
+        open_board()
+        ret_on('◇ +[0-9]+ more')
+        steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
+                                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
+                                ['t', 't', 'nil'])
+        # The newest thread forgotten after the board was drawn.
+        a.eval(f'(progn (remhash {lisp_text(sids[1])} romacs-agent--sessions) t)')
+        ret_on('say two')
+        steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
+                                ['t', 'That thread is gone: the board is drawn again'])
         ret_on('^work  ')
-        steps['gone'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
-        ret_on('^work  ')
-        steps['after_gone'] = showing()
+        steps['after_gone'] = settled(showing, sids[0])
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
-        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file)]
-                        and steps['project_with_session'] == sids[2] and steps['nested'] == [sids[2]]
-                        and steps['more'] == ['*romacs-agents*', 't', 'nil']
-                        and steps['help_line'][0] == '*romacs-agents*'
-                        and 'n and p' in (steps['help_line'][1] or '')
-                        and steps['gone'][0] == '*romacs-agents*' and 'gone' in (steps['gone'][1] or '')
-                        and steps['after_gone'] == sids[1])
+        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file), 'nil']
+                        and steps['project_with_session'] == [sids[1], 'nil'] and steps['nested'] == 1
+                        and steps['more'] == ['t', 't', 'nil']
+                        and steps['gone'][0] == 't' and 'gone' in (steps['gone'][1] or '')
+                        and steps['after_gone'] == sids[0])
         return result
     finally:
         a.close()
@@ -2717,13 +2747,16 @@ def select(args, base):
                           'starts': len(starts(one))}
 
         # Armed during a turn: nothing mid-turn, the message waits for both.
-        a.send(one, 'slow 15')
+        # The turn is held until it has been looked at.
+        gate = a.work / 'release-armed'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
+        gate.touch()
         until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
@@ -2740,8 +2773,10 @@ def select(args, base):
         result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
                              'in_place': replayed.find(divider) < replayed.find('after')}
 
-        # A restart of the server while armed: applied at the live turn's end.
-        a.send(one, 'slow 40')
+        # A restart of the server while armed: applied at the live turn's end,
+        # the turn held until the restored selection has been read.
+        gate = a.work / 'release-restart'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-haiku-5-5', 'high')
         a.restart()
@@ -2749,6 +2784,7 @@ def select(args, base):
         a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
         a.codex_instance()
         found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
+        gate.touch()
         settled(one, 30)
         result['restart_armed'] = {'found': found, 'options': options(one),
                                    'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
@@ -2795,10 +2831,14 @@ def select(args, base):
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
         # Codex: its next turn names them, once the running one ended.
-        run = a.start('slow 3', 'codex')
-        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        # Its turn under way, not starting (a selection made while it starts
+        # rightly reaches the first turn), and held until the next message waits.
+        gate = a.work / 'release-codex'
+        run = a.start(f'wait {gate}', 'codex')
+        until(lambda: a.state(run) == 'running', 15, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
+        gate.touch()
         until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
         runs = a.codex_runs()
         result['codex'] = {'first': runs[0]['model'] == 'gpt-6-luna', 'second': runs[-1]['model'] == 'gpt-6-luna',
@@ -2808,7 +2848,7 @@ def select(args, base):
         live, armed_r, div = result['live'], result['armed'], result['divider']
         result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
                         and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
-                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and armed_r['armed'] == 't' and '→ claude-opus-5-5 · high' in armed_r['header']
                         and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
                         and armed_r['written'][-3:] == [('control_request', 'set_model'),
                                                         ('control_request', 'apply_flag_settings'), ('user', None)]
@@ -2942,13 +2982,14 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--romacs', required=True)
+    # --binary: the name romacs-check gives every live harness its binary by.
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
@@ -2965,15 +3006,19 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe']:
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
+                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
-    return 0 if all(r.get('ok') is not False for r in results.values()) else 1
+    ok = all(r.get('ok') is not False for r in results.values())
+    # What romacs-check reads of a live harness.
+    (out / 'report.json').write_text(json.dumps({'status': 'PASS' if ok else 'FAIL',
+                                                 'failed': [n for n, r in results.items() if r.get('ok') is False]}))
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':

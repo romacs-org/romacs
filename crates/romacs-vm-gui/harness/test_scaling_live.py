@@ -1,6 +1,8 @@
 """scaling_live.py's pure parts: exponents, verdicts, overrides and parsing."""
 import math
+from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 import scaling_live as s
@@ -104,6 +106,32 @@ class Bounded(unittest.TestCase):
     def test_a_session_that_waits_without_working_is_refused_by_the_wall_clock(self):
         with self.assertRaisesRegex(s.Refused, r'sleep: no end after 2s, within 1s of CPU: hung'):
             s.bounded('sleep', [sys.executable, '-c', 'import time; time.sleep(60)'], 0.2)
+
+class World(unittest.TestCase):
+    """A measured session runs from its HOME's batch world: one that fell
+    back to source, which a session tells only with its diagnostics on, is
+    refused rather than measured."""
+    def stub(self, directory):
+        binary = Path(directory) / 'romacs'
+        binary.write_text('#!/bin/sh\n'
+                          'if [ "$ROMACS_DIAGNOSTICS" = 1 ]; then\n'
+                          '  echo \'romacs-world: {"mode":"source","reason":"stale"}\' >&2\n'
+                          'fi\n'
+                          'echo \'SCALING {"instructions": 1}\'\n')
+        binary.chmod(0o755)
+        return binary
+
+    def test_a_measured_session_from_source_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary, home = self.stub(directory), Path(directory)
+            with self.assertRaisesRegex(s.Refused, r'ran from source, not its world'):
+                s.batch(binary, home, '(scaling-run (quote p) 1)', 5, world=True)
+
+    def test_an_unmeasured_session_may_run_from_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary, home = self.stub(directory), Path(directory)
+            self.assertEqual(s.batch(binary, home, '(scaling-list)', 5), [{'instructions': 1}])
+
 
 if __name__ == '__main__':
     unittest.main()

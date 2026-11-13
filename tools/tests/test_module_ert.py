@@ -36,11 +36,12 @@ class ModuleERT(unittest.TestCase):
 
     def invoke(self, *args, binary=None, make=False):
         env = os.environ.copy()
-        # The fixture file runs in a moment. The make target boots a real
-        # session and runs a real module file: about 8 s of CPU, which a
-        # loaded host stretches past any short wall-clock bound. Its bound is
-        # what a hang would take, not what a quiet host takes (romacs#54).
-        file_timeout, run_timeout = ('300', 600) if make else ('10', 20)
+        # The fixture file runs in a moment on a quiet host; the make target
+        # boots a real session and runs a real module file, about 8 s of CPU.
+        # Both start the host, which a host at load 150 stretches past 20 s.
+        # Each bound is what a hang would take, not what a quiet host takes
+        # (romacs#54).
+        file_timeout, run_timeout = ('300', 600) if make else ('120', 240)
         env.update(MODULE='', SELECTOR='t', TEST_FILES='', EMACS_TEST_TIMEOUT=file_timeout,
                    ROMACS_TEST_BINARY=str(binary or self.binary))
         if make:

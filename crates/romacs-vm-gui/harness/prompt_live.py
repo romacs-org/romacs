@@ -19,10 +19,8 @@ Steps, typed into *scratch* in both editors:
 """
 import argparse
 import json
-import os
 from pathlib import Path
 import subprocess
-import tempfile
 import time
 
 import live_oracle as live
@@ -88,112 +86,115 @@ def cursor_pixels(png: Path, rows: int, rgb=(0x90, 0x99, 0xd9), tol=12) -> int:
 
 
 def wait_prompt(log: Path, text: str, timeout: float, seen: int) -> int:
-    """VM2 only: block until a prompt paint showing TEXT has RENDERED (the
-    evaluator waited for the renderer). Synchronisation, not evidence."""
+    """VM2 only: block until a prompt paint showing TEXT has RENDERED: drawn
+    as it was painted, or a later `prompt-drawn' (or drawn prompt paint) of
+    its presentation or one after it, since the evaluator never waits for
+    the renderer. Synchronisation, not evidence."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         lines = log.read_text(errors='replace').splitlines()
+        painted = None
         for n, line in enumerate(lines[seen:], seen):
-            if '"prompt-paint"' in line and json.loads(line).get('minibuffer') == text:
+            if not line.startswith('{'):
+                continue
+            record = json.loads(line)
+            if record.get('diagnostic') == 'prompt-paint' and record.get('minibuffer') == text:
+                if record.get('drawn'):
+                    return n + 1
+                painted = record['presentation']
+            elif painted is not None and record.get('presentation', 0) >= painted and (
+                    record.get('diagnostic') == 'prompt-drawn'
+                    or record.get('diagnostic') == 'prompt-paint' and record.get('drawn')):
                 return n + 1
         time.sleep(.05)
     raise TimeoutError(f'no prompt paint showing {text!r}')
 
 
+def command(args, editor: str):
+    """EDITOR's program and its arguments."""
+    if editor == 'gnu':
+        # Blinking off so a capture never lands in the cursor's off phase.
+        return '/usr/bin/emacs-32.0.50', ('-Q', '--eval', '(progn (setq inhibit-startup-screen t) (blink-cursor-mode -1))')
+    return args.binary, ('--geometry', f'{W}x{H}')
+
+
+def ready_line(log: Path, timeout: float, proc) -> dict:
+    """VM2's ready reply, the first line it writes to stdout, which shares
+    LOG with its stderr."""
+    deadline = time.time() + timeout
+    while time.time() < deadline and proc.poll() is None:
+        for line in log.read_text(errors='replace').splitlines():
+            if '"ready":' in line:
+                return json.loads(line)
+        time.sleep(.05)
+    raise TimeoutError('no ready reply')
+
+
 def run(args, editor: str) -> dict:
     out = args.output / editor
     out.mkdir(parents=True)
-    with tempfile.TemporaryDirectory(prefix='gpr-', dir=args.runtime_root) as temp:
-        runtime = Path(temp); runtime.chmod(0o700)
-        config = runtime / 'config'; config.mkdir(); (config / 'rc.xml').write_text(live.RC_XML)
-        home = runtime / 'home'; home.mkdir()
-        env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-               'XDG_RUNTIME_DIR': str(runtime), 'XDG_CONFIG_HOME': str(home / 'config'),
-               'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-               'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(runtime),
-               'WLR_BACKENDS': 'headless', 'WLR_HEADLESS_OUTPUTS': '1', 'WLR_RENDERER': 'pixman',
-               'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
-        comp = keyboard = proc = None
-        result = {'editor': editor, 'states': {}}
-        log = out / 'editor.stderr'
-        with (out / 'compositor.log').open('w') as clog, log.open('w') as elog:
-            try:
-                comp = subprocess.Popen([live.LABWC, '-C', str(config)], env=env, stdout=clog, stderr=clog)
-                deadline = time.time() + args.timeout
-                while not any(p.is_socket() for p in runtime.glob('wayland-*')):
-                    assert time.time() < deadline and comp.poll() is None, 'compositor did not start'
-                    time.sleep(.05)
-                env['WAYLAND_DISPLAY'] = next(p for p in runtime.glob('wayland-*') if p.is_socket()).name
-                subprocess.run([live.RANDR, '--output', 'HEADLESS-1', '--custom-mode', f'{W}x{H}'], env=env, check=True)
-                keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
-                                            stdout=elog, stderr=elog)
+    result = {'editor': editor, 'states': {}}
+    program, argv = command(args, editor)
+    with live.session(program, out, prefix='gpr-', args=argv, size=f'{W}x{H}', log='editor.stderr') as session:
+        env, proc, log = session.env, session.process, session.log
+        if editor == 'gnu':
+            time.sleep(4)
+        else:
+            ready = ready_line(log, args.timeout, proc)
+            assert ready.get('ready') is True, ready
+            time.sleep(1)
+        result['command'] = [program, *argv]
+        seen = 0
+
+        def shot(state, vm_text=None):
+            nonlocal seen
+            if editor == 'vm2' and vm_text is not None and not args.sleep_sync:
+                seen = wait_prompt(log, vm_text, args.timeout, seen)
+            else:
+                time.sleep(1.2)
+            png = out / f'{state}.png'
+            time.sleep(args.settle)
+            assert proc.poll() is None, f'{editor} exited {proc.returncode} before capture'
+            subprocess.run([args.grim, str(png)], env=env, check=True, timeout=10)
+            rows = args.gnu_rows if editor == 'gnu' else args.rows
+            block = cursor_block(png, rows)
+            # Both cursors may blink (VM2's renderer at 500 ms, GNU's
+            # blink-cursor-mode is off here): look across a full period.
+            blinks = [block]
+            for i in range(4):
                 time.sleep(.3)
-                if editor == 'gnu':
-                    # Blinking off so a capture never lands in the cursor's off phase.
-                    cmd = ['/usr/bin/emacs-32.0.50', '-Q', '--eval', '(progn (setq inhibit-startup-screen t) (blink-cursor-mode -1))']
-                    proc = subprocess.Popen(cmd, env=env, stdout=elog, stderr=elog)
-                    time.sleep(4)
-                else:
-                    cmd = [args.binary, '--geometry', f'{W}x{H}']
-                    proc = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=elog)
-                    ready = json.loads(proc.stdout.readline())
-                    assert ready.get('ready') is True, ready
-                    time.sleep(1)
-                result['command'] = cmd
-                seen = 0
+                extra = out / f'{state}.blink{i}.png'
+                subprocess.run([args.grim, str(extra)], env=env, check=True, timeout=10)
+                blinks.append(cursor_block(extra, rows))
+            seen_block = next((b for b in blinks if b is not None), None)
+            text = ocr_bottom(png, png, rows, block if block is not None else seen_block)
+            result['states'][state] = {'png': png.name, 'ocr': text, 'cursor_block_x': seen_block,
+                                       'cursor_blocks': blinks,
+                                       'cursor_px': cursor_pixels(png, rows), 'rows': rows}
 
-                def shot(state, vm_text=None):
-                    nonlocal seen
-                    if editor == 'vm2' and vm_text is not None and not args.sleep_sync:
-                        seen = wait_prompt(log, vm_text, args.timeout, seen)
-                    else:
-                        time.sleep(1.2)
-                    png = out / f'{state}.png'
-                    time.sleep(args.settle)
-                    assert proc.poll() is None, f'{editor} exited {proc.returncode} before capture'
-                    subprocess.run([args.grim, str(png)], env=env, check=True, timeout=10)
-                    rows = args.gnu_rows if editor == 'gnu' else args.rows
-                    block = cursor_block(png, rows)
-                    # Both cursors may blink (VM2's renderer at 500 ms, GNU's
-                    # blink-cursor-mode is off here): look across a full period.
-                    blinks = [block]
-                    for i in range(4):
-                        time.sleep(.3)
-                        extra = out / f'{state}.blink{i}.png'
-                        subprocess.run([args.grim, str(extra)], env=env, check=True, timeout=10)
-                        blinks.append(cursor_block(extra, rows))
-                    seen_block = next((b for b in blinks if b is not None), None)
-                    text = ocr_bottom(png, png, rows, block if block is not None else seen_block)
-                    result['states'][state] = {'png': png.name, 'ocr': text, 'cursor_block_x': seen_block,
-                                               'cursor_blocks': blinks,
-                                               'cursor_px': cursor_pixels(png, rows), 'rows': rows}
-
-                wtype(env, FORM1)
-                wtype(env, '-M', 'ctrl', '-k', 'x', '-k', 'e', '-m', 'ctrl')
-                shot('prompt', 'Name: ')
-                wtype(env, 'abc')
-                shot('typed', 'Name: abc')
-                wtype(env, '-k', 'Return')
-                shot('returned')
-                wtype(env, '-k', 'Return')
-                wtype(env, FORM2)
-                wtype(env, '-M', 'ctrl', '-k', 'x', '-k', 'e', '-m', 'ctrl')
-                wtype(env, 'zz')
-                shot('quit-prompt', 'Q: zz')
-                wtype(env, '-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
-                shot('quit')
-                result['alive'] = proc.poll() is None
-            finally:
-                live.stop(proc); live.stop(keyboard); live.stop(comp)
-        live.save_json(out / 'result.json', result)
-        return result
+        wtype(env, FORM1)
+        wtype(env, '-M', 'ctrl', '-k', 'x', '-k', 'e', '-m', 'ctrl')
+        shot('prompt', 'Name: ')
+        wtype(env, 'abc')
+        shot('typed', 'Name: abc')
+        wtype(env, '-k', 'Return')
+        shot('returned')
+        wtype(env, '-k', 'Return')
+        wtype(env, FORM2)
+        wtype(env, '-M', 'ctrl', '-k', 'x', '-k', 'e', '-m', 'ctrl')
+        wtype(env, 'zz')
+        shot('quit-prompt', 'Q: zz')
+        wtype(env, '-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        shot('quit')
+        result['alive'] = proc.poll() is None
+    live.save_json(out / 'result.json', result)
+    return result
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary', required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--runtime-root', default=tempfile.gettempdir())
     p.add_argument('--timeout', type=float, default=30)
     p.add_argument('--settle', type=float, default=.3)
     p.add_argument('--rows', type=int, default=26, help='bottom pixel rows read as the minibuffer line')
