@@ -158,8 +158,8 @@ impl Terminal {
         }.map_err(|e| e.to_string())?;
         let shell_pid = pty.child().id().cast_signed();
         let foreground = pty.file().try_clone().ok().map(|master| (master, shell_pid));
-        let shell_id = rustix::process::Pid::from_raw(shell_pid).ok_or("the shell has no pid")?;
-        let child = rustix::process::pidfd_open(shell_id, rustix::process::PidfdFlags::empty()).map_err(|e| e.to_string())?;
+        let shell = rustix::process::Pid::from_raw(shell_pid).ok_or("the shell has no pid")?;
+        let child = rustix::process::pidfd_open(shell, rustix::process::PidfdFlags::empty()).map_err(|e| e.to_string())?;
         let event_loop = EventLoop::new(term.clone(), listener, pty, true, false).map_err(|e| e.to_string())?;
         let channel = event_loop.channel();
         let handle = event_loop.spawn();
