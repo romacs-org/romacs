@@ -3800,6 +3800,7 @@ dependencies = [
  "romacs-vm",
  "ropey",
  "rustc-hash 2.1.3",
+ "rustix",
  "rustls",
  "rustls-webpki",
  "serde_json",
