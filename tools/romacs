@@ -43,7 +43,7 @@ if [ "${ROMACS_NO_BUILD:-}" != 1 ]; then
     # scripts require) from the working directory, not from --manifest-path.
     # Never inherit a lane's target dir or git overrides into the build.
     if ! (cd "$root" && env -u GIT_DIR -u GIT_WORK_TREE CARGO_TARGET_DIR="$target" \
-        cargo build --release --locked -p romacs-vm-gui) >"$target/romacs-build.log" 2>&1; then
+        cargo build --release --locked -p romacs-vm-gui -p romacs-keeper) >"$target/romacs-build.log" 2>&1; then
         tail -n 30 "$target/romacs-build.log" >&2
         echo "romacs: build failed; full log $target/romacs-build.log" >&2
         exit 1

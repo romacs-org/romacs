@@ -3548,3 +3548,24 @@ pub fn inspect_stop() {
     let ours = std::fs::symlink_metadata(&listener.path).is_ok_and(|meta| (meta.dev(), meta.ino()) == listener.identity);
     if ours { let _ = std::fs::remove_file(&listener.path); }
 }
+
+// The keeper (crate romacs-keeper): the process that holds this session's
+// kept descriptors and is its kept children's parent (`keeper.rs`).
+
+/// Attach to the keeper listening at PATH.
+///
+/// # Errors
+/// A refused effect, or the keeper's own refusal, in words.
+pub fn keeper_attach(path: &Path) -> Result<romacs_keeper::Client, String> {
+    effect(|| format!("keeper {}", bytes(path))).map_err(|e| e.to_string())?;
+    romacs_keeper::Client::attach(path)
+}
+
+/// Find CLIENT's keeper again where it listens, after its exec in place.
+///
+/// # Errors
+/// A refused effect, or no keeper of the same epoch there, in words.
+pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String> {
+    effect(|| format!("keeper {}", bytes(client.path()))).map_err(|e| e.to_string())?;
+    client.reconnect()
+}
