@@ -689,7 +689,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
 fn start_heap_file(len: usize) {
     // HOST(std::env::var_os): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
     // the image is adopted; not through host.rs, so that a process that asks for none records no
-    // host read; invisible to Lisp
+    // host read; no world holds it, and Lisp sees it only through romacs--arena-census
     if std::env::var_os("ROMACS_HEAP_FILE").is_some_and(|asked| asked == "1") {
         let _ = HEAP_FILE.set(file_heap::start(len));
     }
