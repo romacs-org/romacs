@@ -79,6 +79,8 @@ romacs-coordinate-contract = { path = "../romacs-coordinate-contract" }
 romacs-layout = { path = "../romacs-layout" }
 # Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
+# Lists tests/*.rs as the modules of the `all` target (tests/all/main.rs).
+romacs-vm-test-modules = { path = "../romacs-vm-test-modules" }
 
 [profile.release]
 opt-level = 3
