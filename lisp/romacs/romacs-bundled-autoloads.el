@@ -209,6 +209,11 @@ they are typed: any other key closes it and runs as usual.
 (register-definition-prefixes "romacs-coding" '("default-file-name-coding-system" "romacs-unsafe-coding" "select-safe-coding-system-interactively"))
 
 
+;;; Generated autoloads from romacs-commands.el
+
+(register-definition-prefixes "romacs-commands" '("read-extended-command-1" "romacs-commands-"))
+
+
 ;;; Generated autoloads from romacs-companion.el
 
 (register-definition-prefixes "romacs-companion" '("romacs-companion-"))

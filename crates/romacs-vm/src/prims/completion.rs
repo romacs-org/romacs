@@ -2,6 +2,7 @@
 use super::*;
 use crate::prim::Kind;
 use std::cmp::Ordering;
+use super::callint::Verdict;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -21,6 +22,22 @@ fn all_completions(cx, string: Value, collection: Value; optional predicate: Val
 defsubr! { name = "test-completion", gnu = "minibuf.c:2062", effect = Global,
 fn test_completion(cx, string: Value, collection: Value; optional predicate: Value) -> Step {
     prepare(cx, Mode::Test, string, collection, predicate)
+}}
+
+defsubr! { name = "romacs-command-symbols", gnu = "romacs:commands", effect = Reads,
+fn romacs_command_symbols(cx) {
+    // A verdict that only Lisp can give, or an error `commandp' would
+    // signal, keeps the symbol: callers filter with `commandp' itself.
+    for (slot, symbol) in cx.command_set_stale() {
+        let member = !matches!(super::callint::command_verdict(cx, symbol, Value::NIL), Ok(Verdict::Known(false)));
+        cx.command_set_mark(slot, member);
+    }
+    Ok(cx.command_set_symbols())
+}}
+defsubr! { name = "romacs-command-epoch", gnu = "romacs:commands", effect = Reads,
+fn romacs_command_epoch(cx) {
+    let epoch = i64::try_from(cx.command_set_epoch()).map_err(|_| Fault::Error("command epoch overflow".into()))?;
+    Value::integer(epoch).map_err(Fault::Error)
 }}
 
 fn number(n: usize) -> Value {
@@ -294,12 +311,16 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
         }
         // Every name begins with the empty input.
         if length > 0 || state.mode == Mode::Test {
-            let name_len = cx.string_view(name)?.chars;
+            let name_len = cx.string_chars(name).ok_or(Fault::Wrong("stringp", name))?;
             if name_len < length || (state.mode == Mode::Test && name_len != length) {
                 continue;
             }
-            if super::string_compare::prefix(cx, name, state.input, length, fold)?.0 != Ordering::Equal
-            {
+            let same = if fold {
+                super::string_compare::prefix(cx, name, state.input, length, fold)?.0 == Ordering::Equal
+            } else {
+                cx.completion_same_prefix(name, state.input, length)?
+            };
+            if !same {
                 continue;
             }
         }
@@ -323,14 +344,22 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
             if !matched { continue; }
         }
         if state.predicate != Value::NIL {
+            // `commandp' answers most candidates without Lisp: those go on
+            // in this loop, so a walk's depth never grows with its count.
             if state.predicate == commandp {
-                return super::callint::command_predicate(
-                    cx,
-                    candidate,
-                    Value::NIL,
-                    tested,
-                    state.save(),
-                );
+                match super::callint::command_verdict(cx, candidate, Value::NIL)? {
+                    Verdict::Known(false) => continue,
+                    Verdict::Known(true) => {
+                        if accept(cx, &mut state)? {
+                            return finish(cx, state);
+                        }
+                        continue;
+                    }
+                    Verdict::Ask(fun) => {
+                        let f = cx.intern("interactive-form");
+                        return Ok(Step::Call { f, args: vec![fun], then: tested, saved: state.save() });
+                    }
+                }
             }
             let args = if cx.kind(state.collection) == Kind::HashTable {
                 vec![candidate, associated]
