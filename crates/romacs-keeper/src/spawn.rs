@@ -136,13 +136,16 @@ fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
 }
 
 /// A pty's master and slave, sized: what `openpty` does, close-on-exec.
+/// The master is opened as the C library's `posix_openpt` opens it, not by
+/// rustix's `openpt`, which reports a full pty table (`ENOSPC`) as `EAGAIN`.
+/// As `openpty`, a size the slave refuses is no failure.
 fn pty(size: (u16, u16)) -> io::Result<(OwnedFd, OwnedFd)> {
-    let flags = OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC;
-    let master = rustix::pty::openpt(flags)?;
+    use rustix::fs::{Mode, OFlags};
+    let master = rustix::fs::open(c"/dev/ptmx", OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC, Mode::empty())?;
     rustix::pty::grantpt(&master)?;
     rustix::pty::unlockpt(&master)?;
-    let slave = rustix::pty::ioctl_tiocgptpeer(&master, flags)?;
-    rustix::termios::tcsetwinsize(&slave, rustix::termios::Winsize { ws_row: size.1, ws_col: size.0, ws_xpixel: 0, ws_ypixel: 0 })?;
+    let slave = rustix::pty::ioctl_tiocgptpeer(&master, OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+    let _ = rustix::termios::tcsetwinsize(&slave, rustix::termios::Winsize { ws_row: size.1, ws_col: size.0, ws_xpixel: 0, ws_ypixel: 0 });
     Ok((master, slave))
 }
 
@@ -247,13 +250,15 @@ impl Plan<'_> {
     /// Become the program, or write the errno of what failed to the report
     /// pipe and exit.
     ///
-    /// Direct C library calls, all of it: between `fork` and `execve` in a
-    /// process that may have threads, only async-signal-safe calls on raw
-    /// descriptor numbers are allowed. rustix's safe calls take owned or
-    /// borrowed descriptors that this child cannot hold (dropping one
-    /// closes it, and the numbers are moved and refilled here), and its
-    /// `execve`, signal disposition and signal mask calls are unsafe
-    /// runtime functions in any case.
+    /// Between `fork` and `execve` in a process that may have threads, only
+    /// async-signal-safe calls are allowed. The session, the directory and
+    /// the umask go through rustix, whose calls are plain system calls. The
+    /// rest are direct C library calls: the descriptor moves work on raw
+    /// numbers this child cannot hold as owned or borrowed descriptors
+    /// (dropping one closes it, and the numbers are moved and refilled
+    /// here), and rustix's signal disposition, signal mask and `execve`
+    /// calls are unsafe runtime functions, its resource limits a closed
+    /// enum where the spec carries a number.
     fn child(&self) -> ! {
         let mut report = self.failure;
         macro_rules! fail { ($errno:expr) => {{
@@ -262,6 +267,7 @@ impl Plan<'_> {
             libc::_exit(127)
         }}; }
         macro_rules! check { ($call:expr) => { if $call < 0 { fail!(*libc::__errno_location()) } }; }
+        macro_rules! safely { ($call:expr) => { if let Err(error) = $call { fail!(error.raw_os_error()) } }; }
         // SAFETY: after fork, in the child: system calls only, on values
         // prepared before the fork and descriptors this process owns. The
         // pointers given to execve are NUL-terminated strings and
@@ -270,7 +276,7 @@ impl Plan<'_> {
             for signal in 1..=64 {
                 libc::signal(signal, libc::SIG_DFL);
             }
-            if self.spec.setsid { check!(libc::setsid()); }
+            if self.spec.setsid { safely!(rustix::process::setsid()); }
             // Above every target, so no dup2 below overwrites a source.
             let failure = libc::fcntl(self.failure, libc::F_DUPFD_CLOEXEC, self.floor);
             check!(failure);
@@ -298,8 +304,8 @@ impl Plan<'_> {
                 low = next + 1;
             }
             libc::close_range((failure + 1).cast_unsigned(), u32::MAX, 0);
-            check!(libc::chdir(self.cwd.as_ptr()));
-            libc::umask(self.spec.umask);
+            safely!(rustix::process::chdir(self.cwd.as_c_str()));
+            rustix::process::umask(rustix::fs::Mode::from_raw_mode(self.spec.umask));
             for &(resource, soft, hard) in &self.spec.limits {
                 check!(libc::setrlimit(resource as _, &libc::rlimit { rlim_cur: soft, rlim_max: hard }));
             }
