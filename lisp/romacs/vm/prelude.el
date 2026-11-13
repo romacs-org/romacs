@@ -86,12 +86,13 @@ GNU fns.c `Fmapcan'."
   "Apply FUNCTION to each element of SEQUENCE, and concat the results.
 SEPARATOR goes between each pair of results.  GNU fns.c `Fmapconcat':
 the symbol `identity' over a list or vector concatenates the elements
-without calling it, and a nil or empty SEPARATOR inserts nothing."
+without calling it, and a nil or empty SEPARATOR inserts nothing.  The
+join, separator included, is one call of `romacs--concat-list'."
   (let ((n (length sequence))
         (i 0)
         (parts nil))
     (if (and (eq function 'identity) (or (consp sequence) (vectorp sequence)))
-        (setq parts (append sequence nil))
+        (setq parts (if (consp sequence) sequence (append sequence nil)))
       (if (listp sequence)
           (let ((tail sequence))
             (while (and (< i n) (consp tail))
@@ -103,12 +104,7 @@ without calling it, and a nil or empty SEPARATOR inserts nothing."
           (setq parts (cons (funcall function (aref sequence i)) parts))
           (setq i (1+ i))))
       (setq parts (nreverse parts)))
-    (if (and separator (not (equal separator "")))
-        (let ((tail parts))
-          (while (cdr tail)
-            (setcdr tail (cons separator (cdr tail)))
-            (setq tail (cdr (cdr tail))))))
-    (romacs--concat-list parts)))
+    (romacs--concat-list parts separator)))
 
 
 ;;; Printing

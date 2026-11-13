@@ -436,6 +436,8 @@ mod mapc;
 mod mapc_frontier;
 #[path = "../mapcan.rs"]
 mod mapcan;
+#[path = "../mapconcat_join.rs"]
+mod mapconcat_join;
 #[path = "../match_data_dead_buffer.rs"]
 mod match_data_dead_buffer;
 #[path = "../match_data_translate.rs"]
