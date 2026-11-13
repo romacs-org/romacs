@@ -425,12 +425,15 @@ pub fn signal(pidfd: &OwnedFd, group: Option<i32>, signal: i32) -> io::Result<()
 /// rustix makes one only by an unsafe constructor, so the system calls are
 /// made directly.
 fn signal_by_number(pidfd: std::os::fd::BorrowedFd<'_>, group: Option<i32>, signal: i32) -> io::Result<()> {
+    // A leader is a pid, as for a named signal: never 0, which would name
+    // the keeper's own group.
+    let group = group.map(pid).transpose()?;
     // SAFETY: both calls take integers and a null siginfo, no memory of
     // this process. The pidfd names one process for good; the group's
     // leader is the caller's unreaped child.
     os(unsafe {
         match group {
-            Some(leader) => libc::kill(-leader, signal),
+            Some(leader) => libc::kill(-leader.as_raw_nonzero().get(), signal),
             None => libc::c_int::from(libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), 0) < 0).wrapping_neg(),
         }
     }).map(drop)

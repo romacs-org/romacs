@@ -6,8 +6,7 @@
 //!
 //! Its system calls go through rustix, but for two that no crate in the
 //! lock file covers safely: the SIGCHLD signalfd with its blocked mask
-//! ([`child_signals`]), and the peer's pidfd by `SO_PEERPIDFD` ([`peer`]),
-//! an option rustix does not have.
+//! ([`child_signals`]), and the peer's credentials and pidfd ([`peer`]).
 
 use std::collections::VecDeque;
 use std::io;
@@ -17,7 +16,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use romacs_record::{channel, hello, Decoder, Handle, Hello, Reader, Record, Writer};
 use rustix::event::{PollFd, PollFlags, Timespec};
 use rustix::io::FdFlags;
-use rustix::process::{PidfdFlags, Resource, Signal};
+use rustix::process::{Pid, PidfdFlags, Resource, Signal};
 
 use crate::proto::{self, count, kind};
 use crate::spawn::{self, Spec, Status, Whom};
@@ -92,27 +91,29 @@ fn child_signals() -> io::Result<OwnedFd> {
     }
 }
 
-/// The process at the other end of SOCKET: its pid and a pidfd for it.
+/// The process at the other end of SOCKET: its pid and a pidfd for it,
+/// the one the kernel made at connect, or else one opened on the pid it
+/// recorded then. Both options are read directly: rustix has no
+/// `SO_PEERPIDFD`, and its `SO_PEERCRED` holds the pid as non-zero, which
+/// a peer outside this keeper's pid namespace, reported as 0, would break.
 fn peer(socket: &UnixStream) -> io::Result<(i32, OwnedFd)> {
-    let pid = rustix::net::sockopt::socket_peercred(socket)?.pid;
-    // The pidfd the kernel made at connect, or else one opened on the pid
-    // it recorded then.
-    match peer_pidfd(socket) {
-        Some(pidfd) => Ok((pid.as_raw_nonzero().get(), pidfd)),
-        None => Ok((pid.as_raw_nonzero().get(), rustix::process::pidfd_open(pid, PidfdFlags::empty())?)),
-    }
-}
-
-/// `SO_PEERPIDFD`, which rustix does not have: `None` on a kernel without it.
-fn peer_pidfd(socket: &UnixStream) -> Option<OwnedFd> {
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut pidfd: RawFd = -1;
-    let mut len: libc::socklen_t = 4;
-    // SAFETY: getsockopt writes at most LEN bytes into PIDFD, an int of
-    // that size; on success it is a new descriptor owned here alone.
-    unsafe {
-        let got = libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD, (&raw mut pidfd).cast(), &raw mut len);
-        (got == 0 && pidfd >= 0).then(|| OwnedFd::from_raw_fd(pidfd))
+    // SAFETY: each getsockopt writes at most the stated size into a local
+    // of that size. SO_PEERPIDFD's, on success, is a new descriptor owned
+    // here alone.
+    let made = unsafe {
+        let mut len: libc::socklen_t = 12;
+        os(libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut cred).cast(), &raw mut len))?;
+        let mut len: libc::socklen_t = 4;
+        (libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD, (&raw mut pidfd).cast(), &raw mut len) == 0)
+            .then(|| OwnedFd::from_raw_fd(pidfd))
+    };
+    if let Some(pidfd) = made {
+        return Ok((cred.pid, pidfd));
     }
+    let pid = Pid::from_raw(cred.pid).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+    Ok((cred.pid, rustix::process::pidfd_open(pid, PidfdFlags::empty())?))
 }
 
 fn timeout(ms: i32) -> Timespec { Timespec { tv_sec: i64::from(ms / 1000), tv_nsec: i64::from(ms % 1000) * 1_000_000 } }
@@ -131,9 +132,9 @@ pub fn bytes_hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
-/// The identity of the executable at PATH, read here: 0 if it cannot be read.
-#[must_use]
-pub fn executable_hash(path: &std::path::Path) -> u64 {
+/// The identity of the executable at PATH, read here: 0 if it cannot be
+/// read. The keeper's own: a session reads through its host boundary.
+fn executable_hash(path: &std::path::Path) -> u64 {
     std::fs::read(path).map_or(0, |bytes| bytes_hash(&bytes))
 }
 
