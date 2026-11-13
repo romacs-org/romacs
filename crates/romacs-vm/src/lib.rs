@@ -109,6 +109,9 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod functions;
+mod epoch;
+mod slots;
 mod gc_mark;
 mod table;
 mod handle;
@@ -121,6 +124,7 @@ mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
 pub mod anchors;
+mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
@@ -579,7 +583,6 @@ enum Primitive {
     DefineKey,
     MakeSparseKeymap,
     Keymapp,
-    KeyBinding,
     LookupKey,
     GlobalSetKey,
     CurrentGlobalMap,
@@ -844,7 +847,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("define-key", Primitive::DefineKey),
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
-    ("key-binding", Primitive::KeyBinding),
     // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
     ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
@@ -1332,6 +1334,9 @@ pub struct Vm {
     disable_inline: bool,
     #[cfg(test)]
     speculative_misses: usize,
+    /// Times `buffer_index` resolved the current buffer afresh.
+    #[cfg(test)]
+    buffer_resolutions: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
@@ -1505,6 +1510,12 @@ pub struct Vm {
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
+    /// The current buffer as `buffer_index` last resolved it: the slot's
+    /// value then, a live buffer, and its object index. Kept by value, not
+    /// by writer: `let` and its unwinding write the slot like any special
+    /// variable, and a different value simply resolves again. Killing a
+    /// buffer and a collection (which may move buffers) drop it.
+    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
@@ -1573,7 +1584,7 @@ pub struct Vm {
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
-    slots: Vec<Slot>,
+    slots: slots::Slots,
     specials: NameSet<String>,
     /// Bumped whenever a symbol stops being special or an uninterned one's
     /// declaration changes: with the size of `specials', which an insertion
@@ -1582,7 +1593,7 @@ pub struct Vm {
     /// Per slot, `slot_is_special''s last answer and the key it held under
     /// (`Vm::special_key'), for the late bindings' check at each `let'.
     special_cache: Vec<u64>,
-    functions: Vec<Arc<Function>>,
+    functions: functions::Functions,
     request_code: request_code::RequestCode,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
@@ -1698,6 +1709,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     #[cfg(test)] inline_hits,
     #[cfg(test)] disable_inline,
     #[cfg(test)] speculative_misses,
+    #[cfg(test)] buffer_resolutions,
     regexp,
     execution_fatal,
     loader,
@@ -1739,6 +1751,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     expanded_macros,
     expanded_symbols,
     buffer_slot,
+    resolved_buffer,
     multibyte_slot,
     truncate_lines_slot,
     defun_start_epoch,
@@ -1899,6 +1912,8 @@ impl Vm {
             disable_inline: false,
             #[cfg(test)]
             speculative_misses: 0,
+            #[cfg(test)]
+            buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
@@ -1973,6 +1988,7 @@ impl Vm {
             isolates: isolate::Isolates::default(),
             inotify: None,
             buffer_slot: 0,
+            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             defun_start_epoch: 0,
@@ -2007,11 +2023,11 @@ impl Vm {
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::default(),
             generated_slots: HashMap::default(),
-            slots: vec![],
+            slots: slots::Slots::default(),
             specials: NameSet::default(),
             special_changes: 0,
             special_cache: Vec::new(),
-            functions: vec![],
+            functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
@@ -2076,6 +2092,8 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
+        // HOST(slot:exec-path, slot:initial-environment, slot:process-environment): declares the
+        // environment specials by name; reads no slot
         vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
         // C specials are special before their symbols are first interned, so
         // already-read forms compile their bindings dynamically.
@@ -2156,6 +2174,7 @@ impl Vm {
         let ignore = vm.intern("ignore");
         vm.declare_special_raw("pre-redisplay-function", ignore);
         vm.declare_special_raw("this-command-keys-shift-translated", Value::NIL);
+        // HOST(delayed-variable): declares the variable; reads no slot
         vm.declare_special_raw("transient-mark-mode", Value::NIL);
         vm.declare_special_raw("standard-input", Value::TRUE);
         for name in ["print-length", "print-level", "print-escape-nonascii", "print-escape-multibyte", "print-escape-control-characters", "print-circle", "print-escape-newlines", "menu-bar-mode", "truncate-lines"] {
@@ -2652,7 +2671,7 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
-        self.functions[id] = Arc::new(function);
+        self.functions.set(id, Arc::new(function));
         Ok(())
     }
     fn expr(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
@@ -3728,6 +3747,7 @@ impl Vm {
     /// whose variable became local) restores through set_default_internal,
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
         let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());

@@ -21,7 +21,10 @@ fn replay(evidence: &str, spec: &[u8]) {
     let declaration = manifest.as_array().unwrap().iter().find(|row| row["name"] == spec_value["name"]).expect("primitive must be registered");
     assert_eq!(declaration["min"], spec_value["arity"][0]);
     assert_eq!(declaration["max"], spec_value["arity"][1]);
-    assert_eq!(declaration["rust"], spec_value["rust"]);
+    // The file, not its line: a line moves whenever code above the declaration does, and two
+    // branches that each move it would fail on their merge though neither is wrong.
+    let file = |v: &Value| v.as_str().map(|s| s.rsplit_once(':').map_or(s, |(f, _)| f).to_owned());
+    assert_eq!(file(&declaration["rust"]), file(&spec_value["rust"]));
     assert_eq!(declaration["gnu"], spec_value["gnu_def"]);
     assert_eq!(declaration["effect"].as_str().unwrap().to_lowercase(), spec_value["effect"].as_str().unwrap());
     assert_eq!(

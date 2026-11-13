@@ -2,7 +2,7 @@
 #
 # A row moves ONE failing deftest out of `failing` into `intentional-divergence`
 # or `out-of-scope`. It never makes a test pass and is never counted as passing.
-# gnu-tests/run.py refuses the WHOLE ledger (exit 2, nothing measured) unless
+# test/gnu/run.py refuses the WHOLE ledger (exit 2, nothing measured) unless
 # every row:
 #   - names exactly one top-level deftest of a GNU file (no globs, no prefixes);
 #   - cites `divergence`, an existing entry id in DIVERGENCES.md or a crate

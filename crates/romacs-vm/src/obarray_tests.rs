@@ -15,7 +15,7 @@ fn obarray_compiled_call_retains_symbol_slot() {
         };
         // Direct also carries a cache index, independently traced.
         let id = vm.compile(&Form::Int(0)).unwrap();
-        let function = Arc::get_mut(&mut vm.functions[id]).unwrap();
+        let function = Arc::get_mut(vm.functions.change(id)).unwrap();
         function.code = vec![op];
         if kind == 2 { vm.caches.push(Cache { version: 0, target: Value::NIL }); }
         let index = vm.closures.len();

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Bounded private-compositor C-x C-f journey through the real native GUI."""
+"""Bounded private-compositor C-x C-f journey through the real native GUI.
+
+--scroll checks that motion reveals point minimally: Romacs's default
+`scroll-conservatively' 101; GNU's default 0 recentres instead, which
+scroll_invisible_live covers.
+"""
 import argparse
 import json
-import os
 from pathlib import Path
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -306,19 +309,9 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     report = {"binary": str(args.binary.resolve()), "steps": [],
               "prompt_observation": "pre-layout snapshot; visibility qualified by compositor captures"}
-    comp = keyboard = proc = None
-    with tempfile.TemporaryDirectory(prefix="find-file-live-") as temp:
-        runtime = Path(temp)
-        runtime.chmod(0o700)
-        config = runtime / "config"
-        config.mkdir()
-        (config / "rc.xml").write_text(live.RC_XML)
-        home = runtime / "home"
-        home.mkdir()
-        work = runtime / "work"
-        work.mkdir()
-        original = work / "original.txt"
-        original.write_text("Original sentinel\nsecond line\n")
+    def prepare(s):
+        work = s.work
+        (work / "original.txt").write_text("Original sentinel\nsecond line\n")
         (work / "completion λ.txt").write_text("Completion sentinel λ\n")
         if args.scroll:
             report["scroll_source"] = '\n'.join(f"ROW {i:03d} λ" for i in range(1, 151))
@@ -330,25 +323,14 @@ def main():
             (work / "02 removed.txt").write_text("removed")
             for index, name in enumerate(["line\nname.txt", "tab\tname.txt", "back\\name.txt"]):
                 (work / name).write_text(f"Escaped entry {index}\n")
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8", "ROMACS_DIAGNOSTICS": "1",
-               "XDG_RUNTIME_DIR": str(runtime), "XDG_CONFIG_HOME": str(home / "config"),
-               "XDG_CACHE_HOME": str(home / "cache"), "XDG_DATA_HOME": str(home / "data"),
-               "XDG_STATE_HOME": str(home / "state"), "TMPDIR": str(runtime), "WLR_BACKENDS": "headless",
-               "WLR_HEADLESS_OUTPUTS": "1", "WLR_RENDERER": "pixman", "WLR_LIBINPUT_NO_DEVICES": "1",
-               "LIBSEAT_BACKEND": "noop"}
-        if args.font:
-            env.update(ROMACS_GUI_FONT=args.font, ROMACS_GUI_FONT_SIZE=str(args.font_size))
-        stderr_path = args.output / "binary.stderr"
-        try:
-            with (args.output / "compositor.log").open("w") as clog, stderr_path.open("w") as blog:
-                comp = subprocess.Popen([live.LABWC, "-C", str(config)], env=env, stdout=clog, stderr=clog)
-                fio.wait(lambda: any(s.is_socket() for s in runtime.glob("wayland-*")), args.timeout, "private compositor", comp)
-                env["WAYLAND_DISPLAY"] = next(s for s in runtime.glob("wayland-*") if s.is_socket()).name
-                subprocess.run([live.RANDR, "--output", "HEADLESS-1", "--custom-mode", f"{args.width}x{args.height}"], env=env, check=True, timeout=10)
-                keyboard = subprocess.Popen(["/usr/bin/wtype", "-s", "120000", "-k", "Shift_L"], env=env, stdout=blog, stderr=blog)
-                time.sleep(0.3)
-                proc = subprocess.Popen([str(args.binary.resolve()), "--trace-scene"], env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=blog, stderr=blog)
 
+    font = {"ROMACS_GUI_FONT": args.font, "ROMACS_GUI_FONT_SIZE": str(args.font_size)} if args.font else {}
+    try:
+        with live.session(args.binary, args.output, prefix="find-file-live-", args=("--trace-scene",), env=font,
+                          size=f"{args.width}x{args.height}", prepare=prepare) as s:
+            proc, env, work, stderr_path = s.process, s.env, s.work, s.log
+            original = work / "original.txt"
+            try:
                 def trace():
                     return stderr_path.read_text(errors="replace")
 
@@ -524,23 +506,18 @@ def main():
                 report["status"] = "PASS"
                 report["new_file_bytes_hex"] = (work / "new λ.txt").read_bytes().hex()
                 report["original_saved_bytes_exact"] = original.read_text() == "Original sentinel dirty!?\nsecond line\n"
-        except Exception as error:
-            report["status"] = "FAIL"
-            report["error"] = repr(error)
-            if proc is not None and proc.poll() is None:
-                fio.shot(args.output / "failure.png", env, report)
-            raise
-        finally:
-            for child in (proc, keyboard, comp):
-                if child is not None and child.poll() is None:
-                    child.terminate()
-                    try:
-                        child.wait(timeout=8)
-                    except subprocess.TimeoutExpired:
-                        child.kill()
-                        child.wait(timeout=8)
-            (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-            (args.output / "INDEX.txt").write_text("\n".join(f"{s['name']}.png: {s['name']}" for s in report["steps"]) + "\n")
+            except Exception:
+                # The failure's screen, while the session still shows it.
+                if proc.poll() is None:
+                    fio.shot(args.output / "failure.png", env, report)
+                raise
+    except Exception as error:
+        report["status"] = "FAIL"
+        report["error"] = repr(error)
+        raise
+    finally:
+        (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (args.output / "INDEX.txt").write_text("\n".join(f"{s['name']}.png: {s['name']}" for s in report["steps"]) + "\n")
     print(json.dumps(report, ensure_ascii=False))
 
 

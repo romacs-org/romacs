@@ -481,6 +481,8 @@ unsafe fn unplace(at: usize, len: usize, placed: i32) {
 unsafe fn start() -> u8 {
     unsafe { take_inventory() };
     unsafe { reserve_window() };
+    // HOST(libc::getenv): the world allocator reads whether it runs in a builder at its first
+    // allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
@@ -489,6 +491,8 @@ unsafe fn start() -> u8 {
     let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
         let mut random = 0usize;
+        // HOST(libc::getrandom): the world allocator picks a random arena address at its first
+        // allocation; no Lisp value depends on it
         let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
         if read != size_of::<usize>() as isize {
             break;
@@ -518,10 +522,14 @@ unsafe fn start() -> u8 {
 /// sparse, so only pages the arena touched hold blocks. -1 when there is
 /// none: a builder without one cannot publish (`write_image`).
 unsafe fn backing_file(reserve: usize) -> i32 {
+    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+    // allocation, before host.rs can run; no Lisp value depends on it
     let fd = unsafe { libc::open(c"/dev/shm".as_ptr(), libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC, 0o600) };
     if fd < 0 {
         return -1;
     }
+    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+    // allocation, before host.rs can run; no Lisp value depends on it
     if unsafe { libc::ftruncate(fd, reserve as i64) } != 0 {
         unsafe { libc::close(fd) };
         return -1;
@@ -609,7 +617,11 @@ fn overlaps(at: usize, len: usize, other: usize, other_len: usize) -> bool {
 unsafe fn map_image_fd(fd: i32) -> Restore {
     let mut bytes = [0u8; size_of::<Header>()];
     let read = unsafe { libc::pread(fd, bytes.as_mut_ptr().cast(), bytes.len(), 0) };
+    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
+    // launcher checked that image
     let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
+    // launcher checked that image
     if read != bytes.len() as isize || unsafe { libc::fstat(fd, &mut stat) } != 0 {
         return Restore::Unreadable;
     }
@@ -753,6 +765,8 @@ unsafe fn shadow_executable(old: usize) -> bool {
         return false;
     }
     let undo = || { unsafe { libc::munmap((old + low) as *mut libc::c_void, span) }; false };
+    // HOST(libc::file): the world allocator maps its own executable read-only where an image
+    // expects it; no Lisp value depends on it
     let fd = unsafe { libc::open(c"/proc/self/exe".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
     if fd < 0 {
         return undo();
@@ -1182,6 +1196,8 @@ unsafe fn copy_extents(from: i32, to: i32, len: usize) -> std::io::Result<()> {
         unsafe { copy_range(from, to, data, end) }?;
         at = end;
     }
+    // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+    // opened through host
     if unsafe { libc::ftruncate(to, len as i64) } != 0 {
         return Err(last());
     }
@@ -1195,6 +1211,8 @@ unsafe fn copy_range(from: i32, to: i32, start: i64, end: i64) -> std::io::Resul
     let mut at = start;
     while at < end {
         let (mut input, mut output) = (at, at);
+        // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+        // opened through host
         let n = unsafe { libc::copy_file_range(from, &mut input, to, &mut output, (end - at) as usize, 0) };
         if n > 0 {
             at += n as isize as i64;

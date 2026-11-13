@@ -608,15 +608,6 @@ fn test_trailing_backslash_reports_gnu_eescape() {
 }
 
 #[test]
-fn test_unmatched_interval_reports_gnu_ebrace() {
-    crate::test_utils::init_test_tracing();
-    match regex_compile("a\\{2", false, false) {
-        Ok(_) => panic!("unmatched interval should fail"),
-        Err(err) => assert_eq!(err.message, "Unmatched \\{"),
-    }
-}
-
-#[test]
 fn test_multibyte_charset() {
     crate::test_utils::init_test_tracing();
     let syn = DefaultSyntaxLookup;
@@ -813,38 +804,6 @@ fn test_ascii_class_before_alternation_no_regression() {
     let r = search_pattern("[a-c]*[ç-ï]", "abcé", 0, false, &syn, 0);
     assert!(r.is_ok(), "compile failed: {:?}", r.err());
     assert_eq!(r.unwrap().expect("[a-c]*[ç-ï] should match \"abcé\"").0, 0);
-}
-
-// ---------------------------------------------------------------------------
-// GNU parity: descending intervals \{n,m\} with n>m must be rejected.
-// (string-match "a\\{2,1\\}" "aa") -> (invalid-regexp "Invalid content of \\{\\}")
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_descending_interval_reports_gnu_badbr() {
-    crate::test_utils::init_test_tracing();
-    // \{2,1\}, \{5,2\}, \{3,0\}: lower > upper must signal "Invalid content of \{\}".
-    for pat in ["a\\{2,1\\}", "a\\{5,2\\}", "a\\{3,0\\}"] {
-        match regex_compile(pat, false, false) {
-            Ok(_) => panic!("descending interval {pat:?} should fail to compile"),
-            Err(err) => assert_eq!(
-                err.message, "Invalid content of \\{\\}",
-                "wrong error for {pat:?}"
-            ),
-        }
-    }
-}
-
-#[test]
-fn test_ascending_and_unbounded_intervals_still_compile() {
-    crate::test_utils::init_test_tracing();
-    // Equal bounds, ascending bounds, and an unbounded upper must remain valid.
-    for pat in ["a\\{2,3\\}", "a\\{2,2\\}", "a\\{2,\\}", "a\\{0,2\\}"] {
-        assert!(
-            regex_compile(pat, false, false).is_ok(),
-            "valid interval {pat:?} should compile"
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------

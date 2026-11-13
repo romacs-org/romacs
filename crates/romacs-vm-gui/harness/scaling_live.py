@@ -53,6 +53,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import shutil
 import signal
 import subprocess
@@ -178,7 +179,9 @@ def private_env(home, extra=None):
     on the evaluating thread alone, so that thread's instructions are all the work."""
     env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_GC_WORKERS': '1',
            'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
-           'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(home / 'tmp')}
+           'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(home / 'tmp'),
+           # Its own, never the user's: no socket or lock of a live session.
+           'XDG_RUNTIME_DIR': str(home / 'run')}
     for name in ('ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_GNU_SOURCE', 'ROMACS_GATE_FONTCONFIG'):
         if name in os.environ:
             env[name] = os.environ[name]
@@ -204,13 +207,20 @@ def bounded(what, argv, timeout, **kwargs):
     return done
 
 
-def batch(binary, home, form, timeout, prefix=(), env=None):
-    """Run FORM after loading the probes in a batch session; its SCALING lines."""
+def batch(binary, home, form, timeout, prefix=(), env=None, world=False):
+    """Run FORM after loading the probes in a batch session; its SCALING
+    lines. WORLD: the session must run from HOME's batch world, as every
+    measured one does: one from source is another regime, not a measure."""
     argv = [*prefix, str(binary), '-Q', '--batch', '-l', str(PROBES), '--eval', form]
+    # A session tells its world mode on stderr only with its diagnostics on.
+    env = {**(env or {}), 'ROMACS_DIAGNOSTICS': '1'} if world else env
     done = bounded(form, argv, timeout, env=private_env(home, env), cwd=home)
     lines = scaling_lines(done.stdout)
     if done.returncode != 0 or not lines:
         raise Refused(f'{form}: exit {done.returncode}: {done.stderr.strip()[-600:]}')
+    source = next((line for line in done.stderr.splitlines() if line.startswith('romacs-world: {"mode":"source"')), None)
+    if world and source:
+        raise Refused(f'{form}: ran from source, not its world: {source[:300]}')
     return lines
 
 
@@ -218,6 +228,7 @@ def prepare(binary, home, timeout):
     """Build the GUI and batch worlds in HOME, as a first session does."""
     for sub in ('config', 'cache', 'data', 'state', 'tmp'):
         (home / sub).mkdir(parents=True, exist_ok=True)
+    (home / 'run').mkdir(mode=0o700, exist_ok=True)
     built = bounded('--world-build', [str(binary), '--loadup', '--world-build'], timeout, env=private_env(home), cwd=home)
     if built.returncode != 0:
         raise Refused(f'--world-build: exit {built.returncode}: {built.stderr.strip()[-600:]}')
@@ -232,8 +243,8 @@ def prepare(binary, home, timeout):
 
 
 def run_batch_probe(binary, home, probe, timeout):
-    """PROBE's row from batch sessions at N and K*N."""
-    small, large = (batch(binary, home, f"(scaling-run '{probe['name']} {n})", timeout)[-1]
+    """PROBE's row from batch sessions at N and K*N, both from HOME's world."""
+    small, large = (batch(binary, home, f"(scaling-run '{probe['name']} {n})", timeout, world=True)[-1]
                     for n in (probe['n'], probe['n'] * probe['k']))
     return verdict(probe, small, large)
 
@@ -353,11 +364,26 @@ def main():
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
     binary = args.binary.resolve()
-    home = args.output / 'home'
+    # One prepared HOME per job: probes run side by side never share one
+    # (files, locks, sockets), and each HOME's worlds are built for it, as
+    # a world is keyed on its HOME. A job's probes run one after another.
+    homes = [args.output / f'home-{job}' for job in range(max(1, args.jobs))]
+    home = homes[0]
     report = {'binary': str(binary), 'probes_file': str(PROBES), 'status': 'FAIL', 'rows': []}
     started = time.monotonic()
     try:
-        probes = prepare(binary, home, args.timeout)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(homes)) as pool:
+            probes = list(pool.map(lambda h: prepare(binary, h, args.timeout), homes))[0]
+        free = queue.Queue()
+        for h in homes:
+            free.put(h)
+
+        def run_in_own_home(probe):
+            own = free.get()
+            try:
+                return run_batch_probe(binary, own, probe, args.timeout)
+            finally:
+                free.put(own)
         if args.only is not None:
             unknown = set(args.only) - {p['name'] for p in probes}
             if unknown:
@@ -367,7 +393,7 @@ def main():
         gui_probes = [p for p in probes if p['gui'] and args.mode != 'batch']
         rows = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {pool.submit(run_batch_probe, binary, home, p, args.timeout): p for p in batch_probes}
+            futures = {pool.submit(run_in_own_home, p): p for p in batch_probes}
             for future, probe in futures.items():
                 try:
                     rows[probe['name']] = future.result()

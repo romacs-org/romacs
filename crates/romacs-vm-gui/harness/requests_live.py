@@ -44,8 +44,9 @@ def main():
     args.output.mkdir(parents=True)
     report = {'binary': str(Path(args.binary).resolve()), 'status': 'FAIL', 'replies': []}
     comp = proc = None
+    temp = None
     try:
-        with tempfile.TemporaryDirectory(prefix='requests-', dir=os.environ.get('XDG_RUNTIME_DIR')) as temp:
+        with tempfile.TemporaryDirectory(prefix='requests-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as temp:
             runtime = Path(temp)
             runtime.chmod(0o700)
             (runtime / 'config').mkdir()
@@ -90,7 +91,10 @@ def main():
     finally:
         live.stop(proc)
         live.stop(comp)
-        (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+        try:
+            (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+        finally:
+            live.remove_root(temp)
     print(report['status'], json.dumps({k: report.get(k) for k in ('window_end', 'point_max', 'error')}))
     return 0 if report['status'] == 'PASS' else 1
 
