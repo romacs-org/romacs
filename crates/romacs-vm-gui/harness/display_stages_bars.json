@@ -24,8 +24,8 @@
   "display_instructions_p90": 547000
  },
  "chat-tick": {
-  "step_instructions": 26800000,
-  "display_instructions": 25800000,
+  "step_instructions": 18800000,
+  "display_instructions": 17800000,
   "display_conses": 7,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -33,11 +33,11 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 25800000
+  "display_instructions_p90": 17800000
  },
  "chat-collected": {
-  "step_instructions": 185000000,
-  "display_instructions": 32200000,
+  "step_instructions": 176000000,
+  "display_instructions": 24100000,
   "display_conses": 181,
   "windows_rebuilt": 2,
   "band_expansions": 2,
@@ -45,11 +45,11 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 32300000
+  "display_instructions_p90": 24100000
  },
  "cursor-move": {
-  "step_instructions": 5820000,
-  "display_instructions": 5110000,
+  "step_instructions": 2280000,
+  "display_instructions": 1790000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -57,11 +57,11 @@
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 5130000
+  "display_instructions_p90": 1800000
  },
  "typed": {
-  "step_instructions": 9840000,
-  "display_instructions": 9190000,
+  "step_instructions": 3800000,
+  "display_instructions": 3170000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -69,11 +69,11 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 9230000
+  "display_instructions_p90": 3210000
  },
  "append-unseen": {
-  "step_instructions": 5360000,
-  "display_instructions": 5000000,
+  "step_instructions": 2060000,
+  "display_instructions": 1700000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -81,11 +81,11 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 5010000
+  "display_instructions_p90": 1710000
  },
  "typed-elements": {
-  "step_instructions": 23500000,
-  "display_instructions": 22900000,
+  "step_instructions": 17700000,
+  "display_instructions": 17100000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -93,11 +93,11 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 23000000
+  "display_instructions_p90": 17200000
  },
  "chat-stream-1k": {
-  "step_instructions": 31400000,
-  "display_instructions": 29900000,
+  "step_instructions": 18800000,
+  "display_instructions": 17200000,
   "display_conses": 7,
   "windows_rebuilt": 1,
   "band_expansions": 2,
@@ -105,11 +105,11 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 96300000
+  "display_instructions_p90": 49600000
  },
  "chat-stream-10k": {
-  "step_instructions": 87100000,
-  "display_instructions": 85300000,
+  "step_instructions": 43300000,
+  "display_instructions": 41600000,
   "display_conses": 7,
   "windows_rebuilt": 1,
   "band_expansions": 2,
@@ -117,6 +117,6 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 586000000
+  "display_instructions_p90": 251000000
  }
 }
