@@ -684,6 +684,7 @@ impl TextBody {
         if changes.all {
             self.syntax.get_mut().forget();
         }
+        self.syntax.get_mut().stats.log_overflows += u64::from(changes.hull);
         for range in changes.ranges {
             let char_of = |byte: usize| self.char_of_byte(ByteOffset(byte.min(self.bytes_len))).map_or(self.chars_len, |c| c.0);
             let (start, end) = (char_of(range.start), char_of(range.end));
