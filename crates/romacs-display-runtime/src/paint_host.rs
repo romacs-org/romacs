@@ -608,6 +608,13 @@ impl PaintSender {
         self.comms.pointer.get()
     }
 
+    /// What the render thread saw of native key repeat since the last take.
+    #[must_use]
+    pub fn take_key_repeats(&self) -> romacs_display_protocol::key_repeat_log::KeyRepeatCounts {
+        romacs_display_protocol::call_count::count("sender.take_key_repeats");
+        self.comms.key_repeats.take()
+    }
+
     /// Title the primary window (xdisp.c gui_consider_frame_title).
     pub fn set_title(&self, title: String) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_title");

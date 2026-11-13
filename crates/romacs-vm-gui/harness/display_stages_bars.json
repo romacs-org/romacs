@@ -1,7 +1,7 @@
 {
  "plain-idle": {
-  "step_instructions": 663000,
-  "display_instructions": 356000,
+  "step_instructions": 645000,
+  "display_instructions": 348000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 0,
@@ -9,47 +9,47 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 360000
+  "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 5350000,
-  "display_instructions": 5050000,
-  "display_conses": 8190,
+  "step_instructions": 842000,
+  "display_instructions": 540000,
+  "display_conses": 7,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 5070000
+  "display_instructions_p90": 547000
  },
  "chat-tick": {
-  "step_instructions": 26000000,
-  "display_instructions": 25000000,
-  "display_conses": 8210,
-  "windows_rebuilt": 2,
+  "step_instructions": 26800000,
+  "display_instructions": 25800000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
   "band_expansions": 1,
-  "layouts": 2,
+  "layouts": 1,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 25100000
+  "display_instructions_p90": 25800000
  },
  "chat-collected": {
-  "step_instructions": 176000000,
-  "display_instructions": 30500000,
-  "display_conses": 8360,
+  "step_instructions": 185000000,
+  "display_instructions": 32200000,
+  "display_conses": 181,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 30600000
+  "display_instructions_p90": 32300000
  },
  "cursor-move": {
-  "step_instructions": 2290000,
-  "display_instructions": 1810000,
+  "step_instructions": 5820000,
+  "display_instructions": 5110000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -57,11 +57,11 @@
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 2070000
+  "display_instructions_p90": 5130000
  },
  "typed": {
-  "step_instructions": 3900000,
-  "display_instructions": 3240000,
+  "step_instructions": 9840000,
+  "display_instructions": 9190000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -69,11 +69,11 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 3430000
+  "display_instructions_p90": 9230000
  },
  "append-unseen": {
-  "step_instructions": 2100000,
-  "display_instructions": 1740000,
+  "step_instructions": 5360000,
+  "display_instructions": 5000000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -81,11 +81,11 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 1740000
+  "display_instructions_p90": 5010000
  },
  "typed-elements": {
-  "step_instructions": 18500000,
-  "display_instructions": 17900000,
+  "step_instructions": 23500000,
+  "display_instructions": 22900000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -93,30 +93,30 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 18000000
+  "display_instructions_p90": 23000000
  },
  "chat-stream-1k": {
-  "step_instructions": 25500000,
-  "display_instructions": 24100000,
-  "display_conses": 8210,
-  "windows_rebuilt": 2,
+  "step_instructions": 31400000,
+  "display_instructions": 29900000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 1,
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 60800000
+  "display_instructions_p90": 96300000
  },
  "chat-stream-10k": {
-  "step_instructions": 52800000,
-  "display_instructions": 51500000,
-  "display_conses": 8210,
-  "windows_rebuilt": 2,
+  "step_instructions": 87100000,
+  "display_instructions": 85300000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 1,
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 287000000
+  "display_instructions_p90": 586000000
  }
 }

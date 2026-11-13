@@ -400,3 +400,259 @@ fn real_soft_wrap_unicode_and_cursor_padding() {
     assert_eq!(snapshot, service.snapshot(id).unwrap());
     service.close(id).unwrap();
 }
+
+/// Past the history limit every push scrolls by the same count and can
+/// look like the one before: the session must still be told, or its
+/// history falls behind the terminal's.
+#[test]
+fn repeated_output_past_the_history_limit_keeps_the_newest_lines() {
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", 40, 5).unwrap();
+    service.send(id, b"i=0; while [ $i -lt 10400 ]; do echo same; i=$((i+1)); done; echo L1; echo same; echo L2; echo same; echo L3\n").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let text = loop {
+        let _ = service.ready().recv_timeout(Duration::from_millis(100));
+        service.changed_sessions();
+        let snapshot = service.snapshot(id).unwrap();
+        if snapshot.text.contains("\nL3\n") { break snapshot.text; }
+        assert!(std::time::Instant::now() < deadline, "the last lines never arrived");
+    };
+    // Whether or not the next prompt has been printed yet.
+    let lines: Vec<&str> = text.lines().collect();
+    let last = lines.iter().rposition(|line| *line == "L3").unwrap();
+    assert_eq!(lines[last - 4..=last], ["L1", "same", "L2", "same", "L3"], "the history ends as the terminal's does");
+    assert_eq!(lines[last - 6..last - 4], ["same", "same"]);
+    let (fulls, deltas) = service.transport_counts(id).unwrap();
+    assert!(deltas > 0 && fulls < 10, "{fulls} full pushes, {deltas} deltas");
+    service.close(id).unwrap();
+}
+
+/// A shell that cannot start is an ended terminal, not a blank running one.
+#[test]
+fn a_shell_that_cannot_start_ends_the_terminal() {
+    let mut service = Service::new();
+    assert!(service.create("/bin/sh", "/", 1, 5).is_err(), "no helper is spawned for a size no terminal has");
+    let id = service.create("/bin/sh", "/nonexistent-directory-for-a-terminal", 40, 5);
+    if let Ok(id) = id {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while service.input_state(id).unwrap().running {
+            assert!(std::time::Instant::now() < deadline, "the terminal still claims to run");
+            let _ = service.ready().recv_timeout(Duration::from_millis(50));
+        }
+    }
+}
+
+/// Run SCRIPT in a terminal and return what the session shows once the
+/// output has settled, then what it shows after the helper has sent every
+/// line again. The first is built from deltas; they must agree.
+fn delta_and_full(script: &str, columns: u16, narrower: Option<u16>) -> (String, String, (u64, u64)) {
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", columns, 6).unwrap();
+    let settle = |service: &mut Service, marker: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let _ = service.ready().recv_timeout(Duration::from_millis(50));
+            service.changed_sessions();
+            let snapshot = service.snapshot(id).unwrap();
+            // Settled: the marker is printed and the shell is back at its prompt.
+            let prompt = snapshot.text.lines().last().is_some_and(|line| line.ends_with("$ "));
+            if prompt && snapshot.text.lines().any(|line| line == marker) { return snapshot.text.to_string(); }
+            assert!(Instant::now() < deadline, "{marker} never arrived");
+        }
+    };
+    service.send(id, format!("{script}; echo SETTLED-1\n").as_bytes()).unwrap();
+    settle(&mut service, "SETTLED-1");
+    if let Some(narrower) = narrower {
+        service.resize(id, narrower, 6).unwrap();
+        service.send(id, b"echo AFTER-RESIZE; echo SETTLED-2\n").unwrap();
+        settle(&mut service, "SETTLED-2");
+    }
+    service.send(id, b"echo more; echo SETTLED-3\n").unwrap();
+    let by_deltas = settle(&mut service, "SETTLED-3");
+    let counts = service.transport_counts(id).unwrap();
+    // The same size again: the helper answers an OPEN with every line.
+    service.resize(id, narrower.unwrap_or(columns), 6).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while service.transport_counts(id).unwrap().0 == counts.0 {
+        assert!(Instant::now() < deadline, "no full push came");
+        let _ = service.ready().recv_timeout(Duration::from_millis(20));
+        // Taking what has come is what lets the helper send more.
+        service.changed_sessions();
+        let _ = service.snapshot(id).unwrap();
+    }
+    let in_full = settle(&mut service, "SETTLED-3");
+    service.close(id).unwrap();
+    (by_deltas, in_full, counts)
+}
+
+/// Where the mark could be copied or lost without notice, the session must
+/// still show exactly the terminal: each case is checked against every
+/// line sent anew.
+#[test]
+fn deltas_agree_with_the_grid_where_the_mark_could_mislead() {
+    let fill = "i=0; while [ $i -lt 10300 ]; do echo line $i; i=$((i+1)); done";
+    let cases: [(&str, String, Option<u16>); 5] = [
+        ("a history at its limit", format!("{fill}; echo tail-a; echo tail-b"), None),
+        ("a scroll region not starting at line 0, history at its limit",
+         format!("{fill}; printf '\\033[2;4r\\033[4;1H'; for n in 1 2 3 4 5 6 7; do echo region $n; done; printf '\\033[r\\033[6;1H'; echo after-region"), None),
+        ("history cleared", "i=0; while [ $i -lt 40 ]; do echo early $i; i=$((i+1)); done; printf '\\033[3J'; echo after-clear; echo again".into(), None),
+        ("the alternate screen", "i=0; while [ $i -lt 30 ]; do echo before $i; i=$((i+1)); done; printf '\\033[?1049h'; echo on-alternate; printf '\\033[?1049l'; echo back".into(), None),
+        ("a resize that reflows history", "i=0; while [ $i -lt 60 ]; do echo a-long-line-that-will-wrap-when-narrower $i; i=$((i+1)); done".into(), Some(20)),
+    ];
+    for (name, script, narrower) in cases {
+        let (by_deltas, in_full, (fulls, deltas)) = delta_and_full(&script, 60, narrower);
+        assert!(by_deltas == in_full, "{name}: the session's copy differs from the terminal ({fulls} full, {deltas} deltas):\n--- by deltas, last lines ---\n{}\n--- in full ---\n{}",
+                by_deltas.lines().rev().take(12).collect::<Vec<_>>().join("\n"), in_full.lines().rev().take(12).collect::<Vec<_>>().join("\n"));
+        assert!(deltas > 0, "{name}: no delta was used, so nothing was checked");
+    }
+}
+
+/// A measurement, not a check: `cat` of a 100 MB text file and an ordinary
+/// shell session, with how many updates carried every line. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement; prints its numbers"]
+fn transport_share_on_cat_and_on_a_shell_session() {
+    let dir = std::env::temp_dir().join(format!("romacs-term-cat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hundred.txt");
+    let line = "the quick brown fox jumps over the lazy dog 0123456789 abcdefghijklmnopqrstuvwxyz\n";
+    std::fs::write(&file, line.repeat(100 * 1024 * 1024 / line.len())).unwrap();
+    let wait = |service: &mut Service, id: u64, marker: &str| {
+        let deadline = Instant::now() + Duration::from_mins(5);
+        loop {
+            let _ = service.ready().recv_timeout(Duration::from_millis(20));
+            service.changed_sessions();
+            if service.snapshot(id).unwrap().text.lines().any(|l| l == marker) { return; }
+            assert!(Instant::now() < deadline, "{marker} never arrived");
+        }
+    };
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", 100, 30).unwrap();
+    service.send(id, b"echo READY\n").unwrap();
+    wait(&mut service, id, "READY");
+    let before = service.transport_counts(id).unwrap();
+    let started = Instant::now();
+    service.send(id, format!("cat {}; echo CAT-DONE\n", file.display()).as_bytes()).unwrap();
+    wait(&mut service, id, "CAT-DONE");
+    let (seconds, after) = (started.elapsed().as_secs_f64(), service.transport_counts(id).unwrap());
+    println!("cat 100 MB: {seconds:.2} s; updates in full {}, as deltas {}", after.0 - before.0, after.1 - before.1);
+    let before = after;
+    for command in ["ls /usr/bin | head -50", "echo hello", "printf 'a\\tb\\n'", "ls -la /etc | tail -30", "date", "seq 1 200", "clear", "echo done"] {
+        service.send(id, format!("{command}; echo STEP\n").as_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        service.changed_sessions();
+        let _ = service.snapshot(id).unwrap();
+    }
+    let after = service.transport_counts(id).unwrap();
+    println!("shell session: updates in full {}, as deltas {}", after.0 - before.0, after.1 - before.1);
+    service.close(id).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A helper given a pty by its spawner runs its shell on that pty, not on
+/// one of its own: the master rides with the session's OPEN, which can
+/// arrive in the same read as its hello.
+#[test]
+fn a_helper_runs_its_shell_on_the_pty_its_spawner_made() {
+    use romacs_keeper::spawn::{self, End, Spec};
+    use std::os::fd::OwnedFd;
+    let host = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("romacs-vm-gui");
+    let spec = Spec { argv: vec![host.to_str().unwrap().as_bytes().to_vec(), b"--terminal-helper".to_vec(), b"/bin/sh".to_vec()],
+                      env: vec![b"PATH=/usr/bin:/bin".to_vec()], cwd: b"/".to_vec(), umask: 0o022,
+                      fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket), (4, End::Pty)], ..Spec::default() };
+    let mut child = spawn::spawn(&spec).unwrap();
+    let (control, master): (OwnedFd, OwnedFd) = (child.fds.remove(0), child.fds.remove(0));
+    let kept = master.try_clone().unwrap();
+    let mut service = Service::new();
+    let id = service.adopt(control, Some(master), 60, 6).unwrap();
+    service.send(id, b"tty; echo TTY-DONE\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let text = loop {
+        let _ = service.ready().recv_timeout(Duration::from_millis(50));
+        service.changed_sessions();
+        let snapshot = service.snapshot(id).unwrap();
+        if snapshot.text.lines().any(|line| line == "TTY-DONE") { break snapshot.text.to_string(); }
+        assert!(Instant::now() < deadline, "the shell never answered");
+    };
+    // The slave's name, from the master the spawner kept.
+    let mut number: libc::c_uint = 0;
+    // SAFETY: TIOCGPTN writes the pty's number into the int it is given.
+    assert_eq!(unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&kept), libc::TIOCGPTN, &raw mut number) }, 0);
+    assert!(text.lines().any(|line| line == format!("/dev/pts/{number}")), "the shell is on another pty:\n{text}");
+    service.close(id).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) {
+        assert!(Instant::now() < deadline, "the helper did not end at its close");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A session that attaches to a terminal with a long history is sent the
+/// screen first, so it can paint, and the history after: the first thing
+/// it shows is short, and what it ends with is every line the first
+/// session had.
+#[test]
+fn an_attach_paints_the_screen_before_it_has_the_history() {
+    use romacs_keeper::spawn::{self, End, Spec};
+    let host = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("romacs-vm-gui");
+    let spec = Spec { argv: vec![host.to_str().unwrap().as_bytes().to_vec(), b"--terminal-helper".to_vec(), b"/bin/sh".to_vec()],
+                      env: vec![b"PATH=/usr/bin:/bin".to_vec()], cwd: b"/".to_vec(), umask: 0o022,
+                      fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket)], ..Spec::default() };
+    let mut child = spawn::spawn(&spec).unwrap();
+    let control = child.fds.remove(0);
+    let settled = |service: &mut Service, id: u64, lines: usize| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let _ = service.ready().recv_timeout(Duration::from_millis(20));
+            service.changed_sessions();
+            let snapshot = service.snapshot(id).unwrap();
+            // Settled: the output is in and the shell is back at its prompt.
+            let prompt = snapshot.text.lines().last().is_some_and(|line| line.ends_with("$ "));
+            if snapshot.text.lines().count() >= lines && snapshot.text.contains("\nFILLED\n") && prompt { return snapshot.text.to_string(); }
+            assert!(Instant::now() < deadline, "{} lines, wanted {lines}", snapshot.text.lines().count());
+        }
+    };
+    let mut first = Service::new();
+    let one = first.adopt(control.try_clone().unwrap(), None, 60, 6).unwrap();
+    first.send(one, b"seq 1 3000; echo FILLED\n").unwrap();
+    let before = settled(&mut first, one, 3000);
+    // A successor: the first session is simply replaced.
+    let mut second = Service::new();
+    let two = second.adopt(control, None, 60, 6).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let painted = loop {
+        let _ = second.ready().recv_timeout(Duration::from_millis(5));
+        second.changed_sessions();
+        let snapshot = second.snapshot(two).unwrap();
+        if snapshot.text.contains("FILLED") { break snapshot.text.lines().count(); }
+        assert!(Instant::now() < deadline, "the screen never came");
+    };
+    assert!(painted <= 6, "the first paint carried {painted} lines: the history came with it");
+    let after = settled(&mut second, two, 3000);
+    assert_eq!(after, before, "scrolling back shows what it showed before");
+    second.close(two).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) {
+        assert!(Instant::now() < deadline, "the helper did not end at its close");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// After the attach the session never asks its helper something and
+/// waits: keys and sizes are sent, state arrives by push. This holds
+/// while the only reads of a helper's socket are the hello at attach and
+/// the mirror thread's. Whoever adds a third is adding a round trip per
+/// something; if it is per key, it is the wrong design.
+#[test]
+fn the_session_never_asks_its_helper_and_waits() {
+    let source = include_str!("../src/terminal_service.rs");
+    assert_eq!(source.matches("channel::receive(").count(), 2, "a new read of a helper's socket");
+    assert_eq!(source.matches("set_read_timeout(").count(), 2, "a new bounded wait on a helper");
+    let attach = source.find("fn attach(").unwrap();
+    let listen = source.find("fn listen(").unwrap();
+    for (at, _) in source.match_indices("channel::receive(") {
+        let owner = if at > attach { "attach" } else if at > listen { "listen" } else { "elsewhere" };
+        assert_ne!(owner, "elsewhere", "a helper's socket is read outside the hello and the mirror thread");
+    }
+}

@@ -8,6 +8,8 @@ description = "Lexical Elisp reader, register compiler and runtime for romacs"
 # Deliberately isolated: no inherited evaluator or workspace build graph.
 [dependencies]
 romacs-brand = { path = "../romacs-brand" }
+romacs-keeper = { path = "../romacs-keeper" }
+romacs-record = { path = "../romacs-record" }
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }
@@ -21,6 +23,9 @@ num-bigint = "0.4"
 num-integer = "0.1"
 stacker.workspace = true
 libc.workspace = true
+# The safe system-call layer host.rs calls through; host/sys.rs holds the
+# C library calls it lacks.
+rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "pty", "system", "thread", "time"] }
 sha2 = "0.11"
 # xxh3: the fast content hash of mapped library segments (world::arena).
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128", "std"] }
@@ -44,6 +49,8 @@ foldhash = "0.2"
 # collector's threads (src/gc_mark.rs), which share chunks through a deque.
 rayon = "1.12"
 crossbeam-deque.workspace = true
+# FSRS, the scheduler Anki uses, for Gnosis (src/prims/fsrs.rs).
+fsrs = "=6.6.1"
 # SQLite for sqlite.c's primitives, built from the bundled amalgamation.
 libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 # gnutls.c's TLS client sessions (src/tls.rs), on the ring provider the
@@ -53,6 +60,9 @@ webpki = { package = "rustls-webpki", version = "0.103", default-features = fals
 # The tree-sitter runtime behind treesit.c's primitives (statically linked;
 # grammars are dlopened as GNU does).
 tree-sitter = "=0.27.0"
+tree-sitter-language.workspace = true
+# dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
+libloading = "0.8"
 
 [build-dependencies]
 sha2 = "0.11"
@@ -73,6 +83,8 @@ romacs-coordinate-contract = { path = "../romacs-coordinate-contract" }
 romacs-layout = { path = "../romacs-layout" }
 # Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
+# Lists tests/*.rs as the modules of the `all` target (tests/all/main.rs).
+romacs-vm-test-modules = { path = "../romacs-vm-test-modules" }
 
 [profile.release]
 opt-level = 3

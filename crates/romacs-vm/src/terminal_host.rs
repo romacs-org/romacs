@@ -107,6 +107,17 @@ impl TerminalSnapshot {
 /// Per-evaluator native terminal service. Calls must not evaluate Lisp.
 pub trait TerminalHost {
     fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String>;
+    /// A terminal that already runs, behind the control socket of its
+    /// helper process: one a keeper spawned for this session, or kept for
+    /// it across a restart. PTY is the master of the pty the spawner made
+    /// for it, when it made one: the helper takes it if its shell is not
+    /// started yet. A host with no helper processes has none.
+    ///
+    /// # Errors
+    /// The helper does not answer, or speaks a version this session cannot read.
+    fn adopt(&mut self, _control: std::os::fd::OwnedFd, _pty: Option<std::os::fd::OwnedFd>, _columns: u16, _rows: u16) -> Result<u64, String> {
+        Err("This terminal host adopts no helper process".into())
+    }
     fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String>;
     fn resize(&mut self, session: u64, columns: u16, rows: u16) -> Result<(), String>;
     fn input_state(&mut self, session: u64) -> Result<TerminalInputState, String>;
@@ -114,6 +125,12 @@ pub trait TerminalHost {
     fn changed_sessions(&mut self) -> Vec<u64>;
     fn snapshot(&mut self, session: u64) -> Result<TerminalSnapshot, String>;
     fn close(&mut self, session: u64) -> Result<(), String>;
+    /// How many of SESSION's updates arrived as the whole grid, and how
+    /// many as a change to it; `None` for a host that has no such transport.
+    fn transport_counts(&mut self, _session: u64) -> Option<(u64, u64)> { None }
+    /// The record version SESSION's helper process speaks, for as long as
+    /// it lives; `None` for a host with no helper processes.
+    fn helper_version(&mut self, _session: u64) -> Option<u16> { None }
 }
 
 pub(crate) struct TerminalBinding {
@@ -549,9 +566,9 @@ impl Vm {
         let send = self.intern("romacs-term-send-key");
         // A keymap or local-map property at point comes first: the
         // character's (`get-char-property'), or the one an insertion there
-        // would inherit (`get-pos-property'), as romacs-keymap--local-map
-        // and keymap.c get_local_map find them.
-        // The reader widens before it looks (romacs-keymap--local-map): a
+        // would inherit (`get-pos-property'), as keymap.c get_local_map
+        // finds them (`Vm::current_active_maps').
+        // The reader widens before it looks: a
         // narrowed buffer goes through the loop.
         let point = match self.object(buffer)? {
             crate::data::Object::Buffer(text) if text.accessible() == (crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(text.as_str().len())) =>

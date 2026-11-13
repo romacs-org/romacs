@@ -753,6 +753,7 @@ impl Vm {
             self.fence_property(symbol, None, crate::world::Access::Write, None);
         }
         let slot = self.plist_owner_mut(symbol)?;
+        self.command_set.plist_written(slot);
         self.slots[slot].plist = plist;
         Ok(plist)
     }
@@ -806,6 +807,7 @@ impl Vm {
             self.fence_property(symbol, Some(key), crate::world::Access::Write, Some(value));
         }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
+        self.command_set.plist_written(owner);
         loop {
             let plist = self.slots[owner].plist;
             let mut walk = TailWalk::new(plist);
@@ -1200,8 +1202,14 @@ pub(crate) struct AnnotatedBuffer {
     pub(crate) indirect: Vec<Value>,
     /// Overlays inserted into this buffer's tree so far (Overlay::inserted).
     pub overlay_insertions: u64,
+    /// What names the state of this buffer's overlays to the windows
+    /// showing it: the display's overlay count at their last change
+    /// (`Vm::overlay_changed`), 0 while none has shown anything. A value is
+    /// given once, so it is another's neither after `buffer-swap-text` nor
+    /// in the store `set-buffer-multibyte` makes.
+    pub overlay_revision: u64,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions });
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions, overlay_revision });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1218,16 +1226,19 @@ impl From<Text> for AnnotatedBuffer {
             base: Value::NIL,
             indirect: Vec::new(),
             overlay_insertions: 0,
+            overlay_revision: 0,
         }
     }
 }
 impl Deref for AnnotatedBuffer {
     type Target = Text;
+    #[inline]
     fn deref(&self) -> &Text {
         &self.text
     }
 }
 impl DerefMut for AnnotatedBuffer {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Text {
         &mut self.text
     }
@@ -1340,16 +1351,27 @@ impl AnnotatedBuffer {
         }
         true
     }
-    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
+    /// Every Value the buffer holds; of its text's properties, what READING
+    /// says (`BodyProperties`).
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
+        self.visit_values_but(reading, None, f);
+    }
+    /// A live buffer's undo list is weak, unless it is its base's and so not in
+    /// its slot; a dead buffer's is held like the rest of it (`mark_buffer`).
+    pub(crate) fn owns_undo_list(&self) -> bool {
+        self.state.live && self.base == Value::NIL
+    }
+    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
-        self.per_buffer.visit_values(f);
+        self.per_buffer.visit_values_but(skip, f);
         self.text.visit_view_values(f);
         // An indirect buffer holds its base alive; the text they share is
         // the base's to visit, once, as collection rewrites what it visits.
         f(&mut self.base);
         for buffer in &mut self.indirect { f(buffer); }
-        if self.base == Value::NIL { self.text.visit_values(f); }
+        if self.base == Value::NIL { self.text.visit_values(reading, f); }
         self.intervals.visit_values(f);
         for v in self.evaporating.values_mut() {
             f(v);

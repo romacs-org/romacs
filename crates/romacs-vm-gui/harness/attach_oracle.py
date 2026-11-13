@@ -27,6 +27,8 @@ work.mkdir(parents=True, exist_ok=True)
 gnu = os.environ['ROMACS_GNU_ORACLE']
 env = {k: v for k, v in os.environ.items() if k not in ('ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'LD_LIBRARY_PATH')}
 env['HOME'] = str(work / 'home'); (work / 'home').mkdir(exist_ok=True)
+# A throwaway HOME spawns no world builder: Romacs boots from source.
+env['ROMACS_WORLD'] = 'off'
 
 def run(binary, form):
     out = subprocess.run([binary, '-Q', '--batch', '--eval', form] if binary == gnu else [binary, '--batch', '--eval', form],

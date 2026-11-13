@@ -30,6 +30,10 @@ possible; say so where you do.
   `substitute-command-keys` or `help-key-binding`, mode-line and status text in
   named faces that inherit theme faces. A command that only makes sense in a mode
   declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
+- Romacs's own Lisp byte-compiles on the pinned GNU Emacs with no new warning: the
+  check's Lisp tier holds each touched file of `lisp/romacs/` to its base. GNU does
+  not know what only Romacs has, so declare it where it is used: `declare-function`
+  for a primitive, naming its Rust file, and `defvar` for a variable.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
@@ -47,6 +51,18 @@ possible; say so where you do.
 - A host query or effect (files, environment, clocks, processes) outside
   `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
   comment lines directly above it; the `host_boundary_lint` test checks each.
+- No generated file is committed. A file a tool of ours makes from the
+  repository's sources is made where it is consumed: a build script writes it
+  into `OUT_DIR` for the binary or a test target to include, Lisp computes it
+  as it loads (a world build keys what it read), a check computes its ledger.
+  Committed copies conflict on every merge of two branches that each change
+  their sources. Ratchet floors that `lower` writes are deliberate records,
+  not generated output. Recordings of pinned GNU and imports from outside
+  sources are not made from the repository: they stay committed, beside
+  their recorder. `tools/lib/generated_files.py` (run by
+  `tools/check-derived`) fails while git tracks a known generator's output.
+- No test pins a source line number. Name a declaration by its file and a
+  form by its text: a line moves whenever anything above it changes.
 - `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
   smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines, every
   rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
@@ -58,7 +74,7 @@ possible; say so where you do.
   listing it there: a deliberate commit with its reason. `smells.py check
   --absolute` holds the trunk to that file at a checkpoint, where `lower`
   records the drops. The file merges by its meaning, each side's raise added:
-  `tools/derived setup` installs the merge driver once per repository, and
+  `tools/git-setup` installs the merge driver once per repository, and
   `python3 tools/lib/smells.py resolve` does the same by hand.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
@@ -123,8 +139,8 @@ possible; say so where you do.
 4. Broaden checks when the change crosses an ownership boundary, affects shared
    runtime behavior, or reveals another failure. GC, evaluation, loading, protocol,
    and lifecycle changes need evidence for the relevant interactions.
-5. Before final verification, inspect the diff, regenerate affected derived
-   artifacts, pass focused checks, and obtain fresh read-only review for nontrivial
+5. Before final verification, inspect the diff, update affected ledgers and
+   floors, pass focused checks, and obtain fresh read-only review for nontrivial
    changes. Freeze the candidate before running the required full project gate.
 6. Reserve the full gate for the final combined candidate. Rerun affected checks
    after a correction; do not repeatedly gate unchanged inputs or rerun failures
@@ -158,6 +174,11 @@ The gates, small and whole for each side:
 The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
+- romacs-vm's whole suite: each `tests/FILE.rs` is also the module `FILE` of one test target, `all`
+  (`crates/romacs-vm/tests/all/`), so a check builds one executable, not one a file. The gates build and
+  run what `python3 tools/lib/test_modules.py targets romacs-vm` prints, and a test is `FILE::TEST_NAME`
+  there. `all` lists the directory's files when it builds; a file that cannot be a module is named,
+  with its reason, in `tests/all/standalone.txt`.
 - Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
@@ -179,9 +200,8 @@ The other commands:
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The
   gate runs the batch probes (`romacs-vm-gui` test `scaling`).
-- Derived artifacts, source/floor validation and the Python unit tests: `python3 tools/check-derived`.
+- Untracked generated files, source/floor validation and the Python unit tests: `python3 tools/check-derived`.
   It runs every tracked `test_*.py`/`*_test.py` that no Rust test owns (`tools/lib/python_tests.py`).
-  It can regenerate stale output; inspect and stage only task-owned changes.
 - Combined verification: `python3 tools/gate focused 'EXPR'`, then
   `python3 tools/gate full` for final acceptance. Inspect `--help` and select
   resource bounds for the current machine. Defaults keep outer VM and display
@@ -237,3 +257,18 @@ standalone Cargo execution without it.
   owned paths. Push, publication, activation, service restarts, and real mail
   require explicit authorization.
 - Report what changed, what actually ran, its result, and any remaining limit.
+
+## Landing work
+
+- `beta` is the development branch. `master` holds releases only: a release
+  fast-forwards it to a fully checked `beta` commit and tags it.
+- Never commit to, merge into or reset `beta` or `master`. A local
+  reference-transaction hook refuses it (`tools/hooks/`, installed by
+  `tools/git-setup`).
+- Work on your own branch in its own worktree, started from `beta`, and merge
+  `beta` in as it moves.
+- A branch lands through the merge queue: signed commits, the full check, then
+  a submitted request. The queue merges requests onto `beta` in order and
+  reruns what each merge changes.
+- A session without the queue's tools leaves its branch committed and checked,
+  and reports the branch name.
