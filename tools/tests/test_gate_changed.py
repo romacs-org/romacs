@@ -10,6 +10,8 @@ GATE = runpy.run_path(str(ROOT / 'tools/gate'), run_name='gate')
 STRUCTURAL = GATE['STRUCTURAL']
 changed_filter = GATE['changed_filter']
 filter_for = GATE['filter_for']
+test_file = GATE['test_file']
+ONLY_STRUCTURAL = ' | '.join(test_file(binary) for binary in STRUCTURAL)
 
 
 class ChangedFilter(unittest.TestCase):
@@ -53,11 +55,15 @@ class ChangedFilter(unittest.TestCase):
         self.assertIn('binary_id(romacs-vm::quit_async)', selected)
         self.assert_structural(selected)
 
+    def test_a_test_file_is_selected_as_a_module_of_all_too(self):
+        # A run builds a file's own target or its package's `all`, not both.
+        self.assertEqual(test_file('romacs-vm::quit_async'),
+                         'binary_id(romacs-vm::quit_async) | (binary_id(romacs-vm::all) & test(/^quit_async::/))')
+
     def test_docs_and_test_commands_select_only_the_structural_rules(self):
         self.write('doc/x.org', 'AGENTS.md', 'Makefile', 'tools/tests/test_x.py')
         selected = changed_filter(self.repo)
-        self.assert_structural(selected)
-        self.assertEqual(selected.count('|') + 1, len(STRUCTURAL))
+        self.assertEqual(selected, ONLY_STRUCTURAL)
 
     def test_a_base_leaves_out_what_came_before_it(self):
         self.git('checkout', '-q', '-b', 'trunk')
@@ -81,7 +87,7 @@ class ChangedFilter(unittest.TestCase):
         self.write(*names)
         self.assertEqual(filter_for(names), changed_filter(self.repo))
         self.assertIsNone(filter_for([*names, 'lisp/romacs/x.el']))
-        self.assertEqual(filter_for([]).count('|') + 1, len(STRUCTURAL))
+        self.assertEqual(filter_for([]), ONLY_STRUCTURAL)
 
     def test_what_cannot_be_mapped_runs_everything(self):
         for name in ('lisp/romacs/x.el', 'crates/romacs-vm/src/lib.rs'):

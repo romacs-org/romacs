@@ -9,6 +9,11 @@ typed text lands in the second idle phase.  A session runs, in order:
 
   idle, self-insert (N x `a'), C-n (N), C-f (N), idle, then C-x C-s.
 
+Its C-n steps that scroll do so under Romacs's `scroll-conservatively'
+101 (just enough to show point), the cost of that path alone: GNU's
+default 0 recentres instead, a different and cheaper redisplay
+(scroll_invisible_live runs both).
+
 Counted sessions count the evaluator thread alone (`perf stat -t`,
 instructions:u) over each phase; latency sessions run without perf and
 with --trace-latency, and read key-enqueue -> render-observed samples: one

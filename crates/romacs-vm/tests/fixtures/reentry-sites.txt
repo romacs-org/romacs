@@ -75,6 +75,7 @@ prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not susp
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
 protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect
 protocol.rs submit prepare_source 2 clean  # no caller Values
+quit.rs eval_as_wait eval_source_raw 1 boundary  # embedder API: the result is a Local borrowing the VM, or none for a quit, whose flag is a constant
 reader/mod.rs compile_source compile 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
 reader/mod.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
@@ -140,7 +141,7 @@ threaded_lend.rs eval_text eval_source_raw 1 clean  # the source is text; the re
 threaded_lend.rs expand_form expand_macro 1 clean  # FORM's objects are rooted; the requester holds no Value and the expansion is a new form
 threaded_lend.rs redisplay frame_snapshot 1 clean  # the size is plain, read before; the requester holds no Value and takes the frame, plain data, at once
 threaded_lend.rs resize resize_root_window 1 clean  # the size, line and column are plain, read before; the requester holds no Value
-threaded_lend.rs run compile 1 suspended  # FORM is Rust data whose objects are rooted
+threaded_lend.rs run compile_request 1 suspended  # FORM is Rust data whose objects are rooted
 threaded_lend.rs run execute_raw 1 suspended  # the function is an index; its value is the caller's to consume
 threaded_lend.rs run lambda_list_closure 1 suspended  # the list stays in the caller's frame
 threaded_lend.rs run loader_primitive 1 suspended  # the arguments stay in the caller's frame

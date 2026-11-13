@@ -86,12 +86,13 @@ GNU fns.c `Fmapcan'."
   "Apply FUNCTION to each element of SEQUENCE, and concat the results.
 SEPARATOR goes between each pair of results.  GNU fns.c `Fmapconcat':
 the symbol `identity' over a list or vector concatenates the elements
-without calling it, and a nil or empty SEPARATOR inserts nothing."
+without calling it, and a nil or empty SEPARATOR inserts nothing.  The
+join, separator included, is one call of `romacs--concat-list'."
   (let ((n (length sequence))
         (i 0)
         (parts nil))
     (if (and (eq function 'identity) (or (consp sequence) (vectorp sequence)))
-        (setq parts (append sequence nil))
+        (setq parts (if (consp sequence) sequence (append sequence nil)))
       (if (listp sequence)
           (let ((tail sequence))
             (while (and (< i n) (consp tail))
@@ -103,12 +104,7 @@ without calling it, and a nil or empty SEPARATOR inserts nothing."
           (setq parts (cons (funcall function (aref sequence i)) parts))
           (setq i (1+ i))))
       (setq parts (nreverse parts)))
-    (if (and separator (not (equal separator "")))
-        (let ((tail parts))
-          (while (cdr tail)
-            (setcdr tail (cons separator (cdr tail)))
-            (setq tail (cdr (cdr tail))))))
-    (romacs--concat-list parts)))
+    (romacs--concat-list parts separator)))
 
 
 ;;; Printing
@@ -265,44 +261,6 @@ keymap bound to a prefix not already reached by a prefix of it."
       (setq maps (cdr maps)))
     (nreverse rows)))
 
-(defun romacs--where-active-maps ()
-  (let* ((local (romacs--keymap-at-point 'local-map))
-         (text (romacs--keymap-at-point 'keymap))
-         (maps (list (current-global-map)))
-         (override (if (boundp 'minor-mode-overriding-map-alist)
-                       minor-mode-overriding-map-alist))
-         (emulation (if (boundp 'emulation-mode-map-alists)
-                        emulation-mode-map-alists))
-         (alists (list override minor-mode-map-alist))
-         (minor nil))
-    (if (not (keymapp local)) (setq local (current-local-map)))
-    (if local (setq maps (cons local maps)))
-    (while emulation
-      (let ((alist (car emulation)))
-        (if (symbolp alist)
-            (setq alist (if (boundp alist) (symbol-value alist))))
-        (setq minor (append minor (romacs--where-minor-maps alist nil))))
-      (setq emulation (cdr emulation)))
-    (while alists
-      (setq minor (append minor (romacs--where-minor-maps
-                                (car alists) (if (cdr alists) nil override))))
-      (setq alists (cdr alists)))
-    (setq maps (append minor maps))
-    (if (keymapp text) (setq maps (cons text maps)))
-    maps))
-
-(defun romacs--where-minor-maps (alist ignored)
-  (let ((maps nil))
-    (while (consp alist)
-      (let ((entry (car alist)))
-        (if (and (consp entry) (symbolp (car entry))
-                 (boundp (car entry)) (symbol-value (car entry))
-                 (not (assq (car entry) ignored)))
-            (let ((map (indirect-function (cdr entry))))
-              (if map (setq maps (cons map maps))))))
-      (setq alist (cdr alist)))
-    (nreverse maps)))
-
 (defun romacs--where-lookup (maps sequence)
   (let ((value nil) (key (copy-sequence sequence)) (i 0))
     ;; GNU treats a range event as its first character during shadow lookup.
@@ -415,7 +373,7 @@ keymap bound to a prefix not already reached by a prefix of it."
   "Return keys invoking DEFINITION in KEYMAP, respecting shadows and remapping."
   (let* ((maps (cond ((and (consp keymap) (keymapp (car keymap))) keymap)
                      (keymap (list keymap (current-global-map)))
-                     (t (romacs--where-active-maps))))
+                     (t (current-active-maps))))
          (remapping (romacs--where-remapping definition maps))
          (modifier (romacs--where-modifier)))
     (if (and (not no-remap) remapping) (setq definition remapping))

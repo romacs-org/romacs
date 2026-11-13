@@ -50,6 +50,9 @@ const FIELDS: &[(&str, Class)] = &[
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
     ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    // The current buffer as last resolved: a collection and a kill clear it,
+    // and a slot holding another value resolves afresh (buffer.rs).
+    ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
@@ -451,14 +454,14 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
     ("compiled_lisp/mod.rs:Configured.identity", Plain),
-    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
+    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
     // The scanner's test text: syntax codes and positions, no Value.
     ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
     ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
-    ("treesit/native.rs:Tree.1", Plain),
+    ("treesit/native.rs:Tree.0", Plain), ("treesit/native.rs:Tree.1", Plain),
 ];
 
 /// How many rows are `Held`. It only falls: a new one fails, and a gone one

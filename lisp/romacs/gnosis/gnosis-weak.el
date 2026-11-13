@@ -94,8 +94,8 @@ its last scheduled review and LAPSES its failure count.  The plist has
 `:score' in [0, 1], `:retrievability', `:difficulty' and `:lapses'.
 Retrievability uses the pinned FSRS model; nothing here is fitted."
   (when (and (numberp stability) (> stability 0) (numberp difficulty))
-    (let* ((retrievability (gnosis-fsrs--retrievability
-                            (max 0 elapsed-days) stability))
+    (let* ((retrievability (romacs-fsrs-retrievability
+                            nil stability (max 0 elapsed-days)))
            (difficulty (min 10.0 (max 1.0 (float difficulty))))
            (lapses (max 0 (or lapses 0)))
            (parts (list (- 1.0 retrievability)
@@ -324,15 +324,18 @@ Ignore narrowing."
     (widen)
     (remove-overlays (point-min) (point-max) 'gnosis-weak t)))
 
-(defun gnosis-weak--place ()
+(defun gnosis-weak--place (&optional anchors)
   "Show indicators for the cached weak nodes at their current anchors.
-Replace all existing indicators; never read the database."
+ANCHORS are the buffer's (ID . ANCHOR) pairs when the caller has just
+read them (`gnosis-weak--buffer-nodes').  Replace all existing
+indicators; never read the database."
   (gnosis-weak--clear)
-  (when gnosis-weak--nodes
+  ;; With no weak node there is nothing to place, and no reason to walk.
+  (when (and gnosis-weak--nodes (> (hash-table-count gnosis-weak--nodes) 0))
     (let ((keys (gnosis-weak--keys-help)))
       (save-restriction
         (widen)
-        (pcase-dolist (`(,id . ,anchor) (gnosis-weak--buffer-nodes))
+        (pcase-dolist (`(,id . ,anchor) (or anchors (gnosis-weak--buffer-nodes)))
           (when-let* ((node (gethash id gnosis-weak--nodes)))
             ;; Span exactly the anchor line so `display-local-help' shows the
             ;; details from the keyboard.  Neither end advances: text typed
@@ -361,12 +364,13 @@ Mode hooks call this from an idle timer instead; see
   (interactive)
   (with-current-buffer (or buffer (current-buffer))
     (condition-case err
-        (let* ((ids (mapcar #'car (gnosis-weak--buffer-nodes)))
+        (let* ((anchors (gnosis-weak--buffer-nodes))
+               (ids (delete-dups (mapcar #'car anchors)))
                (nodes (and ids (gnosis-weak-aggregate
-                                (gnosis-weak--rows (delete-dups ids))
+                                (gnosis-weak--rows ids)
                                 (gnosis--today-int)))))
           (setq gnosis-weak--nodes (gnosis-weak--cache nodes))
-          (gnosis-weak--place)
+          (gnosis-weak--place anchors)
           (setq gnosis-weak--refreshed-at (float-time))
           nodes)
       (error (setq gnosis-weak--nodes nil)

@@ -205,11 +205,14 @@ impl Vm {
         }
         Ok(work)
     }
-    /// Every leaf window of every frame, the mini-windows too: what any
-    /// redisplay may show.
+    /// Every leaf window of every frame shown, the mini-windows too: what
+    /// any redisplay may show. A hidden frame (a child frame kept for a
+    /// layer, a toast or a chip between uses) is not redisplayed, as GNU
+    /// redisplays only visible frames, so its windows run no
+    /// `pre-redisplay-functions`.
     pub(crate) fn displayed_windows(&self) -> Vec<Value> {
         let mut out = vec![];
-        for frame in self.frames() {
+        for frame in self.frames().into_iter().filter(|&frame| self.frame_shown(frame)) {
             let Ok(f) = self.frame(frame) else { continue };
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {

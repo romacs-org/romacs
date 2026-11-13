@@ -256,7 +256,8 @@ impl Vm {
             b.evaporating.insert(start, copy);
         }
         b.intervals.insert(copy, start, end, &b.anchors);
-        self.note_overlay_insertion(buffer, copy)
+        self.note_overlay_insertion(buffer, copy)?;
+        self.overlay_changed(copy)
     }
 
     /// Fkill_buffer (buffer.c:2019): killing a base buffer kills its
