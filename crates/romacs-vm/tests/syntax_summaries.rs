@@ -256,7 +256,10 @@ fn propertizing_parses_match_pinned_gnu() {
 /// A hundred `syntax-table' properties put near the end between two
 /// parses, each second one making a `(' punctuation: more ranges than the
 /// change log keeps apart, so it holds their hull. The values are GNU's,
-/// and the leaves before the first property keep their summaries.
+/// and the leaves before the first property keep their summaries. The one
+/// leaf the hull drops before the scanned tail is summarized twice: with
+/// its `(' punctuation its `)' close past the bottom level, so its general
+/// summary does not fit and an exact one is made for its level count.
 #[test]
 fn property_changes_near_the_end_keep_the_summaries_before_them() {
     const CASE: &str = r#"(with-temp-buffer
@@ -278,7 +281,7 @@ fn property_changes_near_the_end_keep_the_summaries_before_them() {
         (setq counts (list (plist-get (romacs-syntax-summaries-stats) :leaves) (- (plist-get (romacs-syntax-summaries-stats) :leaf-scans) scans)
                            (plist-get (romacs-syntax-summaries-stats) :log-overflows) (plist-get (romacs-syntax-summaries-stats) :context-switches))))");
     let counts = undisturbed(&format!("(let ((counts nil)) {} counts)", CASE.replace("SECOND", &counted)));
-    assert_eq!(counts, "(69 1 1)", "leaves, leaves the second parse summarized again, hulls taken");
+    assert_eq!(counts, "(69 2 1)", "leaves, summaries the second parse made again, hulls taken");
 }
 
 /// What EXPRESSION shows, a list whose last element is its buffer's count
