@@ -147,8 +147,11 @@ string, an overlay."
       (setf (romacs-agent-dir session) dir
             ;; No such socket, and a name short enough to be one.
             (romacs-agent-host-socket session) "/nonexistent/romacs-agent.sock")
+      ;; A supervisor ran it once: its journal is there.
+      (write-region "" nil (expand-file-name "journal.jsonl" dir) nil 'silent)
       (unwind-protect
           (cl-letf (((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+                    ((symbol-function 'romacs-agent--check-companions) #'ignore)
                     ((symbol-function 'romacs-agent--launch) #'ignore)
                     ((symbol-function 'romacs-agent--refork) #'ignore)
                     ((symbol-function 'romacs-agent--drop-relays) #'ignore)
