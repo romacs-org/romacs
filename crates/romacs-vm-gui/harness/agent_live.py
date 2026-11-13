@@ -2808,7 +2808,7 @@ def select(args, base):
         live, armed_r, div = result['live'], result['armed'], result['divider']
         result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
                         and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
-                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and armed_r['armed'] == 't' and '→ claude-opus-5-5 · high' in armed_r['header']
                         and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
                         and armed_r['written'][-3:] == [('control_request', 'set_model'),
                                                         ('control_request', 'apply_flag_settings'), ('user', None)]
