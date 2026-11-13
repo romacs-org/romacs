@@ -342,3 +342,83 @@ fn next_change_matches_the_per_byte_oracle_across_uniform_stretches() {
         }
     }
 }
+
+fn put_syntax(p: &mut Properties, range: Range<usize>, value: i64) {
+    p.put(ByteOffset(range.start)..ByteOffset(range.end), Key::SYNTAX_TABLE, Value::integer(value).unwrap());
+}
+/// The log's ranges as (START, END), taken.
+fn syntax_log(p: &mut Properties) -> Vec<(usize, usize)> {
+    let changes = p.take_syntax_changes();
+    assert!(!changes.all && !changes.hull, "{changes:?}");
+    changes.ranges.iter().map(|r| (r.start, r.end)).collect()
+}
+#[test]
+fn the_syntax_log_past_its_count_is_the_hull_of_its_ranges() {
+    // COUNT one-byte puts three bytes apart, in a scrambled order.
+    let log = |count: usize| {
+        let mut p = Properties::new();
+        for i in 0..count {
+            let at = 1000 + 3 * (i * 37 % count);
+            put_syntax(&mut p, at..at + 1, 1);
+        }
+        p.take_syntax_changes()
+    };
+    let kept = log(64);
+    let mut starts: Vec<_> = kept.ranges.iter().map(|r| (r.start, r.len())).collect();
+    starts.sort_unstable();
+    assert_eq!(starts, (0..64).map(|i| (1000 + 3 * i, 1)).collect::<Vec<_>>());
+    assert!(!kept.hull && !kept.all);
+    for count in [65, 500] {
+        let hull = log(count);
+        let ends: Vec<_> = hull.ranges.iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(ends, [(1000, 998 + 3 * count)], "{count}: from the first put's start to the last one's end");
+        assert!(hull.hull && !hull.all, "{count}");
+    }
+}
+#[test]
+fn the_syntax_log_holds_only_the_runs_a_write_changes() {
+    let mut p = Properties::new();
+    put_syntax(&mut p, 10..20, 2);
+    put_syntax(&mut p, 20..30, 3);
+    put_syntax(&mut p, 30..40, 2);
+    assert_eq!(syntax_log(&mut p), [(10, 40)], "neighbours are one range");
+    // The value there, over all of it and over a part: no change.
+    put_syntax(&mut p, 10..20, 2);
+    put_syntax(&mut p, 32..38, 2);
+    p.put(ByteOffset(0)..ByteOffset(50), named("face"), Value::TRUE);
+    assert!(!p.has_syntax_changes());
+    // Where it had none and where it had another.
+    put_syntax(&mut p, 5..40, 2);
+    assert_eq!(syntax_log(&mut p), [(5, 10), (20, 30)]);
+    put_syntax(&mut p, 0..50, 2);
+    assert_eq!(syntax_log(&mut p), [(0, 5), (40, 50)]);
+    // A remove changes the runs that had a value.
+    p.remove(ByteOffset(50)..ByteOffset(90), Key::SYNTAX_TABLE);
+    assert!(!p.has_syntax_changes());
+    put_syntax(&mut p, 60..70, 4);
+    p.take_syntax_changes();
+    p.remove(ByteOffset(45)..ByteOffset(100), Key::SYNTAX_TABLE);
+    assert_eq!(syntax_log(&mut p), [(45, 50), (60, 70)]);
+    p.remove(ByteOffset(45)..ByteOffset(100), Key::SYNTAX_TABLE);
+    assert!(!p.has_syntax_changes());
+    // nil is a value: over text with none it is a change, again it is not.
+    p.put(ByteOffset(60)..ByteOffset(70), Key::SYNTAX_TABLE, Value::NIL);
+    assert_eq!(syntax_log(&mut p), [(60, 70)]);
+    p.put(ByteOffset(60)..ByteOffset(70), Key::SYNTAX_TABLE, Value::NIL);
+    assert!(!p.has_syntax_changes());
+}
+#[test]
+fn a_reset_marks_every_syntax_property_changed() {
+    let mut p = Properties::new();
+    p.put(ByteOffset(0)..ByteOffset(5), named("face"), Value::TRUE);
+    p.reset();
+    assert!(!p.has_syntax_changes(), "it had no `syntax-table' property");
+    for i in 0..70 {
+        put_syntax(&mut p, 10 * i..10 * i + 1, 1);
+    }
+    p.reset();
+    put_syntax(&mut p, 3..4, 1);
+    let changes = p.take_syntax_changes();
+    assert!(changes.all && changes.ranges.is_empty(), "{changes:?}");
+    assert!(!p.has_syntax_changes());
+}

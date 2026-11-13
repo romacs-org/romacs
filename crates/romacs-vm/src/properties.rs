@@ -960,45 +960,69 @@ pub(crate) struct Properties {
 }
 romacs_snapshot::snapshot_struct!(Properties { layers, stamp, syntax_changes });
 
-/// Byte ranges where the `syntax-table' property changed, or `all' once
-/// there are too many to keep.
+/// Byte ranges where the `syntax-table' property changed, as the text's
+/// bytes lie until its next edit: apart while they are few, then as their
+/// hull (lowest start to highest end), one range that each later change
+/// widens. A count never makes it `all', which is every property replaced.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SyntaxChanges {
     pub ranges: Vec<Range<usize>>,
     pub all: bool,
+    /// Whether the ranges are one hull.
+    pub hull: bool,
 }
-romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all });
+romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all, hull });
 impl SyntaxChanges {
-    /// Note RANGE in SLOT, making the log there if it has none.
+    /// The ranges kept apart.
+    const KEPT: usize = 64;
+    /// Note RANGE in SLOT, making the log there if it has none. A range
+    /// that starts where the last one ends continues it.
     fn note(slot: &mut Option<Box<Self>>, range: Range<usize>) {
-        let changes = slot.get_or_insert_default();
-        if changes.all {
-            return;
+        let Self { ranges, all: false, hull } = &mut **slot.get_or_insert_default() else { return };
+        let join = |a: &Range<usize>, b: &Range<usize>| a.start.min(b.start)..a.end.max(b.end);
+        match ranges.last_mut() {
+            Some(last) if *hull => *last = join(last, &range),
+            Some(last) if last.end == range.start => last.end = range.end,
+            _ => ranges.push(range),
         }
-        if changes.ranges.len() == 64 {
-            changes.ranges.clear();
-            changes.all = true;
-        } else {
-            changes.ranges.push(range);
+        if ranges.len() > Self::KEPT {
+            *ranges = ranges.iter().cloned().reduce(|a, b| join(&a, &b)).into_iter().collect();
+            *hull = true;
+        }
+    }
+    /// Note in SLOT the runs of ROOT's RANGE whose value CHANGED picks, a
+    /// run past ROOT's end, or of no ROOT, having none.
+    fn note_runs(slot: &mut Option<Box<Self>>, root: Option<&Tree>, range: Range<usize>, changed: impl Fn(Option<Value>) -> bool) {
+        let mut at = range.start;
+        while at < range.end {
+            let (end, had) = match root.and_then(|root| root.run_at(at)) {
+                Some((base, run)) => ((base + run.len as usize).min(range.end), run.observed()),
+                None => (range.end, None),
+            };
+            if changed(had) {
+                Self::note(slot, at..end);
+            }
+            at = end;
         }
     }
 }
 
 impl Properties {
-    /// Whether `syntax-table' changed since the last take.
+    /// Whether the log holds a change.
     pub(crate) fn has_syntax_changes(&self) -> bool {
         self.syntax_changes.is_some()
     }
-    /// The `syntax-table` changes since the last take.
+    /// The log since the last take.
     pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
         self.syntax_changes.take().map(|changes| *changes).unwrap_or_default()
     }
     /// No properties at all, as a new store, the change noted.
     pub(crate) fn reset(&mut self) {
-        let mut changes = self.syntax_changes.take();
-        if self.has_key(Key::SYNTAX_TABLE) {
-            changes.get_or_insert_default().all = true;
-        }
+        let changes = if self.has_key(Key::SYNTAX_TABLE) {
+            Some(Box::new(SyntaxChanges { all: true, ..SyntaxChanges::default() }))
+        } else {
+            self.syntax_changes.take()
+        };
         *self = Self { syntax_changes: changes, ..Self::new() };
     }
     fn tree(&self, key: Key) -> Option<&Tree> {
@@ -1113,12 +1137,15 @@ impl Properties {
         self.stamp
     }
     /// Replacement preserves the insertion stamp at already-present positions.
+    /// A `syntax-table' put is a change where a run had another value (as
+    /// `eq') or none.
     pub fn put(&mut self, range: Range<ByteOffset>, key: Key, value: Value) {
         if range.start >= range.end {
             return;
         }
         if key == Key::SYNTAX_TABLE {
-            SyntaxChanges::note(&mut self.syntax_changes, range.start.0..range.end.0);
+            let root = self.layers.get(&key).map(|root| &**root);
+            SyntaxChanges::note_runs(&mut self.syntax_changes, root, range.start.0..range.end.0, |had| had != Some(value));
         }
         let stamp = self.next_stamp();
         let (start, end) = (range.start.0, range.end.0);
@@ -1138,6 +1165,7 @@ impl Properties {
             self.layers.insert(key, root.expect("a range that is not empty"));
         }
     }
+    /// A `syntax-table' remove is a change where a run held a value.
     pub fn remove(&mut self, range: Range<ByteOffset>, key: Key) {
         let Some(root) = self.layers.get_mut(&key) else {
             return;
@@ -1149,7 +1177,7 @@ impl Properties {
             return;
         }
         if key == Key::SYNTAX_TABLE {
-            SyntaxChanges::note(&mut self.syntax_changes, start..end);
+            SyntaxChanges::note_runs(&mut self.syntax_changes, Some(root), start..end, |had| had.is_some());
         }
         Tree::rewrite(root, start, end, &|r| Run::absent(r.len));
         if root.present() == 0 {

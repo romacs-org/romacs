@@ -615,6 +615,25 @@ fn a_read_is_waiting_only_while_it_blocks() {
     assert!(signal.busy_for().is_some(), "busy again after the read");
 }
 
+/// Lisp a host runs while it waits for a key: a C-g that ends it, waiting
+/// as it begins or raised inside it, is the next read's quit character
+/// (keyboard.c `quit_throw_to_read_char`), not its error; other errors are.
+#[test]
+fn a_quit_ending_a_wait_is_the_next_key() {
+    let (mut vm, signal) = busy_vm();
+    let value = vm.eval_as_wait("(+ 1 2)").unwrap().map(|value| value.display().unwrap());
+    assert_eq!(value.as_deref(), Some("3"));
+    assert!(vm.eval_as_wait("(car 1)").is_err(), "an error is the wait's");
+    assert!(signal.interrupt());
+    assert!(vm.eval_as_wait("(let ((x (list 1 2))) (length x))").unwrap().is_none(), "a C-g waiting as it begins ends it");
+    assert!(vm.take_quit_key(), "and is the next key");
+    let presser = press(&signal, Duration::from_millis(100), 1);
+    assert!(vm.eval_as_wait("(while t)").unwrap().is_none(), "a C-g inside ends it");
+    presser.join().unwrap();
+    assert!(vm.take_quit_key(), "and is the next key");
+    assert!(!vm.take_quit_key(), "once");
+}
+
 /// Text long enough that one motion over it outlasts the press.
 const LONG_BUFFER: &str = "(progn (insert (make-string 30000000 ?\\n)) (goto-char 1))";
 

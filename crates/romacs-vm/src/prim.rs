@@ -96,6 +96,9 @@ pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
 pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
+/// The open display's font-objects, a vector `Display::font_objects` indexes:
+/// traced as this slot's value, as GNU's font cache is.
+pub(crate) const FONT_OBJECTS: &str = "#:vm2-font-objects";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
