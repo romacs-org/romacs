@@ -522,6 +522,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
 
 
+;;; Generated autoloads from romacs-mule.el
+
+(register-definition-prefixes "romacs-mule" '("make-translation-table-from-alist" "romacs-mule--translation-map"))
+
+
 ;;; Generated autoloads from romacs-nnheader.el
 
 (register-definition-prefixes "romacs-nnheader" '("romacs-nnheader--find-etc"))
