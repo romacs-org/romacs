@@ -169,8 +169,8 @@ and load nothing when none is."
 (defalias 'minibuffer--sort-by-length-alpha #'romacs--sort-by-length-alpha)
 (defalias 'minibuffer--sort-by-position #'romacs--sort-by-history)
 ;; M-x completes over the command set the runtime keeps, not the obarray
-;; (MX-COMMAND-SET).
-(load "romacs-commands.el" nil t t)
+;; (MX-COMMAND-SET); a later load of simple.el gets it again.
+(romacs-follow-gnu-file 'simple "romacs-commands")
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
 (load "term/tty-colors.el" nil t t)

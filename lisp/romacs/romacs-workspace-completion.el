@@ -17,6 +17,8 @@
 
 ;;; Code:
 
+(declare-function romacs-command-symbols "prims/completion.rs" ())
+
 (defvar extended-command-history nil)
 (defvar buffer-name-history nil)
 (defvar read-file-name-function 'romacs-read-file-name)

@@ -21,6 +21,9 @@
 
 ;;; Code:
 
+(declare-function romacs-command-symbols "prims/completion.rs" ())
+(declare-function romacs-command-epoch "prims/completion.rs" ())
+
 (defvar romacs-commands-modal-predicates
   '(command-completion-default-include-p command-completion-using-modes-p)
   "Values of `read-extended-command-predicate' whose answers M-x keeps.
