@@ -90,8 +90,8 @@ pub enum RenderLoopError {
 pub enum RenderLoopExit {
     /// The loop ended for this cause, or for none it recorded.
     Finished(Option<super::RenderShutdownReason>),
-    /// Native resources have been released, but a driver worker may still be
-    /// inside foreign code. Process exit must bypass library exit callbacks.
+    /// The window closed while the GPU was still starting: the startup was
+    /// cancelled, and its workers joined before the loop returned.
     GpuStartupCancelled,
 }
 

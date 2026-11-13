@@ -80,8 +80,8 @@ without a scan.")
   "Plain alist of NAME and tool plist.
 Each plist has :description, :schema, :handler and optional :annotations.
 Use `romacs-mcp-register-tool' to replace an entry.  Handlers receive a JSON
-object hash table and return a JSON value.  Changes are visible on next list;
-no listChanged capability or subscriptions are advertised.")
+object hash table and return a JSON value.  Clients are told when the list
+changes (`romacs-mcp--tools-changed'), as the listChanged capability says.")
 
 (defvar romacs-mcp-methods (make-hash-table :test #'equal)
   "JSON-RPC methods beyond MCP's, by name: each a function of the peer and
@@ -161,7 +161,64 @@ are descriptive hints, not permissions.  Replace the same name
     (error "Invalid MCP tool registration"))
   (setf (alist-get name romacs-mcp-tools nil nil #'equal)
         (list :description description :schema schema :handler handler
-              :annotations annotations)))
+              :annotations annotations))
+  (romacs-mcp--tools-changed))
+
+(defvar romacs-mcp--tools-telling nil
+  "Whether clients are to be told the tools changed, once this command ends.")
+
+(defvar romacs-mcp--subscriptions nil
+  "The held subscriptions/listen requests that asked for toolsListChanged.")
+
+(defun romacs-mcp--tools-changed (&rest _)
+  "Tell clients that the tools changed, once the running command ends: a
+file's load registers many."
+  (unless romacs-mcp--tools-telling
+    (setq romacs-mcp--tools-telling t)
+    (run-at-time 0 nil #'romacs-mcp--tell-tools-changed)))
+
+(defun romacs-mcp--tell-tools-changed ()
+  "Send notifications/tools/list_changed on each live subscription
+\(stateless clients), tagged with its id, and to each initialized peer
+\(clients of the 2025 protocol); forget subscriptions that ended."
+  (setq romacs-mcp--tools-telling nil)
+  (setq romacs-mcp--subscriptions
+        (cl-remove-if-not (lambda (listen) (and (not (plist-get listen :cancelled))
+                                                (romacs-mcp--live-p (plist-get listen :peer)
+                                                                    (plist-get listen :generation))))
+                          romacs-mcp--subscriptions))
+  (dolist (listen romacs-mcp--subscriptions)
+    (romacs-mcp--send listen (romacs-mcp--subscription-message
+                              listen "notifications/tools/list_changed" (romacs-mcp--object))))
+  (dolist (peer romacs-mcp--peers)
+    (when (eq (process-get peer 'legacy) 'ready)
+      (romacs-mcp--send (list :peer peer :generation romacs-mcp--generation)
+                        (romacs-mcp--object "jsonrpc" "2.0" "method" "notifications/tools/list_changed")))))
+
+(defun romacs-mcp--subscription-message (listen method params)
+  "Notification METHOD with PARAMS on the subscription LISTEN opened."
+  (puthash "_meta" (romacs-mcp--object "io.modelcontextprotocol/subscriptionId"
+                                       (gethash "id" (plist-get listen :message)))
+           params)
+  (romacs-mcp--object "jsonrpc" "2.0" "method" method "params" params))
+
+(defun romacs-mcp--listen (params)
+  "Open a subscriptions/listen stream: held, never answered while it
+lasts, acknowledged with the part of PARAMS' filter served (the tool
+list's changes)."
+  (let* ((listen (romacs-mcp-hold))
+         (wanted (gethash "notifications" params))
+         (tools (and (hash-table-p wanted) (eq (gethash "toolsListChanged" wanted) t))))
+    (when tools (push listen romacs-mcp--subscriptions))
+    (romacs-mcp--send listen (romacs-mcp--subscription-message
+                              listen "notifications/subscriptions/acknowledged"
+                              (romacs-mcp--object "notifications"
+                                                  (if tools (romacs-mcp--object "toolsListChanged" t)
+                                                    (romacs-mcp--object)))))
+    nil))
+
+;; What may be listed changes with it.
+(add-variable-watcher 'romacs-mcp-full-access #'romacs-mcp--tools-changed)
 
 (defun romacs-mcp--schema (properties required)
   "Return a closed object schema from PROPERTIES and REQUIRED field names."
@@ -226,7 +283,7 @@ romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 (romacs_buffer_list/read/edit, romacs_file_write, romacs_visit); input \
 (romacs_send_keys, romacs_wait_idle); options (romacs_option_search/describe, \
 romacs_option_set/save); agents (romacs_delegate_task, \
-romacs_task_status/cancel, romacs_orchestrator_capabilities); restart \
+romacs_task_status/send/list/watch/switch/cancel, romacs_orchestrator_capabilities); restart \
 (romacs_restart_request, romacs_call_outcome); gnosis_* (spaced-repetition \
 practice and review). romacs_help lists them all, one line each."
   "What an MCP client is told at initialization: the entry points and the
@@ -238,8 +295,8 @@ tools' groups, short, since every session pays for it.")
      "romacs_visit")
     ("input" "romacs_send_keys" "romacs_wait_idle")
     ("options" . "romacs_option_")
-    ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_cancel"
-     "romacs_orchestrator_capabilities")
+    ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_send" "romacs_task_list"
+     "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
     ("restart" "romacs_restart_request" "romacs_call_outcome")
     ("gnosis" . "gnosis_"))
   "The tools' groups for `romacs_help': names, or a prefix; the rest are other.")
@@ -436,7 +493,7 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
          (romacs-mcp--object
           "protocolVersion" (if (member version romacs-mcp--legacy-versions)
                                 version romacs-mcp--legacy)
-          "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object))
+          "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object "listChanged" t))
           "serverInfo" (romacs-mcp--object "name" "Romacs" "version" "1")
           "instructions" romacs-mcp-instructions)))
       ("notifications/initialized"
@@ -454,7 +511,7 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
           (romacs-mcp--object
            "resultType" "complete" "supportedVersions"
            (vconcat (list romacs-mcp--modern) romacs-mcp--legacy-versions)
-           "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object))
+           "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object "listChanged" t))
            "_meta" (romacs-mcp--object "io.modelcontextprotocol/serverInfo"
                                        (romacs-mcp--object "name" "Romacs" "version" "1"))
            "instructions" romacs-mcp-instructions
@@ -467,6 +524,9 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
               (puthash "ttlMs" 0 result) (puthash "cacheScope" "private" result))
             result))
          ("tools/call" (romacs-mcp--call params modern))
+         ("subscriptions/listen"
+          (unless modern (romacs-mcp--fail -32601 "Method not found"))
+          (romacs-mcp--listen params))
          (_ (romacs-mcp--fail -32601 "Method not found"))))))))
 
 (defun romacs-mcp--live-p (peer generation)
@@ -690,7 +750,7 @@ This is cooperative admission, not a handler, serialization or send deadline."
 (defun romacs-mcp--cancel (peer id)
   "Mark queued, active or deferred requests matching PEER and ID abandoned."
   (dolist (request (append (list romacs-mcp--active) romacs-mcp--queue
-                           (mapcar #'car romacs-mcp--deferred)))
+                           (mapcar #'car romacs-mcp--deferred) romacs-mcp--subscriptions))
     (when (and request (eq peer (plist-get request :peer))
                (hash-table-p (plist-get request :message))
                (equal id (gethash "id" (plist-get request :message) :absent)))
@@ -706,7 +766,13 @@ must not act as if its answer were delivered."
         (progn (setf (plist-get request :cancelled) t)
                (romacs-mcp--unqueue request))
       (when-let* ((entry (gethash (cons peer target) romacs-mcp--deferred-index)))
-        (setf (plist-get (car entry) :cancelled) t)))
+        (setf (plist-get (car entry) :cancelled) t))
+      ;; A subscription it gave up on: the client listens anew.  The held
+      ;; subscriptions alone: a scan of the queue per withdrawal is quadratic.
+      (dolist (listen romacs-mcp--subscriptions)
+        (when (and (eq peer (plist-get listen :peer))
+                   (equal target (gethash "id" (plist-get listen :message) :absent)))
+          (setf (plist-get listen :cancelled) t))))
     (romacs-mcp--send (list :peer peer :generation romacs-mcp--generation :cancelled nil)
                       (romacs-mcp--object "jsonrpc" "2.0" "id" id
                                           "result" (romacs-mcp--object "cancelled" (if request t :false))))))
@@ -772,10 +838,18 @@ must not act as if its answer were delivered."
         (if (and (not (process-get peer 'token)) (string-match-p "\n" text)) (romacs-mcp--close peer)
           (process-put peer 'input text))))))
 
+(defun romacs-mcp-own-peer (peer)
+  "Vouch for PEER: a layer's own connection (an agent session's relay),
+bounded by what owns it, it leaves the anonymous peers' quota."
+  (process-put peer 'romacs-mcp-owned t))
+
 (defun romacs-mcp--accept (listener peer _message)
-  "Admit PEER from LISTENER, subject to the finite connection quota."
+  "Admit PEER from LISTENER, subject to the finite connection quota: of
+the peers no layer vouches for (`romacs-mcp-own-peer'), as many sessions'
+relays as run never crowd out one."
   (if (or (not (eq listener romacs-mcp--listener))
-          (>= (length romacs-mcp--peers) romacs-mcp--peer-limit))
+          (>= (cl-count-if-not (lambda (p) (process-get p 'romacs-mcp-owned)) romacs-mcp--peers)
+              romacs-mcp--peer-limit))
       (romacs-mcp--close peer)
     (push peer romacs-mcp--peers)
     (process-put peer 'generation romacs-mcp--generation)
@@ -944,10 +1018,13 @@ Keep boot identity and companion receipts until the editor process exits."
  "romacs_help" "Every tool, by group, with one line each."
  (romacs-mcp--schema nil nil) #'romacs-mcp--help
  (romacs-mcp--object "readOnlyHint" t))
-(romacs-mcp-register-tool
- "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."
- (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("code"))
- #'romacs-mcp--eval)
+;; The editor's own, until a layer registers a richer one (romacs-agent-tools's,
+;; with a budget): loading this file again keeps that one.
+(unless (assoc "romacs_eval" romacs-mcp-tools)
+  (romacs-mcp-register-tool
+   "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."
+   (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("code"))
+   #'romacs-mcp--eval))
 
 (provide 'romacs-mcp)
 ;;; romacs-mcp.el ends here

@@ -548,7 +548,8 @@ impl Vm {
     /// or pending in a compiled-Lisp artifact (`decode_pending`).
     pub(super) fn materialize_image_function(&mut self, id: usize) -> Result<()> {
         if self.functions.get(id).ok_or("invalid function")?.pending.is_some() {
-            self.functions[id] = Arc::new(self.decode_pending(id)?);
+            let decoded = Arc::new(self.decode_pending(id)?);
+            self.functions.set(id, decoded);
             return Ok(());
         }
         if self
@@ -558,7 +559,8 @@ impl Vm {
             .mapped_code
             .is_some()
         {
-            self.functions[id] = Arc::new(self.decode_image_function(id)?);
+            let decoded = Arc::new(self.decode_image_function(id)?);
+            self.functions.set(id, decoded);
         }
         Ok(())
     }

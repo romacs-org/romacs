@@ -96,6 +96,9 @@ pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
 pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
+/// The open display's font-objects, a vector `Display::font_objects` indexes:
+/// traced as this slot's value, as GNU's font cache is.
+pub(crate) const FONT_OBJECTS: &str = "#:vm2-font-objects";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
@@ -527,7 +530,12 @@ mod leaf {
         }
         #[inline(always)]
         pub fn pair(&self, v: Value) -> Option<(Value, Value)> {
-            (v.tag() == 3).then(|| self.vm.cons_pair(v).ok()).flatten()
+            if v.tag() != 3 { return None; }
+            // A match, not `or_else': the closure would not inline here.
+            match self.vm.private_cons(v) {
+                Some(pair) => Some(pair),
+                None => self.vm.cons_pair(v).ok(),
+            }
         }
         #[inline(always)]
         pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
@@ -697,6 +705,7 @@ mod leaf {
             let mut properties = crate::properties::Properties::new();
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
+                    if s.properties.is_empty() { continue; }
                     if multibyte && !s.is_multibyte() {
                         // A unibyte part widened: its runs stretch with it.
                         crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
@@ -713,19 +722,30 @@ mod leaf {
             self.vm.allocate_object(object)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
-            let mut size=0;
-            for &arg in args {
-                let view=self.vm.str_view(arg)?;
-                if !(view.is_multibyte() && view.len()==view.bytes().len()) && !view.bytes().is_ascii() { return None; }
-                size+=view.bytes().len();
+            self.concat_ascii_joined(args, None)
+        }
+        /// `concat_ascii` of ARGS with SEPARATOR between each two, or `None`
+        /// when one is not an ASCII string. Each part is looked up once.
+        pub fn concat_ascii_joined(&mut self, args: &[Value], separator: Option<Value>) -> Option<Value> {
+            let ascii = |view: &crate::lstring::StrView<'_>| (view.is_multibyte() && view.len() == view.bytes().len()) || view.bytes().is_ascii();
+            let mut parts = Vec::with_capacity(2 * args.len());
+            let mut bytes = Vec::new();
+            {
+                let separator = match separator {
+                    Some(value) => Some((value, self.vm.str_view(value).filter(|view| ascii(view))?.bytes())),
+                    None => None,
+                };
+                for (index, &arg) in args.iter().enumerate() {
+                    if let (Some((value, text)), true) = (separator, index > 0) {
+                        parts.push((value, bytes.len()));
+                        bytes.extend_from_slice(text);
+                    }
+                    let view = self.vm.str_view(arg).filter(|view| ascii(view))?;
+                    parts.push((arg, bytes.len()));
+                    bytes.extend_from_slice(view.bytes());
+                }
             }
-            let mut bytes=Vec::with_capacity(size);
-            let mut parts=Vec::with_capacity(args.len());
-            for &arg in args {
-                parts.push((arg, bytes.len()));
-                bytes.extend_from_slice(self.vm.str_view(arg)?.bytes());
-            }
-            Some(self.concat_result(bytes,false,&parts))
+            Some(self.concat_result(bytes, false, &parts))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
@@ -1069,6 +1089,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1079,6 +1100,7 @@ mod leaf {
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1091,6 +1113,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1100,6 +1123,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1185,6 +1209,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             Ok(self.vm.dynamic.iter().any(|(bound, ..)| *bound == slot))
         }
         /// GNU `find_symbol_value`: the current binding through aliases,
@@ -1539,9 +1564,6 @@ mod leaf {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(*self.vm.local_keymap(index))
         }
-        pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
-            self.vm.keymap_at_point(property).map_err(Fault::Error)
-        }
         pub fn obarray_lookup(&self, name: &str) -> Option<Value> {
             match name {
                 "nil" => Some(Value::NIL),
@@ -1871,6 +1893,7 @@ mod leaf {
     // module, so it sees `vm`.
     mod map_keymap;
     mod keymap_copy;
+    mod active_keymaps;
     mod category;
     mod fileio;
     mod filelock;

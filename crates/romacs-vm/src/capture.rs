@@ -99,7 +99,7 @@ impl Vm {
         root.rewrite(&mut b.code);
         for (id, index) in functions {
             if index.unboxed.iter().any(|&unboxed| unboxed) {
-                let f = Arc::make_mut(&mut self.functions[id]);
+                let f = Arc::make_mut(self.functions.change(id));
                 index.rewrite(&mut f.code);
                 f.code = optimize(std::mem::take(&mut f.code), &f.sites, f.regs);
             }

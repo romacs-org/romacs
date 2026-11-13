@@ -27,11 +27,12 @@ fn mapc_bootstrap_frontiers() {
         assert!(result.is_err(), "remeasure if the target completes");
         let failure = own.iter().find(|s| s["status"] != "ok").unwrap();
         assert_eq!(failure["ordinal"], if target == "cl-lib.el" { 92 } else { 1 });
-        assert_eq!(failure["line"], if target == "cl-lib.el" { 553 } else { 57 });
+        let head = if target == "cl-lib.el" { "(unless (load \"cl-loaddefs\"" } else { "(require 'cl-lib)" };
+        assert!(failure["source"].as_str().unwrap().starts_with(head), "failing form of {target}: {failure}");
         assert!(failure["error"].as_str().unwrap().contains("(void-function define-inline)"));
         let cause = steps.iter().find(|s| s["status"] != "ok" && s["file"].as_str().unwrap().ends_with("/cl-macs.el")).unwrap();
         assert_eq!(cause["ordinal"], 159);
-        assert_eq!(cause["line"], 3579);
+        assert!(cause["source"].as_str().unwrap().starts_with("(define-inline cl-typep "), "failing form of cl-macs.el: {cause}");
         assert_eq!(cause["error"], "(void-function define-inline)");
     }
 }

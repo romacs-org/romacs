@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 fn check(source: &str, expected: &str, marker: &str) {
     let mut vm = Vm::new();
@@ -136,7 +138,7 @@ fn a_file_of_20000_forms_loads_and_evaluates_as_a_buffer() {
 #[test]
 fn t2_native_dispatch_is_bounded_without_lto() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["growing_t2_frames_preserve_hook_callbacks", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "growing_t2_frames_preserve_hook_callbacks"), "--nocapture"])
         .env("ROMACS_DEPTH_T2_SMALL", "1").output().unwrap();
     print!("{}", String::from_utf8_lossy(&out.stdout));
     assert!(out.status.code() == Some(0), "DEPTH_T2_NATIVE_PROCESS: expected normal result or catchable native guard, numeric_code={:?}: {} {}", out.status.code(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -145,7 +147,7 @@ fn t2_native_dispatch_is_bounded_without_lto() {
 #[test]
 fn native_limit_is_a_lisp_signal_not_process_abort() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["native_stack_probe", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "native_stack_probe"), "--nocapture"])
         .env("ROMACS_DEPTH_PROBE_LIMIT", "4200")
         .env("ROMACS_DEPTH_PROBE_CALLS", "4220")
         .env("ROMACS_DEPTH_PROBE_STACK", "524288").output().unwrap();
@@ -157,7 +159,7 @@ fn native_limit_is_a_lisp_signal_not_process_abort() {
 
 fn native_probe_child(limit: usize, calls: usize, stack: usize) -> (Option<i32>, String, String) {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["native_stack_probe", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "native_stack_probe"), "--nocapture"])
         .env("ROMACS_DEPTH_PROBE_LIMIT", limit.to_string())
         .env("ROMACS_DEPTH_PROBE_CALLS", calls.to_string())
         .env("ROMACS_DEPTH_PROBE_STACK", stack.to_string()).output().unwrap();
@@ -186,7 +188,7 @@ fn compiler_moderate_nesting_compiles_in_child() {
     // Compiler recursion is refused on remaining bytes (see
     // compiler_remaining_stack_guard_is_recoverable), not grown.
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["compiler_native_stack_worker", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "compiler_native_stack_worker"), "--nocapture"])
         .env("ROMACS_DEPTH_COMPILER_CHILD", "1").output().unwrap();
     assert!(out.status.success(), "DEPTH_COMPILER_STACK: GNU expected normal compilation, child {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stdout).contains("DEPTH_COMPILER_WORKER_OK"), "DEPTH_COMPILER_RAN");
@@ -241,7 +243,7 @@ fn compiler_remaining_stack_guard_is_recoverable() {
         return;
     }
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["compiler_remaining_stack_guard_is_recoverable", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "compiler_remaining_stack_guard_is_recoverable"), "--nocapture"])
         .env("ROMACS_DEPTH_NATIVE_GAP_CHILD", "1").output().unwrap();
     assert!(out.status.code() == Some(0) && String::from_utf8_lossy(&out.stdout).contains("DEPTH_NATIVE_GAP_OK"),
       "DEPTH_NATIVE_GAP_PROCESS: code {:?}: {} {}", out.status.code(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -251,13 +253,13 @@ fn compiler_remaining_stack_guard_is_recoverable() {
 fn gnu_real_compiler_fixtures_survive_on_two_mib() {
     if std::env::var_os("ROMACS_DEPTH_GNU_FIXTURE_CHILD").is_some() {
         std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
-            for (origin, source, line, prefix) in [
-                ("comp-common.el:71", include_str!("../../../lisp/gnu/emacs-lisp/comp-common.el"), 71, "(defconst comp-primitive-type-specifiers"),
-                ("cus-start.el:44", include_str!("../../../lisp/gnu/cus-start.el"), 44, "(let* ((quoter"),
+            for (origin, source, prefix) in [
+                ("comp-common.el", include_str!("../../../lisp/gnu/emacs-lisp/comp-common.el"), "(defconst comp-primitive-type-specifiers"),
+                ("cus-start.el", include_str!("../../../lisp/gnu/cus-start.el"), "(let* ((quoter"),
             ] {
-                let offset: usize = source.split_inclusive('\n').take(line - 1).map(str::len).sum();
+                // The form by its text at a line's start, not by its line: the file's edits move it.
+                let offset = source.find(&format!("\n{prefix}")).unwrap_or_else(|| panic!("DEPTH_GNU_FIXTURE_ID: {origin}")) + 1;
                 let tail = &source[offset..];
-                assert!(tail.starts_with(prefix), "DEPTH_GNU_FIXTURE_ID: {origin}");
                 let mut vm = Vm::new();
                 let end = vm.read_source(tail).unwrap().unwrap().1;
                 let got = vm.compile_source(&tail[..end]);
@@ -270,7 +272,7 @@ fn gnu_real_compiler_fixtures_survive_on_two_mib() {
         return;
     }
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["gnu_real_compiler_fixtures_survive_on_two_mib", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "gnu_real_compiler_fixtures_survive_on_two_mib"), "--nocapture"])
         .env("ROMACS_DEPTH_GNU_FIXTURE_CHILD", "1").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.code() == Some(0) && stdout.matches("DEPTH_GNU_FIXTURE_OK").count() == 2,
@@ -370,7 +372,7 @@ fn long_loop_polls_never_abort_on_a_small_stack() {
         return;
     }
     let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["long_loop_polls_never_abort_on_a_small_stack", "--exact", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "long_loop_polls_never_abort_on_a_small_stack"), "--nocapture"])
         .env("ROMACS_DEPTH_POLL_CHILD", "1").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.code() == Some(0) && stdout.contains("DEPTH_POLL_OK"),
