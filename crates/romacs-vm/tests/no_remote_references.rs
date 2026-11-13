@@ -458,7 +458,7 @@ const CELLS: &[(&str, Behind)] = &[
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
-    ("treesit/native.rs:Tree.1", Plain),
+    ("treesit/native.rs:Tree.0", Plain), ("treesit/native.rs:Tree.1", Plain),
 ];
 
 /// How many rows are `Held`. It only falls: a new one fails, and a gone one
