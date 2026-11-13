@@ -82,6 +82,60 @@ does as its step."
                            (list :type 'delta :text "some streamed words " :message "stream"
                                  :seq (+ 5002 i) :last t)))
 
+;; Fontification: what the functions are asked for, counted where a
+;; scenario asks (`display-stages--counting-fontified'), and synthetic text
+;; in the real modes, with the worker off so that a step measures the mode.
+
+(defvar display-stages--fontified nil
+  "Characters `jit-lock' asked its functions for, once a scenario counts them.")
+
+(defun display-stages--count-fontified (start end)
+  "Add the characters from START to END to `display-stages--fontified'."
+  (setq display-stages--fontified (+ display-stages--fontified (- end start))))
+
+(defun display-stages--counting-fontified ()
+  "Count from now the characters `jit-lock' asks its functions for."
+  (setq display-stages--fontified 0)
+  (advice-add 'jit-lock--run-functions :before #'display-stages--count-fontified))
+
+(defvar romacs-fontify-isolate)
+
+(defun display-stages--org (name headings)
+  "An Org buffer NAME, titled with its name, of HEADINGS top-level
+headings, folded to them; return it.  Each heading is over five parts of
+ten items of four lines of marked-up prose, about 22 KB: the shape of
+Org's own news file, whose 15 headings fold 329 KB."
+  (require 'org)
+  (setq romacs-fontify-isolate nil)
+  (with-current-buffer (get-buffer-create name)
+    (erase-buffer)
+    (insert (format "#+title: %s\n" name))
+    (dotimes (h headings)
+      (insert (format "* Release %d of the program\n" h))
+      (dotimes (p 5)
+        (insert (format "** Changes to part %d of release %d\n" p h))
+        (dotimes (i 10)
+          (insert (format "*** Item %d of part %d\n" i p))
+          (dotimes (l 4)
+            (insert (format "Line %d says what *changed* in =part-%d=, with a [[https://example.org/%d][link]] and ~words~ of prose.\n"
+                            l p (+ (* 1000 h) (* 10 i) l)))))))
+    (org-mode)
+    (org-cycle-overview)
+    (goto-char (point-min))
+    (current-buffer)))
+
+(defun display-stages--elisp (name n)
+  "An Emacs Lisp buffer NAME of N generated forms, point mid-buffer at a
+line's end; return it."
+  (setq romacs-fontify-isolate nil)
+  (with-current-buffer (get-buffer-create name)
+    (erase-buffer)
+    (dotimes (i n) (prin1 (scaling--defun-form i) (current-buffer)) (insert "\n"))
+    (emacs-lisp-mode)
+    (goto-char (/ (point-max) 2))
+    (end-of-line)
+    (current-buffer)))
+
 ;; A timer ran and nothing changed: the frame is frozen and compared.
 (display-stages-scenario plain-idle
   :setup (display-stages--show (scaling--lines-buffer "stages" 20000))
@@ -124,6 +178,31 @@ does as its step."
   :setup (display-stages--streaming-chat 1000000)
   :body (display-stages--delta it i))
 
+;; A folded Org buffer is opened: its first paint fontifies what it shows.
+(display-stages-scenario fontify-open-org-folded :paints t
+  :setup (display-stages--counting-fontified)
+  :body (switch-to-buffer (display-stages--org (format "stages-%d.org" i) 15)))
+;; One character typed at the end of a shown heading of a folded Org buffer.
+(display-stages-scenario fontify-typed-org-folded :paints t
+  :setup (prog1 (display-stages--show (display-stages--org "stages.org" 15))
+           (org-next-visible-heading 4) (end-of-line)
+           (display-stages--counting-fontified))
+  :body (insert "a"))
+;; A folded heading's parts are shown, from the last heading up, so that
+;; the window keeps its start and the step is the unfold, not a scroll.
+(display-stages-scenario fontify-unfold-org :paints t
+  :setup (prog1 (display-stages--show (display-stages--org "stages.org" 30))
+           (display-stages--counting-fontified))
+  :body (progn (goto-char (point-max))
+               (re-search-backward "^\\* " nil t (1+ i))
+               (org-fold-show-children)))
+;; One character typed in an Emacs Lisp buffer, as a key types it.
+(display-stages-scenario fontify-typed-elisp :paints t
+  :setup (prog1 (display-stages--show (display-stages--elisp "stages.el" 5000))
+           (goto-char (/ (point-max) 2)) (end-of-line)
+           (display-stages--counting-fontified))
+  :body (let ((last-command-event ?a)) (self-insert-command 1)))
+
 (defun display-stages-list ()
   "Print each scenario's name and whether its steps paint, one SCALING line each."
   (dolist (scenario (reverse display-stages-scenarios))
@@ -132,7 +211,8 @@ does as its step."
 
 (defun display-stages--reading ()
   "The evaluator's instructions and collections so far, and redisplay's counts."
-  `((step-instructions . ,(romacs-instructions)) (collections . ,gcs-done) ,@(romacs--display-stats)))
+  `((step-instructions . ,(romacs-instructions)) (collections . ,gcs-done) ,@(romacs--display-stats)
+    ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified)))))
 
 (defun display-stages-start (name out steps)
   "Run scenario NAME for STEPS steps in this session, then exit.
