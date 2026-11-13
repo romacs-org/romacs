@@ -569,7 +569,7 @@ class CargoSettingsTest(unittest.TestCase):
 
 
 class MergeDriverTest(unittest.TestCase):
-    """git merges the floors file through the driver tools/derived setup installs."""
+    """git merges the floors file through the driver tools/git-setup installs."""
 
     def setUp(self):
         self.repo = tempfile.mkdtemp()
@@ -636,7 +636,7 @@ class TreeTest(unittest.TestCase):
     def test_the_floors_file_is_merged_by_its_driver(self):
         root = Path(__file__).resolve().parents[2]
         self.assertIn(f'{smells.FLOORS} merge=romacs-floors', (root / '.gitattributes').read_text().splitlines())
-        self.assertIn('merge.romacs-floors.driver', (root / 'tools/derived').read_text())
+        self.assertIn('merge.romacs-floors.driver', (root / 'tools/git-setup').read_text())
 
     def test_the_floors_file_is_in_dump_form(self):
         root = Path(__file__).resolve().parents[2]

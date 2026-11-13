@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Set up a Romacs repository's local Git: once per repository.
+
+Installs the merge drivers of the ledgers that merge by their meaning, not
+their text (.gitattributes names them): the smell floors
+(tools/lib/smells.py merge) and the unsafe floors
+(tools/lib/unsafe_census.py merge). Installs the reference-transaction hook
+(tools/hooks/) that keeps the trunk to the merge queue, unless
+core.hooksPath points Git elsewhere. Only the repository's own config and
+hooks change.
+"""
+from pathlib import Path
+import subprocess
+import sys
+
+
+def git(root, *args, check=True):
+    return subprocess.run(['git', '-C', str(root), *args], check=check,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def setup(root):
+    # What the retired derived-artifact driver installed (bundled autoloads are no longer committed).
+    git(root, 'config', '--local', '--remove-section', 'merge.romacs-derived', check=False)
+    git(root, 'config', '--local', '--unset', 'alias.merge-derived', check=False)
+    git(root, 'config', '--local', 'merge.romacs-floors.name', 'Merge the smell floors by their meaning')
+    git(root, 'config', '--local', 'merge.romacs-floors.driver', 'python3 -B tools/lib/smells.py merge %O %A %B')
+    git(root, 'config', '--local', 'merge.romacs-unsafe-floors.name', 'Merge the unsafe floors as exact counts')
+    git(root, 'config', '--local', 'merge.romacs-unsafe-floors.driver', 'python3 -B tools/lib/unsafe_census.py merge %O %A %B')
+    hooks_path = git(root, 'config', 'core.hooksPath', check=False).stdout.strip()
+    if hooks_path:
+        print(f'Installed the merge drivers; core.hooksPath is {hooks_path}, '
+              'so the reference-transaction hook is not installed.')
+        return
+    hook = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip()) / 'hooks/reference-transaction'
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_bytes((Path(__file__).resolve().parent / 'hooks/reference-transaction').read_bytes())
+    hook.chmod(0o755)
+    print(f'Installed the merge drivers and the hook {hook}; no global config changed.')
+
+
+def main():
+    if sys.argv[1:] not in ([], ['setup']):
+        sys.exit(__doc__)
+    try:
+        setup(Path(git(Path.cwd(), 'rev-parse', '--show-toplevel').stdout.strip()))
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f'git-setup: {exc}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
