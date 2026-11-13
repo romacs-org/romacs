@@ -64,6 +64,12 @@ Return SEQUENCE.  GNU fns.c `Fmapc'."
         (setq i (1+ i))))
     sequence))
 
+;; A compiled caller may run a mapping loop in place of a call
+;; (romacs-compile.el, `romacs-compile--mapping') while the function is
+;; still the one defined here: it compares the function cell with this.
+(put 'mapcar 'romacs--definition (symbol-function 'mapcar))
+(put 'mapc 'romacs--definition (symbol-function 'mapc))
+
 (defun mapcan (function sequence)
   "Apply FUNCTION to each element of SEQUENCE, and `nconc' the results.
 GNU fns.c `Fmapcan'."
