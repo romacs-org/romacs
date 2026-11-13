@@ -129,12 +129,23 @@ under one incarnation names nothing in another.")
             (unless attached (sleep-for 0.025)))
           (or attached (romacs--keeper-call 'attach socket))))))
 
+(define-error 'romacs-keeper-unreachable "Cannot attach to this session's keeper" 'file-error)
+
 (defun romacs-keeper-attach (&optional name)
   "Attach this session to the keeper of session NAME, starting it if needed.
 Return a plist with the keeper's :pid and its :incarnation, which is new
-in a new keeper and unchanged when a keeper replaces itself in place."
-  (prog1 (romacs-keeper--attach-socket (romacs-keeper-socket name))
-    (romacs--keeper-call 'configure (* 1000 romacs-keeper-idle-seconds))))
+in a new keeper and unchanged when a keeper replaces itself in place.
+Any failure signals `romacs-keeper-unreachable', naming the socket and
+the cause."
+  (let ((socket nil))
+    (condition-case err
+        (progn
+          (setq socket (romacs-keeper-socket name))
+          (prog1 (romacs-keeper--attach-socket socket)
+            (romacs--keeper-call 'configure (* 1000 romacs-keeper-idle-seconds))))
+      (error (signal 'romacs-keeper-unreachable
+                     (delq nil (list "Cannot attach to this session's keeper" socket
+                                     (error-message-string err))))))))
 
 (defun romacs-keeper-detach (&optional quit)
   "Detach from the keeper.

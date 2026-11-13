@@ -42,15 +42,16 @@
 
 (defun romacs-term--keeper ()
   "Non-nil when this session keeps its terminals in a keeper, attached now.
-A keeper that cannot be reached is said once per terminal; the terminal
-then belongs to this session alone."
+Nil only when `romacs-keeper-enabled' is off.  A keeper that cannot be
+reached signals `romacs-keeper-unreachable': a terminal never goes
+without a keeper the user did not turn off."
   (require 'romacs-keeper)
   (and romacs-keeper-enabled
-       (or (romacs-keeper-attached-p)
-           (condition-case err (romacs-keeper-attach)
-             (error (message "No keeper, so this terminal ends with the session: %s"
-                             (error-message-string err))
-                    nil)))))
+       (or (romacs-keeper-attached-p) (romacs-keeper-attach))))
+
+(defun romacs-term--say-error (text)
+  "Show TEXT in the echo area as an error that did not stop a command."
+  (message "%s" (propertize text 'face 'error)))
 
 (declare-function romacs-keeper-events "romacs-keeper")
 
@@ -128,11 +129,12 @@ outlives this session; `romacs-term-handle' names it."
                :columns (if window (window-body-width window) 80)
                :rows (if window (window-body-height window) 24)))))
 
-(defun romacs-term--ended (why)
-  "Leave the current buffer as a terminal that did not come back, saying WHY."
+(defun romacs-term--ended (why &optional face)
+  "Leave the current buffer as a terminal that did not come back, saying WHY.
+In FACE, by default `warning'."
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (insert (propertize (format "This terminal did not come back: %s.\n" why) 'face 'warning))
+    (insert (propertize (format "This terminal did not come back: %s.\n" why) 'face (or face 'warning)))
     (set-buffer-modified-p nil)))
 
 (defvar romacs-term-reattach-seconds nil
@@ -151,13 +153,18 @@ terminal is left as it is."
 (defun romacs-term--reattach-1 (misc)
   "Do `romacs-term--reattach' for a buffer with no terminal yet."
   (let* ((handle (plist-get misc :handle))
-         (keeper (and (romacs-term--keeper)
+         (unreachable nil)
+         (keeper (and (condition-case err (romacs-term--keeper)
+                        (romacs-keeper-unreachable (setq unreachable (error-message-string err)) nil))
                       (equal (plist-get romacs-keeper-attachment :incarnation) (plist-get misc :incarnation))))
          (row nil))
     (when keeper
       (dolist (candidate (romacs-keeper-handles))
         (when (eql (plist-get candidate :handle) handle) (setq row candidate))))
     (cond
+     (unreachable
+      (romacs-term--ended unreachable 'error)
+      (romacs-term--say-error (format "Terminal %s did not come back: %s" (buffer-name) unreachable)))
      ((not keeper) (romacs-term--ended "the keeper that held it is gone"))
      ((not row) (romacs-term--ended "its keeper no longer holds it"))
      ((not (equal (plist-get row :status) '(running)))
@@ -254,7 +261,8 @@ here, while this session still serves it."
 A session that crashed, or was killed, leaves its terminals in its
 keeper with their programs running.  Each comes back in a buffer of the
 name it had.  Return those buffers.  Does nothing when no keeper runs
-for this session."
+for this session.  One that runs and cannot be reached signals
+`romacs-keeper-unreachable'."
   (interactive)
   (require 'romacs-keeper)
   (let ((buffers nil))
@@ -284,6 +292,13 @@ for this session."
         (message "Terminals brought back: %s" (mapconcat #'buffer-name buffers ", "))))
     (nreverse buffers)))
 
+;;;###autoload
+(defun romacs-term--adopt-saying-why ()
+  "Do `romacs-term-adopt-orphans', and say so when it fails."
+  (condition-case err (romacs-term-adopt-orphans)
+    (error (romacs-term--say-error (format "Terminals a gone session left are not back: %s"
+                                           (error-message-string err))))))
+
 ;; A session that starts where a keeper already runs looks, at the end of
 ;; its startup, for terminals nobody owns.  An image restored after that
 ;; finds its terminal buffers already attached and leaves them so.
@@ -292,7 +307,7 @@ for this session."
   (defun romacs-term--adopt-at-startup ()
     "Once started, bring back terminals a gone session left."
     (unless noninteractive
-      (run-at-time 0 nil (lambda () (ignore-errors (romacs-term-adopt-orphans))))))
+      (run-at-time 0 nil #'romacs-term--adopt-saying-why)))
   (add-hook 'after-init-hook #'romacs-term--adopt-at-startup))
 
 ;; In every session from its start: a restored one must find the handler

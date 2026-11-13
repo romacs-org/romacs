@@ -100,7 +100,11 @@ def session(binary, regime, keys, delay, timeout, output, name):
     """One session's phases, logging to OUTPUT/NAME.stderr: {phase:
     {'latency_ns': [...], 'frames_per_key': F}}."""
     letters = ''.join(chr(ord('a') + i % 26) for i in range(keys))
-    args = ('-Q', *(['--loadup'] if regime == 'loadup' else []), '--trace-latency', 'original.txt')
+    # The terminal in this process, as these journeys always measured it; a
+    # kept terminal is term_keep_live.py's.  (A host copied alone has no
+    # keeper beside it, and a session meant to use one would refuse.)
+    args = ('-Q', *(['--loadup'] if regime == 'loadup' else []), '--eval', '(setq romacs-keeper-enabled nil)',
+            '--trace-latency', 'original.txt')
     with live.session(binary, output, prefix='term-lat-', args=args, size='1600x1000', prepare=prepare,
                       env={'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': '/bin/sh'},
                       log=f'{name}.stderr', compositor_log=f'{name}-compositor.log') as s:

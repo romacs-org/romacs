@@ -18,6 +18,9 @@ replaced and the terminal must be back in the new one:
                  must be refused, naming the terminal, and nothing change;
   --terminals N  N terminals, the extra ones with a full scrollback;
   --cat FILE     no restart: time `cat FILE' in a terminal.
+  --deep-runtime the session's runtime directory is deeper than a socket
+                 address holds (romacs#122), so the keeper's socket path is
+                 too; the compositor's stays short.
 
 A run passes when the script's process is the same and alive, its ticks
 show no gap over 0.25 s, *romacs-term* is running in the new session and
@@ -219,7 +222,11 @@ def one(args, index, output):
         (root / 'work2').mkdir()
         entry['newer_world_seconds'] = None if args.unprepared else prepare_world(args.romacs, newer_env, root / 'work2')
     entry['cross_build'], entry['unprepared'], entry['extra_buffers'] = bool(args.older), args.unprepared, args.buffers
-    engine = Engine('romacs', [binary, '--loadup'], root, None, env, args.timeout).start(args.tools)
+    engine = Engine('romacs', [binary, '--loadup'], root, None, env, args.timeout)
+    if args.deep_runtime:
+        engine.editor_runtime = root / ('deep-runtime-' + 'r' * 60) / ('s' * 40)
+        engine.editor_runtime.mkdir(parents=True, mode=0o700)
+    engine.start(args.tools)
     try:
         ready(engine, '(eq (frame-focus-state) t)', 'focus')
         entry['startup_seconds'] = round(engine.startup_seconds, 3)
@@ -264,6 +271,8 @@ def one(args, index, output):
         ready(engine, '(with-current-buffer "*network-stub*" (> (buffer-size) 20))', 'network output')
         time.sleep(1)
         pids = {'shell': int((work / 'term.pid').read_text()), 'agent': int((work / 'agent.pid').read_text())}
+        socket_path = engine.ask('(and (romacs-keeper-attached-p) (romacs-keeper-socket))')
+        entry['keeper_socket'] = {'path': socket_path, 'bytes': len(os.fsencode(socket_path)) if socket_path else None}
         if args.keeper_exec:
             # The keeper replaces itself in place while the terminal runs.
             kpid = engine.ask('(plist-get (romacs-keeper-info) :pid)')
@@ -464,7 +473,8 @@ def one(args, index, output):
             states = engine.ask(f'(mapcar (lambda (n) (let ((b (get-buffer (format "*romacs-term*<%d>" n)))) (and b (with-current-buffer b (list (and (romacs-term-running-p) t) (count-lines (point-min) (point-max))))))) (number-sequence 2 {args.terminals}))')
             entry['k2_terminals'] = {'count': args.terminals, 'others_running_and_lines': states,
                                      'all_back': all(state and state[0] and state[1] > 9000 for state in states)}
-        entry['k2_shell']['pass'] = bool(entry['k2_shell']['pid_alive'] and entry['k2_shell']['terminal_running']
+        entry['k2_shell']['pass'] = bool((not args.deep_runtime or (entry['keeper_socket']['bytes'] or 0) > 107)
+                                         and entry['k2_shell']['pid_alive'] and entry['k2_shell']['terminal_running']
                                          and gaps and max(gaps) < 0.25 and during and shown == during
                                          and entry['k2_shell']['buffer_follows_new_output'])
         entry['keeper_pid'] = entry['k2_shell']['session_pid']
@@ -516,6 +526,7 @@ def main():
     parser.add_argument('--terminals', type=int, default=1, help='this many terminals, the extra ones with a full scrollback')
     parser.add_argument('--kill-helper', action='store_true', help='kill -9 the terminal helper first: the terminal must end, and restore as ended')
     parser.add_argument('--kill', action='store_true', help='kill -9 the session and relaunch, instead of romacs-restart')
+    parser.add_argument('--deep-runtime', action='store_true', help="a session runtime directory deeper than a socket address holds")
     args = parser.parse_args()
     sys.path.insert(0, args.harness)
     import parity_live

@@ -396,6 +396,10 @@ def main():
     # The leave journey needs GNU's Lisp (isearch, M-w), as a
     # daily session has it.
     flags = ['--loadup'] if args.prompt_grow or args.leave or args.history_buffers else []
+    # The terminal in this process, as these journeys always measured it; a
+    # kept terminal is term_keep_live.py's.  (A host copied alone has no
+    # keeper beside it, and a session meant to use one would refuse.)
+    flags += ['--eval', '(setq romacs-keeper-enabled nil)']
     # The minibuffer must grow over the terminal: fido-vertical's
     # display, not the default layer (VM2-COMPLETE-DEFAULT).
     init = "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n" if args.prompt_grow else None

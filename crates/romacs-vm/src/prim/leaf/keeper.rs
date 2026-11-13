@@ -124,7 +124,7 @@ impl Leaf<'_> {
             "socket" => {
                 let runtime = crate::host::getenv("XDG_RUNTIME_DIR").ok_or_else(|| failed("XDG_RUNTIME_DIR is not set: no place for a keeper's socket".into()))?;
                 let session = String::from_utf8_lossy(&self.string_bytes(arg(0))?).into_owned();
-                let socket = romacs_keeper::run::socket_path(std::path::Path::new(&runtime), &session).map_err(failed)?;
+                let socket = romacs_keeper::run::socket_path(std::path::Path::new(&runtime), &session);
                 Ok(self.string(&socket.to_string_lossy()))
             }
             "detach" => {
@@ -139,7 +139,7 @@ impl Leaf<'_> {
             }
             "configure" => { let idle = natural(arg(0))?; done(self.link()?.client.configure(idle)) }
             "close-orphans" => Ok(integer(self.link()?.client.close_orphans().map_err(failed)?)),
-            "exec" => { let program = path(&self.string_bytes(arg(0))?); done(self.link()?.client.exec(&program)) }
+            "exec" => { let program = path(&self.string_bytes(arg(0))?); done(crate::host::keeper_exec(&mut self.link()?.client, &program)) }
             "shutdown" => { let result = self.link()?.client.shutdown(); self.vm.keeper = None; done(result) }
             "info" => {
                 let info = self.link()?.client.info().map_err(failed)?;

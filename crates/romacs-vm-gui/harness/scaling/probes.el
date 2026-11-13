@@ -138,9 +138,12 @@ thousandth a stack mark."
 ;; N terminals open, each with a table of its own, which what is shown
 ;; must not walk: an ordinary buffer finds none, the last terminal opened
 ;; finds its own, and a face change makes it again.  Constant in N.
+(defvar romacs-keeper-enabled)
 (defun scaling--terminals (n)
-  "N terminals, each shown once; the last."
+  "N terminals, each shown once; the last.
+In this process: what is measured is their display, not a keeper."
   (require 'romacs-term)
+  (setq romacs-keeper-enabled nil)
   (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
   (current-buffer))
 
