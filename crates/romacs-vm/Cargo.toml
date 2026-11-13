@@ -56,6 +56,9 @@ webpki = { package = "rustls-webpki", version = "0.103", default-features = fals
 # The tree-sitter runtime behind treesit.c's primitives (statically linked;
 # grammars are dlopened as GNU does).
 tree-sitter = "=0.27.0"
+tree-sitter-language.workspace = true
+# dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
+libloading = "0.8"
 
 [build-dependencies]
 sha2 = "0.11"
