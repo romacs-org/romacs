@@ -608,6 +608,8 @@ mod save_excursion;
 mod savejourney;
 #[path = "../scaling_fixes.rs"]
 mod scaling_fixes;
+#[path = "../scanner.rs"]
+mod scanner;
 #[path = "../sealed_arithmetic.rs"]
 mod sealed_arithmetic;
 #[path = "../sealed_primitives.rs"]
