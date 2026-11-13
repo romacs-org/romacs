@@ -154,17 +154,14 @@ fn a_matching_editor_attests_at_both_depths() {
 fn the_stamp_carries_the_reference_and_the_depth() {
     let fixture = Fixture::new("31.0.90", pinned_fingerprint());
     let manifest = fixture.manifest();
-    let attested = attest_against(
-        &fixture.executable,
-        AttestationDepth::Fingerprint,
-        &manifest,
-    )
-    .expect("attestation should pass");
-    let stamp = ReferenceUse::Attested(attested).stamp();
-    assert_eq!(
-        stamp,
-        "gnu=31.0.90 fingerprint=000102030405 mirror=00000000000 attest=fingerprint"
-    );
+    for depth in [AttestationDepth::Fingerprint, AttestationDepth::Exhaustive] {
+        let attested =
+            attest_against(&fixture.executable, depth, &manifest).expect("attestation should pass");
+        assert_eq!(
+            ReferenceUse::Attested(attested).stamp(),
+            format!("gnu=31.0.90 fingerprint=000102030405 mirror=00000000000 attest={depth}")
+        );
+    }
 
     let unpinned = ReferenceUse::Unpinned {
         executable: fixture.executable.clone(),
@@ -194,6 +191,10 @@ fn a_different_release_is_refused_by_its_version() {
         &manifest,
     )
     .expect_err("a different release must be refused");
+    assert!(
+        attest_against(&rebuilt.executable, AttestationDepth::Exhaustive, &manifest).is_err(),
+        "a different release must be refused at the exhaustive depth too"
+    );
     match &error {
         AttestationError::Mismatch {
             field,
@@ -373,7 +374,7 @@ fn the_parser_refuses_rather_than_skips() {
     parse_manifest(&base).expect("the baseline must parse");
 
     // Each of these is a way a pin could silently stop meaning what it says.
-    let corruptions: [(&str, String); 7] = [
+    let corruptions: [(&str, String); 9] = [
         (
             "a line the format does not define",
             format!("{base}[table]\n"),
@@ -391,6 +392,14 @@ fn the_parser_refuses_rather_than_skips() {
         (
             "a truncated digest",
             base.replace(&"d".repeat(64), &"d".repeat(63)),
+        ),
+        (
+            "a non-hex fingerprint",
+            base.replace(&"b".repeat(64), &"z".repeat(64)),
+        ),
+        (
+            "a truncated fingerprint",
+            base.replace(&"b".repeat(64), &"b".repeat(63)),
         ),
         (
             "an unrecognised schema",
@@ -416,392 +425,19 @@ fn a_missing_key_is_named() {
     assert!(error.contains("missing key"), "{error}");
 }
 
-// ---------------------------------------------------------------------------
-// The two readers, held together
-// ---------------------------------------------------------------------------
-//
-// There are two implementations of this check because four harnesses need it
-// and two of them are shell.  Two implementations that are not tested against
-// each other drift, and a guard that drifts is a guard that stops guarding one
-// of its callers without telling anyone.  These tests run the SHELL attestor
-// over the same planted fixtures the Rust one sees and require them to reach
-// the same verdict --- and, when they pass, to print the same stamp.
-
-fn attestor_script() -> PathBuf {
-    romacs_infra::workspace_root().join("tools/parity-reference-attest.sh")
-}
-
-/// Write `manifest` to a file the shell attestor can read, comments and all.
-fn write_manifest(dir: &Path, manifest: &ReferenceManifest) -> PathBuf {
-    let path = dir.join("parity-reference.toml");
-    fs::write(
-        &path,
-        format!(
-            "# a planted pin, written by {}\n\n{}",
-            module_path!(),
-            render_manifest_keys(manifest)
-        ),
-    )
-    .expect("write manifest");
-    path
-}
-
-/// What the shell attestor said: exit status and its single stdout line.
-fn shell_attest(executable: &Path, depth: AttestationDepth, manifest: &Path) -> (i32, String) {
-    let output = std::process::Command::new("bash")
-        .arg(attestor_script())
-        .arg(executable)
-        .arg(depth.as_str())
-        .env(MANIFEST_VAR, manifest)
-        .env_remove(OPT_OUT_VAR)
-        .output()
-        .expect("the shell attestor must be runnable");
-    (
-        output
-            .status
-            .code()
-            .expect("the attestor must not be signalled"),
-        String::from_utf8_lossy(&output.stdout).trim().to_string(),
-    )
-}
-
 #[test]
-fn both_readers_agree_on_a_matching_reference() {
-    let fixture = Fixture::new("31.0.90", pinned_fingerprint());
-    let manifest = fixture.manifest();
-    let manifest_path = write_manifest(fixture._dir.path(), &manifest);
-
-    for depth in [AttestationDepth::Fingerprint, AttestationDepth::Exhaustive] {
-        let rust = ReferenceUse::Attested(
-            attest_against(&fixture.executable, depth, &manifest).expect("rust attestation"),
-        );
-        let (code, stamp) = shell_attest(&fixture.executable, depth, &manifest_path);
-        assert_eq!(code, 0, "the shell attestor must accept the pin at {depth}");
-        assert_eq!(
-            stamp,
-            rust.stamp(),
-            "the two readers must publish the same stamp at {depth}"
-        );
-    }
-}
-
-#[test]
-fn both_readers_attest_an_installed_layout_reference() {
+fn an_installed_layout_attests_its_libexec_dump() {
     let fixture = InstalledFixture::new("31.0.90", pinned_fingerprint());
     let manifest = fixture.manifest();
-    let manifest_path = write_manifest(fixture._dir.path(), &manifest);
-
     for depth in [AttestationDepth::Fingerprint, AttestationDepth::Exhaustive] {
-        let rust = attest_against(&fixture.executable, depth, &manifest)
+        let attested = attest_against(&fixture.executable, depth, &manifest)
             .unwrap_or_else(|error| panic!("{depth} attestation should pass: {error}"));
         assert_eq!(
-            rust.pdmp(),
+            attested.pdmp(),
             fs::canonicalize(&fixture.pdmp)
                 .expect("canonicalize")
                 .as_path(),
             "the attested dump must be the installed libexec one"
         );
-        let (code, stamp) = shell_attest(&fixture.executable, depth, &manifest_path);
-        assert_eq!(
-            code, 0,
-            "the shell attestor must accept an installed layout at {depth}"
-        );
-        assert_eq!(
-            stamp,
-            ReferenceUse::Attested(rust).stamp(),
-            "the two readers must publish the same stamp for an installed layout at {depth}"
-        );
     }
-}
-
-#[test]
-fn both_readers_refuse_the_same_planted_references() {
-    let pinned = Fixture::new("31.0.90", pinned_fingerprint());
-    let manifest = pinned.manifest();
-    let manifest_path = write_manifest(pinned._dir.path(), &manifest);
-
-    // (what was planted, the editor, the depth that must refuse it)
-    let planted: Vec<(&str, Fixture, AttestationDepth)> = vec![
-        (
-            "another release: same request, a different GNU",
-            Fixture::new("30.2", pinned_fingerprint()),
-            AttestationDepth::Fingerprint,
-        ),
-        (
-            "another release at the exhaustive depth",
-            Fixture::new("30.2", pinned_fingerprint()),
-            AttestationDepth::Exhaustive,
-        ),
-    ];
-
-    for (what, fixture, depth) in planted {
-        let rust = attest_against(&fixture.executable, depth, &manifest);
-        assert!(rust.is_err(), "the rust reader must refuse {what}");
-        let (code, stamp) = shell_attest(&fixture.executable, depth, &manifest_path);
-        assert_eq!(code, 3, "the shell reader must refuse {what}");
-        assert!(
-            stamp.is_empty(),
-            "a refused attestation must publish no stamp for {what}: {stamp:?}"
-        );
-    }
-
-    // A missing dump is a refusal for both, and is not the same fact as a
-    // mismatch: ledger 211 section 10.1 bought that distinction, keep it.
-    let orphan = Fixture::new("31.0.90", pinned_fingerprint());
-    fs::remove_file(&orphan.pdmp).expect("remove dump");
-    assert!(
-        attest_against(&orphan.executable, AttestationDepth::Fingerprint, &manifest).is_err(),
-        "the rust reader must refuse an editor with no dump"
-    );
-    let (code, _) = shell_attest(
-        &orphan.executable,
-        AttestationDepth::Fingerprint,
-        &manifest_path,
-    );
-    assert_eq!(
-        code, 3,
-        "the shell reader must refuse an editor with no dump"
-    );
-}
-
-#[test]
-fn both_readers_refuse_the_same_malformed_pins() {
-    // The parsers are the part most likely to drift apart, and a parser that
-    // shrugs is how a pin silently stops being checked.  Every corruption here
-    // must stop BOTH readers.
-    let fixture = Fixture::new("31.0.90", pinned_fingerprint());
-    let base = render_manifest_keys(&fixture.manifest());
-
-    let corruptions: [(&str, String); 7] = [
-        (
-            "a line the format does not define",
-            format!("{base}[table]\n"),
-        ),
-        ("a duplicate key", format!("{base}pdmp_size = \"3\"\n")),
-        ("an unknown key", format!("{base}pdmp_sha512 = \"e\"\n")),
-        (
-            "an unquoted value",
-            base.replace("schema = \"1\"", "schema = 1"),
-        ),
-        (
-            "a non-hex fingerprint",
-            base.replace(&fixture.manifest().fingerprint, &"z".repeat(64)),
-        ),
-        (
-            "a truncated fingerprint",
-            base.replace(&fixture.manifest().fingerprint, &"a".repeat(63)),
-        ),
-        (
-            "an unrecognised schema",
-            base.replace("schema = \"1\"", "schema = \"2\""),
-        ),
-    ];
-
-    for (what, text) in corruptions {
-        let path = fixture._dir.path().join("planted-pin.toml");
-        fs::write(&path, &text).expect("write planted pin");
-        assert!(
-            parse_manifest(&text).is_err(),
-            "the rust reader must refuse {what}"
-        );
-        let (code, stamp) = shell_attest(&fixture.executable, AttestationDepth::Fingerprint, &path);
-        assert_eq!(code, 3, "the shell reader must refuse {what}");
-        assert!(
-            stamp.is_empty(),
-            "a refused pin must publish no stamp for {what}: {stamp:?}"
-        );
-    }
-}
-
-#[test]
-fn both_readers_treat_the_opt_out_as_exact() {
-    let fixture = Fixture::new("31.0.90", pinned_fingerprint());
-    let manifest_path = write_manifest(fixture._dir.path(), &fixture.manifest());
-    let run = |value: &str| {
-        let output = std::process::Command::new("bash")
-            .arg(attestor_script())
-            .arg(&fixture.executable)
-            .env(MANIFEST_VAR, &manifest_path)
-            .env(OPT_OUT_VAR, value)
-            .output()
-            .expect("run the shell attestor");
-        (
-            output.status.code().expect("not signalled"),
-            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        )
-    };
-
-    let (code, stamp) = run("none");
-    assert_eq!(code, 0);
-    assert_eq!(
-        stamp,
-        ReferenceUse::Unpinned {
-            executable: fixture.executable.clone()
-        }
-        .stamp(),
-        "an unpinned run must be branded identically by both readers"
-    );
-
-    for typo in ["None", "NONE", "1", "true", "yes"] {
-        let (code, stamp) = run(typo);
-        assert_eq!(code, 3, "{typo:?} must not disable the shell guard");
-        assert!(stamp.is_empty(), "{typo:?} published {stamp:?}");
-        assert!(
-            opt_out_requested(Some(typo)).is_err(),
-            "{typo:?} must not disable the rust guard"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The other half of the pair: this port's own binary
-// ---------------------------------------------------------------------------
-//
-// GNU is PINNED and its predicate is equality with a recorded identity.  This
-// port is NOT pinnable --- it changes every commit --- so its predicate is
-// CORRESPONDENCE with the tree being measured, and only the case where the
-// binary cannot be placed on that tree's history at all is a refusal.  The
-// stubs stand in for a real build because the verdicts are about what a binary
-// REPORTS, and building three different revisions to test three verdicts would
-// cost an hour to exercise thirty lines of shell.
-
-/// A stand-in for `romacs --version` reporting `revision`.
-fn port_stub(dir: &Path, name: &str, revision: &str) -> PathBuf {
-    let path = dir.join(name);
-    write_script(
-        &path,
-        format!("#!/bin/sh\nprintf '%s\\n' 'Romacs 0.0.15\nGit commit: {revision}'\n").as_bytes(),
-    );
-    path
-}
-
-fn port_attest(script: &Path, binary: &Path) -> (i32, String) {
-    let output = std::process::Command::new("bash")
-        .arg(script)
-        .arg("--port")
-        .arg(binary)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .expect("the shell attestor must be runnable");
-    (
-        output.status.code().expect("not signalled"),
-        String::from_utf8_lossy(&output.stdout).trim().to_string(),
-    )
-}
-
-// The script locates the measured tree relative to its own path, not its cwd.
-// Copy the real reader into a disposable repository so frozen source mirrors
-// (and developer checkouts with unrelated history) exercise the same verdicts.
-struct PortTree {
-    _dir: tempfile::TempDir,
-    script: PathBuf,
-    head: String,
-}
-
-impl PortTree {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().expect("port tree");
-        fs::create_dir(dir.path().join("tools")).expect("fixture tools");
-        let script = dir.path().join("tools/parity-reference-attest.sh");
-        fs::copy(attestor_script(), &script).expect("copy actual attestor");
-        let git = |args: &[&str]| {
-            let output = std::process::Command::new("git")
-                .arg("-C")
-                .arg(dir.path())
-                .args(args)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .output()
-                .expect("fixture git");
-            assert!(
-                output.status.success(),
-                "fixture git {args:?}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout)
-                .expect("git UTF-8")
-                .trim()
-                .to_owned()
-        };
-        git(&["init", "--quiet", "--template=", "--object-format=sha1"]);
-        git(&["add", "tools/parity-reference-attest.sh"]);
-        git(&[
-            "-c",
-            "user.name=Parity Fixture",
-            "-c",
-            "user.email=parity@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "commit",
-            "--quiet",
-            "-m",
-            "fixture",
-        ]);
-        let head = git(&["rev-parse", "HEAD"]);
-        Self {
-            _dir: dir,
-            script,
-            head,
-        }
-    }
-}
-
-#[test]
-#[cfg(unix)]
-fn a_port_binary_built_from_head_is_placed_at_head() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let tree = PortTree::new();
-    let stub = port_stub(dir.path(), "romacs", &tree.head);
-    let (code, stamp) = port_attest(&tree.script, &stub);
-    assert_eq!(code, 0, "a binary built from HEAD must attest: {stamp}");
-    assert!(
-        stamp.contains("place=HEAD") && stamp.starts_with("neo="),
-        "the stamp must place the binary on the tree: {stamp}"
-    );
-}
-
-#[test]
-#[cfg(unix)]
-fn a_port_binary_from_another_history_is_refused() {
-    // The one port case that refuses.  A binary built from a commit this tree
-    // has never seen cannot be talking about this tree, so a number scored with
-    // it is not a number about this tree.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let stub = port_stub(dir.path(), "romacs", &"dead0beef".repeat(5)[..40]);
-    let tree = PortTree::new();
-    let (code, stamp) = port_attest(&tree.script, &stub);
-    assert_eq!(code, 3, "a divergent binary must be refused");
-    assert!(
-        stamp.is_empty(),
-        "a refused port must publish no stamp: {stamp:?}"
-    );
-}
-
-#[test]
-#[cfg(unix)]
-fn a_port_binary_that_reports_no_revision_is_refused() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let stub = port_stub(dir.path(), "romacs", "unknown");
-    let tree = PortTree::new();
-    let (code, _) = port_attest(&tree.script, &stub);
-    assert_eq!(
-        code, 3,
-        "a binary that cannot say what it was built from cannot be tied to a tree"
-    );
-}
-
-#[test]
-#[cfg(unix)]
-fn a_port_binary_that_cannot_be_run_is_refused_as_the_binary() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let tree = PortTree::new();
-    let (code, _) = port_attest(&tree.script, &dir.path().join("no-such-binary"));
-    assert_eq!(code, 3);
 }

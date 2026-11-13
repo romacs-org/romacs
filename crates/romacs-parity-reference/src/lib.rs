@@ -36,9 +36,8 @@
 //! # Two depths
 //!
 //! [`AttestationDepth`] is kept for the API and for the stamp.  Both depths
-//! verify the dump magic --- which is what tells a non-GNU peer from a GNU,
-//! before the shell attestor's `--if-gnu` mode would have to run an arbitrary
-//! peer to ask --- and the release version the editor reports.  They no longer
+//! verify the dump magic --- which is what tells a non-GNU peer from a GNU
+//! without running it --- and the release version the editor reports.  They no longer
 //! differ in strength: the recorded byte identity is deliberately not a gate,
 //! because it moves with the toolchain while the source does not.
 //!
@@ -367,10 +366,8 @@ pub fn attest_against(
     let executable = resolve_executable(executable)?;
     let pdmp = dump_for(&executable);
 
-    // Order matters, and it is the same order `tools/parity-reference-attest.sh`
-    // uses: the dump magic comes FIRST, because it is what tells a non-GNU peer
-    // from a wrong GNU, and the shell attestor's --if-gnu mode has to make that
-    // distinction before it runs anything.  The 32-byte build fingerprint that
+    // Order matters: the dump magic comes FIRST, because it is what tells a
+    // non-GNU peer from a wrong GNU before anything is run.  The 32-byte build fingerprint that
     // follows the magic identifies the binary-and-dump PAIR; GNU itself refuses
     // a mismatched pair at startup, so it is not compared against the manifest.
     let _pair_fingerprint = read_dump_fingerprint(&pdmp)?;
@@ -486,8 +483,8 @@ fn dump_for(executable: &Path) -> PathBuf {
         for root in [prefix.join("libexec/emacs"), prefix.join("lib/emacs")] {
             collect_installed_dumps(&root, &mut candidates);
         }
-        // Byte-order, so this and the shell reader (LC_ALL=C sort) pick the
-        // same candidate when a prefix holds more than one.
+        // Byte-order, so the same candidate is picked every time a prefix
+        // holds more than one.
         candidates.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
         if let Some(found) = candidates.into_iter().next() {
             return found;
@@ -575,9 +572,7 @@ fn hex(bytes: &[u8]) -> String {
 /// A line is a comment (`#`), blank, or exactly `key = "value"` with a
 /// lower-snake key and a quote-free, escape-free value.  Anything else is
 /// REFUSED rather than skipped: a parser that shrugs at a line it does not
-/// understand is how a pin silently stops being checked, and the same rules are
-/// implemented in `tools/parity-reference-attest.sh` with a test that holds
-/// the two readers together.
+/// understand is how a pin silently stops being checked.
 pub fn parse_manifest(text: &str) -> Result<ReferenceManifest, String> {
     let mut fields: Vec<(String, String)> = Vec::new();
     for (index, raw) in text.lines().enumerate() {

@@ -31,6 +31,10 @@
 
 (ert-deftest gnosis-test-boundaries-cold-lecture-compile ()
   "Compile lecture authoring alone without relying on earlier Org loads."
+  ;; `byte-compile-file' reads with `read-positioning-symbols', which Romacs
+  ;; does not have yet (romacs#73), so no file compiles.  Expected to fail
+  ;; until it lands; an unexpected pass then says to drop this marker.
+  :expected-result :failed
   (gnosis-test-boundaries--cold
    '(progn
       (require 'bytecomp)
@@ -101,6 +105,8 @@
 
 (ert-deftest gnosis-test-boundaries-cold-dashboard-compilation ()
   "Compile the dashboard without preloading review or study commands."
+  ;; Expected to fail until romacs#73, as the cold lecture compile above.
+  :expected-result :failed
   (gnosis-test-boundaries--cold
    '(progn
       (require 'bytecomp)
