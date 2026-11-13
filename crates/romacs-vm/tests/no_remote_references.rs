@@ -50,6 +50,9 @@ const FIELDS: &[(&str, Class)] = &[
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
     ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    // The current buffer as last resolved: a collection and a kill clear it,
+    // and a slot holding another value resolves afresh (buffer.rs).
+    ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
