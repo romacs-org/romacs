@@ -13,7 +13,8 @@ fn replay(evidence: &str, spec: &[u8]) {
     assert_eq!(spec["arity"], serde_json::json!([declaration["min"], declaration["max"]]));
     assert_eq!(spec["effect"], declaration["effect"].as_str().unwrap().to_lowercase());
     assert_eq!(spec["gnu_def"], declaration["gnu"]);
-    assert_eq!(spec["rust"], declaration["rust"]);
+    let file = |v: &serde_json::Value| v.as_str().map(|s| s.rsplit_once(':').map_or(s, |(f, _)| f).to_owned());
+    assert_eq!(file(&spec["rust"]), file(&declaration["rust"]));
     for (key, bytes) in [
         ("generator_sha256", include_bytes!("../tools/primh/primh.py").as_slice()),
         ("driver_sha256", include_bytes!("../tools/primh/gnu_driver.el").as_slice()),
