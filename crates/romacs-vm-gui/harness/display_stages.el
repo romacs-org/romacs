@@ -56,17 +56,38 @@
 
 (defun display-stages--chat (chars)
   "Show an agent chat of CHARS characters over 100 turns, point at its end;
-return its buffer.  The chat's 1 s ticker is stopped: whether a tick of the
-wall clock lands in a step is the host's load, so `chat-tick' runs what it
-does as its step."
-  (let ((buffer (scaling--big-chat chars)))
+return its buffer.  Its session says what one in use says, so its header
+does: a permission mode, a model, how full its context is, a turn running.
+The chat's 1 s ticker is stopped: whether a tick of the wall clock lands in
+a step is the host's load, so `chat-tick' runs what it does as its step."
+  (let* ((buffer (scaling--big-chat chars))
+         (session (buffer-local-value 'romacs-agent-ui--session buffer)))
     (advice-add 'romacs-agent-ui--tick-start :override #'ignore)
+    (dolist (event '((:type session :model "claude-opus-5-5" :permission-mode "acceptEdits")
+                     (:type usage :context-used 440000)
+                     (:type done :context-window 1000000)
+                     (:type input :text "a prompt")))
+      (romacs-agent--raise session event))
     (when (timerp romacs-agent-ui--ticker)
       (cancel-timer romacs-agent-ui--ticker)
       (setq romacs-agent-ui--ticker nil))
     (switch-to-buffer buffer)
     (goto-char (point-max))
     buffer))
+
+(defun display-stages--turn (buffer seconds)
+  "Make the chat BUFFER's session one whose turn began SECONDS ago; return BUFFER."
+  (romacs-agent--raise (buffer-local-value 'romacs-agent-ui--session buffer)
+                       (list :type 'input :text "a prompt" :time (- (float-time) seconds)))
+  buffer)
+
+(defun display-stages--second (buffer)
+  "A second passes in the running turn of the chat BUFFER's session, as a
+tick finds it, no event raised: its turn began a second earlier.  Return
+BUFFER.  (The slot by name: this file loads before the session's type.)"
+  (cl-decf (cl-struct-slot-value 'romacs-agent 'turn-start
+                                 (buffer-local-value 'romacs-agent-ui--session buffer)))
+  buffer)
 
 (defun display-stages--streaming-chat (chars)
   "`display-stages--chat', a reply about to stream at its end."
@@ -77,10 +98,11 @@ does as its step."
     buffer))
 
 (defun display-stages--delta (buffer i)
-  "Stream the I-th 20-character delta of the reply into the chat BUFFER."
-  (romacs-agent-ui--render (buffer-local-value 'romacs-agent-ui--session buffer)
-                           (list :type 'delta :text "some streamed words " :message "stream"
-                                 :seq (+ 5002 i) :last t)))
+  "Stream the I-th 20-character delta of the reply into the chat BUFFER, as
+its session raises it: drawn, and every view of the session told."
+  (romacs-agent--raise (buffer-local-value 'romacs-agent-ui--session buffer)
+                       (list :type 'delta :text "some streamed words " :message "stream"
+                             :seq (+ 5002 i) :last t)))
 
 ;; Fontification: what the functions are asked for, counted where a
 ;; scenario asks (`display-stages--counting-fontified'), and synthetic text
@@ -144,11 +166,23 @@ line's end; return it."
 (display-stages-scenario chat-idle
   :setup (display-stages--chat 100000)
   :body nil)
-;; What the chat's ticker does each second of a turn: its composer's
-;; overlay put again where it is, with the strings it had.
+;; What the chat's ticker does each second of a turn, in a second that
+;; leaves its composer's boundary and hint as they read: nothing is written.
 (display-stages-scenario chat-tick
   :setup (display-stages--chat 100000)
   :body (with-current-buffer it (romacs-agent-ui--composer-update)))
+;; The same in a second the running turn's clock moved in: the boundary's
+;; rule says a second more, one overlay string put.
+(display-stages-scenario chat-tick-second :paints t
+  :setup (display-stages--turn (display-stages--chat 100000) 0)
+  :body (with-current-buffer (display-stages--second it)
+          (romacs-agent-ui--composer-update)))
+;; Point moves in the chat's composer: the frame changes, its header does not.
+(display-stages-scenario chat-cursor :paints t
+  :setup (with-current-buffer (display-stages--chat 100000)
+           (insert "some words typed in the composer")
+           (current-buffer))
+  :body (if (cl-evenp i) (backward-char 1) (forward-char 1)))
 ;; A collection, in the same chat: nothing shown changed.
 (display-stages-scenario chat-collected
   :setup (display-stages--chat 100000)
