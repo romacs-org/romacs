@@ -25,7 +25,7 @@ fn locale_startup_matches_pinned_gnu() {
             let mut command = Command::new(binary);
             command.args(["-Q", "--batch", "--eval", FORM]).current_dir(&dir)
                 .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG")
-                // A batch world is per HOME and locale (src/batch.rs); this boots from source.
+                // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
                 .env("ROMACS_WORLD", "off");
             if let Some(lang) = lang { command.env("LANG", lang); }
             let output = command.output().unwrap();

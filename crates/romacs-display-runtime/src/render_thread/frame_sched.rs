@@ -178,7 +178,10 @@ pub(crate) enum DemandReason {
     /// deliver.
     PlatformRedraw,
     DebugCapture,
-    /// New editor content needing a repaint.
+    /// Dirty content needing a repaint: a scene the evaluator sent, and
+    /// also a frame the render pass asked to follow, which marks the frame
+    /// dirty while an animation it draws goes on. The scenes alone are
+    /// `frame_stats::SCENE_COMMITS`.
     Redisplay,
     /// Render-effect families (Stage 6). Each names the group animating so
     /// diagnostics can answer "why is this window still rendering?" without

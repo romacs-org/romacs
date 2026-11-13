@@ -244,6 +244,8 @@ mod fillarray_char_table;
 mod find_charset;
 #[path = "../fixnums.rs"]
 mod fixnums;
+#[path = "../flat_tables.rs"]
+mod flat_tables;
 #[path = "../floats.rs"]
 mod floats;
 #[path = "../fmakunbound.rs"]
@@ -532,8 +534,6 @@ mod primh_map_keymap;
 mod primh_mapc;
 #[path = "../primh_mapcan.rs"]
 mod primh_mapcan;
-#[path = "../primitive_call_cost.rs"]
-mod primitive_call_cost;
 #[path = "../primitive_gc_boundary.rs"]
 mod primitive_gc_boundary;
 #[path = "../primitive_registry.rs"]
@@ -608,6 +608,8 @@ mod save_excursion;
 mod savejourney;
 #[path = "../scaling_fixes.rs"]
 mod scaling_fixes;
+#[path = "../scanner.rs"]
+mod scanner;
 #[path = "../sealed_arithmetic.rs"]
 mod sealed_arithmetic;
 #[path = "../sealed_primitives.rs"]
@@ -708,6 +710,8 @@ mod traversal;
 mod treesit;
 #[path = "../truncate_numeric.rs"]
 mod truncate_numeric;
+#[path = "../undo_collection.rs"]
+mod undo_collection;
 #[path = "../unibyte_insert.rs"]
 mod unibyte_insert;
 #[path = "../unibyte_local_map.rs"]
@@ -734,6 +738,8 @@ mod vertical_motion;
 mod vm_unsupported_named;
 #[path = "../where_is.rs"]
 mod where_is;
+#[path = "../where_is_native.rs"]
+mod where_is_native;
 #[path = "../width_rule_oracle.rs"]
 mod width_rule_oracle;
 #[path = "../window_body.rs"]

@@ -630,11 +630,11 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let lookup = |table, code| self.vm.regexp_table_class(table, code);
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let lookup = |table: &crate::char_table::TableReader<'_>, code| table.get(code).ok().map(|entry| self.vm.syntax_entry_class(entry));
             Ok(codes.iter().zip(defaults).map(|(&code, &default)| {
-                let class = lookup(table, code)
-                    .or_else(|| standard.and_then(|t| lookup(t, code)))
+                let class = lookup(&table, code)
+                    .or_else(|| lookup(&standard, code))
                     .unwrap_or(match default { 1 => SyntaxClass::Word, 2 => SyntaxClass::Symbol, _ => SyntaxClass::Punctuation });
                 class == SyntaxClass::Word || (symbols && class == SyntaxClass::Symbol)
             }).collect())
@@ -648,13 +648,22 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let code_of = |table: Value, code: u32| self.vm.char_table_get(table, code as usize).ok()
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let code_of = |table: &crate::char_table::TableReader<'_>, code: u32| table.get(code).ok()
                 .and_then(|entry| self.vm.cons_pair(entry).ok()).and_then(|(n, _)| n.integer_value());
             Ok(codes.iter().map(|&code| {
-                let entry = code_of(table, code).or_else(|| standard.and_then(|t| code_of(t, code)));
+                let entry = code_of(&table, code).or_else(|| code_of(&standard, code));
                 entry.is_some_and(|n| (n >> 20) & 1 != 0)
             }).collect())
+        }
+        /// TABLE, a buffer's syntax table or nil, and the standard syntax
+        /// table once it is made, each ready to read flat: a reader of
+        /// what is no table gives no entry.
+        fn syntax_tables(&mut self, table: Value) -> [Value; 2] {
+            let standard = self.vm.names.get("#:vm2-standard-syntax").map_or(Value::NIL, |&slot| self.vm.slots[slot].value);
+            self.vm.flatten_table(table);
+            self.vm.flatten_table(standard);
+            [table, standard]
         }
         pub fn make_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
             self.vm.make_lisp_string(bytes, multibyte)
@@ -1517,6 +1526,8 @@ mod leaf {
             self.vm.literal(form).map_err(Fault::Error)
         }
         pub fn intern(&mut self, name: &str) -> Value {
+            #[cfg(test)]
+            super::NAME_LOOKUPS.with(|lookups| lookups.set(lookups.get() + 1));
             self.vm.intern(name)
         }
         /// The private object V names, for writing; a frozen or image value
@@ -1881,12 +1892,20 @@ mod leaf {
             }
             Ok(self.vm.make_lisp_string(bytes, multibyte))
         }
+        /// The current buffer's text from character position START to END as
+        /// one run of bytes in GNU's internal form, and whether the buffer is
+        /// multibyte, for a scan (prims/scanner.rs). None when the positions
+        /// are not in order within the accessible text.
+        pub fn scan_region<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> std::result::Result<Option<R>, Fault> {
+            self.vm.with_region_bytes(start, end, scan).map_err(Fault::Error)
+        }
     }
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
     // module, so it sees `vm`.
     mod map_keymap;
     mod keymap_copy;
     mod active_keymaps;
+    mod where_is;
     mod category;
     mod fileio;
     mod filelock;
@@ -1918,6 +1937,8 @@ mod leaf {
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
+    mod string_compare;
+    pub(crate) use string_compare::Span;
     mod modification;
     mod buffer_lifecycle;
     mod editor_mark;
@@ -1962,6 +1983,16 @@ mod leaf {
     mod session;
     mod world;
     mod finalizer;
+}
+#[cfg(test)]
+thread_local! {
+    /// The symbols this thread's primitives have found by name (`Leaf::intern`).
+    static NAME_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The symbols this thread's primitives have found by name so far.
+#[cfg(test)]
+pub(crate) fn name_lookups() -> usize {
+    NAME_LOOKUPS.with(std::cell::Cell::get)
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, FaceKeys, FaceProps, Shown, ShownKind, LineLabels};
 

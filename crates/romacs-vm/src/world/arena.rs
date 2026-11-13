@@ -49,6 +49,13 @@
 //! collection (`trim`). Outside world binaries nothing installs it; when
 //! its range cannot be reserved it hands every request to the system
 //! allocator.
+//!
+//! With `ROMACS_HEAP_FILE=1`, the thread that adopts an image, which then
+//! runs the VM, takes its later blocks from the production allocator's file
+//! heap instead (`romacs_allocator::file_heap`), in address space of its
+//! own, outside both arenas; a fork that thread asks to be lazy copies no
+//! page-table entry of them (`start_heap_file`).
+use romacs_allocator::file_heap;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
@@ -149,6 +156,8 @@ const STEPS: [&str; 6] = ["", "no arena", "adopted already", "address-space limi
 static ADOPTED: AtomicBool = AtomicBool::new(false);
 /// A restored process's allocator for every block outside the arenas.
 const PLATFORM: romacs_allocator::PlatformAllocator = romacs_allocator::PLATFORM_ALLOCATOR;
+/// Whether the file heap this process asked for started (`start_heap_file`); unset when it asked for none.
+static HEAP_FILE: std::sync::OnceLock<Result<(), file_heap::Refused>> = std::sync::OnceLock::new();
 
 /// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
@@ -670,7 +679,27 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     BASE.store(base, Ordering::Release);
     ADOPTED.store(true, Ordering::Release);
     unlock();
+    start_heap_file(reserve);
     Restore::Mapped
+}
+
+/// With `ROMACS_HEAP_FILE=1`, start the file heap, LEN bytes as an arena
+/// has, for the calling thread: the one that adopted the image, which runs
+/// the VM.
+fn start_heap_file(len: usize) {
+    // HOST(std::env::var_os): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
+    // the image is adopted; not through host.rs, so that a process that asks for none records no
+    // host read; no world holds it, and Lisp sees it only through romacs--arena-census
+    if std::env::var_os("ROMACS_HEAP_FILE").is_some_and(|asked| asked == "1") {
+        let _ = HEAP_FILE.set(file_heap::start(len));
+    }
+}
+
+/// The file heap's counts, when this process asked for one
+/// (`ROMACS_HEAP_FILE`) as it adopted its image; or why it was refused.
+#[must_use]
+pub fn heap_file() -> Option<Result<file_heap::Stats, file_heap::Refused>> {
+    HEAP_FILE.get().map(|started| started.map(|()| file_heap::stats()))
 }
 
 /// The executable's load segments, as the kernel loaded it: where it
@@ -945,7 +974,8 @@ pub fn may_reserve() -> bool {
 /// Give the system the whole pages between FROM and TO bytes past BASE, the
 /// spare capacity of a reserved table, whose contents are unused. SAFETY:
 /// those bytes are within one allocation the caller owns, and nothing reads
-/// or holds them: the pages come back zeroed.
+/// or holds them: the pages come back zeroed, or, in the file heap
+/// (`start_heap_file`), as the heap's file last held them.
 pub(crate) unsafe fn release_spare(base: *mut u8, from: usize, to: usize) {
     let start = (base as usize + from).next_multiple_of(PAGE);
     let end = (base as usize + to) / PAGE * PAGE;
