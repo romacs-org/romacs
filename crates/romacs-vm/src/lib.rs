@@ -121,6 +121,7 @@ pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
 mod isolate;
+mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
@@ -1510,6 +1511,8 @@ pub struct Vm {
     region_collect: bool,
     /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
     isolates: isolate::Isolates,
+    /// This session's keeper, once attached (`keeper.rs`).
+    keeper: Option<keeper::Link>,
     /// GNU inotify.c inotifyfd: the file notification instance, made by
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
     inotify: Option<std::os::fd::OwnedFd>,
@@ -1866,6 +1869,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     region_free,
     region_collect,
     isolates,
+    keeper,
     inotify,
     fence,
     pending,
@@ -1999,6 +2003,7 @@ impl Vm {
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
+            keeper: None,
             inotify: None,
             buffer_slot: 0,
             resolved_buffer: None,

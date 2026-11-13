@@ -419,6 +419,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-json" '("json-read" "romacs-json--"))
 
 
+;;; Generated autoloads from romacs-keeper.el
+
+(register-definition-prefixes "romacs-keeper" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-key-hint.el
 
 (register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))
@@ -717,6 +722,39 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-term.el
 
 (register-definition-prefixes "romacs-term" '("kill-ring" "romacs-term"))
+
+
+;;; Generated autoloads from romacs-term-keep.el
+
+(autoload 'romacs-term-keep-open "romacs-term-keep"
+"Start SHELL in DIRECTORY as the current buffer's terminal; its session.
+With a keeper the terminal's helper process is the keeper's child and
+outlives this session; `romacs-term-handle' names it.
+
+(fn SHELL DIRECTORY)")
+(autoload 'romacs-term--restart-blocker "romacs-term-keep"
+"Why the current terminal buffer cannot be handed to the next build, or nil.
+A terminal's helper process speaks the version it was started with for
+as long as the terminal lives.  A restart into a build that cannot read
+it would leave the terminal running and out of reach, so it is refused
+here, while this session still serves it.")
+(with-eval-after-load 'warm-restart (add-hook 'warm-restart-blocker-functions #'romacs-term--restart-blocker))
+(autoload 'romacs-term-desktop-restore "romacs-term-keep"
+"The terminal buffer NAME of MISC, attached again to its running terminal.
+
+(fn FILE NAME MISC)")
+(autoload 'romacs-term-adopt-orphans "romacs-term-keep"
+"Bring back the terminals a session that is gone left running.
+A session that crashed, or was killed, leaves its terminals in its
+keeper with their programs running.  Each comes back in a buffer of the
+name it had.  Return those buffers.  Does nothing when no keeper runs
+for this session." t)
+(defun romacs-term--adopt-at-startup nil
+"Once started, bring back terminals a gone session left." (unless noninteractive (run-at-time 0 nil (lambda nil (ignore-errors (romacs-term-adopt-orphans))))))
+(add-hook 'after-init-hook #'romacs-term--adopt-at-startup)
+(with-eval-after-load 'desktop (add-to-list 'desktop-buffer-mode-handlers '(romacs-term-mode . romacs-term-desktop-restore)))
+(setq romacs-term-open-function #'romacs-term-keep-open)
+(register-definition-prefixes "romacs-term-keep" '("romacs-term-"))
 
 
 ;;; Generated autoloads from romacs-test.el

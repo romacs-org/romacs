@@ -66,10 +66,12 @@ const SIDES: &[(&str, Side)] = &[
     ("input.native_window", Through), ("input.pointer", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
     ("input.watch_processes", Own), ("input.images_behind", Own),
-    // terminal_service.rs: each session's terminal is locked against its
-    // pty thread, and the mailbox against every session's.
-    ("terminal.create", Cross), ("terminal.send", Cross), ("terminal.resize", Cross), ("terminal.input_state", Cross),
-    ("terminal.changed_sessions", Cross), ("terminal.snapshot", Cross), ("terminal.close", Cross),
+    // terminal_service.rs: each session's mirror is locked against the
+    // thread that reads its helper's pushes, and the mailbox against every
+    // session's.
+    ("terminal.create", Cross), ("terminal.adopt", Cross), ("terminal.send", Cross), ("terminal.resize", Cross),
+    ("terminal.input_state", Cross), ("terminal.changed_sessions", Cross), ("terminal.snapshot", Cross),
+    ("terminal.close", Cross), ("terminal.transport_counts", Cross), ("terminal.helper_version", Cross),
     // paint_host.rs, one-way commands queued for the render thread:
     ("sender.submit_scene", Cross), ("sender.load_image", Cross), ("sender.retire_image", Cross),
     ("sender.debug_lose_device", Cross), ("sender.set_frame_alpha", Cross), ("sender.set_title", Cross),
@@ -196,12 +198,15 @@ impl HostInput for Counted<Box<dyn HostInput>> {
 impl TerminalHost for Counted<Box<dyn TerminalHost>> {
     counted! { "terminal";
         fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String>;
+        fn adopt(&mut self, control: std::os::fd::OwnedFd, pty: Option<std::os::fd::OwnedFd>, columns: u16, rows: u16) -> Result<u64, String>;
         fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String>;
         fn resize(&mut self, session: u64, columns: u16, rows: u16) -> Result<(), String>;
         fn input_state(&mut self, session: u64) -> Result<TerminalInputState, String>;
         fn changed_sessions(&mut self) -> Vec<u64>;
         fn snapshot(&mut self, session: u64) -> Result<TerminalSnapshot, String>;
         fn close(&mut self, session: u64) -> Result<(), String>;
+        fn transport_counts(&mut self, session: u64) -> Option<(u64, u64)>;
+        fn helper_version(&mut self, session: u64) -> Option<u16>;
     }
 }
 

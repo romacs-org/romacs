@@ -1930,6 +1930,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod keeper;
     mod flight;
     mod host_calls;
     mod compiled_lisp;
