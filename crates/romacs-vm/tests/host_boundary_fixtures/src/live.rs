@@ -64,7 +64,16 @@ fn planted(p: &Path, dir: &Path, file: &File) {
     libc::syscall(n); // expect: libc::process
     libc::pipe2(fds, 0); // expect: libc::descriptor
     libc::socket(f, t, 0); // expect: libc::socket
+    rustix::process::getuid(); // expect: rustix::query
+    rustix::fs::openat(d, p, f, m); // expect: rustix::file
+    rustix::process::kill_process(pid, s); // expect: rustix::process
+    rustix::pipe::pipe(); // expect: rustix::descriptor
+    rustix::fs::fcntl_getfl(fd); // a descriptor call: no host query
 }
+
+// rustix's host modules are spelled in full.
+use rustix::fs::{openat}; // expect: rustix::file use-host
+use rustix::net as network; // expect: use-alias use-host
 
 // Ordinary spellings that name a forbidden item another way.
 use std::env::{var}; // expect: std::env::var use-host

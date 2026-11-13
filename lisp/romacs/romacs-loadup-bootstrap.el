@@ -29,12 +29,21 @@
 (current-global-map)
 (dolist (map '(global-map esc-map ctl-x-map)) (makunbound map))
 (load "subr.el" nil t t)
+(defconst romacs-standard-obarray obarray
+  "The obarray `obarray' holds when no binding changes it, which `intern'
+and the reader use by default.")
+;; Romacs's definitions of some GNU files' functions follow each load of
+;; those files (`romacs-follow-gnu-file').
+(load "romacs-follow.el" nil t t)
 (load "keymap.el" nil t t)
 (load "version.el" nil t t)
 (load "widget.el" nil t t)
 (load "custom.el" nil t t)
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
+;; mule.el's translation tables, built over Lisp vectors
+;; (DIVERGENCES LISP-TRANSLATION-TABLE).
+(romacs-follow-gnu-file 'mule "romacs-mule")
 (load "international/mule-conf.el" nil t t)
 ;; loadup.el:143.
 (setq load-source-file-function #'load-with-code-conversion)
@@ -112,6 +121,8 @@
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 ;; Gnus's shipped data is in `data-directory' (VM2-ETC1).
 (with-eval-after-load 'nnheader (require 'romacs-nnheader))
+;; json.el's reader through the native parser (DIVERGENCES LISP-JSON-READ).
+(romacs-follow-gnu-file 'json "romacs-json")
 (load "simple.el" nil t t)
 ;; The region is drawn natively (`snapshot_region'): no overlay for it.
 (setq redisplay-highlight-region-function #'romacs--native-region)

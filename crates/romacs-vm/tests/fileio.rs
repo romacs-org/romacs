@@ -11,6 +11,8 @@
 //! that is not the primitive's.
 use romacs_vm::Vm;
 use std::path::PathBuf;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 /// The printed value, or the VM's error, so a missing or wrong primitive
 /// fails at the assertion that names the GNU answer.
@@ -74,7 +76,7 @@ fn reviewed_must_report_target_close_failure_before_visit_success() {
             .arg("-ldl").status().unwrap();
         assert!(status.success(), "REVIEWED_CLOSE_SHIM_COMPILES");
         let child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "reviewed_must_report_target_close_failure_before_visit_success", "--nocapture"])
+            .args(["--exact", &own_test::name(module_path!(), "reviewed_must_report_target_close_failure_before_visit_success"), "--nocapture"])
             .env("ROMACS_FILEIO_CLOSE_CHILD", "1")
             .env("ROMACS_FILEIO_CLOSE_TARGET", &target)
             .env("LD_PRELOAD", so)
@@ -96,7 +98,7 @@ fn reviewed_must_report_target_close_failure_before_visit_success() {
 fn reviewed_must_bound_stalled_fifo_write_in_completed_subprocess() {
     if std::env::var_os("ROMACS_FILEIO_STALLED_FIFO_CHILD").is_none() {
         let child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "reviewed_must_bound_stalled_fifo_write_in_completed_subprocess", "--nocapture"])
+            .args(["--exact", &own_test::name(module_path!(), "reviewed_must_bound_stalled_fifo_write_in_completed_subprocess"), "--nocapture"])
             .env("ROMACS_FILEIO_STALLED_FIFO_CHILD", "1")
             .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
             .spawn().unwrap();
@@ -135,7 +137,7 @@ fn reviewed_must_check_text_readonly_before_decode_and_refusals() {
 fn reviewed_must_bound_circular_property_aliases() {
     if std::env::var_os("ROMACS_FILEIO_CIRCULAR_CHILD").is_none() {
         let child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "reviewed_must_bound_circular_property_aliases", "--nocapture"])
+            .args(["--exact", &own_test::name(module_path!(), "reviewed_must_bound_circular_property_aliases"), "--nocapture"])
             .env("ROMACS_FILEIO_CIRCULAR_CHILD", "1")
             .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
             .spawn().unwrap();
@@ -262,7 +264,7 @@ fn write_region_fsync_default_and_explicit_nil_use_real_syscall() {
         assert!(status.success(), "compile syscall fault shim");
         for mode in ["eio", "eintr", "einval"] {
             let out = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "write_region_fsync_default_and_explicit_nil_use_real_syscall", "--nocapture"])
+                .args(["--exact", &own_test::name(module_path!(), "write_region_fsync_default_and_explicit_nil_use_real_syscall"), "--nocapture"])
                 .env("ROMACS_FILEIO_FSYNC_CHILD", "1").env("ROMACS_FILEIO_FSYNC_FAULT", mode).env("LD_PRELOAD", &so).output().unwrap();
             assert!(out.status.success(), "FILEIO6 syscall child: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         }
@@ -514,7 +516,7 @@ fn fifo_writes_deliver_to_readers_and_fail_closed_without_one() {
     // the no-reader precondition. Open the FIFO in an isolated test process.
     if std::env::var_os("ROMACS_FILEIO_FIFO_CHILD").is_none() {
         let child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "fifo_writes_deliver_to_readers_and_fail_closed_without_one", "--nocapture"])
+            .args(["--exact", &own_test::name(module_path!(), "fifo_writes_deliver_to_readers_and_fail_closed_without_one"), "--nocapture"])
             .env("ROMACS_FILEIO_FIFO_CHILD", "1")
             .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
             .spawn().unwrap();

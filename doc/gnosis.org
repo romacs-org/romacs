@@ -1628,17 +1628,35 @@ batch; it does not resume the summary's historical scope.
 
 ** Scheduling and Retention
 
-Gnosis uses the FSRS-6 default parameters pinned from fsrs-rs 6.6.1,
-with desired retention initially set to 90%.  Successful recall maps to
-/Good/; forgotten information maps to /Again/.  Grade what you recalled
-before feedback, not what you recognise after revealing the answer.
+Gnosis schedules with fsrs-rs 6.6.1, the FSRS library Anki uses, built
+into Romacs.  It uses the FSRS-6 default parameters, with desired
+retention initially set to 90%.  Successful recall maps to /Good/;
+forgotten information maps to /Again/.  Gnosis keeps these two outcomes
+rather than FSRS's four ratings: it judges most answers itself, and /Hard/
+or /Easy/ would add a self-assessment to every card.  Grade what you
+recalled before feedback, not what you recognise after revealing the
+answer.
 
 Gnosis rounds raw FSRS intervals to the nearest whole number of days,
 with exact half-day ties going to the even integer, then applies a
 one-day minimum.  Thus 2.5 days becomes 2 and 3.5 days becomes 4.
 This calendar policy does not promise identical due dates to Anki or
 the fsrs-rs scheduling example.  Accepted reviews retain their original
-scheduling evidence for replay.
+scheduling evidence.  Replay takes each review's recorded result and
+checks that the next review continues it, so history stays valid when
+the FSRS implementation or its parameters change, and a thema reviewed
+under an earlier implementation of the model reviews on.  New parameters
+need each card's memory state recomputed first; Gnosis does not apply
+fitted weights yet.  Replay also recomputes
+each review with today's FSRS and reports, without rejecting, any review
+it would schedule differently by more than 0.01%, under that review's own
+configuration.  Rebuilding a thema's state after an undo shows that
+report as a warning; =M-x gnosis-scheduler-drift= checks the whole
+collection.  A configuration
+names the model and its reference implementation, fsrs-rs 6.6.1.
+Reviews accepted before Romacs built in the crate were computed by an
+Elisp port of it under the same name; they agree with the crate within
+one part in a million, well inside the drift report's tolerance.
 
 Use =M-x gnosis-scheduler-set-retention= to set a user-wide target strictly
 between 0 and 1, for example =0.9=.  Each changed value creates an
@@ -1657,8 +1675,14 @@ the stale preview cannot accept it under a different configuration.
 FSRS updates stability and difficulty after scheduled review.  A higher
 retention target generally means shorter intervals and more work.  The
 target is a model prediction, not measured topic mastery or an exam
-performance guarantee.  Gnosis does not fit model parameters to your
-history.
+performance guarantee.
+
+=M-x gnosis-scheduler-fit-parameters= fits the weights to your effective
+review history with the fsrs-rs optimizer, as Anki does, and reports
+what the history supports: nothing yet, the four initial stabilities, or
+every weight.  Themata migrated with earlier repetitions take no part,
+since their first review in Gnosis is not their first review.  It writes
+nothing; scheduling keeps the default parameters.
 
 ~gnosis-study-history-audit~ shows aggregate-only baseline reviews,
 effective scheduled events, delayed scheduled events, practice exposures
