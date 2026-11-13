@@ -78,6 +78,10 @@ impl Client {
     /// As [`Self::connect`].
     pub fn attach(path: &Path) -> Result<Self, String> { Self::connect(path, vec![proto::class()]) }
 
+    /// Where the keeper listens.
+    #[must_use]
+    pub fn path(&self) -> &Path { &self.path }
+
     /// The version of class ID agreed with this keeper.
     ///
     /// # Errors

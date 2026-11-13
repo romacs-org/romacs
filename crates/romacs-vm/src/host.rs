@@ -3520,3 +3520,12 @@ pub fn keeper_attach(path: &Path) -> Result<romacs_keeper::Client, String> {
     effect(|| format!("keeper {}", bytes(path))).map_err(|e| e.to_string())?;
     romacs_keeper::Client::attach(path)
 }
+
+/// Find CLIENT's keeper again where it listens, after its exec in place.
+///
+/// # Errors
+/// A refused effect, or no keeper of the same epoch there, in words.
+pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String> {
+    effect(|| format!("keeper {}", bytes(client.path()))).map_err(|e| e.to_string())?;
+    client.reconnect()
+}

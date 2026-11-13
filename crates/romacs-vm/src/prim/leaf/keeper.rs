@@ -149,7 +149,8 @@ impl Leaf<'_> {
             }
             "executable-hash" => {
                 let program = path(&self.string_bytes(arg(0))?);
-                Ok(self.string(&format!("{:016x}", romacs_keeper::server::executable_hash(&program))))
+                let hash = crate::host::read_file(&program).map_or(0, |bytes| romacs_keeper::server::bytes_hash(&bytes));
+                Ok(self.string(&format!("{hash:016x}")))
             }
             "events" => {
                 let events = self.link()?.events().map_err(failed)?;

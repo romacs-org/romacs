@@ -125,14 +125,16 @@ fn set_cloexec(fd: BorrowedFd<'_>, on: bool) {
     let _ = rustix::io::fcntl_setfd(fd, if on { FdFlags::CLOEXEC } else { FdFlags::empty() });
 }
 
-fn fnv1a(bytes: &[u8]) -> u64 {
+/// The identity of an executable whose BYTES the caller read: a hash of them.
+#[must_use]
+pub fn bytes_hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
-/// The identity of an executable: a hash of its bytes.
+/// The identity of the executable at PATH, read here: 0 if it cannot be read.
 #[must_use]
 pub fn executable_hash(path: &std::path::Path) -> u64 {
-    std::fs::read(path).map_or(0, |bytes| fnv1a(&bytes))
+    std::fs::read(path).map_or(0, |bytes| bytes_hash(&bytes))
 }
 
 impl Keeper {

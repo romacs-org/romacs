@@ -82,7 +82,7 @@ impl Link {
     /// handles and duplicates stay good.
     pub(crate) fn events(&mut self) -> Result<Vec<Event>, String> {
         let events = self.client.pump()?;
-        if events.contains(&Event::Exec) { self.client.reconnect()?; }
+        if events.contains(&Event::Exec) { crate::host::keeper_reconnect(&mut self.client)?; }
         Ok(events)
     }
 }
