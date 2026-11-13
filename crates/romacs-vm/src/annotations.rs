@@ -753,7 +753,6 @@ impl Vm {
             self.fence_property(symbol, None, crate::world::Access::Write, None);
         }
         let slot = self.plist_owner_mut(symbol)?;
-        self.command_set.plist_written(slot);
         self.slots[slot].plist = plist;
         Ok(plist)
     }
@@ -807,7 +806,6 @@ impl Vm {
             self.fence_property(symbol, Some(key), crate::world::Access::Write, Some(value));
         }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
-        self.command_set.plist_written(owner);
         loop {
             let plist = self.slots[owner].plist;
             let mut walk = TailWalk::new(plist);
