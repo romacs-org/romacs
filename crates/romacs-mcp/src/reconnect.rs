@@ -122,6 +122,10 @@ struct State {
     provisional: bool,
     /// The relay's `tools/list' probe, which ends that.
     probe: Option<String>,
+    /// The harness's own `tools/list' params, which the probe carries: a
+    /// stateless client's protocol metadata travels in each request, and
+    /// the server refuses a list asked without it.
+    list_params: Option<Json>,
     probes: u64,
     /// Connections in a row the server ended within `REFUSED_WITHIN`.
     refusals: u32,
@@ -230,7 +234,9 @@ impl Relay {
         if !state.provisional || state.probe.is_some() { return; }
         state.probes += 1;
         let id = format!("romacs-relay-probe-{}", state.probes);
-        let request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"}).to_string();
+        let mut request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"});
+        if let Some(params) = &state.list_params { request["params"] = params.clone(); }
+        let request = request.to_string();
         if Self::send(state, request, None) { state.probe = Some(key(&json!(id))); }
     }
 
@@ -284,6 +290,7 @@ impl Relay {
         let mut state = self.lock();
         if method == "initialize" { state.initialize = message.clone(); }
         if method == "notifications/initialized" { state.initialized = Some(line.to_owned()); }
+        if method == "tools/list" { state.list_params = message.as_ref().and_then(|m| m.get("params")).cloned(); }
         let Some(id) = id else {
             Self::send(&state, line.to_owned(), None);
             return;
