@@ -1834,30 +1834,8 @@ impl Vm {
         let keep = |v: &Value| traced(*v, in_obarray);
         self.undo_list_index();
         let undo_limits = self.undo_view();
-        let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
-        pending.extend_from_slice(&self.external_roots);
-        for engine in &mut self.suspended {
-            engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
-        }
-        pending.extend(self.doomed_finalizers.iter().copied());
-        pending.extend(self.permanent_symbol_names.values().copied());
-        pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
-        pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
-        if let Some(escape) = &mut self.propagated_escape {
-            escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        }
-        for handler in &mut self.signal_handlers {
-            handler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        }
-        self.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        let mut pending = self.mark_roots(roots, in_obarray);
         let mut local_live = HashSet::default();
-        // GNU's C globals and `buffer_defaults`: roots outside every value
-        // cell (forwarded.rs). Per-buffer values are traced with their buffer.
-        self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        pending.extend_from_slice(&self.standard_case_tables);
-        pending.push(self.command_point.1);
-        self.charsets.trace(&mut pending);
         // HOST(dynamic:saved): collector: forwards the saved values
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches
@@ -1952,6 +1930,38 @@ impl Vm {
         let census = marking.census(&own);
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();
         Some(Marked { marking, own, doomed, local_live, code_marks, census, state })
+    }
+    /// The roots a mark starts from outside the heap's own entries, those it
+    /// traces (`traced`): ROOTS and the external ones, suspended
+    /// engines', the finalizers doomed, permanent symbols, terminal bindings,
+    /// the escape in flight, signal handlers, the backtrace and the profiler,
+    /// GNU's C globals, the case tables, the command point and the charsets.
+    fn mark_roots(&mut self, roots: &[Value], in_obarray: &[bool]) -> Vec<Value> {
+        let keep = |v: &Value| traced(*v, in_obarray);
+        let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
+        pending.extend_from_slice(&self.external_roots);
+        for engine in &mut self.suspended {
+            engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
+        }
+        pending.extend(self.doomed_finalizers.iter().copied());
+        pending.extend(self.permanent_symbol_names.values().copied());
+        pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
+        pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
+        if let Some(escape) = &mut self.propagated_escape {
+            escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        }
+        for handler in &mut self.signal_handlers {
+            handler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        }
+        self.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        // GNU's C globals and `buffer_defaults`: roots outside every value
+        // cell (forwarded.rs). Per-buffer values are traced with their buffer.
+        self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        pending.extend_from_slice(&self.standard_case_tables);
+        pending.push(self.command_point.1);
+        self.charsets.trace(&mut pending);
+        pending
     }
     /// The functions a minor reads, those changed since the last collection:
     /// every other starts reached in `code_marks`, as the old entries do.
