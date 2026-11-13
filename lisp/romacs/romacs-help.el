@@ -10,7 +10,7 @@
 ;; `describe-vector', `help--describe-vector' (a keymap's vectors and
 ;; char-tables), `text-char-description' and
 ;; `internal-describe-syntax-value' (describe-syntax).  GNU writes them in
-;; C; Romacs in Lisp, over the keymap layer of romacs-keymap.el, keeping
+;; C; Romacs in Lisp, over the keymap primitives, keeping
 ;; GNU's output byte for byte.
 ;;
 ;; Adapted from GNU src/keymap.c (`describe-buffer-bindings',
@@ -266,9 +266,9 @@ The optional argument MENUS, if non-nil, says to mention menu bindings.
         ;; The minor and major mode maps, as BUFFER has them.
         (pcase-let ((`(,minor ,keymap ,local-map ,own-map ,mode)
                      (with-current-buffer buffer
-                       (list (romacs-keymap--minor-mode-maps)
-                             (romacs-keymap--local-map (point) 'keymap)
-                             (romacs-keymap--local-map (point) 'local-map)
+                       (list (romacs--minor-mode-maps)
+                             (romacs--keymap-at-point 'keymap)
+                             (romacs--keymap-at-point 'local-map)
                              (current-local-map) major-mode))))
           (when keymap
             (funcall tree keymap t shadow "\f\n`keymap' Property Bindings" nil nil)

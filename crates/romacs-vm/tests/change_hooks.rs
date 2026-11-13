@@ -44,3 +44,33 @@ fn property_change_hooks_match_pinned_gnu() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The calls a form enters when run COUNT times, less the loop's own.
+fn calls(vm: &mut Vm, form: &str, count: usize) -> usize {
+    let mut run = |body: &str| {
+        let before = vm.calls_entered();
+        vm.eval_source(&format!("(let ((n {count})) (while (> n 0) {body} (setq n (1- n))))")).unwrap();
+        vm.calls_entered() - before
+    };
+    let empty = run("nil");
+    run(form) - empty
+}
+
+/// Every keystroke that inserts runs the before-change hooks, and around
+/// them the check of whether a hook moved the change's positions. With one
+/// function on each hook an insertion enters 25 calls: the primitive, the
+/// before and after halves, their hook runners and the hooks, and the
+/// position check with the marker primitives it calls for its three
+/// positions. The check walks them itself; through `mapcar` an insertion
+/// entered 37.
+#[test]
+fn an_insertion_with_change_hooks_enters_few_calls() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(progn (set-buffer (get-buffer-create \"change-calls\")) (setq buffer-undo-list t)
+      (defun change-calls-before (_b _e) nil) (defun change-calls-after (_b _e _l) nil)
+      (set (make-local-variable 'before-change-functions) (list 'change-calls-before))
+      (set (make-local-variable 'after-change-functions) (list 'change-calls-after))
+      (insert \"warm\"))").unwrap();
+    assert_eq!(calls(&mut vm, "(insert \"a\")", 100), 2500);
+}

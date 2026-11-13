@@ -51,9 +51,11 @@ const RESERVE_BYTES: usize = 8 << 30;
 const LOG_GIVES_UP: usize = 1 << 19;
 
 /// Whether an entry of colour COLOR is in use and no mark has reached it.
+/// STICKY is `OLD` in a minor collection's mark, to which every old entry
+/// counts as reached already, and 0 in any other.
 #[inline]
-fn unreached(color: u8) -> bool {
-    color.cast_signed() > 0
+fn unreached(color: u8, sticky: u8) -> bool {
+    color & (IN_USE | MARK | sticky) == IN_USE
 }
 
 /// Whether a byte of WORD is zero.
@@ -73,6 +75,8 @@ pub(crate) struct RawTable<T> {
     free: usize,
     quarantined: usize,
     generation: u64,
+    /// `OLD` for a minor's mark, 0 for any other (`unreached`).
+    sticky: u8,
 }
 
 // SAFETY: the one place a collection's threads meet outside the compiler's
@@ -95,7 +99,7 @@ impl<T> RawTable<T> {
     pub(crate) fn claim(&self, i: usize) -> bool {
         let color = self.color(i);
         // Of the threads that saw it unreached, one finds the bit clear.
-        unreached(color.load(Ordering::Relaxed)) && color.fetch_or(MARK, Ordering::Relaxed) & MARK == 0
+        unreached(color.load(Ordering::Relaxed), self.sticky) && color.fetch_or(MARK, Ordering::Relaxed) & MARK == 0
     }
     pub(crate) fn is_free(&self, i: usize) -> bool {
         self.color(i).load(Ordering::Relaxed) & IN_USE == 0
@@ -136,17 +140,22 @@ impl<T> RawTable<T> {
         };
         let (mut freed, mut last) = (0, 0);
         let mut at = 0;
+        // OLD's bit of each byte, moved down beside its in-use bit, counts
+        // as a mark in a minor's sweep.
+        let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
         while at < colors.len() {
             let end = (at + 8).min(colors.len());
             // Eight entries with none dead, by far the commonest case when
-            // the heap is mostly live: make the ones in use old in one store.
+            // the heap is mostly live: make the ones in use old in one store,
+            // or in none when they are so already, as the old are to a minor.
             if let Ok(bytes) = <[u8; 8]>::try_from(&colors[at..end]) {
                 let word = u64::from_le_bytes(bytes);
                 let in_use = word & LOW_BITS;
-                if in_use & !(word >> 7) == 0 {
+                let reached = word >> 7 | (word >> 4 & old_too);
+                if in_use & !reached == 0 {
                     // Each byte in use becomes OLD | IN_USE; the rest stay.
                     let clean = (word & !(in_use * 0xFF)) | (in_use * u64::from(OLD | IN_USE));
-                    colors[at..end].copy_from_slice(&clean.to_le_bytes());
+                    if clean != word { colors[at..end].copy_from_slice(&clean.to_le_bytes()); }
                     if clean != 0 {
                         last = base + end - clean.leading_zeros() as usize / 8;
                     }
@@ -156,7 +165,7 @@ impl<T> RawTable<T> {
             }
             for i in at..end {
                 let color = colors[i];
-                if unreached(color) {
+                if unreached(color, self.sticky) {
                     destroy(&mut entries[i]);
                     colors[i] = dead;
                     freed += 1;
@@ -174,7 +183,7 @@ impl<T> RawTable<T> {
     pub(crate) fn dead_in(&self, range: std::ops::Range<usize>, wanted: impl Fn(usize) -> bool, found: &mut Vec<u32>) {
         assert!(range.end <= self.len, "a range past its table");
         for i in range {
-            if unreached(self.color(i).load(Ordering::Relaxed)) && wanted(i) {
+            if unreached(self.color(i).load(Ordering::Relaxed), self.sticky) && wanted(i) {
                 found.push(i as u32);
             }
         }
@@ -295,6 +304,9 @@ pub(crate) struct Table<T> {
     high: usize,
     /// A mark began and no sweep has ended it: marks may be left.
     marking: bool,
+    /// `OLD` while a minor's mark stands, to which the old count as
+    /// reached (`unreached`), and 0 otherwise.
+    sticky: u8,
     /// Which marks the colours hold: a new mark, or marks cleared, is another.
     generation: u64,
     barrier: Barrier,
@@ -306,7 +318,7 @@ pub(crate) struct Table<T> {
 impl<T> Default for Table<T> {
     fn default() -> Self {
         Self {
-            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, generation: 0, barrier: Barrier::default(),
+            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, sticky: 0, generation: 0, barrier: Barrier::default(),
             #[cfg(test)]
             reused: 0,
         }
@@ -556,22 +568,23 @@ impl<T> Table<T> {
     /// or a panic ended it gone: it would stop this one at entries it marked.
     /// SAFETY: until the last use of what this returns, the table is not
     /// dropped, and changes only through it; `RawTable::holds' checks that.
-    pub(crate) unsafe fn raw(&mut self) -> RawTable<T> {
+    pub(crate) unsafe fn raw(&mut self, minor: bool) -> RawTable<T> {
         if self.marking {
             self.clear_marks();
         }
         self.marking = true;
+        self.sticky = if minor { OLD } else { 0 };
         self.generation += 1;
         RawTable {
             entries: self.entries.as_mut_ptr(), colors: self.colors.as_mut_ptr().cast(), len: self.entries.len(),
-            free: self.free, quarantined: self.quarantined, generation: self.generation,
+            free: self.free, quarantined: self.quarantined, generation: self.generation, sticky: self.sticky,
         }
     }
     /// Mark entry I, as `RawTable::claim'.
     #[cfg(test)]
     pub(crate) fn mark(&mut self, i: usize) -> bool {
         let color = &mut self.colors[i];
-        if !unreached(*color) {
+        if !unreached(*color, self.sticky) {
             return false;
         }
         *color |= MARK;
@@ -580,14 +593,16 @@ impl<T> Table<T> {
     /// Whether a mark in progress has reached entry I.
     #[inline(always)]
     pub(crate) fn marked(&self, i: usize) -> bool {
-        self.colors[i] & (IN_USE | MARK) == (IN_USE | MARK)
+        let color = self.colors[i];
+        color & IN_USE != 0 && color & (MARK | self.sticky) != 0
     }
     /// Every mark gone, and the free entries counted again: a collection
     /// stopped short. A mark changes neither the generations nor the log, so
     /// one stopped while it marked leaves both as they were. One stopped
     /// part way through its sweep has not: a survivor in a range it swept is
     /// old and clean, and may name a young entry in a range it did not reach.
-    /// Nothing reads the generations yet, and what does will have to know.
+    /// A VM used again after that promotes everything first
+    /// (`Vm::restore_nesting`).
     pub(crate) fn clear_marks(&mut self) {
         let (mut free, mut quarantined) = (0, 0);
         for color in &mut self.colors {
@@ -595,7 +610,7 @@ impl<T> Table<T> {
             free += usize::from(*color == FREE);
             quarantined += usize::from(*color == QUARANTINED);
         }
-        (self.free, self.quarantined, self.cursor, self.marking) = (free, quarantined, 0, false);
+        (self.free, self.quarantined, self.cursor, self.marking, self.sticky) = (free, quarantined, 0, false, 0);
         self.generation += 1;
     }
     /// After a completed mark: every dead entry through DESTROY, which leaves
@@ -612,7 +627,7 @@ impl<T> Table<T> {
     /// in all, the last in use before LAST.
     pub(crate) fn swept(&mut self, freed: usize, last: usize, quarantine: bool) {
         if quarantine { self.quarantined += freed } else { self.free += freed }
-        (self.cursor, self.marking) = (0, false);
+        (self.cursor, self.marking, self.sticky) = (0, false, 0);
         self.generation += 1;
         // Every survivor is old and clean, so nothing logged still stands.
         self.barrier = Barrier::default();
@@ -678,6 +693,25 @@ impl<T> Table<T> {
         self.generation += 1;
         self.barrier = Barrier::default();
     }
+    /// A minor's start. To its mark every old entry counts as reached
+    /// (`raw`), but those it must read again: the ones stored into since
+    /// the last collection, and the ones WHOLE asks for whatever their
+    /// colour, given its index. Each of those is made young for this
+    /// collection and returned, for the mark to claim and read as it does
+    /// the young; being roots, all survive, and the sweep leaves them old
+    /// again. No other colour is written. A minor that ends any other way
+    /// promotes everything (`Vm::promote_all`), which ages them again.
+    pub(crate) fn read_again(&mut self, whole: impl Fn(usize, &T) -> bool) -> Vec<usize> {
+        let mut again = Vec::new();
+        for (i, (color, entry)) in self.colors.iter_mut().zip(&self.entries).enumerate() {
+            if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
+            if *color & DIRTY != 0 || whole(i, entry) {
+                *color &= !OLD;
+                again.push(i);
+            }
+        }
+        again
+    }
     /// Every entry in use becomes old, as a sweep would leave it, and the log
     /// is empty: what a world image holds, whose every entry is old to the
     /// process that restores it.
@@ -690,6 +724,7 @@ impl<T> Table<T> {
         for color in &mut self.colors {
             if *color & IN_USE != 0 { *color = OLD | IN_USE; }
         }
+        self.sticky = 0;
         self.barrier = Barrier::default();
     }
     /// Whether every entry in use is exactly old and the log is empty: what a
@@ -699,7 +734,6 @@ impl<T> Table<T> {
     }
     /// The keys and values put into old strong hash tables since the last
     /// collection.
-    #[cfg(test)]
     pub(crate) fn logged(&self) -> &[Value] {
         &self.barrier.values
     }
@@ -708,15 +742,26 @@ impl<T> Table<T> {
     pub(crate) fn dirty_old(&self) -> impl Iterator<Item = usize> + '_ {
         self.colors.iter().enumerate().filter(|&(_, &color)| color & (OLD | DIRTY) == (OLD | DIRTY)).map(|(i, _)| i)
     }
-    /// Whether the log overflowed since the last collection, and is void.
+    /// The log overflows, as a native loop of puts with no poll makes it.
     #[cfg(test)]
+    pub(crate) fn lose_the_log(&mut self) {
+        self.barrier.lost = true;
+    }
+    /// Whether the log overflowed since the last collection, and is void.
     pub(crate) fn log_lost(&self) -> bool {
         self.barrier.lost
     }
     /// Whether entry I survived a collection.
-    #[cfg(test)]
     pub(crate) fn old(&self, i: usize) -> bool {
         self.colors[i] & OLD != 0
+    }
+    /// Whether entry I was stored into since the last collection.
+    pub(crate) fn stored_into(&self, i: usize) -> bool {
+        self.colors[i] & DIRTY != 0
+    }
+    /// Whether each entry is young and unmarked: what a minor's sweep frees.
+    pub(crate) fn young_unmarked(&self) -> impl Iterator<Item = bool> + '_ {
+        self.colors.iter().map(|&color| color & (IN_USE | OLD | MARK) == IN_USE)
     }
     /// Whether each entry holds an object: in use, whatever else its colour says.
     pub(crate) fn held(&self) -> Vec<bool> {
@@ -728,7 +773,7 @@ impl<T> Table<T> {
     }
     /// Whether a mark in progress reached each entry.
     pub(crate) fn marks(&self) -> impl Iterator<Item = bool> + '_ {
-        self.colors.iter().map(|&color| color & (IN_USE | MARK) == (IN_USE | MARK))
+        self.colors.iter().map(|&color| color & IN_USE != 0 && color & (MARK | self.sticky) != 0)
     }
 }
 
@@ -740,7 +785,7 @@ mod tests {
     pub(super) fn raw_of<T>(t: &mut Table<T>) -> RawTable<T> {
         // SAFETY: each test drops its table only after the last use of this,
         // and whatever else changes the table is what `holds' is to notice.
-        unsafe { t.raw() }
+        unsafe { t.raw(false) }
     }
     /// A sweep of all RAW sees, on the test's one thread.
     pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(&mut T)) -> (usize, usize) {

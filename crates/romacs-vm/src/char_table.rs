@@ -226,14 +226,14 @@ mod tests {
         table.root.lock().unwrap().slots[0] = CharTableSlot::Node(Arc::clone(&shared));
         table.root.lock().unwrap().slots[1] = CharTableSlot::Node(Arc::clone(&shared));
         let mut count = 0;
-        table.collector_visit_values(&mut HashSet::default(), &mut |value| {
+        table.collector_visit_values(&mut HashSet::default(), 0, &mut |value| {
             if *value == Value::TRUE { count += 1; }
         });
         assert_eq!(count, 16, "each physical slot is visited once, not each incoming edge");
         let mut seen = HashSet::default();
-        collector_visit_node(&table.root, &mut seen, &mut |_| {});
+        collector_visit_node(&table.root, &mut seen, 0, &mut |_| {});
         let mut revisits = 0;
-        collector_visit_node(&shared, &mut seen, &mut |_| { revisits += 1; });
+        collector_visit_node(&shared, &mut seen, 0, &mut |_| { revisits += 1; });
         assert_eq!(revisits, 0, "shared collector state also covers a retained handle");
     }
 
@@ -424,8 +424,9 @@ impl Vm {
 
     /// GNU UNIPROP_TABLE_P: purpose `char-code-property-table', 5 extras.
     pub(crate) fn is_uniprop_table(&self, t: &CharTable) -> bool {
-        self.names.get("char-code-property-table")
-            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7) && t.extras.len() == 5)
+        // The extras first: a name lookup on every read cost more than the read.
+        t.extras.len() == 5 && self.names.get("char-code-property-table")
+            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7))
     }
 
     /// The codes of VALUE when it is a compressed uniprop block
@@ -535,8 +536,18 @@ pub(super) struct CharTableNode {
     depth: usize,
     min_char: usize,
     slots: Vec<CharTableSlot>,
+    /// The collections' epoch (`crate::epoch`) when it was made or last written: a
+    /// minor collection reads the nodes written since the last collection
+    /// and passes over the rest, whatever table, sub table or cursor it
+    /// reached them through. It has no default, so a node cannot be built
+    /// without one.
+    stamp: u64,
+    /// Whether no slot holds a node, whatever its depth says (a literal
+    /// may put one anywhere): a minor passes over such a node unread when
+    /// it was not written. Like the stamp, it has no default.
+    leaf: bool,
 }
-romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots });
+romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots, stamp, leaf });
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
@@ -547,6 +558,8 @@ impl CharTableNode {
             depth,
             min_char,
             slots: vec![CharTableSlot::Value(value); Self::SIZES[depth]],
+            stamp: born(),
+            leaf: true,
         }))
     }
 
@@ -564,6 +577,8 @@ impl CharTableNode {
     /// Store SLOT at I, through the funnel.
     fn store(&mut self, i: usize, slot: CharTableSlot) {
         wrote(&slot);
+        self.stamp = born();
+        self.leaf &= matches!(slot, CharTableSlot::Value(_));
         self.slots[i] = slot;
     }
 
@@ -577,10 +592,11 @@ impl CharTableNode {
     /// INDEX's raw value under HANDLE and the inclusive character range of
     /// the slot holding it, refusing geometry a lookup cannot trust.
     pub(super) fn checked_span(handle: &CharTableNodeHandle, index: usize) -> Result<(Value, usize, usize)> {
+        // Each node descended into is one level deeper than its parent and
+        // a depth-three node has no children, so the walk ends within four
+        // nodes: a cycle fails the geometry check.
         let mut current = Arc::clone(handle);
-        let mut seen = HashSet::default();
         loop {
-            if !seen.insert(char_table_node_id(&current)) { return Err("cyclic sub-char-table".into()); }
             let (slot, from, width) = {
                 let node = current.lock().unwrap();
                 let offset = index.checked_sub(node.min_char).ok_or("invalid sub-char-table geometry")?;
@@ -632,20 +648,29 @@ impl CharTableNode {
         Ok(())
     }
 
+    /// The nodes `set_range` descends into for FROM..=TO, checked before it
+    /// writes: only a slot the range covers in part is descended, and only
+    /// the slots holding FROM and TO can be, so a write checks its two
+    /// paths, not the table.
     fn validate_geometry(handle: &CharTableNodeHandle, depth: usize, min_char: usize, from: usize, to: usize) -> Result<()> {
-        let slots = {
+        let partial = {
             let node = handle.lock().unwrap();
             if node.depth != depth || node.min_char != min_char { return Err("invalid sub-char-table geometry".into()); }
-            node.slots.clone()
+            let width = Self::WIDTHS[depth];
+            let slot_of = |c: usize| c.checked_sub(min_char).map(|offset| offset / width).filter(|&i| i < node.slots.len());
+            let (first, last) = (slot_of(from), slot_of(to));
+            let child = |i: Option<usize>| i.and_then(|i| match &node.slots[i] {
+                CharTableSlot::Node(child) => Some((i, Arc::clone(child))),
+                CharTableSlot::Value(_) => None,
+            });
+            [child(first), if last == first { None } else { child(last) }]
         };
-        for (i, slot) in slots.iter().enumerate() {
-            if let CharTableSlot::Node(child) = slot {
-                let start = min_char + i * Self::WIDTHS[depth];
-                let end = start + Self::WIDTHS[depth] - 1;
-                if start > to || end < from || (from <= start && end <= to) { continue; }
-                if depth == 3 { return Err("invalid sub-char-table geometry".into()); }
-                Self::validate_geometry(child, depth + 1, start, from, to)?;
-            }
+        for (i, child) in partial.into_iter().flatten() {
+            let start = min_char + i * Self::WIDTHS[depth];
+            let end = start + Self::WIDTHS[depth] - 1;
+            if from <= start && end <= to { continue; }
+            if depth == 3 { return Err("invalid sub-char-table geometry".into()); }
+            Self::validate_geometry(&child, depth + 1, start, from, to)?;
         }
         Ok(())
     }
@@ -654,7 +679,7 @@ impl CharTableNode {
         let id = char_table_node_id(handle);
         if let Some(copy) = copies.get(&id) { return Arc::clone(copy); }
         let node = handle.lock().unwrap();
-        let copy = Arc::new(Mutex::new(Self { depth: node.depth, min_char: node.min_char, slots: vec![] }));
+        let copy = Arc::new(Mutex::new(Self { depth: node.depth, min_char: node.min_char, slots: vec![], stamp: born(), leaf: node.leaf }));
         copies.insert(id, Arc::clone(&copy));
         let slots = node.slots.clone();
         drop(node);
@@ -663,6 +688,37 @@ impl CharTableNode {
             CharTableSlot::Node(child) => CharTableSlot::Node(Self::deep_copy(child, copies)),
         }).collect();
         copy
+    }
+
+    /// `set_range` for the one character C, checking each node on its path
+    /// as it descends rather than in a pass before: a node it splits is
+    /// new and sound, so a refusal comes before anything is written.
+    fn set_char(handle: &CharTableNodeHandle, c: usize, value: CharTableSlot) -> Result<()> {
+        let (mut current, mut depth, mut min_char) = (Arc::clone(handle), 0, 0);
+        loop {
+            let mut node = current.lock().unwrap();
+            let width = Self::WIDTHS[depth];
+            let i = (c - min_char) / width;
+            if node.depth != depth || node.min_char != min_char || i >= node.slots.len() {
+                return Err("invalid sub-char-table geometry".into());
+            }
+            if depth == 3 {
+                node.store(i, value);
+                return Ok(());
+            }
+            let start = min_char + i * width;
+            let child = match &node.slots[i] {
+                CharTableSlot::Node(child) => Arc::clone(child),
+                CharTableSlot::Value(old) => {
+                    // The split moves OLD into a node no entry has traced yet.
+                    let child = Self::new(depth + 1, start, *old);
+                    node.store(i, CharTableSlot::Node(Arc::clone(&child)));
+                    child
+                }
+            };
+            drop(node);
+            (current, depth, min_char) = (child, depth + 1, start);
+        }
     }
 
     fn set_range(handle: &CharTableNodeHandle, from: usize, to: usize, value: &CharTableSlot) {
@@ -790,6 +846,7 @@ pub(crate) fn writes_here() -> usize {
     tests::WROTE.with(std::cell::Cell::get)
 }
 
+use crate::epoch::born;
 /// The writes to char tables' contents so far in this process, all tables
 /// counted together: what is derived from a table's contents (the syntax
 /// summaries) keys on it with the table's serial, so a write
@@ -822,17 +879,45 @@ pub(crate) fn restore_counters([serials, writes]: [u64; 2]) {
 /// `map_entries` and `entry_values` walk by it too, so their orders match.
 /// Callers may share SEEN across table and cursor roots during a collection.
 /// The visitor must not reenter these node locks or run Lisp callbacks.
+/// With SINCE not 0, a minor collection's visit: the Values of the nodes
+/// stamped at or after it, every node below HANDLE being looked at, since
+/// one may be written under a parent that was not.
 pub(super) fn collector_visit_node(
     handle: &CharTableNodeHandle,
     seen: &mut HashSet<usize>,
+    since: u64,
     visit: &mut impl FnMut(&mut Value),
 ) {
     if !seen.insert(char_table_node_id(handle)) { return; }
     let mut node = handle.lock().unwrap();
+    let written = node.stamp >= since;
+    // A leaf holds no node: one not written has nothing to read.
+    if !written && node.leaf { return; }
     for slot in &mut node.slots {
         match slot {
-            CharTableSlot::Value(value) => visit(value),
-            CharTableSlot::Node(child) => collector_visit_node(child, seen, visit),
+            CharTableSlot::Value(value) => if written { visit(value) },
+            CharTableSlot::Node(child) => collector_visit_node(child, seen, since, visit),
+        }
+    }
+}
+/// `map_entries`' walk of HANDLE: every node is stamped as written, and
+/// each Value it holds goes through MAP and the funnel.
+fn map_node(handle: &CharTableNodeHandle, seen: &mut HashSet<usize>, map: &mut impl FnMut(&mut Value)) {
+    if !seen.insert(char_table_node_id(handle)) { return; }
+    let mut node = handle.lock().unwrap();
+    for i in 0..node.slots.len() {
+        match &mut node.slots[i] {
+            CharTableSlot::Value(value) => {
+                let mut new = *value;
+                map(&mut new);
+                *value = new;
+                wrote(&CharTableSlot::Value(new));
+                node.stamp = born();
+            }
+            CharTableSlot::Node(child) => {
+                let child = Arc::clone(child);
+                map_node(&child, seen, map);
+            }
         }
     }
 }
@@ -1053,8 +1138,12 @@ impl CharTable {
                 return Ok(());
             }
         }
-        CharTableNode::validate_geometry(&self.root, 0, 0, from, to)?;
-        CharTableNode::set_range(&self.root, from, to, &value);
+        if from == to {
+            CharTableNode::set_char(&self.root, from, value)?;
+        } else {
+            CharTableNode::validate_geometry(&self.root, 0, 0, from, to)?;
+            CharTableNode::set_range(&self.root, from, to, &value);
+        }
         if from < 128 { self.reset_ascii(); }
         Ok(())
     }
@@ -1089,7 +1178,7 @@ impl CharTable {
         let mut parent = node.lock().unwrap();
         let from = parent.min_char + index * CharTableNode::WIDTHS[parent.depth];
         let slots = values.into_iter().map(CharTableSlot::Value).collect();
-        let expanded = CharTableSlot::Node(Arc::new(Mutex::new(CharTableNode { depth: 3, min_char: from, slots })));
+        let expanded = CharTableSlot::Node(Arc::new(Mutex::new(CharTableNode { depth: 3, min_char: from, slots, stamp: born(), leaf: true })));
         parent.store(index, expanded.clone());
         drop(parent);
         self.reset_ascii();
@@ -1099,33 +1188,29 @@ impl CharTable {
     /// whose visitor writes nothing, so nothing passes the funnel.
     pub(crate) fn entry_values(&self) -> Vec<Value> {
         let mut out = Vec::new();
-        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| out.push(*value));
+        collector_visit_node(&self.root, &mut HashSet::default(), 0, &mut |value| out.push(*value));
         out
     }
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.
     pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
         self.edits += 1;
-        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| {
-            let mut new = *value;
-            map(&mut new);
-            wrote(&CharTableSlot::Value(new));
-            *value = new;
-        });
+        map_node(&self.root, &mut HashSet::default(), map);
         self.reset_ascii();
     }
     /// The collector's own visit of every Value, past the funnel, as
-    /// `collector_visit_node`'s.
-    pub(super) fn collector_visit_values(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
+    /// `collector_visit_node`'s: with SINCE not 0, of the table's own few
+    /// Values and of its nodes written since.
+    pub(super) fn collector_visit_values(&mut self, seen: &mut HashSet<usize>, since: u64, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.purpose);
         visit(&mut self.default);
         visit(&mut self.parent);
         for value in &mut self.extras { visit(value); }
         match &mut self.ascii {
             CharTableSlot::Value(value) => visit(value),
-            CharTableSlot::Node(node) => collector_visit_node(node, seen, visit),
+            CharTableSlot::Node(node) => collector_visit_node(node, seen, since, visit),
         }
-        collector_visit_node(&self.root, seen, visit);
+        collector_visit_node(&self.root, seen, since, visit);
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
         self.storage_bytes_seen(capacity, &mut HashSet::default())

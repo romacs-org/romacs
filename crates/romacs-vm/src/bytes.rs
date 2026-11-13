@@ -265,14 +265,14 @@ impl ByteBuffer {
         let at = self.point;
         self.replace_with_bias(at..at, inserted, true)
     }
-    pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         visit(&mut self.local_keymap);
         self.per_buffer.visit_values(visit);
-        if let Some(held) = &mut self.held { held.visit_values(visit); }
-        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(visit); }
+        if let Some(held) = &mut self.held { held.visit_values(reading, visit); }
+        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(reading, visit); }
         for props in self.properties.values_mut() {
             for v in props.values_mut() {
                 visit(v);
