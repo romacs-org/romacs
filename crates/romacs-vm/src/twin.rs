@@ -93,16 +93,28 @@ pub(crate) fn fork_marks(vm: &mut Vm, roots: &[Value]) -> Option<Pending> {
 }
 
 /// Fork a child that runs WORK on its copy of VM and sends what it returns,
-/// or why it failed, as its report.
+/// or why it failed, as its report. The parent records which entries held
+/// an object after the fork, not before it: the record is a flag per entry,
+/// fresh memory a fork made after it would have to copy, or fold into the
+/// heap's file (`romacs_allocator::file_heap`).
 fn spawn(vm: &mut Vm, collection: u64, work: impl FnOnce(&mut Vm) -> Result<Vec<u8>, String>) -> Option<Pending> {
-    let allocated = held(vm);
     let (read, write) = crate::host::pipe().ok()?;
     match crate::host::fork_threaded() {
         Ok(0) => {
             drop(read);
             child(vm, write, work)
         }
-        Ok(child) => Some(Pending { child, report: read.into(), reaped: false, allocated, collection }),
+        Ok(child) => {
+            // Which entries held an object at the fork: this runs before the
+            // parent allocates, frees or marks anything in the four tables,
+            // and nothing may be slipped in between the fork and this line.
+            // `held` reads only each colour's in-use bit, so a mark or a
+            // dirty bit set first would not change its answer; an
+            // allocation or a sweep would, and the record would no longer
+            // be the fork's.
+            let allocated = held(vm);
+            Some(Pending { child, report: read.into(), reaped: false, allocated, collection })
+        }
         Err(_) => None,
     }
 }
@@ -415,7 +427,7 @@ fn object_kind(vm: &Vm, i: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Agreed, bound, child_marks, collect_report, encode, marks, settle, spawn, verdict};
+    use super::{Agreed, DEADLINE, bound, child_marks, collect_report, encode, held, marks, settle, spawn, verdict};
     use crate::{Value, Vm};
     use std::sync::Mutex;
     use std::time::Duration;
@@ -593,6 +605,27 @@ mod tests {
         let settled = settle(&vm, pending, Duration::from_millis(300));
         assert!(settled.is_err_and(|e| e.starts_with("no report from the twin's child within 0.3 s")));
         assert!(crate::host::kill(child, 0).is_err(), "the child is gone, reaped");
+    }
+
+    /// The parent's record of which entries held an object, taken after the
+    /// fork, is the child's own view of the tables at the fork: nothing in
+    /// the tables changes between the fork and the record. And a collection
+    /// of garbage made before the fork agrees with the twin forked from it.
+    #[test]
+    fn the_record_of_held_entries_is_the_forks_and_its_twin_agrees() {
+        let mut vm = quiet_vm();
+        vm.eval_source_raw("(setq twin-test-kept (let (l) (dotimes (i 500) (push (cons i (make-string 8 ?k)) l)) l))").unwrap();
+        vm.eval_source_raw("(dotimes (i 3000) (cons i (make-string 8 ?g)))").unwrap();
+        let mut seen = spawn(&mut vm, 0, |vm| Ok(held(vm).concat().into_iter().map(u8::from).collect())).expect("a twin");
+        let recorded: Vec<u8> = seen.allocated.concat().into_iter().map(u8::from).collect();
+        let (report, status) = collect_report(&mut seen, DEADLINE).expect("the child's report");
+        assert_eq!((status, report == recorded), (0, true), "the parent's record and the child's view at the fork");
+
+        // A plain collection's roots: the VM's own, and none from a caller.
+        let twin = spawn(&mut vm, 1, |vm| child_marks(vm, &[])).expect("a twin");
+        vm.collect_garbage();
+        let agreed = settle(&vm, twin, DEADLINE).expect("the twin agrees");
+        assert!(agreed.dead >= 3000, "the garbage made before the fork is dead to both: {}", agreed.dead);
     }
 
     /// A process that ends without unwinding in a collection (an isolate job

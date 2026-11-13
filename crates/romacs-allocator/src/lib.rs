@@ -1,5 +1,7 @@
 //! The production allocator for Romacs: jemalloc, with its statistics.
 
+pub mod file_heap;
+
 pub use tikv_jemallocator::Jemalloc as PlatformAllocator;
 
 pub const PLATFORM_ALLOCATOR: PlatformAllocator = PlatformAllocator;

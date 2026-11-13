@@ -150,7 +150,7 @@
     "clippy::unnecessary_semicolon": 12,
     "clippy::unnecessary_to_owned": 2,
     "clippy::unnecessary_unwrap": 1,
-    "clippy::unnecessary_wraps": 283,
+    "clippy::unnecessary_wraps": 284,
     "clippy::unnested_or_patterns": 2,
     "clippy::unreadable_literal": 1050,
     "clippy::unused_self": 46,
