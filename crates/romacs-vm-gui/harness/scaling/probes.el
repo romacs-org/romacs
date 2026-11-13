@@ -585,6 +585,14 @@ scaling_live.py --record profiles a probe's body alone this way."
                           :instructions (if (and start end) (- end start) nil)
                           :stack (vconcat (nreverse scaling-stack-marks))))))
 
+(defun scaling--quiet ()
+  "Hide the toasts start-up left (the startup message's): one hides
+`romacs-layer-toast-timeout' after it showed, which on a quick host lands
+in the first steps, redisplays its window in each of them and paints once
+as it goes.  Called before a setup: the toasts a setup makes are what its
+probe measures (`toasts-clear', `toasts-follow')."
+  (when (fboundp 'romacs-layer-toast-clear) (romacs-layer-toast-clear)))
+
 (defun scaling--mark (plist)
   "Append PLIST as a JSON line to stderr, among the host's paint diagnostics."
   (write-region (concat (json-encode plist) "\n") nil "/dev/stderr" t 'silent))
@@ -614,6 +622,7 @@ step, before the next step or the count's end."
     (run-with-idle-timer
      0.5 nil
      (lambda ()
+       (scaling--quiet)
        (setq it (funcall (plist-get plist :setup) n))
        (garbage-collect)
        (run-with-timer

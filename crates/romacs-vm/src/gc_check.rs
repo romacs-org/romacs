@@ -10,6 +10,8 @@
 //! own obarray holds unless reached, nor the symbols code names: what it
 //! reaches is a floor of what must live, and the mark must have reached all
 //! of it. A miss is a reachable entry the sweep would free.
+//! An undo list it walks as the collection has left it (`Vm::undo_round'),
+//! whole: all that is still on the list is what the mark had to keep.
 //!
 //! What it cannot see: an omission in what it shares with the marker, each
 //! kind's `visit_values' and the accessors of root sources
