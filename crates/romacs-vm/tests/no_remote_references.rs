@@ -454,7 +454,7 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
     ("compiled_lisp/mod.rs:Configured.identity", Plain),
-    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
+    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
     // The scanner's test text: syntax codes and positions, no Value.
     ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
     ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
