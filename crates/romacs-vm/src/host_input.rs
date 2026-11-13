@@ -119,6 +119,12 @@ pub trait HostInput {
     fn pointer(&mut self) -> Option<(i32, i32)> {
         None
     }
+
+    /// What the host's display saw of native key repeat since the last
+    /// take (`romacs--take-key-repeats`), None with no display.
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.

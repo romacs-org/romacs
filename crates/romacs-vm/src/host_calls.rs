@@ -63,7 +63,7 @@ const SIDES: &[(&str, Side)] = &[
     // window or pointer.
     ("input.input_pending", Through), ("input.key_pending", Through), ("input.redisplay", Through), ("input.next_event", Through),
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
-    ("input.native_window", Through), ("input.pointer", Through),
+    ("input.native_window", Through), ("input.pointer", Through), ("input.take_key_repeats", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
     ("input.watch_processes", Own), ("input.images_behind", Own),
     // terminal_service.rs: each session's terminal is locked against its
@@ -80,10 +80,11 @@ const SIDES: &[(&str, Side)] = &[
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
     ("sender.show_primary", Cross),
     // and reads of state the render thread writes: its input channel,
-    // the latest rendered presentation, the lost images, the adapter and
-    // the pointer.
+    // the latest rendered presentation, the lost images, the adapter, the
+    // pointer and what it saw of key repeat.
     ("sender.input", Cross), ("sender.render_poll", Cross), ("sender.take_lost_images", Cross),
     ("sender.images_reset_pending", Cross), ("sender.software_adapter", Cross), ("sender.pointer", Cross),
+    ("sender.take_key_repeats", Cross),
     ("sender.model_renderer_live", Cross),
 ];
 
@@ -190,6 +191,7 @@ impl HostInput for Counted<Box<dyn HostInput>> {
         fn display_animates(&mut self) -> Option<bool>;
         fn native_window(&mut self, action: NativeWindow) -> Option<bool>;
         fn pointer(&mut self) -> Option<(i32, i32)>;
+        fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts>;
     }
 }
 
