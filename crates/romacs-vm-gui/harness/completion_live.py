@@ -37,9 +37,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -236,117 +234,82 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
-    compositor = keyboard = process = None
-    temporary = None
-    try:
-        with tempfile.TemporaryDirectory(prefix='completion-live-', delete=False) as temporary:
-            root = Path(temporary)
-            root.chmod(0o700)
-            home, work, config = [root / name for name in ('home', 'work', 'config')]
-            for directory in (home, work / 'sub', config):
-                directory.mkdir(parents=True)
-            (work / 'sub' / 'notes.txt').write_text('Notes reached by partial completion.\n')
-            defaults, probe, heights = work / 'defaults.el', work / 'probe', work / 'heights.el'
-            (home / 'config/romacs').mkdir(parents=True)
-            (home / 'config/romacs/init.el').write_text(INIT.format(
-                defaults=json.dumps(str(defaults)), probe=json.dumps(str(probe)))
-                + (FIDO_INIT if args.fido else LAYER_INIT.format(heights=json.dumps(str(heights)), position=args.position,
-                                                                 panels=json.dumps(str(work / 'panels.el')))))
-            (config / 'rc.xml').write_text(live.RC_XML)
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-                   'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-                   'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-                   'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-                   'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-                   'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
-            for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GATE_FONTCONFIG'):
-                if key in os.environ:
-                    env[key] = os.environ[key]
-            if 'ROMACS_GATE_FONTCONFIG' in env:
-                env['FONTCONFIG_FILE'] = env['ROMACS_GATE_FONTCONFIG']
-            # The compositor's own renderer on a real GPU (gles2), when asked.
-            wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
-            log_path = output / 'binary.stderr'
-            with (output / 'compositor.log').open('w') as compositor_log, log_path.open('w') as log:
-                compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
-                                              env=env | wlr, stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', args.size],
-                               env=env, check=True, timeout=15)
-                # A held key gives the seat a keyboard before the client starts.
-                keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
-                time.sleep(.3)
-                # Only the private compositor: no X display, no launch font.
-                assert not any(key in env for key in ('DISPLAY', 'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE')), env
-                socket = root / env['WAYLAND_DISPLAY']
-                report['display'] = {'WAYLAND_DISPLAY': env['WAYLAND_DISPLAY'], 'socket': str(socket),
-                                     'socket_in_private_root': socket.is_socket()}
-                process = subprocess.Popen([str(binary), '--loadup', '--trace-scene'], env=env, cwd=work,
-                                           stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+    paths = {}
 
-                def minibuffer():
-                    rows = ff.current_rows(log_path.read_text(errors='replace'))
-                    return rows[0] if len(rows) == 1 and rows[0] is not None else ''
+    def prepare(s):
+        (s.work / 'sub').mkdir(parents=True)
+        (s.work / 'sub' / 'notes.txt').write_text('Notes reached by partial completion.\n')
+        paths.update(defaults=s.work / 'defaults.el', probe=s.work / 'probe', heights=s.work / 'heights.el')
+        (s.home / 'config/romacs/init.el').write_text(INIT.format(
+            defaults=json.dumps(str(paths['defaults'])), probe=json.dumps(str(paths['probe'])))
+            + (FIDO_INIT if args.fido else LAYER_INIT.format(heights=json.dumps(str(paths['heights'])), position=args.position,
+                                                             panels=json.dumps(str(s.work / 'panels.el')))))
 
-                def layer():
-                    """The minibuffer text and the candidate rows of the last prompt paint."""
-                    paints = [r for r in map(parse, log_path.read_text(errors='replace').split('\n')) if r.get('diagnostic') == 'prompt-paint']
-                    if not paints:
-                        return '', []
-                    last = paints[-1]
-                    rows = [text for child in last.get('layers', []) for text in child]
-                    return last.get('minibuffer') or '', '\n'.join(rows).split('\n') if rows else []
+    # The compositor's own renderer on a real GPU (gles2), when asked.
+    wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
 
-                def keys(*parts):
-                    subprocess.run(['wtype', '-d', '60', *parts], env=env, check=True, timeout=20)
+    with live.session(binary, output, prefix='completion-live-', size=args.size, prepare=prepare, report=report, compositor_env=wlr) as live_session:
+        process, env, log_path, root, work, home = (live_session.process, live_session.env, live_session.log, live_session.root,
+                                                   live_session.work, live_session.home)
+        defaults, probe, heights = paths['defaults'], paths['probe'], paths['heights']
+        # Only the private compositor: no X display, no launch font.
+        assert not any(key in env for key in ('DISPLAY', 'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE')), env
+        socket = root / env['WAYLAND_DISPLAY']
+        report['display'] = {'WAYLAND_DISPLAY': env['WAYLAND_DISPLAY'], 'socket': str(socket),
+                             'socket_in_private_root': socket.is_socket()}
 
-                def shown(name, what, test):
-                    """Wait until the prompt shows TEST, then capture it as NAME."""
-                    fio.wait(lambda: test(minibuffer()), args.timeout, what, process)
-                    time.sleep(.5)
-                    fio.shot(output / f'{name}.png', env, report)
-                    report['captures'].append({'name': name, 'minibuffer': minibuffer()})
+        def minibuffer():
+            rows = ff.current_rows(log_path.read_text(errors='replace'))
+            return rows[0] if len(rows) == 1 and rows[0] is not None else ''
 
-                def mode_lines():
-                    scene = fio.last_scene(log_path.read_text(errors='replace'))
-                    by_y = {}
-                    for glyph in (scene or {}).get('glyphs', []):
-                        # The status bar is the mode line (VM2-STATUS-BAR).
-                        if glyph['role'] in ('ModeLine', 'StatusBar'):
-                            by_y.setdefault(glyph['y'], []).append((glyph['x'], glyph['char']))
-                    return [''.join(c for _, c in sorted(row)) for _, row in sorted(by_y.items())]
+        def layer():
+            """The minibuffer text and the candidate rows of the last prompt paint."""
+            paints = [r for r in map(parse, log_path.read_text(errors='replace').split('\n')) if r.get('diagnostic') == 'prompt-paint']
+            if not paints:
+                return '', []
+            last = paints[-1]
+            rows = [text for child in last.get('layers', []) for text in child]
+            return last.get('minibuffer') or '', '\n'.join(rows).split('\n') if rows else []
 
-                def selected(name, buffer):
-                    """Wait until a mode line names BUFFER, then capture it as NAME."""
-                    fio.wait(lambda: any(buffer in row for row in mode_lines()), args.timeout, f'{buffer} shown', process)
-                    time.sleep(.5)
-                    fio.shot(output / f'{name}.png', env, report)
-                    report['captures'].append({'name': name, 'mode_lines': mode_lines()})
+        def keys(*parts):
+            subprocess.run(['wtype', '-d', '60', *parts], env=env, check=True, timeout=20)
 
-                fio.wait(defaults.exists, args.timeout, 'init.el after --loadup', process)
-                at_init = defaults.read_text()
-                report['checks'].append({'defaults_at_init': at_init})
-                if at_init != EXPECTED_DEFAULTS:
-                    raise AssertionError(f'defaults at init: {at_init}, expected {EXPECTED_DEFAULTS}')
-                fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')), args.timeout, 'first frame', process)
-                time.sleep(1)
-                if not args.fido:
-                    romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env,
-                                    args.position)
-                else:
-                    default_ui(report, keys, minibuffer, shown, selected, probe, work, args.timeout, process)
-                report['status'] = 'PASS'
-    except Exception as error:  # noqa: BLE001
-        report['error'] = repr(error)
-    finally:
-        live.stop(process)
-        live.stop(keyboard)
-        live.stop(compositor)
-        try:
-            (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
-        finally:
-            live.remove_root(temporary)
+        def shown(name, what, test):
+            """Wait until the prompt shows TEST, then capture it as NAME."""
+            fio.wait(lambda: test(minibuffer()), args.timeout, what, process)
+            time.sleep(.5)
+            fio.shot(output / f'{name}.png', env, report)
+            report['captures'].append({'name': name, 'minibuffer': minibuffer()})
+
+        def mode_lines():
+            scene = fio.last_scene(log_path.read_text(errors='replace'))
+            by_y = {}
+            for glyph in (scene or {}).get('glyphs', []):
+                # The status bar is the mode line (VM2-STATUS-BAR).
+                if glyph['role'] in ('ModeLine', 'StatusBar'):
+                    by_y.setdefault(glyph['y'], []).append((glyph['x'], glyph['char']))
+            return [''.join(c for _, c in sorted(row)) for _, row in sorted(by_y.items())]
+
+        def selected(name, buffer):
+            """Wait until a mode line names BUFFER, then capture it as NAME."""
+            fio.wait(lambda: any(buffer in row for row in mode_lines()), args.timeout, f'{buffer} shown', process)
+            time.sleep(.5)
+            fio.shot(output / f'{name}.png', env, report)
+            report['captures'].append({'name': name, 'mode_lines': mode_lines()})
+
+        fio.wait(defaults.exists, args.timeout, 'init.el after --loadup', process)
+        at_init = defaults.read_text()
+        report['checks'].append({'defaults_at_init': at_init})
+        if at_init != EXPECTED_DEFAULTS:
+            raise AssertionError(f'defaults at init: {at_init}, expected {EXPECTED_DEFAULTS}')
+        fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')), args.timeout, 'first frame', process)
+        time.sleep(1)
+        if not args.fido:
+            romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env,
+                            args.position)
+        else:
+            default_ui(report, keys, minibuffer, shown, selected, probe, work, args.timeout, process)
+        report['status'] = 'PASS'
     print(report['status'])
     return 0 if report['status'] == 'PASS' else 1
 

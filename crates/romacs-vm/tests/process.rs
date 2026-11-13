@@ -16,6 +16,8 @@ use std::path::Path;
 
 /// One expression per line, each with `default-directory' set to a private
 /// directory. Romacs runs them in order in one VM, so each leaves no process.
+/// A pty's name is compared by its shape, /dev/pts/N: its number is whichever
+/// pty the host had free when each side ran.
 const CASES: &str = r###"
 (list (processp 1) (process-list) (get-process "nope") (get-buffer-process "nope") (process-status "nope") (condition-case e (get-process 1) (error e)) (condition-case e (process-name 1) (error e)) (condition-case e (process-status nil) (error e)))
 (list (make-process) (make-pipe-process) (make-network-process) (condition-case e (make-process :command (list "true")) (error e)) (condition-case e (make-process :name 1 :command (list "true")) (error e)) (condition-case e (make-process :name "x" :command (list "true") :stop t) (error e)) (condition-case e (make-process :name "x" :foo) (error e)) (condition-case e (make-process :name "x" :command (list "romacs-no-such-program")) (error e)) (process-list))
@@ -30,7 +32,7 @@ const CASES: &str = r###"
 (romacs-test-chunks "printf 'x\\r'; read x; printf 'y\\r'; read x; printf 'z'" 'utf-8-dos 2)
 (romacs-test-chunks "printf 'x\\r'; read x; printf '\\n'" 'undecided-dos 1)
 (romacs-test-chunks "printf 'x\\r'; read x; printf '\\n'" 'utf-8-unix 1)
-(let ((p (make-process :name "tty" :command (list "sh" "-c" "tty >/dev/null && echo tty || echo notty") :buffer (get-buffer-create "romacs-ttybuf")))) (romacs-test-wait p) (list (with-current-buffer "romacs-ttybuf" (buffer-string)) (stringp (process-tty-name p)) (process-tty-name p 'stderr)))
+(let ((p (make-process :name "tty" :command (list "sh" "-c" "tty >/dev/null && echo tty || echo notty") :buffer (get-buffer-create "romacs-ttybuf")))) (romacs-test-wait p) (list (with-current-buffer "romacs-ttybuf" (buffer-string)) (stringp (process-tty-name p)) (string-match-p "\\`/dev/pts/[0-9]+\\'" (process-tty-name p 'stderr))))
 (let ((p (make-process :name "sg" :command (list "sleep" "10") :connection-type 'pipe))) (list (signal-process p 'TERM) (progn (romacs-test-wait p) (process-status p)) (process-exit-status p) (condition-case e (signal-process 0 'NOSUCHSIG) (error e)) (signal-process "romacs-nope" 0)))
 (let ((p (make-pipe-process :name "pp" :noquery t))) (list (process-status p) (process-id p) (process-contact p) (process-contact p t) (process-type p) (buffer-name (process-buffer p)) (process-query-on-exit-flag p) (progn (stop-process p) (process-status p)) (progn (continue-process p) (process-status p)) (progn (delete-process p) (process-status p)) (process-list)))
 (let* ((buf (get-buffer-create "romacs-pipebuf")) (pipe (make-pipe-process :name "errpipe" :buffer buf :noquery t)) (p (make-process :name "w" :command (list "sh" "-c" "echo e1 >&2; echo o1") :connection-type 'pipe :stderr pipe :buffer (get-buffer-create "romacs-wbuf")))) (romacs-test-wait p) (romacs-test-wait pipe) (list (with-current-buffer buf (buffer-string)) (with-current-buffer "romacs-wbuf" (buffer-string)) (process-status pipe)))
