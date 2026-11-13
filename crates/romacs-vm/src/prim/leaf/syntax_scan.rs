@@ -9,8 +9,9 @@ use crate::syntax_scan::{self as scan, Halt, ParseState, Pos, Scanner};
 use std::collections::BTreeMap;
 
 enum Body<'a> {
-    /// The text, its str, and a reader of its `syntax-table' properties.
-    Multibyte(&'a crate::text::Text, crate::properties::KeyReader<'a>),
+    /// The text and, when the scan honours them, a reader of its
+    /// `syntax-table` properties.
+    Multibyte(&'a crate::text::Text, Option<crate::properties::KeyReader<'a>>),
     Unibyte(&'a crate::bytes::ByteBuffer),
 }
 
@@ -30,10 +31,11 @@ struct View<'a> {
     body: Body<'a>,
     table: crate::char_table::TableReader<'a>,
     properties: bool,
-    /// The codes of the ASCII characters this scan has read: an entry is
-    /// a cons a program may alter without writing the table, so its code
-    /// is read from it once a scan, during which no program runs.
-    ascii: [std::cell::Cell<Option<i32>>; 128],
+    /// The codes of the ASCII characters this scan has read, each `UNREAD`
+    /// until then: an entry is a cons a program may alter without writing
+    /// the table, so its code is read from it once a scan, during which no
+    /// program runs.
+    ascii: [std::cell::Cell<i32>; 128],
     /// The last character read, as (byte, code): a scan reads a
     /// character, its syntax and its width at one position in turn.
     last: std::cell::Cell<(usize, u32)>,
@@ -46,6 +48,14 @@ fn buffer_text(vm: &Vm, index: usize) -> &crate::text::Text {
         _ => unreachable!("a multibyte buffer"),
     }
 }
+
+/// No `syntax-ppss` answer yet, as on every scan that never stops: one
+/// map for all of them.
+static UNANSWERED: BTreeMap<i64, i64> = BTreeMap::new();
+
+/// What `View::ascii` holds for a character not read yet: no syntax code,
+/// which is a class and flags in the low 24 bits.
+const UNREAD: i32 = i32::MIN;
 
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
 fn entry_code(vm: &Vm, table: &crate::char_table::TableReader<'_>, c: u32) -> i32 {
@@ -61,14 +71,19 @@ impl<'a> View<'a> {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
-                Body::Multibyte(text, text.properties.reader("syntax-table"))
+                Body::Multibyte(text, properties.then(|| text.properties.reader("syntax-table")))
             }
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
         };
-        let table = vm.char_table_reader(table);
-        let ascii = [const { std::cell::Cell::new(None) }; 128];
-        Self { vm, body, table, properties, ascii, last: std::cell::Cell::new((usize::MAX, 0)) }
+        Self {
+            vm, body, table: vm.char_table_reader(table), properties,
+            // One value throughout, which fills as one block: a closure
+            // called for each slot, or a tag stored in each, cost more
+            // than a short scan.
+            ascii: [const { std::cell::Cell::new(UNREAD) }; 128],
+            last: std::cell::Cell::new((usize::MAX, 0)),
+        }
     }
     fn len(&self) -> usize {
         match self.body {
@@ -78,7 +93,7 @@ impl<'a> View<'a> {
     }
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
-            Body::Multibyte(_, ref reader) => reader.get(ByteOffset(byte)),
+            Body::Multibyte(_, ref reader) => reader.as_ref()?.get(ByteOffset(byte)),
             Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
         }
     }
@@ -143,7 +158,13 @@ impl scan::Text for View<'_> {
     }
     fn table_syntax(&self, c: u32) -> i32 {
         let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, &self.table, c) };
-        memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, &self.table, c); memo.set(Some(code)); code })
+        let read = memo.get();
+        if read != UNREAD {
+            return read;
+        }
+        let code = entry_code(self.vm, &self.table, c);
+        memo.set(code);
+        code
     }
     fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
         let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
@@ -151,7 +172,7 @@ impl scan::Text for View<'_> {
         let (mut pos, mut last) = (at, None);
         while pos.char < limit && pos.byte < len {
             // Only where the table alone gives the syntax.
-            let unset_until = if self.properties { reader.unset_until(ByteOffset(pos.byte)) } else { usize::MAX };
+            let unset_until = reader.as_ref().map_or(usize::MAX, |reader| reader.unset_until(ByteOffset(pos.byte)));
             let room = (unset_until.saturating_sub(pos.byte)).min(usize::try_from(limit - pos.char).unwrap_or(usize::MAX));
             if room == 0 {
                 break;
@@ -328,6 +349,11 @@ impl Leaf<'_> {
         let symbol = self.intern(name);
         Ok(self.variable_value(symbol)?.unwrap_or(Value::NIL))
     }
+    /// `forward-comment-function', which replaces `forward-comment' when set.
+    pub(crate) fn forward_comment_function(&mut self) -> std::result::Result<Value, Fault> {
+        let function = self.vm.forward_comment_function().map_err(Fault::Error)?;
+        Ok(if function == Value::UNBOUND { Value::NIL } else { function })
+    }
     fn fixnum(&self, v: Value) -> std::result::Result<i64, Fault> {
         v.integer_value().ok_or(Fault::Wrong("fixnump", v))
     }
@@ -391,7 +417,7 @@ impl Leaf<'_> {
         let opt = |n: i64| if n < 0 { Value::NIL } else { int(n) };
         let mut levels = Value::NIL;
         for start in state.levelstarts.iter().rev() { levels = self.cons(int(start.unwrap_or(-1)), levels); }
-        let syntax_table = self.intern("syntax-table");
+        let syntax_table = self.vm.syntax_table_symbol();
         let items = [
             int(state.depth),
             opt(state.prevlevelstart),
@@ -418,8 +444,11 @@ impl Leaf<'_> {
     fn syntax_bounds(&self, index: usize) -> std::result::Result<(Pos, Pos, Pos), Fault> {
         match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
+                // The text's own ends are known without a search for them,
+                // which would also displace the one position it remembers.
                 let at = |byte: ByteOffset| -> std::result::Result<Pos, Fault> {
-                    Ok(Pos { char: b.char_of_byte(byte).map_err(Fault::Error)?.0 as i64 + 1, byte: byte.0 })
+                    let before = if byte.0 == 0 { 0 } else if byte.0 == b.len_bytes() { b.len_chars() } else { b.char_of_byte(byte).map_err(Fault::Error)?.0 };
+                    Ok(Pos { char: before as i64 + 1, byte: byte.0 })
                 };
                 let range = b.accessible();
                 Ok((at(range.start)?, at(range.end)?, at(b.point)?))
@@ -429,6 +458,13 @@ impl Leaf<'_> {
                 Ok((at(b.restriction.start), at(b.restriction.end), at(b.point)))
             }
             _ => Err(Fault::Error("buffer required".into())),
+        }
+    }
+    fn state_at(&self, index: usize) -> &crate::bytes::BufferState {
+        match &self.vm.objects[index] {
+            data::Object::Buffer(b) => &b.state,
+            data::Object::ByteBuffer(b) => &b.state,
+            _ => unreachable!("buffer_index validates"),
         }
     }
     fn buffer_state_mut(&mut self, index: usize) -> &mut crate::bytes::BufferState {
@@ -441,7 +477,7 @@ impl Leaf<'_> {
     /// The current buffer's CHARS_MODIFF.
     pub(crate) fn syntax_chars_modiff(&mut self) -> std::result::Result<i64, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        Ok(self.buffer_state_mut(index).modification.chars_modiff as i64)
+        Ok(self.state_at(index).modification.chars_modiff as i64)
     }
     pub(crate) fn syntax_set_point(&mut self, charpos: i64) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -480,7 +516,7 @@ impl Leaf<'_> {
             Op::ParsePartialSexp if memory.is_some() => {
                 let memory = memory.as_ref().expect("rerun");
                 let target = if args[2] == Value::NIL { i64::MIN } else { int(args[2]) };
-                let syntax_table = self.intern("syntax-table");
+                let syntax_table = self.vm.syntax_table_symbol();
                 let commentstop = if args[5] == Value::NIL { 0 } else if args[5] == syntax_table { -1 } else { 1 };
                 let state = memory_state(&memory[MEMORY_STATE..]);
                 parse = Some((int(memory[3]), int(memory[4]), target, args[3] != Value::NIL, commentstop, state));
@@ -502,7 +538,7 @@ impl Leaf<'_> {
                     return Err(Fault::Signal(self.intern("args-out-of-range"), data));
                 }
                 let state = self.internalize_parse_state(args[4])?;
-                let syntax_table = self.intern("syntax-table");
+                let syntax_table = self.vm.syntax_table_symbol();
                 let commentstop = if args[5] == Value::NIL { 0 } else if args[5] == syntax_table { -1 } else { 1 };
                 parse = Some((from, to, target, args[3] != Value::NIL, commentstop, state));
             }
@@ -510,15 +546,18 @@ impl Leaf<'_> {
         }
         let (flags, options) = self.syntax_options(memory.as_ref().map(|memory| int(memory[5])))?;
         let properties = options.propertize_done.is_some();
-        let mut ppss = BTreeMap::new();
+        let mut answered = BTreeMap::new();
         let mut tail = answers;
         while let Some((answer, rest)) = self.pair(tail) {
             let (pos, value) = self.pair(answer).expect("saved syntax-ppss answer");
-            ppss.insert(pos.integer_value().expect("position"), value.integer_value().expect("position"));
+            answered.insert(pos.integer_value().expect("position"), value.integer_value().expect("position"));
             tail = rest;
         }
-        let table = self.syntax_table_to_read()?;
+        let ppss = if answers == Value::NIL { &UNANSWERED } else { &answered };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let table = self.vm.buffer_syntax_table(index);
+        // The scan reads the table through its flat view, kept between calls.
+        self.vm.flatten_table(table);
         if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
             let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
             if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
@@ -532,7 +571,7 @@ impl Leaf<'_> {
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
         let (cached, modiff) = {
-            let state = self.buffer_state_mut(index);
+            let state = self.state_at(index);
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
         let view = View::new(self.vm, index, table, properties);
@@ -554,7 +593,7 @@ impl Leaf<'_> {
                 (pos(int(memory[0])), pos(int(memory[1])), pos(int(memory[2])))
             }
         };
-        let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: cached, modiff };
+        let mut scanner = Scanner { text: &view, begv, zv, options, ppss, defun_start: cached, modiff };
         let scan_stopped = |stopped: scan::Stopped<Box<scan::Scan>>| (stopped.halt, stopped.suspended.map(Kept::Scan));
         let parse_stopped = |stopped: scan::Stopped| (stopped.halt, stopped.suspended.map(Kept::Parse));
         let result: std::result::Result<Result_, (Halt, Option<Kept>)> = match (op, kept) {
@@ -679,18 +718,12 @@ impl Leaf<'_> {
     /// The variables a scan obeys, from SAVED (a rerun's flags) or read
     /// now, as flags and as the engine's options.
     fn syntax_options(&mut self, saved: Option<i64>) -> std::result::Result<(i64, scan::Options), Fault> {
-        const FLAGS: [&str; 6] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments", "comment-end-can-be-escaped",
-            "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start", "comment-use-syntax-ppss"];
-        let flags = match saved {
-            Some(flags) => flags,
-            None => {
-                let mut flags = 0;
-                for (bit, name) in FLAGS.iter().enumerate() {
-                    if self.syntax_var(name)? != Value::NIL { flags |= 1 << bit; }
-                }
-                flags
-            }
-        };
+        // `crate::regexp::SCAN_VARIABLES': six flags, then `syntax-propertize--done'.
+        let [flag_values @ .., done] = self.vm.scan_variables().map_err(Fault::Error)?;
+        let set = |value: Value| value != Value::NIL && value != Value::UNBOUND;
+        let flags = saved.unwrap_or_else(|| {
+            flag_values.iter().enumerate().fold(0, |flags, (bit, &value)| if set(value) { flags | 1 << bit } else { flags })
+        });
         let flag = |bit: usize| flags & (1 << bit) != 0;
         let options = scan::Options {
             ignore_comments: flag(1),
@@ -698,11 +731,7 @@ impl Leaf<'_> {
             multibyte_syntax_as_symbol: flag(3),
             open_paren_in_column_0_is_defun_start: flag(4),
             comment_use_syntax_ppss: flag(5),
-            propertize_done: if flag(0) {
-                Some(self.syntax_var("syntax-propertize--done")?.integer_value().unwrap_or(-1))
-            } else {
-                None
-            },
+            propertize_done: flag(0).then(|| done.integer_value().unwrap_or(-1)),
         };
         Ok((flags, options))
     }

@@ -1526,6 +1526,8 @@ mod leaf {
             self.vm.literal(form).map_err(Fault::Error)
         }
         pub fn intern(&mut self, name: &str) -> Value {
+            #[cfg(test)]
+            super::NAME_LOOKUPS.with(|lookups| lookups.set(lookups.get() + 1));
             self.vm.intern(name)
         }
         /// The private object V names, for writing; a frozen or image value
@@ -1980,6 +1982,16 @@ mod leaf {
     mod session;
     mod world;
     mod finalizer;
+}
+#[cfg(test)]
+thread_local! {
+    /// The symbols this thread's primitives have found by name (`Leaf::intern`).
+    static NAME_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The symbols this thread's primitives have found by name so far.
+#[cfg(test)]
+pub(crate) fn name_lookups() -> usize {
+    NAME_LOOKUPS.with(std::cell::Cell::get)
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, FaceKeys, FaceProps, Shown, ShownKind, LineLabels};
 

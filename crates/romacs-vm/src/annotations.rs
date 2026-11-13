@@ -1230,11 +1230,13 @@ impl From<Text> for AnnotatedBuffer {
 }
 impl Deref for AnnotatedBuffer {
     type Target = Text;
+    #[inline]
     fn deref(&self) -> &Text {
         &self.text
     }
 }
 impl DerefMut for AnnotatedBuffer {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Text {
         &mut self.text
     }
