@@ -57,6 +57,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
+    // Copies of char tables' entries, dropped at every collection
+    // (`clear_collection_caches`) and every char-table write.
+    ("flat_tables", Cache),
     // An entry goes when the value it was converted from dies (gc.rs), and
     // a moving collection rewrites that value.
     ("mode_line_forms", Cache),
@@ -126,13 +129,13 @@ const FIELDS: &[(&str, Class)] = &[
     ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
-    ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
+    ("completion_walks", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     ("stack", Root), ("external_roots", Root),
     // Not roots: the collector dooms those it does not reach.
     ("finalizers", Cache),
     ("doomed_finalizers", Root),
-    ("post_gc_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
+    ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
@@ -422,6 +425,10 @@ const CELLS: &[(&str, Behind)] = &[
     // `CharTableNode` is private to that file.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
     ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
+    // A char table's view, filled under a shared borrow with copies of the
+    // table's entries; the VM drops its views as every collection starts
+    // (`clear_collection_caches`), so no mark ever finds one.
+    ("char_table/flat.rs:FlatTable.planes", Passing), ("char_table/flat.rs:Plane", Passing),
     ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
     ("data.rs:LispString.cursors", Plain), ("data.rs:LispString.scanned", Plain), ("data.rs:LispString.flag_scanned", Plain),
     ("display.rs:FaceTable.faces", Plain), ("display.rs:FaceTable.index", Plain), ("display.rs:FaceTable.over", Plain),
@@ -442,7 +449,8 @@ const CELLS: &[(&str, Behind)] = &[
     ("lib.rs:Vm.variable_read_probes", Plain),
     // A reader borrowing its tree, so no collection runs while it holds the run it read.
     ("properties.rs:KeyReader.run", Passing),
-    ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:StringMatcher.patterns", Plain),
+    ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:CachedPattern.used", Plain),
+    ("regexp.rs:StringMatcher.patterns", Plain),
     ("regexp_syntax.rs:VmSyntax.ascii", Plain),
     ("subprocess.rs:Reaper.state", Plain),
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),

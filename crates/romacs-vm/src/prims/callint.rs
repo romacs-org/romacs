@@ -795,19 +795,10 @@ fn command_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(if value == Value::NIL { Value::NIL } else { Value::TRUE }))
 }
 
-/// What `commandp` answers without running Lisp.
-pub(crate) enum Verdict {
-    Known(bool),
-    /// An `OClosure`, whose interactive form the generic `interactive-form`
-    /// computes (eval.c:2330-2345).
-    Ask(Value),
-}
-
-/// `commandp` of FUNCTION up to its one Lisp call: a caller that walks
-/// many candidates loops on it rather than nesting a continuation each.
-pub(crate) fn command_verdict(
+pub(super) fn command_predicate(
     cx: &mut Leaf<'_>, function: Value, for_call: Value,
-) -> std::result::Result<Verdict, Fault> {
+    then: crate::prim::Then, saved: Vec<Value>,
+) -> Next {
     let fun = indirect(cx, function)?;
     let mut generic = false;
     let accepted = match cx.kind(fun) {
@@ -817,12 +808,14 @@ pub(crate) fn command_verdict(
                 true
             } else {
                 // A docstring slot holding no docstring marks an OClosure,
-                // such as nadvice's advice.
+                // such as nadvice's advice, whose interactive form a generic
+                // function computes: `interactive-form' asks it below
+                // (eval.c:2330-2345).
                 generic = oclosure_p(cx, fun);
                 false
             }
         }
-        Kind::String | Kind::Bytes | Kind::Vector => return Ok(Verdict::Known(for_call == Value::NIL)),
+        Kind::String | Kind::Bytes | Kind::Vector => return then(cx, if for_call == Value::NIL { Value::TRUE } else { Value::NIL }, &saved),
         Kind::Cons => {
             let head = car(cx, fun)?;
             if head == cx.intern("autoload") {
@@ -830,14 +823,14 @@ pub(crate) fn command_verdict(
             } else if head == cx.intern("lambda") {
                 let interactive = cx.intern("interactive");
                 let body = cdr(cx, cdr(cx, fun)?)?;
-                return Ok(Verdict::Known(assq(cx, interactive, body)? != Value::NIL));
+                return then(cx, if assq(cx, interactive, body)? == Value::NIL { Value::NIL } else { Value::TRUE }, &saved);
             } else {
-                return Ok(Verdict::Known(false));
+                return then(cx, Value::NIL, &saved);
             }
         }
-        _ => return Ok(Verdict::Known(false)),
+        _ => return then(cx, Value::NIL, &saved),
     };
-    if accepted { return Ok(Verdict::Known(true)); }
+    if accepted { return then(cx, Value::TRUE, &saved); }
     let property = cx.intern("interactive-form");
     let mut symbol = function;
     while symbolp(cx, symbol) {
@@ -846,19 +839,11 @@ pub(crate) fn command_verdict(
         }
         symbol = cx.symbol_function(symbol)?;
     }
-    Ok(if generic { Verdict::Ask(fun) } else { Verdict::Known(false) })
-}
-
-fn command_predicate(
-    cx: &mut Leaf<'_>, function: Value, for_call: Value,
-    then: crate::prim::Then, saved: Vec<Value>,
-) -> Next {
-    match command_verdict(cx, function, for_call)? {
-        Verdict::Known(accepted) => then(cx, if accepted { Value::TRUE } else { Value::NIL }, &saved),
-        Verdict::Ask(fun) => {
-            let f = cx.intern("interactive-form");
-            Ok(Step::Call { f, args: vec![fun], then, saved })
-        }
+    if generic {
+        let f = cx.intern("interactive-form");
+        Ok(Step::Call { f, args: vec![fun], then, saved })
+    } else {
+        then(cx, Value::NIL, &saved)
     }
 }
 

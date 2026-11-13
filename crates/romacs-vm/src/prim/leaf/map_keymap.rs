@@ -112,13 +112,18 @@ impl Leaf<'_> {
         if original == Value::NIL {
             return Ok(None);
         }
-        let mut value = original;
-        let mut seen = HashSet::default();
+        // Brent's cycle detection: a walk resolves every binding it meets,
+        // so following a function chain allocates nothing.
+        let (mut value, mut mark, mut hops) = (original, original, 0usize);
         while self.kind(value) == Kind::Symbol && value != Value::NIL {
-            if !seen.insert(value.0) {
+            value = self.symbol_function(value)?;
+            if value == mark {
                 return Err(Fault::CyclicFunctionIndirection(original));
             }
-            value = self.symbol_function(value)?;
+            hops += 1;
+            if hops.is_power_of_two() {
+                mark = value;
+            }
         }
         if let Some((head, _)) = self.pair(value) {
             if self.map_is_head(head) {
@@ -139,10 +144,14 @@ impl Leaf<'_> {
     }
 
     pub(crate) fn map_is_head(&self, value: Value) -> bool {
-        self.vm
-            .names
-            .get("keymap")
-            .is_some_and(|&n| value == Value::reference(n + 1, 7))
+        // The tag first: a walk asks this of every binding, and only a
+        // symbol is worth the lookup by name.
+        value.tag() == 7
+            && self
+                .vm
+                .names
+                .get("keymap")
+                .is_some_and(|&n| value == Value::reference(n + 1, 7))
     }
     pub(crate) fn map_table_root(&self, value: Value) -> char_table::CharTableNodeHandle {
         let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {

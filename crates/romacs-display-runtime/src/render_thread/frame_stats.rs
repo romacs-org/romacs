@@ -13,12 +13,21 @@
 //!
 //! All counters are relaxed atomics: every writer runs on the render thread,
 //! and readers only need eventually-consistent totals.
+//!
+//! They are read three ways: [`snapshot`] from any thread, the file
+//! `ROMACS_FRAME_STATS` names at the session's end, and, under
+//! `ROMACS_DIAGNOSTICS=1`, a `frame-stats` line on stderr ([`StatsLines`]) a
+//! second while frames are asked for or drawn and none at rest, which is how
+//! a harness counts the frames of a state and the reasons they were drawn for
+//! (`rest_live.py` among the GUI host's harnesses). Frame work in a session's
+//! last second may get no line: the file has the final totals.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use romacs_display_protocol::frame_time::EventTime;
 
-use super::frame_sched::{FramePlan, RenderWork};
+use super::frame_sched::{FramePlan, RenderWork, SubmissionResult};
 
 /// One event-loop iteration (about_to_wait or user-event wake).
 pub(super) static EVENT_LOOP_WAKEUPS: AtomicU64 = AtomicU64::new(0);
@@ -74,6 +83,12 @@ pub(super) static FULL_FRAME_TEXTURE_REFUSALS: AtomicU64 = AtomicU64::new(0);
 /// frame driven by several reasons increments each.
 static PLAN_DEMAND_REASONS: [AtomicU64; super::frame_sched::DemandReason::COUNT] =
     [const { AtomicU64::new(0) }; super::frame_sched::DemandReason::COUNT];
+/// Frames that reached the surface, per demand reason: the same attribution
+/// as [`PLAN_DEMAND_REASONS`], counted once the frame was submitted. A plan
+/// that drew nothing (no surface, occluded, a timeout) counts above and not
+/// here.
+static PRESENTED_DEMAND_REASONS: [AtomicU64; super::frame_sched::DemandReason::COUNT] =
+    [const { AtomicU64::new(0) }; super::frame_sched::DemandReason::COUNT];
 /// Frames rendered without any demand reason to name. Structurally zero: the
 /// redraw handler falls back to a platform-redraw plan when nothing it
 /// scheduled explains the tick. Kept as standing evidence for architectural
@@ -118,10 +133,6 @@ static EPOCH: std::sync::OnceLock<EventTime> = std::sync::OnceLock::new();
 /// 0 = none pending. Approximate under multiple windows, which is acceptable
 /// for Stage 0 evidence.
 static PENDING_COMMIT_TICK_US: AtomicU64 = AtomicU64::new(0);
-/// Microsecond tick of the last periodic snapshot log.
-static LAST_LOG_TICK_US: AtomicU64 = AtomicU64::new(0);
-/// Wakeup total at the last periodic snapshot log.
-static LAST_LOG_WAKEUPS: AtomicU64 = AtomicU64::new(0);
 
 fn tick_us(now: EventTime) -> u64 {
     let epoch = *EPOCH.get_or_init(|| now);
@@ -151,6 +162,17 @@ pub(super) fn count_plan(plan: &FramePlan) {
     count(counter);
     for reason in plan.reasons.iter() {
         count(&PLAN_DEMAND_REASONS[reason.index()]);
+    }
+}
+
+/// Record how drawing PLAN's frame ended: one that reached the surface counts
+/// once under each reason it satisfies, and any other RESULT counts nothing.
+pub(super) fn count_drawn(plan: &FramePlan, result: SubmissionResult) {
+    if result != SubmissionResult::Submitted {
+        return;
+    }
+    for reason in plan.reasons.iter() {
+        count(&PRESENTED_DEMAND_REASONS[reason.index()]);
     }
 }
 
@@ -207,6 +229,10 @@ pub struct FrameSchedSnapshot {
     pub frame_time_buckets: [u64; 8],
     /// Planned frames per demand reason, indexed as [`DEMAND_REASON_NAMES`].
     pub demand_reasons: [u64; super::frame_sched::DemandReason::COUNT],
+    /// Frames submitted to the surface per demand reason, indexed alike. The
+    /// `platform_redraw` slot counts the redraws the coordinator did not ask
+    /// for.
+    pub presented_reasons: [u64; super::frame_sched::DemandReason::COUNT],
     /// Frames rendered with no demand reason. Must stay 0.
     pub unattributed_present_attempts: u64,
 }
@@ -246,62 +272,126 @@ pub fn snapshot() -> FrameSchedSnapshot {
         max_commit_to_present_us: MAX_COMMIT_TO_SUBMISSION_US.load(Ordering::Relaxed),
         frame_time_buckets: std::array::from_fn(|i| FRAME_TIME_BUCKETS[i].load(Ordering::Relaxed)),
         demand_reasons: std::array::from_fn(|i| PLAN_DEMAND_REASONS[i].load(Ordering::Relaxed)),
+        presented_reasons: std::array::from_fn(|i| {
+            PRESENTED_DEMAND_REASONS[i].load(Ordering::Relaxed)
+        }),
         unattributed_present_attempts: UNATTRIBUTED_SUBMISSION_ATTEMPTS.load(Ordering::Relaxed),
     }
 }
 
-const LOG_INTERVAL_US: u64 = 5_000_000;
+/// The least time between two diagnostic lines.
+const LINE_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Log a snapshot at debug level at most every 5 seconds, and only when the
-/// loop actually woke since the previous log. Called from about_to_wait, so a
-/// fully idle loop logs nothing at all.
-pub(super) fn maybe_log_snapshot(now: EventTime) {
-    let tick = tick_us(now);
-    let last = LAST_LOG_TICK_US.load(Ordering::Relaxed);
-    if tick.saturating_sub(last) < LOG_INTERVAL_US {
-        return;
-    }
-    if LAST_LOG_TICK_US
-        .compare_exchange(last, tick, Ordering::Relaxed, Ordering::Relaxed)
-        .is_err()
-    {
-        return;
-    }
-    let snap = snapshot();
-    let last_wakeups = LAST_LOG_WAKEUPS.swap(snap.wakeups, Ordering::Relaxed);
-    if snap.wakeups == last_wakeups {
-        return;
-    }
-    let elapsed_s = tick.saturating_sub(last) as f64 / 1_000_000.0;
-    let demand_reasons = DEMAND_REASON_NAMES
-        .iter()
-        .zip(snap.demand_reasons.iter())
-        .filter(|(_, count)| **count > 0)
-        .map(|(name, count)| format!("{name}={count}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    tracing::debug!(
-        wakeups = snap.wakeups,
-        wakeups_per_s = format!("{:.1}", (snap.wakeups - last_wakeups) as f64 / elapsed_s),
-        redraw_requests = snap.redraw_requests,
-        deadline_serviced_redraws = snap.deadline_serviced_redraws,
-        redraw_events = snap.redraw_events,
-        scene_commits = snap.scene_commits,
-        root_glyph_passes = snap.root_glyph_passes,
-        presents = snap.presents,
-        plan_none = snap.plan_none,
-        plan_composite_only = snap.plan_composite_only,
-        plan_repaint_layers = snap.plan_repaint_layers,
-        plan_rebuild_scene = snap.plan_rebuild_scene,
-        retained_static_builds = snap.retained_static_builds,
-        scroll_raster_builds = snap.scroll_raster_builds,
-        scroll_raster_blits = snap.scroll_raster_blits,
-        full_frame_texture_refusals = FULL_FRAME_TEXTURE_REFUSALS.load(Ordering::Relaxed),
-        composite_only_frames = snap.composite_only_frames,
-        last_commit_to_present_us = snap.last_commit_to_present_us,
-        max_commit_to_present_us = snap.max_commit_to_present_us,
-        demand_reasons = demand_reasons,
-        unattributed_present_attempts = snap.unattributed_present_attempts,
-        "frame_sched_stats"
-    );
+/// Redraws asked for and delivered, scenes ingested and frames submitted.
+type FrameWork = [u64; 4];
+
+/// The frame work SNAP counts: what a line reports as changed. Loop wakeups
+/// are left out, or the wake that writes a line would ask for the next one.
+fn frame_work(snap: &FrameSchedSnapshot) -> FrameWork {
+    [
+        snap.redraw_requests,
+        snap.redraw_events,
+        snap.scene_commits,
+        snap.presents,
+    ]
 }
+
+/// When the diagnostic lines were last written, and the frame work they
+/// reported.
+#[derive(Debug, Default)]
+pub(super) struct StatsLines {
+    last: Option<(EventTime, FrameWork)>,
+}
+
+/// What a pass of the loop does about the diagnostic line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineDue {
+    /// Nothing to say: no frame work since the last line.
+    Quiet,
+    /// Write one now.
+    Now,
+    /// Frame work since the last line, written too recently: wake then.
+    At(EventTime),
+}
+
+impl StatsLines {
+    /// What is due at NOW with the frame WORK counted so far; a line due now
+    /// is taken as written. The lines are a series of the counters at
+    /// [`LINE_INTERVAL`]'s resolution whose last line holds the totals once
+    /// the loop is quiet: a change is written at once, or at the interval's
+    /// end when one was just written, and no change writes nothing, so a
+    /// loop at rest is not woken.
+    fn step(&mut self, now: EventTime, work: FrameWork) -> LineDue {
+        match self.last {
+            Some((_, reported)) if reported == work => LineDue::Quiet,
+            Some((at, _)) if now < at.plus(LINE_INTERVAL) => LineDue::At(at.plus(LINE_INTERVAL)),
+            _ => {
+                self.last = Some((now, work));
+                LineDue::Now
+            }
+        }
+    }
+
+    /// Under `ROMACS_DIAGNOSTICS=1`, write the counters to stderr as one
+    /// `frame-stats` line when one is due at NOW; when the loop must wake to
+    /// write the next. Called as the loop goes to wait.
+    pub(super) fn service(&mut self, now: EventTime) -> Option<EventTime> {
+        if !super::diagnostics() {
+            return None;
+        }
+        let snap = snapshot();
+        match self.step(now, frame_work(&snap)) {
+            LineDue::Quiet => None,
+            LineDue::At(at) => Some(at),
+            LineDue::Now => {
+                write_line(&line(&snap, tick_us(now)));
+                None
+            }
+        }
+    }
+}
+
+/// SNAP as a `frame-stats` diagnostic: the loop's counters and, per demand
+/// reason that has any, the frames planned and presented for it.
+fn line(snap: &FrameSchedSnapshot, at_us: u64) -> serde_json::Value {
+    let by_reason = |counts: &[u64]| -> serde_json::Map<String, serde_json::Value> {
+        DEMAND_REASON_NAMES
+            .iter()
+            .zip(counts)
+            .filter(|(_, count)| **count > 0)
+            .map(|(name, count)| ((*name).to_owned(), (*count).into()))
+            .collect()
+    };
+    serde_json::json!({
+        "diagnostic": "frame-stats",
+        "at_us": at_us,
+        "wakeups": snap.wakeups,
+        "redraw_requests": snap.redraw_requests,
+        "deadline_serviced_redraws": snap.deadline_serviced_redraws,
+        "redraw_events": snap.redraw_events,
+        "scene_commits": snap.scene_commits,
+        "presents": snap.presents,
+        "plan_none": snap.plan_none,
+        "plan_composite_only": snap.plan_composite_only,
+        "plan_repaint_layers": snap.plan_repaint_layers,
+        "plan_rebuild_scene": snap.plan_rebuild_scene,
+        "root_glyph_passes": snap.root_glyph_passes,
+        "composite_only_frames": snap.composite_only_frames,
+        "full_frame_texture_refusals": FULL_FRAME_TEXTURE_REFUSALS.load(Ordering::Relaxed),
+        "unattributed_present_attempts": snap.unattributed_present_attempts,
+        "planned": by_reason(&snap.demand_reasons),
+        "presented": by_reason(&snap.presented_reasons),
+    })
+}
+
+/// VALUE on stderr as one line, in one write.
+fn write_line(value: &serde_json::Value) {
+    use std::io::Write;
+    let mut line = serde_json::to_vec(value).unwrap_or_default();
+    line.push(b'\n');
+    let _ = std::io::stderr().lock().write_all(&line);
+}
+
+#[cfg(test)]
+#[path = "tests/frame_stats_test.rs"]
+mod frame_stats_test;
