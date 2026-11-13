@@ -28,7 +28,12 @@ back), and counts from before the first step to after the last step's
 layout and paint submission; the steps' work includes the redisplay they
 cause.  A GUI measurement is refused
 unless the host's diagnostics show a paint submitted (laid out by the
-evaluator) after every step, before the next step's mark or the end mark.
+evaluator) after every step, before the next step's mark or the end mark;
+an :idle probe's steps change nothing shown, so a step a paint followed is
+set aside: the host repaints for reasons of its own now and then, and that
+paint is no part of an idle step's work.  Its work is that of the steps no
+paint followed, scaled to all of them, and its measurement is refused when
+more than a tenth of its steps were set aside.
 
 --record profiles the body of every batch probe over its budget at K*N
 with `perf record --call-graph fp', counting only while the probe enables
@@ -65,6 +70,8 @@ PROBES = HERE / 'scaling' / 'probes.el'
 MIN_WORK = 1_000_000
 STACK_SLACK = 64 * 1024
 DEFAULT_BUDGET = 1.25
+# The share of an :idle GUI probe's steps a stray paint may set aside.
+IDLE_ODD = 0.1
 # A session that spends no CPU for this many times its CPU bound is hung.
 WALL_FACTOR = 10
 
@@ -93,6 +100,9 @@ def verdict(probe, small, large):
     if work_n is None or work_kn is None:
         return {**row, 'status': 'FAIL', 'reason': 'no instruction counter (romacs-instructions is nil)'}
     row.update(work_n=work_n, work_kn=work_kn)
+    disturbed = small.get('disturbed', 0) + large.get('disturbed', 0)
+    if disturbed:
+        row['disturbed'] = disturbed
     if work_n < MIN_WORK:
         return {**row, 'status': 'FAIL', 'reason': f'body does {work_n} instructions at N, under {MIN_WORK}'}
     if work_kn <= 0:
@@ -130,6 +140,9 @@ def table(rows):
             note = f"{note}; known: {r['known']}" if note else f"known: {r['known']}"
         if 'stack_growth' in r:
             note = f"{note}; stack spread {r['stack_growth']} B" if note else f"stack spread {r['stack_growth']} B"
+        if r.get('disturbed'):
+            aside = f"{r['disturbed']} idle steps set aside for a paint"
+            note = f'{note}; {aside}' if note else aside
         lines.append(f"| {r['name']}{' (gui)' if r.get('gui') else ''} | {r['n']} | {r['k']} | {work(r.get('work_n'))}"
                      f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')} | {r['budget']} | {r['status']}"
                      f"{' — ' + note if note else ''} |")
@@ -165,11 +178,31 @@ def step_paints(stderr_text):
     return counts
 
 
+def paints_problem(probe, paints):
+    """What is wrong with PAINTS, the paints submitted after each step of
+    PROBE: every step paints, and at most a tenth of an :idle probe's do."""
+    odd = sum(map(bool, paints)) > IDLE_ODD * probe['steps'] if probe['idle'] else 0 in paints
+    if len(paints) != probe['steps'] or odd:
+        return f"paints after each of {probe['steps']} {'idle ' if probe['idle'] else ''}steps: {paints}"
+    return None
+
+
+def idle_work(deltas, paints):
+    """An :idle probe's work from its steps' instructions DELTAS and the
+    paints after each: the steps no paint followed, scaled to all of them
+    (None with a step uncounted, or none kept), and how many were set aside."""
+    kept = [delta for delta, painted in zip(deltas, paints) if not painted]
+    if None in deltas or not kept:
+        return None, len(deltas) - len(kept)
+    return round(sum(kept) * len(deltas) / len(kept)), len(deltas) - len(kept)
+
+
 def probe_entry(raw):
     """A probe from `scaling-list''s JSON, nulls and defaults normalised."""
     return {'name': raw['name'], 'n': int(raw['n']), 'k': int(raw.get('k') or 4),
             'budget': float(raw.get('budget') or DEFAULT_BUDGET), 'known': raw.get('known') or None,
-            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True}
+            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True,
+            'idle': raw.get('idle') is True}
 
 
 # Sessions.
@@ -207,11 +240,12 @@ def bounded(what, argv, timeout, **kwargs):
     return done
 
 
-def batch(binary, home, form, timeout, prefix=(), env=None, world=False):
-    """Run FORM after loading the probes in a batch session; its SCALING
-    lines. WORLD: the session must run from HOME's batch world, as every
-    measured one does: one from source is another regime, not a measure."""
-    argv = [*prefix, str(binary), '-Q', '--batch', '-l', str(PROBES), '--eval', form]
+def batch(binary, home, form, timeout, prefix=(), env=None, world=False, loads=()):
+    """Run FORM after loading the probes and LOADS in a batch session; its
+    SCALING lines. WORLD: the session must run from HOME's batch world, as
+    every measured one does: one from source is another regime, not a measure."""
+    argv = [*prefix, str(binary), '-Q', '--batch', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
+            '--eval', form]
     # A session tells its world mode on stderr only with its diagnostics on.
     env = {**(env or {}), 'ROMACS_DIAGNOSTICS': '1'} if world else env
     done = bounded(form, argv, timeout, env=private_env(home, env), cwd=home)
@@ -252,9 +286,9 @@ def run_batch_probe(binary, home, probe, timeout):
 class Gui:
     """A private headless labwc for --wayland sessions."""
 
-    def __init__(self, home, runtime, timeout):
+    def __init__(self, binary, home, runtime, timeout):
         import live_oracle as live
-        self.live, self.home, self.runtime, self.timeout = live, home, runtime, timeout
+        self.live, self.binary, self.home, self.runtime, self.timeout = live, binary, home, runtime, timeout
         (runtime / 'config').mkdir()
         (runtime / 'config' / 'rc.xml').write_text(live.RC_XML)
         self.env = private_env(home, {'XDG_RUNTIME_DIR': str(runtime), 'ROMACS_DIAGNOSTICS': '1',
@@ -276,29 +310,46 @@ class Gui:
         subprocess.run([randr or 'wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1600x1000'],
                        env=self.env, check=True, timeout=15, stdout=subprocess.DEVNULL)
 
-    def measure(self, probe, n):
-        """The steps' instructions of PROBE at N in a fresh --loadup session,
-        refused unless the host submitted a paint after every step."""
-        out = self.home / 'tmp' / f"{probe['name']}-{n}.json"
-        stderr = self.home / f"{probe['name']}-{n}.stderr"
-        form = f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")'
-        # Append mode: the probe's marks append to the same file.
+    def session(self, tag, form, loads=(), env=None, prefix=(), wait=None):
+        """A fresh --loadup session named TAG that loads the probes and LOADS
+        and evaluates FORM of a file name, which writes that file and ends
+        the session: what it wrote, as JSON, and the session's stderr.
+        Refused unless it exits 0 having written the file within WAIT
+        seconds (a fifth of the batch sessions' bound unless given)."""
+        out = self.home / 'tmp' / f'{tag}.json'
+        stderr = self.home / f'{tag}.stderr'
+        argv = [*prefix, str(self.binary), '-Q', '--loadup', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
+                '--eval', form(out)]
+        # Append mode: the session's marks append to the same file.
         with stderr.open('a') as log:
-            proc = subprocess.Popen([str(self.binary), '-Q', '--loadup', '-l', str(PROBES), '--eval', form],
-                                    env=self.env, cwd=self.home, stdin=subprocess.DEVNULL,
+            proc = subprocess.Popen(argv, env={**self.env, **(env or {})}, cwd=self.home, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=log)
             try:
-                proc.wait(timeout=self.timeout / 5)
+                proc.wait(timeout=wait or self.timeout / 5)
             except subprocess.TimeoutExpired:
-                raise Refused(f"{probe['name']} at {n}: GUI session timed out") from None
+                raise Refused(f'{tag}: GUI session timed out') from None
             finally:
                 self.live.stop(proc)
+        text = stderr.read_text(errors='replace')
         if proc.returncode != 0 or not out.is_file():
-            raise Refused(f"{probe['name']} at {n}: exit {proc.returncode}: {stderr.read_text(errors='replace')[-600:]}")
-        paints = step_paints(stderr.read_text(errors='replace'))
-        if len(paints) != probe['steps'] or 0 in paints:
-            raise Refused(f"{probe['name']} at {n}: paints after each of {probe['steps']} steps: {paints}")
-        return json.loads(out.read_text())
+            raise Refused(f'{tag}: exit {proc.returncode}: {text[-600:]}')
+        return json.loads(out.read_text()), text
+
+    def measure(self, probe, n):
+        """The steps' instructions of PROBE at N in a fresh --loadup session,
+        refused unless the host submitted a paint after every step; an :idle
+        probe's are those of the steps no paint followed (`idle_work'),
+        refused when a paint followed more than a tenth of them."""
+        tag = f"{probe['name']}-{n}"
+        result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
+        paints = step_paints(stderr)
+        problem = paints_problem(probe, paints)
+        if problem:
+            raise Refused(f'{tag}: {problem}')
+        if not probe['idle']:
+            return result
+        work, disturbed = idle_work(result.get('steps') or [None], paints)
+        return {**result, 'instructions': work, 'disturbed': disturbed}
 
     def close(self):
         self.live.stop(self.compositor)
@@ -310,8 +361,7 @@ def run_gui_probes(binary, home, probes, timeout):
     rows = []
     with tempfile.TemporaryDirectory(prefix='scaling-', dir=runtime) as temporary:
         Path(temporary).chmod(0o700)
-        gui = Gui(home, Path(temporary), timeout)
-        gui.binary = binary
+        gui = Gui(binary, home, Path(temporary), timeout)
         try:
             for probe in probes:
                 try:

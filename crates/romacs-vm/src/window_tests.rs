@@ -408,12 +408,12 @@ fn an_overlay_change_redisplays_only_its_own_buffers_windows() {
                           (setq indirect (make-indirect-buffer other "indirect")))"#);
     vm.frame_snapshot(800, 576).unwrap();
     vm.frame_snapshot(800, 576).unwrap();
-    // The windows a redisplay after CHANGE rebuilds.
+    // The windows a redisplay after CHANGE rebuilds (`romacs--display-stats`).
     let mut rebuilt = |change: &str| {
         run(&mut vm, change);
-        let before = vm.window_rebuilds();
+        let before = vm.display_state.stats.rebuilt;
         vm.frame_snapshot(800, 576).unwrap();
-        vm.window_rebuilds() - before
+        vm.display_state.stats.rebuilt - before
     };
     assert_eq!(rebuilt("nil"), 0, "nothing changed");
     // In a buffer no window shows, and in one sharing a shown buffer's text.

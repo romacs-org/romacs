@@ -1,0 +1,102 @@
+{
+ "plain-idle": {
+  "step_instructions": 645000,
+  "display_instructions": 348000,
+  "display_conses": 0,
+  "windows_rebuilt": 0,
+  "band_expansions": 0,
+  "layouts": 0,
+  "frames_submitted": 0,
+  "display_instructions_p90": 352000
+ },
+ "chat-idle": {
+  "step_instructions": 842000,
+  "display_instructions": 540000,
+  "display_conses": 7,
+  "windows_rebuilt": 0,
+  "band_expansions": 1,
+  "layouts": 0,
+  "frames_submitted": 0,
+  "display_instructions_p90": 547000
+ },
+ "chat-tick": {
+  "step_instructions": 26800000,
+  "display_instructions": 25800000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 1,
+  "frames_submitted": 0,
+  "display_instructions_p90": 25800000
+ },
+ "chat-collected": {
+  "step_instructions": 185000000,
+  "display_instructions": 32200000,
+  "display_conses": 181,
+  "windows_rebuilt": 2,
+  "band_expansions": 2,
+  "layouts": 2,
+  "frames_submitted": 0,
+  "display_instructions_p90": 32300000
+ },
+ "cursor-move": {
+  "step_instructions": 5820000,
+  "display_instructions": 5110000,
+  "display_conses": 0,
+  "windows_rebuilt": 0,
+  "band_expansions": 1,
+  "layouts": 0,
+  "frames_submitted": 1,
+  "display_instructions_p90": 5130000
+ },
+ "typed": {
+  "step_instructions": 9840000,
+  "display_instructions": 9190000,
+  "display_conses": 0,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 1,
+  "frames_submitted": 1,
+  "display_instructions_p90": 9230000
+ },
+ "append-unseen": {
+  "step_instructions": 5360000,
+  "display_instructions": 5000000,
+  "display_conses": 0,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 1,
+  "frames_submitted": 0,
+  "display_instructions_p90": 5010000
+ },
+ "typed-elements": {
+  "step_instructions": 23500000,
+  "display_instructions": 22900000,
+  "display_conses": 0,
+  "windows_rebuilt": 1,
+  "band_expansions": 1,
+  "layouts": 1,
+  "frames_submitted": 1,
+  "display_instructions_p90": 23000000
+ },
+ "chat-stream-1k": {
+  "step_instructions": 31400000,
+  "display_instructions": 29900000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
+  "band_expansions": 2,
+  "layouts": 1,
+  "frames_submitted": 1,
+  "display_instructions_p90": 96300000
+ },
+ "chat-stream-10k": {
+  "step_instructions": 87100000,
+  "display_instructions": 85300000,
+  "display_conses": 7,
+  "windows_rebuilt": 1,
+  "band_expansions": 2,
+  "layouts": 1,
+  "frames_submitted": 1,
+  "display_instructions_p90": 586000000
+ }
+}
