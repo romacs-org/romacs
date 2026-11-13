@@ -302,6 +302,17 @@ fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce
     lisp_dir.map(Into::into).unwrap_or_else(|| runtime_root().join("lisp/gnu"))
 }
 
+/// Romacs's per-user cache, `$XDG_CACHE_HOME/romacs`, or `~/.cache/romacs`
+/// (the XDG base directory default), from GET: where worlds and the icon
+/// font file go. None without an absolute directory to put it in; a
+/// relative `XDG_CACHE_HOME` is invalid and ignored.
+#[must_use]
+pub fn cache_dir(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let cache = get("XDG_CACHE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute())
+        .or_else(|| get("HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".cache")))?;
+    Some(cache.join("romacs"))
+}
+
 /// The runtime tree around the GNU Lisp directory `dir`
 /// (`<root>/lisp/gnu`): the checkout or an installed `share/romacs`, which
 /// the bundled Lisp and lisp/bundled.json's paths are relative to.

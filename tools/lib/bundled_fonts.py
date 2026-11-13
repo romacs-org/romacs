@@ -6,9 +6,8 @@ release archive's URL and SHA-256 (as the release's SHA-256.txt gives it),
 the SHA-256 of every file taken from it, and its licence: the file, the
 URL it came from and its SHA-256. `check` hashes the committed
 files against that record, so a font cannot change silently, and refuses a
-font in assets/fonts that no entry and no build (RomacsIcons.ttf,
-tools/lib/icon_font.py) accounts for, and a README that does not give each
-file's SHA-256.
+font in assets/fonts that no entry accounts for, and a README that does not
+give each file's SHA-256.
 
 usage: bundled_fonts.py check [--root ROOT]
 """
@@ -20,8 +19,6 @@ from pathlib import Path
 
 FONTS = Path('assets/fonts')
 SOURCES = FONTS / 'sources.json'
-# Fonts Romacs builds itself, checked by their own tool.
-BUILT = {'RomacsIcons.ttf'}
 # What crates/romacs-vm-gui/src/fonts.rs registers.
 FONT_SUFFIXES = {'.ttf', '.otf', '.ttc'}
 
@@ -54,7 +51,7 @@ def problems(root):
             if digest not in readme:
                 found.append(f'{FONTS / "README.md"} does not give {file}\'s SHA-256')
     for path in sorted(fonts.iterdir()):
-        if path.suffix in FONT_SUFFIXES and path.name not in recorded | BUILT:
+        if path.suffix in FONT_SUFFIXES and path.name not in recorded:
             found.append(f'{FONTS / path.name} is in no entry of {SOURCES}')
     return found
 

@@ -7,6 +7,7 @@ members = [
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-vm-test-modules",
+    "crates/romacs-icon-font",
     "crates/romacs-layout-input",
     "crates/romacs-layout",
     "crates/romacs-vm-gui",

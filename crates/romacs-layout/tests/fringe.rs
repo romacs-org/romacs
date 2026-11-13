@@ -230,7 +230,7 @@ fn an_icon_keeps_its_colour_on_a_pill_where_it_reads() {
 #[test]
 fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     // The GUI host registers Romacs Icons at startup (vm-gui fonts.rs).
-    assert!(romacs_font::register_font_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/RomacsIcons.ttf")));
+    assert!(romacs_font::register_font_file(&romacs_icon_font::file_in(&std::env::temp_dir().join("romacs-layout-icons")).unwrap()));
     let band = [30, 40, 50];
     let bar = |text: &str, marks: BandMarks| StatusBarSnapshot {
         x: 0, y: 150, width: 116, height: 20,
@@ -316,7 +316,7 @@ fn the_status_bar_centres_its_middle_zone() {
 /// font's own advance differs from a 20-pixel mono cell.
 #[test]
 fn an_icon_in_text_paints_and_measures_one_column() {
-    assert!(romacs_font::register_font_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/RomacsIcons.ttf")));
+    assert!(romacs_font::register_font_file(&romacs_icon_font::file_in(&std::env::temp_dir().join("romacs-layout-icons")).unwrap()));
     let text = "a\u{FE001}b";
     let mut snapshot = window(text, LineWrap::Window);
     snapshot.faces = vec![Face { pixel_size: 20.0, ..face([255; 3], [0; 3]) }; 3];
