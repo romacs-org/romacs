@@ -95,10 +95,14 @@ class DerivedTests(unittest.TestCase):
         if land is not None:
             env['ROMACS_LAND'] = land
         out = Path(self.tmp.name) / 'plain'
-        status = out.with_suffix('.status')
+        status, go = out.with_suffix('.status'), out.with_suffix('.go')
         status.unlink(missing_ok=True)
-        subprocess.run(['setsid', '-f', 'sh', '-c', 'git "$@" > "$OUT" 2>&1; echo $? > "$OUT.status"', 'sh', *args],
+        go.unlink(missing_ok=True)
+        # The child waits for GO, written once setsid has exited and so the child is reparented.
+        script = 'until [ -e "$OUT.go" ]; do sleep 0.01; done; git "$@" > "$OUT" 2>&1; echo $? > "$OUT.status"'
+        subprocess.run(['setsid', '-f', 'sh', '-c', script, 'sh', *args],
                        cwd=self.root, env={**env, 'OUT': str(out)}, check=True)
+        go.touch()
         for _ in range(300):
             if status.exists() and status.read_text().endswith('\n'):
                 return int(status.read_text()), out.read_text()
