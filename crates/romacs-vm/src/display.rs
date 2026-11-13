@@ -252,8 +252,9 @@ pub(super) struct DisplayState {
     /// `shown' when a frame last skipped the hooks (`Vm::defer_parse'), until
     /// the hooks run: they are told what changed since they last ran.
     hooked: Option<std::collections::BTreeMap<u64, Shown>>,
-    /// Advanced by every overlay change: overlays are display state no
-    /// buffer modification tick counts.
+    /// The last overlay revision given (`Vm::overlay_changed`): overlays
+    /// are display state no buffer modification tick counts, and each
+    /// buffer's windows read its own revision.
     pub(super) overlays: u64,
     /// Per window id, how its last publication's display text maps to
     /// buffer text, when overlay strings were spliced in.
@@ -1259,12 +1260,12 @@ impl Vm {
     pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
-    /// Read-only: the display version a renderer uses to decide whether to repaint.
     /// How many times a mode-line expansion entered the evaluator: its
     /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
     pub fn mode_line_evals(&self) -> u64 {
         self.display_state.mode_line_evals
     }
+    /// Read-only: the display version a renderer uses to decide whether to repaint.
     pub fn display_version(&self) -> u64 {
         self.display_state.version
     }
@@ -1443,11 +1444,19 @@ impl Vm {
         width: u32,
         height: u32,
     ) -> Result<WindowSnapshot> {
-        if let Some(snapshot) = self.reuse_shown(root, slot, width, height)? {
-            self.display_state.stats.reused += 1;
-            self.check_reuse(self.slots[root].value, height, &snapshot);
-            return Ok(self.publish_window(snapshot));
+        match self.reuse_shown(root, slot, width, height)? {
+            Some(snapshot) => {
+                self.display_state.stats.reused += 1;
+                self.check_reuse(self.slots[root].value, height, &snapshot);
+                Ok(self.publish_window(snapshot))
+            }
+            None => self.rebuild_window(root, slot, width, height),
         }
+    }
+    /// The window in ROOT redisplayed in full: its point kept visible, its
+    /// text fontified and read, its bands expanded, and the record made
+    /// that the next redisplay reuses it by.
+    fn rebuild_window(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<WindowSnapshot> {
         self.display_state.stats.rebuilt += 1;
         let bands = self.redisplay_and_build_mode_line(root, slot, height, true)?;
         let window = self.slots[root].value;
@@ -2170,7 +2179,7 @@ impl Vm {
         let selected = self.selected_window_value()?;
         Ok(ShownKey {
             collections: self.gc_stats.collections,
-            overlays: self.display_state.overlays,
+            overlays: self.overlay_store(buffer).map_or(0, |store| store.overlay_revision),
             hosted: self.display_state.hosted,
             buffer,
             shows: self.window(window)?.shows,

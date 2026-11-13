@@ -81,6 +81,14 @@ a step is the host's load, so `chat-tick' runs what it does as its step."
                        (list :type 'input :text "a prompt" :time (- (float-time) seconds)))
   buffer)
 
+(defun display-stages--second (buffer)
+  "A second passes in the running turn of the chat BUFFER's session, as a
+tick finds it, no event raised: its turn began a second earlier.  Return
+BUFFER.  (The slot by name: this file loads before the session's type.)"
+  (cl-decf (cl-struct-slot-value 'romacs-agent 'turn-start
+                                 (buffer-local-value 'romacs-agent-ui--session buffer)))
+  buffer)
+
 (defun display-stages--streaming-chat (chars)
   "`display-stages--chat', a reply about to stream at its end."
   (let ((buffer (display-stages--chat chars)))
@@ -113,7 +121,7 @@ its session raises it: drawn, and every view of the session told."
 ;; rule says a second more, one overlay string put.
 (display-stages-scenario chat-tick-second :paints t
   :setup (display-stages--turn (display-stages--chat 100000) 0)
-  :body (with-current-buffer (display-stages--turn it (1+ i))
+  :body (with-current-buffer (display-stages--second it)
           (romacs-agent-ui--composer-update)))
 ;; Point moves in the chat's composer: the frame changes, its header does not.
 (display-stages-scenario chat-cursor :paints t

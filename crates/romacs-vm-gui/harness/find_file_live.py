@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded private-compositor C-x C-f journey through the real native GUI."""
+"""Bounded private-compositor C-x C-f journey through the real native GUI.
+
+--scroll checks that motion reveals point minimally: Romacs's default
+`scroll-conservatively' 101; GNU's default 0 recentres instead, which
+scroll_invisible_live covers.
+"""
 import argparse
 import json
 from pathlib import Path

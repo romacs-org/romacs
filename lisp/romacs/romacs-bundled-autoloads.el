@@ -43,6 +43,19 @@ Interactively, open the chat without sending an initial prompt.
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
 
 
+;;; Generated autoloads from romacs-agent-board.el
+
+(autoload 'romacs-agents "romacs-agent-board"
+"Show the agent board over the frame: every agent thread by project,
+those that want you first, then the newest, with what each delegated
+folded under it.  Its keys act on the thread at point;
+\\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
+\\{romacs-agent-board-mode-map}" t)
+(defalias 'romacs-agent-switch #'romacs-agents)
+(defalias 'romacs-agent-switch-chat #'romacs-agents)
+(register-definition-prefixes "romacs-agent-board" '("romacs-agent-board-"))
+
+
 ;;; Generated autoloads from romacs-agent-claude.el
 
 (register-definition-prefixes "romacs-agent-claude" '("romacs-agent--claude-"))
@@ -109,25 +122,11 @@ Interactively, open the chat without sending an initial prompt.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
-(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agent-switch-chat) (define-key map "a" #'romacs-agents) map)
+(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agents) (define-key map "a" #'romacs-agents) map)
 "Global prefix map for starting and finding agent sessions.
 \\{romacs-agents-map}")
  (define-key global-map (kbd "C-c C-;") romacs-agents-map)
-(autoload 'romacs-agent-switch "romacs-agent-ui"
-"Switch to agent SESSION, in this window, chosen by what each is doing:
-those that want you first, finished delegated tasks last, each with its
-state, last activity, context, model, project and the start of its last
-reply.  A session with no chat yet gets one.
-
-(fn SESSION)" t)
-(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
-"Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
-only sessions whose chat is open.
-
-(fn SESSION)" t)
-(autoload 'romacs-agents "romacs-agent-ui"
-"Show every agent session, by project." t)
-(register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
+(register-definition-prefixes "romacs-agent-ui" '("romacs-agent-"))
 
 
 ;;; Generated autoloads from romacs-agent-watch.el
@@ -427,7 +426,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("posn-point" "romacs--menu-filter"))
 
 
 ;;; Generated autoloads from romacs-landing.el
@@ -526,6 +525,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 
 (fn MESHES &rest PLIST)")
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
+
+
+;;; Generated autoloads from romacs-mule.el
+
+(register-definition-prefixes "romacs-mule" '("make-translation-table-from-alist" "romacs-mule--translation-map"))
 
 
 ;;; Generated autoloads from romacs-nnheader.el
@@ -1533,6 +1537,17 @@ Optional VALIDATE checks caller ownership before selection and replacement.
 
 ;;; Generated autoloads from gnosis-scheduler.el
 
+(autoload 'gnosis-scheduler-drift "gnosis-scheduler"
+"Return the reviews in DB that today's FSRS schedules differently.
+Replay every reviewed thema from its recorded results and list
+(THEMA-ID . DRIFT) for each with drift, DRIFT as
+`gnosis-scheduler-replay' reports it, or (THEMA-ID (:error MESSAGE)) for
+one whose history does not replay.  The collection is read in two
+queries and each review recomputed once; nothing is written.
+Interactively, report the themata that drift and those that do not
+replay (`gnosis-scheduler--drift-report').
+
+(fn &optional DB)" t)
 (autoload 'gnosis-scheduler-set-retention "gnosis-scheduler"
 "Select user-wide desired RETENTION for future accepted reviews.
 Append an immutable configuration snapshot.  Existing due dates and events
@@ -1542,6 +1557,18 @@ require its longest model interval to fit the current year's scheduler
 calendar.  Unsupported values signal `user-error'; intervals are not capped.
 
 (fn RETENTION)" t)
+(autoload 'gnosis-scheduler-fit-parameters "gnosis-scheduler"
+"Return FSRS weights fitted to the effective review history in DB.
+The fit is fsrs-rs's optimizer, as Anki runs it, and nothing is written.
+Only themata whose whole history is in Gnosis's events take part: one
+migrated with earlier reviews (a baseline with repetitions) would enter
+as a new card.  The plist has `:parameters', `:items' (the reviews it
+could learn from, before the optimizer drops outliers) and `:fitted':
+`none' when the weights are the defaults (too little history),
+`initial-stability' when only the first four moved, else `all'.
+Interactively, report the result in the echo area.
+
+(fn &optional DB)" t)
 (register-definition-prefixes "gnosis-scheduler" '("gnosis-scheduler-"))
 
 

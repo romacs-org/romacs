@@ -93,23 +93,29 @@ string, an overlay."
       ;; Its model, and that it runs.
       (raise :type 'session :model "claude-fable-5-2")
       (should (shows "  fable-5-2 high  "))
-      (should (shows "  Running"))
+      (should (shows "  Working"))
       ;; How full its context is.
       (raise :type 'usage :context-used 500000)
       (should (shows "  50%%"))
       ;; Its permission mode.
       (raise :type 'mode :permission-mode "acceptEdits")
       (should (shows "  acceptEdits  "))
-      ;; Its state: waiting for the user, then a turn's end, failed.
+      ;; Its state, in the board's words: waiting for the user, then a
+      ;; turn's end, failed, while no one has seen it.
       (raise :type 'approval :request-id "r1" :tool "Bash" :user t)
-      (should (shows "  Approval"))
+      (should (shows "  Needs approval"))
       (raise :type 'answered :request-id "r1" :behavior "allow")
-      (should (shows "  Running"))
-      (raise :type 'done :text "over" :error t)
+      (should (shows "  Working"))
+      (raise :type 'done :text "over" :error t :seq 5)
       (should (shows "  Failed"))
-      (raise :type 'input :text "again" :time 10.0)
-      (should (shows "  Running"))
-      (raise :type 'done :text "over")
+      ;; An unseen failure outranks the next turn's work.
+      (raise :type 'input :text "again" :time 10.0 :seq 6)
+      (should (shows "  Failed"))
+      (raise :type 'done :text "over" :seq 7)
+      (should (shows "  Completed"))
+      ;; Seen, it says nothing more: no event of its harness says so.
+      (romacs-agent-mark-seen session)
+      (should-not (shows "Completed"))
       (should (string-suffix-p "50%%" (romacs-agent-header-tests--header)))
       ;; The model a selection put in effect.
       (raise :type 'selection :from '(:model "claude-fable-5-2") :to '(:model "claude-sonnet-5-5"))
@@ -160,23 +166,23 @@ string, an overlay."
                     ((symbol-function 'process-live-p) (lambda (_) live)))
             (cl-flet ((shows (text) (string-search text (romacs-agent-header-tests--header))))
               ;; A turn launched: starting.
-              (should-not (shows "Running"))
+              (should-not (shows "Working"))
               (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
                 (romacs-agent--turn session "go"))
-              (should (shows "  Running"))
+              (should (shows "  Working"))
               ;; No supervisor to attach to: detached.
               (romacs-agent--attach session 0)
               (should (shows "  Detached"))
               ;; Resumed: starting.
               (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
                 (romacs-agent-resume session))
-              (should (shows "  Running"))
+              (should (shows "  Working"))
               ;; Its startup over with no turn to take up: idle.
               (setq live t)
               (cl-letf (((symbol-function 'romacs-agent--harness-get)
                          (lambda (_session key) (and (eq key :next) (lambda (_) :ready)))))
                 (romacs-agent--step session))
-              (should-not (shows "Running"))
+              (should-not (shows "Working"))
               ;; Its connection gone.
               (setq live nil)
               (let ((process (make-pipe-process :name "romacs-agent-header-tests" :noquery t)))
@@ -191,10 +197,12 @@ string, an overlay."
               (romacs-agent--attach session 0)
               (should (shows "  Ended"))
               (delete-file (expand-file-name "stopped" dir))
-              ;; No journal: its supervisor never started.
+              ;; No journal: its supervisor never started, a failure no one
+              ;; has seen yet, which outranks saying it never started.
               (delete-file (expand-file-name "journal.jsonl" dir))
               (romacs-agent--attach session 0)
-              (should (shows "  Never started"))
+              (should (shows "  Failed"))
+              (should (eq (romacs-agent-state session) 'unstarted))
               ;; A selection its harness is restarted for: waiting, then in
               ;; effect and the harness resuming, then nothing waiting.
               (setf (romacs-agent-pending-selection session)
@@ -217,7 +225,9 @@ string, an overlay."
       (should (timerp romacs-agent-ui--children-timer))
       (cancel-timer romacs-agent-ui--children-timer)
       (romacs-agent-ui--children-flush)
-      (should (string-search "  1 running  " (romacs-agent-header-tests--header)))
+      ;; Idle while a worker works: it waits on its workers.
+      (should (string-search "  Waiting on its workers  " (romacs-agent-header-tests--header)))
+      (should (string-search "  1 working  " (romacs-agent-header-tests--header)))
       ;; Glyphs turned on: the line and the state are said by them.
       (setf (romacs-agent-state session) 'running)
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
@@ -226,12 +236,33 @@ string, an overlay."
             (progn (customize-set-variable 'romacs-agent-glyphs t)
                    (should (string-suffix-p "  🤖  opus-5-5 high  🤖1  44%%" (romacs-agent-header-tests--header))))
           (customize-set-variable 'romacs-agent-glyphs nil))
-        (should (string-suffix-p "  Running  opus-5-5 high  1 running  44%%" (romacs-agent-header-tests--header))))
+        (should (string-suffix-p "  Working  opus-5-5 high  1 working  44%%" (romacs-agent-header-tests--header))))
       ;; A font set that cannot draw the harness's icon: its name.
       (cl-letf (((symbol-function 'char-displayable-p) #'ignore)
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list session))))
         (run-hooks 'after-setting-font-hook)
         (should (string-prefix-p "claude  " (romacs-agent-header-tests--header)))))))
+
+(ert-deftest romacs-agent-changed-moves-views-only-with-the-state ()
+  ;; A write no harness event says is a `changed' event: the chat's header
+  ;; follows it, and the board's batch (rows, status bar, the board) runs
+  ;; only when the session's state key moved.
+  (romacs-agent-header-tests--with
+    (cl-flet ((flush () (when (timerp romacs-agent-ui--children-timer)
+                          (cancel-timer romacs-agent-ui--children-timer)
+                          (romacs-agent-ui--children-flush))))
+      (romacs-agent--raise session (list :type 'done :text "over" :seq 3))
+      (flush)
+      (should (string-search "  Completed  " (romacs-agent-header-tests--header)))
+      ;; An option changes no state: the header follows, the views do not.
+      (romacs-agent--set-options session '(:effort "max"))
+      (should (string-search " max  " (romacs-agent-header-tests--header)))
+      (should-not romacs-agent-ui--children-timer)
+      ;; Seen, its state moves from completed to idle: the views follow.
+      (romacs-agent-mark-seen session)
+      (should-not (string-search "Completed" (romacs-agent-header-tests--header)))
+      (should (timerp romacs-agent-ui--children-timer))
+      (flush))))
 
 (ert-deftest romacs-agent-header-unchanged-is-not-written ()
   (romacs-agent-header-tests--with
@@ -289,7 +320,7 @@ string, an overlay."
     (romacs-agent--raise session (list :type 'input :text "go" :time 1.0))
     (romacs-agent--raise session (list :type 'mode :permission-mode "acceptEdits"))
     (should (equal (romacs-agent-header-tests--header)
-                   (concat (romacs-agent-ui--harness-icon 'claude) "  Running  opus-5-5 high  acceptEdits  44%%")))
+                   (concat (romacs-agent-ui--harness-icon 'claude) "  Working  opus-5-5 high  acceptEdits  44%%")))
     (save-window-excursion
       (delete-other-windows)
       (switch-to-buffer chat)

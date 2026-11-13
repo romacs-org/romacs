@@ -546,7 +546,7 @@ with it, when there is one, attached or resumed."
                     (romacs-agent-import (plist-get item :harness) id (plist-get item :path)
                                          (plist-get item :cwd) (plist-get item :title)
                                          (plist-get item :provider) (plist-get item :config-dir)))))
-    (romacs-agent-ui--dashboard-changed)
+    (romacs-agent-ui--batch)
     (romacs-agent-show session)))
 
 (defun romacs-agent-history-resume-this ()

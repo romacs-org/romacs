@@ -164,6 +164,30 @@
     (should (equal baseline with-exam))
     (should (cl-every (lambda (r) (= 1 (plist-get r :config-id))) (car baseline)))))
 
+(ert-deftest gnosis-test-exam-review-after-an-implementation-upgrade ()
+  "Preview and accept agree on the one configuration an exam review makes.
+Under an active configuration naming an earlier implementation, a review
+the exam raises records a single new configuration, the one its preview
+named, under today's implementation and the raised retention."
+  (gnosis-test-exam--with-db
+    (gnosis-test-exam--thema 21 '("anat"))
+    (gnosis-exam-save "Anatomy" 20261030 '(("anat")) 0.95)
+    (let* ((gnosis-fsrs--implementation "fsrs-rs-7.0.0")
+           (preview (gnosis-scheduler-preview-review
+                     (format "%064x" 21001) 21 'success 21001000 20261001))
+           (accepted (gnosis-scheduler-accept-review
+                      (format "%064x" 21001) 21 'success 21001000 20261001
+                      (plist-get preview :config-id) preview)))
+      (should (plist-get accepted :inserted-p))
+      (should (= (plist-get preview :config-id) (plist-get accepted :config-id)))
+      (pcase-let ((`((,id ,implementation ,retention))
+                   (gnosis-sqlite-select
+                    gnosis-db "SELECT id, implementation, desired_retention
+                                 FROM scheduler_config WHERE id > 1")))
+        (should (= id (plist-get accepted :config-id)))
+        (should (equal "fsrs-rs-7.0.0" implementation))
+        (should (> retention 0.9))))))
+
 (ert-deftest gnosis-test-exam-in-scope-caps-due-and-replays ()
   "In-scope reviews stay due before the exam and replay without exam data."
   (gnosis-test-exam--with-db

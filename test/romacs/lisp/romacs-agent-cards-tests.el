@@ -18,7 +18,8 @@
 (defmacro romacs-agent-cards-tests--with-chat (var &rest body)
   "BODY in a chat of a session VAR with one known child."
   (declare (indent 1))
-  `(let* ((,var (romacs-agent--make :id romacs-agent-cards-tests--parent :harness 'claude :state 'running
+  `(let* ((romacs-agent-glyphs nil)
+          (,var (romacs-agent--make :id romacs-agent-cards-tests--parent :harness 'claude :state 'running
                                     :title "parent" :tools (make-hash-table :test #'equal)))
           (child (romacs-agent--make :id romacs-agent-cards-tests--child :harness 'claude :state 'idle :title "child"
                                      :options (list :parent romacs-agent-cards-tests--parent))))
@@ -58,12 +59,26 @@
 (ert-deftest romacs-agent-delegate-call-is-a-card-with-a-thread-link ()
   (romacs-agent-cards-tests--with-chat session
     (romacs-agent-cards-tests--delegate session)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Review it  codex  running  ↗ thread\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Review it  codex  Working  thread\n"))
     (let ((shown nil))
       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
         (goto-char (point-min))
         (romacs-agent-chat-open-task))
       (should (equal (romacs-agent-id shown) romacs-agent-cards-tests--child)))))
+
+(ert-deftest romacs-agent-wake-of-a-turn-that-left-work-running ()
+  ;; Its turn ended with a command still running in the background (an
+  ;; interim report): not the task done.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--delegate session)
+    (setf (romacs-agent-children-rows child) (list (list :key 'working :state "running" :title "check")))
+    (let ((text (romacs-agent-tools--wake-text child '(7 "waiting on the check" nil))))
+      (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
+    (should (string-search "⇠ child  Waiting on its workers  thread" (romacs-agent-cards-tests--visible)))
+    (setf (romacs-agent-children-rows child) nil)
+    (let ((text (romacs-agent-tools--wake-text child '(8 "done" nil))))
+      (romacs-agent-cards-tests--draw session :type 'input :text text :seq 10))
+    (should (string-search "⇠ child  Completed  thread  done" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-wake-settles-the-card-and-is-no-prompt ()
   (romacs-agent-cards-tests--with-chat session
@@ -71,8 +86,8 @@
     (let ((text (romacs-agent-tools--wake-text child '(7 "all good\nsecond line" nil))))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
     (should (equal (romacs-agent-cards-tests--visible)
-                   (concat "  ✓ ⇢ Review it  codex  completed  ↗ thread\n"
-                           "  ⇠ child  completed  ↗ thread  all good second line\n")))
+                   (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
+                           "  ⇠ child  Completed  thread  all good second line\n")))
     (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
     (goto-char (point-min))
@@ -91,13 +106,13 @@
        session :type 'tool :state 'completed :id "t1"
        :output (format "{\"taskId\":\"%s\",\"status\":\"%s\",\"result\":\"REVIEW RESULT\"}"
                        romacs-agent-cards-tests--child status))
-      (should (equal (romacs-agent-cards-tests--visible) (format "  ✓ ⇢ Review it  %s  ↗ thread\n" status)))
+      (should (equal (romacs-agent-cards-tests--visible) (format "  ✓ ⇢ Review it  %s  thread\n" (capitalize status))))
       (goto-char (point-min))
       (romacs-agent-chat-toggle)
       (should (string-suffix-p "REVIEW RESULT\n" (romacs-agent-cards-tests--visible))))))
 
 (ert-deftest romacs-agent-history-shows-a-delegation-card ()
-  (let ((file (make-temp-file "romacs-cards" nil ".jsonl")) (buffer nil))
+  (let ((file (make-temp-file "romacs-cards" nil ".jsonl")) (buffer nil) (romacs-agent-glyphs nil))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -107,7 +122,7 @@
                     "\"content\":\"{\\\"taskId\\\":\\\"" romacs-agent-cards-tests--child "\\\",\\\"status\\\":\\\"running\\\"}\"}]}}\n"))
           (setq buffer (romacs-agent-history-open (list :path file :title "h" :harness 'claude :id "h1" :cwd "/")))
           (with-current-buffer buffer
-            (should (string-match-p "⇢ Review it  running  ↗ thread" (buffer-string)))))
+            (should (string-match-p "⇢ Review it  Working  thread" (buffer-string)))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 
@@ -116,7 +131,7 @@
     (romacs-agent-cards-tests--delegate session)
     (romacs-agent-cards-tests--draw session :type 'input :seq 9
                                     :text (romacs-agent-tools--wake-text child '(7 "no" t)))
-    (should (string-match-p "Review it  codex  failed" (romacs-agent-cards-tests--visible)))))
+    (should (string-match-p "Review it  codex  Failed" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-user-text-shaped-like-a-wake-stays-a-prompt ()
   ;; A task this session did not delegate, or none: the user's own words.
@@ -191,7 +206,7 @@
     (let ((romacs-agent-glyphs nil) (romacs-agent-default-provider "claude"))
       (cl-flet ((header () (substring-no-properties
                             (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session)))))
-        (should (equal (header) (concat (romacs-agent-ui--harness-icon 'claude) "  Running  opus-5-5 high  44%")))
+        (should (equal (header) (concat (romacs-agent-ui--harness-icon 'claude) "  Working  opus-5-5 high  44%")))
         ;; A mode other than bypassing approvals is worth a glance.
         (setf (romacs-agent-permission-mode session) "plan")
         (should (string-search "  plan  " (header)))

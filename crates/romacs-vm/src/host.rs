@@ -3307,19 +3307,39 @@ fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A request the evaluator has not answered. Two relaxed loads per poll.
+/// Which thread answers inspections: the evaluator's, the one that started
+/// listening (or, in a test, the one that raised the request).  Every VM in
+/// the process polls, worker VMs too, and only that thread's may answer, so
+/// a worker's backtrace is never taken for the evaluator's.  A count, not a
+/// thread id: each registration takes the next one, and the thread keeps
+/// its own copy, so the check is two relaxed loads.
+static INSPECT_TARGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+thread_local! {
+    static INSPECT_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Make the current thread the one that answers inspections.
+fn inspect_target_here() {
+    let token = INSPECT_TARGET.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    INSPECT_HERE.with(|here| here.set(token));
+}
+
+/// A request this thread's evaluator has not answered. Two relaxed loads per
+/// poll; whose thread answers is read only while a request waits.
 #[inline(always)]
 pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+        && INSPECT_HERE.with(std::cell::Cell::get) == INSPECT_TARGET.load(Relaxed)
 }
 /// Whether a listener runs, so that a native loop should poll for requests.
 pub fn inspect_enabled() -> bool {
     INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
-/// Raise a request, as a client does.
+/// Raise a request, as a client does, for this thread's evaluator to answer.
 #[cfg(test)]
 pub fn inspect_request() {
+    inspect_target_here();
     INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 /// Whether native loops poll for requests, as a listener makes them.
@@ -3478,6 +3498,7 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
         None => None,
     };
     *inspect_lock(&INSPECT_LISTENER) = Some(InspectListener { path, identity: (meta.dev(), meta.ino()), stop, store });
+    inspect_target_here();
     INSPECT_ENABLED.store(true, SeqCst);
     Ok(())
 }

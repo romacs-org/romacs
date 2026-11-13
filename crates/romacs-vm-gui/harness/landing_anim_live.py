@@ -33,7 +33,9 @@ scroll: M-> then M-<, C-v then M-v, and C-u 0 C-l on the logo's fifth line
 then M-<, each with the logo turning.  The landing is the logo alone,
 sized to the window, so M-> scrolls it by the line or two its controls
 take below the window (GNU's end-of-buffer: point at the end, the window
-start moving only as far as point's line needs); whether a window
+start moving only as far as point's line needs: Romacs's
+`scroll-conservatively' 101, not GNU's default 0, which recentres and
+scroll_invisible_live covers); whether a window
 scrolled is read from the rows the evaluator's scene shows in it.  Under ROMACS_DIAGNOSTICS=1 the
 render thread says how each window draws its animation (a scene and its
 placement, cells, or hidden) whenever that changes.  Back at the top the

@@ -227,7 +227,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (setenv "XDG_STATE_HOME" (make-temp-file "scaling-state-" t))
   (require 'romacs-agent))
 
-;; The home page over N projects of one session each, and over N roots in one project.
+;; The agent board over N projects of one session each, and over N roots in one project.
 (defun scaling--agent-sessions (n project)
   (scaling--agent)
   (clrhash romacs-agent--sessions)
@@ -236,7 +236,12 @@ comment and string syntax, its summaries made by one parse to the end."
                                  :title (format "session %d" i) :cwd (funcall project i)
                                  :last-time (+ 1e9 i) :state 'idle :turns 1)))
       (puthash (romacs-agent-id s) s romacs-agent--sessions)))
-  (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+  (scaling--agent-board))
+
+(defun scaling--agent-board ()
+  "The agent board's buffer, not shown."
+  (require 'romacs-agent-board)
+  (romacs-agent-board--buffer))
 
 ;; The harnesses' history: N Claude Code transcripts in one configuration
 ;; directory, listed (stat only) once described, and listed and described anew.

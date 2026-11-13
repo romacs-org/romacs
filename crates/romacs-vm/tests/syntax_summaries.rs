@@ -83,6 +83,37 @@ fn summaries_serve_the_long_parses() {
     }
 }
 
+/// Closes past the outermost level and nesting past GNU's 100 levels have
+/// summaries of their own: once made, the same parses read no leaf again,
+/// neither for a summary nor in place of one. The char-table write count
+/// is the process's, which the other tests here move from their threads:
+/// a round counts only after a whole round in one context, and in one.
+#[test]
+fn closes_past_the_bottom_and_deep_nesting_are_served_from_kept_summaries() {
+    let fixtures = [
+        r#"(syn ?\( "()" ?\) ")(") (build "a) b)) (c (d) e\n" 4000)"#,
+        r#"(syn ?\( "()" ?\) ")(" ?\; "<" ?\n ">") (insert (make-string 150 ?\() "\n") (build "(a ; ) (\n b)\n" 3000) (insert (make-string 160 ?\)) "\n") (build "x (y) z\n" 1000)"#,
+    ];
+    for fixture in fixtures {
+        let expression = format!(r"(with-temp-buffer {fixture}
+           (let ((stats (lambda () (let ((stats (romacs-syntax-summaries-stats)))
+                                     (list (plist-get stats :leaf-scans) (plist-get stats :context-switches) (plist-get stats :plain-leaves)))))
+                 (clean 0) (tries 0) (result nil))
+             (probe) (chain)
+             (while (and (not result) (< tries 20))
+               (let ((before (funcall stats)))
+                 (probe) (chain)
+                 (let ((after (funcall stats)))
+                   (setq clean (if (= (nth 1 before) (nth 1 after)) (1+ clean) 0) tries (1+ tries))
+                   (when (>= clean 2) (setq result (list (- (car after) (car before)) (nth 2 after)))))))
+             result))");
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shown = vm.eval_source(&PRELUDE.replace("EXPR", &expression)).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{fixture}: {e:?}"));
+        assert_eq!(shown, "(0 0)", "{fixture}: leaf scans a warm round added, leaves ever scanned outside a summary");
+    }
+}
+
 /// Two tables holding one sub-char-table: a write through either changes
 /// both, so summaries read under the other are not used again.
 #[test]
@@ -225,7 +256,10 @@ fn propertizing_parses_match_pinned_gnu() {
 /// A hundred `syntax-table' properties put near the end between two
 /// parses, each second one making a `(' punctuation: more ranges than the
 /// change log keeps apart, so it holds their hull. The values are GNU's,
-/// and the leaves before the first property keep their summaries.
+/// and the leaves before the first property keep their summaries. The one
+/// leaf the hull drops before the scanned tail is summarized twice: with
+/// its `(' punctuation its `)' close past the bottom level, so its general
+/// summary does not fit and an exact one is made for its level count.
 #[test]
 fn property_changes_near_the_end_keep_the_summaries_before_them() {
     const CASE: &str = r#"(with-temp-buffer
@@ -247,7 +281,7 @@ fn property_changes_near_the_end_keep_the_summaries_before_them() {
         (setq counts (list (plist-get (romacs-syntax-summaries-stats) :leaves) (- (plist-get (romacs-syntax-summaries-stats) :leaf-scans) scans)
                            (plist-get (romacs-syntax-summaries-stats) :log-overflows) (plist-get (romacs-syntax-summaries-stats) :context-switches))))");
     let counts = undisturbed(&format!("(let ((counts nil)) {} counts)", CASE.replace("SECOND", &counted)));
-    assert_eq!(counts, "(69 1 1)", "leaves, leaves the second parse summarized again, hulls taken");
+    assert_eq!(counts, "(69 2 1)", "leaves, summaries the second parse made again, hulls taken");
 }
 
 /// What EXPRESSION shows, a list whose last element is its buffer's count

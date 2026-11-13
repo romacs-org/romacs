@@ -10,7 +10,7 @@ import render_replay
 
 
 class ReplayRenderingTests(unittest.TestCase):
-    def test_rendering_changes_only_the_import_and_display_api(self):
+    def test_rendering_changes_only_the_import_display_api_and_location_check(self):
         for family in ("primh", "varh"):
             with self.subTest(family=family), tempfile.TemporaryDirectory() as directory:
                 harness = render_replay.load_harness(family)
@@ -21,8 +21,11 @@ class ReplayRenderingTests(unittest.TestCase):
                 original = out.read_text()
                 render_replay.render(family, specs, str(out))
                 expected = original.replace("use romacs_vm2::Vm;", "use romacs_vm::Vm;", 1)
+                expected = expected.replace(render_replay.PINNED_LINE, render_replay.FILE_ONLY, 1)
                 expected = expected.replace("vm.display(v)", "v.display()")
                 self.assertEqual(out.read_text(), expected)
+                if family == "primh":
+                    self.assertIn(render_replay.FILE_ONLY, out.read_text())
                 self.assertIn("use romacs_vm::Vm;", out.read_text())
 
     def test_original_template_hash_and_unrelated_edit_refusal(self):
