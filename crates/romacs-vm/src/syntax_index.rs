@@ -101,8 +101,10 @@ pub(crate) struct Stats {
     pub composed: u64,
     /// Contexts changed.
     pub switches: u64,
+    /// Takes of the property change log that found it a hull.
+    pub log_overflows: u64,
 }
-romacs_snapshot::snapshot_struct!(Stats { served, declined, leaf_scans, plain_leaves, composed, switches });
+romacs_snapshot::snapshot_struct!(Stats { served, declined, leaf_scans, plain_leaves, composed, switches, log_overflows });
 
 /// Why a parse took the plain scanner.
 #[derive(Clone, Copy, Debug)]
