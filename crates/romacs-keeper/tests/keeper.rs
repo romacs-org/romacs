@@ -14,6 +14,10 @@ use romacs_keeper::spawn::{End, Spec, Status};
 use romacs_keeper::{proto, Client, Event};
 use romacs_record::ClassRange;
 
+fn kill(pid: u32, signal: rustix::process::Signal) {
+    rustix::process::kill_process(rustix::process::Pid::from_raw(pid.cast_signed()).unwrap(), signal).unwrap();
+}
+
 const KEEPER: &str = env!("CARGO_BIN_EXE_romacs-keeper");
 
 const NEXT: &str = env!("CARGO_BIN_EXE_romacs-keeper-test-next");
@@ -224,8 +228,7 @@ fn a_stopped_predecessor_is_killed_before_its_descriptors_are_handed_on() {
     let keeper = Fixture::start(60_000);
     let mut old = keeper.session();
     let (handle, _) = old.spawn("sleep 600");
-    // SAFETY: kill takes a pid and a signal; the pid is this test's child.
-    unsafe { libc::kill(old.pid.cast_signed(), libc::SIGSTOP) };
+    kill(old.pid, rustix::process::Signal::STOP);
     let mut successor = keeper.client();
     let refused = successor.claim(handle, 0).unwrap_err();
     assert!(refused.contains(&format!("owned by session {}", old.pid)), "{refused}");
@@ -370,8 +373,7 @@ fn the_keepers_death_is_reported_by_pid() {
     let keeper = Fixture::start(60_000);
     let mut client = keeper.client();
     let pid = client.info().unwrap().pid;
-    // SAFETY: kill takes a pid and a signal.
-    unsafe { libc::kill(pid.cast_signed(), libc::SIGKILL) };
+    kill(pid, rustix::process::Signal::KILL);
     assert_eq!(client.list().unwrap_err(), format!("the keeper (pid {pid}) of this session is gone"));
 }
 

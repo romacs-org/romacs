@@ -3,13 +3,21 @@
 //! Single-threaded, and never blocked on a session: sockets are
 //! nonblocking, replies queue, and a session that does not read only
 //! stalls itself. The keeper never reads or writes a kept descriptor.
+//!
+//! Its system calls go through rustix, but for two that no crate in the
+//! lock file covers safely: the SIGCHLD signalfd with its blocked mask
+//! ([`child_signals`]), and the peer's pidfd by `SO_PEERPIDFD` ([`peer`]),
+//! an option rustix does not have.
 
 use std::collections::VecDeque;
 use std::io;
-use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 use romacs_record::{channel, hello, Decoder, Handle, Hello, Reader, Record, Writer};
+use rustix::event::{PollFd, PollFlags, Timespec};
+use rustix::io::FdFlags;
+use rustix::process::{PidfdFlags, Resource, Signal};
 
 use crate::proto::{self, count, kind};
 use crate::spawn::{self, Spec, Status, Whom};
@@ -68,6 +76,8 @@ fn os(result: libc::c_int) -> io::Result<libc::c_int> {
 }
 
 /// A descriptor that reads when SIGCHLD arrives; the signal stays blocked.
+/// Direct calls: rustix has no signalfd, and changes the signal mask and a
+/// disposition only through unsafe runtime functions.
 fn child_signals() -> io::Result<OwnedFd> {
     // SAFETY: the set is initialised by sigemptyset before use; the calls
     // take it by pointer for their duration. signalfd returns a new
@@ -84,31 +94,35 @@ fn child_signals() -> io::Result<OwnedFd> {
 
 /// The process at the other end of SOCKET: its pid and a pidfd for it.
 fn peer(socket: &UnixStream) -> io::Result<(i32, OwnedFd)> {
-    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
-    let mut pidfd: RawFd = -1;
-    // SAFETY: each getsockopt writes at most the stated size into a local
-    // of that size. SO_PEERPIDFD returns a new descriptor owned here; the
-    // fallback opens the peer's pid, which the kernel recorded at connect.
-    unsafe {
-        let mut len: libc::socklen_t = 12;
-        os(libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut cred).cast(), &raw mut len))?;
-        let mut len: libc::socklen_t = 4;
-        if libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD, (&raw mut pidfd).cast(), &raw mut len) != 0 {
-            pidfd = RawFd::try_from(libc::syscall(libc::SYS_pidfd_open, cred.pid, 0)).ok().filter(|fd| *fd >= 0).ok_or_else(io::Error::last_os_error)?;
-        }
-        Ok((cred.pid, OwnedFd::from_raw_fd(pidfd)))
+    let pid = rustix::net::sockopt::socket_peercred(socket)?.pid;
+    // The pidfd the kernel made at connect, or else one opened on the pid
+    // it recorded then.
+    match peer_pidfd(socket) {
+        Some(pidfd) => Ok((pid.as_raw_nonzero().get(), pidfd)),
+        None => Ok((pid.as_raw_nonzero().get(), rustix::process::pidfd_open(pid, PidfdFlags::empty())?)),
     }
 }
 
-fn readable(fd: RawFd, timeout_ms: i32) -> bool {
-    let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-    // SAFETY: poll reads and writes the one pollfd it is given.
-    unsafe { libc::poll(&raw mut poll, 1, timeout_ms) > 0 }
+/// `SO_PEERPIDFD`, which rustix does not have: `None` on a kernel without it.
+fn peer_pidfd(socket: &UnixStream) -> Option<OwnedFd> {
+    let mut pidfd: RawFd = -1;
+    let mut len: libc::socklen_t = 4;
+    // SAFETY: getsockopt writes at most LEN bytes into PIDFD, an int of
+    // that size; on success it is a new descriptor owned here alone.
+    unsafe {
+        let got = libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD, (&raw mut pidfd).cast(), &raw mut len);
+        (got == 0 && pidfd >= 0).then(|| OwnedFd::from_raw_fd(pidfd))
+    }
 }
 
-fn set_cloexec(fd: RawFd, on: bool) {
-    // SAFETY: F_SETFD sets a flag on a descriptor this process holds.
-    unsafe { libc::fcntl(fd, libc::F_SETFD, if on { libc::FD_CLOEXEC } else { 0 }) };
+fn timeout(ms: i32) -> Timespec { Timespec { tv_sec: i64::from(ms / 1000), tv_nsec: i64::from(ms % 1000) * 1_000_000 } }
+
+fn readable(fd: BorrowedFd<'_>, timeout_ms: i32) -> bool {
+    rustix::event::poll(&mut [PollFd::new(&fd, PollFlags::IN)], Some(&timeout(timeout_ms))).is_ok_and(|ready| ready > 0)
+}
+
+fn set_cloexec(fd: BorrowedFd<'_>, on: bool) {
+    let _ = rustix::io::fcntl_setfd(fd, if on { FdFlags::CLOEXEC } else { FdFlags::empty() });
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -129,17 +143,11 @@ impl Keeper {
     pub fn new(mut table: Table, build: Build) -> io::Result<Self> {
         let listener = UnixListener::from(table.listener.take().ok_or(io::ErrorKind::InvalidInput)?);
         listener.set_nonblocking(true)?;
-        // SAFETY: prctl with integer arguments: orphaned descendants are
-        // reparented to this process, which reaps them.
-        unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
-        let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        // SAFETY: getrlimit fills the struct; setrlimit reads it.
-        unsafe {
-            if libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) == 0 {
-                limit.rlim_cur = limit.rlim_max;
-                libc::setrlimit(libc::RLIMIT_NOFILE, &raw const limit);
-            }
-        }
+        // Orphaned descendants are reparented to this process, which reaps them.
+        let _ = rustix::process::set_child_subreaper(Some(rustix::process::getpid()));
+        let mut limit = rustix::process::getrlimit(Resource::Nofile);
+        limit.current = limit.maximum;
+        let _ = rustix::process::setrlimit(Resource::Nofile, limit);
         if table.idle_ms == 0 { table.idle_ms = DEFAULT_IDLE_MS; }
         let mut keeper = Self { table, listener, conns: Vec::new(), signals: child_signals()?, build,
                                 exe_hash: executable_hash(std::path::Path::new("/proc/self/exe")), idle_since: now_ms(), stop: false };
@@ -163,35 +171,29 @@ impl Keeper {
     }
 
     fn wait(&mut self, timeout_ms: i32) {
-        let mut polls = vec![
-            libc::pollfd { fd: self.listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
-            libc::pollfd { fd: self.signals.as_raw_fd(), events: libc::POLLIN, revents: 0 },
-        ];
-        polls.extend(self.conns.iter().map(|c| libc::pollfd {
-            fd: c.socket.as_raw_fd(), events: libc::POLLIN | if c.out.is_empty() { 0 } else { libc::POLLOUT }, revents: 0,
-        }));
-        let sessions: Vec<u64> = self.table.attachments.iter().filter(|(_, a)| a.pidfd.is_some()).map(|(id, _)| *id).collect();
-        polls.extend(sessions.iter().map(|id| libc::pollfd {
-            fd: self.table.attachments[id].pidfd.as_ref().map_or(-1, AsRawFd::as_raw_fd), events: libc::POLLIN, revents: 0,
-        }));
-        // SAFETY: poll reads and writes the vector's pollfds, whose count is given.
-        if unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as libc::nfds_t, timeout_ms) } <= 0 { return; }
-        let ready = |poll: &libc::pollfd| poll.revents != 0;
+        let sessions: Vec<(u64, BorrowedFd<'_>)> = self.table.attachments.iter()
+            .filter_map(|(id, a)| a.pidfd.as_ref().map(|pidfd| (*id, pidfd.as_fd()))).collect();
+        let mut polls = vec![PollFd::new(&self.listener, PollFlags::IN), PollFd::new(&self.signals, PollFlags::IN)];
+        polls.extend(self.conns.iter().map(|c| PollFd::new(&c.socket, if c.out.is_empty() { PollFlags::IN } else { PollFlags::IN | PollFlags::OUT })));
+        polls.extend(sessions.iter().map(|(_, pidfd)| PollFd::new(pidfd, PollFlags::IN)));
+        if !rustix::event::poll(&mut polls, Some(&timeout(timeout_ms))).is_ok_and(|ready| ready > 0) { return; }
+        let revents: Vec<PollFlags> = polls.iter().map(PollFd::revents).collect();
+        let sessions: Vec<u64> = sessions.into_iter().map(|(id, _)| id).collect();
+        let ready = |index: usize| !revents[index].is_empty();
         let count = self.conns.len();
         for (index, id) in sessions.iter().enumerate() {
-            if ready(&polls[2 + count + index]) { self.session_ended(*id); }
+            if ready(2 + count + index) { self.session_ended(*id); }
         }
         for index in 0..count {
-            if polls[2 + index].revents & libc::POLLOUT != 0 { self.flush(index); }
-            if polls[2 + index].revents & !libc::POLLOUT != 0 && !self.conns[index].dead { self.read(index); }
+            if revents[2 + index].contains(PollFlags::OUT) { self.flush(index); }
+            if !revents[2 + index].difference(PollFlags::OUT).is_empty() && !self.conns[index].dead { self.read(index); }
         }
-        if ready(&polls[1]) {
+        if ready(1) {
             let mut buffer = [0u8; 512];
-            // SAFETY: reading into a local buffer of the stated size.
-            while unsafe { libc::read(self.signals.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) } > 0 {}
+            while rustix::io::read(&self.signals, &mut buffer).is_ok_and(|read| read > 0) {}
             self.reap();
         }
-        if ready(&polls[0]) { self.accept(); }
+        if ready(0) { self.accept(); }
         self.conns.retain(|c| !c.dead);
     }
 
@@ -460,9 +462,8 @@ impl Keeper {
             if *pid != supersedes {
                 return Err(format!("handle {handle} is owned by session {pid}, which is alive"));
             }
-            // SAFETY: pidfd_send_signal with a pidfd this table owns and a null siginfo.
-            unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), libc::SIGKILL, std::ptr::null::<libc::siginfo_t>(), 0) };
-            if !readable(pidfd.as_raw_fd(), GRACE) {
+            let _ = rustix::process::pidfd_send_signal(pidfd, Signal::KILL);
+            if !readable(pidfd.as_fd(), GRACE) {
                 return Err(format!("session {pid}, which owns handle {handle}, did not die"));
             }
             killed = Some(owner);
@@ -570,11 +571,10 @@ pub fn fresh(path: &std::path::Path) -> io::Result<Table> {
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
     let mut entropy = [0u8; 8];
-    // SAFETY: getrandom fills the eight-byte buffer it is given.
-    unsafe { libc::getrandom(entropy.as_mut_ptr().cast(), 8, 0) };
+    let _ = rustix::rand::getrandom(&mut entropy, rustix::rand::GetRandomFlags::empty());
     Ok(Table { epoch: u64::from_ne_bytes(entropy) | 1, listener: Some(listener.into()), socket_path: path.as_os_str().as_encoded_bytes().to_vec(),
                idle_ms: DEFAULT_IDLE_MS, ..Table::default() })
 }
 
-pub(crate) fn clear_cloexec(fds: &[RawFd]) { for fd in fds { set_cloexec(*fd, false); } }
-pub(crate) fn restore_cloexec(fds: &[RawFd]) { for fd in fds { set_cloexec(*fd, true); } }
+pub(crate) fn clear_cloexec(fds: &[BorrowedFd<'_>]) { for fd in fds { set_cloexec(*fd, false); } }
+pub(crate) fn restore_cloexec(fds: &[BorrowedFd<'_>]) { for fd in fds { set_cloexec(*fd, true); } }

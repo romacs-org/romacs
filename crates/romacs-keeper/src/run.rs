@@ -11,7 +11,7 @@
 //! keeper's life, and a second keeper for the same path exits at once.
 
 use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -34,15 +34,19 @@ pub fn socket_path(runtime: &Path, name: &str) -> Result<PathBuf, String> {
 /// another holds it. The table keeps the descriptor, across an exec too.
 fn lock(socket: &Path) -> std::io::Result<Option<OwnedFd>> {
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(socket.with_extension("lock"))?;
-    // SAFETY: flock takes a descriptor this process holds and integers.
-    let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
-    Ok(taken.then(|| file.into()))
+    // An exclusive flock, without waiting.
+    Ok(file.try_lock().is_ok().then(|| file.into()))
 }
 
 /// Leave the starting process: a new session, no terminal, directory `/`,
 /// no environment, no standard streams. Returns in the detached child with
 /// the pipe on which it reports that it listens; the parent waits for that
 /// report and exits.
+///
+/// `fork`, `clearenv` and `_exit` are direct calls: rustix has them only
+/// as unsafe runtime functions; std's `remove_var` is unsafe too, and
+/// std's `exit` runs the C library's exit handlers in a parent that
+/// shares them with the child.
 fn detach() -> std::io::Result<std::fs::File> {
     let (mut ready, report) = std::io::pipe()?;
     // SAFETY: fork at startup, before any thread exists; the child goes on
@@ -52,13 +56,13 @@ fn detach() -> std::io::Result<std::fs::File> {
         0 => {
             drop(ready);
             let null = std::fs::OpenOptions::new().read(true).write(true).open("/dev/null")?;
-            // SAFETY: setsid, dup2 over the standard streams and clearenv,
-            // in a single-threaded process that owns them all.
-            unsafe {
-                libc::setsid();
-                for fd in 0..3 { libc::dup2(null.as_raw_fd(), fd); }
-                libc::clearenv();
-            }
+            let _ = rustix::process::setsid();
+            let _ = rustix::stdio::dup2_stdin(&null);
+            let _ = rustix::stdio::dup2_stdout(&null);
+            let _ = rustix::stdio::dup2_stderr(&null);
+            // SAFETY: clearenv in a single-threaded process: nothing else
+            // reads the environment while it is emptied.
+            unsafe { libc::clearenv() };
             std::env::set_current_dir("/")?;
             Ok(std::fs::File::from(OwnedFd::from(report)))
         }
@@ -108,6 +112,8 @@ pub fn main(build: Build) -> ExitCode {
     } else if let Some(table) = fd("--resume") {
         // SAFETY: `--resume` is passed only by `exec::exec`, which leaves
         // exactly the table's descriptors, the table and the fallback open.
+        // They are inherited by number, which only an unsafe adoption can
+        // own (`exec::resume`).
         unsafe { crate::exec::resume(table, fd("--fallback"), build) }.and_then(|table| serve(table, build))
     } else if let Some(socket) = value("--socket") {
         start(Path::new(&socket), args.iter().any(|a| a == "--foreground"), value("--idle-ms").and_then(|v| v.parse().ok()), build)

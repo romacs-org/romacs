@@ -87,11 +87,6 @@ impl Size {
     }
 }
 
-unsafe extern "C" {
-    fn pidfd_open(pid: i32, flags: u32) -> i32;
-    fn pidfd_send_signal(fd: i32, signal: i32, info: *const std::ffi::c_void, flags: u32) -> i32;
-}
-
 /// The pty, the shell and the emulator.
 struct Terminal {
     term: Arc<FairMutex<Term<Listener>>>,
@@ -156,22 +151,15 @@ impl Terminal {
                                      drain_on_exit: true, env };
         let pty = match kept {
             Some((master, slave)) => {
-                use std::os::fd::AsRawFd;
-                let window = libc::winsize { ws_col: size.0, ws_row: size.1, ws_xpixel: 0, ws_ypixel: 0 };
-                // SAFETY: TIOCSWINSZ reads a winsize that outlives the call,
-                // on a pty master this process was handed.
-                unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &raw const window) };
+                let _ = rustix::termios::tcsetwinsize(&master, rustix::termios::Winsize { ws_row: size.1, ws_col: size.0, ws_xpixel: 0, ws_ypixel: 0 });
                 tty::from_fd(&options, 0, master, slave)
             }
             None => tty::new(&options, size.window(), 0),
         }.map_err(|e| e.to_string())?;
         let shell_pid = pty.child().id().cast_signed();
         let foreground = pty.file().try_clone().ok().map(|master| (master, shell_pid));
-        // SAFETY: pidfd_open takes a scalar child PID and zero flags, with no pointers.
-        let fd = unsafe { pidfd_open(shell_pid, 0) };
-        if fd < 0 { return Err(std::io::Error::last_os_error().to_string()); }
-        // SAFETY: successful pidfd_open returned a new descriptor owned by this scope.
-        let child = unsafe { OwnedFd::from_raw_fd(fd) };
+        let shell_id = rustix::process::Pid::from_raw(shell_pid).ok_or("the shell has no pid")?;
+        let child = rustix::process::pidfd_open(shell_id, rustix::process::PidfdFlags::empty()).map_err(|e| e.to_string())?;
         let event_loop = EventLoop::new(term.clone(), listener, pty, true, false).map_err(|e| e.to_string())?;
         let channel = event_loop.channel();
         let handle = event_loop.spawn();
@@ -270,17 +258,17 @@ impl Terminal {
 
     /// Hang the shell up, and kill it if it stays.
     fn shutdown(&mut self) {
-        use std::os::fd::AsRawFd;
+        use rustix::process::{Signal, pidfd_send_signal};
         let Some(child) = self.child.take() else { return };
-        // SAFETY: the owned pidfd targets this child without PID reuse; null siginfo and
-        // zero flags pass no userspace memory. HUP lets the shell retire its own jobs.
-        unsafe { pidfd_send_signal(child.as_raw_fd(), 1, std::ptr::null(), 0); }
+        // The owned pidfd targets this child without PID reuse. HUP lets
+        // the shell retire its own jobs.
+        let _ = pidfd_send_signal(&child, Signal::HUP);
         // A second for the shell to pass the hangup on to its jobs: this
         // is the helper's own end, and holds up no session.
         if self.finished.recv_timeout(std::time::Duration::from_secs(1)).is_err() {
-            // SAFETY: the pidfd is still owned here, so escalation cannot
-            // target a later process even if the child has already exited.
-            unsafe { pidfd_send_signal(child.as_raw_fd(), 9, std::ptr::null(), 0); }
+            // The pidfd is still owned here, so escalation cannot target a
+            // later process even if the child has already exited.
+            let _ = pidfd_send_signal(&child, Signal::KILL);
             let _ = self.channel.send(Msg::Shutdown);
             let _ = self.finished.recv_timeout(std::time::Duration::from_millis(500));
         }
@@ -346,6 +334,9 @@ fn listen(id: u64, stream: UnixStream, wake: crossbeam_channel::Sender<Wake>) {
 /// # Errors
 /// No control socket at descriptor 3.
 pub fn run(shell: &str) -> Result<(), String> {
+    // Descriptors inherited by number are adopted directly: no safe API
+    // can own a descriptor it did not open, and asking whether 4 is open
+    // at all takes a raw `fcntl`, as rustix's asks for one already owned.
     // SAFETY: a helper is started with its control socket at descriptor 3
     // (`CONTROL`), which nothing else in this process owns.
     let control = UnixStream::from(unsafe { OwnedFd::from_raw_fd(CONTROL) });

@@ -35,6 +35,7 @@ doc = false
 [dependencies]
 libc.workspace = true
 romacs-record = { path = "../romacs-record" }
+rustix = { workspace = true, features = ["fs", "net", "pipe", "process", "pty", "rand", "stdio", "termios"] }
 
 [lints]
 workspace = true
