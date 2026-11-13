@@ -1,19 +1,15 @@
 use std::time::{Duration, Instant};
 use romacs_display_runtime::thread_comm::InputEvent;
 
-pub fn take_pending(
-    pending: &mut std::collections::VecDeque<InputEvent>,
-) -> std::collections::vec_deque::IntoIter<InputEvent> {
-    std::mem::take(pending).into_iter()
-}
-
-pub fn take_batch(
-    pending: &mut std::collections::VecDeque<InputEvent>,
+/// A pass's input: the AVAILABLE events of INCOMING that arrived before it
+/// join the loop's QUEUE; later arrivals wait for the next pass, so input
+/// that keeps coming never postpones a dirty presentation.
+pub fn admit(
+    queue: &mut std::collections::VecDeque<InputEvent>,
     incoming: impl Iterator<Item = InputEvent>,
     available: usize,
-) -> std::collections::vec_deque::IntoIter<InputEvent> {
-    pending.extend(incoming.take(available));
-    take_pending(pending)
+) {
+    queue.extend(incoming.take(available));
 }
 
 /// How long a submitted paint may go undrawn before the render counts as
@@ -241,8 +237,9 @@ mod tests {
         let mut pending = std::collections::VecDeque::new();
         let mut presentation = Presentation::new();
         let mut arrivals = std::iter::repeat_with(|| native_key(97));
-        let batch = take_batch(&mut pending, &mut arrivals, 3);
-        assert_eq!(batch.count(), 3);
+        admit(&mut pending, &mut arrivals, 3);
+        assert_eq!(pending.len(), 3);
+        pending.clear();
         presentation.changed();
         pending.push_back(arrivals.next().unwrap());
         let mut submissions = 0;
@@ -263,8 +260,7 @@ mod tests {
         let mut presentation = Presentation::new();
         presentation.submitted(1, Instant::now());
         let collections = vm.heap_stats().collections;
-        let mut pending = ['a' as i64, 'Δ' as i64, 2, 'λ' as i64].into_iter().map(native_key).collect();
-        for event in take_pending(&mut pending) {
+        for event in ['a' as i64, 'Δ' as i64, 2, 'λ' as i64].into_iter().map(native_key) {
             let event = crate::native::translate(event).unwrap();
             let outcome = presentation.command(&mut vm, &mut commands, event).unwrap().unwrap();
             assert!(!outcome.bell, "{outcome:?}");

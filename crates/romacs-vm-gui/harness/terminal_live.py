@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -355,86 +354,58 @@ def main():
                         help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
     parser.add_argument('--history-buffers', action='store_true',
                         help='M-p recalls the shell history; numeric prefixes choose the terminal')
-    parser.add_argument('--labwc', default=live.LABWC)
-    parser.add_argument('--wlr-randr', default=live.RANDR)
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     binary = args.binary.resolve()
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
-              'captures': [], 'checks': [], 'scope': 'private software-rendered native keyboard; shell text projection'}
-    compositor = keyboard = process = None
+              'status': 'FAIL', 'captures': [], 'checks': [],
+              'scope': 'private software-rendered native keyboard; shell text projection'}
     background_pid = None
-    temporary = None
-    try:
-        with tempfile.TemporaryDirectory(prefix='term-live-', delete=False) as temporary:
-            root = Path(temporary)
-            root.chmod(0o700)
-            home = root / 'home'
-            work = root / 'work'
-            config = root / 'config'
-            for directory in (home, work, config):
-                directory.mkdir()
-            original = work / 'original.txt'
-            original.write_text('Terminal safety sentinel\n')
-            if args.editor_prefix:
-                (work / 'record-keys.py').write_text(
-                    "import os, pathlib, termios, tty\n"
-                    "saved = termios.tcgetattr(0)\n"
-                    "data = bytearray()\n"
-                    "try:\n"
-                    "    tty.setraw(0)\n"
-                    "    os.write(1, b'\\r\\nRAW_KEYS_READY\\r\\n')\n"
-                    "    while not data.endswith(b'TERMINAL_ONLY\\r'):\n"
-                    "        data.extend(os.read(0, 4096))\n"
-                    "        pathlib.Path('terminal-keys').write_bytes(data)\n"
-                    "finally:\n"
-                    "    termios.tcsetattr(0, termios.TCSANOW, saved)\n"
-                    "print('\\nRAW_KEYS_DONE', flush=True)\n")
-            for number in range(24):
-                (work / f'ls-entry-{number:02}').write_text('listing fixture\n')
-            (work / 'interrupt.py').write_text(
-                "import pathlib, signal, time\n"
-                "def interrupted(*_):\n"
-                "    pathlib.Path('interrupt').write_text('interrupt')\n"
-                "    raise SystemExit(0)\n"
-                "signal.signal(signal.SIGINT, interrupted)\n"
-                "pathlib.Path('sleep-ready').write_text('ready')\n"
-                "while True: time.sleep(1)\n")
-            (config / 'rc.xml').write_text(live.RC_XML.replace('</labwc_config>',
-                '<keyboard><keybind key="A-F4"><action name="Close"/></keybind></keyboard></labwc_config>'))
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-                   'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-                   'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-                   'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-                   'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-                   'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
-                   'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20',
-                   'SHELL': os.environ.get('SHELL') or '/bin/sh'}
-            log_path = output / 'binary.stderr'
-            with (output / 'compositor.log').open('w') as compositor_log, log_path.open('w') as log:
-                compositor = subprocess.Popen([args.labwc, '-C', str(config)], env=env,
-                                              stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), args.timeout,
-                         'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                subprocess.run([args.wlr_randr, '--output', 'HEADLESS-1', '--custom-mode', '2532x1347'],
-                               env=env, check=True, timeout=15)
-                keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '120000', '-k', 'Shift_L'], env=env,
-                                            stdout=log, stderr=log)
-                time.sleep(.3)
-                # The leave journey needs GNU's Lisp (isearch, M-w), as a
-                # daily session has it.
-                flags = ['--loadup'] if args.prompt_grow or args.leave or args.history_buffers else []
-                if args.prompt_grow:
-                    # The minibuffer must grow over the terminal: fido-vertical's
-                    # display, not the default layer (VM2-COMPLETE-DEFAULT).
-                    (home / 'config' / 'romacs').mkdir(parents=True, exist_ok=True)
-                    (home / 'config' / 'romacs' / 'init.el').write_text(
-                        "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n")
-                process = subprocess.Popen([str(binary), *flags, '--trace-scene', str(original)], env=env, cwd=work,
-                                           stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
+    def prepare(s):
+        work = s.work
+        (work / 'original.txt').write_text('Terminal safety sentinel\n')
+        if args.editor_prefix:
+            (work / 'record-keys.py').write_text(
+                "import os, pathlib, termios, tty\n"
+                "saved = termios.tcgetattr(0)\n"
+                "data = bytearray()\n"
+                "try:\n"
+                "    tty.setraw(0)\n"
+                "    os.write(1, b'\\r\\nRAW_KEYS_READY\\r\\n')\n"
+                "    while not data.endswith(b'TERMINAL_ONLY\\r'):\n"
+                "        data.extend(os.read(0, 4096))\n"
+                "        pathlib.Path('terminal-keys').write_bytes(data)\n"
+                "finally:\n"
+                "    termios.tcsetattr(0, termios.TCSANOW, saved)\n"
+                "print('\\nRAW_KEYS_DONE', flush=True)\n")
+        for number in range(24):
+            (work / f'ls-entry-{number:02}').write_text('listing fixture\n')
+        (work / 'interrupt.py').write_text(
+            "import pathlib, signal, time\n"
+            "def interrupted(*_):\n"
+            "    pathlib.Path('interrupt').write_text('interrupt')\n"
+            "    raise SystemExit(0)\n"
+            "signal.signal(signal.SIGINT, interrupted)\n"
+            "pathlib.Path('sleep-ready').write_text('ready')\n"
+            "while True: time.sleep(1)\n")
+
+    rc_xml = live.RC_XML.replace('</labwc_config>',
+        '<keyboard><keybind key="A-F4"><action name="Close"/></keybind></keyboard></labwc_config>')
+    # The leave journey needs GNU's Lisp (isearch, M-w), as a
+    # daily session has it.
+    flags = ['--loadup'] if args.prompt_grow or args.leave or args.history_buffers else []
+    # The minibuffer must grow over the terminal: fido-vertical's
+    # display, not the default layer (VM2-COMPLETE-DEFAULT).
+    init = "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n" if args.prompt_grow else None
+    env = {'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': os.environ.get('SHELL') or '/bin/sh'}
+    try:
+        with live.session(binary, output, prefix='term-live-', init=init, args=(*flags, '--trace-scene', 'original.txt'),
+                          rc_xml=rc_xml, env=env, size='2532x1347', prepare=prepare, report=report) as s:
+            env, process, work, log_path = s.env, s.process, s.work, s.log
+            original = work / 'original.txt'
+            try:
                 def trace():
                     return log_path.read_text(errors='replace')
 
@@ -608,21 +579,15 @@ def main():
                 report['checks'].append('CONFIRMED_CLOSE_RETIRES_BACKGROUND_JOB')
                 report.update(status='PASS', exit=process.returncode, original_file_unchanged=True,
                               child_result=result.read_text(), actual_interrupt=interrupt.read_text())
-    except Exception as error:
-        report.update(status='FAIL', error=repr(error))
+            finally:
+                # A shell job the journey left behind, before the session ends.
+                if background_pid is not None and process_running(background_pid):
+                    command_line = Path(f'/proc/{background_pid}/cmdline').read_bytes()
+                    if command_line.startswith(b'sleep\x007777\x00'):
+                        os.kill(background_pid, 9)
     finally:
-        if background_pid is not None and process_running(background_pid):
-            command_line = Path(f'/proc/{background_pid}/cmdline').read_bytes()
-            if command_line.startswith(b'sleep\x007777\x00'):
-                os.kill(background_pid, 9)
-        for child in (process, keyboard, compositor):
-            live.stop(child)
-        try:
-            (output / 'report.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
-            (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
-            print(json.dumps(report, ensure_ascii=False))
-        finally:
-            live.remove_root(temporary)
+        (output / 'INDEX.txt').write_text('\n'.join(c['name'] + '.png' for c in report['captures']) + '\n')
+        print(json.dumps(report, ensure_ascii=False))
     return 0 if report.get('status') == 'PASS' else 1
 
 

@@ -15,6 +15,10 @@
   (require 'romacs-agent-t3)
   (require 'romacs-mcp-session))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 ;;; The user's own errors
 
 (ert-deftest romacs-mcp-dogfood-user-errors-apart ()
@@ -24,8 +28,7 @@
   (dolist (data '((error "Real fault") (wrong-type-argument listp 1) (void-function nosuch) (file-missing "x")))
     (should-not (romacs-usage-log-user-error-p data)))
   ;; The session's last error is the last fault; the user's own apart.
-  (let ((romacs-mcp-session--last-error nil) (romacs-mcp-session--last-user-error nil)
-        (romacs-mcp-session--previous-command-error #'ignore))
+  (let ((romacs-mcp-session--last-error nil) (romacs-mcp-session--last-user-error nil))
     (romacs-mcp-session--command-error '(wrong-type-argument listp 1) nil nil)
     (romacs-mcp-session--command-error '(beginning-of-buffer) nil nil)
     (should (string-match-p "wrong-type-argument" (gethash "data" romacs-mcp-session--last-error)))
@@ -46,6 +49,25 @@
             (should (eq (plist-get (nth 0 records) :user) t))
             (should-not (plist-member (nth 1 records) :user))))
       (delete-file file))))
+
+;;; Every recorder of a command error runs once around one report
+
+(ert-deftest romacs-mcp-dogfood-command-error-recorders-compose ()
+  ;; The session tools enabled again after the usage log advised the report
+  ;; once made the report call itself, until `max-lisp-eval-depth' ended the
+  ;; command: each recorder now runs once, and the report once.
+  (let* ((reports 0) (logged 0) (recorded 0)
+         (command-error-function (lambda (&rest _) (cl-incf reports)))
+         (romacs-mcp-session--error-count 0)
+         (romacs-mcp-session--last-error nil) (romacs-mcp-session--last-user-error nil))
+    (cl-letf (((symbol-function 'romacs-usage-log--command-error) (lambda (&rest _) (cl-incf logged))))
+      (romacs-mcp-enable-session-tools)
+      (add-function :before command-error-function #'romacs-usage-log--command-error)
+      (romacs-mcp-enable-session-tools)
+      (funcall command-error-function '(end-of-buffer) nil nil)
+      (setq recorded romacs-mcp-session--error-count))
+    (should (equal (list reports logged recorded) '(1 1 1)))
+    (should (string-match-p "end-of-buffer" (gethash "data" romacs-mcp-session--last-user-error)))))
 
 ;;; What observe lists
 
