@@ -15,21 +15,19 @@ struct Work {
     converted: usize,
     /// Strings copied to be read.
     copied: usize,
-    /// Syntax-table entries a scan read from a table.
+    /// Syntax-table entries read from a table's nodes or rows, not from
+    /// its flat view (`char_table::flat`) kept between calls.
     table_reads: usize,
-    /// Syntax reads a scan kept for a rerun.
-    recorded: usize,
 }
 
 fn work() -> Work {
-    let (table_reads, recorded) = crate::prim::scan_work();
+    let [single, rows] = crate::char_table::reads();
     Work {
         names: crate::prim::name_lookups(),
         variables: crate::variable_runtime::variable_reads(),
         converted: super::CONVERTED.with(std::cell::Cell::get),
         copied: super::COPIED.with(std::cell::Cell::get),
-        table_reads,
-        recorded,
+        table_reads: single + rows,
     }
 }
 
@@ -73,7 +71,6 @@ fn repeated(vm: &mut Vm, body: &str) -> (String, Work) {
         converted: after.converted - before.converted,
         copied: after.copied - before.copied,
         table_reads: after.table_reads - before.table_reads,
-        recorded: after.recorded - before.recorded,
     };
     (value, spent)
 }
@@ -147,7 +144,6 @@ fn a_scan_reads_its_variables_and_its_table_once() {
         assert_eq!(value, expected, "{body}");
         assert!(spent.variables <= ONCE && spent.names <= ONCE, "{body}: {spent:?}");
         assert!(spent.table_reads <= ONCE, "{body}: {spent:?}");
-        assert_eq!(spent.recorded, 0, "{body}: nothing stops this scan, so nothing is kept for a rerun: {spent:?}");
     }
 }
 

@@ -4,9 +4,9 @@
 //! the counter fails these tests: they never pass unmeasured.
 //!
 //! Each test runs alone (`alone`), in an executable of its own
-//! (`all/standalone.txt`): a search's syntax memo keys on the char-table
-//! writes of the whole process, so another test's write renews it in the
-//! middle of a measurement.
+//! (`all/standalone.txt`): a syntax table's flat view keys on the
+//! char-table writes of the whole process, so another test's write renews
+//! it in the middle of a measurement.
 use romacs_vm::Vm;
 
 /// Held for a whole test, so no other test of this file writes a char table

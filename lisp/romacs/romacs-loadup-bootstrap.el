@@ -41,6 +41,9 @@ and the reader use by default.")
 (load "custom.el" nil t t)
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
+;; mule.el's translation tables, built over Lisp vectors
+;; (DIVERGENCES LISP-TRANSLATION-TABLE).
+(romacs-follow-gnu-file 'mule "romacs-mule")
 (load "international/mule-conf.el" nil t t)
 ;; loadup.el:143.
 (setq load-source-file-function #'load-with-code-conversion)
@@ -165,6 +168,9 @@ and load nothing when none is."
 ;; candidates (DIVERGENCES.md VM2-COMPLETION-SORT).
 (defalias 'minibuffer--sort-by-length-alpha #'romacs--sort-by-length-alpha)
 (defalias 'minibuffer--sort-by-position #'romacs--sort-by-history)
+;; M-x completes over the command set the runtime keeps, not the obarray
+;; (MX-COMMAND-SET); a later load of simple.el gets it again.
+(romacs-follow-gnu-file 'simple "romacs-commands")
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
 (load "term/tty-colors.el" nil t t)

@@ -119,9 +119,9 @@ fn positioned_symbol_chain_frontier() {
         .collect();
     assert_eq!(cl_macs.len(), 178, "cl-macs now completes after subrp");
     assert!(cl_macs.iter().all(|s| s["status"] == "ok"));
-    for (name, completed, ordinal, line) in [
-        ("cl-lib.el", 94, 95, 599),
-        ("ert.el", 0, 1, 57),
+    for (name, completed, ordinal, head) in [
+        ("cl-lib.el", 94, 95, "(define-minor-mode cl-old-struct-compat-mode"),
+        ("ert.el", 0, 1, "(require 'cl-lib)"),
     ] {
         let steps: Vec<_> = report["steps"].as_array().unwrap().iter()
             .filter(|step| step["file"].as_str().unwrap().ends_with(&format!("/{name}")))
@@ -130,8 +130,8 @@ fn positioned_symbol_chain_frontier() {
         assert_eq!(steps.iter().filter(|step| step["status"] == "ok").count(), completed, "completed frontier for {name}");
         let failed = steps.iter().find(|step| step["status"] == "error").unwrap();
         assert_eq!(failed["ordinal"], ordinal, "frontier ordinal for {name}");
-        assert_eq!(failed["line"], line, "frontier line for {name}");
+        assert!(failed["source"].as_str().unwrap().starts_with(head), "frontier form for {name}: {failed}");
         assert!(failed["error"].as_str().unwrap().ends_with("(void-function define-minor-mode)"), "exact next blocker for {name}: {failed}");
-        println!("{name}: completed={completed}, attempted={}, form={ordinal}, line={line}, next=(void-function define-minor-mode)", steps.len());
+        println!("{name}: completed={completed}, attempted={}, form={ordinal} {head}, next=(void-function define-minor-mode)", steps.len());
     }
 }
