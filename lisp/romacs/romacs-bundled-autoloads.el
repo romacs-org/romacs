@@ -421,7 +421,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("posn-point" "romacs--menu-filter"))
 
 
 ;;; Generated autoloads from romacs-landing.el

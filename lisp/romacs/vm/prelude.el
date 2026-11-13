@@ -261,44 +261,6 @@ keymap bound to a prefix not already reached by a prefix of it."
       (setq maps (cdr maps)))
     (nreverse rows)))
 
-(defun romacs--where-active-maps ()
-  (let* ((local (romacs--keymap-at-point 'local-map))
-         (text (romacs--keymap-at-point 'keymap))
-         (maps (list (current-global-map)))
-         (override (if (boundp 'minor-mode-overriding-map-alist)
-                       minor-mode-overriding-map-alist))
-         (emulation (if (boundp 'emulation-mode-map-alists)
-                        emulation-mode-map-alists))
-         (alists (list override minor-mode-map-alist))
-         (minor nil))
-    (if (not (keymapp local)) (setq local (current-local-map)))
-    (if local (setq maps (cons local maps)))
-    (while emulation
-      (let ((alist (car emulation)))
-        (if (symbolp alist)
-            (setq alist (if (boundp alist) (symbol-value alist))))
-        (setq minor (append minor (romacs--where-minor-maps alist nil))))
-      (setq emulation (cdr emulation)))
-    (while alists
-      (setq minor (append minor (romacs--where-minor-maps
-                                (car alists) (if (cdr alists) nil override))))
-      (setq alists (cdr alists)))
-    (setq maps (append minor maps))
-    (if (keymapp text) (setq maps (cons text maps)))
-    maps))
-
-(defun romacs--where-minor-maps (alist ignored)
-  (let ((maps nil))
-    (while (consp alist)
-      (let ((entry (car alist)))
-        (if (and (consp entry) (symbolp (car entry))
-                 (boundp (car entry)) (symbol-value (car entry))
-                 (not (assq (car entry) ignored)))
-            (let ((map (indirect-function (cdr entry))))
-              (if map (setq maps (cons map maps))))))
-      (setq alist (cdr alist)))
-    (nreverse maps)))
-
 (defun romacs--where-lookup (maps sequence)
   (let ((value nil) (key (copy-sequence sequence)) (i 0))
     ;; GNU treats a range event as its first character during shadow lookup.
@@ -411,7 +373,7 @@ keymap bound to a prefix not already reached by a prefix of it."
   "Return keys invoking DEFINITION in KEYMAP, respecting shadows and remapping."
   (let* ((maps (cond ((and (consp keymap) (keymapp (car keymap))) keymap)
                      (keymap (list keymap (current-global-map)))
-                     (t (romacs--where-active-maps))))
+                     (t (current-active-maps))))
          (remapping (romacs--where-remapping definition maps))
          (modifier (romacs--where-modifier)))
     (if (and (not no-remap) remapping) (setq definition remapping))

@@ -1564,9 +1564,6 @@ mod leaf {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(*self.vm.local_keymap(index))
         }
-        pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
-            self.vm.keymap_at_point(property).map_err(Fault::Error)
-        }
         pub fn obarray_lookup(&self, name: &str) -> Option<Value> {
             match name {
                 "nil" => Some(Value::NIL),
@@ -1889,6 +1886,7 @@ mod leaf {
     // module, so it sees `vm`.
     mod map_keymap;
     mod keymap_copy;
+    mod active_keymaps;
     mod category;
     mod fileio;
     mod filelock;
