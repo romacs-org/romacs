@@ -1341,6 +1341,8 @@ pub struct Vm {
     buffer_resolutions: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
+    /// The char tables read as flat rows (`char_table::flat`).
+    flat_tables: char_table::FlatTables,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1844,6 +1846,7 @@ romacs_snapshot::snapshot_fields!(Vm {
 } at_rest {
     site_leaf,
     regexp_cache,
+    flat_tables,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1925,6 +1928,7 @@ impl Vm {
             buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            flat_tables: char_table::FlatTables::default(),
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),

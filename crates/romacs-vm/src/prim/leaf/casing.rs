@@ -67,15 +67,50 @@ impl Leaf<'_> {
     }
 }
 
-impl Leaf<'_> {
-    /// TABLE's mapping of CODE, None for the Unicode default. A nil entry
-    /// is identity (buffer.h downcase/upcase), except above ASCII in the
-    /// native startup tables before GNU's Lisp enriches them
+/// The event modifier bits an integer keeps through a case conversion.
+const FLAGS: i64 = 0x0fc0_0000;
+
+/// One direction of the current buffer's case tables, found for a call
+/// (`Leaf::case_table`), its flat view made current.
+#[derive(Clone, Copy)]
+pub(crate) struct CaseTable {
+    pub(super) table: Value,
+    /// Whether it is Romacs's own startup table of that direction.
+    pub(super) native: bool,
+    pub(super) down: bool,
+}
+
+impl CaseTable {
+    /// The table to read for this borrow of VM.
+    pub(crate) fn reader(self, vm: &Vm) -> CaseReader<'_> {
+        CaseReader { table: vm.char_table_reader(self.table), native: self.native, down: self.down }
+    }
+}
+
+/// A case table read one character after another (`CaseTable::reader`).
+pub(crate) struct CaseReader<'a> {
+    table: crate::char_table::TableReader<'a>,
+    native: bool,
+    down: bool,
+}
+
+impl CaseReader<'_> {
+    fn entry(&self, code: u32) -> std::result::Result<Value, Fault> {
+        self.table.get(code).map_err(Fault::Error)
+    }
+
+    /// The table's mapping of CODE, None for the Unicode default. A nil
+    /// entry is identity (buffer.h downcase/upcase), except above ASCII
+    /// in the native startup tables before GNU's Lisp enriches them
     /// (VM2-COMPLETION-CASE).
-    fn case_override(&self, table: Value, code: u32, down: bool) -> std::result::Result<Option<u32>, Fault> {
-        let value = self.char_table_element(table, code as usize)?;
+    pub(crate) fn mapped(&self, code: u32) -> std::result::Result<Option<u32>, Fault> {
+        self.mapping(code, self.entry(code)?)
+    }
+
+    /// `mapped` from VALUE, the table's entry for CODE.
+    fn mapping(&self, code: u32, value: Value) -> std::result::Result<Option<u32>, Fault> {
         if value == Value::NIL {
-            return Ok((code < 128 || !self.native_case_mapping(table, if down { 0 } else { 1 })).then_some(code));
+            return Ok((code < 128 || !self.native).then_some(code));
         }
         // GNU ignores non-natural-number entries, but they remain explicit
         // identity overrides rather than requests for the Unicode default.
@@ -88,12 +123,37 @@ impl Leaf<'_> {
         Ok(Some(mapped as u32))
     }
 
-    /// buffer.h downcase (DOWN) or upcase of CODE through TABLE, the current
-    /// buffer's case table of that direction.
-    pub(crate) fn case_of(&self, table: Value, code: u32, down: bool) -> std::result::Result<u32, Fault> {
-        Ok(self.case_override(table, code, down)?.unwrap_or_else(|| simple(code, down)))
+    /// buffer.h downcase or upcase of CODE.
+    pub(crate) fn of(&self, code: u32) -> std::result::Result<u32, Fault> {
+        Ok(self.mapped(code)?.unwrap_or_else(|| simple(code, self.down)))
     }
 
+    /// casefiddle.c `do_casify_natnum` of N, a character with its event
+    /// modifiers, in a buffer that is MULTIBYTE or not: below 256 in a
+    /// unibyte buffer it is a byte, cased as one.
+    fn natnum(&self, n: i64, multibyte: bool) -> std::result::Result<i64, Fault> {
+        let code = u32::try_from(n & !FLAGS).expect("a character code below the modifier bits");
+        let unibyte = code < 256 && !multibyte;
+        let mapped = self.of(byte_code(code, unibyte))?;
+        let mapped = if unibyte { u32::from(Leaf::byte_case_result(mapped, code, self.down)) } else { mapped };
+        Ok(i64::from(mapped) | (n & FLAGS))
+    }
+
+    /// `upcase' or `downcase' of the character CODE in a buffer that is
+    /// MULTIBYTE or not, as `Fcompare_strings` and completion fold one.
+    pub(crate) fn character(&self, code: u32, multibyte: bool) -> std::result::Result<u32, Fault> {
+        let entry = self.entry(code)?;
+        if entry == Value::NIL && (code < 128 || !self.native) {
+            return Ok(code);
+        }
+        if code < 256 && !multibyte {
+            return Ok(u32::from(Leaf::byte_case_result(self.of(byte_code(code, true))?, code, self.down)));
+        }
+        Ok(self.mapping(code, entry)?.unwrap_or_else(|| simple(code, self.down)))
+    }
+}
+
+impl Leaf<'_> {
     /// Each of CODES as casefiddle.c's case_character cases it for upcase
     /// or downcase: in multibyte text the special casing first, then the
     /// case table's mapping, else the Unicode default, and a capital sigma
@@ -101,12 +161,13 @@ impl Leaf<'_> {
     /// IN_BUFFER, a character with the syntax prefix flag starts no word.
     pub(crate) fn case_mappings(&mut self, codes: &[u32], multibyte: bool, down: bool, in_buffer: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
         const SIGMA: u32 = 0x3a3;
-        let table = self.current_case_mapping(down)?;
+        let table = self.case_table(down)?;
         // Only a capital sigma reads word syntax.
         let (words, prefixes) = if multibyte && codes.contains(&SIGMA) {
             let prefixes = if in_buffer { self.casing_prefix_flags(codes)? } else { vec![false; codes.len()] };
             (crate::prim::prims::capitalize::word_flags(self, codes)?, prefixes)
         } else { (Vec::new(), Vec::new()) };
+        let table = table.reader(self.vm);
         let mut inword = false;
         let mut mappings = Vec::with_capacity(codes.len());
         for (i, &code) in codes.iter().enumerate() {
@@ -117,7 +178,7 @@ impl Leaf<'_> {
                 continue;
             }
             let default = if multibyte || code < 128 { simple(code, down) } else { code };
-            let cased = self.case_override(table, byte_code(code, !multibyte), down)?.unwrap_or(default);
+            let cased = table.mapped(byte_code(code, !multibyte))?.unwrap_or(default);
             let last = !words.get(i + 1).copied().unwrap_or(false);
             mappings.push(vec![if was_inword && code == SIGMA && cased != code && last { 0x3c2 } else { cased }]);
         }
@@ -127,23 +188,12 @@ impl Leaf<'_> {
     pub fn case_convert(&mut self, value: Value, down: bool) -> super::super::Out {
         if let Some(n) = value.integer_value().filter(|n| *n >= 0) {
             // Preserve event modifiers and GNU's non-character integer domain.
-            const FLAGS: i64 = 0x0fc0_0000;
             if n > FLAGS + i64::from(crate::lstring::MAX_CHAR) {
                 return Ok(value);
             }
-            let code = (n & !FLAGS) as u32;
-            let table = self.current_case_mapping(down)?;
-            let unibyte = code < 256 && !self.buffer_multibyte()?;
-            let lookup = byte_code(code, unibyte);
-            let mapped = self
-                .case_override(table, lookup, down)?
-                .unwrap_or_else(|| simple(lookup, down));
-            let mapped = if unibyte {
-                Self::byte_case_result(mapped, code, down) as u32
-            } else {
-                mapped
-            };
-            return Value::integer(i64::from(mapped) | (n & FLAGS)).map_err(Fault::Error);
+            let table = self.case_table(down)?;
+            let multibyte = self.buffer_multibyte()?;
+            return Value::integer(table.reader(self.vm).natnum(n, multibyte)?).map_err(Fault::Error);
         }
         if !matches!(self.kind(value), Kind::String | Kind::Bytes) {
             return Err(Fault::Wrong("char-or-string-p", value));

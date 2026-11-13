@@ -57,6 +57,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
+    // Copies of char tables' entries, dropped at every collection
+    // (`clear_collection_caches`) and every char-table write.
+    ("flat_tables", Cache),
     // An entry goes when the value it was converted from dies (gc.rs), and
     // a moving collection rewrites that value.
     ("mode_line_forms", Cache),
@@ -422,6 +425,10 @@ const CELLS: &[(&str, Behind)] = &[
     // `CharTableNode` is private to that file.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
     ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
+    // A char table's view, filled under a shared borrow with copies of the
+    // table's entries; the VM drops its views as every collection starts
+    // (`clear_collection_caches`), so no mark ever finds one.
+    ("char_table/flat.rs:FlatTable.planes", Passing), ("char_table/flat.rs:Plane", Passing),
     ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
     ("data.rs:LispString.cursors", Plain), ("data.rs:LispString.scanned", Plain), ("data.rs:LispString.flag_scanned", Plain),
     ("display.rs:FaceTable.faces", Plain), ("display.rs:FaceTable.index", Plain), ("display.rs:FaceTable.over", Plain),

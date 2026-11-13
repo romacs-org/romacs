@@ -1805,6 +1805,8 @@ impl Vm {
         self.resolved_buffer = None;
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
+        // A view's rows are the Values of its table's entries.
+        self.flat_tables.forget();
         // Finished nested runs' programs are caches: relowering what is used
         // again costs less than tracing, retiring and forwarding every copy.
         for program in &mut self.spare_programs {
