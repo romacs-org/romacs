@@ -40,6 +40,9 @@
     ((:state idle :done-seq 7 :settled-seq 5 :input-seq 6) completed)
     ((:state detached) detached)
     ((:state detached :settled-seq 0) settled)
+    ;; Its supervisor never came up: a failure until seen, then what it is.
+    ((:state unstarted :failed t :done-seq 3) failed)
+    ((:state unstarted :failed t :done-seq 3 :seen-seq 3) unstarted)
     ((:state ended :done-seq 5 :seen-seq 5) ended)
     ((:state ended :done-seq 5) completed)
     ((:state history) history)

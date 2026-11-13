@@ -2747,13 +2747,16 @@ def select(args, base):
                           'starts': len(starts(one))}
 
         # Armed during a turn: nothing mid-turn, the message waits for both.
-        a.send(one, 'slow 15')
+        # The turn is held until it has been looked at.
+        gate = a.work / 'release-armed'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
+        gate.touch()
         until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
@@ -2770,8 +2773,10 @@ def select(args, base):
         result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
                              'in_place': replayed.find(divider) < replayed.find('after')}
 
-        # A restart of the server while armed: applied at the live turn's end.
-        a.send(one, 'slow 40')
+        # A restart of the server while armed: applied at the live turn's end,
+        # the turn held until the restored selection has been read.
+        gate = a.work / 'release-restart'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-haiku-5-5', 'high')
         a.restart()
@@ -2779,6 +2784,7 @@ def select(args, base):
         a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
         a.codex_instance()
         found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
+        gate.touch()
         settled(one, 30)
         result['restart_armed'] = {'found': found, 'options': options(one),
                                    'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
@@ -2825,10 +2831,14 @@ def select(args, base):
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
         # Codex: its next turn names them, once the running one ended.
-        run = a.start('slow 3', 'codex')
-        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        # Its turn under way, not starting (a selection made while it starts
+        # rightly reaches the first turn), and held until the next message waits.
+        gate = a.work / 'release-codex'
+        run = a.start(f'wait {gate}', 'codex')
+        until(lambda: a.state(run) == 'running', 15, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
+        gate.touch()
         until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
         runs = a.codex_runs()
         result['codex'] = {'first': runs[0]['model'] == 'gpt-6-luna', 'second': runs[-1]['model'] == 'gpt-6-luna',
@@ -2838,7 +2848,7 @@ def select(args, base):
         live, armed_r, div = result['live'], result['armed'], result['divider']
         result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
                         and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
-                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and armed_r['armed'] == 't' and '→ claude-opus-5-5 · high' in armed_r['header']
                         and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
                         and armed_r['written'][-3:] == [('control_request', 'set_model'),
                                                         ('control_request', 'apply_flag_settings'), ('user', None)]
@@ -2978,7 +2988,8 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--romacs', required=True)
+    # --binary: the name romacs-check gives every live harness its binary by.
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
@@ -2996,14 +3007,18 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     results = {}
     for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe']:
+                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
-    return 0 if all(r.get('ok') is not False for r in results.values()) else 1
+    ok = all(r.get('ok') is not False for r in results.values())
+    # What romacs-check reads of a live harness.
+    (out / 'report.json').write_text(json.dumps({'status': 'PASS' if ok else 'FAIL',
+                                                 'failed': [n for n, r in results.items() if r.get('ok') is False]}))
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':

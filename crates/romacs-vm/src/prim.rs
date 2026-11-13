@@ -96,6 +96,9 @@ pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
 pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
+/// The open display's font-objects, a vector `Display::font_objects` indexes:
+/// traced as this slot's value, as GNU's font cache is.
+pub(crate) const FONT_OBJECTS: &str = "#:vm2-font-objects";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
@@ -1074,6 +1077,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1084,6 +1088,7 @@ mod leaf {
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1096,6 +1101,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1105,6 +1111,7 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1190,6 +1197,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             Ok(self.vm.dynamic.iter().any(|(bound, ..)| *bound == slot))
         }
         /// GNU `find_symbol_value`: the current binding through aliases,

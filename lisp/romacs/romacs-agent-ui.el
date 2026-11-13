@@ -846,12 +846,12 @@ new turn starts, and last turn's failures have been seen."
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--state-statuses
-  '("detached" "supervisor not reachable" "cancelled" "plan mode" "plan mode off")
+  '("detached" "attached" "stopped" "supervisor not reachable" "cancelled" "plan mode" "plan mode off")
   "The `status' events that change what a session's state reads.")
 
 (defun romacs-agent-ui--state-event-p (event)
   "Whether EVENT may change its session's state (`romacs-agent-ui--state')."
-  (or (memq (plist-get event :type) '(run session input approval answered plan done exit settled))
+  (or (memq (plist-get event :type) '(run session input approval answered plan done exit unstarted settled))
       (and (eq (plist-get event :type) 'status) (member (plist-get event :text) romacs-agent-ui--state-statuses))))
 
 (defun romacs-agent-ui--track-children (session event)
@@ -929,6 +929,7 @@ failed...) where the frame can draw it: the word shows on hover."
      ;; Nothing to say: no glyph.
      (idle nil "Idle" romacs-agent-dim)
      (detached "🔌" "Detached" romacs-agent-dim)
+     (unstarted "❗" "Never started" romacs-agent-error)
      (ended "⏹" "Ended" romacs-agent-dim)
      (history "📜" "History" romacs-agent-dim)
      (settled nil "Settled" romacs-agent-dim)))
@@ -983,6 +984,7 @@ completion went to its parent: not news to the user."
           ((romacs-agent-settled-p session) 'settled)
           ((romacs-agent-cancelled session) 'ended)
           ((eq state 'detached) 'detached)
+          ((eq state 'unstarted) 'unstarted)
           ((romacs-agent-ui--plan-ready-p session) 'plan)
           ((and (romacs-agent-unseen-p session) (not (romacs-agent-failed session))
                 (not (plist-get (romacs-agent-options session) :parent)))
@@ -1102,14 +1104,26 @@ and its state."
 
 (defun romacs-agent-ui--hint ()
   "The empty composer's hint (hermes-chat--placeholder-string)."
-  (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint))))
+  (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint "Message…"))))
 
-(defun romacs-agent-ui--make-hint ()
-  "The hint alone: the keys are the actions menu's (?)."
-  (let ((hint (propertize "Message…" 'face 'romacs-agent-dim)))
+(defun romacs-agent-ui--make-hint (text &optional key)
+  "TEXT as the empty composer shows it, never as its text, then KEY that
+takes it: the other keys are the actions menu's (?)."
+  (let ((hint (concat (propertize text 'face 'romacs-agent-dim) (if key (concat "  " key) ""))))
     ;; The cursor before the hint, not after it.
     (put-text-property 0 1 'cursor t hint)
     hint))
+
+(defvar romacs-agent-ui--accept-key nil "The key taking a predicted prompt, looked up once.")
+
+(defun romacs-agent-ui--accept-key ()
+  (or romacs-agent-ui--accept-key
+      (setq romacs-agent-ui--accept-key (romacs-agent-ui--key 'completion-at-point))))
+
+(defun romacs-agent-ui--suggestion ()
+  "The prompt this chat's harness predicts, while it is to be offered."
+  (and romacs-agent-suggestions romacs-agent-ui--session
+       (romacs-agent-suggestion romacs-agent-ui--session)))
 
 (defun romacs-agent-ui--live-rule ()
   "The rule above the composer while a turn runs: ● Running, its clock, the tool."
@@ -1141,12 +1155,16 @@ whoever wrote last and whatever the session's state."
           (or (romacs-agent-ui--live-rule) "")))
 
 (defun romacs-agent-ui--composer-update ()
-  "The boundary and, in an empty composer, the hint."
+  "The boundary and, in an empty composer, the predicted prompt or the hint."
   (when (overlayp romacs-agent-ui--composer)
     (move-overlay romacs-agent-ui--composer romacs-agent-ui--end romacs-agent-ui--end)
     (overlay-put romacs-agent-ui--composer 'before-string (romacs-agent-ui--boundary))
     (overlay-put romacs-agent-ui--composer 'after-string
-                 (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--hint)))))
+                 (and (romacs-agent-ui--composer-empty-p)
+                      (let ((suggestion (romacs-agent-ui--suggestion)))
+                        (if suggestion
+                            (romacs-agent-ui--make-hint suggestion (romacs-agent-ui--accept-key))
+                          (romacs-agent-ui--hint)))))))
 
 ;; One timer ticks every shown chat whose turn runs; it ends when none does.
 (defvar romacs-agent-ui--ticker nil)
@@ -1176,6 +1194,9 @@ whoever wrote last and whatever the session's state."
     ;; The composer's: the transcript's are on its text
     ;; (`romacs-agent-chat-transcript-map').
     (define-key map (kbd "RET") #'romacs-agent-chat-return)
+    ;; Completion (the predicted prompt, `romacs-agent-ui--suggestion-capf'),
+    ;; as M-TAB and C-M-i complete anywhere.
+    (define-key map (kbd "TAB") #'completion-at-point)
     ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
     ;; has the same action; stopping and resuming are in the actions menu.
     (define-key map (kbd "C-j") #'newline)
@@ -1217,6 +1238,13 @@ The transcript is read-only, its keys its own:
   (setq-local scroll-conservatively 101)
   ;; The hint shows exactly while the composer is empty.
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
+  ;; The predicted prompt is a completion: completing takes it, and as it
+  ;; is typed completion-preview-mode shows the rest, as fish does (the
+  ;; composer is prose: after any character, a space too).  Empty, the
+  ;; composer shows it as its hint: no preview over it.
+  (add-hook 'completion-at-point-functions #'romacs-agent-ui--suggestion-capf nil t)
+  (setq-local completion-preview-minimum-symbol-length nil)
+  (add-hook 'completion-preview-inhibit-functions #'romacs-agent-ui--composer-empty-p nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
   ;; The composer moves as text arrives: the tray goes with it.
@@ -1362,6 +1390,17 @@ nest under SOURCE's calls."
   "Send the composer's text."
   (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--deliver (lambda (text images) (romacs-agent-send romacs-agent-ui--session text nil nil images))))
+
+(defun romacs-agent-ui--suggestion-capf ()
+  "Complete the composer's text, empty or typed, to the prompt its harness
+predicts, while that text begins it and point is at its end: never in the
+transcript, nor into the middle of what is written."
+  (when-let* ((suggestion (romacs-agent-ui--suggestion))
+              ((markerp romacs-agent-ui--end))
+              ((eobp))
+              (start (marker-position romacs-agent-ui--end))
+              ((string-prefix-p (buffer-substring-no-properties start (point)) suggestion)))
+    (list start (point) (list suggestion) :exclusive 'no)))
 
 (defun romacs-agent-ui--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: whatever it inherited
@@ -1901,20 +1940,38 @@ ALL, what every turn of the session did."
 
 (defun romacs-agent-chat-handoff (provider model next)
   "Go on with this thread under another instance or model: PROVIDER and
-MODEL picked as for a new session, NEXT what to do there.  A new session
-starts on a brief of the thread, and its chat opens."
+MODEL picked as for a new session.  Under an instance of the same harness
+\(claude to claude2) this session goes on, its conversation moved as is,
+once a running turn ends.  Under another harness a new session starts on
+a brief of the thread, to do NEXT, and its chat opens."
   (interactive
-   (let ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows)))))
-     (list (plist-get fields :provider) (plist-get fields :model)
-           (read-string "Go on with: " nil nil "Go on from where this thread left off.")))
+   (let* ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows))))
+          (provider (plist-get fields :provider)))
+     (list provider (plist-get fields :model)
+           (unless (romacs-agent-ui--moves-p romacs-agent-ui--session provider)
+             (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
-    (message "Gathering %s's thread..." (romacs-agent-title session))
+    (if (romacs-agent-ui--moves-p session provider)
+        (let ((wanted (romacs-agent--wanted session)))
+          (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
+          (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
+                   (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
+      (romacs-agent-ui--hand-off session provider model next))))
+
+(defun romacs-agent-ui--moves-p (session provider)
+  "Whether SESSION goes on under PROVIDER as it is: an instance of its harness."
+  (eq (plist-get (romacs-agent--configured provider) :harness) (romacs-agent-harness session)))
+
+(defun romacs-agent-ui--hand-off (session provider model next)
+  "Start a session under PROVIDER on MODEL on a brief of SESSION's thread,
+to do NEXT."
+  (message "Gathering %s's thread..." (romacs-agent-title session))
     ;; Replayed between keystrokes: a long thread never holds the editor.
     (romacs-agent-events-async
      session (lambda (events)
                (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
-                                                        provider model next))))))
+                                                        provider model next)))))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in plan mode, or take it out: in plan mode it plans
@@ -2085,7 +2142,7 @@ view."
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
-  "H" ("Hand off to another…" romacs-agent-chat-handoff)
+  "H" ("Go on under another instance…" romacs-agent-chat-handoff)
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))
