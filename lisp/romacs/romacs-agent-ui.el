@@ -962,14 +962,26 @@ and its state."
 
 (defun romacs-agent-ui--hint ()
   "The empty composer's hint (hermes-chat--placeholder-string)."
-  (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint))))
+  (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint "Message…"))))
 
-(defun romacs-agent-ui--make-hint ()
-  "The hint alone: the keys are the actions menu's (?)."
-  (let ((hint (propertize "Message…" 'face 'romacs-agent-dim)))
+(defun romacs-agent-ui--make-hint (text &optional key)
+  "TEXT as the empty composer shows it, never as its text, then KEY that
+takes it: the other keys are the actions menu's (?)."
+  (let ((hint (concat (propertize text 'face 'romacs-agent-dim) (if key (concat "  " key) ""))))
     ;; The cursor before the hint, not after it.
     (put-text-property 0 1 'cursor t hint)
     hint))
+
+(defvar romacs-agent-ui--accept-key nil "The key taking a predicted prompt, looked up once.")
+
+(defun romacs-agent-ui--accept-key ()
+  (or romacs-agent-ui--accept-key
+      (setq romacs-agent-ui--accept-key (romacs-agent-ui--key 'romacs-agent-chat-accept-suggestion))))
+
+(defun romacs-agent-ui--suggestion ()
+  "The prompt this chat's harness predicts, while it is to be offered."
+  (and romacs-agent-suggestions romacs-agent-ui--session
+       (romacs-agent-suggestion romacs-agent-ui--session)))
 
 (defun romacs-agent-ui--live-rule ()
   "The rule above the composer while a turn runs: ● Running, its clock, the tool."
@@ -1001,12 +1013,16 @@ whoever wrote last and whatever the session's state."
           (or (romacs-agent-ui--live-rule) "")))
 
 (defun romacs-agent-ui--composer-update ()
-  "The boundary and, in an empty composer, the hint."
+  "The boundary and, in an empty composer, the predicted prompt or the hint."
   (when (overlayp romacs-agent-ui--composer)
     (move-overlay romacs-agent-ui--composer romacs-agent-ui--end romacs-agent-ui--end)
     (overlay-put romacs-agent-ui--composer 'before-string (romacs-agent-ui--boundary))
     (overlay-put romacs-agent-ui--composer 'after-string
-                 (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--hint)))))
+                 (and (romacs-agent-ui--composer-empty-p)
+                      (let ((suggestion (romacs-agent-ui--suggestion)))
+                        (if suggestion
+                            (romacs-agent-ui--make-hint suggestion (romacs-agent-ui--accept-key))
+                          (romacs-agent-ui--hint)))))))
 
 ;; One timer ticks every shown chat whose turn runs; it ends when none does.
 (defvar romacs-agent-ui--ticker nil)
@@ -1036,6 +1052,7 @@ whoever wrote last and whatever the session's state."
     ;; The composer's: the transcript's are on its text
     ;; (`romacs-agent-chat-transcript-map').
     (define-key map (kbd "RET") #'romacs-agent-chat-return)
+    (define-key map (kbd "TAB") #'romacs-agent-chat-accept-suggestion)
     ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
     ;; has the same action; stopping and resuming are in the actions menu.
     (define-key map (kbd "C-j") #'newline)
@@ -1222,6 +1239,16 @@ nest under SOURCE's calls."
   "Send the composer's text."
   (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--deliver (lambda (text images) (romacs-agent-send romacs-agent-ui--session text nil nil images))))
+
+(defun romacs-agent-chat-accept-suggestion ()
+  "Take the prompt predicted in the empty composer as its text, to edit or
+send; anywhere else, indent as TAB does."
+  (interactive nil romacs-agent-chat-mode)
+  (let ((suggestion (and (romacs-agent-ui--composer-empty-p) (romacs-agent-ui--suggestion))))
+    (if (not suggestion)
+        (call-interactively #'indent-for-tab-command)
+      (goto-char (point-max))
+      (insert suggestion))))
 
 (defun romacs-agent-ui--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: whatever it inherited
