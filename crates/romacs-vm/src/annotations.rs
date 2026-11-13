@@ -1200,8 +1200,14 @@ pub(crate) struct AnnotatedBuffer {
     pub(crate) indirect: Vec<Value>,
     /// Overlays inserted into this buffer's tree so far (Overlay::inserted).
     pub overlay_insertions: u64,
+    /// What names the state of this buffer's overlays to the windows
+    /// showing it: the display's overlay count at their last change
+    /// (`Vm::overlay_changed`), 0 while none has shown anything. A value is
+    /// given once, so it is another's neither after `buffer-swap-text` nor
+    /// in the store `set-buffer-multibyte` makes.
+    pub overlay_revision: u64,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions });
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions, overlay_revision });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1218,6 +1224,7 @@ impl From<Text> for AnnotatedBuffer {
             base: Value::NIL,
             indirect: Vec::new(),
             overlay_insertions: 0,
+            overlay_revision: 0,
         }
     }
 }
