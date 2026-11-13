@@ -334,6 +334,30 @@ impl Vm {
         }
     }
 
+    /// Evaluate SOURCE as Lisp a host runs while it waits for a key (GNU's
+    /// `read_char` wait: timers, process output, the idle auto-save). A quit
+    /// from C-g that ends it, pending as it began or raised inside it, is the
+    /// read's quit character (keyboard.c `quit_throw_to_read_char`): it stays
+    /// in `quit-flag` for the next read (`take_quit_key`), and the value is
+    /// None.
+    ///
+    /// # Errors
+    ///
+    /// Any other error SOURCE's evaluation ends with.
+    pub fn eval_as_wait(&mut self, source: &str) -> crate::Result<Option<crate::Local<'_>>> {
+        let (result, quit) = self.quit_watched(|vm| vm.eval_source_raw(source));
+        match result {
+            Ok(value) => Ok(Some(crate::Local::new(self, value))),
+            Err(_) if quit => {
+                // The quit ends here: nothing further unwinds from it.
+                self.quit_unwinding = false;
+                self.set_quit_variable("quit-flag", Value::TRUE);
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// keyboard.c read_char between commands: whether a quit is pending, so
     /// that the next key is the quit character, ahead of any queued input.
     /// `quit-flag' is cleared, as read_key_sequence clears it once read
