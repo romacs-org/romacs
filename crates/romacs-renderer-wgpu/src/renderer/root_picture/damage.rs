@@ -206,34 +206,22 @@ fn has_text(frame: &FrameGlyphBuffer, run: &Run) -> bool {
 /// GLYPHS as runs, in frame order.
 pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
-    // The open run's extent, as its edges.
-    let mut edges = [0.0f32; 4];
     for (at, glyph) in glyphs.iter().enumerate() {
         let (key, painted, text) = place(glyph);
-        let [x0, y0, x1, y1] = [painted.x, painted.y, painted.x + painted.width, painted.y + painted.height];
         match out.last_mut() {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
+                run.bounds = union(run.bounds, painted);
                 run.text |= text;
-                edges = [edges[0].min(x0), edges[1].min(y0), edges[2].max(x1), edges[3].max(y1)];
             }
-            _ => {
-                if let Some(run) = out.last_mut() {
-                    run.bounds = Rect::new(edges[0], edges[1], edges[2] - edges[0], edges[3] - edges[1]);
-                }
-                edges = [x0, y0, x1, y1];
-                out.push(Run {
-                    key,
-                    glyphs: at..at + 1,
-                    bounds: painted,
-                    text,
-                    row: 0,
-                });
-            }
+            _ => out.push(Run {
+                key,
+                glyphs: at..at + 1,
+                bounds: painted,
+                text,
+                row: 0,
+            }),
         }
-    }
-    if let Some(run) = out.last_mut() {
-        run.bounds = Rect::new(edges[0], edges[1], edges[2] - edges[0], edges[3] - edges[1]);
     }
     assign_rows(&mut out);
     out
