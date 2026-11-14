@@ -812,7 +812,7 @@ its text."
   (let* ((from (plist-get message :from))
          (sender (plist-get from :session))
          (known (and sender (romacs-agent-get sender)))
-         (name (or (and known (romacs-agent-title known)) (plist-get from :name) "another session"))
+         (name (romacs-agent-ui--sender-name from))
          (answerable (or sender (plist-get from :address)))
          (id (plist-get message :id)))
     (romacs-agent-ui--line
@@ -826,6 +826,12 @@ its text."
                                                    romacs-agent-ui--end 'romacs-agent-reply t))))
       (puthash id (cons name (and hint (copy-marker hint))) (romacs-agent-ui--received)))
     (romacs-agent-ui--insert (concat (string-trim-right (or (plist-get message :text) "")) "\n"))))
+
+(defun romacs-agent-ui--sender-name (from)
+  "The sender FROM names, a message's: its session's title now when it is
+known, else the name it sent."
+  (or (and-let* ((sender (plist-get from :session)) (known (romacs-agent-get sender))) (romacs-agent-title known))
+      (plist-get from :name) "another session"))
 
 (defun romacs-agent-ui--message-wake (message)
   "MESSAGE, a task's result, as `romacs-agent-ui--arrival' takes a wake."
@@ -979,9 +985,11 @@ or a repeat."
            (cond
             (messages
              (dolist (message messages)
-               (if (plist-get message :wake)
-                   (romacs-agent-ui--arrival session event (romacs-agent-ui--message-wake message))
-                 (romacs-agent-ui--message-card session event message))))
+               (if (not (plist-get message :wake)) (romacs-agent-ui--message-card session event message)
+                 ;; A reply to a result names its sender too.
+                 (puthash (plist-get message :id) (list (romacs-agent-ui--sender-name (plist-get message :from)))
+                          (romacs-agent-ui--received))
+                 (romacs-agent-ui--arrival session event (romacs-agent-ui--message-wake message)))))
             (wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake)))
             (t
              (romacs-agent-ui--line session event "")

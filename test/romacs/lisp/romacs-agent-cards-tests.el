@@ -393,7 +393,13 @@
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
                            "⇠ child · Completed  thread  all good\n"
-                           "✉ child · child  thread  ↩\none more thing\n")))))
+                           "✉ child · child  thread  ↩\none more thing\n")))
+    ;; A reply to the result goes to its task, by name.
+    (romacs-agent-cards-tests--draw
+     session :type 'tool :state 'started :id "r" :name "mcp__romacs__romacs_task_reply"
+     :input (romacs-agent-cards-tests--table "messageId" "m-1" "text" "Thanks."))
+    (romacs-agent-ui--run-settle)
+    (should (string-suffix-p "  ● ✉ → child  Thanks.\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-a-failed-reply-keeps-its-message ()
   (romacs-agent-cards-tests--with-chat session
