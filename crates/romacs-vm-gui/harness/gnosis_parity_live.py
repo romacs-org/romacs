@@ -107,7 +107,7 @@ def init_source(engine, root, lisp):
     # their directories on `load-path' and the same bundled autoloads
     # Romacs's --loadup loads, whose lisp/romacs/ libraries (romacs-video's
     # find-file-hook) need lisp/romacs/ too.  gnosis and keymap-popup come byte-compiled.
-    bundled = [lisp] + [ROOT / 'lisp/romacs' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
+    bundled = [lisp] + [ROOT / 'lisp/romacs' / d for d in ('', 'jabber', 'deps/fsm', 'deps/markdown-mode')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'
         f' (list {" ".join(lisp_string(str(d)) for d in bundled[1:])})))\n'

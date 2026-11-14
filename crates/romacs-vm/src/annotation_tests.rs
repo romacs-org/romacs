@@ -267,7 +267,7 @@ fn notmuch_buffer_queries_use_the_interval_index() {
     assert_eq!(called, 0);
 }
 #[test]
-fn hermes_shape_reuses_three_overlay_slots_for_9276_moves() {
+fn three_overlays_moved_9276_times_reuse_their_slots() {
     let mut vm = Vm::new();
     let buffer = vm.allocate_object(Object::Buffer(Box::new(
         text::Text::new(&vec![b'x'; 8192]).unwrap().into(),

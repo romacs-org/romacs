@@ -57,9 +57,7 @@ tool call failed.
 
 DATA SAFETY: everything a session writes is inside its private trees.  The
 gnosis database is a copy of a copy given with --gnosis-db, never the live
-one, and hermes only attaches to a running dashboard (real_init.py).  A send_keys call that sends a hermes prompt must say
-effect=hermes-prompt; the bench allows one per engine per session, and
-replay skips such calls unless --allow-effect hermes-prompt.
+one.
 """
 import argparse
 import json
@@ -84,7 +82,6 @@ import fixture  # noqa: E402
 import real_init  # noqa: E402
 
 ENGINES = ('gnu', 'romacs')
-GUARDED = {'hermes-prompt': 1}  # effect -> calls allowed per engine per session
 ERROR_LINE = re.compile(r'(?i)\berror\b|failed|wrong type|is void|void-function|void-variable|not implemented|unsupported'
                         r'|args out of range|invalid|debugger entered|\bVM2\b|not supported|wrong number of arguments'
                         # A condition's own name, as an unreported signal echoes it.
@@ -290,13 +287,13 @@ TOOLS = {
                     'project at ~/src/tally, the default) or init (a real init: the profile config\'s packages and data copies).',
                     schema({'engines': {'type': 'array', 'items': {'type': 'string', 'enum': list(ENGINES)}},
                             'profile': {'type': 'string', 'enum': list(real_init.PROFILES)},
-                            'hermes': {'type': 'boolean'}, 'step': STEP})),
+                            'step': STEP})),
     'bench_send_keys': ('Type keys (kbd notation, e.g. "C-x C-f") or literal text into each engine through its '
                         'command loop (via events, paced like typing) or the compositor (via wtype). '
-                        'wait=SECONDS then waits for idle. effect=hermes-prompt marks the one allowed hermes send.',
+                        'wait=SECONDS then waits for idle.',
                         schema({'engine': ENGINE, 'keys': {'type': 'string'}, 'text': {'type': 'string'},
                                 'via': {'type': 'string', 'enum': ['events', 'wtype']}, 'burst': {'type': 'boolean'},
-                                'wait': {'type': 'number'}, 'effect': {'type': 'string'}, 'step': STEP})),
+                                'wait': {'type': 'number'}, 'step': STEP})),
     'bench_wait_idle': ('Wait until each command loop is idle and timers and process output settled, or timeout.',
                         schema({'engine': ENGINE, 'timeout': {'type': 'number'}, 'settle': {'type': 'number'},
                                 'horizon': {'type': 'number'}, 'step': STEP})),
@@ -317,9 +314,9 @@ TOOLS = {
 
 
 class Bench:
-    def __init__(self, options, gnu_cache=None, allow_effects=()):
+    def __init__(self, options, gnu_cache=None):
         self.options, self.engines, self.session = options, {}, None
-        self.gnu_cache, self.allow_effects = gnu_cache, set(allow_effects)
+        self.gnu_cache = gnu_cache
         self.lock = threading.Lock()
         parity_live.GNU = options.gnu
 
@@ -393,7 +390,7 @@ class Bench:
         out = Path(options.output)
         out.mkdir(parents=True, exist_ok=True)
         self.session = Path(tempfile.mkdtemp(prefix=time.strftime('session-%Y%m%d-%H%M%S-'), dir=out))
-        self.seq, self.effects, self.steps = 0, {}, []
+        self.seq, self.steps = 0, []
         self.cursors = {}
         work = Path(options.work)
         work.mkdir(parents=True, exist_ok=True)
@@ -496,16 +493,6 @@ class Bench:
             time.sleep(1)
 
     def bench_send_keys(self, arguments):
-        effect = arguments.get('effect')
-        if effect in GUARDED:
-            for engine in self.targets(arguments):
-                used = self.effects.get((effect, engine.name), 0)
-                if used >= GUARDED[effect]:
-                    raise ToolError(f'{effect} already used {used} time(s) in {engine.name} this session')
-            if self.replaying and effect not in self.allow_effects:
-                return {'skipped': f'effect {effect} needs --allow-effect'}, {'summary': 'skipped'}
-            for engine in self.targets(arguments):
-                self.effects[(effect, engine.name)] = self.effects.get((effect, engine.name), 0) + 1
         via = arguments.get('via', 'events')
         keys, text = arguments.get('keys'), arguments.get('text')
 
@@ -627,8 +614,6 @@ class Bench:
             counts[step['verdict']] = counts.get(step['verdict'], 0) + 1
         return {'session': str(self.session), 'counts': counts, 'steps': self.steps}, {'summary': counts}
 
-    replaying = False
-
 
 def summarise(results):
     """A compact outcome per engine for the recording."""
@@ -638,7 +623,7 @@ def summarise(results):
             if 'error' in value:
                 out[name] = {'error': value['error'][:200]}
             else:
-                keep = {k: value[k] for k in ('undelivered', 'timedOut', 'settled', 'dueTimers', 'skipped') if k in value}
+                keep = {k: value[k] for k in ('undelivered', 'timedOut', 'settled', 'dueTimers') if k in value}
                 if 'idle' in value and isinstance(value['idle'], dict):
                     keep['idle'] = {k: value['idle'][k] for k in ('settled', 'dueTimers') if k in value['idle']}
                 out[name] = keep
@@ -719,7 +704,6 @@ def control_call(path, tool, arguments):
 
 def replay(bench, recording, output):
     """Re-drive RECORDING; return per-step verdicts beside the recorded ones."""
-    bench.replaying = True
     entries = [json.loads(line) for line in Path(recording).read_text().splitlines() if line.strip()]
     recorded = [e for e in entries if e['tool'] == 'bench_compare']
     started, rows, index = time.time(), [], 0
@@ -791,7 +775,6 @@ def main():
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--keep', action='store_true', help='keep the private trees')
     parser.add_argument('--gnu-cache', help="replay: a previous run's results.jsonl for the GNU side")
-    parser.add_argument('--allow-effect', action='append', default=[])
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     if args.mode == 'call':
@@ -804,7 +787,7 @@ def main():
         parser.error('--romacs, --gnu and --output (or their ROMACS_BENCH_* variables) are required')
     args.work = args.work or str(Path(args.output) / 'work')
     cache = gnu_observations(args.gnu_cache) if args.gnu_cache else None
-    bench = Bench(args, cache, args.allow_effect)
+    bench = Bench(args, cache)
     try:
         if args.mode == 'replay':
             return replay(bench, args.rest[0], args.output)
