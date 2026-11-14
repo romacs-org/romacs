@@ -113,11 +113,20 @@ impl Vm {
         Ok(dest)
     }
 
-    /// editfns.c save_restriction_save_1: the current buffer when it is not
-    /// narrowed, else (BEG . END), a left-biased marker at BEGV and a
-    /// right-biased one at ZV.
+    /// editfns.c `save_restriction_save`: `save_restriction_save_1`'s current
+    /// buffer when it is not narrowed, else (BEG . END), a left-biased
+    /// marker at BEGV and a right-biased one at ZV; consed onto the buffer's
+    /// labeled restrictions while it holds one, which a car that is no
+    /// marker tells apart (`prim/leaf/labeled_restrictions.rs`).
     pub(crate) fn save_restriction_data(&mut self) -> Result<Value> {
         let index = self.buffer_index()?;
+        let restriction = self.saved_restriction(index)?;
+        let labeled = self.labeled_restrictions(index);
+        Ok(if labeled == Value::NIL { restriction } else { self.alloc_cons(restriction, labeled) })
+    }
+
+    /// `save_restriction_save_1`.
+    fn saved_restriction(&mut self, index: usize) -> Result<Value> {
         let buffer = self.slots[self.buffer_slot].value;
         let bounds = match &self.objects[index] {
             Object::Buffer(t) if t.accessible() != (ByteOffset(0)..ByteOffset(t.len_bytes())) => t.accessible(),
@@ -133,10 +142,20 @@ impl Vm {
         Ok(self.alloc_cons(beg, end))
     }
 
-    /// editfns.c save_restriction_restore_1: widen a buffer saved unnarrowed,
-    /// or restore a saved restriction and detach its markers, unless the
-    /// buffer was killed. Point is clipped into the restored bounds.
-    pub(crate) fn restore_restriction_data(&mut self, data: Value) -> Result<()> {
+    /// editfns.c `save_restriction_restore`: the buffer's labeled
+    /// restrictions as they were saved, then `save_restriction_restore_1`:
+    /// widen a buffer saved unnarrowed, or restore a saved restriction and
+    /// detach its markers, unless the buffer was killed. Point is clipped
+    /// into the restored bounds.
+    pub(crate) fn restore_restriction_data(&mut self, saved: Value) -> Result<()> {
+        let (data, labeled) = match self.cons_pair(saved) {
+            Ok((car, cdr)) if !matches!(self.object_if(car), Some(Object::Marker(_))) => (car, cdr),
+            _ => (saved, Value::NIL),
+        };
+        let buffer = match self.cons_pair(data) { Ok((beg, _)) => self.marker(beg)?.buffer, Err(_) => data };
+        if buffer != Value::NIL && self.buffer_state(buffer)?.live {
+            self.set_labeled_restrictions(buffer.index(0)? - 1, labeled);
+        }
         let Ok((car, cdr)) = self.cons_pair(data) else {
             if self.buffer_state(data)?.live {
                 match self.object_mut(data)? {
