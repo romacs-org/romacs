@@ -389,7 +389,10 @@ enum Shape<'a> {
     Vector(&'a [Value]),
     BoolVector(&'a data::BoolVector),
     Record(&'a [Value]),
-    Closure(usize, &'a [Value]),
+    /// Its function, captures, docstring (its own slot, as GNU's) and the
+    /// slots it keeps (`make-interpreted-closure`'s), empty for an ordinary
+    /// compiled closure.
+    Closure(usize, &'a [Value], Value, &'a [Value]),
     Marker(Value, Option<u32>),
     Overlay(Value, Option<(u32, u32)>, &'a [(Value, Value)]),
     /// A tree-sitter node: the tree and node `ts_node_eq' compares.
@@ -411,11 +414,38 @@ impl Vm {
     fn anchor_byte(&self, buffer: Value, anchor: anchors::Anchor) -> Option<u32> {
         self.marker_anchors(buffer).ok()?.resolve(anchor)
     }
+    /// Whether closures of functions F and G are of one lambda for `equal`:
+    /// the same compiled function, or two whose source keys agree
+    /// (`closure_key`), as GNU's `equal` compares closures slot by slot.
+    fn same_lambda(&self, f: usize, g: usize) -> bool {
+        f == g || matches!((self.functions.get(f).and_then(|f| f.key), self.functions.get(g).and_then(|g| g.key)), (Some(a), Some(b)) if a == b)
+    }
+    /// A closure's capture as `equal` reads it: the value a cell holds.
+    fn captured(&self, capture: Value) -> Value {
+        capture.index_if(5).map_or(capture, |cell| self.read_capture_cell(cell))
+    }
+    /// Whether two closure environments (GNU's alist of `(NAME . VALUE)`
+    /// bindings, bare special declarations and `t`) have the same entries in
+    /// order, a binding by its name alone.
+    fn same_environment_shape(&self, mut a: Value, mut b: Value) -> bool {
+        loop {
+            match (self.cons_pair(a), self.cons_pair(b)) {
+                (Ok((x, rest_a)), Ok((y, rest_b))) => {
+                    let name = |v: Value| self.cons_pair(v).map_or(v, |(name, _)| name);
+                    if self.cons_pair(x).is_ok() != self.cons_pair(y).is_ok() || name(x) != name(y) { return false; }
+                    (a, b) = (rest_a, rest_b);
+                }
+                (Err(_), Err(_)) => return a == b,
+                _ => return false,
+            }
+        }
+    }
+
     fn shape(&self, v: Value) -> Shape<'_> {
         match v.tag() {
             3 => Shape::Cons,
             4 => match self.closures.get(v.payload() as usize) {
-                Some(c) => Shape::Closure(c.function, &c.captures),
+                Some(c) => Shape::Closure(c.function, &c.captures, c.metadata.get(4).copied().unwrap_or(c.document), &c.metadata),
                 None => Shape::Opaque,
             },
             0 if v == Value::NIL => Shape::Atom,
@@ -505,12 +535,14 @@ impl Vm {
                 .fold(items.len() as u64, |h, &x| {
                     combine(h, self.sxhash_mode(x, depth + 1, moving, public))
                 }),
-            Shape::Closure(function, captures) => captures
-                .iter()
-                .take(SXHASH_MAX_LEN)
-                .fold(function as u64, |h, &x| {
-                    combine(h, self.sxhash_mode(x, depth + 1, moving, public))
-                }),
+            // What every two `equal' closures share, whichever way they were
+            // compared: how many values their environments hold now (a kept
+            // environment's bindings, else the captures). Nothing that
+            // moves enters it.
+            Shape::Closure(_, captures, _, slots) => match slots.get(2) {
+                Some(&env) => crate::closure_key::environment_values(self, env).map_or(0, |values| values.len()) as u64,
+                None => captures.len() as u64,
+            },
             Shape::Marker(buffer, at) => {
                 *moving |= Self::moving_reference(buffer);
                 combine(if public { 0 } else { buffer.0 }, at.map_or(0, u64::from))
@@ -656,8 +688,50 @@ impl Vm {
                 }
                 (Shape::Vector(x), Shape::Vector(y))
                 | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen, props),
-                (Shape::Closure(f, x), Shape::Closure(g, y)) => {
-                    return Ok(f == g && self.equal_items(x, y, depth, seen, props)?);
+                (Shape::Closure(f, x, doc_x, slots_x), Shape::Closure(g, y, doc_y, slots_y)) => {
+                    // Closures that keep their slots (make-interpreted-closure)
+                    // are compared by what those slots hold now, as GNU's
+                    // `equal' compares the slot vector: a caller may have
+                    // changed the body or the interactive modes since. The
+                    // environment slot (2) is compared by its shape (special
+                    // declarations, bound names), its values as the captures,
+                    // which hold them current. Other closures, which expose
+                    // no body, compare by their source key.
+                    if !slots_x.is_empty() && !slots_y.is_empty() {
+                        if slots_x.len() != slots_y.len() { return Ok(false); }
+                        for (i, (&a, &b)) in slots_x.iter().zip(slots_y).enumerate() {
+                            let same = if i == 2 { self.same_environment_shape(a, b) } else { self.equal_at(a, b, depth + 1, seen, props)? };
+                            if !same { return Ok(false); }
+                        }
+                    } else if slots_x.is_empty() && slots_y.is_empty() {
+                        if !self.same_lambda(f, g) { return Ok(false); }
+                    } else {
+                        // One keeps its slots: its key as they stand now. GNU
+                        // gives an ordinary lexical closure the environment
+                        // of its captured bindings alone, or `(t)` when it
+                        // captures nothing, so a kept environment matches it
+                        // only when it ends in `t` exactly then.
+                        let current = |slots: &[Value], f: usize| if slots.is_empty() { self.functions.get(f).and_then(|f| f.key) } else { crate::closure_key::of_slots(self, slots) };
+                        if !matches!((current(slots_x, f), current(slots_y, g)), (Some(a), Some(b)) if a == b) { return Ok(false); }
+                        let (kept, captures) = if slots_x.is_empty() { (slots_y, x) } else { (slots_x, y) };
+                        let marked = self.list_values(kept[2]).is_ok_and(|env| env.contains(&Value::TRUE));
+                        if kept[2] != Value::NIL && marked != captures.is_empty() { return Ok(false); }
+                    }
+                    // GNU compares the environment's values: those its slot
+                    // holds now for a closure that keeps its slots (a caller
+                    // may have replaced a binding), else what the captures'
+                    // cells hold.
+                    if !self.equal_at(doc_x, doc_y, depth + 1, seen, props)? { return Ok(false); }
+                    let values = |slots: &[Value], captures: &[Value]| match slots.get(2) {
+                        Some(&env) => crate::closure_key::environment_values(self, env),
+                        None => Some(captures.iter().map(|&c| self.captured(c)).collect()),
+                    };
+                    let (Some(x), Some(y)) = (values(slots_x, x), values(slots_y, y)) else { return Ok(false) };
+                    if x.len() != y.len() { return Ok(false); }
+                    for (&x, &y) in x.iter().zip(&y) {
+                        if !self.equal_at(x, y, depth + 1, seen, props)? { return Ok(false); }
+                    }
+                    return Ok(true);
                 }
                 (Shape::Marker(x, p), Shape::Marker(y, q)) => {
                     return Ok(x == y && (x == Value::NIL || p == q));

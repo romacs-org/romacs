@@ -109,7 +109,10 @@ impl RenderApp {
     fn handle_clipboard(&mut self, command: ClipboardCommand) {
         match &self.clipboard {
             Ok(clipboard) => clipboard.submit(command),
-            Err(err) => crate::clipboard::reject_command(command, err.clone()),
+            Err(err) => {
+                let (request, reply) = crate::clipboard::reject_command(command, err.clone());
+                self.comms.tell(crate::thread_comm::Fact::Reply { request, reply });
+            }
         }
     }
 }
