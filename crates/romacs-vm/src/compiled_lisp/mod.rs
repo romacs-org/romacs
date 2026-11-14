@@ -79,6 +79,7 @@ struct Configured {
     /// A compile of a tree's (`tree`): its publications leave the store's
     /// maintenance to the tree's end.
     no_prune: bool,
+    // CELL(Plain)
     identity: std::sync::OnceLock<String>,
 }
 

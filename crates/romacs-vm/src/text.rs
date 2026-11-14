@@ -85,24 +85,33 @@ pub struct TextBody {
     chars_len: usize,
     tail: String,
     tail_chars: usize,
+    // CELL(Plain)
     flat: std::sync::OnceLock<String>,
     /// Bytes edits have moved in `flat' since it was last read.
+    // CELL(Plain)
     flat_moved: std::cell::Cell<usize>,
     /// The byte offsets of the placeholders standing for raw bytes
     /// (`internal_to_rope`), sorted; empty for pure Unicode text.
     raw: Vec<u32>,
     /// `bytes()` in GNU's internal form, built once `raw` is non-empty.
+    // CELL(Plain)
     flat_internal: std::sync::OnceLock<Vec<u8>>,
     /// The text kept contiguous for searches across edits (text_gap.rs).
     search: gap::SearchView,
     is_ascii: bool,
+    // CELL(Plain)
     coordinate: std::cell::Cell<(usize, usize)>,
+    // CELL(Plain)
     chunk: std::cell::RefCell<ChunkCursor>,
+    // CELL(Plain)
     cold_chunks: std::cell::RefCell<std::collections::BTreeMap<usize, ChunkCursor>>,
+    // CELL(Plain)
     cold_order: std::cell::RefCell<std::collections::VecDeque<usize>>,
+    // CELL(Plain)
     #[cfg(test)]
     scanned_bytes: std::cell::Cell<usize>,
     pub(crate) properties: crate::properties::BodyProperties,
+    // CELL(Plain)
     #[cfg(test)]
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -111,6 +120,7 @@ pub struct TextBody {
     /// `ts_parser_list'), whose trees every change edits.
     pub(crate) treesit: crate::treesit::Registry,
     /// The parse-state summaries of this text, which every change edits.
+    // CELL(Plain): Parse-state summaries: positions and syntax codes, no Value.
     pub(crate) syntax: std::cell::RefCell<crate::syntax_index::SyntaxIndex>,
 }
 romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax });
@@ -304,6 +314,8 @@ pub(crate) fn octets_as_multibyte(octets: &[u8]) -> (Vec<u8>, Vec<usize>) {
 /// buffer's own point, narrowing, syntax and category tables and identity.
 #[derive(Clone)]
 pub struct Text {
+    // CELL(Held): Text shared by indirect buffers, its properties among it: `TextBody`'s own write
+    // methods.
     body: Shared<TextBody>,
     restriction: Range<ByteOffset>,
     pub(crate) state: crate::bytes::BufferState,

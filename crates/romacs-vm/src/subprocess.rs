@@ -200,6 +200,7 @@ struct Orphan {
 /// reused one.
 #[derive(Default)]
 struct Reaper {
+    // CELL(Plain)
     state: std::sync::Mutex<Reaping>,
 }
 

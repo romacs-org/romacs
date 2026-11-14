@@ -1,3 +1,5 @@
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 
 fn expressions() -> Vec<String> {
@@ -51,13 +53,12 @@ fn ert_and_json_numeric_formats_are_supported() {
 
 #[test]
 fn numeric_formats_match_pinned_gnu() {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in expressions() {
-        let source = format!("(prin1-to-string (condition-case e (list 'ok {expression}) (error (list 'signal (car e)))))");
-        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
-        assert!(output.status.success(), "{expression}: {}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
+    let source = |expression: &str| format!("(prin1-to-string (condition-case e (list 'ok {expression}) (error (list 'signal (car e)))))");
+    let expressions = expressions();
+    let answers = gnu_batch::outputs(&expressions.iter().map(|e| format!("(princ {})", source(e))).collect::<Vec<_>>());
+    for (expression, expected) in expressions.iter().zip(answers) {
+        let source = source(expression);
         let mut vm = Vm::new();
         let actual = vm.eval_source(&source).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap());
