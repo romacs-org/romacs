@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Check a branch before it is submitted: what would send it back, cheapest first.
+
+  forecast    the merge with the trunk, made in memory. A conflicting file is
+              `additive` (both sides add at the same place: keep both), an
+              `overlap` (both rewrote the same lines) or `whole` (one side
+              deleted or moved it), with how many recent landings touched it:
+              one in twenty makes it a hot file.
+  generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
+  structural  the rules a Rust change can break anywhere (tools/gate's
+              STRUCTURAL, and the rules of the crates changed), run on this
+              tree into CARGO_TARGET_DIR: seconds once the test target is
+              built. The rules that run the compiler (SLOW_RULES) are the
+              queue's. A change with no Rust skips the stage; so does
+              --no-structural.
+
+One line a stage and one a finding, each with its fix. Exit 1 when a stage
+fails, 2 when one could not run.
+"""
+import argparse
+from collections import Counter
+import importlib.machinery
+import importlib.util
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import generated_files  # noqa: E402
+import test_modules  # noqa: E402
+
+LANDINGS = 150
+ADVICE = {'additive': 'both sides add at the same place; fix: merge the trunk in and keep both sides\' lines',
+          'overlap': 'both sides rewrote the same lines; fix: merge the trunk in and resolve it',
+          'whole': 'one side deleted or moved it; fix: merge the trunk in and carry the change to where it went'}
+
+
+def load_gate(root=ROOT):
+    """tools/gate as a module: the structural rules are its to name."""
+    loader = importlib.machinery.SourceFileLoader('romacs_gate', str(root / 'tools/gate'))
+    gate = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(gate)
+    return gate
+
+
+# The forecast.
+
+def merged(output):
+    """(TREE, FILES) of `git merge-tree -z --write-tree --name-only --no-messages` OUTPUT.
+    NUL-delimited: git quotes a path with a quote, a backslash or a byte past ASCII otherwise."""
+    tree, *files = [field for field in output.split('\0') if field]
+    return tree, files
+
+
+def hunks(text):
+    """The conflict hunks of diff3-marked TEXT, each (OURS, BASE, THEIRS) as line lists."""
+    found, sides, side = [], None, None
+    for line in text.splitlines():
+        if line.startswith('<<<<<<< '):
+            sides, side = ([], [], []), 0
+        elif sides is not None and line.startswith('||||||| '):
+            side = 1
+        elif sides is not None and line == '=======':
+            side = 2
+        elif sides is not None and line.startswith('>>>>>>> '):
+            found.append(sides)
+            sides = None
+        elif sides is not None:
+            sides[side].append(line)
+    return found
+
+
+def within(part, whole):
+    """Whether the lines PART are in WHOLE, in order."""
+    rest = iter(whole)
+    return all(line in rest for line in part)
+
+
+def kind(text):
+    """How a conflicting file's merged TEXT conflicts: additive, overlap or whole."""
+    found = hunks(text)
+    if not found:
+        return 'whole'
+    return 'additive' if all(within(base, ours) and within(base, theirs) for ours, base, theirs in found) else 'overlap'
+
+
+def landings(log):
+    """How many landings touched each file, from `git log -z --first-parent -m --name-only --format=tformat:` LOG:
+    its fields are paths, the first of a landing after a newline."""
+    return Counter(field.lstrip('\n') for field in log.split('\0') if field.strip('\n'))
+
+
+def conflict(path, how, touched):
+    """The finding for PATH conflicting as HOW, TOUCHED of the last landings having changed it.
+    A file one landing in twenty changes is hot: it will have moved again by the next attempt."""
+    hot = touched * 20 >= LANDINGS
+    return (f'conflict {path}: {how}{" in a hot file" if hot else ""} ({touched} of the last {LANDINGS} landings touched it), '
+            f'{ADVICE[how]}{", then submit at once: it moves often" if hot else ""}')
+
+
+def git(root, *args, check=True):
+    done = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True, errors='replace')
+    if check and done.returncode:
+        raise RuntimeError(f'git {" ".join(args)}: {done.stderr.strip()}')
+    return done
+
+
+def forecast(root, trunk):
+    """(STATUS, SUMMARY, FINDINGS) of merging ROOT's HEAD with TRUNK."""
+    tip = git(root, 'rev-parse', '--short=12', trunk).stdout.strip()
+    behind = git(root, 'rev-list', '--count', '--first-parent', f'HEAD..{trunk}').stdout.strip()
+    dirty = len(git(root, 'status', '--porcelain').stdout.splitlines())
+    notes = [f'{dirty} uncommitted path(s) are not in the forecast; fix: commit them first'] if dirty else []
+    done = git(root, '-c', 'merge.conflictStyle=diff3', 'merge-tree', '-z', '--write-tree', '--name-only', '--no-messages',
+               trunk, 'HEAD', check=False)
+    if done.returncode == 0:
+        return 'ok', f'merges cleanly with {trunk} {tip} ({behind} landing(s) behind)', notes
+    if done.returncode != 1:
+        raise RuntimeError(f'git merge-tree: {done.stderr.strip()}')
+    tree, files = merged(done.stdout)
+    touched = landings(git(root, 'log', '-z', '--first-parent', '-m', '--name-only', '--format=tformat:', '-n', str(LANDINGS), trunk).stdout)
+    findings = [conflict(path, kind(git(root, 'show', f'{tree}:{path}', check=False).stdout), touched[path]) for path in files]
+    return 'FAIL', f'{len(files)} conflict(s) with {trunk} {tip} ({behind} landing(s) behind)', findings + notes
+
+
+# Generated files.
+
+def generated(root):
+    """(STATUS, SUMMARY, FINDINGS): no generator's output is tracked."""
+    found = generated_files.tracked(root)
+    findings = [f'{name} is tracked; {generated_files.OUTPUTS[name]} makes it; fix: git rm it' for name in found]
+    return ('FAIL', f'{len(found)} generated file(s) tracked', findings) if found else ('ok', 'no generated file is tracked', [])
+
+
+# The structural rules.
+
+def plan(gate, names, root):
+    """The runs of the quick structural rules a change to NAMES can break, one
+    a package: (PACKAGE, CARGO TARGET FLAGS, NEXTEST FILTER). None for a change
+    that touches no crate: the rules read Rust."""
+    if not any(name.startswith('crates/') for name in names):
+        return []
+    files = {}
+    for binary in gate.STRUCTURAL:
+        if binary in gate.SLOW_RULES:
+            continue
+        package, file = binary.split('::')
+        files.setdefault(package, []).append(file)
+    runs = [(package,
+             test_modules.targets(root, package) if package in test_modules.PACKAGES
+             else [flag for file in mine for flag in ('--test', file)],
+             ' | '.join(gate.test_file(f'{package}::{file}') for file in mine))
+            for package, mine in files.items()]
+    return runs + [(crate, ['--lib'], rule) for crate, rule in sorted(gate.crate_rules(names).items())]
+
+
+def failures(log):
+    """The failing tests of a nextest LOG, each (TEST, WHY): WHY the lines its panic printed."""
+    found, lines = {}, log.splitlines()
+    for index, line in enumerate(lines):
+        failed = re.match(r'\s+(?:FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL)\b.*?\]\s+(?:\(.*?\)\s+)?(\S+ \S+)\s*$', line)
+        if failed:
+            found.setdefault(failed[1], [])
+        panic = re.match(r"\s+thread '([^']+)' \(\d+\) panicked at ", line)
+        if panic:
+            why = []
+            for after in lines[index + 1:index + 12]:
+                if not after.strip() or 'RUST_BACKTRACE' in after:
+                    break
+                why.append(after.strip())
+            for test in found:
+                if test.endswith(panic[1]) and not found[test]:
+                    found[test] = why
+    return sorted(found.items())
+
+
+def log_path(root):
+    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'romacs/dev-check'
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache / (re.sub(r'[^A-Za-z0-9_.-]', '-', str(root).strip('/')) + '-structural.log')
+
+
+def structural(root, trunk, threads):
+    """(STATUS, SUMMARY, FINDINGS) of the structural rules on ROOT's tree."""
+    gate = load_gate(root)
+    runs = plan(gate, gate.changed_names(root, trunk), root)
+    if not runs:
+        return 'ok', 'no Rust changed: the rules read Rust', []
+    if not shutil.which('cargo'):
+        return 'SKIP', 'cargo is not on PATH', ['fix: run tools/dev-check from a shell with the toolchain']
+    log, started, status = log_path(root), time.monotonic(), 0
+    with log.open('w') as sink, tempfile.TemporaryDirectory(prefix='rdc-', dir=log.parent) as scratch:
+        for package, flags, rule in runs:
+            command = ['cargo', 'nextest', 'run', '--cargo-profile', 'gate', '--locked', '--offline', '-p', package, *flags,
+                       '--test-threads', str(threads), '--no-fail-fast', '--retries', '0', '--no-tests=fail',
+                       '--status-level', 'fail', '--final-status-level', 'fail', '-E', rule]
+            sink.write(f'$ {" ".join(command)}\n')
+            sink.flush()
+            status |= subprocess.run(command, cwd=root, env=dict(os.environ, TMPDIR=scratch), stdin=subprocess.DEVNULL,
+                                     stdout=sink, stderr=subprocess.STDOUT).returncode
+    spent = f'{time.monotonic() - started:.0f} s, log {log}'
+    if status == 0:
+        left = ', '.join(binary.split('::')[1] for binary in gate.SLOW_RULES)
+        return 'ok', f'{len(runs)} package(s) hold ({spent}); the queue runs {left}', []
+    failed = failures(log.read_text(errors='replace'))
+    if not failed:
+        return 'FAIL', f'the rules did not build or run ({spent})', ['fix: read the log']
+    return 'FAIL', f'{len(failed)} rule(s) broken ({spent})', [
+        f'{test}: {" ".join(why)[:400] or "see the log"}' for test, why in failed]
+
+
+def report(stages):
+    """The lines for STAGES, (NAME, STATUS, SUMMARY, FINDINGS): failures first, and the verdict."""
+    order = {'FAIL': 0, 'SKIP': 1, 'ok': 2}
+    lines = []
+    for name, status, summary, findings in sorted(stages, key=lambda stage: order[stage[1]]):
+        lines.append(f'{name}: {status} {summary}')
+        lines.extend(f'  {finding}' for finding in findings)
+    failed = [name for name, status, _, _ in stages if status == 'FAIL']
+    skipped = [name for name, status, _, _ in stages if status == 'SKIP']
+    verdict = f'FAIL ({", ".join(failed)})' if failed else f'INCOMPLETE ({", ".join(skipped)} did not run)' if skipped else 'ok'
+    return lines + [f'dev-check: {verdict}'], 1 if failed else 2 if skipped else 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
+    parser.add_argument('--no-structural', action='store_true', help='leave the structural rules out: they build test targets')
+    parser.add_argument('--threads', type=int, default=8, help='test workers of the structural run')
+    args = parser.parse_args()
+    trunk = load_gate().trunk(ROOT, args.trunk)
+    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT))]
+    if not args.no_structural:
+        stages.append(('structural', *structural(ROOT, trunk, args.threads)))
+    lines, status = report(stages)
+    print('\n'.join(lines))
+    return status
+
+
+if __name__ == '__main__':
+    sys.exit(main())

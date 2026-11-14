@@ -14,10 +14,10 @@ pub fn count(name: &'static str) {
     add(name, 1);
 }
 
-/// Add N to this thread's count NAME: work counted in its own unit (rows,
+/// Count N more of NAME on this thread: work counted in its own unit (rows,
 /// bytes, instructions) where a call is too coarse.
 pub fn add(name: &'static str, n: u64) {
-    COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += n);
+    if n > 0 { COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += n); }
 }
 
 /// This thread's calls of NAME so far.
