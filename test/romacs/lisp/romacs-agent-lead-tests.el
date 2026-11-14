@@ -305,7 +305,13 @@ what waited for that end goes."
         (should (eq (cdr (romacs-agent-ends child)) pile))
         ;; A wait answering one of the pile takes it out alone.
         (romacs-agent-tools--answer child 5)
-        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))))))
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))
+        ;; One already gone (a quiet end its hand-on let go) changes nothing.
+        (romacs-agent-tools--answer child 21)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))
+        (romacs-agent-tools--answer child 23)
+        (romacs-agent-tools--answer child 3)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4)))))))
 
 ;;; romacs_task_list
 

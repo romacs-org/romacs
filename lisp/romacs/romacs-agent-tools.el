@@ -476,12 +476,13 @@ ends still on their way stay so."
 delivery may follow.  The ends are walked only down to it: a wait answers
 its newest end."
   (romacs-agent-tools--mark-answered session seq)
+  ;; Newest first: past an older seq it is not there (gone already).
   (let ((ends (romacs-agent-ends session)))
     (if (eql (car (car ends)) seq)
         (setf (romacs-agent-ends session) (cdr ends))
       (let ((cell ends))
-        (while (and (cdr cell) (not (eql (car (cadr cell)) seq))) (setq cell (cdr cell)))
-        (when (cdr cell) (setcdr cell (cddr cell)))))))
+        (while (and (cdr cell) (> (car (cadr cell)) seq)) (setq cell (cdr cell)))
+        (when (and (cdr cell) (eql (car (cadr cell)) seq)) (setcdr cell (cddr cell)))))))
 
 (defun romacs-agent-tools--drop-answered (child handed answered)
   "Let go of CHILD's ends whose seqs ANSWERED (a table) holds, all newer
