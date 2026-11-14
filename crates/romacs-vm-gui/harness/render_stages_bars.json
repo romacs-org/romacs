@@ -91,12 +91,12 @@
  },
  "fontify-unfold-org": {
   "rows_tessellated": 9,
-  "rows_reused": 42,
+  "rows_reused": 41,
   "cursor_rows": 1,
-  "glyphs_walked": 382,
-  "font_identities": 731,
-  "bytes_uploaded": 163000,
-  "own_instructions": 6570000,
+  "glyphs_walked": 385,
+  "font_identities": 737,
+  "bytes_uploaded": 166000,
+  "own_instructions": 6830000,
   "extra_frames": 0
  },
  "fontify-typed-elisp": {
@@ -120,13 +120,13 @@
   "extra_frames": 0
  },
  "scroll-line": {
-  "rows_tessellated": 3,
-  "rows_reused": 35,
-  "cursor_rows": 1,
-  "glyphs_walked": 223,
-  "font_identities": 425,
-  "bytes_uploaded": 99300,
-  "own_instructions": 5750000,
+  "rows_tessellated": 38,
+  "rows_reused": 0,
+  "cursor_rows": 0,
+  "glyphs_walked": 2240,
+  "font_identities": 4470,
+  "bytes_uploaded": 869000,
+  "own_instructions": 23700000,
   "extra_frames": 0
  }
 }
