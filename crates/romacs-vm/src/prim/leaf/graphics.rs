@@ -208,9 +208,10 @@ impl Leaf<'_> {
         let frame = self.face_frame(frame, true)?;
         // The same frame, faces, display and cell, the same environment:
         // a redisplay asks once for all the images it shows.
+        let native = self.vm.top_geometry(self.vm.top_frame(frame)).map_err(Fault::Error)?;
         let ws = &self.vm.window_state;
         let stamp = [self.vm.frame(frame).map_err(Fault::Error)?.id, self.vm.display_state.face_revision, self.vm.display_state.version,
-                     u64::from(ws.line), u64::from(ws.column), u64::from(ws.width), u64::from(ws.height), u64::from(ws.device_scale.to_bits())];
+                     u64::from(ws.line), u64::from(ws.column), u64::from(native.width), u64::from(native.height), u64::from(ws.device_scale.to_bits())];
         if let Some(env) = self.vm.images.env(&stamp) { return Ok(env); }
         let env = self.image_env_fresh(frame)?;
         self.vm.images.keep_env(stamp, env.clone());
@@ -234,7 +235,8 @@ impl Leaf<'_> {
         let family = attribute(self, ":family")?;
         let font_family = self.vm.str_view(family).map(|s| String::from_utf8_lossy(s.bytes()).into_owned()).unwrap_or_default();
         let (column, line) = (self.vm.window_state.column.max(1), self.vm.window_state.line.max(1));
-        let frame_pixels = (self.vm.window_state.width, self.vm.window_state.height);
+        let native = self.vm.top_geometry(self.vm.top_frame(frame)).map_err(Fault::Error)?;
+        let frame_pixels = (native.width, native.height);
         // GNU's `img->face_font_size', `_height', `_width': the default
         // face's realized font's pixel size, height and average width.
         let font = self.default_font_request().ok()
