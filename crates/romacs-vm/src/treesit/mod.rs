@@ -100,6 +100,13 @@ impl Clone for Registry {
 // capture (`Object::foreign_resource`) and `world_quiescent` an early
 // parse, so a captured registry is empty.
 unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
+// An image holds it empty: nothing to walk.
+impl romacs_snapshot::Schema for Registry {
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 /// The most first parses running at once, whatever a session visits.
 const EARLY_LIMIT: usize = 4;

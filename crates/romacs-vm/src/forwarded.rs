@@ -1043,6 +1043,13 @@ impl Forwarded {
 #[derive(Clone, Default)]
 pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>);
 romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
+impl PerBuffer {
+    /// How many per-buffer variables it has a slot for, each at its
+    /// forwarded place (`Fwd::Buffer`).
+    pub(crate) fn slots(&self) -> usize {
+        self.0.len()
+    }
+}
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

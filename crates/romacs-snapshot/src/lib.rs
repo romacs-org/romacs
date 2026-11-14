@@ -41,45 +41,43 @@
 /// or into immutable data, and no resource of the process.
 pub unsafe trait SnapshotSafe {}
 
-/// Require VALUE's type to be SnapshotSafe: what the listing macros call
-/// for each field.
-pub fn require<T: SnapshotSafe + ?Sized>(_value: &T) {}
+mod schema;
+pub use schema::{EMPTY_HASH_TABLE, Notes, Schema, TAKEN, Walk};
 
 /// `snapshot_struct!(Name { field, ... } at_rest { field, ... })`: Name is
 /// SnapshotSafe, every field listed, each but the at-rest ones
-/// SnapshotSafe. An at-rest field must be checked by `world_quiescent`.
+/// SnapshotSafe (`Walk::field` requires it). An at-rest field must be
+/// checked by `world_quiescent`. The listing is also Name's `Schema`: its
+/// walk meets each listed field.
 #[macro_export]
 macro_rules! snapshot_struct {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
-        // SAFETY: `fields` below names every field and requires each listed
+        // SAFETY: the walk below names every field and requires each listed
         // one SnapshotSafe; at-rest fields are `world_quiescent`'s to check.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
-                $($(#[$m])* $crate::require($field);)*
-            }
-        };
+        $crate::snapshot_fields!($name { $($(#[$m])* $field),* } $(at_rest { $($(#[$rm])* $rest),* })?);
     };
 }
 
 /// `snapshot_fields!(Name { field, ... } at_rest { field, ... })`: the
-/// listing of `snapshot_struct!`, checked the same way, without making
-/// Name SnapshotSafe. For a value that enters an image only through a
-/// door that validates it, as a world's primary VM does through
-/// romacs-vm's `world::image::capture`: SnapshotSafe would let one in
-/// unvalidated, inside another value.
+/// listing of `snapshot_struct!`, checked the same way and walked the same
+/// way, without making Name SnapshotSafe. For a value that enters an image
+/// only through a door that validates it, as a world's primary VM does
+/// through romacs-vm's `world::image::capture`: SnapshotSafe would let one
+/// in unvalidated, inside another value.
 #[macro_export]
 macro_rules! snapshot_fields {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
-                $($(#[$m])* $crate::require($field);)*
+        impl $crate::Schema for $name {
+            #[allow(unused_variables, reason = "at-rest fields are named, not walked")]
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = self;
+                $($(#[$m])* w.field(stringify!($field), $field);)*
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -87,16 +85,18 @@ macro_rules! snapshot_fields {
 #[macro_export]
 macro_rules! snapshot_tuple {
     ($name:ident ( $($field:ident),* $(,)? )) => {
-        // SAFETY: `fields` below names every field and requires each one
+        // SAFETY: the walk below names every field and requires each one
         // SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name($($field),*) = value;
-                $($crate::require($field);)*
+        impl $crate::Schema for $name {
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                let $name($($field),*) = self;
+                $(w.field(stringify!($field), $field);)*
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -106,15 +106,18 @@ macro_rules! snapshot_tuple {
 #[macro_export]
 macro_rules! snapshot_enum {
     ($name:ty { $($pat:pat => ($($bind:ident),*)),* $(,)? }) => {
-        // SAFETY: `fields` below matches every variant, exhaustively, and
+        // SAFETY: the walk below matches every variant, exhaustively, and
         // requires each binding SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                match value { $($pat => { $($crate::require($bind);)* })* }
+        impl $crate::Schema for $name {
+            #[allow(unused_variables, reason = "an at-rest variant's payload is bound, not walked")]
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                match self { $($pat => { w.variant(stringify!($pat)); $(w.field(stringify!($bind), $bind);)* })* }
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -189,12 +192,25 @@ unsafe impl<T: ?Sized> SnapshotSafe for std::marker::PhantomData<T> {}
 // SAFETY: a zero-sized marker for a hasher type.
 unsafe impl<H> SnapshotSafe for std::hash::BuildHasherDefault<H> {}
 
+use std::any::Any;
+
 macro_rules! tuples {
-    ($(($($t:ident),+)),* $(,)?) => {
+    ($(($($t:ident $v:ident),+)),* $(,)?) => {
         $(
             // SAFETY: a tuple holds its SnapshotSafe fields inline.
             unsafe impl<$($t: SnapshotSafe),+> SnapshotSafe for ($($t,)+) {}
+            impl<$($t: SnapshotSafe + Schema),+> Schema for ($($t,)+) {
+                fn walk(&self, w: &mut Walk<'_>) {
+                    let ($($v,)+) = self;
+                    $(w.field(stringify!($v), $v);)+
+                }
+                fn any(&self) -> Option<&dyn Any> {
+                    Some(self)
+                }
+            }
         )*
     };
 }
-tuples!((A), (A, B), (A, B, C), (A, B, C, D), (A, B, C, D, E), (A, B, C, D, E, F), (A, B, C, D, E, F, G));
+tuples!((A a), (A a, B b), (A a, B b, C c), (A a, B b, C c, D d), (A a, B b, C c, D d, E e), (A a, B b, C c, D d, E e, F f),
+        (A a, B b, C c, D d, E e, F f, G g));
+
