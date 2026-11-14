@@ -7,6 +7,9 @@ use std::time::Duration;
 const MAX_JOBS: usize = 16;
 const MAX_INPUT: usize = 1024 * 1024;
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+/// How often a job's worker looks at its cancellation and its child's exit
+/// when its pipes are quiet. Data or room on a pipe wakes it at once.
+const TICK: Duration = Duration::from_millis(5);
 
 pub struct Request {
     pub argv: Vec<String>,
@@ -181,14 +184,15 @@ fn run(_: Request, _: std::process::Command, _: Arc<AtomicBool>) -> Output {
 #[cfg(target_os = "linux")]
 fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
-    use std::os::fd::AsFd;
+    use std::os::fd::{AsFd, AsRawFd};
     use std::os::unix::process::CommandExt;
 
-    fn drain(reader: &mut impl Read, bytes: &mut Vec<u8>) -> Result<(), String> {
+    /// Read what READER holds into BYTES: whether it is still open.
+    fn drain(reader: &mut impl Read, bytes: &mut Vec<u8>) -> Result<bool, String> {
         let mut buffer = [0; 8192];
         loop {
             match reader.read(&mut buffer) {
-                Ok(0) => return Ok(()),
+                Ok(0) => return Ok(false),
                 Ok(count) => {
                     let remaining = MAX_OUTPUT - bytes.len();
                     bytes.extend_from_slice(&buffer[..count.min(remaining)]);
@@ -196,7 +200,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
                         return Err("CLI job output exceeds 4 MiB per stream".into());
                     }
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(true),
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(error.to_string()),
             }
@@ -238,6 +242,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
         .and_then(|()| crate::host::set_nonblocking(stderr.as_fd()))
         .and_then(|()| crate::host::set_nonblocking(stdin.as_ref().unwrap().as_fd()));
     let mut written = 0;
+    let mut open = (true, true);
     if let Err(error) = &setup {
         output.error = Some(error.to_string());
     }
@@ -246,15 +251,19 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
             output.error = Some("CLI job cancelled".into());
             break;
         }
-        if crate::host::monotonic().saturating_duration_since(started) >= request.timeout {
+        let elapsed = crate::host::monotonic().saturating_duration_since(started);
+        if elapsed >= request.timeout {
             output.error = Some("CLI job timed out".into());
             break;
         }
-        if let Err(error) = drain(&mut stdout, &mut output.stdout)
-            .and_then(|()| drain(&mut stderr, &mut output.stderr))
+        match drain(&mut stdout, &mut output.stdout)
+            .and_then(|out| Ok((out, drain(&mut stderr, &mut output.stderr)?)))
         {
-            output.error = Some(error);
-            break;
+            Ok(still) => open = still,
+            Err(error) => {
+                output.error = Some(error);
+                break;
+            }
         }
         if written == request.input.len() {
             stdin.take();
@@ -280,7 +289,24 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
                 break;
             }
         }
-        std::thread::sleep(Duration::from_millis(5));
+        // Wait for a pipe to have data or room, at most a tick: a child's
+        // output is read as fast as it writes it, not a pipe's buffer a tick,
+        // which bounded a job to some 13 MiB/s and let a loaded host's late
+        // wakes run a fast producer out of its time. A closed pipe is not
+        // watched, as it would wake every call.
+        let pending = stdin.as_ref().filter(|_| written < request.input.len());
+        let watched: Vec<_> = [
+            open.0.then_some((stdout.as_raw_fd(), libc::POLLIN)),
+            open.1.then_some((stderr.as_raw_fd(), libc::POLLIN)),
+            pending.map(|pipe| (pipe.as_raw_fd(), libc::POLLOUT)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if let Err(error) = crate::subprocess::poll(&watched, Some(TICK.min(request.timeout - elapsed))) {
+            output.error = Some(error.to_string());
+            break;
+        }
     }
     // Keep the leader unreaped until its group is killed, pinning the numeric PID.
     let _ = crate::host::kill(-pid, libc::SIGKILL);
@@ -297,7 +323,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
     // Never await EOF: a descendant may have escaped the group with inherited pipes.
     if setup.is_ok()
         && let Err(error) = drain(&mut stdout, &mut output.stdout)
-            .and_then(|()| drain(&mut stderr, &mut output.stderr))
+            .and_then(|_| drain(&mut stderr, &mut output.stderr))
     {
         output.error.get_or_insert(error);
     }
@@ -309,17 +335,22 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    /// A job of SCRIPT with the longest timeout a job may have: a test of
+    /// what a job does must not race its clock on a loaded host (the output
+    /// caps once lost to a 2 s timeout). The timeout's own test sets a short one.
     fn request(script: &str) -> Request {
         Request {
             argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
             input: Vec::new(),
             directory: PathBuf::from("/"),
-            timeout: Duration::from_secs(2),
+            timeout: Duration::from_secs(120),
         }
     }
 
+    /// The job's output once it ends. Its worker ends it by its timeout at
+    /// the latest, so the deadline only guards against a worker that hangs.
     fn wait(jobs: &mut Jobs, id: u64) -> Arc<Output> {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(130);
         loop {
             if let Some(output) = jobs.result(id).unwrap() {
                 return output;
@@ -367,7 +398,7 @@ mod tests {
         for script in ["yes x", "yes x >&2"] {
             let id = jobs.start(request(script)).unwrap();
             let output = wait(&mut jobs, id);
-            assert!(output.error.as_ref().unwrap().contains("4 MiB"));
+            assert!(output.error.as_ref().unwrap().contains("4 MiB"), "{script}: {:?}", output.error);
             assert!(output.stdout.len() <= MAX_OUTPUT && output.stderr.len() <= MAX_OUTPUT);
         }
     }
