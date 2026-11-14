@@ -5,7 +5,7 @@
 #
 # Arguments, after `bash -s --' when piped:
 #
-#   --nightly     the rolling build of master, not the latest stable release
+#   --nightly     the rolling build of beta, not the latest stable release
 #   --no-compile  skip compiling the Lisp ahead of use; Romacs compiles
 #                 what it loads as you go, so early sessions are slower
 #   --uninstall   remove the installation; your init and data stay

@@ -47,6 +47,8 @@
 ;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
+(declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
@@ -951,6 +953,10 @@ or a repeat."
       (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
 
 (defun romacs-agent-ui--on-event (session event)
+  ;; A report comes with each request: the views follow only what it changes.
+  (when (and (eq (plist-get event :type) 'rate-limit)
+             (not (equal (romacs-agent-ui--pools-line) romacs-agent-ui--pools-shown)))
+    (romacs-agent-ui--batch))
   (let ((moved (romacs-agent-ui--track-children session event)))
     (romacs-agent-ui--render session event)
     (romacs-agent-ui--header-refresh session)
@@ -1313,11 +1319,41 @@ order, or nil when none is news."
 ;; Sessions a new server restored raised no events: their news shows.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-ui--batch)
 
+(defun romacs-agent-ui--pools-line ()
+  "The pools with an account at or near its limit, each as ⛽ its harness
+and how many of its accounts have room, its accounts in the hover: nil
+while every account has room and none warns."
+  (let ((parts nil))
+    (dolist (cell romacs-agent--drivers)
+      (let* ((pool (romacs-agent-pool (car cell)))
+             (rooms (mapcar (lambda (i) (romacs-agent-room-of (plist-get i :name))) pool)))
+        (when (cl-some (lambda (room) (memq (plist-get room :status) '(warning rejected))) rooms)
+          (push (propertize
+                 (format "⛽%s %d/%d" (car cell)
+                         (cl-count-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool) (length pool))
+                 'face (if (cl-some (lambda (i) (romacs-agent-room (plist-get i :name))) pool) 'warning 'romacs-agent-error)
+                 'help-echo (mapconcat
+                             (lambda (i)
+                               (let ((room (romacs-agent-room-of (plist-get i :name))))
+                                 (format "%s: %s%s%s" (plist-get i :name)
+                                         (if room (plist-get room :status) "no report")
+                                         (if (numberp (plist-get room :used)) (format ", %d%% used" (round (* 100 (plist-get room :used)))) "")
+                                         (if (numberp (plist-get room :resets))
+                                             (format-time-string ", resets %a %H:%M" (plist-get room :resets)) ""))))
+                             pool "\n"))
+                parts))))
+    (and parts (mapconcat #'identity (nreverse parts) " "))))
+
+(defvar romacs-agent-ui--pools-shown nil "The pools line the status bar shows.")
+
 (defun romacs-agent-ui--status-bar ()
-  "Show every session's news in the status bar (`romacs-mode-line-agent')."
+  "Show every session's news in the status bar (`romacs-mode-line-agent'),
+and the pools whose accounts near their limits."
+  (setq romacs-agent-ui--pools-shown (romacs-agent-ui--pools-line))
   (let ((keys nil))
     (maphash (lambda (_ session) (push (romacs-agent-ui--state-key session) keys)) romacs-agent--sessions)
-    (let ((rollup (romacs-agent-ui--rollup keys)))
+    (let ((rollup (let ((parts (delq nil (list (romacs-agent-ui--rollup keys) romacs-agent-ui--pools-shown))))
+                    (and parts (mapconcat #'identity parts " ")))))
       (unless (equal rollup (and (boundp 'romacs-mode-line-agent) (default-value 'romacs-mode-line-agent)))
         (setq-default romacs-mode-line-agent rollup)
         (force-mode-line-update t)))))
@@ -1357,6 +1393,7 @@ made again when it differs."
           :switch (and switch (romacs-agent-ui--selection-label switch))
           :workers (romacs-agent-children-summary session)
           :share (romacs-agent-ui--context-share session)
+          :resume (romacs-agent-resume-time session)
           :state (romacs-agent-ui--state-key session)
           :glyphs romacs-agent-glyphs)))
 
@@ -1367,7 +1404,7 @@ effort, the instance when not the harness's own, a permission mode other
 than bypassing them, a selection waiting, its workers, and how full its
 context is.  The whole line: a window too narrow for it shows its start,
 display clipping the band where the window ends."
-  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state &allow-other-keys)
+  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state resume &allow-other-keys)
       inputs
     (mapconcat
      #'identity
@@ -1375,14 +1412,13 @@ display clipping the band where the window ends."
            (list (romacs-agent-ui--harness-icon harness)
                  (romacs-agent-ui--label (romacs-agent-ui--state-of state))
                  (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
-                                     'face 'romacs-agent-model)
+                                     'face 'romacs-agent-model 'help-echo (and provider (format "account %s" provider)))
                          (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
-                 ;; The icon names the harness: only another instance of it is named.
-                 (and provider (not (equal provider (symbol-name harness)))
-                      (propertize provider 'face 'romacs-agent-dim))
                  (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
                        ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
+                 (and resume (propertize (format-time-string "⏰%H:%M" resume) 'face 'warning
+                                         'help-echo "Resumes by itself when its limit resets; z in the actions menu cancels"))
                  workers
                  (and share (propertize share 'face 'romacs-agent-context))))
      "  ")))
@@ -2208,7 +2244,7 @@ with a prefix argument, asked for."
    (let* ((session romacs-agent-ui--session)
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
           (fields (cdr (romacs-agent--pick-row
-                        (romacs-agent--instance-rows instance (plist-get instance :display) nil))))
+                        (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
           (model (plist-get fields :model))
           (efforts (plist-get fields :efforts))
           (now (plist-get (romacs-agent--wanted session) :effort))
@@ -2318,16 +2354,33 @@ a brief of the thread, to do NEXT, and its chat opens."
              (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
-    (if (romacs-agent-ui--moves-p session provider)
+    (if (and (symbolp provider) (romacs-agent-ui--moves-p session provider))
+        (romacs-agent-chat-next-account)
+      (if (romacs-agent-ui--moves-p session provider)
         (let ((wanted (romacs-agent--wanted session)))
           (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
           (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
                    (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
-      (romacs-agent-ui--hand-off session provider model next))))
+      (romacs-agent-ui--hand-off session provider model next)))))
+
+(defun romacs-agent-chat-next-account ()
+  "Go on under the next account of this session's harness with room, its
+conversation as is (`romacs-agent-move-on')."
+  (interactive nil romacs-agent-chat-mode)
+  (let* ((session romacs-agent-ui--session) (to (romacs-agent-move-on session)))
+    (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) to
+             (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" ""))))
+
+(defun romacs-agent-chat-cancel-resume ()
+  "This session no longer resumes by itself when its limit resets."
+  (interactive nil romacs-agent-chat-mode)
+  (romacs-agent-tools--cancel-resume romacs-agent-ui--session "cancelled by hand"))
 
 (defun romacs-agent-ui--moves-p (session provider)
-  "Whether SESSION goes on under PROVIDER as it is: an instance of its harness."
-  (eq (plist-get (romacs-agent--configured provider) :harness) (romacs-agent-harness session)))
+  "Whether SESSION goes on under PROVIDER as it is: its harness's pool, or
+an instance of its harness."
+  (eq (if (symbolp provider) provider (plist-get (romacs-agent--configured provider) :harness))
+      (romacs-agent-harness session)))
 
 (defun romacs-agent-ui--hand-off (session provider model next)
   "Start a session under PROVIDER on MODEL on a brief of SESSION's thread,
@@ -2511,6 +2564,9 @@ view."
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "H" ("Go on under another instance…" romacs-agent-chat-handoff)
+  "N" ("Next account with room" romacs-agent-chat-next-account)
+  "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
+       :if (lambda () (and romacs-agent-ui--session (romacs-agent-resume-time romacs-agent-ui--session))))
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))

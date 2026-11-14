@@ -38,12 +38,8 @@ fn deferred_gui_native_gated_pending_close_recreates_and_preserves_default_close
                 app.comms = render;
                 app.comms.keep_alive_without_frames = true;
                 app.frame_windows.adopt_primary_frame_id(0x42);
-                let (reply, ready) = crossbeam_channel::bounded(1);
-                app.frame_windows.await_ready(0x42, reply);
-                assert!(matches!(
-                    ready.try_recv(),
-                    Err(crossbeam_channel::TryRecvError::Empty)
-                ));
+                app.frame_windows.await_ready(0x42, 1);
+                assert!(app.frame_windows.take_answers().is_empty());
                 let window: Arc<dyn winit::window::Window> =
                     Arc::from(owner.create_window(Default::default()).unwrap());
                 let stale = window.id();
@@ -60,7 +56,7 @@ fn deferred_gui_native_gated_pending_close_recreates_and_preserves_default_close
                     weak.upgrade().is_none(),
                     "OS-owner must release pending native window"
                 );
-                assert!(ready.try_recv().unwrap().is_err());
+                assert!(matches!(app.frame_windows.take_answers()[..], [(1, Err(_))]));
                 assert!(matches!(
                     emacs.input_rx.try_recv().unwrap(),
                     InputEvent::WindowClose {
