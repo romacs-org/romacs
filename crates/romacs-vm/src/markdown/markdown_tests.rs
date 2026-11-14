@@ -316,3 +316,27 @@ fn references_resolve_outside_the_slice() {
     assert_eq!(parsed.links.len(), 1, "{:?}", parsed.links);
     assert!(spans("[go][r]\n").links.is_empty());
 }
+
+/// A label defined twice stays defined when its first definition goes, and
+/// definitions read past an edit's span are not counted twice.
+#[test]
+fn index_keeps_repeated_definitions_once() {
+    let mut text = String::from("[r]: /one\n\nA.\n\nB.\n\nC.\n\nD.\n\n[r]: /two\n\nE.\n");
+    let mut index = Index::default();
+    let read = |t: &String| { let t = t.clone(); move |r: std::ops::Range<usize>| t[r].to_owned() };
+    index.sync(text.len(), &mut read(&text));
+    let end = text.find("\n\nA.").unwrap() + 2;
+    text.replace_range(0..end, "");
+    index.edit(0, end, 0);
+    index.sync(text.len(), &mut read(&text));
+    assert!(index.defines("r"));
+    for _ in 0..5 {
+        let at = text.find("C.").unwrap();
+        text.insert(at, 'x');
+        index.edit(at, at, 1);
+        index.sync(text.len(), &mut read(&text));
+    }
+    let mut fresh = Index::default();
+    fresh.sync(text.len(), &mut read(&text));
+    assert_eq!(index.defs(), fresh.defs());
+}

@@ -98,13 +98,19 @@ impl Index {
                 // label defined or no longer defined changes what every
                 // reference to it is, so the whole document is again to face.
                 self.defs.retain(|(at, _)| *at < from || cut.is_some_and(|c| *at >= c));
-                self.defs.extend(defs(&text, parsed.labels, from));
+                self.defs.extend(defs(&text, parsed.labels, from).into_iter().filter(|(at, _)| *at < cut_at));
                 self.defs.sort();
                 let labels = counts(&self.defs);
-                let defined = |m: &HashMap<String, usize>| m.iter().filter(|e| *e.1 > 0).map(|e| e.0.clone()).collect::<std::collections::BTreeSet<_>>();
-                let reshaped = defined(&labels) != defined(&self.labels);
+                let lost = self.labels.keys().any(|label| !labels.contains_key(label));
+                if lost {
+                    // A parse keeps only a label's first definition, so one
+                    // gone may hide another outside the span: read it all.
+                    self.built = false;
+                    return self.sync(len, read);
+                }
+                let gained = labels.keys().any(|label| !self.labels.contains_key(label));
                 self.labels = labels;
-                return Some(if reshaped { 0..len } else { from..cut_at });
+                return Some(if gained { 0..len } else { from..cut_at });
             }
             // Not found again: look twice as far.
             k = (k + (k - after).max(1)).min(self.starts.len());
@@ -124,6 +130,12 @@ impl Index {
     #[cfg(test)]
     pub(crate) fn starts(&self) -> &[usize] {
         &self.starts
+    }
+
+    /// The link reference definitions.
+    #[cfg(test)]
+    pub(crate) fn defs(&self) -> &[(usize, String)] {
+        &self.defs
     }
 }
 
