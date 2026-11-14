@@ -7,6 +7,8 @@
 //! `buffer-backed-up` and ibuffer's `buffer-display-time`. Both sessions run
 //! in one private HOME and directory; the test compares exit status and
 //! stdout.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 const SCRIPT: &str = r#";;; -*- lexical-binding: t -*-
@@ -90,8 +92,6 @@ fn run(binary: &str, dir: &std::path::Path) -> (Option<i32>, String, String) {
     let output = Command::new(binary).args(["-Q", "--batch", "-l", "probe.el"]).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
-        // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
-        .env("ROMACS_WORLD", "off")
         .output().unwrap();
     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
     (output.status.code(), text(output.stdout), text(output.stderr))
@@ -108,7 +108,7 @@ fn per_buffer_variables_and_local_builtins_match_pinned_gnu() {
         run(binary, &dir)
     };
     let expected = run_in(&gnu, "gnu");
-    let actual = run_in(env!("CARGO_BIN_EXE_romacs-vm-gui"), "romacs");
+    let actual = run_in(installed::romacs(), "romacs");
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(expected.0, Some(0), "GNU: {}", expected.2);
     let lines = |text: &str| text.lines().map(str::to_owned).collect::<Vec<_>>();

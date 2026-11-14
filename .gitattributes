@@ -126,6 +126,3 @@ lib-src/rcs2log diff=shell
 # This file contains in-line diffs, which can include trailing
 # whitespace.
 java/INSTALL -whitespace
-
-ledger/smell-floors.json merge=romacs-floors
-ledger/unsafe-floors.json merge=romacs-unsafe-floors

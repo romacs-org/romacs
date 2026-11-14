@@ -1024,13 +1024,29 @@ pub struct Census {
 
 /// The arena's census (`Census`), or None when the heap is the system's.
 /// It walks every free list under the allocator's lock.
+#[must_use]
 pub fn census() -> Option<Census> {
+    census_of(&[&BASE, &FORMER])
+}
+
+/// The census of the image this process mapped alone, as it was published
+/// and as it is now: without the arena the process started with.
+#[must_use]
+pub fn image_census() -> Option<Census> {
+    if restore_outcome() != Restore::Mapped {
+        return None;
+    }
+    census_of(&[&BASE])
+}
+
+/// The census of the arenas whose bases ARENAS hold.
+fn census_of(arenas: &[&AtomicUsize]) -> Option<Census> {
     if !started() {
         return None;
     }
     let mut c = Census { classes: vec![(0, 0); CLASSES], ..Census::default() };
     lock();
-    for base in [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)] {
+    for base in arenas.iter().map(|base| base.load(Ordering::Acquire)) {
         if base != 0 {
             unsafe { count(&*(base as *const Header), &mut c) };
         }

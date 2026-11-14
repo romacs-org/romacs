@@ -107,6 +107,7 @@ fn act_in_role() -> bool {
         Ok("heap-file") => heap_file(&store.unwrap()),
         Ok("trim") => trim(),
         Ok("alone") => alone(),
+        Ok("census") => census(&store.unwrap()),
         _ => return false,
     }
     true
@@ -151,6 +152,21 @@ fn damage(store: &Path, edit: impl FnOnce(&mut std::fs::File, u64)) {
 /// The launcher's side: restore, build or boot from source, and say which.
 fn world(store: &Path) -> World {
     World::new(store.to_owned(), vec!["consumer world-image-test".into()]).unwrap()
+}
+
+/// The census of the world in STORE, restored read only as it was
+/// published: what the walk met, by kind and by note, beside the image's
+/// own arena, as long as the file.
+fn census(store: &Path) {
+    let (vm, carry) = World::restore_read_only::<u64>(store, vec!["consumer world-image-test".into()]).unwrap();
+    let census = romacs_vm::world::image::census(&vm, &carry);
+    let count = |kind: &str| census["kinds"].as_array().unwrap().iter().find(|k| k["type"] == kind).map(|k| k["count"].clone());
+    let published = std::fs::metadata(image(store)).unwrap().len();
+    println!("WORLD-IMAGE {}", json!({
+        "vm": count("romacs_vm::Vm"), "image": census["image"]["used"].as_u64() == Some(published),
+        "primitives": census["notes"]["ordinal: a primitive, by its index in the primitive table"].as_u64() > Some(0),
+        "within": census["totals"]["owned_bytes"].as_u64() <= census["image"]["used"].as_u64(),
+    }));
 }
 
 thread_local! {
@@ -290,6 +306,10 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // theirs is kept in the store to stand in for that.
     let kept: Vec<String> = std::fs::read_dir(store.join("ids")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     assert!(kept.iter().all(|name| !name.starts_with("library-")), "{kept:?}");
+    // Its census, read in a process that restores it read only: the VM met,
+    // the image's arena alone counted, the primitives it names by this
+    // build's table counted, and the walk's owned bytes within the image.
+    assert_eq!(outcome(&mut child("census", &store)), json!({"vm": 1, "image": true, "primitives": true, "within": true}).to_string());
 
     // A byte changed in place: the content is not the one the manifest
     // binds. The launch rebuilds the world, a new image, and boots from it.

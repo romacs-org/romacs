@@ -24,6 +24,7 @@ romacs_snapshot::snapshot_enum!(Phase {
 });
 #[derive(Clone)]
 struct Frame {
+    // CELL(Held)
     node: CharTableNodeHandle,
     top: Value,
     from: usize,

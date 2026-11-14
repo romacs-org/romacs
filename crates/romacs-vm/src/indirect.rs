@@ -28,10 +28,23 @@ use std::rc::Rc;
 /// the one split borrow of the arena (`threaded::quiet_insert`) pairs a
 /// string with a buffer. So a mutable reference to a cell's value never
 /// coexists with another reference to it.
+// CELL(Generic)
 pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>);
 // SAFETY: the cell's value is SnapshotSafe, and a world image maps the Rc
 // and its value back where they were.
 unsafe impl<T: romacs_snapshot::SnapshotSafe> romacs_snapshot::SnapshotSafe for Shared<T> {}
+/// A cell shared by several holders is walked once, as an `Rc` is.
+impl<T: romacs_snapshot::Schema> romacs_snapshot::Schema for Shared<T> {
+    fn walk(&self, w: &mut romacs_snapshot::Walk<'_>) {
+        if w.first_share(Rc::as_ptr(&self.0).cast::<u8>() as usize) {
+            w.own(std::mem::size_of::<T>() + 2 * std::mem::size_of::<usize>());
+            w.value(&**self);
+        }
+    }
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 impl<T> Shared<T> {
     pub(crate) fn new(value: T) -> Self {
