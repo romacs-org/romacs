@@ -6,7 +6,7 @@
   "glyphs_walked": 99,
   "font_identities": 185,
   "bytes_uploaded": 61300,
-  "own_instructions": 4660000,
+  "own_instructions": 4640000,
   "extra_frames": 0
  },
  "chat-cursor": {
@@ -26,7 +26,7 @@
   "glyphs_walked": 97,
   "font_identities": 179,
   "bytes_uploaded": 51300,
-  "own_instructions": 3740000,
+  "own_instructions": 3750000,
   "extra_frames": 0
  },
  "typed": {
@@ -36,7 +36,7 @@
   "glyphs_walked": 196,
   "font_identities": 370,
   "bytes_uploaded": 95600,
-  "own_instructions": 5150000,
+  "own_instructions": 5140000,
   "extra_frames": 0
  },
  "typed-elements": {
@@ -46,7 +46,7 @@
   "glyphs_walked": 190,
   "font_identities": 357,
   "bytes_uploaded": 93400,
-  "own_instructions": 4980000,
+  "own_instructions": 5020000,
   "extra_frames": 0
  },
  "chat-stream-1k": {
@@ -66,7 +66,7 @@
   "glyphs_walked": 128,
   "font_identities": 231,
   "bytes_uploaded": 84800,
-  "own_instructions": 5390000,
+  "own_instructions": 5400000,
   "extra_frames": 0
  },
  "fontify-open-org-folded": {
@@ -86,17 +86,17 @@
   "glyphs_walked": 92,
   "font_identities": 161,
   "bytes_uploaded": 54300,
-  "own_instructions": 2850000,
+  "own_instructions": 2810000,
   "extra_frames": 0
  },
  "fontify-unfold-org": {
   "rows_tessellated": 9,
   "rows_reused": 41,
   "cursor_rows": 1,
-  "glyphs_walked": 383,
+  "glyphs_walked": 385,
   "font_identities": 733,
-  "bytes_uploaded": 163000,
-  "own_instructions": 6610000,
+  "bytes_uploaded": 166000,
+  "own_instructions": 6520000,
   "extra_frames": 0
  },
  "fontify-typed-elisp": {
@@ -126,7 +126,7 @@
   "glyphs_walked": 223,
   "font_identities": 425,
   "bytes_uploaded": 99300,
-  "own_instructions": 5910000,
+  "own_instructions": 5500000,
   "extra_frames": 0
  }
 }
