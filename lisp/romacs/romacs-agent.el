@@ -372,7 +372,8 @@ loading it would undo that one's changes; merge it first")
   ;; The messages from other sessions it received last, newest first, each
   ;; its `romacsMessage' record (`romacs-agent--message-envelope'), the
   ;; id of the one its running or last turn began with (what it answers),
-  ;; and the record of the message a per-turn harness's next prompt is.
+  ;; and the messages a per-turn harness's next prompt is, with its text
+  ;; (:text :messages).
   received answering incoming)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
@@ -1259,47 +1260,88 @@ message's text, which a child's result or a quote can fill.")
   "VALUE fit for an envelope's attribute: no quote or angle bracket."
   (replace-regexp-in-string "[\"<>\n]" "" (format "%s" value)))
 
-(defun romacs-agent-message-record (id kind from &optional in-reply-to)
-  "A `romacsMessage' record: its ID, the sender's KIND to the receiver
-\(parent, child, sibling or external), FROM a plist of :session (its id),
-:name and, for a Claude Code session outside Romacs, :address (what its
-SendMessage names it by) and :claude-session, and IN-REPLY-TO."
-  (let ((sender (romacs-mcp--object "session" (or (plist-get from :session) :null)
-                                    "name" (or (plist-get from :name) "a session outside Romacs"))))
+(defun romacs-agent-make-message (id kind from &optional in-reply-to text)
+  "A message from another session, as a plist: its ID, the sender's KIND
+to the receiver (parent, child, sibling or external), FROM a plist of
+:session (its id), :name (its title alone) and, for a Claude Code session
+outside Romacs, :address (what its SendMessage names it by) and
+:claude-session, IN-REPLY-TO, and its TEXT.  A delegated task's result,
+or a copy of a message between tasks, adds :wake (:state, :chars and, for
+a copy, :to)."
+  (list :id id :kind kind
+        :from (list :session (plist-get from :session) :name (or (plist-get from :name) "a session outside Romacs")
+                    :address (plist-get from :address) :claude-session (plist-get from :claude-session))
+        :in-reply-to in-reply-to :text text))
+
+(defun romacs-agent--message-json (message)
+  "MESSAGE (`romacs-agent-make-message') as its journal record keeps it."
+  (let* ((from (plist-get message :from))
+         (sender (romacs-mcp--object "session" (or (plist-get from :session) :null) "name" (plist-get from :name)))
+         (object (romacs-mcp--object "id" (plist-get message :id) "kind" (plist-get message :kind) "from" sender
+                                     "inReplyTo" (or (plist-get message :in-reply-to) :null)
+                                     "text" (or (plist-get message :text) "") "t" (or (plist-get message :time) :null))))
     (when (plist-get from :address) (puthash "address" (plist-get from :address) sender))
     (when (plist-get from :claude-session) (puthash "claudeSession" (plist-get from :claude-session) sender))
-    (romacs-mcp--object "id" id "kind" kind "from" sender "inReplyTo" (or in-reply-to :null))))
+    (when-let* ((wake (plist-get message :wake)))
+      (puthash "wake" (let ((w (romacs-mcp--object "state" (plist-get wake :state) "chars" (plist-get wake :chars))))
+                        (when (plist-get wake :to) (puthash "to" (plist-get wake :to) w))
+                        w)
+               object))
+    object))
+
+(defun romacs-agent--message-of (object)
+  "The message (`romacs-agent-make-message') a journal record's OBJECT keeps."
+  (let ((from (gethash "from" object)) (wake (gethash "wake" object)))
+    (append (list :id (gethash "id" object) :kind (gethash "kind" object)
+                  :from (and (hash-table-p from)
+                             (list :session (romacs-agent--value (gethash "session" from))
+                                   :name (romacs-agent--value (gethash "name" from))
+                                   :address (romacs-agent--value (gethash "address" from))
+                                   :claude-session (romacs-agent--value (gethash "claudeSession" from))))
+                  :in-reply-to (romacs-agent--value (gethash "inReplyTo" object))
+                  :text (romacs-agent--value (gethash "text" object))
+                  :time (romacs-agent--value (gethash "t" object)))
+            (and (hash-table-p wake)
+                 (list :wake (append (list :state (gethash "state" wake) :chars (gethash "chars" wake))
+                                     (and (stringp (gethash "to" wake)) (list :to (gethash "to" wake)))))))))
+
+(defun romacs-agent--messages-of (vector)
+  "The messages a journal record's VECTOR (its romacsMessages) keeps."
+  (and (vectorp vector) (mapcar #'romacs-agent--message-of (append vector nil))))
 
 (defun romacs-agent--message-reply-line (message)
-  "The line that ends MESSAGE's envelope, saying how to answer it with
-its own id or address filled in: never left for the receiver to guess."
-  (let* ((from (gethash "from" message))
-         (address (and (hash-table-p from) (romacs-agent--value (gethash "address" from))))
-         (sender (and (hash-table-p from) (romacs-agent--value (gethash "session" from)))))
+  "The line saying how to answer MESSAGE with its own id or address
+filled in: never left for the receiver to guess."
+  (let* ((from (plist-get message :from)) (address (plist-get from :address)))
     (cond (address
            (format "Reply to this message with SendMessage(to=\"%s\", message=...)." (romacs-agent--attribute address)))
-          (sender
-           (format "Reply to this message with romacs_task_reply(messageId=\"%s\", text=...)."
-                   (romacs-agent--attribute (gethash "id" message))))
+          ((plist-get from :session)
+           (format "Reply to %s with romacs_task_reply(messageId=\"%s\", text=...)."
+                   (if (plist-get message :wake) "this result" "this message")
+                   (romacs-agent--attribute (plist-get message :id))))
           (t "Its sender is outside Romacs and has no reply route: it reads only your turn's reply."))))
 
 (defun romacs-agent--message-envelope (message text)
   "TEXT as its harness reads it when it comes from another session:
-wrapped in a <romacs-message> naming MESSAGE, its `romacsMessage' record
-\(id, kind, from: session, name and a Claude Code address, inReplyTo), then
-the line saying how to answer it (`romacs-agent--message-reply-line').
+wrapped in a <romacs-message> naming MESSAGE (`romacs-agent-make-message'),
+then the line saying how to answer it (`romacs-agent--message-reply-line').
 The body cannot close the envelope early."
-  (let* ((from (gethash "from" message))
-         (name (and (hash-table-p from) (romacs-agent--value (gethash "name" from))))
-         (sender (and (hash-table-p from) (romacs-agent--value (gethash "session" from))))
-         (reply (romacs-agent--value (gethash "inReplyTo" message))))
+  (let* ((from (plist-get message :from)) (reply (plist-get message :in-reply-to)))
     (concat (format "<romacs-message id=\"%s\" kind=\"%s\" from=\"%s\""
-                    (romacs-agent--attribute (gethash "id" message)) (romacs-agent--attribute (gethash "kind" message))
-                    (romacs-agent--attribute (cond ((and name sender) (format "%s (%s)" name sender))
-                                                   (t (or name sender "unknown")))))
+                    (romacs-agent--attribute (plist-get message :id)) (romacs-agent--attribute (plist-get message :kind))
+                    (romacs-agent--attribute (or (plist-get from :name) "unknown")))
+            (if (plist-get from :session) (format " from-session=\"%s\"" (romacs-agent--attribute (plist-get from :session))) "")
             (if reply (format " in-reply-to=\"%s\"" (romacs-agent--attribute reply)) "")
             ">\n" (replace-regexp-in-string "</romacs-message" "<\\/romacs-message" text t t)
             "\n</romacs-message>\n" (romacs-agent--message-reply-line message))))
+
+(defun romacs-agent--messages-text (messages text)
+  "What a harness reads of TEXT, the MESSAGES' delivery: each message from
+another session in its envelope; a delegated task's results (each with
+:wake) TEXT as it is, its wakes, then a line saying how to answer each."
+  (if (cl-some (lambda (m) (plist-get m :wake)) messages)
+      (concat text "\n\n" (mapconcat #'romacs-agent--message-reply-line messages "\n"))
+    (mapconcat (lambda (m) (romacs-agent--message-envelope m (or (plist-get m :text) text))) messages "\n\n")))
 
 (defun romacs-agent--message-body (envelope)
   "The text ENVELOPE (`romacs-agent--message-envelope') wraps."
@@ -1311,25 +1353,33 @@ The body cannot close the envelope early."
     (replace-regexp-in-string "<\\\\/romacs-message" "</romacs-message"
                               (substring envelope start (or end (length envelope))) t t)))
 
-(defun romacs-agent--input (session text &optional images message)
+(defun romacs-agent--stamped (messages text)
+  "MESSAGES with their text (TEXT when one has none) and the time now."
+  (let ((now (float-time)))
+    (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m) :text (or (plist-get m :text) text)) :time now))
+            messages)))
+
+(defun romacs-agent--input (session text &optional images messages)
   "Write TEXT to SESSION's persistent harness as the user's message, with
-the attached IMAGES; MESSAGE, when given, is its `romacsMessage' record:
-it comes from another session, and the harness reads it in its envelope
-\(`romacs-agent--message-envelope').  The journal keeps the message as it
-would be without them, and their files: a replay reads every record, and
-no image's bytes.  Both are made with one request id: the journal's is
-the one written."
+the attached IMAGES; MESSAGES, when given, say it comes from other
+sessions (`romacs-agent-make-message'): the harness reads it as
+`romacs-agent--messages-text' says, and the journal keeps them as
+romacsMessages beside TEXT.  The journal keeps the message as it would be
+without them, and their files: a replay reads every record, and no
+image's bytes.  Both are made with one request id: the journal's is the
+one written."
   (let* ((input (romacs-agent--harness-get session :input))
          (images (romacs-agent--sendable-images images))
          (id (romacs-agent-request-id session))
-         (record (funcall input session text id)))
+         (record (funcall input session text id))
+         (messages (romacs-agent--stamped messages text)))
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
     (when images (puthash "images" (vconcat images) record))
-    (when message (puthash "romacsMessage" message record))
+    (when messages (puthash "romacsMessages" (vconcat (mapcar #'romacs-agent--message-json messages)) record))
     (romacs-agent--line session
                         (let ((romacs-agent--message-images images))
-                          (funcall input session (if message (romacs-agent--message-envelope message text) text) id))
+                          (funcall input session (if messages (romacs-agent--messages-text messages text) text) id))
                         record)
     (run-hook-with-args 'romacs-agent-input-functions session id)))
 
@@ -1368,16 +1418,18 @@ a digest of its identity, UUID-shaped."
                               key)))
                 (hash-table-values romacs-agent--sessions))))
 
-(defun romacs-agent--turn (session text &optional images message)
+(defun romacs-agent--turn (session text &optional images messages)
   "Run one turn of SESSION's per-turn harness on prompt TEXT with the
-attached IMAGES; MESSAGE as `romacs-agent--input' says, TEXT then in its
-envelope.  The supervisor journals TEXT and gives it to the harness
-itself, so the turn goes on whatever becomes of this server."
-  (when message
-    ;; Its prompt's record is the supervisor's: the message's record goes
-    ;; before it, read with it (`romacs-agent--record').
-    (romacs-agent--note session (romacs-mcp--object "type" "message" "message" message))
-    (setq text (romacs-agent--message-envelope message text)))
+attached IMAGES; MESSAGES as `romacs-agent--input' says.  The supervisor
+journals the prompt and gives it to the harness itself, so the turn goes
+on whatever becomes of this server."
+  (when messages
+    ;; Its prompt's record is the supervisor's: the messages' go before
+    ;; it, read with it (`romacs-agent--record').
+    (let ((messages (romacs-agent--stamped messages text)))
+      (romacs-agent--note session (romacs-mcp--object "type" "messages" "text" text
+                                                      "messages" (vconcat (mapcar #'romacs-agent--message-json messages))))
+      (setq text (romacs-agent--messages-text messages text))))
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (let ((input (expand-file-name "input" (romacs-agent-dir session)))
         (images (romacs-agent--sendable-images images)))
@@ -1410,7 +1462,8 @@ itself, so the turn goes on whatever becomes of this server."
                 (romacs-agent--mode-seen session (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
     ;; The message a per-turn harness's next prompt is.
-    ('incoming (setf (romacs-agent-incoming session) (plist-get event :message)))
+    ('incoming (setf (romacs-agent-incoming session) (list :text (plist-get event :text)
+                                                           :messages (plist-get event :messages))))
     ;; A request: when the prompt cache it wrote expires, or unknown.
     ('cache (setf (romacs-agent-driver-state session)
                   (plist-put (romacs-agent-driver-state session) :cache-expires
@@ -1454,12 +1507,13 @@ itself, so the turn goes on whatever becomes of this server."
                                         t)))))
             ;; From another session: kept to be answered; a turn it begins
             ;; answers it (a steer into a running turn does not).
-            (let ((message (plist-get event :message)))
-              (when message (romacs-agent--received session message))
-              (when (eq message (romacs-agent-incoming session)) (setf (romacs-agent-incoming session) nil))
+            (let ((messages (plist-get event :messages)))
+              (dolist (message messages) (romacs-agent--received session message))
+              (when (and messages (eq messages (plist-get (romacs-agent-incoming session) :messages)))
+                (setf (romacs-agent-incoming session) nil))
               ;; A turn begun by an earlier prompt and not ended yet: a steer.
               (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
-                (setf (romacs-agent-answering session) (and message (gethash "id" message)))))
+                (setf (romacs-agent-answering session) (plist-get (car messages) :id))))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
                   (romacs-agent-turn-start session) (plist-get event :time)
@@ -1653,14 +1707,15 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
   "How many of the messages a session received it keeps to answer.")
 
 (defun romacs-agent--received (session message)
-  "Keep MESSAGE, a `romacsMessage' record SESSION received, to be answered."
-  (let ((kept (cons message (cl-remove (gethash "id" message) (romacs-agent-received session)
-                                       :key (lambda (m) (gethash "id" m)) :test #'equal))))
+  "Keep MESSAGE (`romacs-agent-make-message'), one SESSION received, to be
+answered."
+  (let ((kept (cons message (cl-remove (plist-get message :id) (romacs-agent-received session)
+                                       :key (lambda (m) (plist-get m :id)) :test #'equal))))
     (setf (romacs-agent-received session) (seq-take kept romacs-agent--received-limit))))
 
 (defun romacs-agent-received-message (session id)
-  "The message SESSION received under ID, its `romacsMessage' record, or nil."
-  (cl-find id (romacs-agent-received session) :key (lambda (m) (gethash "id" m)) :test #'equal))
+  "The message SESSION received under ID (`romacs-agent-make-message'), or nil."
+  (cl-find id (romacs-agent-received session) :key (lambda (m) (plist-get m :id)) :test #'equal))
 
 (defun romacs-agent--record (session record)
   "Handle one journal RECORD of SESSION."
@@ -1682,19 +1737,19 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
                             ((stringp out) (list (list :type 'unknown :raw out)))
                             ;; A per-turn prompt: the supervisor's own record.
                             ((and (hash-table-p in) (stringp (gethash "prompt" in)))
-                             (let ((message (romacs-agent-incoming session)))
+                             (let ((incoming (romacs-agent-incoming session)))
                                (list (append (list :type 'input
-                                                   :text (if message (romacs-agent--message-body (gethash "prompt" in))
-                                                           (gethash "prompt" in))
+                                                   ;; Its own text, as the note kept it.
+                                                   :text (if incoming (plist-get incoming :text) (gethash "prompt" in))
                                                    :images (append (gethash "images" in) nil))
-                                             (and message (list :message message))))))
+                                             (and incoming (list :messages (plist-get incoming :messages)))))))
                             ((hash-table-p in)
                              (let ((request (gethash "romacsRequest" in))
-                                   (message (gethash "romacsMessage" in)))
+                                   (messages (romacs-agent--messages-of (gethash "romacsMessages" in))))
                                (mapcar (lambda (event)
-                                         (if (and (or request message) (eq (plist-get event :type) 'input))
+                                         (if (and (or request messages) (eq (plist-get event :type) 'input))
                                              (append event (and request (list :request request))
-                                                     (and (hash-table-p message) (list :message message)))
+                                                     (and messages (list :messages messages)))
                                            event))
                                        (funcall (or (romacs-agent--harness-get session :input-events) #'ignore)
                                                 session in))))
@@ -1709,7 +1764,8 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
-                               ("message" (list (list :type 'incoming :message (gethash "message" note))))
+                               ("messages" (list (list :type 'incoming :text (gethash "text" note)
+                                                       :messages (romacs-agent--messages-of (gethash "messages" note)))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
                                ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
@@ -2388,17 +2444,17 @@ for the next, sent once this one is off the queue."
                     (setf (romacs-agent-dispatch session) 'busy)))))))
       (setf (romacs-agent-dispatch session) nil)))))
 
-(defun romacs-agent-send-later (session text &optional first images valid message)
+(defun romacs-agent-send-later (session text &optional first images valid messages)
   "Send TEXT to SESSION, with the attached IMAGES, once its running turn
 ends, now when none runs; FIRST puts it ahead of the messages already
 waiting.  VALID, when given, is asked before it goes: nil drops it.
-MESSAGE: from another session (`romacs-agent--input')."
+MESSAGES: from other sessions (`romacs-agent--input')."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
-      (romacs-agent-send session text nil valid images message)
+      (romacs-agent-send session text nil valid images messages)
     (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil valid images message) (romacs-agent-queue session))
+        (progn (push (list text nil valid images messages) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
-      (romacs-agent--enqueue session (list text nil valid images message)))))
+      (romacs-agent--enqueue session (list text nil valid images messages)))))
 
 ;;; Lifecycle
 
@@ -2772,38 +2828,38 @@ window (`romacs-agent--launch-tries'), as long as attaching is tried."
       (when (> tries 0)
         (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- tries))))))
 
-(defun romacs-agent-send (session text &optional delivered valid images message)
+(defun romacs-agent-send (session text &optional delivered valid images messages)
   "Send TEXT to SESSION's harness as the user's next message, then call
 DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
 given, then says it is no longer wanted.  IMAGES are the files the user
-attached to it.  MESSAGE: it comes from another session, its
-`romacsMessage' record (`romacs-agent--input')."
+attached to it.  MESSAGES: it comes from other sessions
+(`romacs-agent--input')."
   (cond ((or (romacs-agent-pending-selection session)
              ;; A rollback holds it: the message goes to the conversation
              ;; as the rollback leaves it.
              (plist-get (romacs-agent-driver-state session) :rolling-back))
-         (romacs-agent--enqueue session (list text delivered valid images message)))
+         (romacs-agent--enqueue session (list text delivered valid images messages)))
         ;; Stopped (`romacs-agent-stop'): never to the harness going away;
         ;; it waits for the harness resumed, now when it has gone, else
         ;; once it has (`romacs-agent--sentinel').
         ((and (romacs-agent-stopped session) (not (romacs-agent--per-turn-p session)))
-         (romacs-agent--enqueue session (list text delivered valid images message))
+         (romacs-agent--enqueue session (list text delivered valid images messages))
          (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
         ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
-         (romacs-agent--input session text images message)
+         (romacs-agent--input session text images messages)
          (when delivered (funcall delivered)))
         ;; Starting up: it goes once the harness is ready.  An ended one's
         ;; is refused by the write (it resumes first).
         ((not (romacs-agent--per-turn-p session))
          (if (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
-             (romacs-agent--enqueue session (list text delivered valid images message))
-           (romacs-agent--input session text images message)
+             (romacs-agent--enqueue session (list text delivered valid images messages))
+           (romacs-agent--input session text images messages)
            (when delivered (funcall delivered))))
         ((or (process-live-p (romacs-agent-connection session))
              (memq (romacs-agent-state session) '(starting running)))
-         (romacs-agent--enqueue session (list text delivered valid images message)))
-        (t (romacs-agent--turn session text images message)
+         (romacs-agent--enqueue session (list text delivered valid images messages)))
+        (t (romacs-agent--turn session text images messages)
            (when delivered (funcall delivered)))))
 
 (defun romacs-agent--enqueue (session item)

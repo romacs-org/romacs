@@ -172,11 +172,18 @@ every replay."
       (when (string-match "\n?</cross-session-message>[ \t\n]*\\'" body)
         (setq body (substring body 0 (match-beginning 0))))
       (list (list :type 'input :text body
-                  :message (romacs-agent-message-record
-                            (concat "m-" (or uuid (secure-hash 'md5 text))) "external"
-                            (list :name (or (romacs-agent--claude-attribute attributes "from-name") address)
-                                  :address address
-                                  :claude-session (romacs-agent--claude-attribute attributes "from-session"))))))))
+                  :messages (list (append (romacs-agent-make-message
+                                           (concat "m-" (or uuid (secure-hash 'md5 text))) "external"
+                                           (list :name (or (romacs-agent--claude-attribute attributes "from-name") address)
+                                                 :address address
+                                                 :claude-session (romacs-agent--claude-attribute attributes "from-session"))
+                                           nil body)
+                                          (list :time (romacs-agent--claude-time line)))))))))
+
+(defun romacs-agent--claude-time (line)
+  "LINE's own time (its timestamp), or nil."
+  (when-let* ((stamp (romacs-agent--value (gethash "timestamp" line))))
+    (ignore-errors (float-time (date-to-time stamp)))))
 
 (defun romacs-agent--claude-injected (text parent)
   "The events of TEXT, a local command's output nobody typed.  The compaction's

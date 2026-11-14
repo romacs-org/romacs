@@ -396,14 +396,27 @@ the same conversation%s%s."
                           ". romacs_task_switch with that provider goes on there.")
                 "No instance has room."))))))
 
+(defun romacs-agent-tools--wake-result-of (session end)
+  "What the wake of SESSION's turn END says of its result."
+  (romacs-agent-tools--wake-result
+   (romacs-agent-id session)
+   (concat (or (nth 1 end) "") (and (nth 2 end) (romacs-agent-tools--limit-note session)))))
+
+(defun romacs-agent-tools--wake-message (session end)
+  "The record (`romacs-agent-make-message') of the wake of SESSION's turn END:
+a child's result, answering the message its turn began with."
+  (let ((result (romacs-agent-tools--wake-result-of session end)))
+    (append (romacs-agent-make-message (concat "m-" (romacs-agent--uuid)) "child"
+                                  (list :session (romacs-agent-id session)
+                                        :name (or (romacs-agent-title session) (romacs-agent-id session)))
+                                  (nth 3 end) result)
+            (list :wake (list :state (if (nth 2 end) "failed" "completed") :chars (length result))))))
+
 (defun romacs-agent-tools--wake-text (session end)
   "The parent's message for SESSION's turn END, (SEQ RESULT FAILED).  Its
 head says how long its result is: wakes go together, and a result may hold
 anything."
-  (let ((result (romacs-agent-tools--wake-result
-                 (romacs-agent-id session)
-                 (concat (or (nth 1 end) "")
-                         (and (nth 2 end) (romacs-agent-tools--limit-note session))))))
+  (let ((result (romacs-agent-tools--wake-result-of session end)))
     (format "Delegated task %s (%s) [%s, %d chars%s]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
             (if (nth 2 end) "failed" "completed") (length result)
             ;; The turn answered a message: the reply names it.
@@ -439,8 +452,13 @@ nil.  A head's length takes its result whatever it holds; one with none
 plain message, so its journal keeps only this text."
   (let ((pos 0) (wakes nil) (ok t))
     (while (and ok (< pos (length text)))
-      (if (not (and (string-match romacs-agent-tools--wake-head text pos) (= (match-beginning 0) pos)))
-          (setq ok nil)
+      (cond
+       ;; The lines saying how to answer each, after the last.
+       ((and wakes (eq (string-match "\\(?:Reply to [^\n]*\\(?:\n\\|\\'\\)\\)+\\'" text pos) pos))
+        (setq pos (length text)))
+       ((not (and (string-match romacs-agent-tools--wake-head text pos) (= (match-beginning 0) pos)))
+        (setq ok nil))
+       (t
         (let* ((from (match-end 0))
                (size (match-string 4 text))
                (to (if size (+ from (string-to-number size)) (length text))))
@@ -450,7 +468,7 @@ plain message, so its journal keeps only this text."
                   wakes)
             (setq pos to)
             (when (< pos (length text))
-              (if (string-prefix-p "\n\n" (substring text pos)) (cl-incf pos 2) (setq ok nil)))))))
+              (if (string-prefix-p "\n\n" (substring text pos)) (cl-incf pos 2) (setq ok nil))))))))
     (and ok (nreverse wakes))))
 
 (defun romacs-agent-tools--wake-parse (text)
@@ -601,15 +619,19 @@ turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
                     (cl-remove-if (lambda (copy) (memq copy copies))
                                   (gethash (romacs-agent-id parent) romacs-agent-tools--copies))
                     romacs-agent-tools--copies))
-         (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready)))))))
+         (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready))
+         ;; Each is a message from another session: the chat reads these.
+         (append (mapcar (lambda (item) (romacs-agent-tools--wake-message (car item) (cdr item))) ready)
+                 (mapcar (lambda (copy) (romacs-agent-tools--copy-message (car copy) (cdr copy))) copies)))))))
 
-(defun romacs-agent-tools--deliver (session text delivered &optional valid)
+(defun romacs-agent-tools--deliver (session text delivered &optional valid messages)
   "Give SESSION's harness TEXT as its next message, then call DELIVERED.
 A per-turn harness takes it as its next turn (queued behind a running
 one); another once its supervisor is attached.  VALID, when given, is
-asked first: nil drops the message."
+asked first: nil drops the message.  MESSAGES say whose it is
+\(`romacs-agent--input')."
   (let ((deliver (lambda () (when (or (null valid) (funcall valid))
-                              (romacs-agent-send session text delivered valid)))))
+                              (romacs-agent-send session text delivered valid nil messages)))))
     (if (romacs-agent--per-turn-p session) (funcall deliver)
       ;; A parent whose harness was stopped or ended is resumed to take it.
       (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
@@ -806,14 +828,14 @@ parent may do WHAT."
                   (if parent (format "task of session %s" parent) "no delegated task") what))
     session))
 
-(defun romacs-agent-tools--tell (child text &optional mode valid message)
+(defun romacs-agent-tools--tell (child text &optional mode valid messages)
   "Send TEXT to CHILD as its next message by the session's own send:
 now when it is idle, once its running turn ends, once its harness is
 back when it had ended.  MODE `steer' writes it into the running turn,
 as the chat's steer does (a harness run per turn takes it after);
 `interrupt' interrupts the turn and sends it first.  VALID, when given,
-is asked before a waiting message goes: nil drops it.  MESSAGE, when
-given, says it comes from another session (`romacs-agent--input').  Its
+is asked before a waiting message goes: nil drops it.  MESSAGES, when
+given, say it comes from other sessions (`romacs-agent--input').  Its
 next turn end wakes its parent by its wake rule, as its first did.  An
 empty TEXT sends nothing."
   (when (romacs-agent-cancelled child)
@@ -821,17 +843,17 @@ empty TEXT sends nothing."
   (unless (string-empty-p (string-trim text))
     (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
       (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
-             (romacs-agent-send child text nil valid nil message))
+             (romacs-agent-send child text nil valid nil messages))
             ((and busy (eq mode 'interrupt))
              ;; First in line before the cut: a turn not yet under way
              ;; (Codex's before it names it) cannot be cut, and it goes after.
-             (romacs-agent-send-later child text t nil valid message)
+             (romacs-agent-send-later child text t nil valid messages)
              (ignore-error user-error (romacs-agent-interrupt child)))
             (t
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.
              (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
-             (romacs-agent-send-later child text nil nil valid message)))))
+             (romacs-agent-send-later child text nil nil valid messages)))))
   child)
 
 (defconst romacs-agent-tools--send-modes '("queue" "steer" "replace" "interrupt")
@@ -852,20 +874,39 @@ one are dropped as they come up.")
 
 (defvar romacs-agent-tools--copies (make-hash-table :test #'equal)
   "A parent's id to the copies of its tasks' messages to each other, oldest
-first, each (SENDER . TEXT): they go with its next wake, never waking it.")
+first, each (SENDER TARGET MODE TEXT): they go with its next wake, never
+waking it.")
 
-(defun romacs-agent-tools--copy-text (sender text)
-  "SENDER's message TEXT, as a wake its parent reads (state \"sent\")."
-  (format "Delegated task %s (%s) [sent, %d chars]:\n%s"
-          (romacs-agent-id sender) (romacs-agent-title sender) (length text) text))
+(defun romacs-agent-tools--copy-body (copy)
+  "What a COPY, (TARGET MODE TEXT), says: its task, how, and the message."
+  (pcase-let ((`(,target ,mode ,text) copy))
+    (format "To task %s (%s), %s:\n%s" (romacs-agent-id target) (romacs-agent-title target) mode text)))
+
+(defun romacs-agent-tools--copy-text (sender copy)
+  "SENDER's message COPY, (TARGET MODE TEXT), as a wake its parent reads
+\(state \"sent\")."
+  (let ((body (romacs-agent-tools--copy-body copy)))
+    (format "Delegated task %s (%s) [sent, %d chars]:\n%s"
+            (romacs-agent-id sender) (romacs-agent-title sender) (length body) body)))
+
+(defun romacs-agent-tools--copy-message (sender copy)
+  "The record of SENDER's message COPY, (TARGET MODE TEXT), to its parent:
+a sibling's message, sent to TARGET."
+  (pcase-let ((`(,target ,_mode ,text) copy))
+    (append (romacs-agent-make-message (concat "m-" (romacs-agent--uuid)) "sibling"
+                                  (list :session (romacs-agent-id sender)
+                                        :name (or (romacs-agent-title sender) (romacs-agent-id sender)))
+                                  nil text)
+            (list :wake (list :state "sent" :chars (length text) :to (romacs-agent-id target))))))
 
 (defun romacs-agent-tools--message (kind sender &optional in-reply-to)
-  "A new `romacsMessage' record: from SENDER, a session (nil: one outside
-Romacs), what it is to the receiver KIND, answering message IN-REPLY-TO."
-  (romacs-agent-message-record (concat "m-" (romacs-agent--uuid)) kind
-                               (and sender (list :session (romacs-agent-id sender)
-                                                 :name (or (romacs-agent-title sender) (romacs-agent-id sender))))
-                               in-reply-to))
+  "A new message (`romacs-agent-make-message'): from SENDER, a session (nil: one
+outside Romacs), what it is to the receiver KIND, answering message
+IN-REPLY-TO."
+  (romacs-agent-make-message (concat "m-" (romacs-agent--uuid)) kind
+                        (and sender (list :session (romacs-agent-id sender)
+                                          :name (or (romacs-agent-title sender) (romacs-agent-id sender))))
+                        in-reply-to))
 
 (defun romacs-agent-tools--kind (sender target)
   "What SENDER, a session or nil (outside Romacs), is to TARGET: parent,
@@ -894,15 +935,13 @@ record and the message's id."
                                   romacs-agent-tools--generations)
                        (gethash key romacs-agent-tools--generations 0)))
          (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0)))))
-    (romacs-agent-tools--tell target text (intern mode) valid message)
+    (romacs-agent-tools--tell target text (intern mode) valid (list message))
     (when (equal kind "sibling")
       (let ((parent (plist-get (romacs-agent-options target) :parent)))
-        (puthash parent (append (gethash parent romacs-agent-tools--copies)
-                                (list (cons sender (format "To task %s (%s), %s:\n%s" (romacs-agent-id target)
-                                                           (romacs-agent-title target) mode text))))
+        (puthash parent (append (gethash parent romacs-agent-tools--copies) (list (list sender target mode text)))
                  romacs-agent-tools--copies)))
     (let ((record (romacs-agent-tools--task target)))
-      (puthash "messageId" (gethash "id" message) record)
+      (puthash "messageId" (plist-get message :id) record)
       record)))
 
 (defun romacs-agent-tools--send (arguments)
@@ -924,7 +963,7 @@ another task of the caller's parent, its parent then copied."
          (id (or (gethash "messageId" arguments) (user-error "messageId is required")))
          (message (or (romacs-agent-received-message caller id)
                       (user-error "No message %s among the ones this session received" id)))
-         (sender-id (romacs-agent--value (gethash "session" (gethash "from" message))))
+         (sender-id (plist-get (plist-get message :from) :session))
          (sender (cond ((null sender-id)
                         ;; Its own channel's, when it came by one: the call to copy.
                         (user-error "Message %s came from outside Romacs. %s" id
