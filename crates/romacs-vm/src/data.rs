@@ -458,6 +458,23 @@ impl Vm {
             _ => None,
         }
     }
+    /// VALUE's text from character FROM on: a string's through its own
+    /// character/byte cursor (`LispString::byte_offset`, GNU's
+    /// `string_char_to_byte`), so reads at increasing FROM cost the
+    /// characters stepped, not FROM; a unibyte or ASCII text's directly.
+    /// Empty past the end; None for no string.
+    pub(crate) fn str_view_from(&self, value: Value, from: usize) -> Option<crate::lstring::StrView<'_>> {
+        let view = self.str_view(value)?;
+        if from >= view.chars {
+            return Some(crate::lstring::StrView { bytes: &[], chars: 0, multibyte: view.multibyte });
+        }
+        let byte = match self.object_if(value) {
+            Some(Object::String(s) | Object::RawString(s)) => s.byte_offset(coordinates::CharOffset(from))?,
+            _ if !view.multibyte || view.chars == view.bytes.len() => from,
+            _ => view.bytes.iter().enumerate().filter(|&(_, &b)| b & 0xC0 != 0x80).nth(from).map_or(view.bytes.len(), |(at, _)| at),
+        };
+        Some(crate::lstring::StrView { bytes: &view.bytes[byte..], chars: view.chars - from, multibyte: view.multibyte })
+    }
     pub(crate) fn make_lisp_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
         if !multibyte {
             return self.allocate_object(unibyte_object(bytes));

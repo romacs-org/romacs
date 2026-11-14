@@ -844,7 +844,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let relative = self.plist_get(plist, s.relative_width);
         if let Some(factor) = self.leaf.number_value(relative).filter(|&f| f > 0.0) {
             let c = if origin.string == Value::NIL { self.char_at(self.leaf.buffer_byte(self.view.buffer, origin.charpos)?) }
-                else { self.leaf.vm.str_view(origin.string).and_then(|v| v.chars().nth(origin.strpos.unwrap_or(0))).unwrap_or(0x20) };
+                else { self.leaf.vm.str_view_from(origin.string, origin.strpos.unwrap_or(0)).and_then(|v| v.chars().next()).unwrap_or(0x20) };
             // In pixels, FACTOR times the host's glyph of C (Org's table
             // separators); a TAB's would depend on x.
             if self.view.pixels {
