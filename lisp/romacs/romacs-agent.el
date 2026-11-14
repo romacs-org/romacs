@@ -1420,7 +1420,7 @@ itself, so the turn goes on whatever becomes of this server."
                  (romacs-agent-failed session) (plist-get event :error)
                  (romacs-agent-limited session)
                  (and (plist-get event :limit)
-                      (let ((room (gethash (romacs-agent-provider session) romacs-agent--room)))
+                      (let ((room (romacs-agent-room-of (romacs-agent-provider session))))
                         (list :provider (romacs-agent-provider session)
                               :model (and (eq (plist-get event :limit) 'model) (romacs-agent-model session))
                               :text (or (plist-get event :text) (plist-get event :reason))
@@ -2139,47 +2139,135 @@ there from now on: the same session, its id, title, tasks and records."
     (romacs-agent--manifest-put session "provider" provider "configDir" (or config-dir :null))
     (romacs-agent--changed session)))
 
-;;; Room on an instance
+;;; Room on an instance, and pools of them
 
 (defvar romacs-agent--room (make-hash-table :test #'equal)
   "An instance's name to the last of its harness's reports of its usage
 limit: a plist of :status (allowed, warning or rejected), :used (a
-fraction), :resets (seconds since the epoch), :window and :time.")
+fraction), :resets (seconds since the epoch), :window and :time.  Kept on
+disk (`romacs-agent--room-file') as its status, reset or window changes:
+a restarted server knows which accounts are spent.")
+
+(defvar romacs-agent--room-loaded nil
+  "Whether `romacs-agent--room' holds what was kept on disk.")
+
+(defun romacs-agent--room-file ()
+  (expand-file-name "room.eld" (romacs-agent--state-root)))
+
+(defun romacs-agent--room-table ()
+  "`romacs-agent--room', its kept reports read once."
+  (unless romacs-agent--room-loaded
+    (setq romacs-agent--room-loaded t)
+    (when-let* ((kept (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent--room-file))
+                                                       (read (current-buffer))))))
+      (pcase-dolist (`(,name . ,room) kept)
+        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room)))))
+  romacs-agent--room)
+
+(defun romacs-agent--keep-room ()
+  (let ((file (romacs-agent--room-file)) (rows nil))
+    (maphash (lambda (name room) (push (cons name room) rows)) romacs-agent--room)
+    (make-directory (file-name-directory file) t)
+    (with-temp-file (concat file ".tmp") (prin1 rows (current-buffer)))
+    (rename-file (concat file ".tmp") file t)))
 
 (defun romacs-agent--note-room (session event)
   "Keep EVENT, a `rate-limit' report of SESSION's harness, as its
 instance's, unless an older one: a replay reports the past too.  Its
 overage spent is no instance's limit: only the models that need usage
 credits are refused, and the others run."
-  (let ((known (gethash (romacs-agent-provider session) romacs-agent--room))
-        (time (or (plist-get event :time) (float-time))))
+  (let* ((table (romacs-agent--room-table))
+         (known (gethash (romacs-agent-provider session) table))
+         (time (or (plist-get event :time) (float-time))))
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (puthash (romacs-agent-provider session)
-               (list :status (plist-get event :status) :used (plist-get event :used)
-                     :resets (plist-get event :resets) :window (plist-get event :window) :time time)
-               romacs-agent--room))))
+      (let ((room (list :status (plist-get event :status) :used (plist-get event :used)
+                        :resets (plist-get event :resets) :window (plist-get event :window) :time time)))
+        (puthash (romacs-agent-provider session) room table)
+        ;; On disk what a restart needs: not each request's use.
+        (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
+                                     '(:status :resets :window)))
+          (romacs-agent--keep-room))))))
+
+(defun romacs-agent-room-of (provider)
+  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or nil."
+  (gethash provider (romacs-agent--room-table)))
 
 (defun romacs-agent-room (provider)
   "Whether instance PROVIDER has room: no report of its limit, or one
 not rejected, or one whose window has reset since."
-  (let ((room (gethash provider romacs-agent--room)))
+  (let ((room (romacs-agent-room-of provider)))
     (or (null room) (not (eq (plist-get room :status) 'rejected))
         (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))))
 
+(defcustom romacs-agent-pools nil
+  "Each harness's accounts in the order new work draws on them: an alist
+of (HARNESS NAME...), each NAME an instance of `romacs-agent-providers'
+\(T3 Code's among them), or (NAME . CONFIG-DIR) defining one as that
+list does.  A harness not listed pools its enabled instances in their
+order there.  Naming a harness (\"claude\") where an instance is asked
+for means its pool: the first account with room
+\(`romacs-agent-pool-pick'); naming an instance pins it."
+  :type '(alist :key-type symbol :value-type (repeat (choice string (cons string directory))))
+  :group 'romacs-agent)
+
+(defun romacs-agent-pool (harness)
+  "HARNESS's enabled instances, in its pool's order (`romacs-agent-pools')."
+  (let ((instances (cl-remove-if-not (lambda (i) (and (plist-get i :enabled) (eq (plist-get i :harness) harness)))
+                                     (romacs-agent-instances)))
+        (order (alist-get harness romacs-agent-pools)))
+    (if (null order) instances
+      (delq nil (mapcar (lambda (entry)
+                          (if (consp entry)
+                              (romacs-agent--provider (list (car entry) :harness harness :config-dir (cdr entry)))
+                            (cl-find entry instances :key (lambda (i) (plist-get i :name)) :test #'equal)))
+                        order)))))
+
+(defun romacs-agent--pool-harness (name)
+  "The harness NAME names, when it names one: its pool is meant."
+  (let ((harness (and (stringp name) (intern-soft name))))
+    (and harness (gethash harness romacs-agent--driver-table) harness)))
+
+(defun romacs-agent-pool-pick (harness &optional except)
+  "The instance new work of HARNESS draws on: the first of its pool with
+room, but EXCEPT; with none, the one whose limit resets first."
+  (let ((pool (cl-remove except (romacs-agent-pool harness) :key (lambda (i) (plist-get i :name)) :test #'equal)))
+    (or (cl-find-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool)
+        (car (sort (copy-sequence pool)
+                   (lambda (a b) (< (or (plist-get (romacs-agent-room-of (plist-get a :name)) :resets) most-positive-fixnum)
+                                    (or (plist-get (romacs-agent-room-of (plist-get b :name)) :resets) most-positive-fixnum))))))))
+
 (defun romacs-agent-alternatives (session)
   "The enabled instances SESSION could go on under, with room: of its
-harness first (the same conversation moves), then the others (a
-handoff), each a plist of :provider and :lossless."
-  (let ((all (cl-remove-if (lambda (i) (or (not (plist-get i :enabled))
-                                            (equal (plist-get i :name) (romacs-agent-provider session))
-                                            (not (romacs-agent-room (plist-get i :name)))))
-                           (romacs-agent-instances))))
-    (mapcar (lambda (i) (list :provider (plist-get i :name)
-                              :lossless (eq (plist-get i :harness) (romacs-agent-harness session))))
-            (sort all (lambda (a b) (and (eq (plist-get a :harness) (romacs-agent-harness session))
-                                         (not (eq (plist-get b :harness) (romacs-agent-harness session)))))))))
+harness first, in its pool's order (the same conversation moves), then
+the others (a handoff), each a plist of :provider and :lossless."
+  (let ((harness (romacs-agent-harness session)))
+    (cl-loop for i in (append (romacs-agent-pool harness)
+                              (cl-remove-if (lambda (i) (or (not (plist-get i :enabled)) (eq (plist-get i :harness) harness)))
+                                            (romacs-agent-instances)))
+             unless (or (equal (plist-get i :name) (romacs-agent-provider session))
+                        (not (romacs-agent-room (plist-get i :name))))
+             collect (list :provider (plist-get i :name) :lossless (eq (plist-get i :harness) harness)))))
+
+(defconst romacs-agent--moved-on
+  "Your last turn stopped at %s's usage limit; you now run on %s, the same conversation. Go on from where you were."
+  "What a session moved on at its usage limit is told.")
+
+(defun romacs-agent-move-on (session)
+  "Move SESSION, its conversation as is, to the next account of its pool
+with room (`romacs-agent-alternatives'), from its next turn on; when its
+last turn stopped at its limit, it is told to go on there.  Return the
+account, or signal why none."
+  (let* ((target (or (plist-get (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session))
+                                :provider)
+                     (user-error "No other %s account has room" (romacs-agent-harness session))))
+         (from (romacs-agent-provider session))
+         (wanted (romacs-agent--wanted session)))
+    (romacs-agent-select session (plist-get wanted :model) (plist-get wanted :effort) target)
+    (when (romacs-agent-limited session)
+      (romacs-agent-send-later session (format romacs-agent--moved-on from target)))
+    target))
 
 (defun romacs-agent--note (session note)
   "Journal NOTE in SESSION's journal, in its place: through its supervisor
@@ -2436,7 +2524,9 @@ A chat opens with no initial prompt."
 on, or a `user-error' saying why none can start there: unknown, disabled,
 or its configuration directory missing."
   (let* ((name (or provider (romacs-agent--default-provider)))
-         (instance (or (romacs-agent--configured name)
+         (pool (romacs-agent--pool-harness name))
+         (instance (or (and pool (romacs-agent-pool-pick pool))
+                       (romacs-agent--configured name)
                        (user-error "No agent provider %s; configured: %s" name
                                    (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
                                                                   when (plist-get i :enabled) collect (plist-get i :name))

@@ -729,8 +729,12 @@ with resume it goes on with that conversation of the instance's
          (request (gethash "clientRequestId" arguments))
          (target (gethash "target" arguments (romacs-mcp--object)))
          (options (gethash "options" target (romacs-mcp--object)))
+         ;; New work draws on its delegating session's harness's pool; a
+         ;; conversation resumed is its own account's.
          (provider (or (gethash "provider" target)
-                       (and parent (romacs-agent-get parent) (romacs-agent-provider (romacs-agent-get parent)))))
+                       (and parent (romacs-agent-get parent) (symbol-name (romacs-agent-harness (romacs-agent-get parent))))))
+         (pinned (or (gethash "provider" target)
+                     (and parent (romacs-agent-get parent) (romacs-agent-provider (romacs-agent-get parent)))))
          ;; Refused before anything starts, or any worktree is made.
          (wake (let ((wake (gethash "wake" arguments)))
                  (if (member wake romacs-agent-tools--wake-rules) wake
@@ -757,7 +761,7 @@ with resume it goes on with that conversation of the instance's
          (known (and request (romacs-agent-requested parent request))))
     (cond (known (funcall answer known))
           ((gethash "resume" arguments)
-           (funcall answer (romacs-agent-tools--adopt arguments provider start-options)))
+           (funcall answer (romacs-agent-tools--adopt arguments pinned start-options)))
           ((equal (gethash "isolation" arguments) "worktree")
            ;; A child that cannot start leaves no worktree behind.
            (romacs-agent--start-instance provider)
@@ -1054,6 +1058,34 @@ CELL's error as the call's."
                                                "default" (or (plist-get (cdr row) :default-effort) :null)))
                  []))))
 
+(defun romacs-agent-tools--pools ()
+  "Each harness's pool (`romacs-agent-pool'): its accounts in order, each
+with its last limit report and the sessions at work on it, and the one
+new work draws on now."
+  (let ((live (make-hash-table :test #'equal)))
+    (maphash (lambda (_ session)
+               (when (memq (romacs-agent-state session) '(starting running waiting-approval))
+                 (cl-incf (gethash (romacs-agent-provider session) live 0))))
+             romacs-agent--sessions)
+    (cl-loop for (harness) in romacs-agent--drivers
+             for pool = (romacs-agent-pool harness)
+             when pool
+             collect (romacs-mcp--object
+                      "harness" (symbol-name harness)
+                      "next" (plist-get (romacs-agent-pool-pick harness) :name)
+                      "accounts"
+                      (vconcat (mapcar (lambda (i)
+                                         (let ((room (romacs-agent-room-of (plist-get i :name))))
+                                           (romacs-mcp--object
+                                            "providerInstanceId" (plist-get i :name)
+                                            "room" (if (romacs-agent-room (plist-get i :name)) t :false)
+                                            "status" (if room (symbol-name (plist-get room :status)) :null)
+                                            "used" (or (plist-get room :used) :null)
+                                            "resets" (or (plist-get room :resets) :null)
+                                            "window" (or (plist-get room :window) :null)
+                                            "live" (gethash (plist-get i :name) live 0))))
+                                       pool))))))
+
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
 directory, program, models, whether it is enabled and where it comes
@@ -1080,6 +1112,7 @@ from; and each one Romacs cannot run, with why."
                    "models" (vconcat (mapcar (lambda (row) (romacs-agent-tools--model instance row))
                                              (romacs-agent--models instance))))))
               instances))
+     "pools" (vconcat (romacs-agent-tools--pools))
      "constraints"
      (vconcat (mapcar (lambda (c) (romacs-mcp--object "source" (symbol-name (plist-get c :source))
                                                       "id" (or (plist-get c :id) :null) "reason" (plist-get c :reason)))
@@ -1391,7 +1424,10 @@ restart this session is told \"Romacs restarted into <commit>\"; if it fails, it
 
 (romacs-mcp-register-tool
  "romacs_orchestrator_capabilities"
- "The provider instances romacs_delegate_task can start: harness, configuration directory, program and options."
+ "The provider instances romacs_delegate_task can start: harness, configuration directory, program and options; \
+and each harness's pool of accounts in order, each with its last usage-limit report (status, used, resets) and \
+the sessions at work on it. A target provider naming a harness (\"claude\") draws on its pool: the first account \
+with room, `next'; naming an instance pins it."
  (romacs-mcp--schema '(("instance" . "string")) nil)
  #'romacs-agent-tools--capabilities
  (romacs-mcp--object "readOnlyHint" t))
