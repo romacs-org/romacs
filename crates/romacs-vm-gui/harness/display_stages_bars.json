@@ -7,6 +7,8 @@
   "band_expansions": 0,
   "layouts": 0,
   "frames_submitted": 0,
+  "lines_laid": 0,
+  "rows_wrapped": 0,
   "display_instructions_p90": 352000
  },
  "chat-idle": {
@@ -17,6 +19,8 @@
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 0,
+  "lines_laid": 0,
+  "rows_wrapped": 0,
   "display_instructions_p90": 578000
  },
  "chat-tick": {
@@ -27,97 +31,117 @@
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 0,
+  "lines_laid": 0,
+  "rows_wrapped": 0,
   "display_instructions_p90": 574000
  },
  "chat-tick-second": {
-  "step_instructions": 36700000,
-  "display_instructions": 35500000,
+  "step_instructions": 21300000,
+  "display_instructions": 20100000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 35600000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 20200000
  },
  "chat-cursor": {
-  "step_instructions": 19900000,
-  "display_instructions": 19400000,
+  "step_instructions": 11400000,
+  "display_instructions": 10900000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 2,
   "layouts": 0,
   "frames_submitted": 1,
-  "display_instructions_p90": 19800000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 10900000
  },
  "chat-collected": {
   "step_instructions": 170000000,
-  "display_instructions": 32500000,
+  "display_instructions": 24200000,
   "display_conses": 174,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 0,
-  "display_instructions_p90": 33000000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 24300000
  },
  "cursor-move": {
-  "step_instructions": 5820000,
-  "display_instructions": 5110000,
+  "step_instructions": 2280000,
+  "display_instructions": 1790000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
   "layouts": 0,
   "frames_submitted": 1,
-  "display_instructions_p90": 5130000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 1800000
  },
  "typed": {
-  "step_instructions": 9840000,
-  "display_instructions": 9190000,
+  "step_instructions": 3800000,
+  "display_instructions": 3170000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 9230000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 3210000
  },
  "append-unseen": {
-  "step_instructions": 5360000,
-  "display_instructions": 5000000,
+  "step_instructions": 2060000,
+  "display_instructions": 1700000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 0,
-  "display_instructions_p90": 5010000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 1710000
  },
  "typed-elements": {
-  "step_instructions": 23500000,
-  "display_instructions": 22900000,
+  "step_instructions": 17700000,
+  "display_instructions": 17100000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 1,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 23000000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 17200000
  },
  "chat-stream-1k": {
-  "step_instructions": 32000000,
-  "display_instructions": 30300000,
+  "step_instructions": 19200000,
+  "display_instructions": 17400000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 2,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 96400000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 50000000
  },
  "chat-stream-10k": {
-  "step_instructions": 87000000,
-  "display_instructions": 85300000,
+  "step_instructions": 43600000,
+  "display_instructions": 41800000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 2,
   "layouts": 1,
   "frames_submitted": 1,
-  "display_instructions_p90": 586000000
+  "lines_laid": 1,
+  "rows_wrapped": 1,
+  "display_instructions_p90": 251000000
  },
  "fontify-open-org-folded": {
   "step_instructions": 1290000000,
@@ -128,6 +152,8 @@
   "layouts": 1,
   "frames_submitted": 1,
   "chars_fontified": 22500,
+  "lines_laid": 2,
+  "rows_wrapped": 2,
   "display_instructions_p90": 1470000000
  },
  "fontify-typed-org-folded": {
@@ -139,6 +165,8 @@
   "layouts": 3,
   "frames_submitted": 1,
   "chars_fontified": 43,
+  "lines_laid": 3,
+  "rows_wrapped": 3,
   "display_instructions_p90": 162000000
  },
  "fontify-unfold-org": {
@@ -150,6 +178,8 @@
   "layouts": 3,
   "frames_submitted": 1,
   "chars_fontified": 6004,
+  "lines_laid": 10,
+  "rows_wrapped": 10,
   "display_instructions_p90": 1070000000
  },
  "fontify-typed-elisp": {
@@ -161,6 +191,8 @@
   "layouts": 2,
   "frames_submitted": 1,
   "chars_fontified": 133,
+  "lines_laid": 1,
+  "rows_wrapped": 1,
   "display_instructions_p90": 44100000
  }
 }

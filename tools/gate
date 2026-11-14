@@ -669,31 +669,63 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
               'romacs-gui-tests::harness_contract')
 
 
+# The structural rules whose compile-fail fixtures run the compiler: minutes
+# when their inputs changed, where the rest take seconds once the test target
+# is built. A check a lane runs before it submits leaves them to the queue.
+SLOW_RULES = ('romacs-vm::compile_boundaries', 'romacs-vm::primitive_gc_boundary')
+
+# A rule that scans one crate's sources, kept as a unit test of that crate:
+# its package, and the nextest filter of the rule.  It runs when the crate
+# changes, so a small gate does not build every such crate's tests.
+CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test(/(^|::)time_discipline_test::/)'}
+
+
+# The packages whose test files are also modules of one `all` target
+# (tools/lib/test_modules.py's PACKAGES).
+ALL_TARGETS = ('romacs-vm',)
+
+
 def test_file(binary):
     """Nextest filter for the tests of the test file BINARY, `PACKAGE::FILE`:
-    its own target, and its module of the package's `all` target
-    (tools/lib/test_modules.py). A run builds one of the two."""
+    its own target and, in a package that has an `all` target, its module
+    there (tools/lib/test_modules.py). A run builds one of the two. Nextest
+    refuses a filter naming a binary no package has, so a package without
+    `all` is not asked for one."""
     package, file = binary.split('::')
-    return f'binary_id({binary}) | (binary_id({package}::all) & test(/^{file}::/))'
+    alone = f'binary_id({binary})'
+    return f'{alone} | (binary_id({package}::all) & test(/^{file}::/))' if package in ALL_TARGETS else alone
 
 
-def changed_filter(wt, base='beta'):
-    """Nextest filter for the small gate: `filter_for` what changed since BASE,
-    or since origin/BASE in a clone that has only the remote-tracking trunk."""
+def trunk(wt, base='beta'):
+    """BASE, or origin/BASE in a clone that has only the remote-tracking trunk."""
     def resolves(rev):
         return subprocess.run(['git', 'rev-parse', '--verify', '--quiet', rev], cwd=wt,
                               stdout=subprocess.DEVNULL).returncode == 0
-    if not resolves(base) and resolves(f'origin/{base}'):
-        base = f'origin/{base}'
-    base = out('git', 'merge-base', 'HEAD', base, cwd=wt).decode().strip()
+    return f'origin/{base}' if not resolves(base) and resolves(f'origin/{base}') else base
+
+
+def changed_names(wt, base='beta'):
+    """The paths WT changes since its merge-base with BASE, uncommitted ones too."""
+    base = out('git', 'merge-base', 'HEAD', trunk(wt, base), cwd=wt).decode().strip()
     names = set(out('git', 'diff', '--name-only', base, cwd=wt).decode().split())
-    names |= set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
-    return filter_for(names)
+    return names | set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
+
+
+def changed_filter(wt, base='beta'):
+    """Nextest filter for the small gate: `filter_for` what changed since BASE."""
+    return filter_for(changed_names(wt, base))
+
+
+def crate_rules(names):
+    """The CRATE_RULES a change to the paths NAMES can break: those of the crates it touches."""
+    return {crate: rule for crate, rule in CRATE_RULES.items()
+            if any(name.startswith(f'crates/{crate}/') for name in names)}
 
 
 def filter_for(names):
     """Nextest filter for a change to the paths NAMES: tests named after the
-    Rust modules changed, and the structural rules whatever changed.
+    Rust modules changed, the structural rules whatever changed, and the
+    rules of the crates changed.
 
     None (run everything) when a change cannot be mapped to test names. It
     reads no repository, so a caller that knows the paths, a merge it is about
@@ -715,7 +747,7 @@ def filter_for(names):
             return None                           # crate root changed
         leaf = re.sub(r'_test$', '', parts[-1])
         terms.add(f'test(/(^|::){re.escape(leaf)}(_test)?(::|$)/)')
-    return ' | '.join(sorted(terms) + [test_file(binary) for binary in STRUCTURAL])
+    return ' | '.join(sorted(terms) + [test_file(binary) for binary in STRUCTURAL] + sorted(crate_rules(names).values()))
 
 
 def reuse(wt, args, group):

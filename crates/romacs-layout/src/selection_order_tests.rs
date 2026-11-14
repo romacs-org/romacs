@@ -7,7 +7,7 @@ fn selection_order_vm_snapshot_skipped_round_trip_reaches_retained_resolver() {
     vm.eval_source("(internal-set-font-selection-order '(:height :height :height :height))").unwrap();
     let before = vm.frame_snapshot(400, 300).unwrap();
     engine.layout_frame(&before, 1, None).unwrap();
-    assert_eq!(engine.resolver.selection_state(), before.font_selection);
+    assert_eq!(engine.store.resolver.selection_state(), before.font_selection);
 
     // No intermediate snapshot or layout: replaying only the raw final order
     // would miss the priority change from the intervening weight-first order.
@@ -16,7 +16,7 @@ fn selection_order_vm_snapshot_skipped_round_trip_reaches_retained_resolver() {
     assert_eq!(before.font_selection.order(), after.font_selection.order());
     assert_ne!(before.font_selection.shifts(), after.font_selection.shifts());
     engine.layout_frame(&after, 2, None).unwrap();
-    assert_eq!(engine.resolver.selection_state(), after.font_selection,
+    assert_eq!(engine.store.resolver.selection_state(), after.font_selection,
         "LAYOUT_ADOPTS_VM_HISTORY_NOT_ONLY_RAW_FINAL_ORDER");
 
     // A second round trip has identical final raw order AND effective shifts.
@@ -27,6 +27,6 @@ fn selection_order_vm_snapshot_skipped_round_trip_reaches_retained_resolver() {
     assert_eq!(after.font_selection.shifts(), final_frame.font_selection.shifts());
     assert_ne!(after.font_selection.revision(), final_frame.font_selection.revision());
     engine.layout_frame(&final_frame, 3, None).unwrap();
-    assert_eq!(engine.resolver.selection_state(), final_frame.font_selection,
+    assert_eq!(engine.store.resolver.selection_state(), final_frame.font_selection,
         "LAYOUT_ADOPTS_VM_REVISION_ON_IDENTICAL_FINAL_PRIORITIES");
 }

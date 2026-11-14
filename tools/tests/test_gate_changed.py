@@ -2,10 +2,13 @@
 from pathlib import Path
 import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import test_modules  # noqa: E402
 GATE = runpy.run_path(str(ROOT / 'tools/gate'), run_name='gate')
 STRUCTURAL = GATE['STRUCTURAL']
 changed_filter = GATE['changed_filter']
@@ -59,6 +62,18 @@ class ChangedFilter(unittest.TestCase):
         # A run builds a file's own target or its package's `all`, not both.
         self.assertEqual(test_file('romacs-vm::quit_async'),
                          'binary_id(romacs-vm::quit_async) | (binary_id(romacs-vm::all) & test(/^quit_async::/))')
+
+    def test_a_crate_rule_is_selected_when_its_crate_changes(self):
+        # A clock read added to any file of the render thread breaks the time
+        # discipline, which no module's name selects.
+        self.assertNotIn('time_discipline_test', filter_for({'crates/romacs-vm/src/gc.rs'}))
+        self.assertIn('package(romacs-display-runtime) & test(/(^|::)time_discipline_test::/)',
+                      filter_for({'crates/romacs-display-runtime/src/render_thread/window_events.rs'}))
+
+    def test_only_a_package_with_an_all_target_is_asked_for_it(self):
+        # Nextest refuses a whole filter over one binary_id no package has.
+        self.assertEqual(test_file('romacs-gui-tests::harness_contract'), 'binary_id(romacs-gui-tests::harness_contract)')
+        self.assertEqual(set(GATE['ALL_TARGETS']), set(test_modules.PACKAGES))
 
     def test_docs_and_test_commands_select_only_the_structural_rules(self):
         self.write('doc/x.org', 'AGENTS.md', 'Makefile', 'tools/tests/test_x.py')
