@@ -1602,7 +1602,7 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
-                               ("attachments" (list (list :type 'attachments
+                               ("attachments" (list (list :type 'attachments :id (gethash "id" note)
                                                           :attachments (romacs-agent--attachments-of (gethash "items" note))
                                                           :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)

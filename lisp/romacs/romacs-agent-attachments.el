@@ -22,23 +22,48 @@
 (defconst romacs-agent-attachments--limit 16
   "The most files one call attaches.")
 
-(defun romacs-agent-attachments--sha (file)
-  "FILE's sha256, from `sha256sum' (its bytes never pass through Lisp), or nil."
-  (with-temp-buffer
-    (and (eql 0 (ignore-errors (call-process "sha256sum" nil t nil "--" file)))
-         (progn (goto-char (point-min)) (looking-at "[0-9a-f]\\{64\\}"))
-         (match-string 0))))
+(defconst romacs-agent-attachments--hash-limit (* 1024 1024 1024)
+  "The largest file hashed: a larger one is attached with no sha256.")
 
-(defun romacs-agent-attachments--item (path alt)
-  "PATH, an absolute local regular file, as an attachment's record with
-caption ALT; a `user-error' for anything else."
+(defconst romacs-agent-attachments--hash-seconds 20
+  "How long hashing an attachment may take before it is given up.")
+
+(defun romacs-agent-attachments--hash (file size then)
+  "Call THEN with FILE's sha256, or nil when it is larger than
+`romacs-agent-attachments--hash-limit' (SIZE its size) or hashing fails
+or takes too long.  Off the command loop: `sha256sum', its output
+unescaped whatever the file's name."
+  (if (> size romacs-agent-attachments--hash-limit) (funcall then nil)
+    (let* ((output (generate-new-buffer " *romacs-attach-sha*" t))
+           (done nil)
+           (settle (lambda (sha)
+                     (unless done
+                       (setq done t)
+                       (when (buffer-live-p output) (kill-buffer output))
+                       (funcall then sha))))
+           (process (make-process
+                     :name "romacs-attach-sha" :buffer output :noquery t :connection-type 'pipe
+                     :command (list "sha256sum" "--zero" "--" file)
+                     :sentinel (lambda (process _event)
+                                 (unless (process-live-p process)
+                                   (funcall settle
+                                            (and (eql (process-exit-status process) 0) (buffer-live-p output)
+                                                 (with-current-buffer output
+                                                   (goto-char (point-min))
+                                                   (and (looking-at "[0-9a-f]\\{64\\}") (match-string 0))))))))))
+      (run-at-time romacs-agent-attachments--hash-seconds nil
+                   (lambda () (unless done (delete-process process) (funcall settle nil)))))))
+
+(defun romacs-agent-attachments--check (path)
+  "PATH, an attachment's, when it names an absolute local regular file not
+under /proc, /sys or /dev; else a `user-error'.  Its metadata is its
+target's when it is a symbolic link."
   (unless (and (stringp path) (file-name-absolute-p path))
     (user-error "Attach a file by its absolute path: %S" path))
-  (let ((item (romacs-attach-item path)))
-    (romacs-mcp--object "path" (plist-get item :path)
-                        "kind" (if (string-prefix-p "image/" (plist-get item :mime)) "image" "file")
-                        "alt" (or alt :null) "size" (plist-get item :bytes)
-                        "sha" (or (romacs-agent-attachments--sha (plist-get item :path)) :null))))
+  (let ((target (file-truename (expand-file-name path))))
+    (when (string-match-p "\\`/\\(?:proc\\|sys\\|dev\\)/" target)
+      (user-error "Not a file to attach: %s" path))
+    (romacs-attach-item target)))
 
 (defun romacs-agent-attachments--alts (alt count)
   "ALT, a string for one file or an array of one per file, as COUNT captions."
@@ -50,8 +75,19 @@ caption ALT; a `user-error' for anything else."
          (mapcar (lambda (a) (and (stringp a) a)) (append alt nil)))
         (t (user-error "alt is a string, or an array of one per file"))))
 
+(defun romacs-agent-attachments--await (session id then)
+  "Call THEN once SESSION's attachments note ID is read back from its journal."
+  (letrec ((waiter (lambda (seen event)
+                     (when (and (eq seen session) (eq (plist-get event :type) 'attachments)
+                                (equal (plist-get event :id) id))
+                       (remove-hook 'romacs-agent-event-functions waiter)
+                       (funcall then)))))
+    (add-hook 'romacs-agent-event-functions waiter)))
+
 (defun romacs-agent-attachments--tool (arguments)
-  "Attach ARGUMENTS' paths to the calling session's reply."
+  "Attach ARGUMENTS' paths to the calling session's reply: answered once
+every file is hashed and the note is in its journal, its place in the
+turn known."
   (romacs-mcp--instance arguments)
   (let* ((caller (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
                      (user-error "romacs_attach attaches to an agent session's reply: you are none")))
@@ -63,12 +99,35 @@ caption ALT; a `user-error' for anything else."
     (when compare
       (unless (and (= (length compare) 2) (cl-every (lambda (p) (member p paths)) compare))
         (user-error "compare is [before, after], two of paths")))
-    (let ((items (cl-mapcar #'romacs-agent-attachments--item paths
-                            (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths)))))
-      (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "items" (vconcat items)
-                                                     "compare" (if compare (vconcat compare) :null)))
-      (romacs-mcp--object "attached" (vconcat items)
-                          "next" "They are shown with your reply; nothing more to do."))))
+    (let* ((files (mapcar #'romacs-agent-attachments--check paths))
+           (items (cl-mapcar (lambda (path file alt)
+                               (romacs-mcp--object "path" path
+                                                   "kind" (if (string-prefix-p "image/" (plist-get file :mime)) "image" "file")
+                                                   "alt" (or alt :null) "size" (plist-get file :bytes) "sha" :null))
+                             paths files (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths))))
+           (waiting (length items))
+           (id (romacs-agent--uuid))
+           (cell (list nil)))
+      (cl-mapc (lambda (item file)
+                 (romacs-agent-attachments--hash
+                  (plist-get file :path) (plist-get file :bytes)
+                  (lambda (sha)
+                    (when sha (puthash "sha" sha item))
+                    (when (zerop (cl-decf waiting))
+                      (condition-case err
+                          (progn (romacs-agent-attachments--await caller id (lambda () (setcar cell (list :done))))
+                                 (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "id" id
+                                                                                "items" (vconcat items)
+                                                                                "compare" (if compare (vconcat compare) :null))))
+                        (error (setcar cell (list :error (error-message-string err)))))))))
+               items files)
+      (romacs-mcp-defer
+       (lambda ()
+         (pcase (car cell)
+           ('nil nil)
+           (`(:error ,why) (user-error "%s" why))
+           (_ (list (romacs-mcp--object "attached" (vconcat items)
+                                        "next" "They are shown with your reply; nothing more to do.")))))))))
 
 (romacs-mcp-register-tool
  "romacs_attach"

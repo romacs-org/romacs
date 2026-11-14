@@ -33,7 +33,13 @@ its journal's records raise."
          (unwind-protect (progn ,@body) (delete-directory root t))))))
 
 (defun romacs-agent-attachments-tests--attach (&rest arguments)
-  (romacs-agent-attachments--tool (apply #'romacs-mcp--object arguments)))
+  "The tool's answer to ARGUMENTS, its deferred answer waited for."
+  (let ((deferred (romacs-agent-attachments--tool (apply #'romacs-mcp--object arguments)))
+        (answer nil) (end (+ (float-time) 30)))
+    (should (eq (car deferred) 'romacs-mcp--deferred))
+    (while (and (not (setq answer (funcall (nth 1 deferred)))) (< (float-time) end))
+      (accept-process-output nil 0.05))
+    (car answer)))
 
 (ert-deftest romacs-agent-attachments-go-with-the-reply ()
   ;; Referenced where they are: journaled as a note, raised in the turn as
@@ -68,5 +74,39 @@ its journal's records raise."
     (cl-letf (((symbol-function 'romacs-agent-tools--caller) #'ignore))
       (should-error (romacs-agent-attachments-tests--attach "paths" (vector before)) :type 'user-error))
     (should-not (cl-find 'attachments events :key (lambda (e) (plist-get e :type))))))
+
+(ert-deftest romacs-agent-attachments-links-names-and-places ()
+  ;; A link's size is its target's, as its hash is; any file name hashes;
+  ;; a /proc file is no file to attach.
+  (romacs-agent-attachments-tests--with
+    (let ((target (expand-file-name "artifact.bin" root)) (link (expand-file-name "latest.bin" root))
+          (odd (expand-file-name "a\\b\nc.txt" root)))
+      (write-region (make-string 4096 ?x) nil target nil 'silent)
+      (make-symbolic-link target link)
+      (write-region "odd" nil odd nil 'silent)
+      (let ((items (gethash "attached" (romacs-agent-attachments-tests--attach "paths" (vector link odd)))))
+        (should (= (gethash "size" (aref items 0)) 4096))
+        (should (equal (gethash "path" (aref items 0)) link))
+        (when (executable-find "sha256sum")
+          (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" (gethash "sha" (aref items 1)))))))
+    (should-error (romacs-agent-attachments--tool (romacs-mcp--object "paths" (vector "/proc/self/status")))
+                  :type 'user-error)))
+
+(ert-deftest romacs-agent-attachments-answered-once-journaled ()
+  ;; Its harness live: the note goes through its supervisor, and the tool
+  ;; answers only once it is read back, its place in the turn known.
+  (romacs-agent-attachments-tests--with
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'romacs-agent--note) (lambda (_s note) (setq sent note))))
+        (let* ((deferred (romacs-agent-attachments--tool (romacs-mcp--object "paths" (vector notes))))
+               (end (+ (float-time) 30)))
+          (while (and (not sent) (< (float-time) end)) (accept-process-output nil 0.05))
+          (should sent)
+          (should-not (funcall (nth 1 deferred)))
+          ;; Another call's note read back answers this one nothing.
+          (romacs-agent--raise session (list :type 'attachments :id "other" :attachments nil))
+          (should-not (funcall (nth 1 deferred)))
+          (romacs-agent--raise session (list :type 'attachments :id (gethash "id" sent) :attachments nil))
+          (should (gethash "attached" (car (funcall (nth 1 deferred))))))))))
 
 ;;; romacs-agent-attachments-tests.el ends here
