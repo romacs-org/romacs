@@ -32,15 +32,12 @@ impl Leaf<'_> {
     /// With FROM, the text before it is unchanged since the last call, and
     /// only the blocks from the one before FROM's are written again. The
     /// writes record no undo and run no hooks: the caller binds them off
-    /// (`with-silent-modifications`), else this signals. Returns the
-    /// position the writes start at.
+    /// (`with-silent-modifications`), else this signals. Returns (START .
+    /// CODES): where the writes start, and the code blocks written, each
+    /// (LANGUAGE BODY-START BODY-END), LANGUAGE a string or nil.
     pub(crate) fn markdown_fontify(&mut self, beg: Value, end: Value, faces: Value, from: Value) -> R<Value> {
         let (beg, end) = self.validate_region(beg, end)?;
-        let buffer = self.current_buffer()?;
-        let inhibit = self.intern("inhibit-modification-hooks");
-        if self.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) || self.vm.keeps_undo(buffer)? {
-            return Err(Fault::Error("romacs-markdown--fontify writes faces silently: call it inside `with-silent-modifications'".into()));
-        }
+        let buffer = self.markdown_silent_buffer()?;
         let text = self.markdown_text(beg, end)?;
         let parsed = markdown::spans(&text);
         let from_byte = match from.integer_value() {
@@ -48,34 +45,169 @@ impl Leaf<'_> {
             _ => 0,
         };
         let restart = markdown::restart(&parsed.tops, from_byte);
-        let runs = markdown::runs(&parsed.spans);
-        let table = self.markdown_face_table(faces);
-        // Where the writes start, and each run's ends, as positions.
-        let mut offsets = vec![restart];
-        for run in runs.iter().filter(|r| r.end > restart) {
-            offsets.push(run.start.max(restart));
-            offsets.push(run.end);
+        let (start, codes) = self.markdown_write_runs(&text, &parsed, restart..text.len(), beg, faces, buffer)?;
+        Ok(self.cons(start, codes))
+    }
+
+    /// Fontify the blocks of the current buffer, a Markdown document, that
+    /// hold BEG..END, as `markdown_fontify` does a region: the buffer's
+    /// block index (`crate::markdown::Index`) says which, and resyncs what
+    /// changed since; the text it found changed outside those blocks loses
+    /// its `fontified`, so redisplay asks for it again. Returns (START END
+    /// . CODES): the blocks written, and their code blocks.
+    pub(crate) fn markdown_fontify_buffer(&mut self, beg: Value, end: Value, faces: Value) -> R<Value> {
+        let (beg, end) = self.validate_region(beg, end)?;
+        let buffer = self.markdown_silent_buffer()?;
+        let shape = self.buffer_shape()?;
+        let to_offset = |p: i64| usize::try_from(p - 1).unwrap_or(0);
+        let ((blocks, text, parsed), changed) = self.markdown_synced(buffer, |index, read| {
+            let blocks = index.blocks(to_offset(beg), to_offset(end));
+            let text = read(blocks.clone());
+            let parsed = markdown::spans_with(&text, &|label| index.defines(label));
+            (blocks, text, parsed)
+        })?;
+        let lo = i64::try_from(blocks.start).map_err(|_| Fault::Error("position out of range".into()))? + 1;
+        let hi = lo + i64::try_from(text.chars().count()).map_err(|_| Fault::Error("position out of range".into()))?;
+        // Narrowed, only the accessible text is written.
+        let write_from = byte_of_char(&text, usize::try_from((shape.begv - lo).max(0)).unwrap_or(0));
+        let write_to = byte_of_char(&text, usize::try_from((shape.zv.min(hi) - lo).max(0)).unwrap_or(0));
+        let (start, codes) = self.markdown_write_runs(&text, &parsed, write_from..write_to.max(write_from), lo, faces, buffer)?;
+        if let Some(changed) = changed {
+            let fontified = self.intern("fontified");
+            let (cf, ct) = (i64::try_from(changed.start).unwrap_or(0) + 1, i64::try_from(changed.end).unwrap_or(0) + 1);
+            for (a, b) in [(cf, lo.min(ct)), (hi.max(cf), ct)] {
+                let (a, b) = (a.max(shape.begv), b.min(shape.zv));
+                if a < b {
+                    let (a, b) = (Value::integer(a).map_err(Fault::Error)?, Value::integer(b).map_err(Fault::Error)?);
+                    self.markdown_write(&PropertyEdit::Remove(vec![fontified]), a, b, buffer)?;
+                }
+            }
         }
-        let chars = char_offsets(&text, &offsets);
-        let position = |i: usize| at(beg, chars[i]);
+        let end_value = Value::integer(hi.min(shape.zv)).map_err(Fault::Error)?;
+        let tail = self.cons(end_value, codes);
+        Ok(self.cons(start, tail))
+    }
+
+    /// F over BUFFER's Markdown index, synced to the text, and a reader of
+    /// its text by character offsets; with the span the sync read again,
+    /// when the index was already built.
+    fn markdown_synced<T>(&mut self, buffer: Value, f: impl FnOnce(&markdown::Index, &dyn Fn(std::ops::Range<usize>) -> String) -> T)
+        -> R<(T, Option<std::ops::Range<usize>>)> {
+        let Some(data::Object::Buffer(body)) = self.vm.object_if(buffer) else {
+            return Err(Fault::Error("romacs-markdown: not a multibyte buffer".into()));
+        };
+        let read = |r: std::ops::Range<usize>| -> String {
+            let a = body.byte_of_char(crate::coordinates::CharOffset(r.start));
+            let b = body.byte_of_char(crate::coordinates::CharOffset(r.end));
+            match (a, b) {
+                (Ok(a), Ok(b)) => body.slice(a..b).map(std::borrow::Cow::into_owned).unwrap_or_default(),
+                _ => String::new(),
+            }
+        };
+        let mut index = body.markdown.borrow_mut();
+        let was_built = index.built();
+        let changed = index.sync(body.len_chars(), &mut |r| read(r)).filter(|_| was_built);
+        Ok((f(&index, &read), changed))
+    }
+
+    /// The top-level block of the current buffer, a Markdown document,
+    /// holding POS, as (START . END).
+    pub(crate) fn markdown_block_at(&mut self, pos: Value) -> R<Value> {
+        let pos = pos.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", pos))?;
+        let buffer = self.current_buffer()?;
+        let offset = usize::try_from(pos - 1).unwrap_or(0);
+        let (blocks, _) = self.markdown_synced(buffer, |index, _| index.blocks(offset, offset))?;
+        let (a, b) = (at(1, blocks.start)?, at(1, blocks.end)?);
+        Ok(self.cons(a, b))
+    }
+
+    /// The links of BEG..END of the current buffer, one Markdown document:
+    /// each (START END . DESTINATION), DESTINATION empty for a reference
+    /// whose definition is outside the region.
+    pub(crate) fn markdown_links(&mut self, beg: Value, end: Value) -> R<Value> {
+        let (beg, end) = self.validate_region(beg, end)?;
+        let text = self.markdown_text(beg, end)?;
+        let parsed = markdown::spans(&text);
+        let positions = Positions::new(&text, parsed.links.iter().flat_map(|(r, _)| [r.start, r.end]).collect(), beg);
+        let mut list = Value::NIL;
+        for (range, dest) in parsed.links.iter().rev() {
+            let dest = self.make_string(dest.clone().into_bytes(), true);
+            let tail = self.cons(positions.at(range.end)?, dest);
+            let entry = self.cons(positions.at(range.start)?, tail);
+            list = self.cons(entry, list);
+        }
+        Ok(list)
+    }
+
+    /// SOURCE, a pipe table, with its columns aligned, characters as wide
+    /// as `string-width` counts them; nil when SOURCE holds no table.
+    pub(crate) fn markdown_table_align(&mut self, source: Value) -> R<Value> {
+        let view = self.string_view(source).map_err(|_| Fault::Wrong("stringp", source))?;
+        let text: String = view.chars().filter_map(char::from_u32).collect();
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
+        Ok(match markdown::align(&text, &|c| rule.width(u32::from(c))) {
+            Some(aligned) => self.make_string(aligned.into_bytes(), true),
+            None => Value::NIL,
+        })
+    }
+
+    /// The current buffer, once faces may be written to it silently: its
+    /// modification hooks inhibited and its undo off, else an error.
+    fn markdown_silent_buffer(&mut self) -> R<Value> {
+        let buffer = self.current_buffer()?;
+        let inhibit = self.intern("inhibit-modification-hooks");
+        if self.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) || self.vm.keeps_undo(buffer)? {
+            return Err(Fault::Error("romacs-markdown writes faces silently: call it inside `with-silent-modifications'".into()));
+        }
+        Ok(buffer)
+    }
+
+    /// Write PARSED's faces, TEXT beginning at position BASE, over its bytes
+    /// WRITE: the `face` there removed, then each run's put. Returns the
+    /// position the writes start at, and the code blocks whose text ends
+    /// in WRITE, as Lisp lists (LANGUAGE BODY-START BODY-END).
+    fn markdown_write_runs(&mut self, text: &str, parsed: &markdown::Parsed, write: std::ops::Range<usize>, base: i64, faces: Value, buffer: Value) -> R<(Value, Value)> {
+        let runs = markdown::runs(&parsed.spans);
+        let runs: Vec<(usize, usize, &[Kind])> = runs
+            .iter()
+            .filter(|r| r.end > write.start && r.start < write.end)
+            .map(|r| (r.start.max(write.start), r.end.min(write.end), r.kinds.as_slice()))
+            .collect();
+        let codes: Vec<&markdown::Code> = parsed.codes.iter().filter(|c| c.body.end > write.start && c.body.start < write.end).collect();
+        let mut offsets: Vec<usize> = vec![write.start, write.end];
+        offsets.extend(runs.iter().flat_map(|r| [r.0, r.1]));
+        offsets.extend(codes.iter().flat_map(|c| [c.body.start, c.body.end]));
+        let positions = Positions::new(text, offsets, base);
         let face = self.intern("face");
-        let start_value = position(0)?;
-        let end_value = Value::integer(end).map_err(Fault::Error)?;
-        self.markdown_write(&PropertyEdit::Remove(vec![face]), start_value, end_value, buffer)?;
+        let table = self.markdown_face_table(faces);
+        let start = positions.at(write.start)?;
+        if write.start < write.end {
+            self.markdown_write(&PropertyEdit::Remove(vec![face]), start, positions.at(write.end)?, buffer)?;
+        }
         let mut values: HashMap<Vec<Kind>, Value> = HashMap::new();
-        for (i, run) in runs.iter().filter(|r| r.end > restart).enumerate() {
-            let value = if let Some(&value) = values.get(&run.kinds) {
+        for &(a, b, kinds) in &runs {
+            let value = if let Some(&value) = values.get(kinds) {
                 value
             } else {
-                let value = self.markdown_face_value(&table, &run.kinds);
-                values.insert(run.kinds.clone(), value);
+                let value = self.markdown_face_value(&table, kinds);
+                values.insert(kinds.to_vec(), value);
                 value
             };
             if value != Value::NIL {
-                self.markdown_write(&PropertyEdit::Put(face, value), position(1 + 2 * i)?, position(2 + 2 * i)?, buffer)?;
+                self.markdown_write(&PropertyEdit::Put(face, value), positions.at(a)?, positions.at(b)?, buffer)?;
             }
         }
-        Ok(start_value)
+        let mut list = Value::NIL;
+        for code in codes.iter().rev() {
+            let language = match &code.language {
+                Some(name) => self.make_string(name.clone().into_bytes(), true),
+                None => Value::NIL,
+            };
+            let entry = [language, positions.at(code.body.start)?, positions.at(code.body.end)?];
+            let entry = entry.iter().rev().fold(Value::NIL, |l, &v| self.cons(v, l));
+            list = self.cons(entry, list);
+        }
+        Ok((start, list))
     }
 
     /// One property write that must run no Lisp: the caller inhibited it.
@@ -207,6 +339,28 @@ impl Leaf<'_> {
             out.push(self.cons(kind, tail));
         }
         Ok(out.iter().rev().fold(Value::NIL, |list, &v| self.cons(v, list)))
+    }
+}
+
+/// Byte offsets of a text, each as the position it is at: the text begins
+/// at BASE.
+struct Positions {
+    offsets: Vec<usize>,
+    chars: Vec<usize>,
+    base: i64,
+}
+
+impl Positions {
+    fn new(text: &str, mut offsets: Vec<usize>, base: i64) -> Positions {
+        offsets.sort_unstable();
+        offsets.dedup();
+        let chars = char_offsets(text, &offsets);
+        Positions { offsets, chars, base }
+    }
+
+    fn at(&self, offset: usize) -> R<Value> {
+        let i = self.offsets.binary_search(&offset).map_err(|_| Fault::Error("romacs-markdown: lost offset".into()))?;
+        at(self.base, self.chars[i])
     }
 }
 

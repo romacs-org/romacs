@@ -122,8 +122,12 @@ pub struct TextBody {
     /// The parse-state summaries of this text, which every change edits.
     // CELL(Plain): Parse-state summaries: positions and syntax codes, no Value.
     pub(crate) syntax: std::cell::RefCell<crate::syntax_index::SyntaxIndex>,
+    /// The Markdown block index of this text, empty until Markdown is asked
+    /// of it (`crate::markdown::Index`), which every change edits.
+    // CELL(Plain)
+    pub(crate) markdown: std::cell::RefCell<crate::markdown::Index>,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax, markdown });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -372,6 +376,7 @@ impl Text {
                 property_edit_visits: 0,
                 treesit: Default::default(),
                 syntax: Default::default(),
+                markdown: std::cell::RefCell::new(crate::markdown::Index::default()),
             }),
             restriction: ByteOffset(0)..ByteOffset(s.len()),
             state: Default::default(),
@@ -618,6 +623,12 @@ impl Text {
     }
 }
 impl TextBody {
+    /// Characters START..END replaced by INSERTED ones: the caches derived
+    /// from the text follow.
+    fn edit_derived(&mut self, start: usize, end: usize, inserted: usize) {
+        self.syntax.get_mut().edit(start, end, inserted);
+        self.markdown.get_mut().edit(start, end, inserted);
+    }
     /// `Text::append_utf8`'s edit of the body: S, of CHARS characters,
     /// after its end.
     fn append_body(&mut self, s: &str, chars: usize) {
@@ -628,7 +639,7 @@ impl TextBody {
         if self.tail.len() + s.len() > 1024 {
             self.flush_tail();
         }
-        self.syntax.get_mut().edit(self.chars_len, self.chars_len, chars);
+        self.edit_derived(self.chars_len, self.chars_len, chars);
         self.tail.push_str(s);
         self.tail_chars += chars;
         self.bytes_len += s.len();
@@ -670,7 +681,7 @@ impl TextBody {
         }
         self.bytes_len = self.rope.len_bytes();
         let inserted = self.rope.len_chars() + end.0 - start.0 - self.chars_len;
-        self.syntax.get_mut().edit(start.0, end.0, inserted);
+        self.edit_derived(start.0, end.0, inserted);
         self.chars_len = self.rope.len_chars();
         self.is_ascii = self.bytes_len == self.chars_len;
         end.0 - start.0 + inserted
@@ -685,7 +696,7 @@ impl TextBody {
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, replacement);
         self.properties.resize_character(r, replacement.len());
-        self.syntax.get_mut().edit(start, end, replacement.chars().count());
+        self.edit_derived(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, replacement);
         self.bytes_len = self.rope.len_bytes();
@@ -1297,7 +1308,7 @@ impl TextBody {
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, &replacement);
-        self.syntax.get_mut().edit(start, end, replacement.chars().count());
+        self.edit_derived(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, &replacement);
         self.chars_len = self.rope.len_chars();

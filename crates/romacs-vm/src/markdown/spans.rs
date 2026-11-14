@@ -1,6 +1,6 @@
 //! pulldown-cmark's events as spans by [`Kind`].
 use super::Kind;
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{BrokenLink, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag};
 use std::ops::Range;
 
 /// KIND over START..END, DEPTH its element's nesting: where spans
@@ -13,12 +13,26 @@ pub(crate) struct Span {
     pub depth: u32,
 }
 
-/// A document's spans, and the line starts of its top-level blocks
-/// (ascending), from which [`super::restart`] picks.
+/// A document's spans; the line starts of its top-level blocks (ascending),
+/// from which [`super::restart`] picks; its code blocks; and the labels its
+/// link reference definitions define ([`label_key`]).
 #[derive(Debug, Default)]
 pub(crate) struct Parsed {
     pub spans: Vec<Span>,
     pub tops: Vec<usize>,
+    pub codes: Vec<Code>,
+    pub labels: Vec<String>,
+    /// Each link's range and destination (empty when its definition is
+    /// outside the text).
+    pub links: Vec<(Range<usize>, String)>,
+}
+
+/// A code block's text, and the language its fence names (its info
+/// string's first word), if any.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Code {
+    pub language: Option<String>,
+    pub body: Range<usize>,
 }
 
 /// Markup's depth: above every element's.
@@ -39,6 +53,8 @@ enum Frame {
     Around(Kind),
     /// A fenced code block: fence lines around its text.
     Fenced,
+    /// An indented code block: its text alone.
+    Indented,
     /// A table: pipes outside its cells, and its delimiter row.
     Table,
     /// A block quote, its markers found as it opens.
@@ -61,14 +77,24 @@ struct Open {
 
 /// TEXT's spans and top-level block starts.
 pub(crate) fn spans(text: &str) -> Parsed {
+    spans_with(text, &|_| false)
+}
+
+/// TEXT's spans, a reference to a label KNOWN says is defined (elsewhere
+/// in the document TEXT is part of) taken as a link.
+pub(crate) fn spans_with(text: &str, known: &dyn Fn(&str) -> bool) -> Parsed {
     let mut out = Parsed::default();
     let mut open: Vec<Open> = Vec::new();
-    let mut parser = Parser::new_ext(text, options()).into_offset_iter();
+    let resolve = |link: BrokenLink<'_>| known(&label_key(&link.reference)).then_some((CowStr::Borrowed(""), CowStr::Borrowed("")));
+    let mut parser = Parser::new_with_broken_link_callback(text, options(), Some(resolve)).into_offset_iter();
     for (event, range) in parser.by_ref() {
         let depth = u32::try_from(open.len()).unwrap_or(u32::MAX - 1);
         match event {
             Event::Start(tag) => {
                 note_child(&mut open, &range);
+                if let Tag::Link { dest_url, .. } = &tag {
+                    out.links.push((range.clone(), dest_url.to_string()));
+                }
                 if depth == 0 {
                     out.tops.push(line_start(text, range.start));
                 }
@@ -77,7 +103,7 @@ pub(crate) fn spans(text: &str) -> Parsed {
             }
             Event::End(_) => {
                 if let Some(element) = open.pop() {
-                    close(text, &element, &mut out.spans);
+                    close(text, &element, &mut out);
                 }
             }
             Event::Code(_) => {
@@ -106,9 +132,10 @@ pub(crate) fn spans(text: &str) -> Parsed {
             _ => note_child(&mut open, &range),
         }
     }
-    for (_, definition) in parser.reference_definitions().iter() {
+    for (label, definition) in parser.reference_definitions().iter() {
         let span = definition.span.clone();
         out.spans.push(Span { start: span.start, end: span.end, kind: Kind::Url, depth: 0 });
+        out.labels.push(label_key(label));
     }
     out.tops.dedup();
     out
@@ -137,7 +164,7 @@ fn start(text: &str, tag: &Tag<'_>, range: &Range<usize>, depth: u32, open: &mut
         }
         Tag::CodeBlock(kind) => {
             spans.push(element(Kind::CodeBlock));
-            if matches!(kind, CodeBlockKind::Fenced(_)) { Frame::Fenced } else { Frame::Plain }
+            if matches!(kind, CodeBlockKind::Fenced(_)) { Frame::Fenced } else { Frame::Indented }
         }
         Tag::BlockQuote(_) => {
             spans.push(element(Kind::Quote));
@@ -188,9 +215,10 @@ fn open_table(open: &mut [Open]) -> Option<&mut Open> {
     open.iter_mut().rev().find(|o| o.frame == Frame::Table)
 }
 
-/// The markup an element adds as it closes.
-fn close(text: &str, element: &Open, spans: &mut Vec<Span>) {
+/// The markup an element adds as it closes, and a code block's record.
+fn close(text: &str, element: &Open, out: &mut Parsed) {
     let Range { start, end } = element.range.clone();
+    let spans = &mut out.spans;
     match element.frame {
         Frame::Around(kind) => {
             let trailing = if matches!(kind, Kind::Link | Kind::Image) { Kind::Url } else { Kind::Markup };
@@ -221,6 +249,9 @@ fn close(text: &str, element: &Open, spans: &mut Vec<Span>) {
                 None => markup(spans, start, fence_end),
             }
             markup(spans, body_end.max(body_start), end);
+            let language = fence_info(&text[start..first_line])
+                .and_then(|info| text[start..first_line][info].split_whitespace().next().map(str::to_owned));
+            out.codes.push(Code { language, body: body_start..body_end.max(body_start) });
         }
         Frame::Table => {
             let inside = |at: usize| element.cells.iter().any(|cell| cell.contains(&at));
@@ -234,6 +265,7 @@ fn close(text: &str, element: &Open, spans: &mut Vec<Span>) {
                 markup(spans, head_end, rows);
             }
         }
+        Frame::Indented => out.codes.push(Code { language: None, body: start..end }),
         Frame::Quote | Frame::Plain => {}
     }
 }
@@ -303,6 +335,12 @@ fn fence_info(line: &str) -> Option<Range<usize>> {
         let start = indent + fence + lead;
         start..start + info.len()
     })
+}
+
+/// A link label as references match it: case folded, its runs of white
+/// space one space.
+pub(crate) fn label_key(label: &str) -> String {
+    label.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 pub(crate) fn heading_level(level: HeadingLevel) -> u8 {

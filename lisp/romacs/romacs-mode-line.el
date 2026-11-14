@@ -619,7 +619,7 @@ differs, the conflict glyph in the error colour where it conflicts."
     (html-mode . html) (mhtml-mode . html) (css-mode . css) (css-ts-mode . css) (lua-mode . lua) (lua-ts-mode . lua)
     (conf-mode . conf) (yaml-ts-mode . data) (toml-ts-mode . conf) (sql-mode . database)
     (sh-mode . shell) (bash-ts-mode . shell) (org-mode . org) (org-agenda-mode . calendar) (calendar-mode . calendar)
-    (markdown-mode . markdown) (gfm-mode . markdown) (dired-mode . dired)
+    (romacs-markdown-mode . markdown) (markdown-mode . markdown) (gfm-mode . markdown) (dired-mode . dired)
     (eshell-mode . shell) (shell-mode . shell) (term-mode . term) (romacs-term-mode . term) (eww-mode . web)
     (image-mode . image) (help-mode . help) (helpful-mode . help) (Info-mode . info) (Man-mode . info)
     (message-mode . mail) (notmuch-search-mode . mail) (notmuch-show-mode . mail) (notmuch-tree-mode . mail)

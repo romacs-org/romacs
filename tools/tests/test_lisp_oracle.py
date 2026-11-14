@@ -82,8 +82,8 @@ class RealPinControls(unittest.TestCase):
         for root in (ROOT, self.root):
             code, output = self.check(root)
             self.assertEqual(code, 0, output)
-            self.assertIn('1596 identical, 0 modified', output)
-            self.assertIn('31 excluded', output)
+            self.assertIn('1594 identical, 0 modified', output)
+            self.assertIn('33 excluded', output)
             self.assertIn('81 declared generated support, 0 extra', output)
             print(output.strip())
 

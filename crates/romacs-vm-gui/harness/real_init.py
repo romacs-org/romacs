@@ -55,7 +55,6 @@ HERMES_SOURCES = [
     (ROOT / 'lisp/romacs/hermes', '*.el'),
     (ROOT / 'lisp/romacs/emacs-lisp', 'keymap-popup.el'),
     (ROOT / 'lisp/romacs/deps/websocket', 'websocket.el'),
-    (ROOT / 'lisp/romacs/deps/markdown-mode', 'markdown-mode.el'),
 ]
 EXCLUDE = ('-tests.el', '-test.el', 'compat-tests.el', '-pkg.el', '-autoloads.el')
 START_MODE = re.compile(r"start-mode\s+'?:?([\w-]+)")

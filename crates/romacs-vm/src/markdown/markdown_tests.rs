@@ -228,3 +228,53 @@ fn grid_fills_ragged_rows() {
     let drawn = grid("| a | b |\n|---|---|\n| only |\n", 40, &narrow).expect("a table");
     assert!(drawn.text.contains("| only |    |"), "{}", drawn.text);
 }
+
+/// TEXT's characters START..END replaced by INSERT.
+fn replace_chars(text: &mut String, start: usize, end: usize, insert: &str) {
+    let byte = |c: usize| text.char_indices().nth(c).map_or(text.len(), |(i, _)| i);
+    let (a, b) = (byte(start), byte(end));
+    text.replace_range(a..b, insert);
+}
+
+/// An index followed through edits keeps the block starts a fresh read of
+/// the text finds, edits that join, split, open and close blocks included.
+#[test]
+fn index_follows_edits() {
+    let mut text = String::from(
+        "# Título\n\nSome *text* — `code`.\n\n1. one\n2. two\n\n```rust\nfn x() {}\n```\n\n| a | b |\n|---|---|\n| c | d |\n\n> quote\n> more\n\nTail ü\n",
+    );
+    let snippets = ["\n", "\n\n", "```", "```\n", "- ", "1. ", "> ", "# ", "===\n", "---\n", "    ", "*", "`", "|", "x", "é", "[r]: /u\n"];
+    let mut index = Index::default();
+    let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
+    let mut next = |m: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        usize::try_from(seed % (m.max(1) as u64)).unwrap_or(0)
+    };
+    for i in 0..1500 {
+        let len = text.chars().count();
+        let current = text.clone();
+        index.sync(len, &mut |r| current.chars().skip(r.start).take(r.end - r.start).collect());
+        let start = next(len + 1);
+        let (end, insert) = if next(3) == 0 { ((start + 1 + next(12)).min(len), "") } else { (start, snippets[next(snippets.len())]) };
+        replace_chars(&mut text, start, end, insert);
+        index.edit(start, end, insert.chars().count());
+        let len = text.chars().count();
+        let current = text.clone();
+        index.sync(len, &mut |r| current.chars().skip(r.start).take(r.end - r.start).collect());
+        let mut fresh = Index::default();
+        fresh.sync(len, &mut |r| current.chars().skip(r.start).take(r.end - r.start).collect());
+        assert_eq!(index.starts(), fresh.starts(), "edit {i}: {start}..{end} -> {insert:?} in\n{text}");
+    }
+}
+
+#[test]
+fn index_blocks_hold_a_region() {
+    let text = "a\n\nb\n\nc\n";
+    let mut index = Index::default();
+    index.sync(text.len(), &mut |r| text[r].to_owned());
+    assert_eq!(index.blocks(4, 4), 3..6);
+    assert_eq!(index.blocks(0, 4), 0..6);
+    assert_eq!(index.blocks(6, 8), 6..8);
+}
