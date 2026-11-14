@@ -326,12 +326,14 @@ impl HostInput for GuiHost {
     }
 
     fn images_behind(&mut self) -> bool {
-        // Not while a paint is in flight (a stalled render is not spun on),
-        // nor with no window to paint. A paint drawn since (its render woke
-        // this read) is settled first, so the next batch of images goes on.
+        // Pixels landed, or the renderer lost the images it had (a device
+        // reset woke this read): paint again. Not while a paint is in
+        // flight (a stalled render is not spun on), nor with no window to
+        // paint. A paint drawn since (its render woke this read) is
+        // settled first, so the next batch of images goes on.
         self.settle_drawn();
         let shared = self.shared.borrow();
-        self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
+        self.images.borrow().must_repaint(self.sender.as_ref()) && shared.in_flight.is_none() && shared.window_shown()
     }
 
     fn input_pending(&mut self) -> bool {

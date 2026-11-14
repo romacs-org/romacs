@@ -502,8 +502,10 @@ fn a_wheel_remainder_resets_on_quiet_gesture_device_and_model_changes() {
 // ----------------------------------------------------------------------
 // Review MUST 9: renderer loss reaches the ordered input channel at once.
 
+/// The events the evaluator receives, without the renderer liveness fact
+/// the input bridge keeps.
 fn model_events(emacs: &EmacsComms) -> Vec<InputEvent> {
-    emacs.input_rx.try_iter().collect()
+    emacs.input_rx.try_iter().filter(|event| !matches!(event, InputEvent::ModelRenderer { .. })).collect()
 }
 
 /// current -> renderer loss -> a key typed afterwards: the evaluator sees
@@ -909,11 +911,12 @@ fn model_commands_create_update_and_free_a_model() {
 /// (`romacs-model-available-p`).
 #[test]
 fn renderer_liveness_reaches_the_evaluator() {
-    use std::sync::atomic::Ordering;
     let (mut app, emacs) = app_with_channel();
-    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    let liveness = |emacs: &crate::thread_comm::EmacsComms| emacs.input_rx.try_iter()
+        .filter_map(|e| match e { InputEvent::ModelRenderer { live } => Some(live), _ => None }).collect::<Vec<_>>();
+    assert_eq!(liveness(&emacs), Vec::<bool>::new());
     app.note_models_renderer_ready();
-    assert!(emacs.model_renderer.load(Ordering::Acquire));
+    assert_eq!(liveness(&emacs), vec![true]);
     app.note_models_renderer_lost();
-    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    assert_eq!(liveness(&emacs), vec![false]);
 }
