@@ -19,6 +19,10 @@
 ;;           :steps R times from timers, each laid out by the host before
 ;;           the next, `i' bound to the step.
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
+;;   :slope  instead, the most instructions the work may grow by per unit
+;;           of N, per step: (work(K*N) - work(N)) / ((K - 1) * N * steps).
+;;           For a probe whose claim is that N costs nothing, where an
+;;           exponent over total work moves whenever a fixed cost does.
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
 ;;   :ready  a GUI probe's condition for its next step, besides the host's
@@ -557,6 +561,7 @@ closures over a mutable variable (each a closure and a cell)."
     (let ((plist (cdr probe)))
       (scaling--print (list :name (symbol-name (car probe)) :n (plist-get plist :n)
                             :k (or (plist-get plist :k) 4) :budget (or (plist-get plist :budget) 1.25)
+                            :slope (plist-get plist :slope)
                             :known (or (plist-get plist :known) nil) :gui (if (plist-get plist :gui) t :json-false)
                             :steps (or (plist-get plist :steps) 1) :stack (if (plist-get plist :stack) t :json-false)
                             :idle (if (plist-get plist :idle) t :json-false))))))

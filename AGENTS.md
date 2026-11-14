@@ -109,7 +109,10 @@ possible; say so where you do.
   Every new collection-holding subsystem adds a scaling probe, one file under
   `crates/romacs-vm-gui/harness/scaling/probes/`. A probe over its exponent
   budget is fixed, or carries `:known` with a ticket. Raising its budget is
-  not a fix.
+  not a fix. A probe whose claim is that N costs nothing is held by `:slope`
+  (instructions per unit of N a step) instead, its budget the measured residue
+  with a margin and the reason written beside the probe; turning a failing
+  probe into a slope probe is not a fix either.
 - Attack cost in this order: complexity (never worse than GNU's; pick the
   textbook structure: interval trees, ropes, indexes, dependency graphs),
   then incremental work (recompute only what a change dirties, in dependency
