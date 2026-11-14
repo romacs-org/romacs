@@ -592,6 +592,19 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
     Ok(loadup)
 }
 
+/// The Lisp a launch's chain reads under DIR, GNU's Lisp directory: that
+/// directory, the runtime's own Lisp and bundled layout beside it, and the
+/// bundled packages' directories. What a world's builder may read of Lisp
+/// (`world::build_roots`, `test_world`).
+pub fn lisp_roots(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![dir.to_owned()];
+    roots.extend(runtime_of(dir).map(|root| root.join("lisp/romacs")));
+    // The bundled layout, which the bundled autoloads' scan reads.
+    roots.extend(runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
+    roots.extend(bundled_load_path(dir).unwrap_or_default());
+    roots
+}
+
 /// A launch restored from its world (`world::Carry`) from the chain's end on.
 pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup) -> Result<Started, String> {
     let files = take_queued();
@@ -2103,17 +2116,14 @@ mod tests {
     fn loadup_autoloads_bundled_package_commands_without_loading_them() {
         let dir = lisp_dir().canonicalize().unwrap();
         let owned = runtime_of(&dir).unwrap().to_path_buf();
-        let in_vm = dir.clone();
         let (gnu_only, loadup) = on_evaluator(move || {
             let query = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(|v| v.display()).unwrap_or_else(|e| format!("ERR {e}"));
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-            initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &in_vm).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+            resume_loadup(&mut vm, Launch::GnuOnly, loadup).unwrap();
             let gnu_only = query(&mut vm, "(list (fboundp 'hermes) (featurep 'romacs-bundled-autoloads))");
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
             private_home(&mut vm, "autoloads");
-            let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
+            let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let loadup = [("gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("hermes", "hermes/hermes.el")].map(|(name, file)| {
                 let file = lisp_string(&owned.join("lisp/romacs").join(file).to_string_lossy());
@@ -2138,9 +2148,8 @@ mod tests {
         let bundled = runtime_of(&dir).unwrap().join("lisp/romacs");
         let in_vm = dir.clone();
         let (dbus, path, collisions) = on_evaluator(move || {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-            initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &in_vm).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+            resume_loadup(&mut vm, Launch::GnuOnly, loadup).unwrap();
             let found = vm.eval_source("(locate-file-internal \"gnus-dbus\" load-path '(\".elc\" \".el\"))")
                 .and_then(|v| v.display()).map_err(|e| e.to_string());
             assert_eq!(found,
@@ -2300,6 +2309,61 @@ mod tests {
         assert!(bands.iter().all(|b| !b.contains("stand-in")), "{bands:?}");
     }
 
+    /// The scenarios of fixtures/startup-order-gui.txt, a test each, so each
+    /// runs in a process of its own and restores the session's world.
+    const STARTUP_ORDER: &str = include_str!("../tests/fixtures/startup-order-gui.txt");
+
+    /// The fixture's scenarios: name, arguments, keys, init and GNU's record.
+    fn startup_order_cases() -> Vec<[&'static str; 5]> {
+        let lines: Vec<&str> = STARTUP_ORDER.lines().filter(|line| !line.starts_with(";;")).collect();
+        lines.chunks(5).map(|case| [case[0], case[1], case[2], case[3], case[4]]).collect()
+    }
+
+    /// The startup-order scenario SCENARIO (`startup_order_tests`).
+    fn startup_order(scenario: &'static str) {
+        on_evaluator(move || {
+            let [name, args, keys, init, expected] = startup_order_cases().into_iter().find(|case| case[0] == scenario)
+                .unwrap_or_else(|| panic!("fixtures/startup-order-gui.txt has no scenario {scenario}"));
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
+            let home = private_home(&mut vm, &format!("order-{name}"));
+            std::fs::create_dir_all(home.join("sub")).unwrap();
+            for (file, text) in [("visited.txt", "visited\n"), ("chosen.txt", "chosen\n"), ("sub/visited.txt", "visited\n")] {
+                std::fs::write(home.join(file), text).unwrap();
+            }
+            let mut started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
+            // GNU ran in HOME, so relative names and the command line's
+            // directory are HOME's.
+            printed(&mut vm, &format!("(let ((dir {})) (setq command-line-default-directory dir)
+                                         (dolist (b (buffer-list)) (with-current-buffer b (setq default-directory dir))))",
+                                      lisp_string(&format!("{}/", home.display()))));
+            let quick = args.split(' ').any(|arg| arg == "-Q");
+            started.files = args.split(' ').filter(|arg| arg.ends_with(".txt")).map(|arg| home.join(arg)).collect();
+            if quick { printed(&mut vm, QUICK_START); }
+            // Where the GUI loads the user's init; -Q's probe comes in
+            // through -l, which no scenario's record can tell apart.
+            printed(&mut vm, &format!("(progn (defvar startup-order-screen {}) {init} t)", lisp_string(STARTUP_SCREEN)));
+            finish_loadup(&mut vm, &started).unwrap();
+            let record = if keys.is_empty() { "(startup-order-record)".to_owned() } else {
+                let codes: Vec<i64> = keys.split(' ').map(|key| key.parse().unwrap()).collect();
+                let bindings = printed(&mut vm, &format!("(startup-order-bindings '({keys}))"));
+                let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
+                for code in codes {
+                    presentation.command(&mut vm, &mut commands, romacs_vm::CommandEvent::Character(code)).unwrap();
+                    printed(&mut vm, &format!("(startup-order-key-note {code})"));
+                }
+                format!("(startup-order-key-record '{bindings})")
+            };
+            let record = printed(&mut vm, &format!("(let ((print-escape-newlines t)) (prin1-to-string {record}))"));
+            let record: String = serde_json::from_str(&record).unwrap();
+            // *Romacs* is GNU's screen under another name, whose SPC
+            // pauses the logo where GNU's scrolls (GUI-STARTUP1).
+            let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN))
+                .replace("(undefined scroll-up-command ", "(undefined romacs-landing-pause ");
+            let _ = std::fs::remove_dir_all(&home);
+            assert!(record == expected, "{name}:\n  romacs {record}\n  gnu    {expected}");
+        });
+    }
+
     /// What --loadup does after the user's init, in startup.el's order,
     /// against pinned GNU on a window system (fixtures/startup-order-gui.py),
     /// with *Romacs* where GNU shows *GNU Emacs*: a file argument visited
@@ -2312,56 +2376,34 @@ mod tests {
     /// that sets `inhibit-startup-hooks' stopping `window-setup-hook'; the
     /// screen in the command line's directory beside a file from another;
     /// and its keymap through the GUI's command dispatch: typing leaves it,
-    /// SPC and DEL scroll, q kills it and shows *scratch* again.
-    #[test]
-    fn startup_after_the_init_runs_in_gnus_order() {
-        on_evaluator(|| {
-            let fixture = include_str!("../tests/fixtures/startup-order-gui.txt");
-            let lines: Vec<&str> = fixture.lines().filter(|line| !line.starts_with(";;")).collect();
-            let mut failures = vec![];
-            for case in lines.chunks(5) {
-                let (name, args, keys, init, expected) = (case[0], case[1], case[2], case[3], case[4]);
-                let mut vm = Vm::new();
-                vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-                let home = private_home(&mut vm, &format!("order-{name}"));
-                std::fs::create_dir_all(home.join("sub")).unwrap();
-                for (file, text) in [("visited.txt", "visited\n"), ("chosen.txt", "chosen\n"), ("sub/visited.txt", "visited\n")] {
-                    std::fs::write(home.join(file), text).unwrap();
-                }
-                let mut started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
-                // GNU ran in HOME, so relative names and the command line's
-                // directory are HOME's.
-                printed(&mut vm, &format!("(let ((dir {})) (setq command-line-default-directory dir)
-                                             (dolist (b (buffer-list)) (with-current-buffer b (setq default-directory dir))))",
-                                          lisp_string(&format!("{}/", home.display()))));
-                let quick = args.split(' ').any(|arg| arg == "-Q");
-                started.files = args.split(' ').filter(|arg| arg.ends_with(".txt")).map(|arg| home.join(arg)).collect();
-                if quick { printed(&mut vm, QUICK_START); }
-                // Where the GUI loads the user's init; -Q's probe comes in
-                // through -l, which no scenario's record can tell apart.
-                printed(&mut vm, &format!("(progn (defvar startup-order-screen {}) {init} t)", lisp_string(STARTUP_SCREEN)));
-                finish_loadup(&mut vm, &started).unwrap();
-                let record = if keys.is_empty() { "(startup-order-record)".to_owned() } else {
-                    let codes: Vec<i64> = keys.split(' ').map(|key| key.parse().unwrap()).collect();
-                    let bindings = printed(&mut vm, &format!("(startup-order-bindings '({keys}))"));
-                    let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
-                    for code in codes {
-                        presentation.command(&mut vm, &mut commands, romacs_vm::CommandEvent::Character(code)).unwrap();
-                        printed(&mut vm, &format!("(startup-order-key-note {code})"));
-                    }
-                    format!("(startup-order-key-record '{bindings})")
-                };
-                let record = printed(&mut vm, &format!("(let ((print-escape-newlines t)) (prin1-to-string {record}))"));
-                let record: String = serde_json::from_str(&record).unwrap();
-                // *Romacs* is GNU's screen under another name, whose SPC
-                // pauses the logo where GNU's scrolls (GUI-STARTUP1).
-                let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN))
-                    .replace("(undefined scroll-up-command ", "(undefined romacs-landing-pause ");
-                if record != expected { failures.push(format!("{name}:\n  romacs {record}\n  gnu    {expected}")); }
-                let _ = std::fs::remove_dir_all(&home);
+    /// SPC and DEL scroll, q kills it and shows *scratch* again. A test a
+    /// scenario, and one that the tests are the fixture's scenarios.
+    macro_rules! startup_order_tests {
+        ($($test:ident: $name:literal),* $(,)?) => {
+            $(#[test]
+              fn $test() { startup_order($name) })*
+
+            #[test]
+            fn startup_after_the_init_has_a_test_a_scenario() {
+                let names: Vec<&str> = startup_order_cases().iter().map(|case| case[0]).collect();
+                assert_eq!(names, [$($name),*], "fixtures/startup-order-gui.txt and startup_order_tests! differ");
             }
-            assert!(failures.is_empty(), "{}", failures.join("\n"));
-        });
+        };
+    }
+
+    startup_order_tests! {
+        startup_after_the_init_hook_then_file: "hook-then-file",
+        startup_after_the_init_own_scratch_screen: "own-scratch-screen",
+        startup_after_the_init_own_scratch_inhibited: "own-scratch-inhibited",
+        startup_after_the_init_choice_function: "choice-function",
+        startup_after_the_init_choice_t: "choice-t",
+        startup_after_the_init_choice_string_and_file: "choice-string-and-file",
+        startup_after_the_init_quick: "quick",
+        startup_after_the_init_frame_screen: "frame-screen",
+        startup_after_the_init_frame_inhibited: "frame-inhibited",
+        startup_after_the_init_startup_hook_inhibits: "startup-hook-inhibits",
+        startup_after_the_init_screen_directory: "screen-directory",
+        startup_after_the_init_screen_keys: "screen-keys",
     }
 
     /// `--loadup` on this tree: it runs the batch package runner's chain,
@@ -2371,11 +2413,9 @@ mod tests {
     #[test]
     fn loadup_launch_runs_the_shared_chain_and_keeps_a_cursor() {
         let (rows, complete, sites, mode_line, keys, live, ran, bundled) = on_evaluator(|| {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-            vm.set_echo_area_host(true);
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::LOADUP });
             private_home(&mut vm, "shared-chain");
-            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let loadup = started.loadup.as_ref().unwrap();
             let rows: Vec<String> = loadup.rows.iter().map(|r| r.site.name.clone()).collect();
@@ -2447,10 +2487,9 @@ mod tests {
     #[test]
     fn loadup_measures_the_frame_font_for_isearch() {
         let answer = on_evaluator(|| {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 25, 10).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { frame: (1200, 800, 25, 10), ..crate::test_world::Boot::LOADUP });
             private_home(&mut vm, "font-info");
-            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             printed(&mut vm, "(list (display-multi-font-p) (window-font-width) (window-font-height)
                 (aref (font-info (face-font 'default)) 11) (font-info \"-no-such-font-*\")
@@ -2496,10 +2535,9 @@ mod tests {
     #[test]
     fn faces_and_settings_themes_after_launch_keep_the_default_face() {
         let (before, after, themes) = on_evaluator(|| {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
             private_home(&mut vm, "late-faces");
-            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let before = vm.display_default_face().unwrap();
             vm.eval_source("(progn (defface romacs-late-face '((t :foreground \"red\" :weight bold)) \"A late face.\")
@@ -2522,10 +2560,9 @@ mod tests {
     #[test]
     fn loadup_redisplay_fontifies_a_visited_lisp_file_through_jit_lock() {
         let (before, first, second, state, keyword) = on_evaluator(|| {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
             private_home(&mut vm, "jit-lock");
-            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let lines: Vec<&str> = include_str!("../../../lisp/gnu/subr.el").lines().take(2000).collect();
             let dir = scratch_lisp("jit-lock-visit", &[("sample.el", &(lines.join("\n") + "\n"))]);

@@ -15,3 +15,11 @@ pub mod terminal_helper;
 pub mod terminal_proto;
 pub mod terminal_service;
 pub mod terminal_wait;
+
+/// The arena as this library's unit tests' allocator, so a test's loadup
+/// can restore a world (`test_world`), as the program's does.
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: romacs_vm::world::arena::Arena = romacs_vm::world::arena::Arena;
+#[cfg(test)]
+mod test_world;
