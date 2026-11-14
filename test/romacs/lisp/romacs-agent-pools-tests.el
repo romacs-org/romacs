@@ -61,11 +61,28 @@ a time, `allow' marks it allowed."
 (ert-deftest romacs-agent-pools-a-harness-names-its-pool-an-instance-pins ()
   (romacs-agent-pools-tests--with
     (spend "claude" (+ (float-time) 3600))
-    (should (equal (plist-get (romacs-agent--start-instance "claude") :name) "claude2"))
+    ;; The harness, a symbol: its pool.
+    (should (equal (plist-get (romacs-agent--start-instance 'claude) :name) "claude2"))
+    (should (equal (plist-get (romacs-agent--start-instance 'codex) :name) "codex"))
+    ;; An instance's name pins it, even one named as its harness.
+    (should (equal (plist-get (romacs-agent--start-instance "claude") :name) "claude"))
     (should (equal (plist-get (romacs-agent--start-instance "claude3") :name) "claude3"))
-    (should (equal (plist-get (romacs-agent--start-instance "codex") :name) "codex"))
-    ;; The default is the first enabled instance's name: its pool.
-    (should (equal (plist-get (romacs-agent--start-instance nil) :name) "claude2"))))
+    ;; Nothing named: the first enabled instance's harness's pool.
+    (should (equal (plist-get (romacs-agent--start-instance nil) :name) "claude2"))
+    ;; An agent's tool call names a harness by its name.
+    (should (eq (romacs-agent-pool-name "claude") 'claude))
+    (should (equal (romacs-agent-pool-name "claude2") "claude2"))))
+
+(ert-deftest romacs-agent-pools-pickers-name-harnesses ()
+  (romacs-agent-pools-tests--with
+    (cl-letf (((symbol-function 'romacs-agent--models) (lambda (_) '(("opus" :label "Opus")))))
+      (let ((rows (romacs-agent--picker-rows)))
+        (should (equal (delete-dups (mapcar (lambda (row) (plist-get (cdr row) :provider)) rows)) '(claude codex)))
+        (should-not (cl-find-if (lambda (row) (string-match-p "claude2\\|Claude2" (car row))) rows)))
+      ;; Accounts only when asked for.
+      (should (member "claude2" (mapcar (lambda (row) (plist-get (cdr row) :provider)) (romacs-agent--picker-rows t))))
+      (let ((romacs-agent-pick-accounts t))
+        (should (member "claude3" (mapcar (lambda (row) (plist-get (cdr row) :provider)) (romacs-agent--picker-rows))))))))
 
 (ert-deftest romacs-agent-pools-limits-are-kept-across-a-restart ()
   (romacs-agent-pools-tests--with
@@ -85,17 +102,28 @@ a time, `allow' marks it allowed."
 
 (ert-deftest romacs-agent-pools-move-on-to-the-next-account ()
   (romacs-agent-pools-tests--with
-    (let ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :state 'idle
-                                       :limited '(:provider "claude")))
-          (selected nil) (sent nil))
+    (let ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                       :dir (make-temp-file "s" t) :limited '(:provider "claude")))
+          (selected nil) (queued nil) (moved nil))
+      (puthash "s" session romacs-agent--sessions)
       (spend "claude" (+ (float-time) 3600))
       (cl-letf (((symbol-function 'romacs-agent-select)
-                 (lambda (_session _model _effort provider) (setq selected provider)))
-                ((symbol-function 'romacs-agent-send-later) (lambda (_session text &rest _) (push text sent))))
-        (should (equal (romacs-agent-move-on session) "claude2"))
-        (should (equal selected "claude2"))
-        ;; Stopped at its limit: told to go on there.
-        (should (string-match-p "claude's usage limit; you now run on claude2" (car sent)))
+                 (lambda (_session _model _effort provider) (setq selected provider) t))
+                ((symbol-function 'romacs-agent--enqueue) (lambda (_s item) (push (car item) queued))))
+        (let ((romacs-agent-moved-functions (list (lambda (_s from to) (push (cons from to) moved)))))
+          (should (equal (romacs-agent-move-on session) "claude2"))
+          (should (equal selected "claude2"))
+          ;; Told to go on only once the move took effect.
+          (should-not queued)
+          (romacs-agent--raise session '(:type selection :from (:provider "claude") :to (:provider "claude2")))
+          (should (string-match-p "claude's usage limit; you now run on claude2" (car queued)))
+          (should (equal moved '(("claude" . "claude2"))))
+          ;; A move that did not take effect: nothing to go on with.
+          (setq queued nil)
+          (romacs-agent-move-on session)
+          (romacs-agent--raise session '(:type selection :from (:provider "claude") :to (:provider "claude")))
+          (should-not queued)
+          (should (equal (car moved) '("claude" . "claude"))))
         (spend "claude2" (+ (float-time) 3600))
         (spend "claude3" (+ (float-time) 3600))
         (should-error (romacs-agent-move-on session) :type 'user-error)))))

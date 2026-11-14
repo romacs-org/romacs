@@ -1167,11 +1167,8 @@ display clipping the band where the window ends."
            (list (romacs-agent-ui--harness-icon harness)
                  (romacs-agent-ui--label (romacs-agent-ui--state-of state))
                  (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
-                                     'face 'romacs-agent-model)
+                                     'face 'romacs-agent-model 'help-echo (and provider (format "account %s" provider)))
                          (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
-                 ;; The icon names the harness: only another instance of it is named.
-                 (and provider (not (equal provider (symbol-name harness)))
-                      (propertize provider 'face 'romacs-agent-dim))
                  (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
                        ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
@@ -1988,7 +1985,7 @@ with a prefix argument, asked for."
    (let* ((session romacs-agent-ui--session)
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
           (fields (cdr (romacs-agent--pick-row
-                        (romacs-agent--instance-rows instance (plist-get instance :display) nil))))
+                        (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
           (model (plist-get fields :model))
           (efforts (plist-get fields :efforts))
           (now (plist-get (romacs-agent--wanted session) :effort))
@@ -2098,12 +2095,14 @@ a brief of the thread, to do NEXT, and its chat opens."
              (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
-    (if (romacs-agent-ui--moves-p session provider)
+    (if (and (symbolp provider) (romacs-agent-ui--moves-p session provider))
+        (romacs-agent-chat-next-account)
+      (if (romacs-agent-ui--moves-p session provider)
         (let ((wanted (romacs-agent--wanted session)))
           (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
           (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
                    (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
-      (romacs-agent-ui--hand-off session provider model next))))
+      (romacs-agent-ui--hand-off session provider model next)))))
 
 (defun romacs-agent-chat-next-account ()
   "Go on under the next account of this session's harness with room, its
@@ -2114,8 +2113,10 @@ conversation as is (`romacs-agent-move-on')."
              (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" ""))))
 
 (defun romacs-agent-ui--moves-p (session provider)
-  "Whether SESSION goes on under PROVIDER as it is: an instance of its harness."
-  (eq (plist-get (romacs-agent--configured provider) :harness) (romacs-agent-harness session)))
+  "Whether SESSION goes on under PROVIDER as it is: its harness's pool, or
+an instance of its harness."
+  (eq (if (symbolp provider) provider (plist-get (romacs-agent--configured provider) :harness))
+      (romacs-agent-harness session)))
 
 (defun romacs-agent-ui--hand-off (session provider model next)
   "Start a session under PROVIDER on MODEL on a brief of SESSION's thread,

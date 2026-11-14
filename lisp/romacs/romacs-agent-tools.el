@@ -731,8 +731,8 @@ with resume it goes on with that conversation of the instance's
          (options (gethash "options" target (romacs-mcp--object)))
          ;; New work draws on its delegating session's harness's pool; a
          ;; conversation resumed is its own account's.
-         (provider (or (gethash "provider" target)
-                       (and parent (romacs-agent-get parent) (symbol-name (romacs-agent-harness (romacs-agent-get parent))))))
+         (provider (if (gethash "provider" target) (romacs-agent-pool-name (gethash "provider" target))
+                     (and parent (romacs-agent-get parent) (romacs-agent-harness (romacs-agent-get parent)))))
          (pinned (or (gethash "provider" target)
                      (and parent (romacs-agent-get parent) (romacs-agent-provider (romacs-agent-get parent)))))
          ;; Refused before anything starts, or any worktree is made.
@@ -891,52 +891,76 @@ besides."
 
 ;;; Going on under another instance
 
-(defcustom romacs-agent-switch-on-limit nil
-  "What a delegated task whose turn ends at its instance's usage limit
-does: nil, its parent is woken with where it could go on; `lossless', it
-moves to an instance of its harness with room, its conversation and all,
-and goes on there, its parent not woken for it."
-  :type '(choice (const :tag "Wake the parent" nil) (const :tag "Move to an instance with room" lossless))
+(defcustom romacs-agent-switch-on-limit 'lossless
+  "What a session whose turn ends at its account's usage limit does:
+`lossless', after `romacs-agent-switch-delay' seconds it moves to the next
+account of its harness's pool with room (`romacs-agent-move-on'), its
+conversation as is, and goes on there; a delegated task's parent is not
+woken for that end.  nil, it stays, and a delegated task's parent is
+woken with where it could go on; the chat's actions menu still moves it
+by hand.  Each limit moves it once at most, never to an account
+at its own limit, and only between turns: one turn's requests are never
+split across accounts."
+  :type '(choice (const :tag "Move to the next account with room" lossless) (const :tag "Stay" nil))
   :group 'romacs-agent)
 
-(defconst romacs-agent-tools--go-on
-  "Your last turn stopped at %s's usage limit; you now run on %s, the same conversation. Go on from where you were."
-  "What a task moved on its own is told.")
+(defcustom romacs-agent-switch-delay 30
+  "Seconds a session waits at its account's limit before it moves on
+\(`romacs-agent-switch-on-limit')."
+  :type 'number :group 'romacs-agent)
 
 (defun romacs-agent-tools--switch-on-limit (session event)
-  "A delegated SESSION's turn ended at its usage limit (EVENT): moved on
-`romacs-agent-switch-on-limit's say; that end wakes its parent only if
-the move fails (`romacs-agent-tools--moved')."
+  "SESSION's turn ended at its account's usage limit (EVENT): it moves on
+after `romacs-agent-switch-delay', as `romacs-agent-switch-on-limit' says,
+that end held from its parent meanwhile.  With every account spent it
+says so, and its parent is woken with the end."
   (when-let* (((plist-get event :limit))
               ;; A live end: one replayed was handled when it came.
               ((romacs-agent-caught-up session))
               ((eq romacs-agent-switch-on-limit 'lossless))
-              ((plist-get (romacs-agent-options session) :parent))
-              (target (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session))))
-    (let ((wanted (romacs-agent--wanted session)))
+              ;; One move for one limit.
+              ((not (gethash (romacs-agent-id session) romacs-agent-tools--moving))))
+    (if (not (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)))
+        ;; Said, in its journal; its end goes to its parent as it would.
+        (romacs-agent--note session (romacs-mcp--object
+                                     "type" "handoff" "from" (romacs-agent-provider session) "to" :null
+                                     "why" (format "every %s account is at its limit" (romacs-agent-harness session))
+                                     "resets" (or (romacs-agent--earliest-reset (romacs-agent-harness session)) :null)))
       (puthash (romacs-agent-id session) (cons (romacs-agent-done-seq session) (romacs-agent-provider session))
                romacs-agent-tools--moving)
-      (condition-case nil
-          (romacs-agent-select session (plist-get wanted :model) (plist-get wanted :effort) (plist-get target :provider))
-        (error (remhash (romacs-agent-id session) romacs-agent-tools--moving))))))
+      (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session (romacs-agent-done-seq session)))))
 
-(defun romacs-agent-tools--moved (session event)
-  "SESSION's move at its usage limit took effect (EVENT, its selection's
-note) or did not: moved, the end that caused it is handed on to no one
-and it is told to go on; not, its parent is woken with that end."
+(defun romacs-agent-tools--hand-over (session seq)
+  "Move SESSION on, its turn end SEQ at its account's limit still its
+last and nothing moved it meanwhile; else, or with no account left, that
+end goes to its parent as it would have."
+  (if (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+           (eql (romacs-agent-done-seq session) seq) (romacs-agent-limited session)
+           (not (romacs-agent-pending-selection session)))
+      (condition-case err (romacs-agent-move-on session "usage limit")
+        (error (romacs-agent-tools--not-moved session (error-message-string err))))
+    (romacs-agent-tools--not-moved session nil)))
+
+(defun romacs-agent-tools--not-moved (session why)
+  "SESSION stays where its limit stopped it, WHY when said: its end goes
+to its parent."
+  (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+  (when why (romacs-agent--raise session (list :type 'status :text why)))
+  (romacs-agent-tools--wake session))
+
+(defun romacs-agent-tools--moved (session from to)
+  "SESSION's move from FROM took effect, onto TO, or did not (TO is FROM):
+moved, the end that caused it is handed on to no one; not, its parent is
+woken with it."
   (when-let* ((moving (gethash (romacs-agent-id session) romacs-agent-tools--moving)))
     (remhash (romacs-agent-id session) romacs-agent-tools--moving)
-    (let ((to (plist-get (plist-get event :to) :provider)))
-      (if (equal to (cdr moving))
-          (romacs-agent-tools--wake session)
-        (romacs-agent-tools--answer session (car moving))
-        ;; Its harness is still to come back: the message waits for it.
-        (romacs-agent--enqueue session (list (format romacs-agent-tools--go-on (cdr moving) to) nil nil nil))))))
+    (if (equal to from) (romacs-agent-tools--wake session)
+      (romacs-agent-tools--answer session (car moving)))))
+
+(add-hook 'romacs-agent-moved-functions #'romacs-agent-tools--moved)
 
 (defun romacs-agent-tools--limit-on-event (session event)
-  (pcase (plist-get event :type)
-    ('done (romacs-agent-tools--switch-on-limit session event))
-    ('selection (romacs-agent-tools--moved session event))))
+  (when (eq (plist-get event :type) 'done) (romacs-agent-tools--switch-on-limit session event)))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--limit-on-event)
 
