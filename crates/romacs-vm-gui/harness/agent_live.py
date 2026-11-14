@@ -1140,17 +1140,17 @@ def launcher(args, base):
         two = start()
         until(lambda: reached(pinned, two) and reached(fresh, two), 60, 'both sessions reached editor 2')
         # Editor 3 starts while editor 2 is attached: the supervisors refuse
-        # it and no route moves.  Editor 2 then lets the fresh session go
-        # (its supervisor connection closed) and editor 3 attaches it: only
-        # that session's calls reach editor 3, the pinned one's editor 2.
+        # it and no route moves.  Editor 3 then takes the fresh session over
+        # (an attach that steals it: a connection editor 2 merely lost, its
+        # relay's next hello attaches it there again): only that session's
+        # calls reach editor 3, the pinned one's editor 2.
         three = start()
         until(lambda: own(three).is_socket(), 60, "editor 3's endpoint")
         # Longer than any supervisor takes to refuse (an earlier one, with no
         # acknowledgement, is taken as kept only after 3 s connected).
         time.sleep(4)
         kept = (os.readlink(fresh_route), os.readlink(old_socket))
-        ask(own(two), f'(progn (delete-process (romacs-agent-connection (romacs-agent-get {lisp_text(fresh)}))) t)')
-        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10) t)')
+        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10 t) t)')
         until(lambda: os.readlink(fresh_route) == str(own(three)), 15, "the fresh route led to editor 3")
         mark = time.time()
         ask(own(three), f'(romacs-agent-send (romacs-agent-get {lisp_text(fresh)}) {later})')
@@ -1445,7 +1445,7 @@ def mcp_tour(args, base):
                     errors[name] = text[:200]
                 return text
 
-            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_cancel')
+            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
             for name in [n for n in names if n not in on_task + ('romacs_restart_request',)]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
@@ -1476,9 +1476,10 @@ def mcp_tour(args, base):
                         and '*tour*' in listed['buffers'] and friend not in listed['buffers']
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
-                        # without a running unit or a calling task.
+                        # without a running unit or a calling task; romacs_dev_check where no Romacs
+                        # tree is (the tour's project).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch')
+                                                                  'romacs_task_watch', 'romacs_dev_check')
                                 for n in errors)
                         and task is not None)
         return result
