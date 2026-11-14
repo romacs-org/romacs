@@ -1408,6 +1408,12 @@ event is drawn in it before.")
     (when romacs-agent-ui--unfilled
       (setq romacs-agent-ui--unfilled nil)
       (romacs-agent-ui--replay romacs-agent-ui--session)
+      ;; What its journal does not hold, said while it was not shown: its
+      ;; supervisor never coming up.
+      (when (eq (romacs-agent-state romacs-agent-ui--session) 'unstarted)
+        (romacs-agent-ui--render romacs-agent-ui--session
+                                 (list :type 'unstarted :seq (romacs-agent-done-seq romacs-agent-ui--session) :last t
+                                       :text (romacs-agent-reply romacs-agent-ui--session))))
       (romacs-agent-ui--composer-update)
       (romacs-agent-ui--summarize-children romacs-agent-ui--session)
       ;; What the replay drew, seen here, and the rows just made: its

@@ -78,7 +78,14 @@
               ;; Shown again: nothing replays twice.
               (romacs-agent-show session)
               (should (= replays 1))
-              (kill-buffer buffer))))
+              (kill-buffer buffer)
+              ;; Its supervisor never came up while it was not shown (said
+              ;; by no journal record): its chat says so once shown.
+              (let ((again (romacs-agent-ui--make-chat session)))
+                (romacs-agent--raise session (list :type 'unstarted :seq 9 :text "its supervisor never started"))
+                (romacs-agent-show session)
+                (should (string-match-p "^! its supervisor never started$" (with-current-buffer again (buffer-string))))
+                (kill-buffer again)))))
       (delete-directory root t))))
 
 ;;; romacs-agent-restored-chat-tests.el ends here
