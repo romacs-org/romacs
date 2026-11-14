@@ -270,7 +270,8 @@ fn subr_cold_frontier_is_pinned() {
             let error = result.unwrap_err();
             // The expander's compiled body reads the unbound `bound-and-true-p'
             // after its argument, the void variable (DIVERGENCES VM2-BCALL1).
-            assert!(error.contains("line 494 form 50:") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
+            assert!(error.contains(" form 50: ") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
+            assert!(report["steps"].as_array().unwrap().iter().any(|s| s["file"] == canonical && s["status"] == "error" && s["source"].as_str().unwrap().starts_with("(define-minor-mode auto-save-visited-mode")), "FILES_MACRO_FRONTIER_MOVED {error}");
             // Native defgroup is a compiler form, not a callable function cell.
             assert_eq!(vm.eval_source("(fboundp 'defgroup)").unwrap().display().unwrap(), "nil", "FILES_DEFGROUP_ATTRIBUTION_CHANGED");
         } else { assert!(result.is_ok(), "{result:?}"); }

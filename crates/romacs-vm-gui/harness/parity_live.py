@@ -173,6 +173,9 @@ class Engine:
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
         self.probe_dir = root / 'probe'
+        # A runtime directory for the editor alone; the compositor keeps
+        # the root, where its socket's path is short enough to bind.
+        self.editor_runtime = None
 
     def start(self, tools):
         """Start the compositor and the editor; a failure leaves neither running."""
@@ -198,6 +201,8 @@ class Engine:
         time.sleep(.3)
         started = time.time()
         output = (self.root / 'engine.log').open('w')
+        if self.editor_runtime:
+            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)

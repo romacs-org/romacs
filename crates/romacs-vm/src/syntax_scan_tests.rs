@@ -25,23 +25,27 @@ fn scan<T>(text: &str, f: impl FnOnce(&mut Scanner<'_, Plain<fn(u8) -> i32>>) ->
     let mut scanner = Scanner { begv: plain.pos(1), zv: plain.pos(i64::MAX), text: &plain, options, ppss: &ppss, defun_start: None, modiff: 1 };
     f(&mut scanner)
 }
+/// A scan's result, its stop as the halt alone.
+fn halt<T>(result: Result<T, Stopped<Box<Scan>>>) -> R<T> {
+    result.map_err(|stopped| stopped.halt)
+}
 
 #[test]
 fn sexps_skip_strings_comments_and_prefixes() {
-    assert_eq!(scan("(a \"b)\" ; c)\n d) e", |s| s.scan_lists(1, 1, 0, true)), Ok(Some(17)));
-    assert_eq!(scan("'(a) b", |s| s.scan_lists(1, 1, 0, true)), Ok(Some(5)));
-    assert_eq!(scan("(a) b", |s| s.scan_lists(6, -2, 0, true)), Ok(Some(1)));
-    assert_eq!(scan("(a b", |s| s.scan_lists(1, 1, 0, true)),
+    assert_eq!(scan("(a \"b)\" ; c)\n d) e", |s| halt(s.scan_lists(1, 1, 0, true))), Ok(Some(17)));
+    assert_eq!(scan("'(a) b", |s| halt(s.scan_lists(1, 1, 0, true))), Ok(Some(5)));
+    assert_eq!(scan("(a) b", |s| halt(s.scan_lists(6, -2, 0, true))), Ok(Some(1)));
+    assert_eq!(scan("(a b", |s| halt(s.scan_lists(1, 1, 0, true))),
                Err(Halt::ScanError("Unbalanced parentheses", 1, 5)));
-    assert_eq!(scan("a) b", |s| s.scan_lists(1, 1, 1, false)), Ok(Some(3)));
-    assert_eq!(scan(" ) b", |s| s.scan_lists(1, 1, 0, false)),
+    assert_eq!(scan("a) b", |s| halt(s.scan_lists(1, 1, 1, false))), Ok(Some(3)));
+    assert_eq!(scan(" ) b", |s| halt(s.scan_lists(1, 1, 0, false))),
                Err(Halt::ScanError("Containing expression ends prematurely", 2, 3)));
 }
 
 #[test]
 fn comments_move_both_ways() {
-    assert_eq!(scan("  ; a\n ;b\nx", |s| s.forward_comment(s.text.pos(1), 5)).map(|(p, f)| (p.char, f)), Ok((11, false)));
-    assert_eq!(scan("x ; a\n ;b\n", |s| s.forward_comment(s.text.pos(11), -2)).map(|(p, f)| (p.char, f)), Ok((3, true)));
+    assert_eq!(scan("  ; a\n ;b\nx", |s| halt(s.forward_comment(s.text.pos(1), 5))).map(|(p, f)| (p.char, f)), Ok((11, false)));
+    assert_eq!(scan("x ; a\n ;b\n", |s| halt(s.forward_comment(s.text.pos(11), -2))).map(|(p, f)| (p.char, f)), Ok((3, true)));
 }
 
 #[test]
@@ -91,6 +95,20 @@ pub(crate) fn position(at: usize) -> i64 {
 pub(crate) fn random_text(rng: &mut Rng, len: usize) -> Vec<u8> {
     (0..len).map(|_| ALPHABET[rng.below(ALPHABET.len())]).collect()
 }
+/// TABLE with `a` an open paren and `b` a close.
+pub(crate) fn with_parens(mut table: [i32; 128]) -> [i32; 128] {
+    (table[usize::from(b'a')], table[usize::from(b'b')]) = (SOPEN, SCLOSE);
+    table
+}
+/// A text of LEN mostly of `a` and `b`, half the time after a run of `a`
+/// about as long as GNU's level cap: under `with_parens`, nesting that
+/// closes past the bottom level and reaches the cap.
+pub(crate) fn nested_text(rng: &mut Rng, len: usize) -> Vec<u8> {
+    let run = if rng.chance(50) { 90 + rng.below(40) } else { 0 };
+    (0..len).map(|i| {
+        if i < run || rng.chance(30) { b'a' } else if rng.chance(45) { b'b' } else { ALPHABET[rng.below(ALPHABET.len())] }
+    }).collect()
+}
 
 /// ASCII text whose syntax a propagation changes as a parse goes, read
 /// live or, on a rerun, replayed in order as `View` replays it.
@@ -136,11 +154,11 @@ struct Case<'a> {
 }
 /// The propagation a stop at CHARPOS runs: change the syntax of a few
 /// positions, before, at and after it, and move `done` past it.
-fn propagate(rng: &mut Rng, case: &Case<'_>, charpos: i64) -> i64 {
-    let len = case.text.text.len();
+fn propagate(rng: &mut Rng, text: &Mutable<'_>, charpos: i64) -> i64 {
+    let len = text.text.len();
     for _ in 0..rng.below(3) {
         let c = ALPHABET[rng.below(ALPHABET.len())];
-        case.text.overrides.borrow_mut().insert(rng.below(len.max(1)), case.text.table[usize::from(c)]);
+        text.overrides.borrow_mut().insert(rng.below(len.max(1)), text.table[usize::from(c)]);
     }
     charpos + 1 + i64::try_from(rng.below(6)).expect("small")
 }
@@ -166,7 +184,7 @@ fn by_replay(case: &Case<'_>) -> (ParseState, Calls) {
             Ok(()) => return (state, log),
             Err(Halt::Propertize(arg, charpos)) => {
                 log.push((arg, charpos));
-                done = propagate(&mut rng, case, charpos);
+                done = propagate(&mut rng, case.text, charpos);
                 let read = text.read.take();
                 *text.replay.borrow_mut() = read;
             }
@@ -196,7 +214,7 @@ fn by_resume(case: &Case<'_>) -> (ParseState, Calls, Resumed) {
             Err(Stopped { halt: Halt::Propertize(arg, charpos), suspended: stopped }) => {
                 log.push((arg, charpos));
                 labels.push(stopped.as_ref().map(|s| (s.at, s.forw.map(|f| f.at))));
-                done = propagate(&mut rng, case, charpos);
+                done = propagate(&mut rng, case.text, charpos);
                 suspended = stopped.map(|s| *s);
             }
             Err(Stopped { halt, .. }) => panic!("{halt:?}"),
@@ -297,6 +315,114 @@ fn a_resumed_parse_is_a_replayed_one() {
         let (resumed, resume_log, _) = by_resume(&case);
         assert_eq!((resumed, resume_log), (replayed, replay_log), "{fixture:?} from {mid} done {done} {args:?}");
     }
+}
+
+/// A list or comment scan: `scan_lists`'s FROM, COUNT, DEPTH and SEXPFLAG,
+/// or `forward_comment`'s FROM and COUNT.
+#[derive(Clone, Copy, Debug)]
+enum Call { Lists(i64, i64, i64, bool), Comments(i64, i64) }
+/// What a scan ends in: a position and `forward_comment`'s flag, or its
+/// scan error.
+type Ended = Result<(Option<i64>, bool), (&'static str, i64, i64)>;
+/// Where each stop of a scan went on: none for a stop before any read.
+type Went = Vec<Option<(ScanAt, Option<ForwAt>)>>;
+
+/// CALL over TEXT, propertized to DONE, SEED's propagation run at each stop
+/// for Lisp; a `syntax-ppss` stop (logged with argument -1) is answered
+/// with a defun start at or before the position asked. RESUMED, each stop
+/// goes on where it stopped, with that answer alone; else the scan reruns
+/// from its start, replaying what it read, with every answer so far.
+fn scanned(text: &Mutable<'_>, options: Options, call: Call, done: i64, seed: u64, resumed: bool) -> (Ended, Calls, Went) {
+    text.record.set(!resumed);
+    text.overrides.borrow_mut().clear();
+    text.read.borrow_mut().clear();
+    text.replay.borrow_mut().clear();
+    let (mut rng, mut done, mut log, mut went) = (Rng(seed), done, vec![], vec![]);
+    let mut answers = BTreeMap::new();
+    let mut kept: Option<Scan> = None;
+    loop {
+        let options = Options { propertize_done: Some(done), ..options };
+        let mut scanner = Scanner { begv: text.pos(1), zv: text.pos(i64::MAX), text, options, ppss: &answers, defun_start: None, modiff: 1 };
+        let result = match (call, kept.take()) {
+            (Call::Lists(_, _, _, sexpflag), Some(scan)) => scanner.lists(scan, sexpflag).map(|at| (at, false)),
+            (Call::Lists(from, count, depth, sexpflag), None) => scanner.scan_lists(from, count, depth, sexpflag).map(|at| (at, false)),
+            (Call::Comments(..), Some(scan)) => scanner.comments(scan).map(|(at, found)| (Some(at.char), found)),
+            (Call::Comments(from, count), None) => scanner.forward_comment(text.pos(from), count).map(|(at, found)| (Some(at.char), found)),
+        };
+        let stopped = match result {
+            Ok(value) => return (Ok(value), log, went),
+            Err(Stopped { halt: Halt::ScanError(message, a, b), .. }) => return (Err((message, a, b)), log, went),
+            Err(stopped) => stopped,
+        };
+        match stopped.halt {
+            Halt::Propertize(arg, charpos) => {
+                log.push((arg, charpos));
+                done = propagate(&mut rng, text, charpos);
+            }
+            Halt::Ppss(pos) => {
+                log.push((-1, pos));
+                propagate(&mut rng, text, pos);
+                if resumed { answers.clear(); }
+                let back = i64::try_from(rng.below(3) * rng.below(9)).expect("small");
+                answers.insert(pos, (pos - back).max(1));
+            }
+            Halt::ScanError(..) => unreachable!("returned above"),
+        }
+        if resumed {
+            went.push(stopped.suspended.as_ref().map(|scan| (scan.at, scan.forw.map(|forw| forw.at))));
+            kept = stopped.suspended.map(|scan| *scan);
+        } else {
+            let read = text.read.take();
+            *text.replay.borrow_mut() = read;
+        }
+    }
+}
+
+/// `scan_lists` and `forward_comment` stopped for Lisp and gone on where
+/// they stopped end, and call Lisp, as ones rerun from their start
+/// replaying what they read, which is GNU's one scan: over random tables
+/// and texts whose syntax each stop changes, forward through
+/// propertization and backward through `syntax-ppss`, every place a stop
+/// goes on is reached.
+#[test]
+fn a_resumed_scan_is_a_replayed_one() {
+    let mut rng = Rng(0x5ca9_11f7);
+    let mut reached: Went = Vec::new();
+    for case in 0..40_000 {
+        let table = random_table(&mut rng);
+        let size = rng.below(70);
+        let fixture = random_text(&mut rng, size);
+        let text = mutable(&fixture, &table);
+        let options = Options {
+            ignore_comments: rng.chance(80), comment_end_can_be_escaped: rng.chance(40),
+            open_paren_in_column_0_is_defun_start: rng.chance(50), comment_use_syntax_ppss: rng.chance(70),
+            ..Options::default()
+        };
+        let from = position(rng.below(fixture.len() + 1));
+        let count = i64::try_from(rng.below(4)).expect("small") + 1;
+        let count = if rng.chance(50) { count } else { -count };
+        let call = if rng.chance(70) {
+            Call::Lists(from, count, i64::try_from(rng.below(3)).expect("small") - 1, rng.chance(60))
+        } else {
+            Call::Comments(from, count)
+        };
+        // Backward, propertization stops a scan at its start only.
+        let done = if count > 0 { from + i64::try_from(rng.below(8)).expect("small") } else { position(rng.below(fixture.len() + 2)) };
+        let seed = rng.next();
+        let (replayed, replay_log, _) = scanned(&text, options, call, done, seed, false);
+        let (resumed, resume_log, went) = scanned(&text, options, call, done, seed, true);
+        assert_eq!((&resumed, &resume_log), (&replayed, &replay_log),
+                   "case {case}: {call:?} over {:?} done {done} {options:?}", String::from_utf8_lossy(&fixture));
+        if let Call::Lists(..) = call { for at in went { if !reached.contains(&at) { reached.push(at); } } }
+    }
+    let wanted = [
+        Some((ScanAt::Top, None)), Some((ScanAt::Stepped, None)), Some((ScanAt::Dispatch, None)),
+        Some((ScanAt::Symbol, None)), Some((ScanAt::String, None)), Some((ScanAt::Decode, None)),
+        Some((ScanAt::Comment, Some(ForwAt::Read))), Some((ScanAt::Comment, Some(ForwAt::EscapeSkipped))),
+        Some((ScanAt::Comment, Some(ForwAt::Incomment))), Some((ScanAt::Comment, Some(ForwAt::NestedChecks))), None,
+    ];
+    let missed: Vec<_> = wanted.iter().filter(|at| !reached.contains(at)).collect();
+    assert!(missed.is_empty(), "never stopped at {missed:?}");
 }
 
 /// A scan stopped anywhere and resumed from its own state, with its

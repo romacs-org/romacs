@@ -11,6 +11,10 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 (defun romacs-agent-fork-tests--files (directory)
   "Each file under DIRECTORY with its contents."
   (mapcar (lambda (file) (cons file (with-temp-buffer (insert-file-contents-literally file) (buffer-string))))

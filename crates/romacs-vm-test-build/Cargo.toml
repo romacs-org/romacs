@@ -1,0 +1,12 @@
+[package]
+name = "romacs-vm-test-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "romacs-vm's test sources made when its tests build: the module list of the `all` target and the primh and varh replay harnesses"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

@@ -90,7 +90,7 @@ fn run(binary: &str, dir: &std::path::Path) -> (Option<i32>, String, String) {
     let output = Command::new(binary).args(["-Q", "--batch", "-l", "probe.el"]).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
-        // A batch world is per HOME (src/batch.rs); this one boots from source.
+        // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
         .env("ROMACS_WORLD", "off")
         .output().unwrap();
     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();

@@ -1,5 +1,5 @@
 //! G1a's single VM-owned frame/window. Only owned data leaves this module.
-use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, *};
+use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, properties::Key, *};
 #[cfg(test)]
 #[path = "display_tests.rs"]
 mod tests;
@@ -252,8 +252,9 @@ pub(super) struct DisplayState {
     /// `shown' when a frame last skipped the hooks (`Vm::defer_parse'), until
     /// the hooks run: they are told what changed since they last ran.
     hooked: Option<std::collections::BTreeMap<u64, Shown>>,
-    /// Advanced by every overlay change: overlays are display state no
-    /// buffer modification tick counts.
+    /// The last overlay revision given (`Vm::overlay_changed`): overlays
+    /// are display state no buffer modification tick counts, and each
+    /// buffer's windows read its own revision.
     pub(super) overlays: u64,
     /// Per window id, how its last publication's display text maps to
     /// buffer text, when overlay strings were spliced in.
@@ -372,7 +373,7 @@ impl DisplayState {
                 Attribute::Background => FaceValue::Str("#000000".into()),
                 Attribute::Height => FaceValue::Height(romacs_face::Height::Absolute(150)),
                 Attribute::Width | Attribute::Weight | Attribute::Slant => {
-                    FaceValue::Symbol("normal")
+                    FaceValue::Symbol("normal".into())
                 }
                 _ => FaceValue::Bool(false),
             };
@@ -416,6 +417,8 @@ impl DisplayState {
 /// read, besides its buffer's text and the window itself.
 const DISPLAY_VARIABLES: [&str; 29] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
+    // HOST(delayed-variable): the window record's display variables, read through variable_value,
+    // which checks the fence
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
     "cursor-type", "show-trailing-whitespace", "buffer-display-table", "fontification-functions",
@@ -1257,12 +1260,12 @@ impl Vm {
     pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
-    /// Read-only: the display version a renderer uses to decide whether to repaint.
     /// How many times a mode-line expansion entered the evaluator: its
     /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
     pub fn mode_line_evals(&self) -> u64 {
         self.display_state.mode_line_evals
     }
+    /// Read-only: the display version a renderer uses to decide whether to repaint.
     pub fn display_version(&self) -> u64 {
         self.display_state.version
     }
@@ -1370,6 +1373,7 @@ impl Vm {
         self.slots[self.buffer_slot].value = buffer;
         let active = (|| -> Result<bool> {
             let mark = self.slot("mark-active");
+            // HOST(delayed-variable): reads through variable_value, which checks the fence
             let transient = self.slot("transient-mark-mode");
             Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
         })();
@@ -1440,11 +1444,19 @@ impl Vm {
         width: u32,
         height: u32,
     ) -> Result<WindowSnapshot> {
-        if let Some(snapshot) = self.reuse_shown(root, slot, width, height)? {
-            self.display_state.stats.reused += 1;
-            self.check_reuse(self.slots[root].value, height, &snapshot);
-            return Ok(self.publish_window(snapshot));
+        match self.reuse_shown(root, slot, width, height)? {
+            Some(snapshot) => {
+                self.display_state.stats.reused += 1;
+                self.check_reuse(self.slots[root].value, height, &snapshot);
+                Ok(self.publish_window(snapshot))
+            }
+            None => self.rebuild_window(root, slot, width, height),
         }
+    }
+    /// The window in ROOT redisplayed in full: its point kept visible, its
+    /// text fontified and read, its bands expanded, and the record made
+    /// that the next redisplay reuses it by.
+    fn rebuild_window(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<WindowSnapshot> {
         self.display_state.stats.rebuilt += 1;
         let bands = self.redisplay_and_build_mode_line(root, slot, height, true)?;
         let window = self.slots[root].value;
@@ -2085,7 +2097,8 @@ impl Vm {
         let around = ByteOffset(low)..ByteOffset(high);
         for name in ["display", "invisible", "category"] {
             if b.properties.is_empty() { break; }
-            if b.properties.get_property(at, name).is_some() || b.properties.next_single_change(at, name, end) < end { return Ok(true); }
+            let Some(key) = self.property_key(name) else { continue };
+            if b.properties.get_property(at, key).is_some() || b.properties.next_single_change(at, key, end) < end { return Ok(true); }
         }
         let aliases = self.list_values(self.annotation_variable("char-property-alias-alist"))?;
         for entry in aliases {
@@ -2167,7 +2180,7 @@ impl Vm {
         let selected = self.selected_window_value()?;
         Ok(ShownKey {
             collections: self.gc_stats.collections,
-            overlays: self.display_state.overlays,
+            overlays: self.overlay_store(buffer).map_or(0, |store| store.overlay_revision),
             hosted: self.display_state.hosted,
             buffer,
             shows: self.window(window)?.shows,
@@ -2483,19 +2496,19 @@ impl Vm {
         outcome
     }
     /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
-    /// the current buffer, which a window shows. The walk over unfontified
-    /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
-    /// lisp/romacs/vm/prelude.el), so nothing is held across them; a signal is
-    /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic. False when `fontification-functions` is nil,
-    /// so no Lisp ran.
-    fn fontify_range(&mut self, start: usize, end: usize) -> Result<bool> {
+    /// the current buffer, which WINDOW shows. The walk over the positions
+    /// the display iterator would call at and the calls are Lisp
+    /// (`romacs--redisplay-fontify`, lisp/romacs/vm/prelude.el), so nothing
+    /// is held across them; a signal is logged there and never ends
+    /// redisplay, and any other failure becomes a display diagnostic. False
+    /// when `fontification-functions` is nil, so no Lisp ran.
+    fn fontify_range(&mut self, window: Value, start: usize, end: usize) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
             return Ok(false);
         }
-        let args = [Value::integer(start as i64)?, Value::integer(end as i64)?];
-        let call = "(lambda (start end) (romacs--redisplay-fontify start end))";
+        let args = [window, Value::integer(start as i64)?, Value::integer(end as i64)?];
+        let call = "(lambda (window start end) (romacs--redisplay-fontify window start end))";
         if let Err(error) = self.call_prepared_source_raw(call, &args) {
             self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
         }
@@ -2522,7 +2535,7 @@ impl Vm {
         let mut tries = 1;
         while let Some((start, end)) = range {
             let shown = self.window_text_state(root)?;
-            let ran = self.fontify_range(start, end)?;
+            let ran = self.fontify_range(self.slots[root].value, start, end)?;
             let w = self.window(self.slots[root].value)?;
             if !w.live() {
                 return Ok(false);
@@ -2821,9 +2834,9 @@ impl Vm {
                 None => (face != Value::NIL).then_some(face),
             };
             // A later put lists its property first.
-            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), "face", face); }
-            if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
-            if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
+            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), Key::FACE, face); }
+            if let Some(n) = elt { string.properties.put(range.clone(), Key::MODE_LINE_ELT_NO, Value::integer(n)?); }
+            if own.is_some() && let Some(face) = added { string.properties.put(range, Key::FACE, face); }
         }
         let string = self.allocate_object(Object::String(Box::new(string)));
         if band.props.is_empty() { return Ok(string); }
@@ -2837,14 +2850,14 @@ impl Vm {
             let mut made: std::collections::HashMap<(*const Form, &'static str), Value> = std::collections::HashMap::new();
             for (range, projected) in &band.props {
                 for (name, form) in projected.iter() {
-                    self.intern(name);
+                    let property = self.intern_property_key(name);
                     let key = (std::rc::Rc::as_ptr(form), *name);
                     let value = match made.get(&key) {
                         Some(&value) => value,
                         None => { let value = self.ml_prop_value(form)?; made.insert(key, value); value }
                     };
                     let Object::String(s) = self.object_mut(self.slots[slot].value)? else { return Err("mode-line string required".into()) };
-                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), name, value);
+                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), property, value);
                 }
             }
             Ok(())
@@ -3276,12 +3289,9 @@ impl Vm {
             let text_face = match self.shown_text(sources.buffer) {
                 Ok(_) if at >= sources.end => Value::NIL,
                 // The property itself, where nothing could stand in for it.
-                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
-                    b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
-                Ok(b) => {
-                    let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                    self.annotation_resolve(&raw, sources.face)?
-                }
+                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), Key::CATEGORY).is_none() =>
+                    b.properties.get_property(ByteOffset(at), Key::FACE).unwrap_or(Value::NIL),
+                Ok(b) => self.annotation_resolve(&b.properties.properties_at(ByteOffset(at)), sources.face)?,
                 _ => return Err("Unicode display buffer required".into()),
             };
             let end = sources.end.max(at + 1);

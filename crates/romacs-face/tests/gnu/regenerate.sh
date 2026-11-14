@@ -34,7 +34,7 @@ for t in nil $themes; do dump "$t" "$theme_dir"; done
 # Rum beside them: its theme file and the Modus it is written for, with the
 # colours Omarchy gives it.  It is the one dump with palette overrides.
 rum=$work/rum-themes; mkdir "$rum"
-cp "$here/inputs/modus-themes.el" "$rum/"
+cp "$here/../../../../etc/modus/modus-themes.el" "$rum/"
 cp "$here/inputs/rum-emacs.el" "$rum/rum-theme.el"
 dump rum "$rum" '(setq omarchy-color-bg "#000000" omarchy-color-fg "#d4c5a0" omarchy-color-bright-black "#756b59" omarchy-color-accent "#d48a20")'
 h=$(mktemp -d "$work/home.XXXX")

@@ -508,6 +508,8 @@ def main():
     binary_tmp = tempfile.TemporaryDirectory(prefix='census-binary-', dir=env['TMPDIR'])
     binary = Path(binary_tmp.name) / 'romacs-vm-census'
     shutil.copy2(target / 'release/romacs-vm-census', binary)
+    # A copy has left its build: say beside it which tree it runs on.
+    (binary.parent / 'romacs-runtime-root').write_text(f'{ROOT}\n')
     binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         preload = bootstrap_chain() if args.mode == 'warm' else ()

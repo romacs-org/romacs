@@ -200,7 +200,7 @@ pub(super) fn prepare_frame_targets(
     surface: romacs_display_protocol::DrawableSurface,
     plan: &crate::render_thread::render_quality::RenderFeaturePlan,
 ) -> Result<FrameTargets, super::surface::FrameRenderFailure> {
-    prepare_frame_targets_for_scene(renderer, render, surface, plan, true, false)
+    prepare_frame_targets_for_scene(renderer, render, surface, plan, true)
 }
 
 pub(super) fn prepare_frame_targets_for_scene(
@@ -209,7 +209,6 @@ pub(super) fn prepare_frame_targets_for_scene(
     surface: romacs_display_protocol::DrawableSurface,
     plan: &crate::render_thread::render_quality::RenderFeaturePlan,
     compositor_only_hint: bool,
-    has_gradient: bool,
 ) -> Result<FrameTargets, super::surface::FrameRenderFailure> {
     let content = surface
         .content_surface()
@@ -244,7 +243,6 @@ pub(super) fn prepare_frame_targets_for_scene(
     {
         render.compositor.retained_static = None;
     }
-    super::retained_scroll::retire_unusable(renderer, render, has_gradient, surface.device_scale());
     // A dropped unpooled picture must stop charging admission in this retry,
     // not in a successful draw which that stale census could prevent.
     report_unpooled_gpu_textures(renderer, render);

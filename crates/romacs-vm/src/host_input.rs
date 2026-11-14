@@ -119,6 +119,12 @@ pub trait HostInput {
     fn pointer(&mut self) -> Option<(i32, i32)> {
         None
     }
+
+    /// What the host's display saw of native key repeat since the last
+    /// take (`romacs--take-key-repeats`), None with no display.
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -205,11 +211,14 @@ impl Vm {
         }
         Ok(work)
     }
-    /// Every leaf window of every frame, the mini-windows too: what any
-    /// redisplay may show.
+    /// Every leaf window of every frame shown, the mini-windows too: what
+    /// any redisplay may show. A hidden frame (a child frame kept for a
+    /// layer, a toast or a chip between uses) is not redisplayed, as GNU
+    /// redisplays only visible frames, so its windows run no
+    /// `pre-redisplay-functions`.
     pub(crate) fn displayed_windows(&self) -> Vec<Value> {
         let mut out = vec![];
-        for frame in self.frames() {
+        for frame in self.frames().into_iter().filter(|&frame| self.frame_shown(frame)) {
             let Ok(f) = self.frame(frame) else { continue };
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {

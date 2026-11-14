@@ -360,70 +360,70 @@ fn repeated_body_may_match_empty(body: &[u8]) -> bool {
     )
 }
 
-/// Parse an interval \{n,m\} from the pattern.
+/// GNU's `RE_DUP_MAX`: the largest repeat count an interval may give.
+const RE_DUP_MAX: usize = 0xffff;
+
+fn interval_error(message: &str) -> RegexCompileError {
+    RegexCompileError {
+        message: message.to_string(),
+    }
+}
+
+/// Read one count of an interval and the character after it, as GNU's
+/// `GET_INTERVAL_COUNT` (regex-emacs.c): the pattern ending before that
+/// character is "Unmatched \\{", and a count over `RE_DUP_MAX` is invalid
+/// as soon as its digit is read.  No digits is `None`.
+fn interval_count(
+    pattern: &[u8],
+    p: &mut usize,
+) -> Result<(Option<usize>, u8), RegexCompileError> {
+    let mut count = None;
+    loop {
+        let &c = pattern
+            .get(*p)
+            .ok_or_else(|| interval_error("Unmatched \\{"))?;
+        *p += 1;
+        if !c.is_ascii_digit() {
+            return Ok((count, c));
+        }
+        let next = count.unwrap_or(0) * 10 + usize::from(c - b'0');
+        if next > RE_DUP_MAX {
+            return Err(interval_error("Invalid content of \\{\\}"));
+        }
+        count = Some(next);
+    }
+}
+
+/// Parse the interval after `\{`, leaving `p` past its `\}`.
 /// Returns (min, max) where max=None means unbounded.
+///
+/// GNU's `handle_interval` in regex-emacs.c, with its order of errors: a
+/// missing lower bound is 0 and a missing upper bound after the comma is
+/// unbounded; bounds that descend, or a character other than the closing
+/// backslash, are "Invalid content of \\{\\}"; the pattern ending after
+/// that backslash is "Trailing backslash".
 pub(crate) fn parse_interval(
     pattern: &[u8],
     p: &mut usize,
 ) -> Result<(usize, Option<usize>), RegexCompileError> {
-    let plen = pattern.len();
-
-    // Parse min
-    let mut min = 0usize;
-    while *p < plen && pattern[*p].is_ascii_digit() {
-        min = min * 10 + (pattern[*p] - b'0') as usize;
-        *p += 1;
-    }
-
-    let max = if *p < plen && pattern[*p] == b',' {
-        *p += 1; // skip comma
-        if *p < plen && pattern[*p] == b'\\' && *p + 1 < plen && pattern[*p + 1] == b'}' {
-            // \{n,\} — unbounded
-            None
-        } else {
-            let mut m = 0usize;
-            while *p < plen && pattern[*p].is_ascii_digit() {
-                m = m * 10 + (pattern[*p] - b'0') as usize;
-                *p += 1;
-            }
-            Some(m)
-        }
+    let (lower, after_lower) = interval_count(pattern, p)?;
+    let min = lower.unwrap_or(0);
+    let (max, close) = if after_lower == b',' {
+        interval_count(pattern, p)?
     } else {
-        Some(min) // \{n\} — exact count
+        (Some(min), after_lower)
     };
-
-    // GNU's GET_UNSIGNED_NUMBER (regex-emacs.c) rejects a repeat count that
-    // exceeds RE_DUP_MAX (0xffff) with `(invalid-regexp "Invalid content of
-    // \\{\\}")` while reading the number -- not the generic "too big".
-    const RE_DUP_MAX: usize = 0xffff;
-    if min > RE_DUP_MAX || max.is_some_and(|m| m > RE_DUP_MAX) {
-        return Err(RegexCompileError {
-            message: "Invalid content of \\{\\}".to_string(),
-        });
+    if max.is_some_and(|max| max < min) || close != b'\\' {
+        return Err(interval_error("Invalid content of \\{\\}"));
     }
-
-    // GNU regex-emacs.c:2390 rejects a descending interval where a finite
-    // upper bound is smaller than the lower bound (e.g. `a\{2,1\}`), signaling
-    // `(invalid-regexp "Invalid content of \\{\\}")`.  An unbounded `\{n,\}`
-    // (max == None) is always valid.
-    if let Some(m) = max
-        && m < min
-    {
-        return Err(RegexCompileError {
-            message: "Invalid content of \\{\\}".to_string(),
-        });
+    match pattern.get(*p) {
+        None => Err(interval_error("Trailing backslash")),
+        Some(b'}') => {
+            *p += 1;
+            Ok((min, max))
+        }
+        Some(_) => Err(interval_error("Invalid content of \\{\\}")),
     }
-
-    // Expect \}
-    if *p + 1 < plen && pattern[*p] == b'\\' && pattern[*p + 1] == b'}' {
-        *p += 2;
-    } else {
-        return Err(RegexCompileError {
-            message: "Unmatched \\{".to_string(),
-        });
-    }
-
-    Ok((min, max))
 }
 
 /// Compile an interval \{n,m\} into GNU's counted interval bytecode.

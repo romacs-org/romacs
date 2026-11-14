@@ -52,6 +52,8 @@ fn a_terminal_over_gnu_lisp_routes_keys_and_keeps_the_minibuffer_s() {
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(setq inhibit-startup-screen t)").unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();
+        // The terminal host here is a stand-in in this process: no keeper.
+        vm.eval_source("(setq romacs-keeper-enabled nil)").unwrap();
         vm.eval_source("(romacs-term \"/bin/sh\")").unwrap();
         vm.poll_terminal_output().unwrap();
         let signals = type_keys(&mut vm, chars("ab"), 2);

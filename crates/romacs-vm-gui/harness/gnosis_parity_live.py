@@ -104,7 +104,7 @@ DB_QUERIES = [
 def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
-    # their directories on `load-path' and the same generated autoloads
+    # their directories on `load-path' and the same bundled autoloads
     # Romacs's --loadup loads, whose lisp/romacs/ libraries (romacs-video's
     # find-file-hook) need lisp/romacs/ too.  gnosis and keymap-popup come byte-compiled.
     bundled = [lisp] + [ROOT / 'lisp/romacs' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]

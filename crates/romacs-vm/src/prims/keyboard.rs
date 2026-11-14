@@ -457,6 +457,13 @@ fn input_pending_p(cx; optional check_timers: Value) {
     Ok(if pending { Value::TRUE } else { Value::NIL })
 }}
 
+// What the display saw of native key repeat since the last call, for the
+// usage log (lisp/romacs/romacs-usage-log.el): (REPEATS AFTER-PRESS
+// LONGEST-HOLD-MS), AFTER-PRESS a vector of counts by the usage log's
+// doubling buckets; nil with no display.
+defsubr! { name = "romacs--take-key-repeats", gnu = "romacs:display", effect = Global,
+fn take_key_repeats(cx) { cx.take_key_repeats() }}
+
 defsubr! { name = "current-input-mode", gnu = "keyboard.c:12967", effect = Reads,
 fn current_input_mode(cx) {
     // A frame that is not a tty's, as every VM2 frame is (VM2-WIN5):

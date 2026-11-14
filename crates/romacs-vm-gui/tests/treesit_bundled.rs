@@ -105,7 +105,7 @@ fn a_library_in_the_users_grammar_directory_comes_first() {
         (princ (list (car (cdr (treesit-language-available-p 'json t))) (treesit-language-available-p 'python))))",
         format!("{}/", user.display()));
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
-        .args(["-Q", "--batch", "--eval", &form]).env("HOME", &user).output().unwrap();
+        .args(["-Q", "--batch", "--eval", &form]).env("HOME", &user).env("ROMACS_WORLD", "off").output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8_lossy(&output.stdout), "(symbol-error t)");
 }

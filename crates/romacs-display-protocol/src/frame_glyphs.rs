@@ -1131,9 +1131,6 @@ pub struct RoundedFill {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct FrameGlyphBuffer {
     pub scroll_input_policy: crate::ScrollInputPolicy,
-    /// Shared immutable off-screen text for compositor scrolling.
-    pub scroll_surfaces: Vec<std::sync::Arc<crate::scroll_coverage::ScrollSurface>>,
-    pub input_checkpoint: Vec<crate::input_progress::InputCheckpoint>,
     /// Evaluator interaction snapshot paired with these exact pixels.
     pub presentation_id: crate::frame_chrome::PresentationId,
     /// Canonical frame ancestry/placement for this presentation.
@@ -1336,12 +1333,10 @@ impl FrameGlyphBuffer {
             frame_placement: _,
             origin: _,
             layout_identity: _,
-            input_checkpoint: _,
             presented_pointer: _,
             presented_pointer_source: _,
             presented_hit_index: _,
             scroll_input_policy: _,
-            scroll_surfaces: _,
             transition_hints: _,
             status_bar_places: _,
             // Read only by passes that are not a frame's own glyph pass
@@ -1530,18 +1525,6 @@ impl FrameGlyphBuffer {
         Ok(())
     }
 
-    pub(crate) fn scroll_pointer_source(
-        &self,
-    ) -> Result<crate::PresentedPointerSourceMap, crate::PresentedPointerMapError> {
-        match &self.presented_pointer_source {
-            Some(source) => Ok(source.as_ref().clone()),
-            None if self.presented_pointer.is_empty() => {
-                Ok(crate::PresentedPointerSourceMap::empty())
-            }
-            None => Err(crate::PresentedPointerMapError::MissingSourceMap),
-        }
-    }
-
     fn synthesize_face(
         &self,
         face_id: FaceId,
@@ -1623,8 +1606,6 @@ impl FrameGlyphBuffer {
     pub fn new() -> Self {
         Self {
             scroll_input_policy: crate::ScrollInputPolicy::default(),
-            scroll_surfaces: Vec::new(),
-            input_checkpoint: Vec::new(),
             presentation_id: crate::frame_chrome::PresentationId::default(),
             frame_placement: crate::presented_frame::PresentedFramePlacement::default(),
             origin: crate::presentation_origin::PresentationOrigin::Ordinary,

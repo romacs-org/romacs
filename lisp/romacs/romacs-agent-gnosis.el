@@ -283,6 +283,23 @@ changed since. Return fresh records."
     (list romacs-agent-gnosis--instance '("plan-token" . "string")) '("plan-token")
   (gnosis-agent-content-apply (romacs-agent-gnosis--value-of (gethash "plan-token" arguments))))
 
+(romacs-agent-gnosis--tool "gnosis_cards_create"
+    "Create Gnosis cards (themata), 1 to 500 per call, all or none. Each card {type, question, answer [], \
+choices [] (mcq, mc-cloze), hints [] (other types), parathema, rubric (agent-eval), aliases [] (accepted typed \
+spellings), tags [] (Org tags: letters, digits, _ @ # %), key}. Types: basic, double (makes two, reversed), mcq, \
+cloze (each answer a blank: a disjoint occurrence in question; or mark blanks inline with no answer), mc-cloze, \
+agent-eval; model cards: gnosis_model_card_preview. Gnosis has no decks: use tags. key (unique to the card \
+across all calls; omit it rather than number cards per call), or when omitted the card's content (all but its \
+tags), makes a retry idempotent: a card already created reports exists with its ids. Outer whitespace is trimmed. \
+Text the Gnosis editor would read as Org structure, so could not keep unchanged (a line starting \"- \", \"+ \" \
+or \"1) \" inside an answer, an Org heading, a table, an unindented #+begin_src block), makes the card invalid; \
+the error names the field and what the editor would keep; resubmit that kept value (a source block's body \
+indented two spaces, its delimiters not). dry-run checks and reports without writing. Returns {dry-run, written, cards: [{index, key, \
+status: created|exists|would-create|invalid, ids?, themata?, error?}]}; with any card invalid nothing is written."
+    (list romacs-agent-gnosis--instance '("cards" . "array") '("dry-run" . "boolean")) '("cards")
+  (gnosis-agent-content-create (vconcat (mapcar #'romacs-agent-gnosis--data (gethash "cards" arguments)))
+                               :dry-run (eq (gethash "dry-run" arguments) t)))
+
 (romacs-agent-gnosis--tool "gnosis_review_start_session"
     "Reserve a local tutoring session: questions (at most 128 records {id, type, question, answer [], choices [], \
 rubric, hints [], parathema, tags [], source}), a teaching goal and a fixed source. The tutor is the session's \

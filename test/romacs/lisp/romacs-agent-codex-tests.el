@@ -449,7 +449,7 @@ journals what its harness writes."
               ((symbol-function 'romacs-agent--note) #'ignore))
       (should (romacs-agent-select session "b" "high")))
     (should-not (romacs-agent-pending-selection session))
-    (should (equal (romacs-agent--selection session) '(:model "b" :effort "high")))
+    (should (equal (romacs-agent--selection session) '(:model "b" :effort "high" :provider "codex")))
     (romacs-agent-send session "go")
     (let ((params (gethash "params" (last-written))))
       (should (equal (gethash "model" params) "b"))

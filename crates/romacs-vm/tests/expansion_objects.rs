@@ -4,7 +4,7 @@
 //! objects return themselves, quoted ones are the identical object, and a
 //! function object in head position is called.
 //!
-//! The case that blocked GNU's own Lisp: macroexp.el:955
+//! The case that blocked GNU's own Lisp, macroexp.el's
 //!     (eval-when-compile (add-hook 'emacs-startup-hook (lambda () ...)))
 //! `eval-when-compile' (byte-run.el:674) expands to `(quote VALUE)' where
 //! VALUE is the hook list add-hook returns -- a list holding a closure.
@@ -37,7 +37,7 @@ fn macro_may_expand_to_a_quoted_closure() {
 
 #[test]
 fn eval_when_compile_returning_a_hook_list_holding_a_closure() {
-    // The exact shape of macroexp.el:955.
+    // The exact shape of macroexp.el's startup-hook form.
     let mut vm = Vm::new();
     vm.eval_source(EVAL_WHEN_COMPILE).unwrap();
     vm.eval_source("(defvar eo-hook nil)").unwrap();
@@ -222,11 +222,15 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     let path = root.join("lisp/gnu/emacs-lisp/macroexp.el").canonicalize().unwrap();
     let result = vm.load_file(&path).map(|_| ());
     let report = vm.load_report();
+    // The form's line, found by its text: the file's edits move it.
+    let macroexp = std::fs::read_to_string(&path).unwrap();
+    let form = "\n(eval-when-compile\n  (add-hook 'emacs-startup-hook";
+    let line = macroexp[..=macroexp.find(form).expect("macroexp's startup-hook form")].matches('\n').count() + 1;
     let step = report["steps"].as_array().unwrap().iter()
-        .find(|s| s["file"] == path.to_string_lossy().as_ref() && s["line"] == 956)
+        .find(|s| s["file"] == path.to_string_lossy().as_ref() && s["line"] == line)
         .cloned();
-    let step = step.expect("macroexp.el:956 must be reached");
-    assert_eq!(step["status"], "ok", "macroexp.el:956: {step}");
+    let step = step.expect("macroexp's startup-hook form must be reached");
+    assert_eq!(step["status"], "ok", "macroexp.el:{line}: {step}");
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(shown(&mut vm, "(featurep 'macroexp)"), "t");
     // The startup hook now holds GNU's closure, callable as a function.

@@ -186,6 +186,7 @@ impl Vm {
         let mark = self.dynamic.len();
         let buffer = self.slots[self.buffer_slot].value;
         // record_unwind_protect (un_autoload, Vautoload_queue); Vautoload_queue = Qt;
+        // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
         self.dynamic.push((queue, self.slots[queue].value, buffer, false));
         self.slots[queue].value = Value::TRUE;
         Ok((mark, saved))

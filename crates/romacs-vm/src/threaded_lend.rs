@@ -264,7 +264,8 @@ pub(crate) fn unwind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize)
 
 /// Lisp a suspended engine runs nested.
 pub(super) enum Nested<'f> {
-    /// Compile FORM and run it as an `eval` (the signal hook, the debugger).
+    /// Compile FORM as request code and run it as an `eval` (the signal
+    /// hook, the debugger).
     Form(&'f Form),
     /// `autoload-do-load' of FUNDEF and FUNCTION, rooted in the frame
     /// (FUNCTION first: the call is retried from it).
@@ -280,10 +281,14 @@ impl Nested<'_> {
     fn run(self, vm: &mut Vm, gc: Gc<'_, '_>) -> Result<Value> {
         stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || match self {
             Nested::Form(form) => {
-                let function = vm.compile(form)?;
+                // Request code, as `eval_form_raw' compiles: the next
+                // collection retires it and the objects it quotes (a
+                // signal's data), where code compiled outright would stay.
+                let (function, _) = vm.compile_request(form)?;
                 vm.propagate_next = true;
                 let result = vm.execute_raw(function);
                 vm.propagate_next = false;
+                vm.release_request_entry(function);
                 result
             }
             Nested::Autoload(frame) => {

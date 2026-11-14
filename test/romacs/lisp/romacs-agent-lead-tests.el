@@ -65,7 +65,12 @@ runs: harnesses are never started."
                ((symbol-function 'romacs-agent--input) (lambda (session text &rest _) (push (cons session text) sent)))
                ((symbol-function 'romacs-agent-tools--deliver)
                 (lambda (_session text done &optional _valid) (push text delivered) (funcall done)))
-               ((symbol-function 'run-at-time) #'ignore))
+               ((symbol-function 'run-at-time) #'ignore)
+               ;; No process starts here: the build's companions are not needed.
+               ((symbol-function 'romacs-agent--check-companions) #'ignore)
+               ;; Children start at once here (romacs-agent-launch-tests
+               ;; has one that never does).
+               ((symbol-function 'romacs-agent-tools--started) (lambda (_child then) (funcall then))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
 (defun romacs-agent-lead-tests--args (&rest pairs)

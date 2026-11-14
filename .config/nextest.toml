@@ -15,9 +15,10 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
 # included, in a target directory of its own. Warm it takes about a minute; a
 # cold one, as a freshly seeded check target has, compiles every dependency
 # from nothing and passed 600 s under load. A wrong verdict is its failure,
-# not time.
+# not time. It is `compile_boundaries::NAME` in romacs-vm's `all` target and
+# NAME in its own.
 [[profile.default.overrides]]
-filter = 'test(=the_compiler_enforces_the_boundaries)'
+filter = 'test(/(^|::)the_compiler_enforces_the_boundaries$/)'
 slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
 
 # The batch scaling probes bound each session by its CPU (scaling_live.py);

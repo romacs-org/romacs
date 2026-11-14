@@ -40,6 +40,14 @@
 ;;       counts in buckets that double: N0 gaps under 1 ms, N1 under 2 ms,
 ;;       and the last 32 s or more; written with the counts, when any.
 ;;       The idle windows a background task (a checkpoint, a fork) has.
+;;   {"kind":"repeat","n":N,"bounds_ms":[1,...,32768],"after_press_ms":[N0,...],"longest_hold_ms":L}
+;;       what the display saw of native key repeat since the last write: N
+;;       repeats it let through, counted by how long after their key's
+;;       press each came, in the gap buckets; L the longest a key was
+;;       held, from the press it saw to the release it saw.  A key repeats
+;;       until its release is seen, so a release seen late shows as repeats
+;;       the user never held the key for.  Written with the counts, when a
+;;       key was pressed and released or repeated.
 ;;   {"kind":"collection","collection":K,"pause_ms":MS,"t":T,"live_objects":O,"live_bytes_est":B,"late_objects":L,"met":M,"command":C}
 ;;       a garbage collection MS long, a float read to the microsecond, K
 ;;       `idle' (the idle pass's or a
@@ -318,6 +326,16 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                (cdr taken))
        (and (> (car taken) 0) (list (json-serialize (list :kind "collection" :dropped (car taken)))))))))
 
+(defun romacs-usage-log--key-repeats ()
+  "The `repeat' line for what the display saw of native key repeat since
+the last write (`romacs--take-key-repeats'), or nil when it saw no key held
+or repeated, or there is no display."
+  (when (fboundp 'romacs--take-key-repeats)
+    (let ((taken (romacs--take-key-repeats)))
+      (when (and taken (or (> (nth 0 taken) 0) (> (nth 2 taken) 0)))
+        (json-serialize (list :kind "repeat" :n (nth 0 taken) :bounds_ms romacs-usage-log--gap-bounds
+                              :after_press_ms (nth 1 taken) :longest_hold_ms (nth 2 taken)))))))
+
 (defun romacs-usage-log-flush ()
   "Append the queued lines and the counts since the last write to the log."
   (when romacs-usage-log-file
@@ -345,6 +363,8 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                          counts)))
                romacs-usage-log--slow)
       (clrhash romacs-usage-log--slow)
+      (let ((repeat (romacs-usage-log--key-repeats)))
+        (when repeat (push repeat counts)))
       (when (> (apply #'+ (append romacs-usage-log--gaps nil)) 0)
         (push (json-serialize (list :kind "gaps" :bounds_ms romacs-usage-log--gap-bounds
                                     :counts (copy-sequence romacs-usage-log--gaps)))

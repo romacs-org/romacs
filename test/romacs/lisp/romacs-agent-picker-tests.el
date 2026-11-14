@@ -11,7 +11,12 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
-  (require 'romacs-agent-ui))
+  (require 'romacs-agent-ui)
+  (require 'romacs-agent-board))
+
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
 
 (defmacro romacs-agent-picker--with (bindings &rest body)
   "BODY in a private state directory, with `root' its temporary root and
@@ -231,14 +236,16 @@ affixation it saw pushed on the list in cell ASKED."
               ((symbol-function 'romacs-agent-start)
                (lambda (&rest _) (interactive) (setq started (called-interactively-p 'any)))))
       (with-temp-buffer
-        (insert (propertize "row\n" 'romacs-agents-project (directory-file-name sub)))
+        (insert (propertize "row\n" 'romacs-agent-board-row (list :kind 'project :cwd (directory-file-name sub))))
         (goto-char (point-min))
-        (romacs-agents-new)
-        (should (equal offered sub))
-        (should started)
-        ;; Off every section: the current project's.
-        (goto-char (point-max))
-        (romacs-agents-new)
+        ;; The board hides first; then the prompt, where the user was.
+        (cl-letf (((symbol-function 'romacs-popup-then) #'funcall))
+          (romacs-agent-board-new)
+          (should (equal offered sub))
+          (should started)
+          ;; Off every section: the current project's.
+          (goto-char (point-max))
+          (romacs-agent-board-new))
         (should (equal offered (expand-file-name "repository/" root))))
       (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)

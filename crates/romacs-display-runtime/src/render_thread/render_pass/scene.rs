@@ -35,18 +35,9 @@ pub(super) fn render_frame_root_glyphs(
     cursor_visible: bool,
     root_animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
     bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
-    retain_scroll_body: bool,
 ) {
     frame_stats::count(&frame_stats::ROOT_GLYPH_PASSES);
     if frame.status_bar.is_some() { frame_stats::count(&frame_stats::CHROME_BAR_BANDS); }
-    let raster = super::retained_scroll::prepare(
-        renderer,
-        render,
-        frame,
-        present_mapping,
-        bg_gradient.is_some() || !retain_scroll_body,
-    );
-    let frame = raster.as_ref().map_or(frame, |raster| &raster.frame);
     let pointer_selection = render.pointer_selection_for(frame);
     let hovered_scroll_bar = render.hovered_scroll_bar(frame);
     if let Some(atlas) = render.compositor.glyph_atlas.as_mut() {
@@ -56,7 +47,7 @@ pub(super) fn render_frame_root_glyphs(
     // child frame drawn after the root reads it too.
     renderer.cursor_light = render.cursor.light;
     let size = romacs_renderer_wgpu::SnapshotSize::new(renderer.width(), renderer.height())
-        .filter(|_| pictured(renderer, render, frame, raster.is_some(), bg_gradient.is_some(), pointer_selection.is_some(), hovered_scroll_bar.is_some()));
+        .filter(|_| pictured(renderer, render, frame, bg_gradient.is_some(), pointer_selection.is_some(), hovered_scroll_bar.is_some()));
     if let Some(size) = size
         && render.compositor.root_picture.as_ref().is_none_or(|picture| !picture.fits(size))
     {
@@ -88,47 +79,17 @@ pub(super) fn render_frame_root_glyphs(
                 hovered_scroll_bar,
                 bg_gradient,
                 pointer_selection,
-                if raster.is_some() {
-                    None
-                } else {
-                    render.compositor.current_row_damage.as_ref()
-                },
+                render.compositor.current_row_damage.as_ref(),
             ),
         }
     });
-    let presentation = frame.presentation_id;
-    if let Some(raster) = raster {
-        let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
-            romacs_display_protocol::present_trace::Stage::NonRootStart,
-            romacs_display_protocol::present_trace::Stage::NonRootEnd,
-            render.emacs_frame_id,
-            presentation,
-        );
-        let region = romacs_renderer_wgpu::renderer::SnapshotRegion::new(
-            &raster.texture,
-            raster.source_pixels,
-            raster.destination,
-        )
-        .expect("crop was validated before drawing the base");
-        renderer
-            .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-                surface_view,
-                present_mapping.surface(),
-            ))
-            .blit_snapshot_region(region);
-        frame_stats::count(&frame_stats::SCROLL_RASTER_BLITS);
-        // The blit replaced the panes the root pass drew there.
-        renderer.render_panes_within(surface_view, &raster.frame, present_mapping, raster.destination.raw());
-        tracing::debug!(target: "romacs_display_runtime::retained_scroll", "composited retained scroll raster");
-    }
     // The root pass draws the panes (VM2-PANE-CHROME).
     frame_stats::add(&frame_stats::CHROME_DIVIDER_QUADS, renderer.take_pane_quads() as u64);
 }
 
 /// Whether FRAME's root pass is drawn through the root picture: whether its
 /// pixels, cursors apart, are a function of its glyphs, tables and settings
-/// alone. Not when a scroll RASTER stands in for its body, under a
-/// background GRADIENT, a pointer's highlight (a POINTER selection, a
+/// alone. Not under a background GRADIENT, a pointer's highlight (a POINTER selection, a
 /// HOVERED scroll bar), idle dimming, an enabled body effect or one still
 /// running, a box border that animates, or with media glyphs, whose textures
 /// change under the frame; nor on a translucent frame, nor under
@@ -137,7 +98,6 @@ fn pictured(
     renderer: &WgpuRenderer,
     render: &GuiFrameRenderState,
     frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-    raster: bool,
     gradient: bool,
     pointer: bool,
     hovered: bool,
@@ -154,13 +114,12 @@ fn pictured(
                 | FrameGlyph::ScrollBar { .. }
         )
     };
-    !raster
-        && !gradient
+    !gradient
         && !pointer
         && !hovered
         && render.overlays.idle_dim.current_alpha == 0.0
-        && super::retained_scroll::static_body_effects(&renderer.effects)
-        && frame.cursor_effects_by_window.values().all(super::retained_scroll::static_body_effects)
+        && super::retained_static::static_body_effects(&renderer.effects)
+        && frame.cursor_effects_by_window.values().all(super::retained_static::static_body_effects)
         && !render.compositor.renderer_effects.needs_redraw()
         && frame.background_alpha == 1.0
         && !frame.faces.values().any(|face| face.box_corner_radius > 0 && face.box_border_style.is_fancy())

@@ -48,7 +48,7 @@ fn url_retrieve_through_the_connection_pool_matches_pinned_gnu() {
     let run = |binary: &str| {
         let output = Command::new(binary).args(["-Q", "--batch", "--eval", &form]).current_dir(&dir)
             .env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-            // A batch world is per HOME (src/batch.rs); this one boots from source.
+            // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
             .env("ROMACS_WORLD", "off")
             .output().unwrap();
         (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),

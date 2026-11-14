@@ -42,9 +42,13 @@ fn ordered_real_ert_dependency_frontier() {
         .load_file(&root.join("emacs-lisp/cl-lib.el"))
         .unwrap_err();
     assert!(
-        error.contains("line 599 form 95") && error.contains("(void-variable emacs-lisp-docstring-fill-column)"),
+        error.contains(" form 95: ") && error.contains("(void-variable emacs-lisp-docstring-fill-column)"),
         "ORDERED_CL_LIB_FRONTIER: {error}"
     );
+    let report = vm.load_report();
+    let failed = report["steps"].as_array().unwrap().iter()
+        .find(|s| s["file"].as_str().unwrap().ends_with("/cl-lib.el") && s["status"] == "error").unwrap();
+    assert!(failed["source"].as_str().unwrap().starts_with("(define-minor-mode cl-old-struct-compat-mode"), "ORDERED_CL_LIB_FRONTIER: {failed}");
     // A separate dependency diagnosis, not permission to resume this failed chain.
     let bindings = vm.load_file(&root.join("bindings.el"));
     assert!(bindings.is_ok(), "ORDERED_BINDINGS_COMPLETE: {bindings:?}");

@@ -11,5 +11,7 @@ pub mod measure;
 pub mod native;
 pub mod presentation;
 pub mod startup;
+pub mod terminal_helper;
+pub mod terminal_proto;
 pub mod terminal_service;
 pub mod terminal_wait;

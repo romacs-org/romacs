@@ -445,7 +445,11 @@ class Transport(unittest.TestCase):
         child, peer = self.relay()
         peer.close()
         time.sleep(.2)
-        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        # A stateless client: its protocol metadata comes with each request,
+        # and the probe asks as the client asked.
+        params = {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                            "io.modelcontextprotocol/clientCapabilities": {}}}
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": params})
         self.assertEqual(len(self.hear(child, 2)["result"]["tools"]), 1)
         back, _ = self.listener.accept()
         self.sockets.append(back)
@@ -454,6 +458,7 @@ class Transport(unittest.TestCase):
         while b"romacs-relay-probe" not in received:
             received += back.recv(1 << 16)
         line = next(l for l in received.split(b"\n") if b"romacs-relay-probe" in l)
+        self.assertEqual(json.loads(line).get("params"), params)
         back.sendall(json.dumps({"jsonrpc": "2.0", "id": json.loads(line)["id"], "result": {"tools": []}}).encode() + b"\n")
         self.hear_method(child, "notifications/tools/list_changed")
 

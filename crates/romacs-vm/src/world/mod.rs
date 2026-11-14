@@ -121,7 +121,11 @@ impl Vm {
     pub fn world_begin(&mut self) {
         if host::mode() == host::Mode::Build {
             self.fence = Some(Box::default());
+            // HOST(slot:initial-environment, slot:process-environment): fences the environment
+            // lists by name; reads no slot
             let roots = [("process-environment", Root::Environment), ("initial-environment", Root::Environment),
+                         // HOST(slot:exec-path): fences the environment lists by name; reads no
+                         // slot
                          ("exec-path", Root::Environment), ("default-directory", Root::Directory)];
             for (name, root) in roots {
                 // A build interns nothing a source boot does not, or symbols
@@ -157,12 +161,15 @@ impl Vm {
         // Compiled patterns' SIMD searchers hold function pointers; each is
         // compiled again at its first search.
         self.regexp_cache = Default::default();
+        self.flat_tables.forget();
         self.mode_line_forms.clear();
         self.lambda_lists.clear();
         // An escape deferred in the builder is that session's own.
         self.drop_deferred_escapes();
         self.status_bar_line = None;
         self.idle_since = None;
+        // HOST(slot:exec-path, slot:initial-environment, slot:process-environment): clears the
+        // environment lists before a world capture; restore rebuilds them
         for name in ["process-environment", "initial-environment", "exec-path"] {
             let slot = self.slot(name);
             self.slots[slot].value = Value::NIL;
@@ -172,7 +179,8 @@ impl Vm {
     }
 
     /// A top-level FORM of a loaded file ends: a re-seed form's variable is
-    /// fenced from here (root 4); in a layer, a definition that read a
+    /// fenced from here (root 4); the build host's form leaves `system-name`
+    /// to be read again; in a layer, a definition that read a
     /// per-process fact is kept for restore to evaluate again
     /// (`romacs--world-reseed-forms`), and its variable fenced (root 7).
     pub(crate) fn world_form_done(&mut self, form: &crate::Form) {
@@ -182,6 +190,12 @@ impl Vm {
         if let Some(name) = host::reseed_output() {
             let slot = self.slot(name);
             self.fence_variable(slot, Root::Reseed);
+        }
+        // The build host is baked, unrecorded, into `emacs-build-system'
+        // only: `system-name' does not keep it, so a later reader in the
+        // build asks the host, and its read is keyed.
+        if host::at_baked_host() {
+            self.forget_system_name();
         }
         if let Some((kind, name, cut)) = host::layer_form_done() {
             self.record_reseed_form(kind, &name, form, cut);
@@ -353,6 +367,7 @@ impl Vm {
             // its reads and writes go through the fence like any other's.
             Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_))
             | Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) if root == Root::Tainted || !matches!(redirect, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => {
+                // HOST(dynamic:saved): reads the bound variable, not the saved value
                 let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
                 self.fence_mut().cells.insert(slot, Cell { root, redirect, older });
                 self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
@@ -477,6 +492,7 @@ impl Vm {
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
         let saved = matches!(access, Access::SavedRead | Access::SavedWrite);
+        // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, let_default))|
             bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
         if !shadowed {
@@ -761,9 +777,14 @@ impl Vm {
 
     /// A use of the random state (root 5).
     pub(crate) fn fence_random(&self) {
-        if self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint() {
+        if self.random_fenced() {
             host::refuse("fence", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
         }
+    }
+
+    /// Whether a use of the random state now refuses the build (root 5).
+    pub(crate) fn random_fenced(&self) -> bool {
+        self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint()
     }
 }
 
@@ -775,8 +796,8 @@ fn framed(hasher: &mut sha2::Sha256, bytes: &[u8]) {
 }
 
 /// TEXT's property runs as Lisp sees them, their count and each run's
-/// bounds and keys into HASHER: the property values, for the caller to
-/// digest.
+/// bounds into HASHER: the property keys' symbols and the values, for the
+/// caller to digest.
 fn property_runs(properties: &crate::properties::Properties, len: usize, hasher: &mut sha2::Sha256) -> Vec<Value> {
     use crate::coordinates::ByteOffset;
     use sha2::Digest;
@@ -792,8 +813,7 @@ fn property_runs(properties: &crate::properties::Properties, len: usize, hasher:
     for (at, end, properties) in runs {
         hasher.update([at, end, properties.len()].map(usize::to_le_bytes).concat());
         for (key, value) in properties {
-            framed(hasher, key.as_bytes());
-            values.push(value);
+            values.extend([key.symbol(), value]);
         }
     }
     values.reverse();

@@ -39,6 +39,11 @@ class Figures(unittest.TestCase):
         self.assertEqual((calm['display_instructions_p90'], d.quantile([1, 2, 3, 4], .5), d.quantile([1], .9)), (4000, 3, 1))
         self.assertEqual(d.figures(d.steps(readings(*[STEP] * 19, heavy)))['display_instructions_p90'], 500)
 
+    def test_a_count_only_some_scenarios_keep_is_a_figure_where_kept(self):
+        counted = [dict(r, **{'fontified-chars': 40 * i}) for i, r in enumerate(readings(STEP, STEP, STEP))]
+        self.assertEqual(d.figures(d.steps(counted))['chars_fontified'], 40)
+        self.assertNotIn('chars_fontified', d.figures(d.steps(readings(STEP, STEP))))
+
 
 class Refusals(unittest.TestCase):
     def test_a_whole_measurement_is_not_refused(self):

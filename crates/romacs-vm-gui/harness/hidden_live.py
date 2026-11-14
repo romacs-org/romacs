@@ -21,9 +21,7 @@ from --tools or PATH.
 import argparse
 import json
 from pathlib import Path
-import shutil
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -154,79 +152,64 @@ def run(args, output, report):
         if not ok:
             report['failures'].append(name)
 
-    compositor = keyboard = process = None
-    temporary = None
-    try:
-        with tempfile.TemporaryDirectory(prefix='hidden-live-', delete=False) as temporary:
-            root = Path(temporary)
-            root.chmod(0o700)
-            env, state, work, config = tl.session_env(root, args)
-            (Path(env['HOME']) / 'config/romacs/init.el').write_text(INIT.format(state=json.dumps(str(state))))
-            (config / 'rc.xml').write_text(RC_XML)
-            env.update({'ROMACS_DIAGNOSTICS': '1', 'ROMACS_RENDER_STALL_MS': str(int(args.stall * 1000))})
-            if args.present_mode:
-                env['ROMACS_BENCH_PRESENT_MODE'] = args.present_mode
-            log_path = output / 'session.stderr'
-            with (output / 'compositor.log').open('w') as compositor_log, log_path.open('w') as log:
-                compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
-                                              env=env, stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                assert 'DISPLAY' not in env
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
-                               env=env, check=True, timeout=15)
-                # A held key gives the seat a keyboard before the client starts.
-                keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
-                time.sleep(.3)
-                empty = grab(env, output / 'empty.png')
-                process = subprocess.Popen([str(args.binary), '--loadup'], env=env, cwd=work,
-                                           stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-                report['pid'] = process.pid
-                text = lambda: log_path.read_text(errors='replace')
-                if args.hidden_start:
-                    # Hidden as it starts (the owner switches away while it
-                    # prepares its world): once mapped, by the first start's
-                    # "Preparing" frame or the first paint, its next frame is
-                    # not drawn until it shows.
-                    # Mapped once the output differs from the empty desktop
-                    # (a window maps on the desktop current when it does).
-                    fio.wait(lambda: grab(env, output / 'start.png') != empty, args.timeout, 'the window drawn', process)
-                    first_paint = 'paint-submitted' in text()
-                    chord(env, 'logo', 'F2')
-                    fio.wait(lambda: len(ticks(state)) >= 2 * args.stall + 4, args.timeout, 'ticks while hidden from the start', process)
-                    report['hidden_start'] = {'drawn': paints(text()), 'warnings': stalls(text()),
-                                              'first_paint_before_hiding': first_paint}
-                    check('hidden from the start: hidden before the first paint', not first_paint, report['hidden_start'])
-                    check('hidden from the start: alive, no paint drawn', process.poll() is None and not paints(text()),
-                          report['hidden_start'])
-                    chord(env, 'logo', 'F1')
-                fio.wait(lambda: len(ticks(state)) >= 2 and paints(text()), args.timeout, 'ticks and a drawn paint', process)
-                fio.shot(output / 'before.png', env, report)
+    state = empty = None
 
-                told = len(stalls(text()))
-                if not hidden_round('plain', args, env, state, process, text, report, check, (told + 1,)):
-                    return
-                shown_round('plain', env, state, process, text, report, check, 'zz', lambda: None,
-                            lambda log: len(paints(log)))
-                fio.shot(output / 'after.png', env, report)
-                # Again with a minibuffer prompt open: the timer's redisplays
-                # go through the prompt's host (prompt.rs), which must not
-                # block on, or fail over, the undrawn paint either.
-                prompts = lambda: text().count('"diagnostic":"prompt-paint"')
-                chord(env, 'alt', 'x')
-                fio.wait(lambda: prompts() > 0, 10, 'the M-x prompt drawn', process)
-                # The loop that tells a stall waits for the prompt to end.
-                if not hidden_round('prompt', args, env, state, process, text, report, check, (told + 1, told + 2)):
-                    return
-                shown_round('prompt', env, state, process, text, report, check, 'yy', lambda: chord(env, 'ctrl', 'g'),
-                            drawn_prompts)
-                fio.shot(output / 'after-prompt.png', env, report)
-    finally:
-        live.stop(process)
-        live.stop(keyboard)
-        live.stop(compositor)
-        live.remove_root(temporary)
+    def prepare(s):
+        nonlocal state
+        state = s.work / 'timers-state.el'
+        (s.home / 'config/romacs/init.el').write_text(INIT.format(state=json.dumps(str(state))))
 
+    def before_launch(s):
+        nonlocal empty
+        empty = grab(s.env, output / 'empty.png')
+
+    extra = {'ROMACS_RENDER_STALL_MS': str(int(args.stall * 1000)), 'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '14'}
+    if args.present_mode:
+        extra['ROMACS_BENCH_PRESENT_MODE'] = args.present_mode
+    with live.session(args.binary, output, prefix='hidden-live-', args=('--loadup',), rc_xml=RC_XML, env=extra,
+                      tools=args.tools, prepare=prepare, before_launch=before_launch, log='session.stderr') as s:
+        env, process, log_path = s.env, s.process, s.log
+        assert 'DISPLAY' not in env
+        report['pid'] = process.pid
+        text = lambda: log_path.read_text(errors='replace')
+        if args.hidden_start:
+            # Hidden as it starts (the owner switches away while it
+            # prepares its world): once mapped, by the first start's
+            # "Preparing" frame or the first paint, its next frame is
+            # not drawn until it shows.
+            # Mapped once the output differs from the empty desktop
+            # (a window maps on the desktop current when it does).
+            fio.wait(lambda: grab(env, output / 'start.png') != empty, args.timeout, 'the window drawn', process)
+            first_paint = 'paint-submitted' in text()
+            chord(env, 'logo', 'F2')
+            fio.wait(lambda: len(ticks(state)) >= 2 * args.stall + 4, args.timeout, 'ticks while hidden from the start', process)
+            report['hidden_start'] = {'drawn': paints(text()), 'warnings': stalls(text()),
+                                      'first_paint_before_hiding': first_paint}
+            check('hidden from the start: hidden before the first paint', not first_paint, report['hidden_start'])
+            check('hidden from the start: alive, no paint drawn', process.poll() is None and not paints(text()),
+                  report['hidden_start'])
+            chord(env, 'logo', 'F1')
+        fio.wait(lambda: len(ticks(state)) >= 2 and paints(text()), args.timeout, 'ticks and a drawn paint', process)
+        fio.shot(output / 'before.png', env, report)
+
+        told = len(stalls(text()))
+        if not hidden_round('plain', args, env, state, process, text, report, check, (told + 1,)):
+            return
+        shown_round('plain', env, state, process, text, report, check, 'zz', lambda: None,
+                    lambda log: len(paints(log)))
+        fio.shot(output / 'after.png', env, report)
+        # Again with a minibuffer prompt open: the timer's redisplays
+        # go through the prompt's host (prompt.rs), which must not
+        # block on, or fail over, the undrawn paint either.
+        prompts = lambda: text().count('"diagnostic":"prompt-paint"')
+        chord(env, 'alt', 'x')
+        fio.wait(lambda: prompts() > 0, 10, 'the M-x prompt drawn', process)
+        # The loop that tells a stall waits for the prompt to end.
+        if not hidden_round('prompt', args, env, state, process, text, report, check, (told + 1, told + 2)):
+            return
+        shown_round('prompt', env, state, process, text, report, check, 'yy', lambda: chord(env, 'ctrl', 'g'),
+                    drawn_prompts)
+        fio.shot(output / 'after-prompt.png', env, report)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

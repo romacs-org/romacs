@@ -931,6 +931,7 @@ impl Vm {
             let value = table.values[slot];
             table.remove(slot);
             if let Some(binding) = value.index_if(7).and_then(|n| n.checked_sub(1)) {
+                // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
                 if self.local_binding_slots.contains(&binding) && !self.dynamic.iter().any(|(active, _, _, _)| *active == binding) {
                     self.slots[binding].value = Value::UNBOUND;
                 }

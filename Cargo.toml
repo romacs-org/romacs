@@ -1,9 +1,13 @@
 [workspace]
 members = [
     "crates/romacs-brand",
+    "crates/romacs-record",
+    "crates/romacs-keeper",
     "crates/romacs-coordinate-contract",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
+    "crates/romacs-vm-test-build",
+    "crates/romacs-icon-font",
     "crates/romacs-layout-input",
     "crates/romacs-layout",
     "crates/romacs-vm-gui",
@@ -54,10 +58,10 @@ repository = "https://git.thanosapollo.org/romacs"
 # Lints every package inherits with `[lints] workspace = true`. Every unsafe
 # operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
 # carries its own SAFETY justification. tools/lib/unsafe_census.py (run by
-# tools/check-derived) fails when a package neither denies this nor is
-# listed as pending in ledger/unsafe-floors.json. Clippy's
-# undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
-# here: existing code would fail it.
+# tools/check-derived) fails when a package does not deny this. Clippy's
+# undocumented_unsafe_blocks is enforced by the smells ratchet's count of
+# undocumented sites (tools/lib/smells.py), not here: existing code would
+# fail it.
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

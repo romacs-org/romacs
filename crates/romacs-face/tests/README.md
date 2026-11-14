@@ -19,7 +19,7 @@ coverage weak. Do not describe those counts as independent meaningful
 height proofs.
 
 `gnu/fixtures/rum-configured.eld` is the look the stock theme `default`
-ports: modus-themes 5.3.0 (`gnu/inputs/modus-themes.el`), Omarchy's Rum
+ports: modus-themes 5.3.0 (`etc/modus/modus-themes.el`, the copy Romacs adapts too), Omarchy's Rum
 theme file (`gnu/inputs/rum-emacs.el`), the reference configuration's
 Modus options and font faces, and notmuch's faces, captured by
 `gnu/rum-configured.el` in `dump.el`'s regime. Regenerate with

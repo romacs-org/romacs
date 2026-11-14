@@ -1,4 +1,8 @@
-;;; Export default case data from the pinned GNU, not host Unicode tables.
+;;; capitalize-tables.el --- GNU's case and word tables as Rust data
+;;
+;; Run by the pinned GNU, so the tables are GNU's and not the host's Unicode
+;; tables: `CAPITALIZE_TABLE_OUTPUT=src/prims/capitalize-tables.in emacs
+;; --batch -l tools/primh/capitalize-tables.el' from crates/romacs-vm.
 (let ((coding-system-for-write 'utf-8-unix)
       (print-escape-nonascii t))
   (with-temp-buffer

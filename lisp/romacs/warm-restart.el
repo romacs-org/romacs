@@ -135,6 +135,10 @@ rebuild, such as `hard' newlines the user typed."
 
 (defconst warm-restart--schema 1 "The image form's schema.")
 
+(defvar romacs-keeper-restarting)
+(declare-function romacs-keeper-attached-p "romacs-keeper")
+(declare-function romacs-keeper-close-orphans "romacs-keeper")
+
 (defvar warm-restart--problems nil
   "What went wrong in the restore running now, as `lost'-style entries.")
 
@@ -944,6 +948,11 @@ the report."
         (warm-restart--restore-frames (plist-get form :frames) (warm-restart--names records buffers))
       (error (push (list :frame 1 :reason (error-message-string err)) warm-restart--problems)))
     (setq warm-restart--problems (append (warm-restart--activate) warm-restart--problems))
+    ;; The adopters have claimed what they restore.  What the previous
+    ;; session left in the keeper and nobody claimed ends here, as it
+    ;; would have ended with that session; what is marked kept stays.
+    (when (and (fboundp 'romacs-keeper-attached-p) (romacs-keeper-attached-p))
+      (ignore-errors (romacs-keeper-close-orphans)))
     (let ((modified (cl-loop for buffer being the hash-values of buffers
                              when (buffer-modified-p buffer) collect buffer)))
       (run-at-time 0 nil #'warm-restart--lock modified))
@@ -1204,7 +1213,10 @@ for running a newer build."
       (when server (warm-restart--publish-pending image server))
       (condition-case err
           (progn
-            (run-hooks 'kill-emacs-hook)
+            ;; A restart, not a quit: what the keeper holds for this
+            ;; session stays for the successor (romacs-keeper.el).
+            (let ((romacs-keeper-restarting t))
+              (run-hooks 'kill-emacs-hook))
             ;; The new process locks these files again; this one's locks
             ;; would name a pid that is about to end.
             (dolist (buffer (buffer-list))

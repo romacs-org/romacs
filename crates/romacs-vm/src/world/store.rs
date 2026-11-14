@@ -114,8 +114,10 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 /// The content digest of FILE (`content_digest`), cached in STORE by the
 /// file's identity and change times: hashing tens or hundreds of megabytes
 /// at every launch would cost more than the rest of a restore. A write, a
-/// truncation or a change of mode changes the identity.
-fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> {
+/// truncation or a change of mode changes the identity. Without REMEMBER
+/// the cache is read, never filled: a store this process only reads
+/// (`World::restore_read_only`).
+fn file_digest(store: &Path, file: &std::fs::File, remember: bool) -> std::io::Result<[u8; 32]> {
     let meta = host::file_metadata(file)?;
     let cached = store.join("ids").join(identity_name(&meta));
     if let Ok(text) = host::read_store_file(&cached)
@@ -124,7 +126,9 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
         return Ok(digest.try_into().expect("32 bytes"));
     }
     let digest = content_digest(file, meta.len())?;
-    let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
+    if remember {
+        let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
+    }
     Ok(digest)
 }
 
@@ -367,20 +371,71 @@ fn identity_entry(name: &str) -> bool {
         && fields[3..].iter().all(|f| f.split_once('.').is_some_and(|(a, b)| digits(a) && digits(b)))
 }
 
+/// The key of this executable, the libraries it loaded and RECIPE, the
+/// executable's digest through STORE's cache (REMEMBER as `file_digest`).
+fn world_key(store: &Path, recipe: &[String], remember: bool) -> std::io::Result<[u8; 32]> {
+    let executable = file_digest(store, &host::open_world_file("/proc/self/exe")?, remember)?;
+    let libraries = libraries_digest()
+        .map_err(|e| std::io::Error::other(format!("the libraries this process loaded cannot all be identified: {e}")))?;
+    let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
+    for line in recipe {
+        text.push_str(line);
+        text.push('\n');
+    }
+    Ok(sha256(text.as_bytes()))
+}
+
 impl World {
     /// RECIPE's world in STORE: the key of this executable and RECIPE.
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
         let store = store_path(&store)?;
         private_store(&store)?;
-        let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
-        let libraries = libraries_digest()
-            .map_err(|e| std::io::Error::other(format!("the libraries this process loaded cannot all be identified: {e}")))?;
-        let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
-        for line in &recipe {
-            text.push_str(line);
-            text.push('\n');
+        let key = world_key(&store, &recipe, true)?;
+        Ok(World { store, key, recipe })
+    }
+
+    /// Whether RECIPE's world in STORE, a store this process only reads,
+    /// would restore now (`restore_read_only`), writing nothing there.
+    #[must_use]
+    pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
+        World::read_only(store, recipe).is_ok()
+    }
+
+    /// RECIPE's world in STORE, read only, and its image opened, when its
+    /// manifest holds and the image is the one bound.
+    fn read_only(store: &Path, recipe: Vec<String>) -> Result<(World, std::fs::File), Json> {
+        let fail = |e: std::io::Error| json!({"store": e.to_string()});
+        let store = store_path(store).map_err(fail)?;
+        checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
+        let key = world_key(&store, &recipe, false).map_err(fail)?;
+        let world = World { store, key, recipe };
+        let manifest = world.valid_manifest()?;
+        let image = world.checked_image(&manifest, false)?;
+        Ok((world, image))
+    }
+
+    /// RECIPE's world restored from STORE, a store this process only reads
+    /// (an installation's, which its installer built): when it is usable
+    /// now, with nothing made or written there, no lock taken, no use
+    /// stamped and its digest cache never filled. No launch prunes such a
+    /// store or builds in it.
+    ///
+    /// # Errors
+    ///
+    /// Why the world is not usable: worlds unavailable to this process, a
+    /// store that is no private one of this user's, a stale or missing
+    /// manifest, or an image the arena cannot adopt.
+    pub fn restore_read_only<T: super::safe::SnapshotSafe + 'static>(store: &Path, recipe: Vec<String>)
+        -> Result<(Box<Vm>, T), Json> {
+        if !arena::active() {
+            return Err(json!("no arena"));
         }
-        Ok(World { store, key: sha256(text.as_bytes()), recipe })
+        let (world, image) = World::read_only(store, recipe)?;
+        match arena::adopt(&image) {
+            arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (Box::new(vm), carry))
+                .ok_or_else(|| json!({"image": "made for another key"})),
+            refused => Err(refusal(refused)),
+        }
     }
 
     /// The world LINES add to this one's recipe: keyed by this world's key
@@ -457,10 +512,10 @@ impl World {
     }
 
     /// The image MANIFEST names, opened, when its content is the one it
-    /// binds.
-    fn checked_image(&self, manifest: &Json) -> Result<std::fs::File, Json> {
+    /// binds; REMEMBER as `file_digest` takes it.
+    fn checked_image(&self, manifest: &Json, remember: bool) -> Result<std::fs::File, Json> {
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| json!({"missing": e.to_string()}))?;
-        let digest = file_digest(&self.store, &image).map_err(|e| json!({"image": e.to_string()}))?;
+        let digest = file_digest(&self.store, &image, remember).map_err(|e| json!({"image": e.to_string()}))?;
         match manifest["image"].as_str() {
             Some(bound) if bound == hex(&digest) => Ok(image),
             bound => Err(json!({"image": {"bound": bound, "now": hex(&digest)}})),
@@ -547,7 +602,7 @@ impl World {
     /// record and the image's content.
     fn usable(&self) -> Result<(std::fs::File, Json), Json> {
         let manifest = self.valid_manifest()?;
-        Ok((self.checked_image(&manifest)?, manifest))
+        Ok((self.checked_image(&manifest, true)?, manifest))
     }
 
     /// The world's image and manifest once a build made them usable, for a
@@ -888,7 +943,7 @@ impl World {
         host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
         // Hashed from the file as published, which also caches it.
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| e.to_string())?;
-        let digest = file_digest(&self.store, &image).map_err(|e| e.to_string())?;
+        let digest = file_digest(&self.store, &image, true).map_err(|e| e.to_string())?;
         manifest["image"] = json!(hex(&digest));
         self.publish(".json", &serde_json::to_vec(&manifest).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         Ok(len)
@@ -1450,7 +1505,7 @@ mod tests {
         let w = world.clone();
         assert!(bounded("the manifest", move || w.valid_manifest()).is_err());
         let w = world.clone();
-        assert!(bounded("the image", move || w.checked_image(&json!({"image": "00"}))).is_err());
+        assert!(bounded("the image", move || w.checked_image(&json!({"image": "00"}), true)).is_err());
         // As the digest cache's entry for a real file: not read, and the
         // digest made from the file itself.
         let input = dir.join("input");
@@ -1459,7 +1514,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("ids")).unwrap();
         fifo(&dir.join("ids").join(identity_name(&meta)));
         let store = dir.clone();
-        let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap())).unwrap();
+        let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap(), true)).unwrap();
         assert_eq!(digest, tree_digest(b"bytes"));
         let w = world.clone();
         assert!(bounded("the world's lock", move || w.try_lock()).is_err());

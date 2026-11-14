@@ -283,7 +283,7 @@ romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 (romacs_buffer_list/read/edit, romacs_file_write, romacs_visit); input \
 (romacs_send_keys, romacs_wait_idle); options (romacs_option_search/describe, \
 romacs_option_set/save); agents (romacs_delegate_task, \
-romacs_task_status/send/list/watch/cancel, romacs_orchestrator_capabilities); restart \
+romacs_task_status/send/list/watch/switch/cancel, romacs_orchestrator_capabilities); restart \
 (romacs_restart_request, romacs_call_outcome); gnosis_* (spaced-repetition \
 practice and review). romacs_help lists them all, one line each."
   "What an MCP client is told at initialization: the entry points and the
@@ -296,7 +296,7 @@ tools' groups, short, since every session pays for it.")
     ("input" "romacs_send_keys" "romacs_wait_idle")
     ("options" . "romacs_option_")
     ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_send" "romacs_task_list"
-     "romacs_task_watch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
+     "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
     ("restart" "romacs_restart_request" "romacs_call_outcome")
     ("gnosis" . "gnosis_"))
   "The tools' groups for `romacs_help': names, or a prefix; the rest are other.")
@@ -838,10 +838,18 @@ must not act as if its answer were delivered."
         (if (and (not (process-get peer 'token)) (string-match-p "\n" text)) (romacs-mcp--close peer)
           (process-put peer 'input text))))))
 
+(defun romacs-mcp-own-peer (peer)
+  "Vouch for PEER: a layer's own connection (an agent session's relay),
+bounded by what owns it, it leaves the anonymous peers' quota."
+  (process-put peer 'romacs-mcp-owned t))
+
 (defun romacs-mcp--accept (listener peer _message)
-  "Admit PEER from LISTENER, subject to the finite connection quota."
+  "Admit PEER from LISTENER, subject to the finite connection quota: of
+the peers no layer vouches for (`romacs-mcp-own-peer'), as many sessions'
+relays as run never crowd out one."
   (if (or (not (eq listener romacs-mcp--listener))
-          (>= (length romacs-mcp--peers) romacs-mcp--peer-limit))
+          (>= (cl-count-if-not (lambda (p) (process-get p 'romacs-mcp-owned)) romacs-mcp--peers)
+              romacs-mcp--peer-limit))
       (romacs-mcp--close peer)
     (push peer romacs-mcp--peers)
     (process-put peer 'generation romacs-mcp--generation)

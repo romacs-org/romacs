@@ -344,7 +344,8 @@ else nil."
     (concat icon " ")))
 
 (defvar romacs-mode-line-agent nil
-  "Non-nil while an agent works for this buffer: a string to show.")
+  "What agents have to say, a string to show, or nil: by default, every
+agent session's news (the agent UI sets it).")
 (put 'romacs-mode-line-agent 'risky-local-variable t)
 
 (defcustom romacs-mode-line-minor-modes nil

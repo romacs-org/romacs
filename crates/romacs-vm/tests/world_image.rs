@@ -104,6 +104,7 @@ fn act_in_role() -> bool {
         Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
+        Ok("heap-file") => heap_file(&store.unwrap()),
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         _ => return false,
@@ -455,6 +456,80 @@ fn a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_pea
     assert_eq!(outcome(&mut child_of(HEAP, "launch", &store)), restored());
     assert_eq!(outcome(&mut child_of(HEAP, "heap", &store)), json!({"outside": true, "used_kept": true}).to_string());
     assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "collected": true}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const HEAP_FILE: &str = "a_restored_process_that_asks_for_the_file_heap_allocates_from_it_and_its_twins_map_it";
+
+/// After a restore, on as many collector threads as the parent asks: whether
+/// the file heap started, as asked or not, and the census says so; whether a
+/// new block is the file heap's and none of the arena's; and, after rounds
+/// that each make conses, strings and a vector, collect, drop them and
+/// collect again, each collection forking a mark twin whose marks it checks
+/// against its own (a difference ends the process), how the twins were
+/// forked, whether the collector ran threads, and whether the heap is whole.
+/// The threads free the dead strings' and vector's storage, the VM's own
+/// blocks, while the next rounds run.
+fn heap_file(store: &Path) {
+    use romacs_allocator::file_heap;
+    let Launch::Restored { mut vm, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    vm.world_reinit();
+    let threads: usize = std::env::var("ROMACS_WORLD_IMAGE_TEST_THREADS").unwrap().parse().unwrap();
+    vm.set_gc_threads(threads);
+    let started = arena::heap_file().map(|started| started.map(|_| ()).map_err(|refused| format!("{refused:?}")));
+    let (base, reserve) = arena::current_range().unwrap();
+    let block = vec![1u8; 64 << 20];
+    let at = block.as_ptr() as usize;
+    let (file, arena) = (file_heap::owns(at), (base..base + reserve).contains(&at));
+    drop(block);
+    vm.eval_source("(dotimes (_ 6) (let ((strings nil)) (dotimes (_ 20000) (setq strings (cons (make-string 100 ?x) strings))) \
+                      (setq world-image-junk (list (make-list 200000 nil) strings (make-vector 100000 nil)))) \
+                    (garbage-collect) (setq world-image-junk nil) (garbage-collect))").unwrap();
+    // The pages a twin's fork folds straight after a fold, with three million conses held: its
+    // record of held entries, a byte each, is made after the fork, or it would be among them.
+    let in_fork = if file { vm.eval_source("(progn (setq world-image-junk (make-list 3000000 nil)) (garbage-collect) (romacs--heap-file-fold) \
+        (let ((before (plist-get (plist-get (romacs--arena-census) :heap-file) :folded-pages))) (garbage-collect) \
+          (- (plist-get (plist-get (romacs--arena-census) :heap-file) :folded-pages) before)))")
+        .and_then(romacs_vm::Local::display).unwrap().parse::<u64>().unwrap() } else { 0 };
+    let value = vm.eval_source("(world-image-probe)").and_then(romacs_vm::Local::display).unwrap();
+    let census = vm.eval_source("(and (plist-member (romacs--arena-census) :heap-file) t)").and_then(romacs_vm::Local::display).unwrap();
+    let stats = arena::heap_file().and_then(Result::ok).unwrap_or_default();
+    println!("WORLD-IMAGE {}", json!({"started": started, "census": census, "file": file, "arena": arena, "value": value,
+                                       "lazy": stats.lazy_forks, "plain": stats.plain_forks, "failed": stats.failed_folds,
+                                       "threads": collector_threads(), "in_fork": in_fork}));
+}
+
+#[test]
+fn a_restored_process_that_asks_for_the_file_heap_allocates_from_it_and_its_twins_map_it() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(HEAP_FILE);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(HEAP_FILE, "launch", &store)), restored());
+    let run = |asked: bool, threads: usize| -> serde_json::Value {
+        let mut command = child_of(HEAP_FILE, "heap-file", &store);
+        command.env("ROMACS_GC_TWIN", "1").env("ROMACS_WORLD_IMAGE_TEST_THREADS", threads.to_string());
+        if asked { command.env("ROMACS_HEAP_FILE", "1") } else { command.env_remove("ROMACS_HEAP_FILE") };
+        serde_json::from_str(&outcome(&mut command)).unwrap()
+    };
+    // Asked for, on one collector thread and on four: every twin is forked
+    // lazily, each gone before the next collection, and agrees.
+    for threads in [1, 4] {
+        let ran = run(true, threads);
+        assert_eq!((&ran["started"], &ran["census"], &ran["file"], &ran["arena"], &ran["value"]),
+                   (&json!({"Ok": null}), &json!("t"), &json!(true), &json!(false), &json!("(built 1)")), "{threads} threads: {ran}");
+        assert!(ran["lazy"].as_u64() >= Some(12) && ran["plain"] == 0 && ran["failed"] == 0, "{threads} threads: {ran}");
+        assert!(ran["in_fork"].as_u64() < Some(3_000_000 / 4096 / 2), "{threads} threads: {ran}");
+        assert_eq!(ran["threads"].as_u64() > Some(1), threads > 1, "{threads} threads: {ran}");
+    }
+    // Not asked for, none of it exists, the census's row included.
+    let ran = run(false, 4);
+    assert_eq!((&ran["started"], &ran["census"], &ran["file"], &ran["lazy"], &ran["plain"]),
+               (&json!(null), &json!("nil"), &json!(false), &json!(0), &json!(0)), "{ran}");
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

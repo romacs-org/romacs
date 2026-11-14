@@ -113,6 +113,6 @@ fn ordinary_search_path_still_loads_production_generated_support() {
     assert_eq!(own.iter().filter(|step| step["status"] == "ok").count(), 94);
     assert_eq!(own.len(), 95);
     assert_eq!(own[94]["ordinal"], 95);
-    assert_eq!(own[94]["line"], 599);
+    assert!(own[94]["source"].as_str().unwrap().starts_with("(define-minor-mode cl-old-struct-compat-mode"), "{}", own[94]);
     assert_eq!(own[94]["error"], "(void-function define-minor-mode)");
 }

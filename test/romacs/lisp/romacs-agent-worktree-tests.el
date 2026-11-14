@@ -12,6 +12,10 @@
   (require 'romacs-agent)
   (require 'romacs-agent-tools))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 (defun romacs-agent-worktree-tests--git (directory &rest args)
   "Git ARGS's output in DIRECTORY, trimmed; an error when it fails."
   (with-temp-buffer

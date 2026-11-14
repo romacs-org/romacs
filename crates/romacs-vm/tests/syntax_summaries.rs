@@ -83,6 +83,37 @@ fn summaries_serve_the_long_parses() {
     }
 }
 
+/// Closes past the outermost level and nesting past GNU's 100 levels have
+/// summaries of their own: once made, the same parses read no leaf again,
+/// neither for a summary nor in place of one. The char-table write count
+/// is the process's, which the other tests here move from their threads:
+/// a round counts only after a whole round in one context, and in one.
+#[test]
+fn closes_past_the_bottom_and_deep_nesting_are_served_from_kept_summaries() {
+    let fixtures = [
+        r#"(syn ?\( "()" ?\) ")(") (build "a) b)) (c (d) e\n" 4000)"#,
+        r#"(syn ?\( "()" ?\) ")(" ?\; "<" ?\n ">") (insert (make-string 150 ?\() "\n") (build "(a ; ) (\n b)\n" 3000) (insert (make-string 160 ?\)) "\n") (build "x (y) z\n" 1000)"#,
+    ];
+    for fixture in fixtures {
+        let expression = format!(r"(with-temp-buffer {fixture}
+           (let ((stats (lambda () (let ((stats (romacs-syntax-summaries-stats)))
+                                     (list (plist-get stats :leaf-scans) (plist-get stats :context-switches) (plist-get stats :plain-leaves)))))
+                 (clean 0) (tries 0) (result nil))
+             (probe) (chain)
+             (while (and (not result) (< tries 20))
+               (let ((before (funcall stats)))
+                 (probe) (chain)
+                 (let ((after (funcall stats)))
+                   (setq clean (if (= (nth 1 before) (nth 1 after)) (1+ clean) 0) tries (1+ tries))
+                   (when (>= clean 2) (setq result (list (- (car after) (car before)) (nth 2 after)))))))
+             result))");
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shown = vm.eval_source(&PRELUDE.replace("EXPR", &expression)).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{fixture}: {e:?}"));
+        assert_eq!(shown, "(0 0)", "{fixture}: leaf scans a warm round added, leaves ever scanned outside a summary");
+    }
+}
+
 /// Two tables holding one sub-char-table: a write through either changes
 /// both, so summaries read under the other are not used again.
 #[test]
@@ -220,4 +251,81 @@ fn propertizing_parses_match_pinned_gnu() {
                       (list (parse-partial-sexp 400 (point-max) nil nil (parse-partial-sexp 1 400)) (nreverse log))))))"#;
     let (expected, actual) = run(&PRELUDE.replace("EXPR", stops));
     assert_eq!(actual.as_deref(), Ok(expected.as_str()));
+}
+
+/// A hundred `syntax-table' properties put near the end between two
+/// parses, each second one making a `(' punctuation: more ranges than the
+/// change log keeps apart, so it holds their hull. The values are GNU's,
+/// and the leaves before the first property keep their summaries. The one
+/// leaf the hull drops before the scanned tail is summarized twice: with
+/// its `(' punctuation its `)' close past the bottom level, so its general
+/// summary does not fit and an exact one is made for its level count.
+#[test]
+fn property_changes_near_the_end_keep_the_summaries_before_them() {
+    const CASE: &str = r#"(with-temp-buffer
+       (syn ?\; "<" ?\n ">" ?\" "\"")
+       (build "(defun f (a) \"doc\" (list a 'b)) ; comment\n" 3000)
+       (set (make-local-variable 'parse-sexp-lookup-properties) t)
+       (setq syntax-propertize--done most-positive-fixnum)
+       (let ((before (probe)) (n 0))
+         (goto-char (- (point-max) 6000))
+         (while (< n 100)
+           (re-search-forward "[(a]")
+           (put-text-property (1- (point)) (point) 'syntax-table (string-to-syntax (if (eq (char-before) ?\() "." "w")))
+           (setq n (1+ n)))
+         (list before SECOND (probe) (chain))))"#;
+    const PARSE: &str = "(parse-partial-sexp 1 (point-max))";
+    let (expected, actual) = run(&PRELUDE.replace("EXPR", &CASE.replace("SECOND", PARSE)));
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()));
+    let counted = format!("(let ((scans (plist-get (romacs-syntax-summaries-stats) :leaf-scans))) {PARSE}
+        (setq counts (list (plist-get (romacs-syntax-summaries-stats) :leaves) (- (plist-get (romacs-syntax-summaries-stats) :leaf-scans) scans)
+                           (plist-get (romacs-syntax-summaries-stats) :log-overflows) (plist-get (romacs-syntax-summaries-stats) :context-switches))))");
+    let counts = undisturbed(&format!("(let ((counts nil)) {} counts)", CASE.replace("SECOND", &counted)));
+    assert_eq!(counts, "(69 2 1)", "leaves, summaries the second parse made again, hulls taken");
+}
+
+/// What EXPRESSION shows, a list whose last element is its buffer's count
+/// of context switches, without that element, from a run where it is 0: a
+/// char-table write by any thread of the process changes every index's
+/// context, and with it the leaves a parse scans.
+fn undisturbed(expression: &str) -> String {
+    for _ in 0..100 {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shown = vm.eval_source(&PRELUDE.replace("EXPR", expression)).and_then(romacs_vm::Local::display).unwrap();
+        if let Some(counts) = shown.strip_suffix(" 0)") {
+            return format!("{counts})");
+        }
+    }
+    panic!("a char table was written during each of 100 runs");
+}
+
+/// A write that leaves a run's `syntax-table' value as it was (`eq') is
+/// no change to a parse: a put beside another property that does change,
+/// a put over more text than had the value (its new part alone is one),
+/// a remove where there is none, beside one of a property that is there
+/// (as `syntax.el` removes `syntax-multiline` with it). An equal value in
+/// another cons is another value.
+#[test]
+fn a_property_write_changes_only_the_runs_it_changes() {
+    let source = r#"(with-temp-buffer
+       (build "(defun f (a) \"doc\" (list a 'b)) ; comment\n" 3000)
+       (set (make-local-variable 'parse-sexp-lookup-properties) t)
+       (setq syntax-propertize--done most-positive-fixnum)
+       (put-text-property 1000 3000 'syntax-multiline t)
+       (let* ((value (list 1))
+              (scans (lambda (write)
+                       (parse-partial-sexp 1 (point-max))
+                       (let ((scans (plist-get (romacs-syntax-summaries-stats) :leaf-scans)))
+                         (funcall write)
+                         (parse-partial-sexp 1 (point-max))
+                         (- (plist-get (romacs-syntax-summaries-stats) :leaf-scans) scans)))))
+         (list (funcall scans (lambda () (put-text-property 5000 100000 'syntax-table value)))
+               (funcall scans (lambda () (add-text-properties 5000 100000 (list 'face 'bold 'syntax-table value))))
+               (funcall scans (lambda () (put-text-property 4000 100000 'syntax-table value)))
+               (funcall scans (lambda () (remove-list-of-text-properties 1000 3000 '(syntax-table syntax-multiline))))
+               (funcall scans (lambda () (put-text-property 5000 100000 'syntax-table (list 1))))
+               (plist-get (romacs-syntax-summaries-stats) :log-overflows)
+               (plist-get (romacs-syntax-summaries-stats) :context-switches))))"#;
+    assert_eq!(undisturbed(source), "(47 0 2 0 47 0)", "leaves summarized again after each write, and no hull");
 }

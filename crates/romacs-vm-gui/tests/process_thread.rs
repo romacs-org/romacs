@@ -27,7 +27,7 @@ fn an_accepted_client_keeps_its_servers_lock() {
     std::fs::create_dir_all(&dir).unwrap();
     let run = |binary: &str| {
         let output = Command::new(binary).args(["-Q", "--batch", "--eval", form]).current_dir(&dir)
-            .env("HOME", &dir).output().unwrap();
+            .env("HOME", &dir).env("ROMACS_WORLD", "off").output().unwrap();
         assert!(output.status.success(), "{binary}: {}", String::from_utf8_lossy(&output.stderr));
         String::from_utf8(output.stdout).unwrap()
     };

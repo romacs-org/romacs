@@ -87,6 +87,7 @@ fn suspend_emacs_stops_between_its_hooks() {
                        (prin1 (suspend-emacs)))";
     let run = |binary: &str| {
         let child = Command::new(binary).args(["-Q", "--batch", "--eval", form]).current_dir(&dir).env("HOME", &dir)
+            .env("ROMACS_WORLD", "off")
             .stdout(std::process::Stdio::piped()).process_group(0).spawn().unwrap();
         let stat = format!("/proc/{}/stat", child.id());
         let stopped = || std::fs::read_to_string(&stat).is_ok_and(|text| text.rsplit(") ").next().unwrap_or("").starts_with('T'));

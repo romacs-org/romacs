@@ -25,13 +25,17 @@ Run from the repository root with the configured Rust toolchain:
 ```sh
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
 cargo build -p romacs-vm --bins
-cargo test -p romacs-vm
-cargo test -p romacs-vm --release
+cargo nextest run -p romacs-vm $(python3 tools/lib/test_modules.py targets romacs-vm)
 python3 crates/romacs-vm/tools/check_source.py \
   --binary "$CARGO_TARGET_DIR/debug/romacs-vm" --output "$CARGO_TARGET_DIR/source-oracle.json"
 ```
 
 `-p romacs-vm` builds and tests this runtime without the GUI host.
+The test line runs the library's tests and the `all` target, which holds every
+`tests/FILE.rs` as a module, each test in a process of its own as the gates run
+them. A bare `cargo test -p romacs-vm` also builds each file as a target of its
+own and runs its tests a second time; `cargo test -p romacs-vm --test FILE`
+runs one file.
 
 ## Source and agent requests
 

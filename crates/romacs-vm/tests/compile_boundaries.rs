@@ -49,7 +49,7 @@ fn the_sealed_api_is_usable() {
 fn listed_data_is_snapshot_safe() {
     use romacs_vm::world::safe::{SnapshotSafe, snapshot_enum, snapshot_struct, snapshot_tuple};
 
-    pub struct Report { name: String, rows: Vec<(u32, f64)>, note: Option<&'static str> }
+    pub struct Report { name: String, rows: Vec<(u32, f64)>, note: Option<Box<str>> }
     snapshot_struct!(Report { name, rows, note });
     pub struct Pair(u8, Box<str>);
     snapshot_tuple!(Pair(a, b));

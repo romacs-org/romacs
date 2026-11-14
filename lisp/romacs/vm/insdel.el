@@ -45,10 +45,20 @@ after the hooks and left to the collector after a non-local exit.  A VM2
 unibyte buffer holds no markers: there POSITIONS stay as they are."
   (if (not enable-multibyte-characters)
       (progn (funcall function) positions)
-    (let ((markers (mapcar (lambda (p) (if p (copy-marker p))) positions)))
+    ;; Loops, not `mapcar': this runs around every change that has a hook.
+    (let ((markers nil) (moved nil))
+      (while positions
+        (setq markers (cons (if (car positions) (copy-marker (car positions))) markers)
+              positions (cdr positions)))
       (funcall function)
-      (mapcar (lambda (m) (if m (prog1 (marker-position m) (set-marker m nil))))
-              markers))))
+      ;; MARKERS is in reverse, so MOVED comes out in order.
+      (while markers
+        (setq moved (cons (if (car markers)
+                              (prog1 (marker-position (car markers))
+                                (set-marker (car markers) nil)))
+                          moved)
+              markers (cdr markers)))
+      moved)))
 
 (defun romacs--before-change (buffer beg end modification-hooks
                                      &optional undoable preserve)

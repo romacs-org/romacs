@@ -648,7 +648,7 @@ Modus merges them): MODUS is a plist of :base, :preference, :core (a
 (defconst romacs-theme--modus-constants
   '((fg-table-dim "gray50") (term-dim "#595959") (term-light "#a6a6a6"))
   "The literal colours of Modus's table, under the names
-tools/adapt-modus gives them, as Modus has them: a theme with its own
+romacs-theme-modus.el gives them, as Modus has them: a theme with its own
 roles sets these names, one on Modus's palette gets Modus's values.")
 
 (defun romacs-theme--modus-bindings (palette)

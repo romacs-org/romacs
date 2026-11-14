@@ -106,12 +106,25 @@ fn take_post_gc(cx) {
     Ok(if cx.take_post_gc() { Value::TRUE } else { Value::NIL })
 }}
 
+/// A plist of ROWS, each key the keyword of its name.
+fn plist(cx: &mut Leaf<'_>, rows: &[(&str, Value)]) -> Value {
+    rows.iter().rev().fold(Value::NIL, |tail, &(key, value)| {
+        let key = cx.intern(&format!(":{key}"));
+        let tail = cx.cons(value, tail);
+        cx.cons(key, tail)
+    })
+}
+
 // Where the process's heap bytes are: a plist of the production
 // allocator's :platform-allocated and :platform-resident bytes
 // (`romacs_allocator::stats`, 0 where it keeps none), the arenas' :used,
 // :small-free, :slab-rest, :runs-kept, :runs-released and :above-top bytes
 // (`world::arena::census`) and :classes, an alist of block size to free
-// bytes; nil when the heap is the system allocator's.
+// bytes; nil when the heap is the system allocator's. A process that asked
+// for the file heap (`ROMACS_HEAP_FILE`) has :heap-file too: its counts
+// (`romacs_allocator::file_heap::Stats`; :readers is t once a forked child
+// went untracked; :outside is the bytes taken outside its range once that
+// had no room), or a string saying why it was refused.
 defsubr! { name = "romacs--arena-census", gnu = "alloc.c:7154", effect = Global,
 fn arena_census(cx) {
     let Some(c) = crate::world::arena::census() else { return Ok(Value::NIL) };
@@ -124,11 +137,35 @@ fn arena_census(cx) {
     let rows = [("platform-allocated", int(allocated)), ("platform-resident", int(resident)), ("used", int(c.used)),
         ("small-free", int(c.small_free)), ("slab-rest", int(c.slab_rest)), ("runs-kept", int(c.runs_kept)),
         ("runs-released", int(c.runs_released)), ("above-top", int(c.above_top)), ("classes", classes)];
-    Ok(rows.iter().rev().fold(Value::NIL, |tail, &(key, value)| {
-        let key = cx.intern(&format!(":{key}"));
-        let tail = cx.cons(value, tail);
-        cx.cons(key, tail)
-    }))
+    let heap_file = match crate::world::arena::heap_file() {
+        None => return Ok(plist(cx, &rows)),
+        Some(Err(refused)) => cx.string(&format!("{refused:?}")),
+        Some(Ok(s)) => {
+            let count = |n: u64| int(usize::try_from(n).unwrap_or(usize::MAX));
+            let readers = if s.readers == usize::MAX { Value::TRUE } else { int(s.readers) };
+            plist(cx, &[("mapped", int(s.mapped)), ("folds", count(s.folds)), ("folded-pages", count(s.folded_pages)),
+                ("punched", count(s.punched)), ("kept", count(s.kept)), ("readers", readers), ("lazy-forks", count(s.lazy_forks)),
+                ("plain-forks", count(s.plain_forks)), ("failed-folds", count(s.failed_folds)), ("outside", count(s.outside))])
+        }
+    };
+    let mut all = rows.to_vec();
+    all.push(("heap-file", heap_file));
+    Ok(plist(cx, &all))
+}}
+
+// Copy the pages written since the last fold into the heap file
+// (`romacs_allocator::file_heap::fold`), so that the next fork by this
+// thread copies almost nothing: for an idle moment. (PAGES . RUNS) folded,
+// or nil when nothing was (no file heap, or a forked child still reads the file).
+defsubr! { name = "romacs--heap-file-fold", gnu = "alloc.c:7154", effect = Global,
+fn heap_file_fold(cx) {
+    Ok(match romacs_allocator::file_heap::fold() {
+        Some(fold) => {
+            let int = |n: usize| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).expect("a page count fits a fixnum");
+            cx.cons(int(fold.pages), int(fold.runs))
+        }
+        None => Value::NIL,
+    })
 }}
 
 // The GNU/Linux sysinfo branch, in KiB; a handler for `default-directory'

@@ -5,25 +5,6 @@ use crate::thread_comm::{InputEvent, WindowCommand};
 use winit::window::UserAttentionType;
 
 impl RenderApp {
-    pub(super) fn retire_cancelled_frames(&mut self) {
-        let cancelled: Vec<_> = self
-            .frame_leases
-            .iter()
-            .filter_map(|(frame, live)| {
-                (!live.load(std::sync::atomic::Ordering::Acquire)).then_some(*frame)
-            })
-            .collect();
-        for frame in cancelled {
-            self.frame_leases.remove(&frame);
-            if let Some(waits) = &self.comms.native_window_waits {
-                waits.remove(frame);
-            }
-            self.handle_window(WindowCommand::DestroyWindow {
-                frame: crate::thread_comm::FrameRef::Frame(frame),
-            });
-        }
-    }
-
     pub(super) fn refresh_frame_opacity(&mut self) {
         // Never hold this CPU lock across GPU work or callback-capable code.
         let controls = self
@@ -131,32 +112,8 @@ impl RenderApp {
                 visual,
                 adopt_primary,
                 reply,
-                live,
-                deadline,
             } => {
-                if !live.load(std::sync::atomic::Ordering::Acquire) {
-                    // Legacy adoption owns the pre-existing initial window.
-                    // Never let a stale cancellation retire a newer identity.
-                    if adopt_primary && self.frame_windows.primary_frame_id().is_none() {
-                        self.handle_window(WindowCommand::DestroyWindow {
-                            frame: crate::thread_comm::FrameRef::Primary,
-                        });
-                    }
-                    return;
-                }
                 let id = frame.raw_id();
-                if let Some(waits) = &self.comms.native_window_waits {
-                    if waits.terminal() {
-                        if let Some(reply) = reply {
-                            let _ = reply.send(Err(
-                                "Native connection closed during frame preparation".into(),
-                            ));
-                        }
-                        return;
-                    }
-                    waits.register(id, live.clone(), deadline);
-                }
-                self.frame_leases.insert(id, live);
                 if let Some(visual) = visual {
                     self.handle_config(crate::thread_comm::ConfigCommand::SetVisualConfig(visual));
                 }

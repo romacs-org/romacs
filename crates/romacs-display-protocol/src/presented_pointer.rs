@@ -6,7 +6,7 @@
 
 use crate::{
     DisplaySlotId, DisplayWindowId, FaceId, FrameGlyph, FrameGlyphBuffer, FrameRect, FrameSize,
-    InteractionId, PresentationId, Rect,
+    InteractionId, PresentationId,
 };
 
 /// Semantic area resolved from the immutable geometry of one presentation.
@@ -494,29 +494,6 @@ pub struct PresentedHit {
 }
 
 impl PresentedHit {
-    /// Preserve source identity while describing the actual scrolled pixels.
-    /// The caller owns a validated, body-only coverage projection.
-    pub(crate) fn project_scrolled_body(
-        mut self,
-        viewport: Rect,
-        offset: f32,
-        row_delta: i64,
-    ) -> Self {
-        self.region.bounds =
-            FrameRect::new(viewport.x, viewport.y, viewport.width, viewport.height)
-                .expect("validated scroll viewport");
-        if let Some(position) = self.text_position.as_mut() {
-            let bounds = position.bounds;
-            let top = (bounds.y() - offset).max(viewport.y);
-            let bottom = (bounds.y() + bounds.height() - offset).min(viewport.bottom());
-            position.bounds =
-                FrameRect::new(bounds.x(), top, bounds.width(), (bottom - top).max(0.0))
-                    .expect("validated scroll hit");
-            position.row += row_delta;
-        }
-        self
-    }
-
     #[must_use]
     pub const fn region(self) -> PresentedHitRegion {
         self.region
@@ -1042,11 +1019,6 @@ impl PresentedHitIndex {
     #[must_use]
     pub fn text_positions(&self) -> &[PresentedTextPosition] {
         &self.text.parts().positions
-    }
-
-    #[must_use]
-    pub(crate) fn string_positions(&self) -> &[PresentedStringPosition] {
-        &self.string_positions
     }
 
     /// Pointer regions this index would examine for a hit at `(x, y)`.
@@ -2140,7 +2112,6 @@ pub enum PresentedPointerMapError {
     Semantic(PresentedHitError),
     UnknownAppearance(PointerAppearanceId),
     MissingRegionBehavior,
-    MissingSourceMap,
     EmptyAppearance,
     EmptyPaintSpan,
     OverlappingPaintSpans,
@@ -2461,8 +2432,6 @@ fn rect_has_valid_geometry(rect: FrameRect) -> bool {
         && (rect.x() + rect.width()).is_finite()
         && (rect.y() + rect.height()).is_finite()
 }
-
-mod scroll;
 
 /// Source role of one point rectangle. This byte-sized numeric role survives
 /// compact row storage and transport; it carries no Lisp identity or cache.

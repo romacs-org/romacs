@@ -33,12 +33,12 @@
   "The Romacs autoloads that declare nothing yet, read before any library loads.")
 
 (defconst romacs-idioms-test--libraries
-  '(romacs-agent-ui romacs-agent-history romacs-attach romacs-video romacs-model
+  '(romacs-agent-ui romacs-agent-board romacs-agent-history romacs-attach romacs-video romacs-model
     romacs-shader-playground romacs-shaders romacs-surface romacs-mcp)
   "The libraries with keymaps a session does not load by itself.")
 
 (defconst romacs-idioms-test--anywhere
-  '((romacs-agent-switch "Reaches a session from any buffer; a chat binds it too"))
+  '()
   "Commands a Romacs keymap binds that apply anywhere, each (COMMAND REASON).")
 
 (defconst romacs-idioms-test--literal-keys

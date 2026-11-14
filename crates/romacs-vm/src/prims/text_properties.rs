@@ -34,19 +34,27 @@ fn edit_of(cx: &mut Leaf<'_>, kind: Value, arg: Value) -> std::result::Result<Pr
 }
 
 fn property_change(cx: &mut Leaf<'_>, kind: i64, start: Value, end: Value, arg: Value, object: Value) -> Next {
+    let edit = edit_of(cx, Value::integer(kind).unwrap(), arg)?;
+    property_edit(cx, kind, &edit, start, end, |_| arg, object)
+}
+
+/// EDIT of kind KIND begun: done at once, or waiting on its hooks with ARG
+/// in its registers, which is made only then.
+fn property_edit(cx: &mut Leaf<'_>, kind: i64, edit: &PropertyEdit, start: Value, end: Value, arg: impl FnOnce(&mut Leaf<'_>) -> Value, object: Value) -> Next {
     let kind = Value::integer(kind).unwrap();
-    let edit = edit_of(cx, kind, arg)?;
     let put = matches!(kind.integer_value(), Some(3..=5));
-    match cx.property_begin(&edit, start, end, object)? {
+    match cx.property_begin(edit, start, end, object)? {
         PropertyBegin::Done(value) => Ok(Step::Done(if put { Value::NIL } else { value })),
         PropertyBegin::Hooks { retry, .. } if super::insdel::half_missing(cx)? => {
             // The Lisp half first; the change is then planned afresh.
             for marker in [retry.start, retry.end] {
                 if marker != Value::NIL { cx.release_watch(marker)?; }
             }
+            let arg = arg(cx);
             super::insdel::install_half(cx, replan, vec![kind, start, end, arg, object])
         }
         PropertyBegin::Hooks { buffer, start: beg, end: stop, prepared, retry } => {
+            let arg = arg(cx);
             let hooks = prepared.modification_hooks.iter().rev().fold(Value::NIL, |tail, &h| cx.cons(h, tail));
             let undoable = if prepared.undoable { Value::TRUE } else { Value::NIL };
             let (b, e) = (Value::integer(beg).unwrap(), Value::integer(stop).unwrap());
@@ -136,9 +144,8 @@ fn get_pos_property(cx, position: Value, prop: Value; optional object: Value) {
 // Fput_text_property: add_text_properties_1 with (PROPERTY VALUE), always nil.
 defsubr! { name = "put-text-property", gnu = "textprop.c:1314", effect = Global,
 fn put_text_property(cx, start: Value, end: Value, property: Value, value: Value; optional object: Value) -> Step {
-    let tail = cx.cons(value, Value::NIL);
-    let plist = cx.cons(property, tail);
-    property_change(cx, 3, start, end, plist, object)
+    let plist = |cx: &mut Leaf<'_>| { let tail = cx.cons(value, Value::NIL); cx.cons(property, tail) };
+    property_edit(cx, 3, &PropertyEdit::Put(property, value), start, end, plist, object)
 }}
 
 // Fadd_face_text_property: FACE prepended (or with APPENDP appended) to each
