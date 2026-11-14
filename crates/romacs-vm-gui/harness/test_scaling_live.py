@@ -106,6 +106,23 @@ class Parsing(unittest.TestCase):
                           '{"scaling":"end"}', '{"diagnostic":"paint-submitted","presentation":4}'])
         self.assertEqual(s.step_paints(text), [1, 0, 1])
 
+    def test_a_slope_probe_is_held_by_its_slope_not_its_exponent(self):
+        # 10 M of fixed work and 2 instructions per unit of N a step, 4 steps
+        # at N 100 and 400: the exponent says it grows, the slope that it is
+        # within 3 a unit.
+        flat = row(10**7 + 2 * 100 * 4, 10**7 + 2 * 400 * 4, slope=3.0, steps=4, budget=0.0)
+        self.assertEqual((flat['status'], flat['slope'], flat['slope_budget']), ('PASS', 2.0, 3.0))
+        steep = row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4)
+        self.assertEqual(steep['status'], 'FAIL')
+        self.assertIn('slope 5.0 over budget 3.0', steep['reason'])
+        self.assertEqual(row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4, known='tickets.md#y')['status'], 'KNOWN')
+        self.assertNotIn('slope', row(10**7, 4 * 10**7))
+        text = s.table([flat])
+        self.assertIn('| slope 3.0 | PASS', text)
+        self.assertIn('slope 2.0 a unit of N a step', text)
+        entry = s.probe_entry({'name': 'a', 'n': 3, 'slope': 2})
+        self.assertEqual((entry['slope'], s.probe_entry({'name': 'a', 'n': 3})['slope']), (2.0, None))
+
     def test_table_names_status_and_reason(self):
         text = s.table([row(10**7, 16 * 10**7, known='tickets.md#x')])
         self.assertIn('KNOWN', text)

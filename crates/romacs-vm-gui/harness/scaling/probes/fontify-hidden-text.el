@@ -10,9 +10,16 @@
 ;; highlighting is by keywords only: a syntactic pass parses from the
 ;; buffer's start to each chunk it fontifies, hidden text or not, in GNU
 ;; as here.
+;;
+;; Held by its slope, instructions per hidden character a paint, not by an
+;; exponent: an exponent over total work moves when a fixed cost moves (it
+;; failed on an improvement, 09862fd6f).  The 11 left are window_text's
+;; publish-lines loop searching raw newlines across hidden text three times
+;; a paint (about 4) and allocation and small scans the profile spreads;
+;; they go when extraction takes the row bound itself (romacs#145's loop).
 (defvar romacs-fontify-isolate)
 
-(scaling-probe fontify-hidden-text :gui t :n 80000 :k 8 :steps 4 :budget 0.1
+(scaling-probe fontify-hidden-text :gui t :n 80000 :k 8 :steps 4 :slope 13
   :setup (progn
            (setq romacs-fontify-isolate nil)
            (let (buffers)

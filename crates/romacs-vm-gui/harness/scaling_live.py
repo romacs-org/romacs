@@ -12,7 +12,15 @@ The empirical exponent is
 1 for linear work, about 1.15 for n log n at these sizes, 2 for quadratic.
 A probe passes when its exponent is within its budget (default 1.25); a
 probe whose super-linear cost is a known, ticketed debt (:known) reports
-KNOWN instead of failing.  A body that does under MIN_WORK instructions at
+KNOWN instead of failing.  A probe that claims N costs it nothing gives a
+:slope instead: the most instructions its work may grow by per unit of N
+and step,
+
+    (work(K*N) - work(N)) / ((K - 1) * N * steps),
+
+which holds what it claims however large the fixed cost under it is (an
+exponent over total work moves when that cost moves, either way); the
+exponent is still reported.  A body that does under MIN_WORK instructions at
 N is refused: its exponent would measure the probe's own overhead.  A
 :stack probe also passes only if the native stack room it records at each
 `scaling-stack-mark' varies by under STACK_SLACK bytes at K*N: a loader that
@@ -87,6 +95,12 @@ def exponent(work_n, work_kn, k):
     return math.log(work_kn / work_n) / math.log(k)
 
 
+def slope(work_n, work_kn, probe):
+    """The instructions WORK_N grows by to WORK_KN per unit of PROBE's N and
+    per step."""
+    return (work_kn - work_n) / ((probe['k'] - 1) * probe['n'] * probe.get('steps', 1))
+
+
 def stack_growth(marks):
     """The spread of a :stack probe's room marks, in bytes (0 without marks)."""
     return max(marks) - min(marks) if marks else 0
@@ -109,7 +123,11 @@ def verdict(probe, small, large):
         return {**row, 'status': 'FAIL', 'reason': f'body does {work_kn} instructions at K*N'}
     row['exponent'] = round(exponent(work_n, work_kn, probe['k']), 3)
     problems = []
-    if row['exponent'] > probe['budget']:
+    if probe.get('slope') is not None:
+        row.update(slope=round(slope(work_n, work_kn, probe), 2), slope_budget=probe['slope'])
+        if row['slope'] > probe['slope']:
+            problems.append(f"slope {row['slope']} over budget {probe['slope']} instructions per unit of N a step")
+    elif row['exponent'] > probe['budget']:
         problems.append(f"exponent {row['exponent']} over budget {probe['budget']}")
     if probe.get('stack'):
         row['stack_growth'] = stack_growth(large.get('stack') or [])
@@ -120,7 +138,7 @@ def verdict(probe, small, large):
     if not problems:
         stale = {'reason': 'within budget: its known override can go'} if probe.get('known') else {}
         return {**row, 'status': 'PASS', **stale}
-    status = 'KNOWN' if probe.get('known') and all(p.startswith('exponent') for p in problems) else 'FAIL'
+    status = 'KNOWN' if probe.get('known') and all(p.startswith(('exponent', 'slope')) for p in problems) else 'FAIL'
     return {**row, 'status': status, 'reason': '; '.join(problems)}
 
 
@@ -140,11 +158,15 @@ def table(rows):
             note = f"{note}; known: {r['known']}" if note else f"known: {r['known']}"
         if 'stack_growth' in r:
             note = f"{note}; stack spread {r['stack_growth']} B" if note else f"stack spread {r['stack_growth']} B"
+        if 'slope' in r:
+            held = f"slope {r['slope']} a unit of N a step"
+            note = f'{note}; {held}' if note else held
         if r.get('disturbed'):
             aside = f"{r['disturbed']} idle steps set aside for a paint"
             note = f'{note}; {aside}' if note else aside
         lines.append(f"| {r['name']}{' (gui)' if r.get('gui') else ''} | {r['n']} | {r['k']} | {work(r.get('work_n'))}"
-                     f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')} | {r['budget']} | {r['status']}"
+                     f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')}"
+                     f" | {'slope ' + str(r['slope_budget']) if 'slope_budget' in r else r['budget']} | {r['status']}"
                      f"{' — ' + note if note else ''} |")
     return '\n'.join(lines) + '\n'
 
@@ -202,7 +224,7 @@ def probe_entry(raw):
     return {'name': raw['name'], 'n': int(raw['n']), 'k': int(raw.get('k') or 4),
             'budget': float(raw.get('budget') or DEFAULT_BUDGET), 'known': raw.get('known') or None,
             'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True,
-            'idle': raw.get('idle') is True}
+            'idle': raw.get('idle') is True, 'slope': None if raw.get('slope') is None else float(raw['slope'])}
 
 
 # Sessions.
