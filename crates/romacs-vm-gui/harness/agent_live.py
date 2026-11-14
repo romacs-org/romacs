@@ -2766,7 +2766,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')

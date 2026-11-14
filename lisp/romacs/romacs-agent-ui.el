@@ -53,8 +53,12 @@
 
 ;;; Faces (hermes-chat's, for the same look)
 
-(defface romacs-agent-prompt '((t :inherit highlight))
-  "A user's prompt in a chat (hermes-chat-user-input).")
+(defface romacs-agent-prompt '((t :inherit highlight :extend t))
+  "A user's prompt in a chat: a band across the window, so what the user
+said stands apart from what agents and sessions said.")
+(defface romacs-agent-note '((t :inherit romacs-agent-dim :slant italic))
+  "A note of what happened to the session (a compaction, a model switch, a
+fork), said by no one: the quietest row.")
 (defface romacs-agent-rule
   '((((background light)) :foreground "gray70")
     (t :foreground "gray30"))
@@ -222,6 +226,16 @@ settles the open run first."
     (apply #'romacs-agent-ui--insert
            (concat (if (save-excursion (goto-char romacs-agent-ui--end) (bolp)) "" "\n") indent text "\n")
            properties)))
+
+(defun romacs-agent-ui--noted (text)
+  "TEXT in the note face, under the faces its parts have (a link)."
+  (let ((text (copy-sequence text)))
+    (add-face-text-property 0 (length text) 'romacs-agent-note t text)
+    text))
+
+(defun romacs-agent-ui--note (session event text &rest properties)
+  "A row noting what EVENT did to SESSION (`romacs-agent-note'): \"  · TEXT\"."
+  (apply #'romacs-agent-ui--line session event (romacs-agent-ui--noted (concat "  · " text)) properties))
 
 (defun romacs-agent-ui--brief (input)
   "One line of a tool's INPUT."
@@ -409,18 +423,25 @@ what the user wrote stays theirs, whatever it looks like."
          wakes)))
 
 (defun romacs-agent-ui--arrival (session event wake)
-  "Show WAKE, a task's result reaching SESSION at EVENT: a row of its own,
-never a prompt, the result folded below it, and its card settled."
-  (let* ((id (plist-get wake :id)) (state (plist-get wake :state))
+  "Show WAKE, a task's result reaching SESSION at EVENT, as a message's
+card is shown: ⇠ and the task, its state, its thread and the result's
+first line on one row, never a prompt, the whole result folded below,
+and the task's card settled.  A copy of a message the task sent another
+\(state \"sent\") settles nothing: its state is ✉."
+  (let* ((id (plist-get wake :id)) (state (plist-get wake :state)) (sent (equal state "sent"))
          (result (string-trim (plist-get wake :result)))
          (key (format "%s:%s" id (plist-get event :seq)))
-         (preview (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " result) 72 nil nil t)))
-    (romacs-agent-ui--settle-task id state)
+         (head (concat (propertize (concat "⇠ " (plist-get wake :title)) 'face 'romacs-agent-delegate 'romacs-agent-card t)
+                       (propertize " · " 'face 'romacs-agent-dim)
+                       (if sent (propertize "✉" 'face 'romacs-agent-dim) (romacs-agent-ui--chip id state))
+                       "  " (romacs-agent-ui--thread-link id)))
+         (preview (car (split-string result "\n"))))
+    (unless sent (romacs-agent-ui--settle-task id state))
     (romacs-agent-ui--line
      session event
-     (concat "  ⇠ " (propertize (plist-get wake :title) 'face 'romacs-agent-delegate 'romacs-agent-card t)
-             "  " (romacs-agent-ui--chip id state) "  " (romacs-agent-ui--thread-link id)
-             (if (string-empty-p preview) "" (propertize (concat "  " preview) 'face 'romacs-agent-dim)))
+     (concat head (if (string-empty-p preview) ""
+                    (propertize (concat "  " (romacs-agent-ui--fit preview (+ 2 (string-width head))))
+                                'face 'romacs-agent-dim)))
      'romacs-agent-tool key)
     (unless (string-empty-p result)
       (romacs-agent-ui--insert (concat result "\n") 'face 'romacs-agent-dim 'romacs-agent-output key
@@ -966,12 +987,13 @@ or a repeat."
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              ;; A prompt carries its request id: what names its turn.
-             (romacs-agent-ui--insert "> " 'romacs-agent-turn (or (plist-get event :request) t))
+             ;; A band, its newline's face carrying it to the window's edge.
+             (romacs-agent-ui--insert "> " 'face 'romacs-agent-prompt 'romacs-agent-turn (or (plist-get event :request) t))
              (let ((images (plist-get event :images)))
                (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt
                                         'romacs-agent-turn (or (plist-get event :request) t)
                                         'romacs-agent-images images)
-               (romacs-agent-ui--insert "\n")
+               (romacs-agent-ui--insert "\n" 'face 'romacs-agent-prompt)
                (dolist (file images)
                  (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))))
          ;; The first prompt names the session: its buffer follows.
@@ -999,9 +1021,8 @@ or a repeat."
         ('thinking (romacs-agent-ui--run-words session event 'thinking))
         ('tool (romacs-agent-ui--tool session event))
         ('compacted
-         (romacs-agent-ui--line session event
-                                (concat (propertize "  · " 'face 'romacs-agent-dim)
-                                        (propertize "Session compacted" 'face 'romacs-agent-link 'mouse-face 'highlight))
+         (romacs-agent-ui--note session event
+                                (propertize "Session compacted" 'face 'romacs-agent-link 'mouse-face 'highlight)
                                 'keymap romacs-agent-ui--compaction-map 'help-echo "Show what the session kept"
                                 'romacs-agent-compaction (plist-get event :text)))
         ;; A tool call the policy answers asks no one: its card shows it; a
@@ -1026,9 +1047,9 @@ or a repeat."
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
         ;; Under an approval shown: one the policy answered had none.
         ((and 'answered (guard (gethash (plist-get event :request-id) (romacs-agent-ui--asks))))
-         (romacs-agent-ui--line session event (format "  %s" (pcase (plist-get event :behavior)
-                                                               ("allow" "✓ allowed") ("deny" "! denied") (_ "answered")))
-                                'face 'romacs-agent-dim))
+         (romacs-agent-ui--line session event (romacs-agent-ui--noted
+                                               (format "  %s" (pcase (plist-get event :behavior)
+                                                                ("allow" "✓ allowed") ("deny" "! denied") (_ "answered"))))))
         ('done (when-let* ((reason (plist-get event :reason)))
                  (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
                (romacs-agent-ui--footer session event)
@@ -1039,20 +1060,18 @@ or a repeat."
          (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ('status
          (unless (member (plist-get event :text) '("requesting" "compacting" "detached" "selection armed"))
-           (romacs-agent-ui--line session event (format "  · %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
+           (romacs-agent-ui--note session event (plist-get event :text))))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
         ('forked (romacs-agent-ui--draw-source session event))
         ('rolled-back (romacs-agent-ui--rolled-back session event))
         ('selection
-         (romacs-agent-ui--line session event
-                                (format "── %s → %s ──" (romacs-agent-ui--selection-label (plist-get event :from))
-                                        (romacs-agent-ui--selection-label (plist-get event :to)))
-                                'face 'romacs-agent-dim))
+         (romacs-agent-ui--note session event
+                                (format "%s → %s" (romacs-agent-ui--selection-label (plist-get event :from))
+                                        (romacs-agent-ui--selection-label (plist-get event :to)))))
         ('exit
          ;; A per-turn harness ends every turn: only a failed run is news.
          (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
-           (romacs-agent-ui--line session event (format "  · harness exited (%s)" (plist-get event :status))
-                                  'face 'romacs-agent-dim)))
+           (romacs-agent-ui--note session event (format "harness exited (%s)" (plist-get event :status)))))
         (_ nil))
       (romacs-agent-ui--composer-update)
       (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
@@ -1840,11 +1859,9 @@ the source's own source and imported transcript first, then a rule."
                       (when (<= seq upto)
                         (let ((romacs-agent-event-functions (if (> seq after) romacs-agent-event-functions nil)))
                           (romacs-agent--record scratch record)))))))))
-    (romacs-agent-ui--line session event
-                           (format (if (> after 0) "── Forked again from %s, now at its turn %s ──"
-                                     "── Forked from %s at its turn %s ──")
-                                   (plist-get event :title) (plist-get event :turns))
-                           'face 'romacs-agent-dim)))
+    (romacs-agent-ui--note session event
+                           (format (if (> after 0) "Forked again from %s, now at its turn %s" "Forked from %s at its turn %s")
+                                   (plist-get event :title) (plist-get event :turns)))))
 
 (defun romacs-agent-ui--draw-as (session source event)
   "Draw SOURCE's EVENT in SESSION's chat, SOURCE's turn start and tool
@@ -2357,10 +2374,10 @@ stay readable, as the journal keeps them."
       (let ((inhibit-read-only t)) (add-face-text-property at romacs-agent-ui--end 'romacs-agent-dim))))
   (let ((turns (or (plist-get event :turns) 0)))
     (romacs-agent-ui--line session event
-                           (format "↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
-                                   (if (plist-get event :files) " and their files" "")
-                                   (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n")) 60 nil nil t))
-                           'face 'romacs-agent-dim)))
+                           (romacs-agent-ui--noted
+                            (format "  ↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
+                                    (if (plist-get event :files) " and their files" "")
+                                    (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n")) 60 nil nil t))))))
 
 (defun romacs-agent-ui--last-prompt (session)
   "The request id of SESSION's last prompt still in its conversation."

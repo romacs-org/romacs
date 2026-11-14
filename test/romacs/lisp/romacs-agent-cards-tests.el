@@ -75,11 +75,11 @@
     (setf (romacs-agent-children-rows child) (list (list :key 'working :state "running" :title "check")))
     (let ((text (romacs-agent-tools--wake-text child '(7 "waiting on the check" nil))))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
-    (should (string-search "⇠ child  Waiting on its workers  thread" (romacs-agent-cards-tests--visible)))
+    (should (string-search "⇠ child · Waiting on its workers  thread" (romacs-agent-cards-tests--visible)))
     (setf (romacs-agent-children-rows child) nil)
     (let ((text (romacs-agent-tools--wake-text child '(8 "done" nil))))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 10))
-    (should (string-search "⇠ child  Completed  thread  done" (romacs-agent-cards-tests--visible)))))
+    (should (string-search "⇠ child · Completed  thread  done" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-wake-settles-the-card-and-is-no-prompt ()
   (romacs-agent-cards-tests--with-chat session
@@ -88,7 +88,7 @@
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
-                           "  ⇠ child  Completed  thread  all good second line\n")))
+                           "⇠ child · Completed  thread  all good\n")))
     (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
     (goto-char (point-min))
@@ -392,7 +392,7 @@
                              (list :text "one more thing"))))
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
-                           "  ⇠ child  Completed  thread  all good\n"
+                           "⇠ child · Completed  thread  all good\n"
                            "✉ child · child  thread  ↩\none more thing\n")))))
 
 (ert-deftest romacs-agent-a-failed-reply-keeps-its-message ()
