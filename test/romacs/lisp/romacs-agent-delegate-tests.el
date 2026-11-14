@@ -569,6 +569,27 @@ message's record for TEXT, `interrupted' each interrupted."
             (dolist (key '(:id :kind :from :in-reply-to :text :wake))
               (should (equal (plist-get back key) (plist-get wake key))))))))))
 
+(ert-deftest romacs-agent-delegate-a-large-delivery-keeps-every-reply-route ()
+  ;; More messages at once than a session keeps: every one of them stays
+  ;; answerable, what it answers too.
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "x" :harness 'claude :state 'idle))
+         (old (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead")))
+         (many (cl-loop repeat 65 collect (romacs-agent-tools--message "child" (romacs-agent--make :id "c" :title "c")))))
+    (romacs-agent--raise session (list :type 'input :text "old" :messages (list old) :seq 1))
+    (setf (romacs-agent-done-seq session) 2)
+    (romacs-agent--raise session (list :type 'input :text "wakes" :messages many :seq 3))
+    (should (romacs-agent-received-message session (plist-get (car many) :id)))
+    (should (romacs-agent-received-message session (plist-get (car (last many)) :id)))
+    (should (equal (romacs-agent-answering session) (plist-get (car many) :id)))
+    (should-not (romacs-agent-received-message session (plist-get old :id)))
+    ;; A smaller one next keeps the latest of these besides.
+    (let ((next (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead"))))
+      (romacs-agent--raise session (list :type 'input :text "next" :messages (list next) :seq 5))
+      (should (= (length (romacs-agent-received session)) 64))
+      (should (romacs-agent-received-message session (plist-get next :id)))
+      (should (romacs-agent-received-message session (plist-get (car (last many)) :id))))))
+
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none
   ;; delegated: said to be external.

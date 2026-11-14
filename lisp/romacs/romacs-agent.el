@@ -370,7 +370,7 @@ loading it would undo that one's changes; merge it first")
   ;; a plist of :provider :text :window :resets.
   limited
   ;; The messages from other sessions it received last, newest first, each
-  ;; its `romacsMessage' record (`romacs-agent--message-envelope'), the
+  ;; a plist (`romacs-agent-make-message'), the
   ;; id of the one its running or last turn began with (what it answers),
   ;; and the messages a per-turn harness's next prompt is, with its text
   ;; (:text :messages).
@@ -1502,7 +1502,7 @@ on whatever becomes of this server."
             ;; From another session: kept to be answered; a turn it begins
             ;; answers it (a steer into a running turn does not).
             (let ((messages (plist-get event :messages)))
-              (dolist (message messages) (romacs-agent--received session message))
+              (when messages (romacs-agent--received session messages))
               ;; A turn begun by an earlier prompt and not ended yet: a
               ;; steer.  An exit mid-turn ends it too (its done-seq).
               (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
@@ -1699,12 +1699,15 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
 (defconst romacs-agent--received-limit 64
   "How many of the messages a session received it keeps to answer.")
 
-(defun romacs-agent--received (session message)
-  "Keep MESSAGE (`romacs-agent-make-message'), one SESSION received, to be
-answered."
-  (let ((kept (cons message (cl-remove (plist-get message :id) (romacs-agent-received session)
-                                       :key (lambda (m) (plist-get m :id)) :test #'equal))))
-    (setf (romacs-agent-received session) (seq-take kept romacs-agent--received-limit))))
+(defun romacs-agent--received (session messages)
+  "Keep MESSAGES (`romacs-agent-make-message'), one delivery's to SESSION,
+to be answered: all of them, however many, and the latest of those
+before while `romacs-agent--received-limit' lasts."
+  (let* ((ids (mapcar (lambda (m) (plist-get m :id)) messages))
+         (earlier (cl-remove-if (lambda (m) (member (plist-get m :id) ids)) (romacs-agent-received session))))
+    (setf (romacs-agent-received session)
+          (append (reverse messages)
+                  (seq-take earlier (max 0 (- romacs-agent--received-limit (length messages))))))))
 
 (defun romacs-agent-received-message (session id)
   "The message SESSION received under ID (`romacs-agent-make-message'), or nil."
