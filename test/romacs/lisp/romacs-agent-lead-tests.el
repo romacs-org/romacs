@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -28,10 +29,12 @@ each session gone on with, `delivered' what wakes the lead.  Nothing
 runs: harnesses are never started."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-lead-" t))
+          ;; Its sockets' directory is short: TMPDIR may not be.
+          (run (romacs-test-socket-directory "lead-"))
           (cwd (file-name-as-directory (expand-file-name "project" root)))
           (config (expand-file-name "claude" root))
           (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
-                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                             (concat "XDG_RUNTIME_DIR=" run))
                                        process-environment))
           (romacs-agent-providers (list (cons "claude" config)))
           (romacs-agent-restored-hook nil)
@@ -71,7 +74,7 @@ runs: harnesses are never started."
                ;; Children start at once here (romacs-agent-launch-tests
                ;; has one that never does).
                ((symbol-function 'romacs-agent-tools--started) (lambda (_child then) (funcall then))))
-       (unwind-protect (progn ,@body) (delete-directory root t)))))
+       (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
 (defun romacs-agent-lead-tests--args (&rest pairs)
   "A tool's arguments of PAIRS, as the endpoint parses them."
