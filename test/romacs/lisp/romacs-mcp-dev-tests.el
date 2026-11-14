@@ -41,7 +41,8 @@ the tree, with the trunk, the target and the structural switch it was given."
           (should (equal (gethash "verdict" answer) "fail"))
           (should (equal (gethash "exit" answer) 1))
           (should (equal (gethash "report" answer)
-                         (format "args:--trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                         (format "args:--binary %s --trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                                 (expand-file-name invocation-name invocation-directory)
                                  (directory-file-name (file-truename tree))))))
       (delete-directory tree t))))
 
@@ -51,7 +52,8 @@ the tree, with the trunk, the target and the structural switch it was given."
     (unwind-protect
         (let ((answer (romacs-mcp-dev-tests--call "worktree" tree)))
           (should (equal (gethash "verdict" answer) "ok"))
-          (should (string-prefix-p "args:\n" (gethash "report" answer))))
+          (should (string-prefix-p (format "args:--binary %s\n" (expand-file-name invocation-name invocation-directory))
+                                   (gethash "report" answer))))
       (delete-directory tree t))))
 
 (ert-deftest romacs-mcp-dev-tests-incomplete ()

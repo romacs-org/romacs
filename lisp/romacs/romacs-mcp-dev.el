@@ -4,8 +4,9 @@
 
 ;;; Commentary:
 ;; romacs_dev_check runs a source tree's own `tools/dev-check' (the merge
-;; forecast with the trunk, the generated-file check, the structural
-;; rules) and answers with its report when it ends.  The tree's tool
+;; forecast with the trunk, the generated-file check, the lint of the
+;; Lisp the branch touches, run by this Romacs, and the structural rules)
+;; and answers with its report when it ends.  The tree's tool
 ;; decides what is checked; this file starts it and reads it.  It runs as
 ;; a subprocess, so the command loop goes on meanwhile; a request that is
 ;; cancelled leaves the check to finish, and nothing of it behind.
@@ -24,7 +25,8 @@
         (trunk (gethash "trunk" arguments)))
     (unless (file-executable-p tool)
       (user-error "No tools/dev-check under %s: merge the trunk into the branch" worktree))
-    (append (list tool)
+    ;; The lint's host is this Romacs: it is the machine the branch is held to.
+    (append (list tool "--binary" (expand-file-name invocation-name invocation-directory))
             (and trunk (list "--trunk" trunk))
             (and (eq (gethash "structural" arguments) :false) (list "--no-structural")))))
 
@@ -68,7 +70,7 @@
   (interactive)
   (romacs-mcp-register-tool
    "romacs_dev_check"
-   "Check a Romacs worktree before its branch is submitted, cheapest first: the merge forecast with the trunk (each conflicting file as additive, overlap or whole), tracked generated files, then, for a change to Rust, the quick structural rules (they build test targets into targetDir, default this Romacs's CARGO_TARGET_DIR; structural false leaves them out). Answers when done with verdict (ok, fail, incomplete) and the report: a line a stage and a finding, each with its fix."
+   "Check a Romacs worktree before its branch is submitted, cheapest first: the merge forecast with the trunk (each conflicting file as additive, overlap or whole), tracked generated files, romacs-lint on the Lisp it touches (run by this Romacs), then, for a change to Rust, the quick structural rules (they build test targets into targetDir, default this Romacs's CARGO_TARGET_DIR; structural false leaves them out). Answers when done with verdict (ok, fail, incomplete) and the report: a line a stage and a finding, each with its fix."
    (romacs-mcp--schema '(("instance" . "string") ("worktree" . "string") ("trunk" . "string")
                          ("structural" . "boolean") ("targetDir" . "string"))
                        '("worktree"))
