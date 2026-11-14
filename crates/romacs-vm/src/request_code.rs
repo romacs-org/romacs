@@ -263,6 +263,7 @@ impl Vm {
                 pending: None,
                 dynamic: None,
                 params: None,
+                key: None,
             },
         );
         if self.request_code.live[id] && !self.request_code.permanent[id] {

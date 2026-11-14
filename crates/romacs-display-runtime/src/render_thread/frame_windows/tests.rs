@@ -10,19 +10,14 @@ use romacs_display_protocol::types::Color;
 #[test]
 fn deferred_gui_native_ready_requires_realized_frame() {
     let mut windows = GuiFrameWindowManager::new();
-    let (reply, receive) = crossbeam_channel::bounded(1);
-    windows.await_ready(42, reply);
-    assert!(receive.recv().unwrap().is_err());
+    windows.await_ready(42, 1);
+    assert!(matches!(windows.take_answers()[..], [(1, Err(_))]));
     windows.request_create(43, 320, 200, "deferred".into(), default_geometry_hints());
-    let (reply, receive) = crossbeam_channel::bounded(1);
-    windows.await_ready(43, reply);
-    assert!(matches!(
-        receive.try_recv(),
-        Err(crossbeam_channel::TryRecvError::Empty)
-    ));
+    windows.await_ready(43, 2);
+    assert!(windows.take_answers().is_empty(), "answered once the window is made");
     windows.pending_creates.clear(); // Native constructor failed: no realized window.
     windows.settle_ready_replies();
-    assert!(receive.recv().unwrap().is_err());
+    assert!(matches!(windows.take_answers()[..], [(2, Err(_))]));
     assert!(windows.ready_replies.is_empty());
 }
 
@@ -30,10 +25,9 @@ fn deferred_gui_native_ready_requires_realized_frame() {
 fn deferred_gui_pending_ready_is_cancelled_on_connection_shutdown() {
     let mut windows = GuiFrameWindowManager::new();
     windows.request_create(43, 320, 200, "deferred".into(), default_geometry_hints());
-    let (reply, receive) = crossbeam_channel::bounded(1);
-    windows.await_ready(43, reply);
+    windows.await_ready(43, 1);
     windows.destroy_all();
-    assert!(matches!(receive.recv(), Err(crossbeam_channel::RecvError)));
+    assert!(matches!(windows.take_answers()[..], [(1, Err(_))]), "its waiter hears of it at once");
     assert!(windows.pending_creates.is_empty());
 }
 

@@ -33,15 +33,15 @@
 
 (ert-deftest romacs-mcp-dev-tests-verdict-and-report ()
   "The check's exit is the verdict and its output the report; it runs in
-the tree, with the trunk, the target and the structural switch it was given."
+the tree, with the trunk, the target and the tests switch it was given."
   (let ((tree (romacs-mcp-dev-tests--tree 1)))
     (unwind-protect
-        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree "trunk" "main" "structural" :false
+        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree "trunk" "main" "tests" :false
                                                   "targetDir" "/somewhere/target")))
           (should (equal (gethash "verdict" answer) "fail"))
           (should (equal (gethash "exit" answer) 1))
           (should (equal (gethash "report" answer)
-                         (format "args:--binary %s --trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                         (format "args:--binary %s --trunk main --no-tests\ntarget:/somewhere/target\nin:%s\n"
                                  (expand-file-name invocation-name invocation-directory)
                                  (directory-file-name (file-truename tree))))))
       (delete-directory tree t))))
@@ -99,6 +99,24 @@ short step, and sees a function defined since this Romacs started."
     (should (> polls 1))
     (should (string-prefix-p "romacs-mcp-dev-tests--defined-since-boot (function): Return THING, for an aardwolf: no world was built with this function.\n"
                              (car result)))))
+
+(ert-deftest romacs-mcp-dev-tests-guide-module-notes ()
+  "Given a worktree, the guide answers with what the tree's own
+tools/lib/agents_md.py prints for the branch's paths."
+  (let ((tree (romacs-mcp-dev-tests--tree 0)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "tools/lib" tree))
+          (with-temp-file (expand-file-name "tools/lib/agents_md.py" tree)
+            (insert "import sys\nprint('== notes for', ' '.join(sys.argv[1:]))\n"))
+          (let* ((deferred (romacs-mcp-dev--guide (romacs-mcp--object "worktree" tree "trunk" "main")))
+                 (end (+ (float-time) 30)) (result nil))
+            (while (and (not (setq result (funcall (cadr deferred)))) (< (float-time) end))
+              (accept-process-output nil 0.05))
+            (should (equal (car result) (format "== notes for notes --root %s --trunk main" tree))))
+          (delete-file (expand-file-name "tools/lib/agents_md.py" tree))
+          (should-error (romacs-mcp-dev--guide (romacs-mcp--object "worktree" tree)) :type 'user-error))
+      (delete-directory tree t))))
 
 (ert-deftest romacs-mcp-dev-tests-no-tool ()
   "A tree without the check is refused, with what to do."

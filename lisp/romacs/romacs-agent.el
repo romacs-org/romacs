@@ -494,13 +494,20 @@ connection, is answered on catching up."
 (defun romacs-agent--runtime-root ()
   (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR") (format "/tmp/romacs%d" (user-uid)))))
 
-(defun romacs-agent--short (id) (substring id 0 8))
+(defun romacs-agent--short (id) (substring id 0 (min 8 (length id))))
 
 (defun romacs-agent--key (id)
   "ID's name for its supervisor's socket directory and unit: its short
 form, readable, and a digest of all of it, since ids made close together
 \(Codex's time-ordered threads) share their first characters."
   (concat (romacs-agent--short id) "-" (substring (secure-hash 'sha256 id) 0 8)))
+
+(defun romacs-agent--host-socket (id)
+  "Where the supervisor of session ID listens: under this process's
+runtime directory, named by ID alone.  Never read from a record: a copy
+of the state under another runtime directory reaches no supervisor
+outside it."
+  (expand-file-name (concat (romacs-agent--key id) "/host.sock") (romacs-agent--runtime-root)))
 
 (defun romacs-agent--program (name)
   "Romacs's own program NAME, beside the running binary, else on PATH,
@@ -1070,7 +1077,34 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
                               common)))
                   models))))
 
-(defun romacs-agent--picker-rows ()
+(defcustom romacs-agent-pick-accounts nil
+  "Non-nil: pickers list each account (instance) of a harness, to pin
+one.  nil: each harness once, its pool choosing the account
+\(`romacs-agent-pools'); \\[universal-argument] \\[universal-argument]
+lists the accounts once."
+  :type 'boolean :group 'romacs-agent)
+
+(defun romacs-agent--harness-display (harness)
+  (or (plist-get (romacs-agent--driver-of harness) :display) (capitalize (symbol-name harness))))
+
+(defun romacs-agent--picker-rows (&optional accounts)
+  "The picker's rows: each harness's (`romacs-agent--instance-rows' of its
+pool's first account, its pool their provider), the default's first; with
+ACCOUNTS or `romacs-agent-pick-accounts', each enabled instance's."
+  (if (or accounts romacs-agent-pick-accounts) (romacs-agent--account-rows)
+    (let* ((default (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :harness))
+           (harnesses (delete-dups (cl-loop for i in (romacs-agent-instances)
+                                            when (plist-get i :enabled) collect (plist-get i :harness)))))
+      (cl-loop for harness in (cons default (remq default harnesses))
+               for instance = (car (romacs-agent-pool harness))
+               for label = (romacs-agent--harness-display harness)
+               for group = (format "%s%s" label (if (eq harness default) "  default" ""))
+               when instance
+               append (mapcar (lambda (row) (cons (car row) (plist-put (plist-put (copy-sequence (cdr row)) :provider harness)
+                                                                      :group group)))
+                              (romacs-agent--instance-rows instance label (eq harness default)))))))
+
+(defun romacs-agent--account-rows ()
   "Every enabled instance's rows (`romacs-agent--instance-rows'), the
 default instance's first."
   (let* ((default (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :name))
@@ -1118,18 +1152,20 @@ instance, the first the default."
                                  nil t nil nil default)))
     (and (not (string-empty-p answer)) answer)))
 
-(defun romacs-agent--read-selection (ask-effort)
+(defun romacs-agent--read-selection (ask-effort &optional accounts)
   "What a new session runs on, as (PROVIDER . OPTIONS): asked for when
-more than one instance is enabled, or ASK-EFFORT.  Its effort is asked for
-with ASK-EFFORT, or when nothing gives the chosen model one."
-  (let* ((rows (romacs-agent--picker-rows))
+more than one harness is enabled (with ACCOUNTS, account), or ASK-EFFORT.
+Its effort is asked for with ASK-EFFORT, or when nothing gives the chosen
+model one."
+  (let* ((rows (romacs-agent--picker-rows accounts))
          ;; Rows come by instance: its first and last differ with several.
          (several (not (equal (plist-get (cdar rows) :provider) (plist-get (cdar (last rows)) :provider))))
          (fields (cdr (if (or ask-effort several) (romacs-agent--pick-row rows) (car rows))))
          (provider (plist-get fields :provider))
          (model (plist-get fields :model))
          (efforts (plist-get fields :efforts))
-         (own (plist-get (romacs-agent--configured provider) :effort))
+         (own (plist-get (if (symbolp provider) (car (romacs-agent-pool provider)) (romacs-agent--configured provider))
+                         :effort))
          (effort (when (and efforts (or ask-effort (and model (not own) (not (plist-get fields :default-effort)))))
                    (romacs-agent--read-effort efforts (if (member own efforts) own (plist-get fields :default-effort))))))
     (cons provider (append (and model (list :model model)) (and effort (list :effort effort))))))
@@ -1342,7 +1378,8 @@ itself, so the turn goes on whatever becomes of this server."
                   ;; Moved: the last instance's limit is not its own now.
                   (unless (equal (plist-get (plist-get event :to) :provider) (plist-get (plist-get event :from) :provider))
                     (setf (romacs-agent-limited session) nil))
-                  (when model (setf (romacs-agent-model session) model))))
+                  (when model (setf (romacs-agent-model session) model))
+                  (romacs-agent--moved session event)))
     ;; A run starts (the supervisor's first record): its startup is its own,
     ;; and the record's seq names the run.
     ;; A run starts on its driver as defined now: one loaded since speaks
@@ -1420,7 +1457,7 @@ itself, so the turn goes on whatever becomes of this server."
                  (romacs-agent-failed session) (plist-get event :error)
                  (romacs-agent-limited session)
                  (and (plist-get event :limit)
-                      (let ((room (gethash (romacs-agent-provider session) romacs-agent--room)))
+                      (let ((room (romacs-agent-room-of (romacs-agent-provider session))))
                         (list :provider (romacs-agent-provider session)
                               :model (and (eq (plist-get event :limit) 'model) (romacs-agent-model session))
                               :text (or (plist-get event :text) (plist-get event :reason))
@@ -1595,17 +1632,38 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ("handoff" (list (list :type 'status
+                                                      :text (format "%s: %s%s"
+                                                                    (if (stringp (gethash "to" note))
+                                                                        (format "moved from %s to %s" (gethash "from" note) (gethash "to" note))
+                                                                      (format "stays on %s" (gethash "from" note)))
+                                                                    (gethash "why" note)
+                                                                    (let ((resets (gethash "resets" note)))
+                                                                      (if (numberp resets)
+                                                                          (format-time-string " (resets %a %H:%M)" resets)
+                                                                        ""))))))
+                               ("resume" (list (list :type 'status
+                                                     :text (pcase (gethash "state" note)
+                                                             ("scheduled" (format-time-string "resumes by itself at %a %H:%M, once its limit resets"
+                                                                                              (gethash "at" note)))
+                                                             ("fired" (format "resumed on %s: its limit reset" (gethash "on" note)))
+                                                             (_ (format "will not resume by itself: %s" (gethash "why" note)))))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
                                ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
                                                        :prompt (gethash "prompt" note) :files (eq (gethash "files" note) t)))))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
-          (while events
-            (romacs-agent--raise session (append (car events) (list :seq seq :last (null (cdr events))
-                                                                    :time (gethash "t" record))))
-            (setq events (cdr events)))
-          (when (romacs-agent-caught-up session) (romacs-agent--step session)))))))
+          (let ((ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
+            (while events
+              (romacs-agent--raise session (append (car events) (list :seq seq :last (null (cdr events))
+                                                                      :time (gethash "t" record))))
+              (setq events (cdr events)))
+            (when (romacs-agent-caught-up session)
+              ;; A turn or a run ended: its state is kept, as of the last
+              ;; record handled before the editor is idle.
+              (when (or ends (assq session romacs-agent--keeping)) (romacs-agent--keep-soon session))
+              (romacs-agent--step session))))))))
 
 (defun romacs-agent--step-id (object)
   "What names a driver line written, to know its echo by: its request id
@@ -1774,6 +1832,7 @@ byte FROM (a record's start) when given."
                    (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
+                 (romacs-agent--keep-soon session)
                  (romacs-agent--seen-caught-up session)
                  (romacs-agent--allow-tool-calls session)
                  (romacs-agent--step session)
@@ -2139,47 +2198,195 @@ there from now on: the same session, its id, title, tasks and records."
     (romacs-agent--manifest-put session "provider" provider "configDir" (or config-dir :null))
     (romacs-agent--changed session)))
 
-;;; Room on an instance
+;;; Room on an instance, and pools of them
 
 (defvar romacs-agent--room (make-hash-table :test #'equal)
   "An instance's name to the last of its harness's reports of its usage
 limit: a plist of :status (allowed, warning or rejected), :used (a
-fraction), :resets (seconds since the epoch), :window and :time.")
+fraction), :resets (seconds since the epoch), :window and :time.  Kept on
+disk (`romacs-agent--room-file') as its status, reset or window changes:
+a restarted server knows which accounts are spent.")
+
+(defvar romacs-agent--room-loaded nil
+  "Whether `romacs-agent--room' holds what was kept on disk.")
+
+(defun romacs-agent--room-file ()
+  (expand-file-name "room.eld" (romacs-agent--state-root)))
+
+(defun romacs-agent--room-table ()
+  "`romacs-agent--room', its kept reports read once."
+  (unless romacs-agent--room-loaded
+    (setq romacs-agent--room-loaded t)
+    (when-let* ((kept (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent--room-file))
+                                                       (read (current-buffer))))))
+      (pcase-dolist (`(,name . ,room) kept)
+        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room)))))
+  romacs-agent--room)
+
+(defun romacs-agent--with-lock (file function)
+  "Call FUNCTION holding FILE's lock, a directory FILE.lock made atomically,
+so one process at a time reads, merges and replaces FILE.  Held by
+another, FUNCTION is tried again shortly, never run without the lock and
+never waited for on the command loop; a lock older than 10 s is a crashed
+writer's, taken over."
+  (let ((lock (concat file ".lock")))
+    (make-directory (file-name-directory file) t)
+    (let ((made (file-attribute-modification-time (file-attributes lock))))
+      (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
+    (if (condition-case nil (progn (make-directory lock) t) (file-already-exists nil))
+        (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
+      (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
+
+(defun romacs-agent--keep-room ()
+  "Write `romacs-agent--room' to its file, merged with what another server
+wrote there meanwhile, under its lock: each account's newer report wins."
+  (romacs-agent--with-lock (romacs-agent--room-file) #'romacs-agent--merge-room))
+
+(defun romacs-agent--merge-room ()
+  (let ((file (romacs-agent--room-file)) (rows nil))
+    (pcase-dolist (`(,name . ,room) (ignore-errors (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))
+      (let ((mine (gethash name romacs-agent--room)))
+        (when (or (null mine) (> (or (plist-get room :time) 0) (or (plist-get mine :time) 0)))
+          (puthash name room romacs-agent--room))))
+    (maphash (lambda (name room) (push (cons name room) rows)) romacs-agent--room)
+    (make-directory (file-name-directory file) t)
+    (let ((temporary (make-temp-file (expand-file-name "room-" (file-name-directory file)) nil ".tmp")))
+      (with-temp-file temporary (prin1 rows (current-buffer)))
+      (rename-file temporary file t))))
 
 (defun romacs-agent--note-room (session event)
   "Keep EVENT, a `rate-limit' report of SESSION's harness, as its
 instance's, unless an older one: a replay reports the past too.  Its
 overage spent is no instance's limit: only the models that need usage
 credits are refused, and the others run."
-  (let ((known (gethash (romacs-agent-provider session) romacs-agent--room))
-        (time (or (plist-get event :time) (float-time))))
+  (let* ((table (romacs-agent--room-table))
+         (known (gethash (romacs-agent-provider session) table))
+         (time (or (plist-get event :time) (float-time))))
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (puthash (romacs-agent-provider session)
-               (list :status (plist-get event :status) :used (plist-get event :used)
-                     :resets (plist-get event :resets) :window (plist-get event :window) :time time)
-               romacs-agent--room))))
+      (let ((room (list :status (plist-get event :status) :used (plist-get event :used)
+                        :resets (plist-get event :resets) :window (plist-get event :window) :time time)))
+        (puthash (romacs-agent-provider session) room table)
+        ;; On disk what a restart needs: not each request's use.
+        (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
+                                     '(:status :resets :window)))
+          (romacs-agent--keep-room))))))
+
+(defun romacs-agent-room-of (provider)
+  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or nil."
+  (gethash provider (romacs-agent--room-table)))
 
 (defun romacs-agent-room (provider)
   "Whether instance PROVIDER has room: no report of its limit, or one
 not rejected, or one whose window has reset since."
-  (let ((room (gethash provider romacs-agent--room)))
+  (let ((room (romacs-agent-room-of provider)))
     (or (null room) (not (eq (plist-get room :status) 'rejected))
         (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))))
 
+(defcustom romacs-agent-pools nil
+  "Each harness's accounts in the order new work draws on them: an alist
+of (HARNESS NAME...), each NAME an instance of `romacs-agent-providers'
+\(T3 Code's among them), where accounts are defined.  A harness not
+listed pools its enabled instances in their order there.  A harness
+where an instance is asked for (the symbol `claude'; \"claude\" in an
+agent's tool call) means its pool: the first account with room
+\(`romacs-agent-pool-pick'); an instance's name pins it."
+  :type '(alist :key-type symbol :value-type (repeat string))
+  :group 'romacs-agent)
+
+(defun romacs-agent-pool (harness)
+  "HARNESS's enabled instances, in its pool's order (`romacs-agent-pools')."
+  (let ((instances (cl-remove-if-not (lambda (i) (and (plist-get i :enabled) (eq (plist-get i :harness) harness)))
+                                     (romacs-agent-instances)))
+        (order (alist-get harness romacs-agent-pools)))
+    (if (null order) instances
+      (delq nil (mapcar (lambda (name) (cl-find name instances :key (lambda (i) (plist-get i :name)) :test #'equal))
+                        order)))))
+
+(defun romacs-agent-pool-name (name)
+  "NAME, a provider an agent's tool call names, as `romacs-agent-start'
+takes it: a harness's name (\"claude\") its pool, the symbol; any other
+an instance's name, as it is."
+  (let ((harness (and (stringp name) (intern-soft name))))
+    (if (and harness (gethash harness romacs-agent--driver-table)) harness name)))
+
+(defun romacs-agent-pool-pick (harness &optional except)
+  "The instance new work of HARNESS draws on: the first of its pool with
+room, but EXCEPT; with none, the one whose limit resets first."
+  (let ((pool (cl-remove except (romacs-agent-pool harness) :key (lambda (i) (plist-get i :name)) :test #'equal)))
+    (or (cl-find-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool)
+        (car (sort (copy-sequence pool)
+                   (lambda (a b) (< (or (plist-get (romacs-agent-room-of (plist-get a :name)) :resets) most-positive-fixnum)
+                                    (or (plist-get (romacs-agent-room-of (plist-get b :name)) :resets) most-positive-fixnum))))))))
+
 (defun romacs-agent-alternatives (session)
   "The enabled instances SESSION could go on under, with room: of its
-harness first (the same conversation moves), then the others (a
-handoff), each a plist of :provider and :lossless."
-  (let ((all (cl-remove-if (lambda (i) (or (not (plist-get i :enabled))
-                                            (equal (plist-get i :name) (romacs-agent-provider session))
-                                            (not (romacs-agent-room (plist-get i :name)))))
-                           (romacs-agent-instances))))
-    (mapcar (lambda (i) (list :provider (plist-get i :name)
-                              :lossless (eq (plist-get i :harness) (romacs-agent-harness session))))
-            (sort all (lambda (a b) (and (eq (plist-get a :harness) (romacs-agent-harness session))
-                                         (not (eq (plist-get b :harness) (romacs-agent-harness session)))))))))
+harness first, in its pool's order (the same conversation moves), then
+the others (a handoff), each a plist of :provider and :lossless."
+  (let ((harness (romacs-agent-harness session)))
+    (cl-loop for i in (append (romacs-agent-pool harness)
+                              (cl-remove-if (lambda (i) (or (not (plist-get i :enabled)) (eq (plist-get i :harness) harness)))
+                                            (romacs-agent-instances)))
+             unless (or (equal (plist-get i :name) (romacs-agent-provider session))
+                        (not (romacs-agent-room (plist-get i :name))))
+             collect (list :provider (plist-get i :name) :lossless (eq (plist-get i :harness) harness)))))
+
+(defconst romacs-agent--moved-on
+  "Your last turn stopped at %s's usage limit; you now run on %s, the same conversation. Go on from where you were."
+  "What a session moved on at its usage limit is told.")
+
+(defvar romacs-agent--moving-on (make-hash-table :test #'eq :weakness 'key)
+  "Sessions `romacs-agent-move-on' moves, each to (FROM LIMITED): the
+account left, and whether the last turn stopped at its limit.")
+
+(defvar romacs-agent-moved-functions nil
+  "Functions called with a session, the account `romacs-agent-move-on'
+moved it from and the one it runs on, once its selection's note is read:
+the two are the same when the move did not take effect.")
+
+(defun romacs-agent--earliest-reset (harness)
+  "When the first of HARNESS's spent accounts gets room again, or nil."
+  (let ((resets (delq nil (mapcar (lambda (i) (plist-get (romacs-agent-room-of (plist-get i :name)) :resets))
+                                  (romacs-agent-pool harness)))))
+    (and resets (apply #'min resets))))
+
+(defun romacs-agent-move-on (session &optional why)
+  "Move SESSION, its conversation as is, to the next account of its pool
+with room (`romacs-agent-alternatives'), from its next turn on, journaling
+the move and WHY (default: asked).  Once it takes effect, a session whose
+last turn stopped at its limit is told to go on there.  Return the
+account; with none, a `user-error' saying when the first resets."
+  (let* ((harness (romacs-agent-harness session))
+         (target (or (plist-get (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session))
+                                :provider)
+                     (let ((resets (romacs-agent--earliest-reset harness)))
+                       (user-error "Every %s account is at its limit%s" harness
+                                   (if resets (format-time-string ": the first resets at %a %H:%M" resets) "")))))
+         (from (romacs-agent-provider session))
+         (room (romacs-agent-room-of from))
+         (wanted (romacs-agent--wanted session)))
+    (unless (and (gethash session romacs-agent--moving-on) (equal (plist-get wanted :provider) target))
+      (romacs-agent--note session (romacs-mcp--object "type" "handoff" "from" from "to" target "why" (or why "asked")
+                                                      "window" (or (plist-get room :window) :null)
+                                                      "resets" (or (plist-get room :resets) :null)))
+      (puthash session (list from (and (romacs-agent-limited session) t)) romacs-agent--moving-on)
+      (unless (condition-case err (romacs-agent-select session (plist-get wanted :model) (plist-get wanted :effort) target)
+                (error (remhash session romacs-agent--moving-on) (signal (car err) (cdr err))))
+        (remhash session romacs-agent--moving-on)))
+    target))
+
+(defun romacs-agent--moved (session event)
+  "SESSION's selection EVENT came: a move by `romacs-agent-move-on' took
+effect or did not; when it did, a turn stopped at its limit goes on."
+  (when-let* (((romacs-agent--live-p session))
+              (moving (gethash session romacs-agent--moving-on)))
+    (remhash session romacs-agent--moving-on)
+    (let ((to (plist-get (plist-get event :to) :provider)))
+      (when (and (cadr moving) (not (equal to (car moving))))
+        ;; Its harness is still to come back: the message waits for it.
+        (romacs-agent--enqueue session (list (format romacs-agent--moved-on (car moving) to) nil nil nil)))
+      (run-hook-with-args 'romacs-agent-moved-functions session (car moving) to))))
 
 (defun romacs-agent--note (session note)
   "Journal NOTE in SESSION's journal, in its place: through its supervisor
@@ -2300,6 +2507,8 @@ waiting."
                        "switch" (romacs-agent--switch-object session)
                        "seenSeq" (or (romacs-agent-seen-seq session) :null)
                        "settledSeq" (or (romacs-agent-settled-seq session) :null)
+                       ;; Read by builds before `romacs-agent--host-socket', a
+                       ;; rollback to one among them.
                        "hostSocket" (romacs-agent-host-socket session))))
 
 (defconst romacs-agent--option-keys
@@ -2428,15 +2637,20 @@ configuration directory comes from its instance, never from here."
   "`romacs-agent-start''s arguments, asked for, DIRECTORY offered.
 A chat opens with no initial prompt."
   (let* ((cwd (read-directory-name "Project directory: " directory))
-         (selection (romacs-agent--read-selection current-prefix-arg)))
+         (selection (romacs-agent--read-selection current-prefix-arg (equal current-prefix-arg '(16)))))
     (list cwd nil nil (car selection) (cdr selection))))
 
 (defun romacs-agent--start-instance (provider)
-  "The instance a session started under PROVIDER (nil: the default) runs
-on, or a `user-error' saying why none can start there: unknown, disabled,
-or its configuration directory missing."
-  (let* ((name (or provider (romacs-agent--default-provider)))
-         (instance (or (romacs-agent--configured name)
+  "The instance a session started under PROVIDER runs on: PROVIDER an
+instance's name, or a harness (a symbol) whose pool picks one
+\(`romacs-agent-pool-pick'); nil, `romacs-agent-default-provider', else the
+first enabled instance's harness's pool.  A `user-error' says why none can
+start there: unknown, disabled, or its configuration directory missing."
+  (let* ((name (or provider romacs-agent-default-provider
+                   (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :harness)))
+         (pool (and (symbolp name) name))
+         (instance (or (and pool (romacs-agent-pool-pick pool))
+                       (romacs-agent--configured name)
                        (user-error "No agent provider %s; configured: %s" name
                                    (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
                                                                   when (plist-get i :enabled) collect (plist-get i :name))
@@ -2501,8 +2715,7 @@ known, with its private directory."
   (let* ((id (plist-get fields :id))
          (session (apply #'romacs-agent--make
                          :dir (expand-file-name id (romacs-agent--state-root))
-                         :host-socket (expand-file-name (concat (romacs-agent--key id) "/host.sock")
-                                                        (romacs-agent--runtime-root))
+                         :host-socket (romacs-agent--host-socket id)
                          fields)))
     (make-directory (romacs-agent-dir session) t)
     (set-file-modes (romacs-agent-dir session) #o700)
@@ -2833,6 +3046,168 @@ neither callback runs after it."
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent--ask-event)
 
+;;; A session's state, kept
+
+;; A server restoring a session reads its journal only after the state
+;; it kept: what the journal's records had folded the session into, as of
+;; one of them (state.eld in its directory).  It is written once the editor
+;; is idle after a record ending a turn or a run where its records are the
+;; live ones, and after a restore or an attachment has caught up with the
+;; journal: a record is handled whole before any timer runs, so the state
+;; then is the fold of every record up to its seq.  A
+;; restore takes it back when this build defines the session record as it
+;; was written, and when the journal still holds the record it ends at;
+;; else the whole journal is read, as before there was one.  Its manifest
+;; keeps what is not folded from records, and this process what is its own.
+
+(defconst romacs-agent--unkept
+  '(;; Its manifest's, read from it.
+    id harness provider config-dir cwd dir host-socket unit title title-auto options
+    seen-seq settled-seq imported cancelled pending-selection journal-start
+    ;; This process's own: its connection, its views, what it sends.
+    connection buffer driver queue queue-tail queue-length dispatch caught-up
+    startup-pending models-request requests children-rows children-summary)
+  "The fields of a session its kept state leaves out (`romacs-agent--keep').
+The others are what its journal's records fold into.")
+
+(defconst romacs-agent--kept-version 1
+  "The form of a kept state this build writes and reads.")
+
+(defvar romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)
+  "Each session to the seq its kept state is at, as this process last
+wrote or read it: it is not written again for the same seq.")
+
+(defun romacs-agent--kept-file (session)
+  (expand-file-name "state.eld" (romacs-agent-dir session)))
+
+(defun romacs-agent--kept-text (session &optional state)
+  "SESSION's state to keep, as text that reads back as it is; nil when a
+field holds what cannot be read back (a buffer, a process).  STATE, when
+given, is its state as its records left it."
+  (let ((layout (romacs-agent--slot-names 'romacs-agent)))
+    (catch 'unreadable
+      (let ((print-circle t) (print-length nil) (print-level nil)
+            (print-unreadable-function (lambda (_object _escape) (throw 'unreadable nil))))
+        (prin1-to-string
+         (list :version romacs-agent--kept-version :layout layout :seq (romacs-agent-seq session)
+               ;; Folded from its journal (a fork's note), though its options are its manifest's.
+               :forked (plist-get (romacs-agent-options session) :forked)
+               :fields (cl-loop for slot in layout unless (memq slot romacs-agent--unkept)
+                                collect (cons slot (pcase slot
+                                                     ;; As its records left it, not as this
+                                                     ;; process's view of its connection has it.
+                                                     ('state (or state (romacs-agent-state session)))
+                                                     ;; A rollback's hold is this process's own.
+                                                     ('driver-state (romacs-agent--without
+                                                                     (romacs-agent-driver-state session)
+                                                                     '(:rolling-back)))
+                                                     (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
+
+(defun romacs-agent--keep (session &optional state)
+  "Write SESSION's state, as its records have folded it, to its directory:
+only the registered session's (a copy replaying them keeps nothing), and
+not again for the seq it was kept at.  STATE, when given, is its state as
+its records left it (`romacs-agent--keep-soon')."
+  (let ((seq (romacs-agent-seq session)))
+    (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
+               (eq (romacs-agent-get (romacs-agent-id session)) session)
+               (not (eql seq (gethash session romacs-agent--kept))))
+      (when-let* ((text (romacs-agent--kept-text session state)))
+        (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
+          (with-temp-file (concat file ".tmp") (insert text))
+          (set-file-modes (concat file ".tmp") #o600)
+          (rename-file (concat file ".tmp") file t))
+        (puthash session seq romacs-agent--kept)))))
+
+(defvar romacs-agent--keeping nil
+  "The sessions whose state is kept at the editor's next idle moment,
+each (SESSION SEQ STATE): the record it is kept as of, and its state as
+the records left it.")
+
+(defun romacs-agent--keep-soon (session)
+  "Keep SESSION's state once the editor is idle: a write costs a few
+milliseconds, tens for a session with a long history, never in the middle
+of what the user is doing.  Its state is taken now, as its records leave
+it: a server's view of its connection (detached, ended) is laid over it
+after.  A record handled meanwhile takes this one's place."
+  (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
+  (setq romacs-agent--keeping (cons (list session (romacs-agent-seq session) (romacs-agent-state session))
+                                    (cl-remove session romacs-agent--keeping :key #'car))))
+
+(defun romacs-agent--keep-pending ()
+  "Keep the state of every session waiting to be kept, as of the record it
+waits at."
+  (let ((waiting (nreverse romacs-agent--keeping)))
+    (setq romacs-agent--keeping nil)
+    (pcase-dolist (`(,session ,seq ,state) waiting)
+      (when (eql seq (romacs-agent-seq session)) (romacs-agent--keep session state)))))
+
+(defun romacs-agent--record-line-end (seq)
+  "In the current buffer, bytes of a journal, the end of record SEQ's line
+nearest its end, or nil.  A record's line ends with its seq and time (the
+supervisor writes its keys sorted), or starts with its seq (written in
+their order): either tells which record a line is without parsing it,
+and nothing nested can stand at a line's start or end."
+  (goto-char (point-max))
+  (let ((sorted (format "\"seq\":%d,\"t\":" seq)) (found nil))
+    (while (and (not found) (search-backward sorted nil t))
+      (when (save-excursion (goto-char (match-end 0)) (looking-at "[-+.0-9eE]+}$"))
+        (setq found (line-end-position))))
+    (or found
+        (progn (goto-char (point-max))
+               (and (re-search-backward (format "^{\"seq\":%d," seq) nil t) (line-end-position))))))
+
+(defun romacs-agent--journal-after (session seq)
+  "The byte at which SESSION's journal goes on after its record SEQ, looked
+for from the journal's end in growing spans; nil when no line there is
+record SEQ (`romacs-agent--record-line-end')."
+  (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         (size (file-attribute-size (file-attributes journal)))
+         (span 16384) (found nil))
+    (when size
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (while (not found)
+          (let ((start (max 0 (- size span))))
+            (widen)
+            (erase-buffer)
+            (insert-file-contents-literally journal nil start size)
+            ;; Begun inside a record: its part is no line's start.
+            (when (> start 0)
+              (goto-char (point-min))
+              (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
+            (setq found (let ((end (romacs-agent--record-line-end seq)))
+                          (cond (end (min size (+ start end)))
+                                ((= start 0) 'none))))
+            (setq span (* 4 span))))))
+    (and (integerp found) found)))
+
+(defun romacs-agent--read-kept (session)
+  "SESSION's kept state as written, or nil when there is none it can read."
+  (let ((file (romacs-agent--kept-file session)))
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+        (ignore-errors (read (current-buffer)))))))
+
+(defun romacs-agent--restore-kept (session)
+  "Put SESSION's kept state back, when this build defines the session
+record as it was written and its journal holds the record it is at:
+the byte its journal goes on from after that record.  Else nil, SESSION
+untouched."
+  (when-let* ((kept (romacs-agent--read-kept session))
+              ((eql (plist-get kept :version) romacs-agent--kept-version))
+              ((equal (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
+              ((integerp (plist-get kept :seq)))
+              (from (romacs-agent--journal-after session (plist-get kept :seq))))
+    ;; The layout is this build's: each field is where it was written.
+    (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
+      (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
+    (when-let* ((forked (plist-get kept :forked)))
+      (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
+    (puthash session (plist-get kept :seq) romacs-agent--kept)
+    from))
+
 ;;; A new server
 
 (defun romacs-agent--load (dir)
@@ -2852,7 +3227,8 @@ neither callback runs after it."
                                        (list :path (gethash "path" imported) :size (gethash "size" imported))))
                       :harness-session (gethash "harnessSession" manifest)
                       :cancelled (file-exists-p (expand-file-name "cancelled" dir))
-                      ;; Should attaching fail, the journal is read from its start.
+                      ;; Should attaching fail, the journal is read from its start
+                      ;; (from where its kept state ends, once that is back).
                       :journal-start 0
                       :cwd (gethash "cwd" manifest) :title (gethash "title" manifest)
                       ;; Earlier records named a session "<dir> <id>": generated.
@@ -2864,14 +3240,20 @@ neither callback runs after it."
                       :dir dir :unit (gethash "unit" manifest)
                       :seen-seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
                       :settled-seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))
-                      :host-socket (gethash "hostSocket" manifest) :state 'detached)))
+                      :host-socket (romacs-agent--host-socket (gethash "id" manifest)) :state 'detached)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
+        ;; Its kept state back, its journal is read on from there: by its
+        ;; supervisor's replay from that record, or here.
+        (when-let* ((from (romacs-agent--restore-kept session)))
+          (setf (romacs-agent-journal-start session) from))
         (if (file-exists-p (romacs-agent-host-socket session))
             (romacs-agent--attach session 0)
           ;; No supervisor: what the journal says is all there is.
           (let ((romacs-agent-event-functions nil))
-            (romacs-agent--read-journal session (lambda (record) (romacs-agent--record session record))))
+            (romacs-agent--read-journal session (lambda (record) (romacs-agent--record session record))
+                                        (romacs-agent-journal-start session)))
+          (romacs-agent--keep-soon session)
           (unless (or (eq (romacs-agent-state session) 'ended)
                       ;; A per-turn harness between turns is idle, not detached.
                       (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle)))
@@ -2885,11 +3267,17 @@ neither callback runs after it."
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
         ;; Replayed already, unless attached (its replay ends `attached').
         (unless (romacs-agent-connection session) (romacs-agent--seen-caught-up session))
+        (run-hook-with-args 'romacs-agent-loaded-functions session manifest)
         session))))
 
 ;;;###autoload
 (defvar romacs-agent-restored-hook nil
   "Run after `romacs-agent-restore' has loaded every recorded session.")
+
+(defvar romacs-agent-loaded-functions nil
+  "Functions called with each session a server loads and its manifest (a
+hash table), once it is known: what is kept there besides the session's
+own fields is taken back.")
 
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.

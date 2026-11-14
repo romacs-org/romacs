@@ -232,6 +232,16 @@
             (let ((last-command-event ?5))
               (should-error (romacs-agent-chat-open-child) :type 'user-error))))))))
 
+(ert-deftest romacs-agent-children-a-long-title-is-cut-with-the-sessions-dots ()
+  ;; The menu's next column stays put: no `…', only the session's ellipsis.
+  (let* ((truncate-string-ellipsis "...")
+         (label (romacs-agent-ui--worker-label
+                 (list :key 'working :title "lane unsafe-down (992 -> <100 unsafe sites, a long title)"
+                       :activity "mcp__romacs__romacs_task_status_and_more" :time (float-time)))))
+    (should-not (string-search "…" label))
+    (should (string-search "..." label))
+    (should (<= (string-width label) keymap-popup--max-description-width))))
+
 (ert-deftest romacs-agent-children-menu-rows-take-a-click ()
   ;; A row carries the popup's click data, its key among it: the popup's
   ;; mouse path replays that key.

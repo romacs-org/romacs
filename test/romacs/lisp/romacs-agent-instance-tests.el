@@ -28,6 +28,7 @@ conversation is in `one'; `told' collects what a task is told."
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent--room (make-hash-table :test #'equal))
+          (romacs-agent--room-loaded t)
           (romacs-agent-tools--answered (make-hash-table :test #'equal))
           (romacs-agent-tools--moving (make-hash-table :test #'equal))
           (romacs-agent-tools--pending (make-hash-table :test #'equal))
@@ -199,8 +200,14 @@ conversation is in `one'; `told' collects what a task is told."
 
 (ert-deftest romacs-agent-instance-on-limit-moves-a-lane ()
   (romacs-agent-instance-tests--with
-    (let ((romacs-agent-switch-on-limit 'lossless) (sent nil))
-      (cl-letf (((symbol-function 'romacs-agent--enqueue) (lambda (_s item) (push (car item) sent))))
+    (let ((romacs-agent-switch-on-limit 'lossless) (sent nil) (waits nil))
+      (cl-letf (((symbol-function 'romacs-agent--enqueue) (lambda (_s item) (push (car item) sent)))
+                ((symbol-function 'run-at-time)
+                 (lambda (delay _repeat function &rest args)
+                   (when (eq function #'romacs-agent-tools--hand-over) (push (cons delay (cons function args)) waits)))))
+        (cl-flet ((waited () (let ((wait (pop waits)))
+                               (should (equal (car wait) romacs-agent-switch-delay))
+                               (apply (cadr wait) (cddr wait)))))
         ;; Replayed, not live: nothing moves.
         (setf (romacs-agent-caught-up session) nil)
         (romacs-agent--raise session (list :type 'done :error t :limit t :text "old limit" :seq 5))
@@ -208,8 +215,17 @@ conversation is in `one'; `told' collects what a task is told."
         (setf (romacs-agent-caught-up session) t)
         (romacs-agent--raise session (list :type 'rate-limit :status 'rejected :time 1.0))
         (romacs-agent--raise session (list :type 'done :error t :limit t :text "You've hit your weekly limit" :seq 9))
-        ;; Moved, told to go on, and its parent not woken for it.
+        ;; One wait for one limit: a second report of it starts none.
+        (romacs-agent--raise session (list :type 'done :error t :limit t :text "again" :seq 9))
+        (should (= (length waits) 1))
+        ;; Nothing moves before the wait ends.
+        (should (equal (romacs-agent-provider session) "claude"))
+        (waited)
+        ;; Moved, the move journaled with why, told to go on, and its parent not woken for it.
         (should (equal (romacs-agent-provider session) "claude2"))
+        (should (string-match-p "\"type\":\"handoff\",\"from\":\"claude\",\"to\":\"claude2\",\"why\":\"usage limit\""
+                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+                                                  (buffer-string))))
         (should (string-match-p "stopped at claude's usage limit; you now run on claude2" (car sent)))
         (should-not (romacs-agent-tools--wanted-p session 9))
         ;; One that cannot move wakes its parent with its end, as without the option.
@@ -221,11 +237,20 @@ conversation is in `one'; `told' collects what a task is told."
             ;; Now claude2 is spent, and claude has room again.
             (romacs-agent--raise session (list :type 'rate-limit :status 'rejected :time 2.0))
             (puthash "claude" (list :status 'allowed :time 3.0) romacs-agent--room)
-            (romacs-agent--raise session (list :type 'done :error t :limit t :text "limit again" :seq 12)))
+            (romacs-agent--raise session (list :type 'done :error t :limit t :text "limit again" :seq 12))
+            (waited))
           (should (equal (romacs-agent-provider session) "claude2"))
           (should-not sent)
           (should (romacs-agent-tools--wanted-p session 12))
-          (should (gethash "lead" romacs-agent-tools--pending)))))))
+          (should (gethash "lead" romacs-agent-tools--pending))
+          ;; Every account spent: it stays, says when the first resets, and its parent has the end.
+          (clrhash romacs-agent-tools--pending)
+          (puthash "claude" (list :status 'rejected :resets (+ (float-time) 600) :time 4.0) romacs-agent--room)
+          (romacs-agent--raise session (list :type 'done :error t :limit t :text "spent" :seq 20))
+          (should-not waits)
+          (should (string-match-p "\"from\":\"claude2\",\"to\":null,\"why\":\"every claude account is at its limit\",\"resets\":[0-9]"
+                                  (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+                                                    (buffer-string))))))))))
 
 (ert-deftest romacs-agent-instance-the-tool ()
   (romacs-agent-instance-tests--with

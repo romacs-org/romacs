@@ -6,29 +6,9 @@
 //! copies of the json, python and rust grammars (never a user's
 //! directory), the cases on those run too.
 use romacs_vm::Vm;
-use std::path::Path;
-
-/// A VM on Romacs's loadup chain, as tests/advised_commands.rs boots one.
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// One expression per line, on the system C grammar both editors find by
 /// GNU's default search (a bare library name), with `user-emacs-directory'
@@ -114,8 +94,7 @@ const SYSTEM_SETUP: &str = "(setq user-emacs-directory \"/nonexistent-romacs-use
 
 #[test]
 fn treesit_matches_pinned_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'treesit)").unwrap();
     let available = vm.eval_source(&format!("(progn {SYSTEM_SETUP} (treesit-language-available-p 'c))")).and_then(|v| v.display());
     assert_eq!(available.as_deref(), Ok("t"), "the system C grammar (libtree-sitter-c) GNU's default search finds");
@@ -131,8 +110,7 @@ fn treesit_matches_pinned_gnu() {
 /// asks otherwise.
 #[test]
 fn an_early_parse_is_used_only_for_the_text_it_read() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'treesit)").unwrap();
     let source = format!("(progn {SYSTEM_SETUP} \
         (let* ((text \"int a; int b;\") \
@@ -154,8 +132,7 @@ fn an_early_parse_is_used_only_for_the_text_it_read() {
 /// runs them, however small its own edit. A larger edit never waits.
 #[test]
 fn a_small_edit_shows_for_one_frame_before_its_parse() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     // It counts hook calls, and a collection between frames tells every window.
     vm.set_gc_stress(0);
     vm.eval_source("(require 'treesit)").unwrap();
@@ -252,8 +229,7 @@ impl romacs_vm::LayoutHost for Cells {
 /// itself.
 #[test]
 fn twin_parsers_parse_an_edit_once() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'treesit)").unwrap();
     let setup = format!("(progn {SYSTEM_SETUP} \
         (set-buffer (get-buffer-create \"twin\")) (insert \"int a;\\nint b = ;\\nint c;\\n\") \
@@ -294,8 +270,7 @@ fn twin_parsers_parse_an_edit_once() {
 /// in flight is the primitive's answer here, so no thread's timing decides it.
 #[test]
 fn a_frame_waits_for_no_first_parse() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.set_gc_stress(0);
     vm.eval_source("(progn (require 'treesit) (load \"romacs-treesit\" nil t))").unwrap();
     let setup = format!("(progn {SYSTEM_SETUP} \
@@ -318,12 +293,57 @@ fn a_frame_waits_for_no_first_parse() {
     assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
 }
 
+/// romacs-treesit-code.el: a code block takes its language's faces in front
+/// of the faces it has, as a buffer of its own would give them, so an
+/// unclosed brace in one block leaves the next alone; a block that grows
+/// takes the faces of what it grew by; text in no buffer gets the same; a
+/// language with no grammar or mode leaves the text alone.
+#[test]
+fn code_blocks_take_their_languages_faces() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(load \"romacs-treesit-code\" nil t)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (set-buffer (get-buffer-create \"md\")) \
+        (insert \"intro\\nint b = {{\\nint c;\\n\") \
+        (put-text-property 1 (point-max) 'face 'shadow) \
+        (setq md-b (cons 7 17) md-c (cons 17 23)) \
+        (defalias 'md-faces (lambda (beg end) \
+          (let (runs) (while (< beg end) (push (get-text-property beg 'face) runs) (setq beg (1+ beg))) (nreverse runs)))))");
+    vm.eval_source(&setup).unwrap();
+    let check = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(check(&mut vm, "(list (romacs-treesit-fontify-code 'c (car md-b) (cdr md-b)) \
+        (romacs-treesit-fontify-code 'c (car md-c) (cdr md-c)) \
+        (equal (md-faces (car md-c) (cdr md-c)) \
+               (let ((alone (romacs-treesit-fontify-string 'c (propertize \"int c;\" 'face 'shadow)))) \
+                 (with-temp-buffer (insert alone) (md-faces 1 (point-max))))) \
+        (get-text-property (car md-c) 'face))"), "(nil nil t (font-lock-type-face shadow))");
+    assert_eq!(check(&mut vm, "(progn (goto-char (cdr md-c)) (insert \"int d;\") \
+        (put-text-property (cdr md-c) (point) 'face 'shadow) \
+        (romacs-treesit-fontify-code 'c (car md-c) (point) (cdr md-c)) \
+        (list (get-text-property (cdr md-c) 'face) (get-text-property (1- (cdr md-c)) 'face)))"),
+        "((font-lock-type-face shadow) shadow)");
+    assert_eq!(check(&mut vm, "(let ((before (buffer-string))) \
+        (list (romacs-treesit-fontify-code 'no-such-language 1 6) (equal-including-properties before (buffer-string))))"), "(nil t)");
+    // No user hook runs for the hidden buffer; its owner's mode change, or
+    // killing the owner, kills it.
+    assert_eq!(check(&mut vm, "(let ((runs 0)) \
+        (add-hook 'change-major-mode-hook (lambda () (setq runs (1+ runs)))) \
+        (add-hook 'after-change-major-mode-hook (lambda () (setq runs (1+ runs)))) \
+        (with-current-buffer (get-buffer-create \"owner\") (insert \"int x;\") (setq runs 0) (romacs-treesit-fontify-code 'c 1 7) \
+          (let ((hidden (cdr (assq 'c romacs-treesit--code-buffers))) (during runs)) \
+            (fundamental-mode) \
+            (list during (romacs-treesit-code-language-p 'c) (romacs-treesit-code-language-p 'no-such-language) \
+                  (buffer-live-p hidden) \
+                  (progn (romacs-treesit-fontify-code 'c 1 7) \
+                         (let ((again (cdr (assq 'c romacs-treesit--code-buffers)))) (kill-buffer) (buffer-live-p again)))))))"),
+        "(0 t nil nil nil)");
+}
+
 /// `redisplay' between a deferred frame and the next tells the hooks what
 /// changed: the next frame does not tell them again.
 #[test]
 fn redisplay_after_a_deferred_frame_settles_the_hooks() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'treesit)").unwrap();
     vm.set_layout_host(Some(Box::new(Cells)));
     let setup = format!("(progn {SYSTEM_SETUP} \
@@ -353,8 +373,7 @@ fn redisplay_after_a_deferred_frame_settles_the_hooks() {
 /// them (GNU hashes the node object's address and misses).
 #[test]
 fn equal_nodes_hash_alike() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     let source = format!("(progn {SYSTEM_SETUP} \
         (with-temp-buffer (insert \"int a;\") (let* ((root (treesit-parser-root-node (treesit-parser-create 'c))) \
           (a (treesit-node-child root 0)) (b (treesit-node-child root 0)) (table (make-hash-table :test 'equal))) \
@@ -371,8 +390,7 @@ fn equal_nodes_hash_alike() {
 /// `(treesit-buffer_changed FN)` (`treesit_pred_with_guard`).
 #[test]
 fn reparsing_predicates_signal_as_treesit_c() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     let source = format!("(progn {SYSTEM_SETUP} \
         (defalias 'treesit-test-reparse (lambda (n) (insert \"x\") (treesit-parser-root-node (treesit-node-parser n)) t)) \
         (with-temp-buffer (insert \"int a[] = {{1, 2}};\") (let ((root (treesit-parser-root-node (treesit-parser-create 'c)))) \
