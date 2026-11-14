@@ -138,7 +138,8 @@ impl Value {
     pub fn to_datum(&self) -> Datum {
         match self {
             Value::Str(s) => Datum::Str(s.clone()),
-            Value::Symbol(s) => Datum::symbol(s),
+            // Never `nil' or `t': no font table lists either.
+            Value::Symbol(s) => Datum::Symbol(s.clone()),
             Value::Height(Height::Absolute(h)) => Datum::Int(*h),
             Value::Height(Height::Relative(f)) => Datum::Float(*f),
             Value::Bool(true) => Datum::T,

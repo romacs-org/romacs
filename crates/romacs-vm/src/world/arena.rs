@@ -32,8 +32,8 @@
 //! world process maps stays randomized, the executable too. What an image holds of the
 //! executable is read-only data that plain types of the standard library and
 //! other crates point to, such as the empty hash table group in its first
-//! segment; Romacs's own types hold no `&'static` reference (romacs-snapshot
-//! admits none). A process that maps an image maps a copy of its
+//! segment; Romacs's own types hold no reference into the executable
+//! (romacs-snapshot admits none). A process that maps an image maps a copy of its
 //! executable's read-only segments, the first and RELRO, where the
 //! builder's had them, and nothing else there (`shadow_executable`). An image holds no code or writable
 //! static address: a VM at rest keeps no lowered code (`world_normalize`)

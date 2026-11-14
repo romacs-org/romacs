@@ -69,15 +69,20 @@ impl Fault {
 }
 type Checked<T> = std::result::Result<T, Fault>;
 
-/// Romacs's own built-in condition, beside GNU's catalog.
-const NOT_UNICODE: (&str, &str) = ("not-unicode-string", "String is not Unicode text");
+/// Romacs's own built-in conditions, beside GNU's catalog (`builtins`):
+/// name, ancestry and message.
+const ROMACS_BUILTINS: &[(&str, &[&str], &str)] = &[
+    ("not-unicode-string", &["not-unicode-string", "error"], "String is not Unicode text"),
+];
+
+/// Every built-in condition: Romacs's own, then GNU's.
+fn all_builtins() -> impl Iterator<Item = &'static (&'static str, &'static [&'static str], &'static str)> {
+    ROMACS_BUILTINS.iter().chain(builtins::BUILTINS)
+}
 
 /// The message of the built-in condition NAME.
 fn builtin_message(name: &str) -> Option<&'static str> {
-    if name == NOT_UNICODE.0 {
-        return Some(NOT_UNICODE.1);
-    }
-    builtins::BUILTINS.iter().find(|(builtin, _, _)| *builtin == name).map(|&(_, _, text)| text)
+    all_builtins().find(|(builtin, _, _)| *builtin == name).map(|&(_, _, text)| text)
 }
 
 impl Vm {
@@ -94,13 +99,7 @@ impl Vm {
     pub(super) fn initialize_conditions(&mut self) {
         self.intern_symbol("error-conditions");
         self.intern_symbol("error-message");
-        let symbol = self.intern_symbol(NOT_UNICODE.0);
-        let error = self.intern_symbol("error");
-        let ancestors = vec![SymbolId::new(symbol).unwrap(), SymbolId::new(error).unwrap()];
-        self.conditions.entries.insert(SymbolId::new(symbol).unwrap(), Entry {
-            ancestry: Some(ancestors.clone()), builtin: Some(ancestors), ..Entry::default()
-        });
-        for &(name, ancestors, _) in builtins::BUILTINS {
+        for &(name, ancestors, _) in all_builtins() {
             let symbol = self.intern_symbol(name);
             let id = SymbolId::new(symbol).unwrap();
             let ancestors = ancestors

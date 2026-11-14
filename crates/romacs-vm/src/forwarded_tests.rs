@@ -160,19 +160,21 @@ fn table_entries_are_unique_and_cite_gnu() {
         let (file, line) = v.gnu.split_once(':').expect("FILE:LINE");
         assert!(file.ends_with(".c") && line.parse::<u32>().is_ok(), "{}: {}", v.name, v.gnu);
     }
-    // Every name has a place, and the place is its own: `PLACES' numbers
-    // each kind's storage in the order the store makes it.
+    // Every variable's place is its kind's storage numbered in table
+    // order, and the store holds that variable there.
     let store = Forwarded::default();
-    for v in C_VARIABLES {
-        let place = Forwarded::lookup(v.name).unwrap_or_else(|| panic!("{} has no place", v.name));
-        let held = match (place, &v.kind) {
-            (Fwd::Obj(i), Kind::Lisp(_)) => C_VARIABLES[store.object_vars[i as usize]].name == v.name,
-            (Fwd::Buffer(i), Kind::PerBuffer { .. }) => C_VARIABLES[store.buffer_vars[i as usize]].name == v.name,
-            (Fwd::Bool(i), Kind::Bool(initial)) => store.bools[i as usize] == *initial,
-            (Fwd::Int(i), Kind::Int(initial)) => store.ints[i as usize] == *initial,
-            _ => false,
+    let kind = |var: &CVariable| std::mem::discriminant(&var.kind);
+    for (at, v) in C_VARIABLES.iter().enumerate() {
+        let before = C_VARIABLES[..at].iter().filter(|w| kind(w) == kind(v)).count();
+        let i = u16::try_from(before).expect("a kind's storage fits a u16");
+        let (expected, held) = match v.kind {
+            Kind::Lisp(_) => (Fwd::Obj(i), C_VARIABLES[store.object_vars[before]].name == v.name),
+            Kind::PerBuffer { .. } => (Fwd::Buffer(i), C_VARIABLES[store.buffer_vars[before]].name == v.name),
+            Kind::Bool(initial) => (Fwd::Bool(i), store.bools[before] == initial),
+            Kind::Int(initial) => (Fwd::Int(i), store.ints[before] == initial),
         };
-        assert!(held, "{}'s place {place:?} is another variable's", v.name);
+        assert_eq!(Forwarded::lookup(v.name), Some(expected), "{}'s place", v.name);
+        assert!(held, "the store does not hold {} at {expected:?}", v.name);
     }
 }
 
