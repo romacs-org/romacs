@@ -268,10 +268,26 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     // checked on the way down.
     let dir = host::open_store_dir(store, true)?;
     owned_store(&dir, store, home.as_deref())?;
-    if host::store_dir_is_empty(dir.as_fd())? {
-        return write_marker(&dir);
+    // Marked and read under a lock on the directory itself, released as it
+    // closes: processes that start at once on a new store all find it
+    // empty, and one must make and write the marker before any other reads
+    // it, or the others' exclusive creation of it fails (EEXIST).
+    rustix::fs::flock(&dir, rustix::fs::FlockOperation::LockExclusive)?;
+    // Read through the directory opened again under the lock: btrfs lists
+    // to a directory's reader only the entries it had when the reader
+    // opened it, so a marker made since would not be seen through DIR.
+    let now = host::open_store_dir(store, false)?;
+    let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
+    };
+    if identity(&now)? != identity(&dir)? {
+        return Err(std::io::Error::other(format!("world store {}: replaced while it was opened", store.display())));
     }
-    match marker_error(&dir) {
+    if host::store_dir_is_empty(now.as_fd())? {
+        return write_marker(&now);
+    }
+    match marker_error(&now) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
     }
@@ -1419,6 +1435,25 @@ mod tests {
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Launches that start at once on a new store each find it a store:
+    /// one marks it, the others read its marker once written. Its failure
+    /// on btrfs, whose reader of a directory sees only the entries it had
+    /// when opened, was a temporary directory there (the train's).
+    #[test]
+    fn a_new_store_opened_at_once_by_many_is_marked_once() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-at-once", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        let start = std::sync::Barrier::new(16);
+        let opened: Vec<std::io::Result<()>> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..16).map(|_| scope.spawn(|| { start.wait(); private_store(&store) })).collect();
+            threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        let marker = std::fs::read_to_string(store.join(MARKER));
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(opened.iter().all(Result::is_ok), "{}: {opened:?}", store.display());
+        assert_eq!(marker.unwrap(), MARKER_TEXT);
     }
 
     /// A build whose image cannot be written or placed leaves no image
