@@ -100,8 +100,7 @@ fn insert_special_event_matches_gnu() {
 /// of the closed instance. The guard timer tells a hang from the end.
 #[test]
 fn batch_read_ends_when_a_timer_removes_the_last_watch() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     let dir = std::env::temp_dir().join(format!("romacs-inotify-timer-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let got = vm.eval_source(&format!(r#"(let ((w (inotify-add-watch {:?} 'create #'ignore)))

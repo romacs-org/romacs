@@ -13,6 +13,9 @@
 use romacs_vm::Vm;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::Path;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// One expression per line, each with `default-directory' set to a private
 /// directory. Romacs runs them in order in one VM, so each leaves no process.
@@ -94,26 +97,6 @@ const PROLOGUE: &str = r#"(progn
       (romacs-test-wait p)
       (reverse chunks))))"#;
 
-/// The loadup chain the daily-driver consumers run on (real_ert_load.rs).
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 /// Run each of EXPRESSIONS in Romacs's VM and in pinned GNU, each in a
 /// private `default-directory' under BASE; the mismatches.
 fn mismatches(vm: &mut Vm, expressions: &[&str], base: &Path) -> Vec<String> {
@@ -151,7 +134,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 #[test]
 fn processes_match_pinned_gnu() {
     let base = scratch("test");
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let cases: Vec<&str> = CASES.lines().filter(|line| !line.is_empty()).collect();
     let failures = mismatches(&mut vm, &cases, &base);
@@ -196,7 +179,7 @@ fn saturated_listener() -> (OwnedFd, Vec<std::net::TcpStream>, u16) {
 fn nowait_connect_does_not_block_like_gnu() {
     let base = scratch("nowait");
     let (_listener, _queued, port) = saturated_listener();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let case = format!("(let* ((t0 (float-time)) (c (make-network-process :name \"sat\" :host \"127.0.0.1\" :service {port} :nowait t :noquery t))) (prog1 (list (process-status c) (< (- (float-time) t0) 1) (progn (accept-process-output nil 0.05) (process-status c)) (process-contact c :remote)) (delete-process c)))");
     let failures = mismatches(&mut vm, &[&case], &base);
@@ -231,7 +214,7 @@ fn local_sockets_match_pinned_gnu() {
     let cases: Vec<String> = LOCAL_CASES.lines().filter(|line| !line.is_empty())
         .map(|line| line.replace("@DIR@", sockets.to_str().unwrap())).collect();
     let cases: Vec<&str> = cases.iter().map(String::as_str).collect();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let failures = mismatches(&mut vm, &cases, &base);
     drop(vm);
@@ -244,7 +227,7 @@ fn local_sockets_match_pinned_gnu() {
 // still reaped once they exit, not left as zombies.
 #[test]
 fn dropped_vm_children_are_reaped() {
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let pids = vm.eval_source(r#"(progn (setq default-directory "/") (list (process-id (make-process :name "live" :command (list "sleep" "10") :connection-type 'pipe :noquery t))
                                        (let ((p (make-process :name "dead" :command (list "sleep" "10") :connection-type 'pipe :noquery t))) (delete-process p) (process-id p))))"#)
         .and_then(|v| v.display()).unwrap();
@@ -279,7 +262,7 @@ fn dropped_vm_children_share_one_reaper() {
     assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
     // Held open for writing, so each child's open of the FIFO returns.
     let release = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let script = format!("trap '' HUP; echo ready; read x < {}", fifo.display());
     let pids = vm.eval_source(&format!(r#"(progn (setq default-directory "/") (let* ((out "")
             (ps (mapcar (lambda (_) (make-process :name "hup" :command (list "sh" "-c" {script:?}) :connection-type 'pipe :noquery t
