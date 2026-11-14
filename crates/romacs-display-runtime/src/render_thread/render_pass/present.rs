@@ -270,7 +270,7 @@ impl RenderApp {
         {
             let unresolved_face_text_total = atlas.unresolved_face_text_total();
             window.render.reported_presentation = frame.presentation_id.get();
-            self.comms.send_input(crate::thread_comm::InputEvent::PresentationRendered {
+            self.comms.tell(crate::thread_comm::Fact::PresentationRendered {
                 frame: emacs_frame_id,
                 presentation: frame.presentation_id.get(),
                 unresolved_face_text_total,

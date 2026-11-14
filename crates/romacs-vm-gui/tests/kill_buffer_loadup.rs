@@ -5,6 +5,8 @@
 //! is kept. Compared with pinned GNU -Q --batch on the same form.
 use romacs_vm_gui::startup;
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 const FORM: &str = r#"(let* ((a (get-buffer-create "kl-a")))
   (set-window-buffer (selected-window) a)
@@ -29,6 +31,7 @@ fn kill_buffer_replaces_windows_and_keeps_a_sole_scratch_as_gnu() {
     let mine = std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        home::private_home(&mut vm, "kill-buffer");
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         // GNU's batch shows no startup screen (command-line-1 under
         // `noninteractive'); a shown one is recorded first in `buffer-list'.

@@ -130,3 +130,19 @@ fn exec_path_decodes_the_launch_path_like_gnu() {
         assert_eq!(romacs, String::from_utf8_lossy(&gnu.stdout), "PATH={path:?}");
     }
 }
+
+/// A primitive that resolves an environment variable reads the session's
+/// `process-environment`, as `getenv` does, never the process's own: the
+/// keeper's socket lies in the `XDG_RUNTIME_DIR` the session names, and a
+/// session that unsets it has no place for one.
+#[test]
+fn the_keepers_socket_lies_in_the_sessions_runtime_directory() {
+    let mut vm = Vm::new();
+    let mut shown = |form: &str| vm.eval_source(form).unwrap().display().unwrap();
+    let named = shown(r#"(let ((process-environment (cons "XDG_RUNTIME_DIR=/romacs-env-test/run" process-environment)))
+                           (romacs--keeper-call 'socket "s"))"#);
+    assert!(named.starts_with("\"/romacs-env-test/run/"), "{named}");
+    let unset = shown(r#"(let ((process-environment (cons "XDG_RUNTIME_DIR" process-environment)))
+                           (condition-case e (romacs--keeper-call 'socket "s") (error (list 'failed (car (cdr e))))))"#);
+    assert!(unset.starts_with("(failed \"XDG_RUNTIME_DIR is not set"), "{unset}");
+}

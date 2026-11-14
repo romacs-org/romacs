@@ -314,6 +314,8 @@ impl Vm {
         // One slot value, registered and in the closure's slot 5, as GNU's
         // closure holds it once. [SPEC MODES] is a fresh vector for each
         // closure, as make-interpreted-closure's Fvector makes it.
+        // The closure's key covers the spec and modes (`closure_key_extra').
+        let key_extra = vec![spec.clone(), modes.clone().unwrap_or_else(|| sym("nil"))];
         let spec_value = self.literal(&spec)?;
         let spec_reg = builder.reg();
         builder.emit(Op::Const(spec_reg, spec_value));
@@ -327,8 +329,10 @@ impl Vm {
             None => spec_reg,
         };
         let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
+        self.closure_key_extra = key_extra;
         let parts = self.expr(builder, &call("function", vec![Form::List(lambda)]))
             .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
+        self.closure_key_extra.clear();
         self.keep_captures = saved_captures;
         let (closure, thunk) = parts?;
         let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");

@@ -315,8 +315,8 @@ standalone Cargo execution without it.
   `beta` in as it moves.
 - Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
   in a Romacs session): the merge forecast with `beta`, tracked generated files,
-  the lint of the Lisp the branch touches, and the structural rules, each finding
-  with its fix.
+  the lint of the Lisp the branch touches, and the Rust tests the change can reach
+  (`tools/lib/impact.py`), each finding with its fix.
 - A branch lands through the merge queue: signed commits, the full check, then
   a submitted request. The queue merges requests onto `beta` in order and
   reruns what each merge changes.

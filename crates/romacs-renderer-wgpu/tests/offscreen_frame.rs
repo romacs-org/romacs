@@ -12,6 +12,8 @@
 use romacs_display_protocol::face::BoxVerticalEdges;
 #[path = "offscreen_frame/fade_edges_test.rs"]
 mod fade_edges_test;
+#[path = "offscreen_frame/indent_guides_test.rs"]
+mod indent_guides_test;
 #[path = "offscreen_frame/menu_test.rs"]
 mod menu_test;
 #[path = "offscreen_frame/opacity_test.rs"]
