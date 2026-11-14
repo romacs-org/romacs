@@ -120,6 +120,13 @@ pub trait HostInput {
         None
     }
 
+    /// Whether the host shows top-level frames beyond the first, each in
+    /// a window of its own: what lets `make-frame' make one. A host
+    /// without, every batch run's, keeps the one.
+    fn top_level_frames(&mut self) -> bool { false }
+    /// Ask the host to give the window of the top-level frame whose id is
+    /// FRAME the input focus (`x-focus-frame'); the compositor may refuse.
+    fn focus_frame(&mut self, _frame: u64) {}
     /// What the host's display saw of native key repeat since the last
     /// take (`romacs--take-key-repeats`), None with no display.
     fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {

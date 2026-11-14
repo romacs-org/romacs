@@ -243,6 +243,11 @@ impl Vm {
         let Ok(f) = self.frame(frame) else { return Value::UNBOUND; };
         match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
     }
+    /// Whether top-level frame ROOT's minibuffer window is its own, not
+    /// one it borrows from another frame (`(minibuffer . nil)').
+    pub(super) fn owns_minibuffer(&self, root: Value) -> Result<bool> {
+        Ok(self.window(self.frame(root)?.minibuffer)?.frame == root)
+    }
     /// The selected frame's minibuffer window.
     pub(super) fn mini_window(&self) -> Value {
         self.window_root_peek(MINI)
@@ -916,11 +921,13 @@ impl Vm {
         let mut ids = vec![];
         self.window_leaf_ids(self.frame(root)?.root, &mut ids)?;
         let mini = self.frame(root)?.minibuffer;
-        // A hosted mini-window is shown with its host's windows.
+        // A hosted mini-window is shown with its host's windows, and a
+        // borrowed one with its own frame's.
         let host = self.minibuffer_host(root);
-        if host.is_none() { ids.push(self.window(mini)?.id); }
+        let own = self.owns_minibuffer(root)?;
+        if host.is_none() && own { ids.push(self.window(mini)?.id); }
         // Redisplay sizes the mini-window to its display before laying out.
-        if self.resize_mini_window(root, mini)? { self.refit_mini_window(root, width, height)?; }
+        if own && self.resize_mini_window(root, mini)? { self.refit_mini_window(root, width, height)?; }
         self.reconcile_terminal_geometry()?;
         // Painted inside the internal border (frame.h:1796).
         let border = self.host_border(self.frame_of_id(frame)?);
@@ -1234,8 +1241,9 @@ impl Vm {
             return Err("frame geometry is below safe window minimum".into());
         }
         let root = self.frame(root_frame)?.root;
-        // A hosted mini-window takes none of the root windows' lines.
-        let hosted = self.minibuffer_host(root_frame).is_some();
+        // A hosted mini-window takes none of the root windows' lines, nor
+        // does another frame's that this one borrows.
+        let hosted = self.minibuffer_host(root_frame).is_some() || !self.owns_minibuffer(root_frame)?;
         // A mini-window the root windows cannot make room for keeps one
         // line (window.c grow_mini_window, bug#69140).
         let mini_lines = self.top_geometry(root_frame)?.mini_lines;
