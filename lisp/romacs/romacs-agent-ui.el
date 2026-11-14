@@ -494,7 +494,7 @@ recedes, a failure is loud, and the output is folded under the row."
                      (record (let ((result (gethash "result" record))) (if (stringp result) result "")))
                      (t output))))
     (when-let* ((answered (and row (not failed) (get-text-property row 'romacs-agent-answers))))
-      (romacs-agent-ui--replied answered))
+      (romacs-agent-ui--replied answered mark))
     (when mark (romacs-agent-ui--run-ended id mark failed (plist-get event :time)))
     (save-excursion
       (let ((inhibit-read-only t))
@@ -772,8 +772,8 @@ quiet call: its thinking is then for `romacs-agent-chat-expand-all'."
 ;; a link to the sender's thread, the reply hint, then the message.  A message this session
 ;; sends (romacs_task_send, romacs_task_reply) is a loud card in its run:
 ;; ✉ →, whom it goes to, its first line, the whole of it folded.  The
-;; reply hint is ↩, dim until this session answers the message with
-;; romacs_task_reply, then ↩ ✓.
+;; reply hint is ↩, dim until the message is answered, then ↩ ✓, which
+;; RET follows to the reply.
 
 (defvar-local romacs-agent-ui--received nil
   "Each message this chat shows by its id: (SENDER . HINT), the sender's
@@ -799,10 +799,22 @@ it answers; nil for any other call."
            (list (or (car (gethash id (romacs-agent-ui--received))) "its sender")
                  (or (funcall field "text") "") id)))))))
 
-(defun romacs-agent-ui--reply-hint (answered)
-  "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED."
+(defvar romacs-agent-ui--reply-link-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map romacs-agent-chat-transcript-map)
+    (define-key map (kbd "RET") #'romacs-agent-chat-goto-reply)
+    (define-key map [mouse-1] #'romacs-agent-chat-goto-reply)
+    map)
+  "Keys of an answered message's hint: RET goes to the reply.")
+
+(defun romacs-agent-ui--reply-hint (answered &optional reply)
+  "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED, a link to the
+REPLY's row, a marker, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
-              'romacs-agent-reply t 'help-echo (if answered "Answered" "Not answered yet")))
+              'romacs-agent-reply t
+              'help-echo (cond (reply "Answered: RET goes to the reply") (answered "Answered") (t "Not answered yet"))
+              'keymap (and reply romacs-agent-ui--reply-link-map)
+              'mouse-face (and reply 'highlight) 'romacs-agent-reply-at reply))
 
 (defun romacs-agent-ui--message-card (session event message)
   "MESSAGE, one of SESSION's EVENT's :messages, as its card: its sender
@@ -839,12 +851,13 @@ known, else the name it sent."
     (list :id (plist-get from :session) :title (or (plist-get from :name) "task")
           :state (plist-get wake :state) :result (or (plist-get message :text) ""))))
 
-(defun romacs-agent-ui--replied (id)
-  "Show message ID answered, where this chat shows its card."
+(defun romacs-agent-ui--replied (id &optional reply)
+  "Show message ID answered, where this chat shows its card: by REPLY, a
+marker at the reply's row, when this chat shows it."
   (when-let* ((hint (cdr (gethash id (romacs-agent-ui--received)))))
     (save-excursion
       (let* ((inhibit-read-only t) (start (marker-position hint))
-             (answered (romacs-agent-ui--reply-hint t)))
+             (answered (romacs-agent-ui--reply-hint t reply)))
         (delete-region start (next-single-property-change start 'romacs-agent-reply nil (point-max)))
         (romacs-agent-ui--insert-at start answered)
         (set-marker hint start)))))
@@ -1935,6 +1948,15 @@ strings, compared by value."
     (while (and pos (< pos (point-max)) (not (equal (get-text-property pos 'romacs-agent-output) id)))
       (setq pos (next-single-property-change pos 'romacs-agent-output)))
     (and pos (< pos (point-max)) pos)))
+
+(defun romacs-agent-chat-goto-reply ()
+  "Go to the reply that answered the message on this row."
+  (interactive nil romacs-agent-chat-mode)
+  (let ((reply (or (get-text-property (point) 'romacs-agent-reply-at)
+                   (user-error "No reply to go to here"))))
+    (goto-char reply)
+    (romacs-agent-ui--reveal (point))
+    (when (eq (window-buffer) (current-buffer)) (recenter))))
 
 (defun romacs-agent-chat-open-task ()
   "Open the thread of the delegated task on this row."

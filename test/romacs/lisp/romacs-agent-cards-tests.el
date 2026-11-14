@@ -401,6 +401,23 @@
     (romacs-agent-ui--run-settle)
     (should (string-suffix-p "  ● ✉ → child  Thanks.\n" (romacs-agent-cards-tests--visible)))))
 
+(ert-deftest romacs-agent-an-answered-message-links-its-reply ()
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--receive
+     session "Can you rebase?" (romacs-agent-cards-tests--message "m-1" "child" :session romacs-agent-cards-tests--child))
+    (romacs-agent-cards-tests--draw
+     session :type 'tool :state 'started :id "r" :name "mcp__romacs__romacs_task_reply"
+     :input (romacs-agent-cards-tests--table "messageId" "m-1" "text" "Rebased."))
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "r" :output "{}")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Done.")
+    ;; RET on ↩ ✓ goes to the reply's row.
+    (goto-char (point-min))
+    (search-forward "↩ ✓")
+    (goto-char (match-beginning 0))
+    (should (eq (key-binding (kbd "RET")) #'romacs-agent-chat-goto-reply))
+    (romacs-agent-chat-goto-reply)
+    (should (eq (point) (marker-position (gethash "r" romacs-agent-ui--tool-lines))))))
+
 (ert-deftest romacs-agent-a-failed-reply-keeps-its-message ()
   (romacs-agent-cards-tests--with-chat session
     (romacs-agent-cards-tests--receive
