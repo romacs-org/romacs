@@ -432,9 +432,11 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
                       ;; Quit is the call's error (`with-local-quit' would
                       ;; return nil for it): C-g or a deadline tells the caller.
                       (let ((inhibit-quit nil))
+                        ;; With no request active (a call made from Lisp), no peer and no id.
                         (funcall romacs-mcp-call-function
                                  (plist-get romacs-mcp--active :peer)
-                                 (gethash "id" (plist-get romacs-mcp--active :message) nil)
+                                 (when-let* ((message (plist-get romacs-mcp--active :message)))
+                                   (gethash "id" message nil))
                                  (gethash "name" params)
                                  (lambda () (funcall (plist-get tool :handler) arguments))))
                     ((error quit)
