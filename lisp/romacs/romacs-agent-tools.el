@@ -423,8 +423,9 @@ named, then `romacs-agent-tools--child-note'; an empty TASK stays empty."
           task "\n\n" romacs-agent-tools--child-note)))
 
 (defconst romacs-agent-tools--wake-head
-  "Delegated task \\([0-9a-f-]\\{36\\}\\) (\\(.*\\)) \\[\\(completed\\|failed\\)\\(?:, \\([0-9]+\\) chars\\)?\\]:\n"
-  "A wake's head: its task, title, state and, when it says, its result's length.")
+  "Delegated task \\([0-9a-f-]\\{36\\}\\) (\\(.*\\)) \\[\\(completed\\|failed\\|sent\\)\\(?:, \\([0-9]+\\) chars\\)?\\]:\n"
+  "A wake's head: its task, title, state (\"sent\": a copy of its message to
+another task of its parent) and, when it says, its result's length.")
 
 (defun romacs-agent-tools--wakes-parse (text)
   "TEXT read back as the wakes it carries, in order, each a plist of :id
@@ -568,7 +569,13 @@ turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
       (when ready
         (romacs-agent-tools--deliver
          parent
-         (mapconcat (lambda (item) (romacs-agent-tools--wake-text (car item) (cdr item))) ready "\n\n")
+         (mapconcat #'identity
+                    (append (mapcar (lambda (item) (romacs-agent-tools--wake-text (car item) (cdr item))) ready)
+                            ;; Its tasks' messages to each other since the last: copies, never a wake.
+                            (mapcar (lambda (copy) (romacs-agent-tools--copy-text (car copy) (cdr copy)))
+                                    (prog1 (gethash (romacs-agent-id parent) romacs-agent-tools--copies)
+                                      (remhash (romacs-agent-id parent) romacs-agent-tools--copies))))
+                    "\n\n")
          ;; Delivered only once the parent's harness has it.
          (lambda () (dolist (item ready) (romacs-agent-tools--mark-woken (car item) (cadr item))))
          (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready)))))))
@@ -775,28 +782,89 @@ parent may do WHAT."
                   (if parent (format "task of session %s" parent) "no delegated task") what))
     session))
 
-(defun romacs-agent-tools--tell (child text)
+(defun romacs-agent-tools--tell (child text &optional mode valid)
   "Send TEXT to CHILD as its next message by the session's own send:
 now when it is idle, once its running turn ends, once its harness is
-back when it had ended.  Its next turn end wakes its parent by its wake
-rule, as its first did.  An empty TEXT sends nothing."
+back when it had ended.  MODE `steer' writes it into the running turn,
+as the chat's steer does (a harness run per turn takes it after);
+`interrupt' interrupts the turn and sends it first.  VALID, when given,
+is asked before a waiting message goes: nil drops it.  Its next turn end
+wakes its parent by its wake rule, as its first did.  An empty TEXT
+sends nothing."
   (when (romacs-agent-cancelled child)
     (user-error "Task %s (%s) was cancelled" (romacs-agent-id child) (romacs-agent-title child)))
   (unless (string-empty-p (string-trim text))
-    ;; One starting is going on already: attaching it again would take its
-    ;; supervisor from the attachment under way.
-    (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
-    (romacs-agent-send-later child text))
+    (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
+      (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
+             (romacs-agent-send child text nil valid))
+            ((and busy (eq mode 'interrupt))
+             (romacs-agent-interrupt child)
+             (romacs-agent-send-later child text t nil valid))
+            (t
+             ;; One starting is going on already: attaching it again would take its
+             ;; supervisor from the attachment under way.
+             (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+             (romacs-agent-send-later child text nil nil valid)))))
   child)
 
+(defconst romacs-agent-tools--send-modes '("queue" "steer" "replace" "interrupt")
+  "How romacs_task_send delivers: after the running turn, into it, in place
+of what the sender has waiting, or cutting the turn short.")
+
+(defvar romacs-agent-tools--generations (make-hash-table :test #'equal)
+  "(TASK-ID . SENDER-ID) to the generation of the sender's messages to the
+task: a `replace' starts a new one, and the waiting messages of an older
+one are dropped as they come up.")
+
+(defun romacs-agent-tools--sibling-p (session caller)
+  "Whether CALLER is another task of SESSION's parent."
+  (let ((parent (plist-get (romacs-agent-options session) :parent)))
+    (and parent caller (not (equal caller (romacs-agent-id session)))
+         (when-let* ((sender (romacs-agent-get caller)))
+           (equal (plist-get (romacs-agent-options sender) :parent) parent)))))
+
+(defvar romacs-agent-tools--copies (make-hash-table :test #'equal)
+  "A parent's id to the copies of its tasks' messages to each other, oldest
+first, each (SENDER . TEXT): they go with its next wake, never waking it.")
+
+(defun romacs-agent-tools--copy-text (sender text)
+  "SENDER's message TEXT, as a wake its parent reads (state \"sent\")."
+  (format "Delegated task %s (%s) [sent, %d chars]:\n%s"
+          (romacs-agent-id sender) (romacs-agent-title sender) (length text) text))
+
 (defun romacs-agent-tools--send (arguments)
-  "Send ARGUMENTS' message to the caller's task taskId."
+  "Send ARGUMENTS' message to task taskId: the caller's own task, or
+another task of the caller's parent, its parent then copied."
   (romacs-mcp--instance arguments)
-  (let ((child (romacs-agent-tools--own (romacs-agent-tools--known arguments) (romacs-agent-tools--caller)
-                                        "send it messages")))
-    (when (string-empty-p (string-trim (or (gethash "message" arguments) "")))
+  (let* ((caller (romacs-agent-tools--caller))
+         (task (romacs-agent-tools--known arguments))
+         (sibling (romacs-agent-tools--sibling-p task caller))
+         (child (if sibling task (romacs-agent-tools--own task caller "send it messages (or another of its parent's tasks)")))
+         (message (or (gethash "message" arguments) ""))
+         (mode (or (gethash "mode" arguments) "queue")))
+    (when (string-empty-p (string-trim message))
       (user-error "message is empty"))
-    (romacs-agent-tools--task (romacs-agent-tools--tell child (gethash "message" arguments)))))
+    (unless (member mode romacs-agent-tools--send-modes)
+      (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
+    (let* ((key (cons (romacs-agent-id child) caller))
+           (generation (if (equal mode "replace")
+                           (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
+                                    romacs-agent-tools--generations)
+                         (gethash key romacs-agent-tools--generations 0)))
+           (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0))))
+           (text (if sibling
+                     (format "Message from task %s (%s), another task of your parent:\n%s"
+                             caller (romacs-agent-title (romacs-agent-get caller)) message)
+                   message)))
+      (romacs-agent-tools--tell child text (intern mode) valid)
+      (when sibling
+        (let ((parent (plist-get (romacs-agent-options child) :parent)))
+          (puthash parent (append (gethash parent romacs-agent-tools--copies)
+                                  (list (cons (romacs-agent-get caller)
+                                              (format "To task %s (%s), %s:\n%s" (romacs-agent-id child)
+                                                      (romacs-agent-title child) mode message))))
+                   romacs-agent-tools--copies))))
+    (romacs-agent-tools--task child)))
 
 (defun romacs-agent-tools--same-directory-p (a b)
   (equal (file-name-as-directory (file-truename a)) (file-name-as-directory (file-truename b))))
@@ -1340,10 +1408,19 @@ last result."
 
 (romacs-mcp-register-tool
  "romacs_task_send"
- "Send a message to a task you delegated (only its parent may), by its session's own send: at once when it is \
-idle, after its running turn when it is busy, resuming its harness when it had ended. Its next turn end wakes you \
-with its reply by the task's wake rule, as its first did: end your turn then, do not poll. Answers its task record."
- (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string") ("message" . "string")) '("taskId" "message"))
+ "Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
+parent gets a copy with its next wake, never woken for it); any other session is refused. mode queue (default): at \
+once when the task is idle, after its running turn when it is busy, resuming its harness when it had ended; steer: \
+into its running turn; replace: in place of your messages still waiting for it; interrupt: its turn cut short, \
+then this first. A task's next turn end wakes its parent with its reply by its wake rule: end your turn then, do \
+not poll. Answers its task record."
+ (romacs-mcp--object
+  "type" "object"
+  "properties" (romacs-mcp--object
+                "instance" (romacs-mcp--object "type" "string") "taskId" (romacs-mcp--object "type" "string")
+                "message" (romacs-mcp--object "type" "string")
+                "mode" (romacs-mcp--object "type" "string" "enum" (vconcat romacs-agent-tools--send-modes)))
+  "required" ["taskId" "message"] "additionalProperties" :false)
  #'romacs-agent-tools--send)
 
 (romacs-mcp-register-tool

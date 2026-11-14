@@ -402,16 +402,19 @@ what the user wrote stays theirs, whatever it looks like."
 
 (defun romacs-agent-ui--arrival (session event wake)
   "Show WAKE, a task's result reaching SESSION at EVENT: a row of its own,
-never a prompt, the result folded below it, and its card settled."
-  (let* ((id (plist-get wake :id)) (state (plist-get wake :state))
+never a prompt, the result folded below it, and its card settled.  A
+copy of the task's message to another task (state \"sent\") settles
+nothing."
+  (let* ((id (plist-get wake :id)) (state (plist-get wake :state)) (sent (equal state "sent"))
          (result (string-trim (plist-get wake :result)))
          (key (format "%s:%s" id (plist-get event :seq)))
          (preview (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " result) 72 nil nil t)))
-    (romacs-agent-ui--settle-task id state)
+    (unless sent (romacs-agent-ui--settle-task id state))
     (romacs-agent-ui--line
      session event
      (concat "  ⇠ " (propertize (plist-get wake :title) 'face 'romacs-agent-delegate 'romacs-agent-card t)
-             "  " (romacs-agent-ui--chip id state) "  " (romacs-agent-ui--thread-link id)
+             "  " (if sent (propertize "✉" 'face 'romacs-agent-dim) (romacs-agent-ui--chip id state))
+             "  " (romacs-agent-ui--thread-link id)
              (if (string-empty-p preview) "" (propertize (concat "  " preview) 'face 'romacs-agent-dim)))
      'romacs-agent-tool key)
     (unless (string-empty-p result)

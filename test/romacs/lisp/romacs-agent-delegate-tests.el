@@ -201,3 +201,80 @@ recorded in a private directory; `delivered' collects what wakes it."
 
 (provide 'romacs-agent-delegate-tests)
 ;;; romacs-agent-delegate-tests.el ends here
+
+;; Messages to tasks: how they go, and between tasks of one parent.
+
+(defmacro romacs-agent-delegate-tests--sending (caller &rest body)
+  "BODY in `romacs-agent-delegate-tests--family' of tasks a and b, both
+busy with ready harnesses, CALLER's tool calls: `written' collects what
+reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
+  (declare (indent 1))
+  `(romacs-agent-delegate-tests--family ((a nil) (b nil))
+     (dolist (task (list a b)) (setf (romacs-agent-driver-state task) (list :ready t)))
+     (let ((written nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
+           (romacs-agent-tools--copies (make-hash-table :test #'equal)))
+       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id ,caller)))
+                 ((symbol-function 'romacs-agent--input)
+                  (lambda (task text &rest _) (push (cons (romacs-agent-title task) text) written)))
+                 ((symbol-function 'romacs-agent-interrupt) (lambda (task) (push (romacs-agent-title task) interrupted)))
+                 ((symbol-function 'romacs-agent--continue) #'ignore))
+         (cl-flet ((send (task message &optional mode)
+                     (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id task) "message" message
+                                                                   "mode" (or mode "queue"))))
+                   (drain (task) (setf (romacs-agent-state task) 'idle) (romacs-agent--send-next task t)))
+           ,@body)))))
+
+(ert-deftest romacs-agent-delegate-send-steers-queues-and-interrupts ()
+  (romacs-agent-delegate-tests--sending parent
+    (send a "later")
+    (should-not written)
+    (should (= (romacs-agent-queue-length a) 1))
+    ;; Into the running turn.
+    (send a "now" "steer")
+    (should (equal written '(("a" . "now"))))
+    ;; Cut short, then first.
+    (send a "first" "interrupt")
+    (should (equal interrupted '("a")))
+    (drain a)
+    (should (equal (car written) '("a" . "first")))))
+
+(ert-deftest romacs-agent-delegate-send-replaces-the-senders-waiting-messages ()
+  (romacs-agent-delegate-tests--sending parent
+    (send a "one")
+    (send a "two")
+    (send a "three" "replace")
+    (dotimes (_ 3) (drain a))
+    ;; Only what replaced them went.
+    (should (equal (mapcar #'cdr written) '("three")))))
+
+(ert-deftest romacs-agent-delegate-siblings-send-their-parent-copied ()
+  (romacs-agent-delegate-tests--sending a
+    (send b "the interface is X" "steer")
+    (should (string-match-p "\\`Message from task 00000001-.* (a), another task of your parent:\nthe interface is X\\'"
+                            (cdar written)))
+    ;; Its parent is not woken for it.
+    (romacs-agent-tools--flush parent)
+    (should-not delivered)
+    ;; It reads it with its next wake.
+    (romacs-agent-delegate-tests--end b 7 "B done")
+    (romacs-agent-tools--flush parent)
+    (let ((wakes (romacs-agent-tools--wakes-parse (car delivered))))
+      (should (equal (mapcar (lambda (w) (plist-get w :state)) wakes) '("completed" "sent")))
+      (should (string-match-p "To task 00000002-.* (b), steer:\nthe interface is X" (plist-get (cadr wakes) :result))))
+    ;; Delivered once.
+    (romacs-agent-delegate-tests--end b 9 "B again")
+    (romacs-agent-tools--flush parent)
+    (should (= (length (romacs-agent-tools--wakes-parse (car delivered))) 1))))
+
+(ert-deftest romacs-agent-delegate-send-outside-the-tree-is-refused ()
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((stranger (romacs-agent--make :id "eeeeeeee-0000-4000-8000-000000000000" :harness 'claude
+                                        :options '(:parent "ffffffff-0000-4000-8000-000000000000"))))
+      (puthash (romacs-agent-id stranger) stranger romacs-agent--sessions)
+      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id stranger))))
+        (should-error (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id a) "message" "hi"))
+                      :type 'user-error))
+      ;; Nor may a task send to its parent this way.
+      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id a))))
+        (should-error (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id parent) "message" "hi"))
+                      :type 'user-error)))))
