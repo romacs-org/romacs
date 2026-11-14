@@ -30,14 +30,10 @@ fn deferred_gui_pending_primary_close_rejects_exact_frame_and_recreates() {
     let mut app = make_test_app();
     app.comms.keep_alive_without_frames = true;
     app.frame_windows.adopt_primary_frame_id(0x42);
-    let (reply, rx) = crossbeam_channel::bounded(1);
-    app.frame_windows.await_ready(0x42, reply);
-    assert!(matches!(
-        rx.try_recv(),
-        Err(crossbeam_channel::TryRecvError::Empty)
-    ));
+    app.frame_windows.await_ready(0x42, 1);
+    assert!(app.frame_windows.take_answers().is_empty());
     app.retire_pending_primary();
-    assert!(rx.try_recv().unwrap().is_err());
+    assert!(matches!(app.frame_windows.take_answers()[..], [(1, Err(_))]));
     assert!(app.frame_windows.primary_window().is_none());
     assert!(!app.lifecycle_flags.is_shutting_down());
     app.handle_window(WindowCommand::CreateWindow {
@@ -1000,23 +996,23 @@ fn clipboard_command_before_display_initialization_returns_an_explicit_error() {
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
         true,
     );
-    let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
     emacs
         .cmd_tx
         .send(crate::thread_comm::RenderCommand::Clipboard(
             crate::thread_comm::ClipboardCommand::GetText {
                 selection: crate::thread_comm::ClipboardSelection::Clipboard,
                 expires_at: std::time::Instant::now() + std::time::Duration::from_secs(5),
-                reply: reply_tx,
+                request: 7,
             },
         ))
         .unwrap();
 
     assert!(!app.process_commands());
-    assert_eq!(
-        reply_rx.recv().unwrap(),
-        Err("clipboard is unavailable before display initialization".to_owned())
-    );
+    assert!(matches!(
+        emacs.facts_rx.try_recv().unwrap(),
+        crate::thread_comm::Fact::Reply { request: 7, reply: crate::thread_comm::Reply::Text(Err(error)) }
+            if error == "clipboard is unavailable before display initialization"
+    ));
 }
 
 #[test]
