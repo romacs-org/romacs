@@ -4,8 +4,9 @@
 //! A frame is painted through it in three steps (`RootPicture::paint`):
 //!
 //! 1. Bring the picture up to date. `damage::plan` compares the frame with
-//!    the one the picture shows: nothing to do, regions to repaint, or all
-//!    of it. A region is repainted by the glyph pass itself, run over the
+//!    the one the picture shows: nothing to do, bands of rows to move and
+//!    regions to repaint, or all of it. A band whose rows only moved (a
+//!    scroll, `moves`) is copied to its new place. A region is repainted by the glyph pass itself, run over the
 //!    frame's background as a rectangle and then every glyph of the groups
 //!    (a window's row, its background) whose bounds touch the region, onto
 //!    the picture loaded and scissored to the region: inside it, the same
@@ -25,8 +26,8 @@
 //! is drawn again under the new reach: a patch is idempotent, so the second
 //! covers the first.
 //!
-//! A frame that needs a whole repaint right after one that did (scrolling,
-//! an animation the layout does not hold still) is drawn straight onto the
+//! A frame that needs a whole repaint right after one that did (a jump
+//! past a window, an animation the layout does not hold still) is drawn straight onto the
 //! target, as without a picture; the picture is repainted whole only once a
 //! frame repeats what the last showed.
 //!
@@ -43,8 +44,10 @@ use super::super::glyph_atlas::WgpuGlyphAtlas;
 use super::{FullFrameTexture, RenderTarget, SnapshotSize, UnpooledTexture, WgpuRenderer};
 
 mod damage;
+mod moves;
 pub(super) mod reach;
 use damage::{Indexed, Plan, Run};
+use moves::Move;
 use reach::Reach;
 
 /// How a frame was painted.
@@ -107,7 +110,10 @@ impl RootPicture {
             "root-picture",
             size,
             renderer.surface_format(),
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
         );
         let bind_group = renderer.create_texture_bind_group(texture.view());
         Self {
@@ -165,7 +171,7 @@ impl RootPicture {
             Some(s) if repeats => Plan::Clean {
                 rows: damage::text_rows(&s.indexed, |_| true),
             },
-            Some(s) => damage::plan(&s.indexed, frame, &runs),
+            Some(s) => damage::plan(&s.indexed, frame, &runs, self.reach, renderer.scale_factor()),
         };
         let keep = |frame: &FrameGlyphBuffer, runs: Vec<Run>, pictured, effects| Shown {
             indexed: Indexed {
@@ -178,7 +184,7 @@ impl RootPicture {
             pictured,
             slots: HashMap::new(),
         };
-        let (mut shown, painted) = match (plan, shown) {
+        let (shown, painted) = match (plan, shown) {
             // A frame that needs a whole repaint is drawn as it comes: the
             // next frame may not repeat it (scrolling, a change of theme).
             (Plan::Whole, _) => {
@@ -211,17 +217,76 @@ impl RootPicture {
                 crate::cost::add(crate::cost::ROWS_REUSED, rows);
                 (shown, Painted::Clean)
             }
-            (Plan::Regions { regions, rows_kept }, Some(_)) => {
+            (
+                Plan::Regions {
+                    moves,
+                    regions,
+                    rows_kept,
+                },
+                Some(_),
+            ) => {
                 let mut shown = keep(frame, runs, true, renderer.effects.clone());
+                if !self.carry(renderer, &moves) {
+                    // No texture to move through: picture the frame whole.
+                    let shown = self.repaint(renderer, atlas, shown, mapping);
+                    return self.composed(renderer, atlas, shown, target, Painted::Whole);
+                }
                 self.patch_regions(renderer, atlas, &mut shown, &regions, mapping);
                 crate::cost::add(crate::cost::ROWS_REUSED, rows_kept);
                 (shown, Painted::Regions(regions.len()))
             }
             (_, None) => unreachable!("only a whole repaint is planned without a shown frame"),
         };
+        self.composed(renderer, atlas, shown, target, painted)
+    }
+
+    /// Compose SHOWN onto TARGET and keep it; PAINTED.
+    fn composed(
+        &mut self,
+        renderer: &mut WgpuRenderer,
+        atlas: &mut WgpuGlyphAtlas,
+        mut shown: Shown,
+        target: PaintTarget<'_>,
+        painted: Painted,
+    ) -> Painted {
         self.compose(renderer, atlas, &mut shown, target);
         self.shown = Some(shown);
         painted
+    }
+
+    /// Copy each of MOVES' bands to its new place in the picture, through a
+    /// pooled texture (a texture is not copied onto itself); false when the
+    /// pool has none to lend or a band leaves the picture.
+    fn carry(&self, renderer: &mut WgpuRenderer, moves: &[Move]) -> bool {
+        if moves.is_empty() {
+            return true;
+        }
+        let size = self.texture.size();
+        let scale = renderer.scale_factor();
+        let Some(bands) = moves.iter().map(|m| device_band(m, scale, size)).collect::<Option<Vec<_>>>() else {
+            return false;
+        };
+        let Ok(lease) = renderer.acquire_snapshot(size) else {
+            return false;
+        };
+        let (picture, scratch) = (self.texture.view().texture(), lease.view().texture());
+        let at = |texture, origin| wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin,
+            aspect: wgpu::TextureAspect::All,
+        };
+        let mut encoder = renderer
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("root-picture-moves"),
+            });
+        for (origin, to, extent) in bands {
+            encoder.copy_texture_to_texture(at(picture, origin), at(scratch, origin), extent);
+            encoder.copy_texture_to_texture(at(scratch, origin), at(picture, wgpu::Origin3d { y: to, ..origin }), extent);
+        }
+        renderer.submit_commands([encoder.finish()]);
+        true
     }
 
     /// Repaint REGIONS of the picture from SHOWN's frame, without its cursors.
@@ -422,6 +487,30 @@ fn slot_facts(frame: &FrameGlyphBuffer, slot: DisplaySlotId) -> (Option<usize>, 
         .filter_map(FrameGlyph::geometry)
         .reduce(damage::union);
     (frame.cursor_anchor(slot), in_slot)
+}
+
+/// MOVE's band in device pixels at SCALE: where it is, the row it goes to,
+/// and its size; None unless both places lie inside a picture of SIZE.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "device pixels: whole numbers checked to lie inside the picture, far below f32's exact range"
+)]
+fn device_band(m: &Move, scale: f32, size: SnapshotSize) -> Option<(wgpu::Origin3d, u32, wgpu::Extent3d)> {
+    let device = |v: f32| (v * scale).round();
+    let (x, y) = (device(m.from.x), device(m.from.y));
+    let (width, height) = (device(m.from.x + m.from.width) - x, device(m.from.y + m.from.height) - y);
+    let to = y + device(m.dy);
+    let inside = x >= 0.0
+        && y.min(to) >= 0.0
+        && x + width <= size.width() as f32
+        && y.max(to) + height <= size.height() as f32;
+    inside.then_some((
+        wgpu::Origin3d { x: x as u32, y: y as u32, z: 0 },
+        to as u32,
+        wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+    ))
 }
 
 /// What a patch of REGION draws: the frame's background over it, then the

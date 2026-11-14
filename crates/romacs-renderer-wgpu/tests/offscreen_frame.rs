@@ -18,6 +18,8 @@ mod menu_test;
 mod opacity_test;
 #[path = "offscreen_frame/root_picture_test.rs"]
 mod root_picture_test;
+#[path = "offscreen_frame/root_picture_moves_test.rs"]
+mod root_picture_moves_test;
 use romacs_display_protocol::frame_chrome::PresentationId;
 use romacs_display_protocol::frame_glyphs::{
     CursorStyle, DisplaySlotId, FrameGlyph, FrameGlyphBuffer, GlyphRowRole, PhysCursor,
