@@ -41,4 +41,5 @@ face runs, block structure and table grids.
 ## Decisions
 - pulldown-cmark over tree-sitter-md: tree-sitter-md agreed with the spec
   examples on 89.6% and cost about 1G instructions a key on a 1 MB file.
-  pulldown-cmark passes the examples and reparses only the changed blocks.
+  pulldown-cmark passes the examples. It parses a region whole; `restart`
+  limits only which faces are written again.
