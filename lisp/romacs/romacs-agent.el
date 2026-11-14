@@ -2240,6 +2240,26 @@ writer's, taken over."
         (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
       (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
 
+(defun romacs-agent--room-merged (mine theirs)
+  "An account's report MINE (this server's) and THEIRS (another's, read
+from disk) as one: each window its newer report, the account bound as
+those say (`romacs-agent--room-binding'); with no windows, the newer."
+  (cond
+   ((null mine) theirs)
+   ((null theirs) mine)
+   (t
+    (let* ((windows (copy-alist (romacs-agent--room-kept-windows mine)))
+           (time (max (or (plist-get mine :time) 0) (or (plist-get theirs :time) 0))))
+      (pcase-dolist (`(,window . ,report) (romacs-agent--room-kept-windows theirs))
+        (let ((own (cdr (assoc window windows))))
+          (when (or (null own) (> (or (plist-get report :time) 0) (or (plist-get own :time) 0)))
+            (setf (alist-get window windows nil nil #'equal) report))))
+      (let ((newer (if (> (or (plist-get theirs :time) 0) (or (plist-get mine :time) 0)) theirs mine)))
+        (append (or (romacs-agent--room-binding windows time)
+                    (list :status (plist-get newer :status) :used (plist-get newer :used)
+                          :resets (plist-get newer :resets) :window (plist-get newer :window)))
+                (list :time time :windows windows)))))))
+
 (defun romacs-agent--keep-room ()
   "Write `romacs-agent--room' to its file, merged with what another server
 wrote there meanwhile, under its lock: each account's newer report wins."
@@ -2248,9 +2268,7 @@ wrote there meanwhile, under its lock: each account's newer report wins."
 (defun romacs-agent--merge-room ()
   (let ((file (romacs-agent--room-file)) (rows nil))
     (pcase-dolist (`(,name . ,room) (ignore-errors (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))
-      (let ((mine (gethash name romacs-agent--room)))
-        (when (or (null mine) (> (or (plist-get room :time) 0) (or (plist-get mine :time) 0)))
-          (puthash name room romacs-agent--room))))
+      (puthash name (romacs-agent--room-merged (gethash name romacs-agent--room) room) romacs-agent--room))
     (maphash (lambda (name room) (push (cons name room) rows)) romacs-agent--room)
     (make-directory (file-name-directory file) t)
     (let ((temporary (make-temp-file (expand-file-name "room-" (file-name-directory file)) nil ".tmp")))
@@ -2268,7 +2286,15 @@ credits are refused, and the others run."
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (let* ((windows (romacs-agent--room-windows (plist-get known :windows) (plist-get event :windows) time))
+      (let* ((windows (romacs-agent--room-windows
+                       (romacs-agent--room-kept-windows known)
+                       ;; One that names no windows reports its own.
+                       (or (plist-get event :windows)
+                           (and (plist-get event :window)
+                                (list (list :name (romacs-agent--room-window-name (plist-get event :window))
+                                            :status (plist-get event :status) :used (plist-get event :used)
+                                            :resets (plist-get event :resets)))))
+                       time))
              (room (append (or (romacs-agent--room-binding windows time)
                                (list :status (plist-get event :status) :used (plist-get event :used)
                                      :resets (plist-get event :resets) :window (plist-get event :window)))
@@ -2281,17 +2307,31 @@ credits are refused, and the others run."
                      (equal (romacs-agent--room-gist (plist-get known :windows)) (romacs-agent--room-gist windows)))
           (romacs-agent--keep-room))))))
 
+(defun romacs-agent--room-window-name (name)
+  "NAME, a window's as reports of before named it, as windows are now."
+  (pcase name ("300 minutes" "five_hour") ("10080 minutes" "seven_day") (_ name)))
+
+(defun romacs-agent--room-kept-windows (room)
+  "ROOM's windows (an instance's kept report); one kept before windows
+were, its one report as its window's."
+  (or (plist-get room :windows)
+      (and (plist-get room :window)
+           (list (cons (romacs-agent--room-window-name (plist-get room :window))
+                       (list :status (plist-get room :status) :used (plist-get room :used)
+                             :resets (plist-get room :resets) :time (plist-get room :time)))))))
+
 (defun romacs-agent--room-windows (known reported time)
   "KNOWN windows (an instance's :windows) with REPORTED ones (a rate-limit
 event's :windows, plists of :name :status :used :resets) as of TIME:
-each window's latest report."
+each window's latest report; a status not said is the one known."
   ;; Its own cells: the known report stays as it was.
   (let ((windows (copy-alist known)))
     (dolist (window reported windows)
       (when-let* ((name (plist-get window :name)))
-        (setf (alist-get name windows nil nil #'equal)
-              (list :status (plist-get window :status) :used (plist-get window :used)
-                    :resets (plist-get window :resets) :time time))))))
+        (let ((before (cdr (assoc name windows))))
+          (setf (alist-get name windows nil nil #'equal)
+                (list :status (or (plist-get window :status) (plist-get before :status))
+                      :used (plist-get window :used) :resets (plist-get window :resets) :time time)))))))
 
 (defun romacs-agent--room-binding (windows now)
   "The limit WINDOWS (an instance's :windows) bind it by as of NOW: spent,
@@ -2299,9 +2339,15 @@ until the last of its spent windows resets; else the fullest, its status
 the worst of theirs.  A plist of :status :used :resets :window, or nil
 with no window known."
   (let* ((live (cl-remove-if (lambda (w) (let ((resets (plist-get (cdr w) :resets)))
-                                           (and (numberp resets) (<= resets now))))
+                                           (or (and (numberp resets) (<= resets now))
+                                               ;; Usage credits: only the models needing them.
+                                               (string-match-p "overage" (car w)))))
                              windows))
-         (spent (cl-remove-if-not (lambda (w) (eq (plist-get (cdr w) :status) 'rejected)) live))
+         (spent (cl-remove-if-not (lambda (w) (or (eq (plist-get (cdr w) :status) 'rejected)
+                                                  ;; Its status not said, its use full.
+                                                  (and (null (plist-get (cdr w) :status))
+                                                       (numberp (plist-get (cdr w) :used)) (>= (plist-get (cdr w) :used) 1.0))))
+                                  live))
          (pick (car (if spent
                         (sort (copy-sequence spent) (lambda (a b) (> (or (plist-get (cdr a) :resets) 0)
                                                                      (or (plist-get (cdr b) :resets) 0))))

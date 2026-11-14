@@ -52,7 +52,8 @@ root, their reports in a fresh table; `kept' counts writes to disk."
     (should (equal (mapcar (lambda (w) (plist-get w :name)) windows) '("five_hour" "seven_day")))
     (should (equal (plist-get (cadr windows) :status) 'warning))
     (should (equal (plist-get (cadr windows) :used) 0.91)))
-  (should (equal (romacs-agent--codex-window (romacs-mcp--object "usedPercent" 100 "windowDurationMins" 10080 "resetsAt" 5))
+  (should (equal (romacs-agent--codex-window (romacs-mcp--object "usedPercent" 100 "windowDurationMins" 10080 "resetsAt" 5)
+                                            "secondary")
                  '(:name "seven_day" :status rejected :used 1.0 :resets 5))))
 
 (ert-deftest romacs-agent-limits-each-window-is-kept ()
@@ -108,6 +109,74 @@ root, their reports in a fresh table; `kept' counts writes to disk."
               (should (equal (gethash "status" window) "reset"))
               (should (eq (gethash "used" window) :null))))
         (delete-process live)))))
+
+(defun romacs-agent-limits-tests--claude (info provider time)
+  "PROVIDER's Claude Code reports rate_limit_info INFO at TIME."
+  (let ((event (car (romacs-agent--claude-events
+                     (romacs-agent--make :id "x" :harness 'claude)
+                     (romacs-mcp--object "type" "rate_limit_event" "rate_limit_info" info)))))
+    (romacs-agent--note-room (romacs-agent--make :id (format "s-%s" provider) :provider provider :caught-up t)
+                             (plist-put event :time time))))
+
+(ert-deftest romacs-agent-limits-what-binds-an-account ()
+  (romacs-agent-limits-tests--with
+    (let ((later (+ (float-time) 86400)))
+      ;; Its weekly window spent, said at the top, its unified row silent:
+      ;; spent, and new work goes to the other account.
+      (romacs-agent-limits-tests--claude
+       (romacs-mcp--object "status" "rejected" "rateLimitType" "seven_day" "resetsAt" later "utilization" 1.0
+                           "unifiedWindows" (romacs-mcp--object
+                                             "seven_day" (romacs-mcp--object "resetsAt" later)
+                                             "five_hour" (romacs-mcp--object "status" "allowed" "utilization" 0.2
+                                                                             "resetsAt" (+ later 100))))
+       "claude" 1.0)
+      (should-not (romacs-agent-room "claude"))
+      (should (equal (plist-get (romacs-agent-pool-pick 'claude) :name) "claude2"))
+      ;; Usage credits spent bind no account: only the models needing them.
+      (romacs-agent-limits-tests--claude
+       (romacs-mcp--object "status" "allowed" "rateLimitType" "five_hour" "resetsAt" later "utilization" 0.3
+                           "unifiedWindows" (romacs-mcp--object
+                                             "five_hour" (romacs-mcp--object "status" "allowed" "utilization" 0.3
+                                                                             "resetsAt" later)
+                                             "seven_day_overage_included" (romacs-mcp--object "status" "rejected"
+                                                                                              "utilization" 1.0
+                                                                                              "resetsAt" later)))
+       "claude2" 2.0)
+      (should (romacs-agent-room "claude2"))
+      ;; Codex windows with no length: each its own, the spent one binding.
+      (let ((event (car (romacs-agent--codex-events
+                         (romacs-agent--make :id "c" :harness 'codex)
+                         (romacs-mcp--object "method" "account/rateLimits/updated"
+                                             "params" (romacs-mcp--object
+                                                       "rateLimits" (romacs-mcp--object
+                                                                     "primary" (romacs-mcp--object "usedPercent" 100 "resetsAt" later)
+                                                                     "secondary" (romacs-mcp--object "usedPercent" 10 "resetsAt" later))))))))
+        (should (equal (mapcar (lambda (w) (plist-get w :name)) (plist-get event :windows)) '("primary" "secondary")))
+        (romacs-agent--note-room (romacs-agent--make :id "s-codex" :provider "codex" :caught-up t) (plist-put event :time 3.0))
+        (should-not (romacs-agent-room "codex"))))))
+
+(ert-deftest romacs-agent-limits-a-legacy-report-and-another-servers ()
+  (romacs-agent-limits-tests--with
+    (let ((later (+ (float-time) 86400)))
+      ;; Kept before windows were: its weekly rejection holds past a
+      ;; five-hour report.
+      (puthash "claude" (list :status 'rejected :resets later :window "seven_day" :time 1.0) romacs-agent--room)
+      (romacs-agent-limits-tests--report "claude" 2.0 `("five_hour" allowed 0.2 ,(+ later 10)))
+      (should-not (romacs-agent-room "claude"))
+      ;; Another server's weekly rejection on disk, this one's newer
+      ;; five-hour report: merged window by window, still spent.
+      (clrhash romacs-agent--room)
+      (let ((file (romacs-agent--room-file)))
+        (make-directory (file-name-directory file) t)
+        (with-temp-file file
+          (prin1 (list (cons "claude2" (list :status 'rejected :resets later :window "seven_day" :time 5.0
+                                             :windows (list (cons "seven_day" (list :status 'rejected :used 1.0 :resets later :time 5.0))))))
+                 (current-buffer))))
+      (romacs-agent-limits-tests--report "claude2" 6.0 `("five_hour" allowed 0.1 ,(+ later 10)))
+      (romacs-agent--merge-room)
+      (let ((room (romacs-agent-room-of "claude2")))
+        (should (equal (sort (mapcar #'car (plist-get room :windows)) #'string<) '("five_hour" "seven_day")))
+        (should (eq (plist-get room :status) 'rejected))))))
 
 (ert-deftest romacs-agent-limits-the-tool ()
   (romacs-agent-limits-tests--with

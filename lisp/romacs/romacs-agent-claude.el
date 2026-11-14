@@ -375,24 +375,33 @@ cache, it reports none) or does not say."
   (pcase status ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed)))
 
 (defun romacs-agent--claude-windows (info)
-  "Each limit window INFO, a rate_limit_info, reports (its unifiedWindows,
-else its one window): plists of :name (five_hour, seven_day...),
-:status, :used (a fraction) and :resets."
-  (let ((windows (gethash "unifiedWindows" info)))
-    (if (hash-table-p windows)
-        (let ((rows nil))
-          (maphash (lambda (name window)
-                     (when (hash-table-p window)
-                       (push (list :name name :status (romacs-agent--claude-limit-status (gethash "status" window))
-                                   :used (romacs-agent--value (gethash "utilization" window))
-                                   :resets (romacs-agent--value (gethash "resetsAt" window)))
-                             rows)))
-                   windows)
-          (nreverse rows))
-      (when-let* ((name (romacs-agent--value (gethash "rateLimitType" info))))
-        (list (list :name name :status (romacs-agent--claude-limit-status (gethash "status" info))
-                    :used (romacs-agent--value (gethash "utilization" info))
-                    :resets (romacs-agent--value (gethash "resetsAt" info))))))))
+  "Each limit window INFO, a rate_limit_info, reports: plists of :name
+\(five_hour, seven_day...), :status (nil when not said), :used (a
+fraction) and :resets.  The report's own window (its rateLimitType) is
+its top level's, what a unified row of it does not say taken from there."
+  (let* ((windows (gethash "unifiedWindows" info))
+         (top (romacs-agent--value (gethash "rateLimitType" info)))
+         (rows nil))
+    (when (hash-table-p windows)
+      (maphash (lambda (name window)
+                 (when (hash-table-p window)
+                   (let ((own (equal name top)))
+                     (push (list :name name
+                                 :status (let ((status (or (romacs-agent--value (gethash "status" window))
+                                                           (and own (romacs-agent--value (gethash "status" info))))))
+                                           (and status (romacs-agent--claude-limit-status status)))
+                                 :used (romacs-agent--value (or (gethash "utilization" window)
+                                                                (and own (gethash "utilization" info))))
+                                 :resets (romacs-agent--value (or (gethash "resetsAt" window)
+                                                                  (and own (gethash "resetsAt" info)))))
+                           rows))))
+               windows))
+    (when (and top (not (cl-find top rows :key (lambda (w) (plist-get w :name)) :test #'equal)))
+      (push (list :name top :status (romacs-agent--claude-limit-status (gethash "status" info))
+                  :used (romacs-agent--value (gethash "utilization" info))
+                  :resets (romacs-agent--value (gethash "resetsAt" info)))
+            rows))
+    (nreverse rows)))
 
 (defun romacs-agent--claude-models (answer)
   "The model rows in ANSWER, what Claude Code says to `initialize': each
