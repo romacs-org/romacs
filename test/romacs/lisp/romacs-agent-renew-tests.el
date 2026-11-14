@@ -495,6 +495,11 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
   (romacs-agent-renew-tests--with 'claude
     (run-hook-with-args 'romacs-agent-input-functions session 7)
     (should (string-match-p "busy" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))
+    ;; One its harness ended without reading back is on its way no more.
+    (run-hook-with-args 'romacs-agent-input-functions session 6)
+    (romacs-agent--raise session (list :type 'exit :status 1 :seq 29))
+    (should-not (romacs-agent-renew--unechoed-p session))
+    (run-hook-with-args 'romacs-agent-input-functions session 7)
     (romacs-agent--raise session (list :type 'input :text "go" :request 7 :seq 30))
     (setf (romacs-agent-state session) 'idle (romacs-agent-done-seq session) 31)
     (should (eq (car (romacs-agent-renew-tests--run session)) :done))))

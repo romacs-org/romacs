@@ -94,9 +94,12 @@ and not yet read back from its journal: a turn on its way.")
   (puthash session id romacs-agent-renew--written))
 
 (defun romacs-agent-renew--read-back (session event)
-  "A prompt's echo (EVENT, an input) read back: no longer on its way."
-  (when (and (eq (plist-get event :type) 'input)
-             (equal (plist-get event :request) (gethash session romacs-agent-renew--written)))
+  "A prompt's echo (EVENT, an input) read back: no longer on its way; nor
+is one its harness ended, or its next run began, without reading back."
+  (when (and (gethash session romacs-agent-renew--written)
+             (pcase (plist-get event :type)
+               ('input (equal (plist-get event :request) (gethash session romacs-agent-renew--written)))
+               ((or 'exit 'run 'unstarted) t)))
     (remhash session romacs-agent-renew--written)))
 
 (defun romacs-agent-renew--unechoed-p (session)
