@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -38,8 +39,10 @@ state root that has said two things, its writes to its harness in
 `written' (LINE . RECORD) and its relaunches counted in `relaunched'."
   (declare (indent 1))
   `(let* ((root (make-temp-file "romacs-renew-" t))
+          ;; Its sockets' directory is short: TMPDIR may not be.
+          (run (romacs-test-socket-directory "renew-"))
           (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
-                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                             (concat "XDG_RUNTIME_DIR=" run))
                                        process-environment))
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (written nil) (relaunched 0)
@@ -59,7 +62,8 @@ state root that has said two things, its writes to its harness in
                      ((symbol-function 'romacs-agent--relaunch)
                       (lambda (_s &optional before) (when before (funcall before)) (cl-incf relaunched))))
              ,@body))
-       (delete-directory root t))))
+       (delete-directory root t)
+       (delete-directory run t))))
 
 (defun romacs-agent-renew-tests--run (session &optional why)
   "`romacs-agent-renew''s outcome, waited for."
@@ -67,6 +71,10 @@ state root that has said two things, its writes to its harness in
     (romacs-agent-renew session why (lambda (result) (setq outcome result)))
     (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
     outcome))
+
+(defun romacs-agent-renew-tests--ran (session)
+  "SESSION's harness ran anew: its new run's note is read."
+  (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session)))))
 
 (defun romacs-agent-renew-tests--notes (session)
   (delq nil (mapcar (lambda (record) (and (romacs-agent--note-p record "renew") (gethash "note" record)))
@@ -101,6 +109,9 @@ state root that has said two things, its writes to its harness in
         (should (string-suffix-p "---\n\n" brief))
         (should (equal (romacs-agent-brief session) brief)))
       (should (= relaunched 1))
+      ;; Held until its new run starts.
+      (should (romacs-agent--held-p session))
+      (romacs-agent--raise session (list :type 'run :seq 90))
       (should-not (romacs-agent--held-p session))
       (should-not written)
       ;; Its next run begins the new conversation; one said in goes on.
@@ -130,7 +141,10 @@ state root that has said two things, its writes to its harness in
       (should (equal (car (car (romacs-agent-queue session))) "meanwhile"))
       (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
       (should (eq (car outcome) :done))
-      (should (equal (mapcar #'car (romacs-agent-queue session)) '("meanwhile")))
+      ;; Still waiting: the new run has not started.
+      (romacs-agent-send session "and this")
+      (should (equal (mapcar #'car (romacs-agent-queue session)) '("meanwhile" "and this")))
+      (romacs-agent--raise session (list :type 'run :seq 90))
       (let ((brief (romacs-agent-brief session)))
         (romacs-agent--input session "meanwhile")
         (let* ((line (car (car written))) (record (cdr (car written))))
@@ -153,6 +167,10 @@ state root that has said two things, its writes to its harness in
       (romacs-agent--read-journal copy (lambda (record) (romacs-agent--record copy record)))
       (should (equal (romacs-agent-harness-session copy) native))
       (should (equal (romacs-agent-brief copy) brief))
+      ;; No run since: still renewing, until one starts.
+      (should (romacs-agent-renewing copy))
+      (romacs-agent--record copy (romacs-mcp--object "seq" 98 "t" 98.0 "note" (romacs-mcp--object "type" "run")))
+      (should-not (romacs-agent-renewing copy))
       (romacs-agent--record copy (romacs-mcp--object "seq" 99 "t" 99.0 "in"
                                                      (romacs-mcp--object "type" "user" "romacsRequest" 12 "romacsBrief" t
                                                                          "message" (romacs-mcp--object "role" "user" "content" "go"))))
@@ -163,6 +181,7 @@ state root that has said two things, its writes to its harness in
   ;; back, nor to the prompt that carried the brief.
   (romacs-agent-renew-tests--with 'claude
     (romacs-agent-renew-tests--run session)
+    (romacs-agent-renew-tests--ran session)
     (let ((records (romacs-agent--journal-records session)))
       (should (romacs-agent--note-p (car (romacs-agent--live-records records)) "renew"))
       (should-not (cl-some #'romacs-agent--record-request (romacs-agent--live-records records))))
@@ -180,6 +199,7 @@ state root that has said two things, its writes to its harness in
   ;; what was said since; nothing from before the first renewal besides.
   (romacs-agent-renew-tests--with 'claude
     (romacs-agent-renew-tests--run session)
+    (romacs-agent-renew-tests--ran session)
     (let ((first (romacs-agent-brief session)))
       (romacs-agent--input session "write the docs")
       (let ((seq (romacs-agent-seq session)) (coding-system-for-write 'utf-8-unix))
@@ -218,6 +238,9 @@ state root that has said two things, its writes to its harness in
     (should (string-match-p "busy" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))
     (setf (romacs-agent-state session) 'idle)
     (romacs-agent-renew-tests--run session)
+    ;; Held until its new run starts.
+    (should (string-match-p "already" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))
+    (romacs-agent-renew-tests--ran session)
     (cl-letf (((symbol-function 'romacs-agent-events-async) #'ignore))
       (romacs-agent-renew session)
       (should (string-match-p "already" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))))
@@ -247,5 +270,56 @@ state root that has said two things, its writes to its harness in
   (should (eq (lookup-key romacs-agent-chat-actions-map "N") 'romacs-agent-chat-renew))
   (should (equal (command-modes 'romacs-agent-chat-renew) '(romacs-agent-chat-mode)))
   (should (functionp (plist-get (cdr (assoc "romacs_task_renew" (let ((romacs-mcp-tools nil)) (load "romacs-agent-tools" nil t) romacs-mcp-tools))) :handler))))
+
+(ert-deftest romacs-agent-renew-a-failed-write-keeps-the-brief ()
+  (romacs-agent-renew-tests--with 'claude
+    (romacs-agent-renew-tests--run session)
+    (let ((brief (romacs-agent-brief session)))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (&rest _) (user-error "Session t has ended"))))
+        (should-error (romacs-agent--input session "request") :type 'user-error))
+      (should (equal (romacs-agent-brief session) brief))
+      (romacs-agent--input session "request")
+      (should (string-prefix-p brief (romacs-agent--text-of (gethash "content" (gethash "message" (car (car written))))))))))
+
+(ert-deftest romacs-agent-renew-at-a-turn-end-holds-before-what-waited ()
+  ;; Wanted at a turn's end: held at once, so what waited for that end
+  ;; goes to the new conversation, not the old.
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-state session) 'running)
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+      (romacs-agent-renew-soon session "full")
+      (romacs-agent-send-later session "next")
+      (should (= (romacs-agent-queue-length session) 1))
+      (setf (romacs-agent-state session) 'idle)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (should (romacs-agent--held-p session))
+      (romacs-agent--send-next session t)
+      (should-not written))))
+
+(ert-deftest romacs-agent-renew-unfinished-is-finished-on-restore ()
+  ;; Journaled, then Romacs ended before its harness ran anew: a restore
+  ;; finishes it, its manifest made to say so, and holds it till then.
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-options session) (list :fork "thread-source"))
+    (romacs-agent--manifest-put session "options" (romacs-agent--options-object (romacs-agent-options session)))
+    (romacs-agent--record session (romacs-mcp--object "seq" 50 "t" 50.0 "note"
+                                                      (romacs-mcp--object "type" "renew" "from" "old" "to" :null
+                                                                          "brief" "B")))
+    (should (romacs-agent--held-p session))
+    (romacs-agent-renew--restored)
+    (should (= relaunched 1))
+    (should-not (plist-member (romacs-agent-options session) :fork))
+    (should (null (gethash "harnessSession" (romacs-agent-renew-tests--manifest session) :absent)))
+    ;; Renewed and run since: nothing to finish.
+    (romacs-agent--raise session (list :type 'run :seq 51))
+    (romacs-agent-renew--restored)
+    (should (= relaunched 1))))
+
+(ert-deftest romacs-agent-renew-refuses-a-rollback-meanwhile ()
+  (romacs-agent-renew-tests--with 'claude
+    (cl-letf (((symbol-function 'romacs-agent-events-async) #'ignore))
+      (romacs-agent-renew session)
+      (should (string-match-p "renewing already"
+                              (cadr (should-error (romacs-agent-rollback session 9 #'ignore) :type 'user-error)))))))
 
 ;;; romacs-agent-renew-tests.el ends here

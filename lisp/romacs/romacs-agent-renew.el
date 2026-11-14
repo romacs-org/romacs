@@ -13,8 +13,11 @@
 ;; new conversation and holds the brief.  Folded, it gives the session its
 ;; new native id and the brief its next message carries (`romacs-agent--input');
 ;; its live records begin there (`romacs-agent--live-records').  The harness
-;; then runs anew.  Messages sent meanwhile wait, and go to the new
-;; conversation.  The old one stays readable: the journal keeps it.
+;; then runs anew.  Messages sent meanwhile wait, until the new run starts
+;; (the note folds as a hold its run note lets go), and go to the new
+;; conversation.  A renewal journaled that no run followed (Romacs ended
+;; between) is finished when the session is restored.  The old
+;; conversation stays readable: the journal keeps it.
 
 ;;; Code:
 
@@ -90,9 +93,11 @@ cannot renew."
                  (romacs-agent-renew--release session token)
                  (funcall then (list :error message)))))
     ;; Held from here: messages sent meanwhile wait for the new conversation.
+    ;; The journal is read after: at a turn's end, before what waits for it.
     (romacs-agent-renew--hold session token)
     (romacs-agent--changed session)
-    (romacs-agent-events-async
+    (run-at-time
+     0 nil #'romacs-agent-events-async
      session
      (lambda (events)
        (when (eq (romacs-agent-renew--holder session) token)
@@ -104,17 +109,33 @@ cannot renew."
                (romacs-agent-renew--await
                 session token
                 (lambda ()
+                  ;; Journaled: the renewal holds the session until its new
+                  ;; run starts, whatever becomes of this callback.
+                  (romacs-agent-renew--release session token)
                   (condition-case err
-                      (progn (romacs-agent-renew--commit session native)
-                             ;; Held until the new run takes messages: none
-                             ;; goes to the harness stopping.
-                             (romacs-agent--relaunch session (lambda () (romacs-agent-renew--hold session nil)))
+                      (progn (romacs-agent-renew--finish session native)
                              (funcall then (list :done native)))
-                    (error (funcall fail (error-message-string err))))))
+                    (error (funcall then (list :error (error-message-string err)))))))
                (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
                                                                "why" (or why :null) "brief" brief
                                                                "context" (or (romacs-agent-context-used session) :null))))
            (error (funcall fail (error-message-string err)))))))))
+
+(defun romacs-agent-renew--finish (session native)
+  "Finish SESSION's journaled renewal to conversation NATIVE: its manifest
+says so, and its harness runs anew on it."
+  (romacs-agent-renew--commit session native)
+  (romacs-agent--relaunch session))
+
+(defun romacs-agent-renew--restored ()
+  "Finish every renewal journaled that no run of its harness followed."
+  (dolist (session (romacs-agent-sessions))
+    (when (romacs-agent-renewing session)
+      (condition-case err (romacs-agent-renew--finish session (romacs-agent-harness-session session))
+        (error (romacs-agent--raise session (list :type 'error :text (format "Renewal not finished: %s"
+                                                                             (error-message-string err)))))))))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 
 (defun romacs-agent-renew--commit (session native)
   "SESSION's manifest names its new conversation NATIVE (nil: its harness
@@ -147,13 +168,12 @@ Return `now' or `soon'."
              (gethash session romacs-agent-renew--wanted)
              (romacs-agent--live-p session))
     (let ((why (gethash session romacs-agent-renew--wanted)))
-      ;; After the event is folded and its turn's end has been dealt with.
-      (run-at-time 0 nil (lambda ()
-                           (when (and (gethash session romacs-agent-renew--wanted)
-                                      (condition-case nil (progn (romacs-agent-renew--check session) t)
-                                        (user-error nil)))
-                             (remhash session romacs-agent-renew--wanted)
-                             (romacs-agent-renew session why)))))))
+      ;; Now, the event folded: held before the messages that waited for
+      ;; this end are sent (they go to the new conversation).  The work
+      ;; itself comes after (`romacs-agent-renew').
+      (when (condition-case nil (progn (romacs-agent-renew--check session) t) (user-error nil))
+        (remhash session romacs-agent-renew--wanted)
+        (romacs-agent-renew session why)))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-renew--at-end)
 

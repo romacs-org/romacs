@@ -371,8 +371,9 @@ loading it would undo that one's changes; merge it first")
   limited
   ;; A renewal's brief (romacs-agent-renew.el), carried by its next
   ;; message to the new conversation: folded from the note, the message
-  ;; written clears it.
-  brief)
+  ;; written clears it.  And the seq of a renewal journaled that no run of
+  ;; its harness has followed yet: until one does, messages wait.
+  brief renewing)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1268,13 +1269,13 @@ Both are made with one request id: the journal's is the one written."
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
     (when images (puthash "images" (vconcat images) record))
-    (when brief
-      (puthash "romacsBrief" t record)
-      (setf (romacs-agent-brief session) nil))
+    (when brief (puthash "romacsBrief" t record))
     (romacs-agent--line session
                         (let ((romacs-agent--message-images images))
                           (funcall input session (if brief (concat brief text) text) id))
                         record)
+    ;; Written: the next message carries no brief (a failed write keeps it).
+    (when brief (setf (romacs-agent-brief session) nil))
     (run-hook-with-args 'romacs-agent-input-functions session id)))
 
 (defun romacs-agent--uuid-p (id)
@@ -1355,7 +1356,8 @@ itself, so the turn goes on whatever becomes of this server."
     ;; Renewed: a new conversation, named by its harness when nil, its
     ;; brief to go with its next message.
     ('renewed (setf (romacs-agent-harness-session session) (plist-get event :to)
-                    (romacs-agent-brief session) (plist-get event :brief)))
+                    (romacs-agent-brief session) (plist-get event :brief)
+                    (romacs-agent-renewing session) (or (plist-get event :seq) t)))
     ;; What a fork was last forked from, folded from its journal.
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
@@ -1373,6 +1375,8 @@ itself, so the turn goes on whatever becomes of this server."
     ;; A run starts on its driver as defined now: one loaded since speaks
     ;; to the next run, never to the one going on.
     ('run (setf (romacs-agent-driver session) nil
+                ;; A renewal's new conversation runs now.
+                (romacs-agent-renewing session) nil
                 (romacs-agent-driver-state session) (list :run (plist-get event :seq))
                 ;; The mode is the run's: unknown till its harness says.
                 (romacs-agent-permission-mode session) nil
@@ -2288,9 +2292,9 @@ looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
 (defun romacs-agent--held-p (session)
   "Whether SESSION's messages wait whatever its harness does: a rollback
 or a renewal (romacs-agent-renew.el) holds them for the conversation it
-leaves them to."
+leaves them to, a renewal until its new conversation's run starts."
   (let ((state (romacs-agent-driver-state session)))
-    (or (plist-get state :rolling-back) (plist-get state :renewing))))
+    (or (plist-get state :rolling-back) (plist-get state :renewing) (romacs-agent-renewing session))))
 
 (defun romacs-agent--send-next (session &optional force)
   "Send the first message waiting for SESSION's turn to end, unless a
