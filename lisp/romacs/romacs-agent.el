@@ -1602,6 +1602,9 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ("attachments" (list (list :type 'attachments
+                                                          :attachments (romacs-agent--attachments-of (gethash "items" note))
+                                                          :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
                                ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
@@ -1717,6 +1720,16 @@ at a time between the editor's other work: a long journal never holds it."
   "The request id of RECORD, a user's message written, or nil."
   (let ((in (gethash "in" record)))
     (and (hash-table-p in) (gethash "romacsRequest" in))))
+
+(defun romacs-agent--attachments-of (items)
+  "ITEMS, an attachments note's (romacs-agent-attachments.el), as an
+event carries them: plists of :path :kind (image, file or capture) :alt
+:size :sha."
+  (mapcar (lambda (item)
+            (list :path (gethash "path" item) :kind (intern (gethash "kind" item))
+                  :alt (romacs-agent--value (gethash "alt" item)) :size (romacs-agent--value (gethash "size" item))
+                  :sha (romacs-agent--value (gethash "sha" item))))
+          (append items nil)))
 
 (defun romacs-agent--rollback-note-p (record)
   (let ((note (gethash "note" record)))
