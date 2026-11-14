@@ -181,6 +181,8 @@ impl ImageRenderState {
         load: ImageLoadToken,
         timeout: std::time::Duration,
     ) -> Option<ImageDecodeTerminal> {
+        // CLOCK: a Condvar::wait_timeout run on the Lisp thread, not the
+        // render loop: it bounds a wait, and samples nothing a frame shows.
         let deadline = std::time::Instant::now() + timeout;
         let mut terminals = self.lock_terminals();
         loop {
@@ -193,6 +195,7 @@ impl ImageRenderState {
             {
                 return Some(terminal);
             }
+            // CLOCK: what is left of that wait, on the Lisp thread.
             let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
             match self.terminal_changed.wait_timeout(terminals, remaining) {
                 Ok((guard, result)) => {
@@ -327,6 +330,8 @@ impl Default for FpsCounter {
             frame_count: 0,
             display_value: 0.0,
             frame_time_ms: 0.0,
+            // CLOCK: seeds the stopwatch over CPU render work
+            // (`begin_fps_cpu_span`), which a frame sample cannot measure.
             cpu_span_start: Instant::now(),
         }
     }

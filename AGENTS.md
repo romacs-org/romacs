@@ -51,6 +51,10 @@ possible; say so where you do.
 - A host query or effect (files, environment, clocks, processes) outside
   `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
   comment lines directly above it; the `host_boundary_lint` test checks each.
+- The render thread takes its time from the frame: a `FrameSample`, an
+  `EventTime` or a `FutureDeadline`. A raw clock read there (`Instant::now()`,
+  `.elapsed()`) carries `// CLOCK: reason` in the comment lines directly above
+  it; the `time_discipline` test checks each.
 - No generated file is committed. A file a tool of ours makes from the
   repository's sources is made where it is consumed: a build script writes it
   into `OUT_DIR` for the binary or a test target to include, Lisp computes it
