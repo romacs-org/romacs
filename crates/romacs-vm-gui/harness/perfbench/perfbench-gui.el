@@ -54,4 +54,18 @@ counts none of it; `perfbench-gui-resume' ends that sooner."
                              (push (- (float-time) perfbench-gui--started) perfbench-gui-latencies)
                              (setq perfbench-gui--started nil))))
 
+(defun perfbench-gui-visit (file ts where)
+  "Visit FILE afresh in the selected window alone, C in `c-ts-mode' when TS,
+point at WHERE: `top', or `middle' (`perfbench-middle').  Its major mode."
+  (let ((old (find-buffer-visiting file)))
+    (when old
+      (with-current-buffer old (set-buffer-modified-p nil))
+      (kill-buffer old)))
+  (delete-other-windows)
+  (let ((major-mode-remap-alist (if ts (cons '(c-mode . c-ts-mode) major-mode-remap-alist) major-mode-remap-alist)))
+    (find-file file))
+  (if (eq where 'middle) (perfbench-middle) (goto-char (point-min)))
+  (recenter)
+  (symbol-name major-mode))
+
 ;;; perfbench-gui.el ends here
