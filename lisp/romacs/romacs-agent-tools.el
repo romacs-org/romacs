@@ -979,21 +979,10 @@ needs a newer one reported, so a limit that stays never schedules again.")
   "When SESSION resumes by itself at its limit's reset, or nil."
   (car (gethash session romacs-agent-tools--resumes)))
 
-(defun romacs-agent-tools--resumes-file ()
-  (expand-file-name "resumes.eld" (romacs-agent--state-root)))
-
-(defun romacs-agent-tools--keep-resume (id time)
-  "Record that session ID resumes at TIME (nil: no longer), in the file a
-restarted server re-arms them from, under its lock."
-  (let ((file (romacs-agent-tools--resumes-file)))
-    (romacs-agent--with-lock
-     file (lambda ()
-            (let ((rows (assoc-delete-all id (ignore-errors (with-temp-buffer (insert-file-contents file)
-                                                                              (read (current-buffer))))))
-                  (temporary (make-temp-file (expand-file-name "resumes-" (file-name-directory file)) nil ".tmp")))
-              (when time (push (cons id time) rows))
-              (with-temp-file temporary (prin1 rows (current-buffer)))
-              (rename-file temporary file t))))))
+(defun romacs-agent-tools--keep-resume (session time)
+  "Record in SESSION's manifest that it resumes at TIME (nil: no longer):
+its own record, written as asked, so a restarted server arms it again."
+  (romacs-agent--manifest-put session "resumeAt" (or time :null)))
 
 (defun romacs-agent-tools--arm-resume (session time)
   (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
@@ -1010,7 +999,7 @@ or `romacs-agent-resume-at-reset' is off."
     (puthash session resets romacs-agent-tools--resets-used)
     (let ((time (max (+ resets romacs-agent-resume-margin) (+ (float-time) romacs-agent-switch-delay))))
       (romacs-agent-tools--arm-resume session time)
-      (romacs-agent-tools--keep-resume (romacs-agent-id session) time)
+      (romacs-agent-tools--keep-resume session time)
       (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "scheduled" "at" time)))))
 
 (defun romacs-agent-tools--cancel-resume (session &optional why)
@@ -1018,7 +1007,7 @@ or `romacs-agent-resume-at-reset' is off."
   (when-let* ((pending (gethash session romacs-agent-tools--resumes)))
     (cancel-timer (cdr pending))
     (remhash session romacs-agent-tools--resumes)
-    (romacs-agent-tools--keep-resume (romacs-agent-id session) nil)
+    (romacs-agent-tools--keep-resume session nil)
     (when why (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "cancelled" "why" why)))
     (romacs-agent--changed session)))
 
@@ -1029,13 +1018,17 @@ An account still spent (its report not yet renewed) waits for the next
 reset, once."
   (cond
    ((not (equal (romacs-agent-resume-time session) time)))
+   ;; Turned off since: forgotten.
+   ((not romacs-agent-resume-at-reset)
+    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--keep-resume session nil))
    ;; Its journal still replaying: what it is at is not yet known.
    ((and (process-live-p (romacs-agent-connection session)) (not (romacs-agent-caught-up session)))
     (romacs-agent-tools--arm-resume session time))
    (t
     (remhash session romacs-agent-tools--resumes)
-    (romacs-agent-tools--keep-resume (romacs-agent-id session) nil)
-    (when (and romacs-agent-resume-at-reset (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+    (romacs-agent-tools--keep-resume session nil)
+    (when (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
                (not (romacs-agent-stopped session)) (romacs-agent-limited session)
                (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
       (let ((target (romacs-agent-pool-pick (romacs-agent-harness session))))
@@ -1046,16 +1039,14 @@ reset, once."
               (romacs-agent-tools--tell session romacs-agent-tools--resumed)
             (romacs-agent-move-on session "limit reset"))))))))
 
-(defun romacs-agent-tools--rearm-resumes ()
-  "After a restart: arm again the resumes the last server left waiting;
-with `romacs-agent-resume-at-reset' off, forget them."
-  (pcase-dolist (`(,id . ,time) (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--resumes-file))
-                                                                 (read (current-buffer)))))
-    (if (not romacs-agent-resume-at-reset) (romacs-agent-tools--keep-resume id nil)
-      (when-let* ((session (romacs-agent-get id)) ((not (romacs-agent-resume-time session))))
-        (romacs-agent-tools--arm-resume session time)))))
+(defun romacs-agent-tools--rearm-resume (session manifest)
+  "SESSION, loaded by a new server, resumes at the time its MANIFEST
+kept, if any; with `romacs-agent-resume-at-reset' off, that is forgotten."
+  (when-let* ((time (gethash "resumeAt" manifest)) ((numberp time)))
+    (if romacs-agent-resume-at-reset (romacs-agent-tools--arm-resume session time)
+      (romacs-agent-tools--keep-resume session nil))))
 
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--rearm-resumes)
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-tools--rearm-resume)
 
 (defun romacs-agent-tools--not-moved (session why)
   "SESSION stays where its limit stopped it, WHY when said: its end goes

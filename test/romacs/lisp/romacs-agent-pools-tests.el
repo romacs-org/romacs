@@ -155,6 +155,7 @@ a time, `allow' marks it allowed."
            (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
       (puthash "r" session romacs-agent--sessions)
+      (romacs-agent--manifest session nil)
       (spend "claude" soon) (spend "claude2" (+ soon 600)) (spend "claude3" (+ soon 900))
       (cl-letf (((symbol-function 'run-at-time) (lambda (delay _ function &rest args) (push (list delay function args) armed) 'timer))
                 ((symbol-function 'cancel-timer) #'ignore)
@@ -167,9 +168,11 @@ a time, `allow' marks it allowed."
         (should (cl-find #'romacs-agent-tools--resume armed :key #'cadr))
         (let ((journal (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))
           (should (string-match-p "\"type\":\"resume\",\"state\":\"scheduled\"" journal)))
-        ;; A restarted server arms it again.
-        (clrhash romacs-agent-tools--resumes)
-        (romacs-agent-tools--rearm-resumes)
+        ;; Kept in its manifest: a restarted server, loading it, arms it again.
+        (let ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
+          (should (= (gethash "resumeAt" manifest) (+ soon 1)))
+          (clrhash romacs-agent-tools--resumes)
+          (run-hook-with-args 'romacs-agent-loaded-functions session manifest))
         (should (= (romacs-agent-resume-time session) (+ soon 1)))
         ;; Due, its own account back: told to go on there.
         (spend "claude" (- (float-time) 1) 9.0)
@@ -188,6 +191,8 @@ a time, `allow' marks it allowed."
         (romacs-agent-tools--arm-resume session 43.0)
         (romacs-agent-tools--limit-on-event session '(:type input))
         (should-not (romacs-agent-resume-time session))
+        ;; Its manifest says so at once: nothing written later brings it back.
+        (should-not (gethash "resumeAt" (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
         ;; A reset already used schedules nothing again.
         (spend "claude" soon 13.0) (spend "claude2" (+ soon 600) 13.0)
         (puthash session soon romacs-agent-tools--resets-used)
@@ -202,11 +207,11 @@ a time, `allow' marks it allowed."
           (romacs-agent-tools--arm-resume session 44.0)
           (romacs-agent-tools--resume session 44.0)
           (should-not (or told moved))
-          (romacs-agent-tools--keep-resume "r" 45.0)
-          (romacs-agent-tools--rearm-resumes)
+          (romacs-agent-tools--keep-resume session 45.0)
+          (run-hook-with-args 'romacs-agent-loaded-functions session
+                              (romacs-agent--read-json (expand-file-name "manifest.json" dir)))
           (should-not (romacs-agent-resume-time session))
-          (should-not (with-temp-buffer (insert-file-contents (romacs-agent-tools--resumes-file))
-                                        (read (current-buffer)))))))))
+          (should-not (gethash "resumeAt" (romacs-agent--read-json (expand-file-name "manifest.json" dir)))))))))
 
 (ert-deftest romacs-agent-pools-a-wait-is-its-limits-alone ()
   (romacs-agent-pools-tests--with

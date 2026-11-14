@@ -3084,11 +3084,17 @@ neither callback runs after it."
           (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
         ;; Replayed already, unless attached (its replay ends `attached').
         (unless (romacs-agent-connection session) (romacs-agent--seen-caught-up session))
+        (run-hook-with-args 'romacs-agent-loaded-functions session manifest)
         session))))
 
 ;;;###autoload
 (defvar romacs-agent-restored-hook nil
   "Run after `romacs-agent-restore' has loaded every recorded session.")
+
+(defvar romacs-agent-loaded-functions nil
+  "Functions called with each session a server loads and its manifest (a
+hash table), once it is known: what is kept there besides the session's
+own fields is taken back.")
 
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
