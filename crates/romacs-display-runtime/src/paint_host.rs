@@ -22,10 +22,14 @@ pub struct PaintHost {
 }
 
 pub struct PaintSender {
-    comms: EmacsComms,
+    commands: crate::thread_comm::CommandSender,
+    /// The render thread's input, as the input bridge passes it on.
+    input: crossbeam_channel::Receiver<crate::thread_comm::InputEvent>,
     proxy: render_thread::RenderEventLoopProxy,
     /// What the render thread reported, as the input bridge keeps it.
     facts: std::sync::Arc<crate::input_bridge::Facts>,
+    /// The last request id issued (`InputEvent::Reply`).
+    requests: std::sync::atomic::AtomicU64,
 }
 
 impl PaintHost {
@@ -70,15 +74,13 @@ impl PaintHost {
         let lifetime = reply
             .ready(InitialWindowSize { width, height })
             .ok_or("initial window receiver closed")?;
-        let (EmacsComms { cmd_tx, input_rx, frame_opacity }, mut render) = ThreadComms::new().split();
+        let (EmacsComms { cmd_tx, input_rx, facts_rx }, mut render) = ThreadComms::new().split();
         // The evaluator reads the render thread's events through its bridge.
-        let (facts, input_rx) = crate::input_bridge::spawn(input_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
+        let (facts, input_rx) = crate::input_bridge::spawn(input_rx, facts_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
             .map_err(|error| format!("input bridge: {error}"))?;
-        let comms = EmacsComms { cmd_tx, input_rx, frame_opacity };
         render.keep_alive_without_frames = server;
         if !server {
-            comms
-                .cmd_tx
+            cmd_tx
                 .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
                     frame: FrameRef::Frame(PRIMARY_FRAME),
                 }))
@@ -93,9 +95,11 @@ impl PaintHost {
                 title,
             },
             PaintSender {
-                comms,
+                commands: cmd_tx,
+                input: input_rx,
                 proxy,
                 facts,
+                requests: std::sync::atomic::AtomicU64::new(0),
             },
         ))
     }
@@ -179,6 +183,10 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
+    fn next_request(&self) -> u64 {
+        self.requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
     /// Call WAKE, from the input bridge, when a presentation of the primary
     /// frame newer than any before it has rendered: a paint's completion then ends a wait
     /// for input itself. One waiter per sender: a second registration
@@ -205,11 +213,13 @@ impl PaintSender {
     /// on the render thread. Absence of text is distinct from transport errors.
     pub fn clipboard_text(&self) -> Result<Option<String>, String> {
         romacs_display_protocol::call_count::count("sender.clipboard_text");
-        self.clipboard_request(|expires_at, reply| ClipboardCommand::GetText {
-            selection: ClipboardSelection::Clipboard,
-            expires_at,
-            reply,
-        })
+        self.clipboard_request(
+            |expires_at, request| ClipboardCommand::GetText { selection: ClipboardSelection::Clipboard, expires_at, request },
+            |reply| match reply {
+                crate::thread_comm::Reply::Text(text) => text,
+                other => Err(format!("clipboard read answered {other:?}")),
+            },
+        )
     }
 
     /// Publish owned CLIPBOARD text through the same worker. A timeout is not
@@ -217,27 +227,35 @@ impl PaintSender {
     /// already started may finish later; queued expired requests are rejected.
     pub fn set_clipboard_text(&self, text: &str) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_clipboard_text");
-        self.clipboard_request(|expires_at, reply| ClipboardCommand::SetText {
-            selection: ClipboardSelection::Clipboard,
-            text: Some(text.to_owned()),
-            expires_at,
-            reply,
-        })
+        self.clipboard_request(
+            |expires_at, request| ClipboardCommand::SetText {
+                selection: ClipboardSelection::Clipboard,
+                text: Some(text.to_owned()),
+                expires_at,
+                request,
+            },
+            |reply| match reply {
+                crate::thread_comm::Reply::Done(done) => done,
+                other => Err(format!("clipboard write answered {other:?}")),
+            },
+        )
     }
 
-    fn clipboard_request<T>(
+    /// A clipboard request by id, answered within a second: COMMAND made
+    /// with its deadline and id, its reply read by ANSWER.
+    fn clipboard_request<T: Send + 'static>(
         &self,
-        command: impl FnOnce(
-            std::time::Instant,
-            crossbeam_channel::Sender<Result<T, String>>,
-        ) -> ClipboardCommand,
+        command: impl FnOnce(std::time::Instant, u64) -> ClipboardCommand,
+        answer: fn(crate::thread_comm::Reply) -> Result<T, String>,
     ) -> Result<T, String> {
         let expires_at = std::time::Instant::now() + std::time::Duration::from_secs(1);
         let (reply, response) = crossbeam_channel::bounded(1);
-        self.comms
-            .cmd_tx
-            .try_send(RenderCommand::Clipboard(command(expires_at, reply)))
-            .map_err(|error| format!("clipboard request could not be queued: {error}"))?;
+        let request = self.next_request();
+        self.facts.expect(request, Box::new(move |done| { let _ = reply.send(answer(done)); }));
+        if let Err(error) = self.commands.try_send(RenderCommand::Clipboard(command(expires_at, request))) {
+            self.facts.forget(request);
+            return Err(format!("clipboard request could not be queued: {error}"));
+        }
         self.proxy.wake_up();
         response.recv_deadline(expires_at).map_err(|error| match error {
             crossbeam_channel::RecvTimeoutError::Timeout => "clipboard request timed out".to_owned(),
@@ -279,9 +297,7 @@ impl PaintSender {
         validate_frame(&frame)?;
         validate_children(&frame, &children)?;
         let scene = crate::thread_comm::PaintScene { root: frame, children, text_animations };
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Paint(Box::new(scene)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -396,7 +412,7 @@ impl PaintSender {
 
     /// Send asset COMMAND unless LIMIT commands already wait.
     fn send_asset_within(&self, command: crate::thread_comm::AssetCommand, limit: usize) -> Result<bool, String> {
-        let result = match self.comms.cmd_tx.try_send_within(RenderCommand::Asset(command), limit) {
+        let result = match self.commands.try_send_within(RenderCommand::Asset(command), limit) {
             Ok(()) => Ok(true),
             Err(crossbeam_channel::TrySendError::Full(_)) => Ok(false),
             Err(error) => Err(error.to_string()),
@@ -410,11 +426,10 @@ impl PaintSender {
     /// raised to LIMIT.
     pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_frame_alpha");
-        self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(frame, alpha, limit);
-        let result = self
-            .comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        // Never refused for room (`exempt_from_capacity`): the display owns
+        // the state, so a dropped command would be a lost setting.
+        let result = self.commands
+            .try_send(RenderCommand::Window(WindowCommand::SetFrameAlpha { frame, alpha, limit }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
@@ -432,12 +447,23 @@ impl PaintSender {
     ) -> Result<crossbeam_channel::Receiver<Result<(), String>>, String> {
         romacs_display_protocol::call_count::count("sender.show_primary");
         let (reply, ready) = crossbeam_channel::bounded(1);
+        let request = self.next_request();
+        // A window made after its waiter gave up is destroyed, not left.
+        let (commands, proxy) = (self.commands.clone(), self.proxy.clone());
+        self.facts.expect(request, Box::new(move |answer| {
+            let made = match answer {
+                crate::thread_comm::Reply::Done(made) => made,
+                other => Err(format!("window realization answered {other:?}")),
+            };
+            if reply.send(made.clone()).is_err() && made.is_ok() {
+                let _ = commands.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(PRIMARY_FRAME) }));
+                proxy.wake_up();
+            }
+        }));
         let none = crate::host_types::GuiFrameGeometryHints {
             base_width: 0, base_height: 0, min_width: 0, min_height: 0, width_inc: 0, height_inc: 0,
         };
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::RealizeFrame {
                 frame: FrameRef::Frame(PRIMARY_FRAME),
                 width,
@@ -446,9 +472,10 @@ impl PaintSender {
                 geometry_hints: none,
                 visual: None,
                 adopt_primary: true,
-                reply: Some(reply),
+                request: Some(request),
             }))
             .map_err(|error| error.to_string());
+        if result.is_err() { self.facts.forget(request); }
         self.proxy.wake_up();
         result.map(|()| ready)
     }
@@ -469,9 +496,7 @@ impl PaintSender {
     /// Title the primary window (xdisp.c gui_consider_frame_title).
     pub fn set_title(&self, title: String) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_title");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { title }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -481,9 +506,7 @@ impl PaintSender {
     /// Close a server's primary window; the render loop and the GPU stay.
     pub fn hide_primary(&self) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.hide_primary");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Primary }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -495,9 +518,7 @@ impl PaintSender {
     /// configuration would leave an option silently without effect.
     pub fn set_visual_config(&self, config: romacs_display_protocol::VisualConfig) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_visual_config");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .send(RenderCommand::Config(crate::thread_comm::ConfigCommand::SetVisualConfig(config)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -507,9 +528,7 @@ impl PaintSender {
     /// Ask the compositor to bring the primary window to the user.
     pub fn raise_primary(&self) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.raise_primary");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -518,14 +537,12 @@ impl PaintSender {
 
     pub fn input(&self) -> &crossbeam_channel::Receiver<crate::thread_comm::InputEvent> {
         romacs_display_protocol::call_count::count("sender.input");
-        &self.comms.input_rx
+        &self.input
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.shutdown");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();

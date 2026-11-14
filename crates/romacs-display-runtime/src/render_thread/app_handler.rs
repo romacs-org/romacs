@@ -69,6 +69,8 @@ impl ApplicationHandler for RenderApp {
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.handle_about_to_wait(event_loop);
+        // Readiness decided in this pass goes out with it.
+        self.send_answers();
     }
 
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {

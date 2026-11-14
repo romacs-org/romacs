@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -175,8 +176,10 @@ DELAY), `stopped' each session stopped."
 
 (ert-deftest romacs-agent-reap-a-stopped-socket-left-is-ended ()
   (let* ((root (make-temp-file "romacs-stopped-" t))
+         ;; Its socket's directory is short: TMPDIR may not be.
+         (run (romacs-test-socket-directory "reap-"))
          (session (romacs-agent--make :id "ssssssss-1111-4000-8000-000000000000" :harness 'claude :state 'detached :dir root :journal-start 0
-                                      :host-socket (expand-file-name "gone.sock" root))))
+                                      :host-socket (expand-file-name "gone.sock" run))))
     (unwind-protect
         (progn (write-region "" nil (expand-file-name "journal.jsonl" root))
                (romacs-agent--set-stopped session t)
@@ -190,7 +193,8 @@ DELAY), `stopped' each session stopped."
                (romacs-agent--attach session 0)
                (should (= (romacs-agent-seq session) 2))
                (should (eq (romacs-agent-state session) 'ended)))
-      (delete-directory root t))))
+      (delete-directory root t)
+      (delete-directory run t))))
 
 (ert-deftest romacs-agent-reap-by-role-and-on-restore ()
   (romacs-agent-reap-tests--with
