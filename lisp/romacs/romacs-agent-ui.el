@@ -1512,7 +1512,6 @@ event is drawn in it before.")
 (defun romacs-agent-ui--make-chat (session)
   "SESSION's chat buffer, made empty: its composer, no transcript yet
 \(`romacs-agent-ui--fill')."
-  (romacs-agent-ui--helpers)
   ;; The session's own buffer: never found by its title, which another
   ;; session may share.
   (let ((buffer (generate-new-buffer (format "*agent: %s*" (romacs-agent-title session)))))
