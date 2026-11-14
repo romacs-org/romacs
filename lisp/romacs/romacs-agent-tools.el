@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-issues)
 
 (defcustom romacs-agent-eval-budget 5000
   "Milliseconds an agent's `romacs_eval' may run before it is quit, as
@@ -989,10 +990,13 @@ role and worktree."
     (romacs-agent-events-async
      task (lambda (events)
             (setcar cell (condition-case err
-                             (list :child (romacs-agent-handoff
+                             (let ((child (romacs-agent-handoff
                                            task (romacs-agent-handoff-thread task events) provider model
                                            (or next "Go on from where this thread left off.")
-                                           (and effort (list :effort effort))))
+                                           (and effort (list :effort effort)))))
+                               (romacs-agent-issues-record 'handoff task :from (romacs-agent-provider task) :to provider
+                                                           :child (romacs-agent-id child))
+                               (list :child child))
                            (error (list :error (error-message-string err)))))))
     (romacs-mcp-defer
      (lambda ()
