@@ -465,9 +465,12 @@ read once from its `answered' file.")
         (puthash (romacs-agent-id session) table romacs-agent-tools--answered))))
 
 (defun romacs-agent-tools--answer (session seq)
-  "A `wait' answered with SESSION's turn end SEQ: its parent has it, and
-earlier ends still on their way stay so."
+  "A `wait' answered with SESSION's turn end SEQ, or an end no rule lets
+wake its parent: the parent has it, and earlier ends still on their way
+stay so.  It goes from SESSION's ends now: no delivery may follow."
   (puthash seq t (romacs-agent-tools--answered-table session))
+  ;; Answered at its hand-on, the end is among the newest: found at once.
+  (setf (romacs-agent-ends session) (cl-delete seq (romacs-agent-ends session) :key #'car :count 1))
   (write-region (format "%d\n" seq) nil (expand-file-name "answered" (romacs-agent-dir session)) t 'silent))
 
 (defun romacs-agent-tools--wanted-p (session seq)
@@ -524,7 +527,8 @@ hands them on again.")
 
 (defvar romacs-agent-tools--pruned (make-hash-table :test #'eq :weakness 'key)
   "A child to the delivered seq its ends were last pruned at: they are
-pruned again only once more of them are delivered.")
+pruned again only once more of them are delivered.  An end answered goes
+as it is (`romacs-agent-tools--answer').")
 
 (defun romacs-agent-tools--unhanded (child)
   "CHILD's turn ends not yet handed on by this process, oldest first: the
@@ -535,8 +539,8 @@ newest of its ends, newest first, down to the last handed on."
 
 (defun romacs-agent-tools--prune-ends (child)
   "Let go of CHILD's ends its parent has, once more of them are delivered
-since they were last pruned: a parent at work while ends pile up costs
-nothing per end."
+since they were last pruned (and the first time, what a restart kept): a
+parent at work while ends pile up costs nothing per end."
   (let ((woken (romacs-agent-tools--woken child)))
     (unless (eql woken (gethash child romacs-agent-tools--pruned))
       (puthash child woken romacs-agent-tools--pruned)

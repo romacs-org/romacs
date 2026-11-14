@@ -274,6 +274,19 @@ what waited for that end goes."
                              (romacs-agent-tools--wakes-parse (car delivered)))
                      '(("landed abc123" "completed") ("" "failed")))))))
 
+(ert-deftest romacs-agent-lead-ends-no-one-is-woken-by-are-let-go ()
+  ;; Turn after turn that wakes no one, its parent never woken: none of
+  ;; them stays among the child's ends, nor does one a wait answered.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-lead-tests--child lead root)))
+      (dotimes (i 20) (romacs-agent-lead-tests--end child (+ 3 (* 2 i)) "[quiet] still building"))
+      (should-not delivered)
+      (should-not (romacs-agent-ends child))
+      (romacs-agent-lead-tests--end child 50 "landed abc123")
+      (should (equal (mapcar #'car (romacs-agent-ends child)) '(50)))
+      (romacs-agent-tools--answer child 50)
+      (should-not (romacs-agent-ends child)))))
+
 ;;; romacs_task_list
 
 (ert-deftest romacs-agent-lead-list-survives-a-restart ()
