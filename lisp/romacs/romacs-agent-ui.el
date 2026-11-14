@@ -622,9 +622,9 @@ usual one, whatever width the window has when the row is drawn or later.")
 
 (defun romacs-agent-ui--fit (text taken)
   "TEXT within `romacs-agent-ui--row-columns' after TAKEN columns: cut,
-with an ellipsis, only where it is too wide."
+with the session's `truncate-string-ellipsis', only where it is too wide."
   (let ((room (- romacs-agent-ui--row-columns taken)))
-    (if (<= (string-width text) room) text (truncate-string-to-width text room nil nil "…"))))
+    (if (<= (string-width text) room) text (truncate-string-to-width text room nil nil t))))
 
 (defun romacs-agent-ui--run-set (key value)
   (setq romacs-agent-ui--run (plist-put romacs-agent-ui--run key value)))
@@ -1634,7 +1634,7 @@ made: the one line that moves while the run's own steps stay folded."
              (room (- (romacs-agent-ui--rule-width) (string-width state) (string-width tail) 10))
              (doing (and run (plist-get run :doing) (> room 8)
                          (concat (propertize " · " 'face 'romacs-agent-dim)
-                                 (truncate-string-to-width (plist-get run :doing) room nil nil "…")))))
+                                 (truncate-string-to-width (plist-get run :doing) room nil nil t)))))
         (concat (romacs-agent-ui--rule (concat state doing tail)) "\n")))))
 
 (defun romacs-agent-ui--composer-empty-p ()
