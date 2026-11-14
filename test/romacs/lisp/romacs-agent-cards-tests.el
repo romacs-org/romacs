@@ -60,7 +60,7 @@
 (ert-deftest romacs-agent-delegate-call-is-a-card-with-a-thread-link ()
   (romacs-agent-cards-tests--with-chat session
     (romacs-agent-cards-tests--delegate session)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Review it  codex  Working  thread\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Review it · codex  Working  thread\n"))
     (let ((shown nil))
       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
         (goto-char (point-min))
@@ -87,7 +87,7 @@
     (let ((text (romacs-agent-tools--wake-text child '(7 "all good\nsecond line" nil))))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
     (should (equal (romacs-agent-cards-tests--visible)
-                   (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
+                   (concat "  ✓ ⇢ Review it · codex  Completed  thread\n"
                            "⇠ child · Completed  thread  all good\n")))
     (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
@@ -133,7 +133,7 @@
     (romacs-agent-cards-tests--delegate session)
     (romacs-agent-cards-tests--draw session :type 'input :seq 9
                                     :text (romacs-agent-tools--wake-text child '(7 "no" t)))
-    (should (string-match-p "Review it  codex  Failed" (romacs-agent-cards-tests--visible)))))
+    (should (string-match-p "Review it · codex  Failed" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-user-text-shaped-like-a-wake-stays-a-prompt ()
   ;; A task this session did not delegate, or none: the user's own words.
@@ -158,7 +158,7 @@
      :input (romacs-agent-cards-tests--table "description" "Find callers" "subagent_type" "Explore" "prompt" "..."))
     (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "t2" :output "found 3")
     (romacs-agent-ui--run-settle)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers  Explore\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers · Explore\n"))
     (should-not (text-property-any (point-min) (point-max) 'romacs-agent-chip t))
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
@@ -193,6 +193,24 @@
     (should (equal (romacs-agent-cards-tests--visible) "▸ Bash  ls\n"))
     (romacs-agent-chat-toggle)
     (should (string-suffix-p "  ✓ Bash  ls\n{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
+
+(ert-deftest romacs-agent-a-call-drawn-anew-is-its-runs-row ()
+  ;; A renderer's words at the call's end are the run's row too, and its
+  ;; colours stay over the settled row's dim.
+  (romacs-agent-cards-tests--with-chat session
+    (let ((romacs-icons-ascii t))
+      (romacs-agent-cards-tests--draw
+       session :type 'tool :state 'started :id "d" :name "mcp__romacs__romacs_dev_check"
+       :input (romacs-agent-cards-tests--table "worktree" "/w/tree/"))
+      (romacs-agent-cards-tests--draw
+       session :type 'tool :state 'completed :id "d"
+       :output (json-serialize (romacs-agent-cards-tests--table "verdict" "ok" "report" "lint: ok\ndev-check: ok")))
+      (romacs-agent-ui--run-settle)
+      (should (equal (romacs-agent-cards-tests--visible) "▸ ⚑ dev-check ok · 1/1 stages\n"))
+      (goto-char (point-min))
+      (romacs-agent-chat-toggle)
+      (search-forward "dev-check ok")
+      (should (eq (car (ensure-list (get-text-property (1- (point)) 'face))) 'romacs-agent-done)))))
 
 (ert-deftest romacs-agent-run-says-what-it-did-and-failures-stay ()
   (romacs-agent-cards-tests--with-chat session
@@ -312,7 +330,7 @@
     (romacs-agent-cards-tests--draw session :type 'delta :text "Three callers.")
     ;; The card shows; its subagent's words and calls are its steps,
     ;; not the run's own calls.
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers  Explore\nThree callers."))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers · Explore\nThree callers."))
     (romacs-agent-chat-expand-all)
     (should (string-search "    Searching the tree.\n    ✓ Grep  callers\n" (romacs-agent-cards-tests--visible)))))
 
@@ -336,8 +354,8 @@
      session "all good\nsecond line"
      (romacs-agent-cards-tests--message "m-1" "child" :session romacs-agent-cards-tests--child :name "old name"))
     ;; The sender by its title now, its kind, its thread, the reply hint,
-    ;; then the text.
-    (should (equal (romacs-agent-cards-tests--visible) "✉ child · child  thread  ↩\nall good\nsecond line\n"))
+    ;; then the text, quoted: the bar is not copied.
+    (should (equal (romacs-agent-cards-tests--visible) "✉ child · child  thread  ↩\n┃ all good\n┃ second line\n"))
     (should-not (text-property-any (point-min) (point-max) 'face 'romacs-agent-prompt))
     ;; No prompt, as a task's result is none: n and p pass it.
     (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
@@ -352,11 +370,11 @@
   (romacs-agent-cards-tests--with-chat session
     ;; No route back: no thread, no hint.
     (romacs-agent-cards-tests--receive session "hello" (romacs-agent-cards-tests--message "m-1" "external"))
-    (should (equal (romacs-agent-cards-tests--visible) "✉ a session outside Romacs · external\nhello\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "✉ a session outside Romacs · external\n┃ hello\n"))
     ;; A Claude Code session's, with an address: answerable, no thread here.
     (romacs-agent-cards-tests--receive
      session "ping" (romacs-agent-cards-tests--message "m-2" "external" :name "dotfiles" :address "dotfiles [ab12]"))
-    (should (string-suffix-p "✉ dotfiles · external  ↩\nping\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-suffix-p "✉ dotfiles · external  ↩\n┃ ping\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-a-reply-is-a-card-and-answers-its-message ()
   (romacs-agent-cards-tests--with-chat session
@@ -367,17 +385,16 @@
      :input (romacs-agent-cards-tests--table "messageId" "m-1" "text" "Rebased.\nAll green."))
     (romacs-agent-cards-tests--draw
      session :type 'tool :state 'completed :id "r"
-     :output (format "{\"taskId\":\"%s\",\"status\":\"idle\",\"messageId\":\"m-2\"}" romacs-agent-cards-tests--child))
+     :output (format "{\"taskId\":\"%s\",\"title\":\"child\",\"status\":\"idle\",\"messageId\":\"m-2\"}"
+                     romacs-agent-cards-tests--child))
     (romacs-agent-cards-tests--draw session :type 'delta :text "Done.")
-    (let ((shown (romacs-agent-cards-tests--visible)))
-      ;; Answered; the reply goes to the message's sender, loud in its run.
-      (should (string-prefix-p "✉ child · child  thread  ↩ ✓\nCan you rebase?\n" shown))
-      (should (string-search "  ✓ ✉ → child  Rebased.  " shown))
-      (should-not (string-search "All green." shown)))
-    ;; The whole reply is a fold away.
-    (goto-char (gethash "r" romacs-agent-ui--tool-lines))
-    (romacs-agent-chat-toggle)
-    (should (string-search "Rebased.\nAll green.\n" (romacs-agent-cards-tests--visible)))))
+    ;; Answered; the reply goes to the message's sender, loud in its run,
+    ;; the message quoted under it; and copied, it has no bar.
+    (should (equal (romacs-agent-cards-tests--visible)
+                   (concat "✉ child · child  thread  ↩ ✓\n┃ Can you rebase?\n"
+                           "  ✓ ✉ to child  idle  thread\n┃ Rebased.\n┃ All green.\nDone.")))
+    (should (string-search "Can you rebase?\n" (romacs-agent-ui--text-of (point-min) (point-max))))
+    (should-not (string-search "┃" (romacs-agent-ui--text-of (point-min) (point-max))))))
 
 (ert-deftest romacs-agent-a-result-as-a-record-is-its-arrival ()
   ;; A delivery of a result and a message: each its own row, in order.
@@ -391,15 +408,18 @@
                      (append (romacs-agent-cards-tests--message "m-2" "child" :session romacs-agent-cards-tests--child)
                              (list :text "one more thing"))))
     (should (equal (romacs-agent-cards-tests--visible)
-                   (concat "  ✓ ⇢ Review it  codex  Completed  thread\n"
+                   (concat "  ✓ ⇢ Review it · codex  Completed  thread\n"
                            "⇠ child · Completed  thread  all good\n"
-                           "✉ child · child  thread  ↩\none more thing\n")))
-    ;; A reply to the result goes to its task, by name.
+                           "✉ child · child  thread  ↩\n┃ one more thing\n")))
+    ;; A reply to the result goes to its task, named by the task's record.
     (romacs-agent-cards-tests--draw
      session :type 'tool :state 'started :id "r" :name "mcp__romacs__romacs_task_reply"
      :input (romacs-agent-cards-tests--table "messageId" "m-1" "text" "Thanks."))
+    (romacs-agent-cards-tests--draw
+     session :type 'tool :state 'completed :id "r"
+     :output (format "{\"taskId\":\"%s\",\"title\":\"child\",\"status\":\"idle\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (string-suffix-p "  ● ✉ → child  Thanks.\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-suffix-p "  ✓ ✉ to child  idle  thread\n┃ Thanks.\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-an-answered-message-links-its-reply ()
   (romacs-agent-cards-tests--with-chat session
@@ -427,11 +447,10 @@
      :input (romacs-agent-cards-tests--table "messageId" "m-1" "text" "Rebased."))
     (romacs-agent-cards-tests--draw session :type 'tool :state 'failed :id "r" :output "Message m-1's sender is gone")
     (romacs-agent-ui--run-settle)
-    ;; Not answered; the failure is loud, and its fold holds the message and why.
-    (should (string-prefix-p "✉ child · child  thread  ↩\n" (romacs-agent-cards-tests--visible)))
-    (goto-char (gethash "r" romacs-agent-ui--tool-lines))
-    (romacs-agent-chat-toggle)
-    (should (string-search "Rebased.\n\nMessage m-1's sender is gone\n" (romacs-agent-cards-tests--visible)))))
+    ;; Not answered; the failure is loud, and shows the message and why.
+    (should (equal (romacs-agent-cards-tests--visible)
+                   (concat "✉ child · child  thread  ↩\n┃ Can you rebase?\n"
+                           "  ! ✉ reply\n┃ Rebased.\n\nMessage m-1's sender is gone\n")))))
 
 (ert-deftest romacs-agent-a-message-sent-is-a-card ()
   (romacs-agent-cards-tests--with-chat session
@@ -442,7 +461,7 @@
      session :type 'tool :state 'completed :id "s"
      :output (format "{\"taskId\":\"%s\",\"status\":\"running\",\"messageId\":\"m-9\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (string-prefix-p "  ✓ ✉ → child  Rebase, please." (romacs-agent-cards-tests--visible)))))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ✉ to child  Working  thread\n┃ Rebase, please.\n"))))
 
 (ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
   (romacs-agent-cards-tests--with-chat session
