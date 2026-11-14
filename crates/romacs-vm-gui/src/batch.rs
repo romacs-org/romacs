@@ -288,7 +288,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
-            diagnose(&serde_json::json!({"mode": "restored", "store": world.store}));
+            diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             restarted(*vm)
         }
         Launch::Build => {
@@ -321,7 +321,7 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
     let store = beside_executable("worlds").filter(|store| store.is_dir() && !romacs_vm::world::store::disabled())?;
     match World::restore_read_only::<()>(&store, recipe(dir)) {
         Ok((vm, ())) => {
-            diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true}));
+            diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some(vm)
         }
         Err(reason) => {

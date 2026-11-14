@@ -13,6 +13,7 @@
 //! foreign_resource`). These are the fields and variants the VM's
 //! `SnapshotSafe` listing names as at rest (`world::safe`).
 use super::arena::{self, ImageFields};
+use super::safe::Schema;
 use crate::{LocalZone, Value, Vm};
 use std::sync::atomic::Ordering;
 
@@ -125,10 +126,7 @@ impl Vm {
         self.mktime_offset = 0;
         self.tz_rule_dstoff = 0;
         self.doc_file = None;
-        self.idle_since = None;
         self.rooted = crate::handle::RootSet::default();
-        self.process_jobs = Default::default();
-        self.subprocesses = Default::default();
         self.gc_stress.rearm();
         self.reset_collection_counters();
         self.forget_system_name();
@@ -140,8 +138,9 @@ impl Vm {
 /// process's heap; nothing else allocates while the image is written, and
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
-pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
-    let vm = vm.at_rest_for_image()?;
+pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
+    let mut vm = vm.at_rest_for_image()?;
+    settle(&mut vm.0, &mut carry)?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
@@ -149,6 +148,20 @@ pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
     // The VM stays allocated: the image owns it, and this process exits.
     written
+}
+
+/// Make VM and CARRY hold nothing of the executable (`romacs_snapshot::
+/// Settle`): every empty hash table they hold gets an allocation of its
+/// own, so an image restores wherever this process's executable lay. Refused,
+/// naming the type, when a table out of reach is empty.
+fn settle<T: super::safe::Schema>(vm: &mut Vm, carry: &mut T) -> Result<(), String> {
+    let mut settle = romacs_snapshot::Settle::default();
+    vm.settle(&mut settle);
+    carry.settle(&mut settle);
+    match settle.unsettled() {
+        [] => Ok(()),
+        held => Err(format!("world capture refused: an empty hash table, out of reach, in {}", held.join(", "))),
+    }
 }
 
 /// The census of VM and CARRY as an image holds them
@@ -203,7 +216,10 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
-    let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    let mut root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    // The at-rest fields are this process's to make, before anything runs.
+    // Only the VM, the image's root, has them (`snapshot_fields!`).
+    root.0.renew();
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.
     crate::epoch::raise(root.0.allocation.since);
