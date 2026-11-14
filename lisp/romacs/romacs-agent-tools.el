@@ -404,8 +404,11 @@ anything."
                  (romacs-agent-id session)
                  (concat (or (nth 1 end) "")
                          (and (nth 2 end) (romacs-agent-tools--limit-note session))))))
-    (format "Delegated task %s (%s) [%s, %d chars]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
-            (if (nth 2 end) "failed" "completed") (length result) result)))
+    (format "Delegated task %s (%s) [%s, %d chars%s]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
+            (if (nth 2 end) "failed" "completed") (length result)
+            ;; The turn answered a message: the reply names it.
+            (if (nth 3 end) (format ", re %s" (nth 3 end)) "")
+            result)))
 
 (defconst romacs-agent-tools--child-note
   "You are a delegated task: your parent sees only your final reply.  Do the work yourself, \
@@ -423,15 +426,17 @@ named, then `romacs-agent-tools--child-note'; an empty TASK stays empty."
           task "\n\n" romacs-agent-tools--child-note)))
 
 (defconst romacs-agent-tools--wake-head
-  "Delegated task \\([0-9a-f-]\\{36\\}\\) (\\(.*\\)) \\[\\(completed\\|failed\\|sent\\)\\(?:, \\([0-9]+\\) chars\\)?\\]:\n"
+  "Delegated task \\([0-9a-f-]\\{36\\}\\) (\\(.*\\)) \\[\\(completed\\|failed\\|sent\\)\\(?:, \\([0-9]+\\) chars\\)?\\(?:, re \\(m-[0-9a-f-]+\\)\\)?\\]:\n"
   "A wake's head: its task, title, state (\"sent\": a copy of its message to
-another task of its parent) and, when it says, its result's length.")
+another task of its parent), when it says, its result's length, and the
+message the turn answered.")
 
 (defun romacs-agent-tools--wakes-parse (text)
   "TEXT read back as the wakes it carries, in order, each a plist of :id
-:title :state :result, or nil.  A head's length takes its result whatever
-it holds; one with none (a wake of before) takes the rest of TEXT.  The
-harness takes wakes as a plain message, so its journal keeps only this text."
+:title :state :reply-to (the message the turn answered) and :result, or
+nil.  A head's length takes its result whatever it holds; one with none
+\(a wake of before) takes the rest of TEXT.  The harness takes wakes as a
+plain message, so its journal keeps only this text."
   (let ((pos 0) (wakes nil) (ok t))
     (while (and ok (< pos (length text)))
       (if (not (and (string-match romacs-agent-tools--wake-head text pos) (= (match-beginning 0) pos)))
@@ -441,7 +446,7 @@ harness takes wakes as a plain message, so its journal keeps only this text."
                (to (if size (+ from (string-to-number size)) (length text))))
           (if (> to (length text)) (setq ok nil)
             (push (list :id (match-string 1 text) :title (match-string 2 text) :state (match-string 3 text)
-                        :result (substring text from to))
+                        :reply-to (match-string 5 text) :result (substring text from to))
                   wakes)
             (setq pos to)
             (when (< pos (length text))
@@ -801,31 +806,32 @@ parent may do WHAT."
                   (if parent (format "task of session %s" parent) "no delegated task") what))
     session))
 
-(defun romacs-agent-tools--tell (child text &optional mode valid)
+(defun romacs-agent-tools--tell (child text &optional mode valid message)
   "Send TEXT to CHILD as its next message by the session's own send:
 now when it is idle, once its running turn ends, once its harness is
 back when it had ended.  MODE `steer' writes it into the running turn,
 as the chat's steer does (a harness run per turn takes it after);
 `interrupt' interrupts the turn and sends it first.  VALID, when given,
-is asked before a waiting message goes: nil drops it.  Its next turn end
-wakes its parent by its wake rule, as its first did.  An empty TEXT
-sends nothing."
+is asked before a waiting message goes: nil drops it.  MESSAGE, when
+given, says it comes from another session (`romacs-agent--input').  Its
+next turn end wakes its parent by its wake rule, as its first did.  An
+empty TEXT sends nothing."
   (when (romacs-agent-cancelled child)
     (user-error "Task %s (%s) was cancelled" (romacs-agent-id child) (romacs-agent-title child)))
   (unless (string-empty-p (string-trim text))
     (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
       (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
-             (romacs-agent-send child text nil valid))
+             (romacs-agent-send child text nil valid nil message))
             ((and busy (eq mode 'interrupt))
              ;; First in line before the cut: a turn not yet under way
              ;; (Codex's before it names it) cannot be cut, and it goes after.
-             (romacs-agent-send-later child text t nil valid)
+             (romacs-agent-send-later child text t nil valid message)
              (ignore-error user-error (romacs-agent-interrupt child)))
             (t
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.
              (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
-             (romacs-agent-send-later child text nil nil valid)))))
+             (romacs-agent-send-later child text nil nil valid message)))))
   child)
 
 (defconst romacs-agent-tools--send-modes '("queue" "steer" "replace" "interrupt")
@@ -853,39 +859,79 @@ first, each (SENDER . TEXT): they go with its next wake, never waking it.")
   (format "Delegated task %s (%s) [sent, %d chars]:\n%s"
           (romacs-agent-id sender) (romacs-agent-title sender) (length text) text))
 
+(defun romacs-agent-tools--message (kind sender &optional in-reply-to)
+  "A new `romacsMessage' record: from SENDER, a session (nil: one outside
+Romacs), what it is to the receiver KIND, answering message IN-REPLY-TO."
+  (romacs-mcp--object "id" (concat "m-" (romacs-agent--uuid)) "kind" kind
+                      "from" (romacs-mcp--object "session" (if sender (romacs-agent-id sender) :null)
+                                                 "name" (if sender (or (romacs-agent-title sender) (romacs-agent-id sender))
+                                                           "a session outside Romacs"))
+                      "inReplyTo" (or in-reply-to :null)))
+
+(defun romacs-agent-tools--kind (sender target)
+  "What SENDER, a session or nil (outside Romacs), is to TARGET: parent,
+child, sibling, or external."
+  (let ((parent-of (lambda (session) (plist-get (romacs-agent-options session) :parent))))
+    (cond ((null sender) "external")
+          ((equal (funcall parent-of target) (romacs-agent-id sender)) "parent")
+          ((equal (funcall parent-of sender) (romacs-agent-id target)) "child")
+          ((and (funcall parent-of target) (equal (funcall parent-of target) (funcall parent-of sender))) "sibling")
+          (t "external"))))
+
+(defun romacs-agent-tools--message-to (sender target text mode &optional in-reply-to)
+  "Send TEXT from SENDER (a session, or nil) to TARGET as a message by MODE
+\(`romacs-agent-tools--send-modes'), answering IN-REPLY-TO when given.
+A sibling's parent gets a copy with its next wake.  Answer TARGET's task
+record and the message's id."
+  (when (string-empty-p (string-trim (or text ""))) (user-error "message is empty"))
+  (unless (member mode romacs-agent-tools--send-modes)
+    (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
+  (let* ((caller (and sender (romacs-agent-id sender)))
+         (kind (romacs-agent-tools--kind sender target))
+         (message (romacs-agent-tools--message kind sender in-reply-to))
+         (key (cons (romacs-agent-id target) caller))
+         (generation (if (equal mode "replace")
+                         (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
+                                  romacs-agent-tools--generations)
+                       (gethash key romacs-agent-tools--generations 0)))
+         (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0)))))
+    (romacs-agent-tools--tell target text (intern mode) valid message)
+    (when (equal kind "sibling")
+      (let ((parent (plist-get (romacs-agent-options target) :parent)))
+        (puthash parent (append (gethash parent romacs-agent-tools--copies)
+                                (list (cons sender (format "To task %s (%s), %s:\n%s" (romacs-agent-id target)
+                                                           (romacs-agent-title target) mode text))))
+                 romacs-agent-tools--copies)))
+    (let ((record (romacs-agent-tools--task target)))
+      (puthash "messageId" (gethash "id" message) record)
+      record)))
+
 (defun romacs-agent-tools--send (arguments)
   "Send ARGUMENTS' message to task taskId: the caller's own task, or
 another task of the caller's parent, its parent then copied."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (task (romacs-agent-tools--known arguments))
-         (sibling (romacs-agent-tools--sibling-p task caller))
-         (child (if sibling task (romacs-agent-tools--own task caller "send it messages (or another of its parent's tasks)")))
-         (message (or (gethash "message" arguments) ""))
-         (mode (or (gethash "mode" arguments) "queue")))
-    (when (string-empty-p (string-trim message))
-      (user-error "message is empty"))
-    (unless (member mode romacs-agent-tools--send-modes)
-      (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
-    (let* ((key (cons (romacs-agent-id child) caller))
-           (generation (if (equal mode "replace")
-                           (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
-                                    romacs-agent-tools--generations)
-                         (gethash key romacs-agent-tools--generations 0)))
-           (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0))))
-           (text (if sibling
-                     (format "Message from task %s (%s), another task of your parent:\n%s"
-                             caller (romacs-agent-title (romacs-agent-get caller)) message)
-                   message)))
-      (romacs-agent-tools--tell child text (intern mode) valid)
-      (when sibling
-        (let ((parent (plist-get (romacs-agent-options child) :parent)))
-          (puthash parent (append (gethash parent romacs-agent-tools--copies)
-                                  (list (cons (romacs-agent-get caller)
-                                              (format "To task %s (%s), %s:\n%s" (romacs-agent-id child)
-                                                      (romacs-agent-title child) mode message))))
-                   romacs-agent-tools--copies))))
-    (romacs-agent-tools--task child)))
+         (sibling (romacs-agent-tools--sibling-p task caller)))
+    (unless sibling (romacs-agent-tools--own task caller "send it messages (or another of its parent's tasks)"))
+    (romacs-agent-tools--message-to (and caller (romacs-agent-get caller)) task (gethash "message" arguments)
+                                    (or (gethash "mode" arguments) "queue") (gethash "inReplyTo" arguments))))
+
+(defun romacs-agent-tools--reply (arguments)
+  "Answer the message messageId the caller received, routed to its sender."
+  (romacs-mcp--instance arguments)
+  (let* ((caller (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
+                     (user-error "romacs_task_reply answers a message an agent session received: you are none")))
+         (id (or (gethash "messageId" arguments) (user-error "messageId is required")))
+         (message (or (romacs-agent-received-message caller id)
+                      (user-error "No message %s among the ones this session received" id)))
+         (sender-id (romacs-agent--value (gethash "session" (gethash "from" message))))
+         (sender (cond ((null sender-id)
+                        (user-error "Message %s came from outside Romacs: answer it in your reply" id))
+                       ((romacs-agent-get sender-id))
+                       (t (user-error "Message %s's sender, session %s, is gone" id sender-id)))))
+    (romacs-agent-tools--message-to caller sender (gethash "text" arguments)
+                                    (or (gethash "mode" arguments) "queue") id)))
 
 (defun romacs-agent-tools--same-directory-p (a b)
   (equal (file-name-as-directory (file-truename a)) (file-name-as-directory (file-truename b))))
@@ -1429,8 +1475,9 @@ last result."
 
 (romacs-mcp-register-tool
  "romacs_task_send"
- "Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
-parent gets a copy with its next wake, never woken for it); any other session is refused. mode queue (default): at \
+ "Send a message to a task you delegated, or to another task of your own parent (your parent gets a copy with its \
+next wake, never woken for it); any other session is refused. It reads it as a <romacs-message> naming you, and \
+answers with romacs_task_reply or its turn's reply; inReplyTo links this one to a message it answers. mode queue (default): at \
 once when the task is idle, after its running turn when it is busy, resuming its harness when it had ended; steer: \
 into its running turn; replace: in place of your messages still waiting for it; interrupt: its turn cut short, \
 then this first. A task's next turn end wakes its parent with its reply by its wake rule: end your turn then, do \
@@ -1440,9 +1487,26 @@ not poll. Answers its task record."
   "properties" (romacs-mcp--object
                 "instance" (romacs-mcp--object "type" "string") "taskId" (romacs-mcp--object "type" "string")
                 "message" (romacs-mcp--object "type" "string")
-                "mode" (romacs-mcp--object "type" "string" "enum" (vconcat romacs-agent-tools--send-modes)))
+                "mode" (romacs-mcp--object "type" "string" "enum" (vconcat romacs-agent-tools--send-modes))
+                "inReplyTo" (romacs-mcp--object "type" "string"
+                                                "description" "The id of a message this one answers."))
   "required" ["taskId" "message"] "additionalProperties" :false)
  #'romacs-agent-tools--send)
+
+(romacs-mcp-register-tool
+ "romacs_task_reply"
+ "Answer a message another session sent you (a <romacs-message>, by its id): routed back to its sender, whatever \
+it is to you (parent, child, sibling), linked to the message it answers. A message from your parent is answered \
+by your turn's reply too: use this to answer before your turn ends, or anyone else. mode as romacs_task_send's. \
+Answers the sender's task record and the reply's messageId."
+ (romacs-mcp--object
+  "type" "object"
+  "properties" (romacs-mcp--object
+                "instance" (romacs-mcp--object "type" "string")
+                "messageId" (romacs-mcp--object "type" "string") "text" (romacs-mcp--object "type" "string")
+                "mode" (romacs-mcp--object "type" "string" "enum" (vconcat romacs-agent-tools--send-modes)))
+  "required" ["messageId" "text"] "additionalProperties" :false)
+ #'romacs-agent-tools--reply)
 
 (romacs-mcp-register-tool
  "romacs_task_list"

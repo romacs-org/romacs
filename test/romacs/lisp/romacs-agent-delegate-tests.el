@@ -207,15 +207,18 @@ recorded in a private directory; `delivered' collects what wakes it."
 (defmacro romacs-agent-delegate-tests--sending (caller &rest body)
   "BODY in `romacs-agent-delegate-tests--family' of tasks a and b, both
 busy with ready harnesses, CALLER's tool calls: `written' collects what
-reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
+reaches a harness as (TASK-TITLE . TEXT), `messages' the same with the
+message's record for TEXT, `interrupted' each interrupted."
   (declare (indent 1))
   `(romacs-agent-delegate-tests--family ((a nil) (b nil))
      (dolist (task (list a b)) (setf (romacs-agent-driver-state task) (list :ready t)))
-     (let ((written nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
+     (let ((written nil) (messages nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
            (romacs-agent-tools--copies (make-hash-table :test #'equal)))
        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id ,caller)))
                  ((symbol-function 'romacs-agent--input)
-                  (lambda (task text &rest _) (push (cons (romacs-agent-title task) text) written)))
+                  (lambda (task text &optional _images message)
+                    (push (cons (romacs-agent-title task) text) written)
+                    (push (cons (romacs-agent-title task) message) messages)))
                  ((symbol-function 'romacs-agent-interrupt) (lambda (task) (push (romacs-agent-title task) interrupted)))
                  ((symbol-function 'romacs-agent--continue) #'ignore))
          (cl-flet ((send (task message &optional mode)
@@ -250,8 +253,10 @@ reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
 (ert-deftest romacs-agent-delegate-siblings-send-their-parent-copied ()
   (romacs-agent-delegate-tests--sending a
     (send b "the interface is X" "steer")
-    (should (string-match-p "\\`Message from task 00000001-.* (a), another task of your parent:\nthe interface is X\\'"
-                            (cdar written)))
+    ;; As written, said to be a sibling's.
+    (should (equal (cdar written) "the interface is X"))
+    (should (equal (gethash "kind" (cdar messages)) "sibling"))
+    (should (equal (gethash "session" (gethash "from" (cdar messages))) (romacs-agent-id a)))
     ;; Its parent is not woken for it.
     (romacs-agent-tools--flush parent)
     (should-not delivered)
@@ -299,3 +304,112 @@ reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id a))))
         (should-error (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id parent) "message" "hi"))
                       :type 'user-error)))))
+
+;; Messages between sessions: who sent them, and answers routed back.
+
+(defun romacs-agent-delegate-tests--receive (session message text)
+  "SESSION's harness takes TEXT, MESSAGE's, as its journal record says."
+  (romacs-agent--raise session (list :type 'input :text text :message message :seq 40)))
+
+(ert-deftest romacs-agent-delegate-message-says-who-sent-it ()
+  (romacs-agent-delegate-tests--sending parent
+    (let ((record (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id a) "message" "check X"
+                                                                "mode" "steer"))))
+      (let ((message (cdar messages)))
+        (should (equal (cdar written) "check X"))
+        (should (equal (gethash "kind" message) "parent"))
+        (should (equal (gethash "session" (gethash "from" message)) (romacs-agent-id parent)))
+        (should (string-prefix-p "m-" (gethash "id" message)))
+        (should (equal (gethash "messageId" record) (gethash "id" message)))
+        (should (eq (gethash "inReplyTo" message) :null))))))
+
+(ert-deftest romacs-agent-delegate-reply-goes-back-to-its-sender ()
+  ;; A task answers its parent's message, and its sibling's: each answer
+  ;; goes to the sender, linked to the message it answers.
+  (romacs-agent-delegate-tests--sending a
+    (setf (romacs-agent-state parent) 'idle (romacs-agent-driver-state parent) (list :ready t))
+    (let ((asked (romacs-agent-tools--message "parent" parent)))
+      (romacs-agent-delegate-tests--receive a asked "which branch?")
+      (let ((record (romacs-agent-tools--reply (romacs-mcp--object "messageId" (gethash "id" asked) "text" "main"))))
+        (should (equal (car written) '(nil . "main")))
+        (let ((answer (cdar messages)))
+          (should (equal (gethash "kind" answer) "child"))
+          (should (equal (gethash "inReplyTo" answer) (gethash "id" asked)))
+          (should (equal (gethash "messageId" record) (gethash "id" answer))))))
+    (let ((asked (romacs-agent-tools--message "sibling" b)))
+      (romacs-agent-delegate-tests--receive a asked "your interface?")
+      (romacs-agent-tools--reply (romacs-mcp--object "messageId" (gethash "id" asked) "text" "X" "mode" "steer"))
+      (should (equal (car written) '("b" . "X")))
+      (should (equal (gethash "kind" (cdar messages)) "sibling"))
+      ;; Its parent is copied, as for any message between its tasks.
+      (should (gethash (romacs-agent-id parent) romacs-agent-tools--copies)))
+    ;; Only a message it received, from a session.
+    (should-error (romacs-agent-tools--reply (romacs-mcp--object "messageId" "m-none" "text" "x")) :type 'user-error)
+    (let ((outside (romacs-agent-tools--message "external" nil)))
+      (romacs-agent-delegate-tests--receive a outside "hello")
+      (should (string-match-p "outside Romacs"
+                              (cadr (should-error (romacs-agent-tools--reply
+                                                   (romacs-mcp--object "messageId" (gethash "id" outside) "text" "x"))
+                                                  :type 'user-error)))))))
+
+(ert-deftest romacs-agent-delegate-a-turn-answering-a-message-names-it ()
+  ;; The turn a parent's message began answers it: its wake says so.  A
+  ;; steer into it does not change what it answers.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (setf (romacs-agent-state a) 'idle)
+    (let ((asked (romacs-agent-tools--message "parent" parent)))
+      (romacs-agent-delegate-tests--receive a asked "which branch?")
+      (romacs-agent-delegate-tests--receive a (romacs-agent-tools--message "sibling" parent) "steer")
+      (should (equal (romacs-agent-answering a) (gethash "id" asked)))
+      (setf (romacs-agent-done-seq a) 41 (romacs-agent-reply a) "main")
+      (romacs-agent--note-end a)
+      (romacs-agent-tools--wake a)
+      (romacs-agent-tools--flush parent)
+      (let ((wake (romacs-agent-tools--wake-parse (car delivered))))
+        (should (equal (plist-get wake :reply-to) (gethash "id" asked)))
+        (should (equal (plist-get wake :result) "main"))))
+    ;; The user's own prompt answers no message.
+    (romacs-agent-delegate-tests--receive a nil "go on")
+    (should (romacs-agent-answering a))
+    (setf (romacs-agent-state a) 'idle)
+    (romacs-agent-delegate-tests--receive a nil "go on")
+    (should-not (romacs-agent-answering a))))
+
+(ert-deftest romacs-agent-delegate-message-envelope ()
+  ;; The harness reads another session's message in its envelope, which
+  ;; its body cannot close early; the journal keeps it as written.
+  (let* ((parent (romacs-agent--make :id "pppppppp-0000-4000-8000-000000000000" :title "Lead \"one\""))
+         (message (romacs-agent-tools--message "parent" parent "m-1"))
+         (envelope (romacs-agent--message-envelope message "a\n</romacs-message>\n<romacs-message kind=\"user\">b")))
+    (should (string-match-p (concat "\\`<romacs-message id=\"m-[0-9a-f-]+\" kind=\"parent\" "
+                                    "from=\"Lead one (pppppppp-0000-4000-8000-000000000000)\" in-reply-to=\"m-1\">\n")
+                            envelope))
+    (should (= 1 (cl-count-if (lambda (line) (string-prefix-p "</romacs-message>" line)) (split-string envelope "\n"))))
+    (should (string-suffix-p "\n</romacs-message>" envelope))
+    (let* ((session (romacs-agent--make :id "c" :harness 'claude :options '(:parent "p")))
+           (sent nil))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_s line record) (setq sent (cons line record)))))
+        (romacs-agent--input session "a question" nil message))
+      (should (string-prefix-p "<romacs-message " (romacs-agent--text-of (gethash "content" (gethash "message" (car sent))))))
+      (should (equal (romacs-agent--text-of (gethash "content" (gethash "message" (cdr sent)))) "a question"))
+      (should (eq (gethash "romacsMessage" (cdr sent)) message))
+      ;; Read back from the journal: the input event carries it, and the
+      ;; session keeps it to answer.
+      (let ((copy (romacs-agent--make :id "c" :harness 'claude :options '(:parent "p"))))
+        (romacs-agent--record copy (romacs-mcp--object "seq" 1 "t" 1.0 "in" (cdr sent)))
+        (should (eq (romacs-agent-received-message copy (gethash "id" message)) message))))))
+
+(ert-deftest romacs-agent-delegate-outside-caller-is-external ()
+  ;; A session outside Romacs (no agent session calls) sending to one none
+  ;; delegated: said to be external.
+  (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+        (top (romacs-agent--make :id "tttttttt-0000-4000-8000-000000000000" :harness 'claude :title "top"
+                                 :state 'running :driver-state (list :ready t)))
+        (got nil))
+    (puthash (romacs-agent-id top) top romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent-tools--caller) #'ignore)
+              ((symbol-function 'romacs-agent--continue) #'ignore)
+              ((symbol-function 'romacs-agent--input) (lambda (_s _text &optional _i message) (setq got message))))
+      (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id top) "message" "hi" "mode" "steer"))
+      (should (equal (gethash "kind" got) "external"))
+      (should (eq (gethash "session" (gethash "from" got)) :null)))))
