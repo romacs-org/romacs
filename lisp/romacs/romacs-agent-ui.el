@@ -93,6 +93,8 @@
   "A project heading on the home page.")
 (defface romacs-agent-delegate '((t :inherit font-lock-function-name-face :weight bold))
   "Face of a delegated task's title.")
+(defface romacs-agent-message '((t :inherit font-lock-function-name-face :weight bold))
+  "The other session on a message's card: its sender, or the one it goes to.")
 (defface romacs-agent-link '((t :inherit link))
   "Face of a link to a delegated task's thread.")
 (defface romacs-agent-unread '((t :weight bold))
@@ -314,14 +316,19 @@ tool and `romacs_delegate_task'."
        (list (or (gethash "description" input) "task") (gethash "subagent_type" input))))))
 
 (defun romacs-agent-ui--tool-text (name input)
-  "A tool row's text after its mark: a delegation's card head, or NAME and
-a brief of INPUT."
-  (let ((delegation (romacs-agent-ui--delegation name input)))
-    (if delegation
-        (concat " ⇢ " (propertize (car delegation) 'face 'romacs-agent-delegate 'romacs-agent-card t)
-                (if (cadr delegation) (propertize (concat "  " (cadr delegation)) 'face 'romacs-agent-dim) ""))
-      (let ((brief (romacs-agent-ui--brief input)))
-        (concat " " name (if (string-empty-p brief) "" (concat "  " brief)))))))
+  "A tool row's text after its mark: a delegation's card head, a message's
+\(`romacs-agent-ui--message-call'), or NAME and a brief of INPUT."
+  (let ((delegation (romacs-agent-ui--delegation name input))
+        (message (romacs-agent-ui--message-call name input)))
+    (cond (delegation
+           (concat " ⇢ " (propertize (car delegation) 'face 'romacs-agent-delegate 'romacs-agent-card t)
+                   (if (cadr delegation) (propertize (concat "  " (cadr delegation)) 'face 'romacs-agent-dim) "")))
+          (message
+           (concat " ✉ → " (propertize (car message) 'face 'romacs-agent-message 'romacs-agent-card t)
+                   (propertize (concat "  " (car (split-string (string-trim (cadr message)) "\n")))
+                               'face 'romacs-agent-dim)))
+          (t (let ((brief (romacs-agent-ui--brief input)))
+               (concat " " name (if (string-empty-p brief) "" (concat "  " brief))))))))
 
 (defun romacs-agent-ui--task-key (id word)
   "Task ID's state key: its status WORD (a record's, a wake's), unless its
@@ -432,7 +439,8 @@ output folded below.  A delegation's row is a card
 shows while its run is folded."
   (let* ((id (plist-get event :id))
          (name (romacs-agent-ui--tool-name (plist-get event :name)))
-         (card (romacs-agent-ui--delegation name (plist-get event :input)))
+         (sent (romacs-agent-ui--message-call name (plist-get event :input)))
+         (card (or (romacs-agent-ui--delegation name (plist-get event :input)) sent))
          (indent (make-string (* 2 (1+ (romacs-agent-ui--depth session (plist-get event :parent)))) ?\s))
          ;; A card leaves room for the state and the link its call's end adds.
          (text (romacs-agent-ui--fit (romacs-agent-ui--tool-text name (plist-get event :input))
@@ -441,7 +449,9 @@ shows while its run is folded."
     (romacs-agent-ui--run-started id (substring text 1) (or card (plist-get event :parent)))
     (romacs-agent-ui--step-insert (concat indent (propertize "●" 'face 'romacs-agent-running)) card)
     (puthash id (copy-marker (1- romacs-agent-ui--end)) romacs-agent-ui--tool-lines)
-    (romacs-agent-ui--step-insert (propertize (concat text "\n") 'romacs-agent-tool id) card)))
+    (romacs-agent-ui--step-insert (propertize (concat text "\n") 'romacs-agent-tool id
+                                              'romacs-agent-sent (cadr sent) 'romacs-agent-answers (nth 2 sent))
+                                  card)))
 
 (defun romacs-agent-ui--tool-end (event failed)
   "EVENT ends its call, FAILED or not: the row's mark settles and the row
@@ -453,9 +463,17 @@ recedes, a failure is loud, and the output is folded under the row."
                            (goto-char mark)
                            (text-property-any (point) (line-end-position) 'romacs-agent-card t))))
          (record (and card (romacs-agent-ui--task-record output)))
+         ;; The row's own text, after its mark.
+         (row (and mark (1+ mark)))
+         (sent (and row (get-text-property row 'romacs-agent-sent)))
          ;; A task's record is the card; a `wait' brings its result
-         ;; here, and no wake follows it.
-         (body (if record (let ((result (gethash "result" record))) (if (stringp result) result "")) output)))
+         ;; here, and no wake follows it.  A message's card folds its text,
+         ;; and why it failed when it did.
+         (body (cond (sent (if failed (concat sent "\n\n" output) sent))
+                     (record (let ((result (gethash "result" record))) (if (stringp result) result "")))
+                     (t output))))
+    (when-let* ((answered (and row (not failed) (get-text-property row 'romacs-agent-answers))))
+      (romacs-agent-ui--replied answered))
     (when mark (romacs-agent-ui--run-ended id mark failed (plist-get event :time)))
     (save-excursion
       (let ((inhibit-read-only t))
@@ -724,6 +742,86 @@ quiet call: its thinking is then for `romacs-agent-chat-expand-all'."
               ((romacs-agent-ui--run-folded-p (car bounds))))
     (romacs-agent-ui--run-fold (car bounds) nil)))
 
+;;; Messages between sessions
+;;
+;; What other sessions send this one comes as its `input' event's
+;; :messages, each a message (`romacs-agent-make-message'): a task's
+;; result (one with a :wake) is its arrival's row; any other is a card,
+;; never a prompt: ✉ and its sender, what the sender is to this session,
+;; a link to the sender's thread, the reply hint, then the message.  A message this session
+;; sends (romacs_task_send, romacs_task_reply) is a loud card in its run:
+;; ✉ →, whom it goes to, its first line, the whole of it folded.  The
+;; reply hint is ↩, dim until this session answers the message with
+;; romacs_task_reply, then ↩ ✓.
+
+(defvar-local romacs-agent-ui--received nil
+  "Each message this chat shows by its id: (SENDER . HINT), the sender's
+name and a marker at its reply hint, nil where nothing can answer it.")
+
+(defun romacs-agent-ui--received ()
+  "This chat's `romacs-agent-ui--received', made when first wanted."
+  (or romacs-agent-ui--received (setq romacs-agent-ui--received (make-hash-table :test #'equal))))
+
+(defun romacs-agent-ui--message-call (name input)
+  "What a card shows for tool NAME's INPUT when the call sends a message,
+\(TO TEXT ANSWERS): whom it goes to, the message, and the id of the one
+it answers; nil for any other call."
+  (when (hash-table-p input)
+    (let ((field (lambda (key) (let ((value (gethash key input))) (and (stringp value) value)))))
+      (pcase name
+        ("romacs_task_send"
+         (let ((task (funcall field "taskId")))
+           (list (or (and-let* ((task) (to (romacs-agent-get task))) (romacs-agent-title to)) "a task")
+                 (or (funcall field "message") "") (funcall field "inReplyTo"))))
+        ("romacs_task_reply"
+         (let ((id (funcall field "messageId")))
+           (list (or (car (gethash id (romacs-agent-ui--received))) "its sender")
+                 (or (funcall field "text") "") id)))))))
+
+(defun romacs-agent-ui--reply-hint (answered)
+  "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED."
+  (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
+              'romacs-agent-reply t 'help-echo (if answered "Answered" "Not answered yet")))
+
+(defun romacs-agent-ui--message-card (session event message)
+  "MESSAGE, one of SESSION's EVENT's :messages, as its card: its sender
+\(the sender's session's title now, else the name it sent), its kind,
+the sender's thread and the reply hint where it can be answered, then
+its text."
+  (let* ((from (plist-get message :from))
+         (sender (plist-get from :session))
+         (known (and sender (romacs-agent-get sender)))
+         (name (or (and known (romacs-agent-title known)) (plist-get from :name) "another session"))
+         (answerable (or sender (plist-get from :address)))
+         (id (plist-get message :id)))
+    (romacs-agent-ui--line
+     session event
+     (concat (propertize (concat "✉ " name) 'face 'romacs-agent-message)
+             (propertize (format " · %s" (plist-get message :kind)) 'face 'romacs-agent-dim)
+             (if known (concat "  " (romacs-agent-ui--thread-link sender)) "")
+             (if answerable (concat "  " (romacs-agent-ui--reply-hint nil)) "")))
+    (let ((hint (and answerable (text-property-any (save-excursion (goto-char romacs-agent-ui--end)
+                                                                   (line-beginning-position 0))
+                                                   romacs-agent-ui--end 'romacs-agent-reply t))))
+      (puthash id (cons name (and hint (copy-marker hint))) (romacs-agent-ui--received)))
+    (romacs-agent-ui--insert (concat (string-trim-right (or (plist-get message :text) "")) "\n"))))
+
+(defun romacs-agent-ui--message-wake (message)
+  "MESSAGE, a task's result, as `romacs-agent-ui--arrival' takes a wake."
+  (let ((from (plist-get message :from)) (wake (plist-get message :wake)))
+    (list :id (plist-get from :session) :title (or (plist-get from :name) "task")
+          :state (plist-get wake :state) :result (or (plist-get message :text) ""))))
+
+(defun romacs-agent-ui--replied (id)
+  "Show message ID answered, where this chat shows its card."
+  (when-let* ((hint (cdr (gethash id (romacs-agent-ui--received)))))
+    (save-excursion
+      (let* ((inhibit-read-only t) (start (marker-position hint))
+             (answered (romacs-agent-ui--reply-hint t)))
+        (delete-region start (next-single-property-change start 'romacs-agent-reply nil (point-max)))
+        (romacs-agent-ui--insert-at start answered)
+        (set-marker hint start)))))
+
 (defun romacs-agent-ui--table-width ()
   "Columns a table may take, as hermes-chat--table-window-width counts them:
 the window's pixels in the fixed-pitch font's width, less two for the line's
@@ -854,8 +952,17 @@ or a repeat."
   "Draw SESSION's EVENT in its chat BUFFER, the current buffer."
       (pcase (plist-get event :type)
         ('input
-         (let ((wakes (romacs-agent-ui--wakes session (plist-get event :text))))
-           (if wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake))
+         (let ((messages (plist-get event :messages))
+               ;; A journal of before messages had records: its wakes' text.
+               (wakes (romacs-agent-ui--wakes session (plist-get event :text))))
+           (cond
+            (messages
+             (dolist (message messages)
+               (if (plist-get message :wake)
+                   (romacs-agent-ui--arrival session event (romacs-agent-ui--message-wake message))
+                 (romacs-agent-ui--message-card session event message))))
+            (wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake)))
+            (t
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              ;; A prompt carries its request id: what names its turn.
@@ -866,7 +973,7 @@ or a repeat."
                                         'romacs-agent-images images)
                (romacs-agent-ui--insert "\n")
                (dolist (file images)
-                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file))))))
+                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
