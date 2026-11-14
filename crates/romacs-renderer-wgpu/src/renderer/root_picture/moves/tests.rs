@@ -3,7 +3,7 @@ use romacs_display_protocol::types::{Color, DisplayWindowId, Rect};
 
 use super::super::damage::{self, Indexed, Plan};
 use super::super::reach::Reach;
-use super::{Move, snapped, whole};
+use super::{Move, moved_glyph, snapped, whole};
 
 const ROW: f32 = 10.0;
 
@@ -86,4 +86,27 @@ fn a_distance_is_whole_device_pixels_and_a_band_snaps_out_at_its_sides_and_in_at
     let device = [band.x, band.y, band.x + band.width, band.y + band.height].map(|v| (v * 1.5).round());
     assert_eq!(device, [0.0, 2.0, 16.0, 31.0]);
     assert_eq!(snapped(Rect::new(0.0, 0.0, 10.0, 0.5), 1.0), None);
+}
+
+#[test]
+fn a_glyph_moved_is_the_same_but_for_its_y_and_its_slot() {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    use romacs_display_protocol::types::FaceId;
+    let frame = window(&LINES, 0, 1);
+    for old in frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Char { .. } | FrameGlyph::Background { .. })) {
+        let mut new = old.clone();
+        match &mut new {
+            FrameGlyph::Char { y, baseline, slot_id, .. } => {
+                (*y, *baseline, slot_id.row) = (*y + ROW, *baseline + ROW, slot_id.row + 1);
+            }
+            FrameGlyph::Background { bounds, .. } => bounds.y += ROW,
+            _ => unreachable!(),
+        }
+        assert!(moved_glyph(old, &new, ROW), "{old:?}");
+        assert!(!moved_glyph(old, &new, 2.0 * ROW), "another distance: {old:?}");
+        if let FrameGlyph::Char { face_id, .. } = &mut new {
+            *face_id = FaceId::new(9);
+            assert!(!moved_glyph(old, &new, ROW), "another face");
+        }
+    }
 }

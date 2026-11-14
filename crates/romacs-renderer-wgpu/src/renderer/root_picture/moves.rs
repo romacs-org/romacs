@@ -152,10 +152,16 @@ fn whole(dy: f32, scale: f32) -> bool {
     (device - device.round()).abs() < 1e-3
 }
 
-/// A hash of the glyphs at AT of FRAME's RUNS that leaves their y out.
+/// A hash of the glyphs at AT of FRAME's RUNS that leaves their y out: of
+/// how many there are and of the first and the last.
 fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
     let mut hasher = FxHasher::default();
-    for glyph in at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter()) {
+    let mut glyphs = at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
+    let count: usize = at.iter().map(|&i| runs[i].glyphs.len()).sum();
+    count.hash(&mut hasher);
+    // Its count and its ends: what tells most rows apart, and costs the
+    // same however long the row; `moved` checks every glyph.
+    for glyph in [glyphs.next(), glyphs.last()].into_iter().flatten() {
         std::mem::discriminant(glyph).hash(&mut hasher);
         if let FrameGlyph::Char { char, face_id, .. } = glyph {
             char.hash(&mut hasher);
@@ -203,17 +209,11 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
 
 /// Whether NEW is OLD moved DY down, its slot aside.
 fn moved_glyph(old: &FrameGlyph, new: &FrameGlyph, dy: f32) -> bool {
+    if let Some(moved) = moved_text(old, new, dy) {
+        return moved;
+    }
     let mut moved = old.clone();
     match &mut moved {
-        FrameGlyph::Char { y, baseline, slot_id, .. } => {
-            *y += dy;
-            *baseline += dy;
-            *slot_id = new.slot_id().unwrap_or(*slot_id);
-        }
-        FrameGlyph::Stretch { y, slot_id, .. } => {
-            *y += dy;
-            *slot_id = new.slot_id().unwrap_or(*slot_id);
-        }
         FrameGlyph::Image { y, slot_rect, box_rect, slot_id, .. } => {
             *y += dy;
             slot_rect.y += dy;
@@ -222,11 +222,114 @@ fn moved_glyph(old: &FrameGlyph, new: &FrameGlyph, dy: f32) -> bool {
         }
         FrameGlyph::FringeBitmap { y, .. } | FrameGlyph::Border { y, .. } => *y += dy,
         FrameGlyph::Background { bounds, .. } => bounds.y += dy,
-        // Drawn from outside the frame's glyphs (a video, a surface, a
-        // widget), or not by row (a scroll bar).
+        // Text of two kinds; or drawn from outside the frame's glyphs (a
+        // video, a surface, a widget), or not by row (a scroll bar).
         _ => return false,
     }
     moved == *new
+}
+
+/// For OLD and NEW both a character or both a stretch, the most of a row:
+/// whether NEW is OLD moved DY down, its slot aside, compared field by field
+/// (every field named, so one added to the glyph is compared here too).
+fn moved_text(old: &FrameGlyph, new: &FrameGlyph, dy: f32) -> Option<bool> {
+    let same = |a: f32, b: f32| a.to_bits() == b.to_bits();
+    match (old, new) {
+        (
+            FrameGlyph::Char {
+                window_id,
+                row_role,
+                clip_rect,
+                slot_id: _,
+                bidi_level,
+                char,
+                composed,
+                x,
+                y,
+                baseline,
+                width,
+                height,
+                ascent,
+                face_id,
+                box_vertical_edges,
+            },
+            FrameGlyph::Char {
+                window_id: window_id2,
+                row_role: row_role2,
+                clip_rect: clip_rect2,
+                slot_id: _,
+                bidi_level: bidi_level2,
+                char: char2,
+                composed: composed2,
+                x: x2,
+                y: y2,
+                baseline: baseline2,
+                width: width2,
+                height: height2,
+                ascent: ascent2,
+                face_id: face_id2,
+                box_vertical_edges: box_vertical_edges2,
+            },
+        ) => Some(
+            char == char2
+                && same(*x, *x2)
+                && same(*y + dy, *y2)
+                && same(*baseline + dy, *baseline2)
+                && same(*width, *width2)
+                && same(*height, *height2)
+                && same(*ascent, *ascent2)
+                && face_id == face_id2
+                && window_id == window_id2
+                && row_role == row_role2
+                && clip_rect == clip_rect2
+                && bidi_level == bidi_level2
+                && composed == composed2
+                && box_vertical_edges == box_vertical_edges2,
+        ),
+        (
+            FrameGlyph::Stretch {
+                window_id,
+                row_role,
+                clip_rect,
+                slot_id: _,
+                bidi_level,
+                x,
+                y,
+                width,
+                height,
+                bg,
+                face_id,
+                box_vertical_edges,
+            },
+            FrameGlyph::Stretch {
+                window_id: window_id2,
+                row_role: row_role2,
+                clip_rect: clip_rect2,
+                slot_id: _,
+                bidi_level: bidi_level2,
+                x: x2,
+                y: y2,
+                width: width2,
+                height: height2,
+                bg: bg2,
+                face_id: face_id2,
+                box_vertical_edges: box_vertical_edges2,
+            },
+        ) => Some(
+            same(*x, *x2)
+                && same(*y + dy, *y2)
+                && same(*width, *width2)
+                && same(*height, *height2)
+                && bg == bg2
+                && face_id == face_id2
+                && window_id == window_id2
+                && row_role == row_role2
+                && clip_rect == clip_rect2
+                && bidi_level == bidi_level2
+                && box_vertical_edges == box_vertical_edges2,
+        ),
+        _ => None,
+    }
 }
 
 /// The clip GLYPH is drawn under, if any.
