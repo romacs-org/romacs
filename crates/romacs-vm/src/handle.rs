@@ -318,6 +318,7 @@ static NEXT_VM: AtomicU64 = AtomicU64::new(1);
 /// Only `collect` reads it; a dropped handle's weak entry is pruned there.
 pub(crate) struct RootSet {
     id: u64,
+    // CELL(Rooted): Root registrations, kept as Value bits.
     slots: RefCell<Vec<Weak<AtomicU64>>>,
 }
 romacs_snapshot::snapshot_struct!(RootSet { id, slots });
@@ -660,6 +661,7 @@ mod tests {
     }
 
     /// A host that counts its looks for a key press and never has one.
+    // CELL(Plain)
     struct Looks(std::rc::Rc<std::cell::Cell<usize>>);
     impl crate::HostInput for Looks {
         fn input_pending(&mut self) -> bool { false }

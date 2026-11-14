@@ -678,6 +678,7 @@ impl PrintGraph {
 }
 /// What a print does with an unreadable object (print.c
 /// print_vectorlike_unreadable) for `print-unreadable-function'.
+// CELL(Held): The printer's state for one print, which can call Lisp.
 enum Unreadable {
     /// The variable is nil: print it as usual.
     Ignored,
@@ -689,6 +690,7 @@ enum Unreadable {
     Refused,
 }
 struct PrintOptions {
+    // CELL(Held)
     graph: std::cell::RefCell<PrintGraph>,
     unreadable: Unreadable,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,

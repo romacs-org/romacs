@@ -48,6 +48,11 @@ possible; say so where you do.
   reason above. The smells ratchet (below) holds the workspace's undeclared and
   undocumented sites to the merge-base's; `tools/lib/unsafe_census.py` says
   what counts.
+- In `crates/romacs-vm/src`, a field, enum or alias that puts a cell or lock
+  (`Cell`, `RefCell`, `Mutex`, `OnceLock`, ...) around what it holds carries
+  `// CELL(Class)` in the comment lines directly above it: what the collector
+  must know of it, `Plain` when it holds no Lisp value. The classes are `Behind`'s
+  in `tests/no_remote_references.rs`, which checks each.
 - A host query or effect (files, environment, clocks, processes) outside
   `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
   comment lines directly above it; the `host_boundary_lint` test checks each.
