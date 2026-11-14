@@ -100,6 +100,7 @@ impl Language {
 /// changing them in place, and a node of the tree points into those
 /// subtrees: the pinned copy keeps them for as long as any tree sharing
 /// them, and so any node of one, lives.
+// CELL(Plain)
 pub(crate) struct Tree(RefCell<tree_sitter::Tree>, OnceCell<Rc<tree_sitter::Tree>>);
 
 /// A tree no thread holds yet, on its way from the one that parsed it.
