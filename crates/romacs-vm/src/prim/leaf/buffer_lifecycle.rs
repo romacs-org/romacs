@@ -18,15 +18,18 @@ impl Leaf<'_> {
         self.vm.ensure_windows().map_err(Fault::Error)?;
         // minibuf.c: one of `Vminibuffer_list' (lisp/romacs/vm/minibuf.el),
         // or with LIVE an active one, of depth 1 to the current level.
+        // Before the first read made the list, *Minibuf-0* is the buffer
+        // the mini-window shows.
         let variable = |vm: &Vm, name: &str| vm.names.get(name).map_or(Value::NIL, |&slot| vm.slots[slot].value);
         let level = variable(self.vm, "romacs--minibuf-level").integer_value().unwrap_or(0);
         let mut depth = None;
-        let (mut tail, mut at) = (variable(self.vm, "romacs--minibuffer-list"), 0);
+        let list = variable(self.vm, "romacs--minibuffer-list");
+        let (mut tail, mut at) = (list, 0);
         while let Some((made, rest)) = self.pair(tail) {
             if made == buffer { depth = Some(at); break; }
             (tail, at) = (rest, at + 1);
         }
-        let made = depth.is_some() || self.vm.minibuffer_window_buffer() == Some(buffer);
+        let made = depth.is_some() || (list == Value::NIL && self.vm.minibuffer_window_buffer() == Some(buffer));
         let active = depth.is_some_and(|d| d >= 1 && d <= level);
         Ok(if (live == Value::NIL && made) || (live != Value::NIL && active) { Value::TRUE } else { Value::NIL })
     }
