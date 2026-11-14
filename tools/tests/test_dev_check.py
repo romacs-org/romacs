@@ -1,6 +1,7 @@
 """tools/dev-check: how a conflict is classed, what the structural run is, and the report."""
 import importlib.machinery
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -131,27 +132,131 @@ class Lint(unittest.TestCase):
         self.assertIn('no host at /x/romacs-vm-gui; fix: pass --binary HOST', findings[0])
 
 
-class Structural(unittest.TestCase):
-    def test_each_package_runs_once_with_its_targets_and_rules(self):
-        gate = check.load_gate()
-        runs = {package: (flags, rule) for package, flags, rule in check.plan(gate, {'crates/romacs-vm/src/gc.rs'}, ROOT)}
-        self.assertEqual(set(runs), {binary.split('::')[0] for binary in gate.STRUCTURAL})
+def answer(packages=(), files=(), everything=False, harnesses=()):
+    """An answer of impact.select's shape, as the tests stage reads it."""
+    return {'everything': everything, 'reasons': ['Cargo.lock'] if everything else [], 'packages': {p: 'changed' for p in packages},
+            'files': {f: 'changed' for f in files}, 'harnesses': {h: 'changed' for h in harnesses}}
+
+
+class Toolchain(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        for name in ('rust/cargo', 'nextest/cargo-nextest', 'both/cargo', 'both/cargo-nextest'):
+            path = self.root / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_text('#!/bin/sh\n')
+            path.chmod(0o755)
+
+    def test_a_path_that_has_both_is_kept(self):
+        both = str(self.root / 'both')
+        self.assertEqual(check.toolchain_path({'PATH': both, 'ROMACS_TOOLCHAIN_BIN': '/x', 'CARGO_HOME': '/h'}),
+                         os.pathsep.join([both, '/h/bin']))
+
+    def test_the_pins_complete_a_path_that_lacks_them(self):
+        env = {'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': str(self.root / 'rust'), 'ROMACS_NEXTEST_BIN': str(self.root / 'nextest'),
+               'HOME': '/u'}
+        self.assertEqual(check.toolchain_path(env),
+                         os.pathsep.join(['/usr/bin', str(self.root / 'rust'), str(self.root / 'nextest'), '/u/.cargo/bin']))
+
+    def test_cargos_home_comes_last_so_it_does_not_win(self):
+        # Cargo puts its home's bin before PATH only when PATH lacks it.
+        both = str(self.root / 'both')
+        self.assertEqual(check.toolchain_path({'PATH': os.pathsep.join(['/h/bin', both]), 'CARGO_HOME': '/h'}),
+                         os.pathsep.join(['/h/bin', both]))
+
+    def test_the_stage_runs_on_the_toolchains_path_and_puts_its_callers_back(self):
+        seen, keep = [], {name: os.environ.get(name) for name in ('PATH', 'ROMACS_TOOLCHAIN_BIN', 'ROMACS_NEXTEST_BIN', 'CARGO_HOME')}
+        real = check.run_tests
+        check.run_tests = lambda root, names, threads: seen.append(os.environ['PATH']) or ('ok', 'ran', [])
+        try:
+            os.environ.update(PATH='/nowhere', ROMACS_TOOLCHAIN_BIN=str(self.root / 'rust'),
+                              ROMACS_NEXTEST_BIN=str(self.root / 'nextest'), CARGO_HOME='/h')
+            self.assertEqual(check.tests(ROOT, [], 1), ('ok', 'ran', []))
+            self.assertEqual(seen, [os.pathsep.join(['/nowhere', str(self.root / 'rust'), str(self.root / 'nextest'), '/h/bin'])])
+            self.assertEqual(os.environ['PATH'], '/nowhere')
+            del os.environ['ROMACS_TOOLCHAIN_BIN']
+            self.assertEqual(check.tests(ROOT, [], 1)[0], 'SKIP')
+            self.assertEqual((os.environ['PATH'], len(seen)), ('/nowhere', 1))
+        finally:
+            check.run_tests = real
+            for name, value in keep.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def test_neither_way_is_no_toolchain(self):
+        self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin'}))
+        # cargo without nextest runs no test.
+        self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': str(self.root / 'rust')}))
+
+
+class Tests(unittest.TestCase):
+    def test_a_change_that_reaches_no_package_runs_the_quick_rules(self):
+        runs = {package: (flags, rule) for package, flags, rule in check.plan(answer(), ROOT)}
+        self.assertEqual(set(runs), {binary.split('::')[0] for binary in check.impact.STRUCTURAL})
         # The rules that run the compiler take minutes: the queue's, not a lane's.
-        self.assertTrue(set(gate.SLOW_RULES) <= set(gate.STRUCTURAL))
+        self.assertTrue(set(check.impact.SLOW_RULES) <= set(check.impact.STRUCTURAL))
         self.assertNotIn('compile_boundaries', runs['romacs-vm'][1])
         self.assertNotIn('primitive_gc_boundary', runs['romacs-vm'][1])
+        self.assertIn('no_remote_references', runs['romacs-vm'][1])
         self.assertEqual(runs['romacs-vm'][0][:4], ['--lib', '--bins', '--test', 'all'])
-        self.assertIn('(binary_id(romacs-vm::all) | binary_id(romacs-vm::gnu)) & test(/^no_remote_references::/)', runs['romacs-vm'][1])
-        self.assertEqual(runs['romacs-gui-tests'][0], ['--test', 'harness_contract'])
 
-    def test_a_change_with_no_rust_runs_no_rule(self):
-        self.assertEqual(check.plan(check.load_gate(), {'lisp/romacs/romacs-agent.el', 'AGENTS.md'}, ROOT), [])
+    def test_no_run_takes_the_tests_that_need_the_gates_evidence(self):
+        for _, _, rule in check.plan(answer(packages=['romacs-vm', 'romacs-gnu-tests']), ROOT):
+            self.assertTrue(rule.endswith(f') & not {check.impact.GATE_ONLY}'), rule)
+        self.assertIn('parity_ratchet_', check.impact.GATE_ONLY)
 
-    def test_a_changed_crate_adds_its_own_rule(self):
-        names = {'crates/romacs-display-runtime/src/render_thread/window_events.rs'}
-        runs = check.plan(check.load_gate(), names, ROOT)
-        self.assertEqual(runs[-1][:2], ('romacs-display-runtime', ['--lib']))
-        self.assertIn('time_discipline_test', runs[-1][2])
+    def test_a_reached_package_runs_whole_but_for_the_slow_rules(self):
+        runs = {package: rule for package, _, rule in check.plan(answer(packages=['romacs-vm']), ROOT)}
+        self.assertTrue(runs['romacs-vm'].startswith('((package(romacs-vm)) & not ('), runs['romacs-vm'])
+        self.assertIn('compile_boundaries', runs['romacs-vm'])
+        self.assertIn('primitive_gc_boundary', runs['romacs-vm'])
+
+    def test_a_reached_crate_adds_its_own_rule(self):
+        runs = {package: rule for package, _, rule in check.plan(answer(packages=['romacs-display-runtime']), ROOT)}
+        self.assertIn('time_discipline_test', runs['romacs-display-runtime'])
+
+    def test_a_change_that_reaches_everything_has_no_plan(self):
+        self.assertIsNone(check.plan(answer(everything=True), ROOT))
+
+    def test_the_summary_names_what_the_queue_runs(self):
+        self.assertEqual(check.queue_runs(answer(harnesses=['popup', 'agent'])),
+                         'the queue runs compile_boundaries, primitive_gc_boundary, the parity ratchets and the harnesses agent, popup')
+        self.assertEqual(check.queue_runs(answer()), 'the queue runs compile_boundaries, primitive_gc_boundary, the parity ratchets')
+
+    def test_a_build_that_failed_says_its_errors_and_where(self):
+        log = '\n'.join([
+            'error[E0433]: cannot find type `Path` in this scope',
+            '   --> crates/romacs-vm/tests/gnu/../treesit.rs:303:16',
+            '    |',
+            'error[E0425]: cannot find function `bootstrapped` in this scope',
+            '   --> crates/romacs-vm/tests/gnu/../treesit.rs:304:18',
+            'error: could not compile `romacs-vm` (test "gnu") due to 2 previous errors',
+            'error[E0433]: cannot find type `Path` in this scope',
+            '   --> crates/romacs-vm/tests/gnu/../treesit.rs:303:16',
+        ])
+        self.assertEqual(check.build_errors(log), [
+            'crates/romacs-vm/tests/gnu/../treesit.rs:303:16: error[E0433]: cannot find type `Path` in this scope',
+            'crates/romacs-vm/tests/gnu/../treesit.rs:304:18: error[E0425]: cannot find function `bootstrapped` in this scope',
+        ])
+
+    def test_a_failed_test_and_a_failed_build_are_both_said(self):
+        log = '\n'.join([
+            '        FAIL [   0.1s] (1/9) romacs-vm::all quit_async::c_g_stops',
+            "    thread 'quit_async::c_g_stops' (1) panicked at crates/romacs-vm/tests/all/../quit_async.rs:9:5:",
+            '    it did not stop',
+            '',
+            'error[E0433]: cannot find type `Path` in this scope',
+            '   --> crates/romacs-gnu-tests/tests/x.rs:3:16',
+            'error: test run failed',
+        ])
+        self.assertEqual(check.failed_runs(log, '9 s'), ('FAIL', '1 test(s) failed of what the change reaches; and a package did not build (9 s)', [
+            'romacs-vm::all quit_async::c_g_stops: it did not stop',
+            'crates/romacs-gnu-tests/tests/x.rs:3:16: error[E0433]: cannot find type `Path` in this scope; fix: make it compile']))
+        self.assertEqual(check.failed_runs('nothing useful', '9 s'), ('FAIL', 'the tests did not build or run (9 s)', ['fix: read the log']))
 
     def test_a_failing_rule_is_named_with_what_it_printed(self):
         log = '\n'.join([

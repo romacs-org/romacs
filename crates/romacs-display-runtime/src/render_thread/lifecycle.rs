@@ -145,6 +145,7 @@ impl RenderApp {
                     if self.clipboard.is_err() {
                         self.clipboard = crate::clipboard::ClipboardService::for_display(
                             event_loop.owned_display_handle(),
+                            self.comms.facts_tx.clone(),
                         );
                         if let Err(err) = &self.clipboard {
                             tracing::error!("Failed to initialize clipboard service: {err}");
