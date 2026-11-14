@@ -89,12 +89,13 @@ impl CommandSender {
             // Cancellation is one coalescing bit, independent of FIFO capacity.
             pending.shutdown = true;
         } else {
-            // A paint is a mailbox: it replaces a paint the renderer has not
-            // taken, and goes behind what was sent since, so its producer
-            // never waits for drawing and the renderer draws the newest.
-            let superseded = matches!(command, RenderCommand::Paint(_))
-                .then(|| pending.queue.iter().position(|queued| matches!(queued, RenderCommand::Paint(_))))
-                .flatten();
+            // A paint is a mailbox per top-level frame: it replaces a paint
+            // of its own frame the renderer has not taken, and goes behind
+            // what was sent since, so its producer never waits for drawing
+            // and the renderer draws each frame's newest.  Another frame's
+            // paint is never replaced.
+            let superseded = paint_frame(&command)
+                .and_then(|frame| pending.queue.iter().position(|queued| paint_frame(queued) == Some(frame)));
             if !exempt_from_capacity(&command)
                 && pending.queue.len() - usize::from(superseded.is_some()) >= limit.min(self.shared.capacity)
             {
@@ -126,6 +127,14 @@ impl CommandSender {
     pub fn len(&self) -> usize {
         let pending = self.shared.pending.lock().unwrap();
         pending.queue.len() + usize::from(pending.shutdown)
+    }
+}
+
+/// The top-level frame a paint draws, if COMMAND is one.
+fn paint_frame(command: &RenderCommand) -> Option<u64> {
+    match command {
+        RenderCommand::Paint(scene) => Some(scene.root.frame_placement.frame().get()),
+        _ => None,
     }
 }
 

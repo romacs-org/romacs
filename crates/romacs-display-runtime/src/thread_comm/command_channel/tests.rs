@@ -439,3 +439,26 @@ fn exempt_commands_stay_bounded_and_keep_their_effect() {
     // which sets inactive and keeps the active scalar 0.99 applied.
     assert_eq!(queued, ["1:[0.99, 0.5]", "2:[0.3, 0.3]", "1:[-1.0, 0.7]", "destroy"]);
 }
+
+/// The mailbox is per top-level frame: a paint replaces an unread paint of
+/// its own frame only, never another frame's.
+#[test]
+fn a_paint_replaces_only_its_own_frames_unread_paint() {
+    use romacs_display_protocol::{DisplayFrameId, FrameGlyphBuffer, types::Color};
+    let paint = |frame: u64, width: f32| {
+        let mut buffer = FrameGlyphBuffer::with_size(width, 10.0);
+        buffer.set_frame_identity(DisplayFrameId::new(frame), DisplayFrameId::new(0), 0.0, 0.0, 0, false, 0.0, Color::BLACK, false, 1.0);
+        RenderCommand::Paint(Box::new(buffer.into()))
+    };
+    let drawn = |command: RenderCommand| match command {
+        RenderCommand::Paint(scene) => (scene.root.frame_placement.frame().get(), scene.root.width as u32),
+        _ => panic!("not a paint"),
+    };
+    let (sender, receiver) = command_channel(8);
+    sender.try_send(paint(1, 100.0)).unwrap();
+    sender.try_send(paint(2, 200.0)).unwrap();
+    sender.try_send(paint(1, 110.0)).unwrap();
+    sender.try_send(paint(2, 210.0)).unwrap();
+    let order: Vec<_> = std::iter::from_fn(|| receiver.try_recv().ok()).map(drawn).collect();
+    assert_eq!(order, [(1, 110), (2, 210)], "each frame's newest, in the order sent");
+}
