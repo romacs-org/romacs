@@ -36,6 +36,9 @@ pub(crate) struct Run {
     /// It holds characters or stretches: a row's text, which underline and
     /// box runs span.
     pub(crate) text: bool,
+    /// Its visual row (`assign_rows`): text runs of one window that overlap
+    /// vertically share one; any other run is a row of its own.
+    pub(crate) row: usize,
 }
 
 /// A frame and its runs.
@@ -178,10 +181,39 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
                 glyphs: at..at + 1,
                 bounds,
                 text,
+                row: 0,
             }),
         }
     }
+    assign_rows(&mut out);
     out
+}
+
+/// Give RUNS their visual rows: a sweep over each window's text runs by y
+/// joins those whose vertical extents overlap (an underline or a box run
+/// may span glyphs of two heights); every other run is a row of its own.
+fn assign_rows(runs: &mut [Run]) {
+    let mut order: Vec<usize> = (0..runs.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (a, b) = (&runs[a], &runs[b]);
+        (a.key.0, !a.text).cmp(&(b.key.0, !b.text)).then(a.bounds.y.total_cmp(&b.bounds.y))
+    });
+    // The window, bottom and row of the text row being swept.
+    let mut open: Option<(i64, f32, usize)> = None;
+    for (id, &at) in order.iter().enumerate() {
+        let run = &runs[at];
+        let bottom = run.bounds.y + run.bounds.height;
+        runs[at].row = match open {
+            Some((window, end, row)) if run.text && window == run.key.0 && run.bounds.y < end => {
+                open = Some((window, end.max(bottom), row));
+                row
+            }
+            _ => {
+                open = run.text.then_some((run.key.0, bottom, id));
+                id
+            }
+        };
+    }
 }
 
 /// Each group's runs, by position in RUNS.

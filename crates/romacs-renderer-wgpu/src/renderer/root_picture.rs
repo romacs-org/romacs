@@ -325,8 +325,17 @@ impl RootPicture {
             })
             .collect();
         let anchors: Vec<usize> = facts.iter().filter_map(|fact| fact.0).collect();
-        let extents: Vec<Rect> = renderer
-            .cursor_extents(&shown.indexed.frame, cursor_visible, animated_cursor.as_ref())
+        // A cursor is placed from its anchor glyph alone (`cursor_draw_rect`
+        // reads nothing else), so its extent is found on a frame of anchors.
+        let mut held = anchors.clone();
+        held.sort_unstable();
+        held.dedup();
+        let anchor_glyphs: Vec<FrameGlyph> = held.iter().map(|&at| shown.indexed.frame.glyphs[at].clone()).collect();
+        let mut extents = Vec::new();
+        with_glyphs(&mut shown.indexed.frame, anchor_glyphs, true, |sub| {
+            extents = renderer.cursor_extents(sub, cursor_visible, animated_cursor.as_ref());
+        });
+        let extents: Vec<Rect> = extents
             .into_iter()
             .zip(&facts)
             .filter_map(|(extent, fact)| extent.map(|extent| fact.1.map_or(extent, |slot| damage::union(extent, slot))))
@@ -421,10 +430,9 @@ fn slot_facts(frame: &FrameGlyphBuffer, slot: DisplaySlotId) -> (Option<usize>, 
 
 /// What a patch of REGION draws: the frame's background over it, then the
 /// glyphs of every run of SHOWN whose group touches it (bounds grown by
-/// REACH), with the whole visual rows they lie on (the text runs of their
-/// window that overlap them, so underline and box runs that span runs of
-/// different heights lay out as in the whole frame), and ANCHORS, in frame
-/// order.
+/// REACH), with the whole visual rows they lie on (`damage::Run::row`, so
+/// underline and box runs that span runs of different heights lay out as in
+/// the whole frame), and ANCHORS, in frame order.
 fn region_glyphs(shown: &Indexed, region: Rect, reach: Reach, anchors: &[usize]) -> Vec<FrameGlyph> {
     let (frame, runs) = (&shown.frame, &shown.runs);
     let mut keys: Vec<_> = runs
@@ -434,23 +442,18 @@ fn region_glyphs(shown: &Indexed, region: Rect, reach: Reach, anchors: &[usize])
         .collect();
     keys.sort_unstable();
     keys.dedup();
-    let mut picked: Vec<bool> = runs.iter().map(|run| keys.binary_search(&run.key).is_ok()).collect();
-    // Close over rows: a text run of a picked text run's window that
-    // overlaps it vertically is picked too, until nothing more is.
-    let rows = |a: &damage::Run, b: &damage::Run| {
-        a.text && b.text && a.key.0 == b.key.0 && a.bounds.y < b.bounds.y + b.bounds.height && b.bounds.y < a.bounds.y + a.bounds.height
-    };
-    loop {
-        let more: Vec<usize> = (0..runs.len())
-            .filter(|&j| !picked[j] && (0..runs.len()).any(|i| picked[i] && rows(&runs[i], &runs[j])))
-            .collect();
-        if more.is_empty() {
-            break;
-        }
-        for j in more {
-            picked[j] = true;
-        }
-    }
+    // The visual rows of the groups touched, taken whole.
+    let mut rows: Vec<usize> = runs
+        .iter()
+        .filter(|run| keys.binary_search(&run.key).is_ok())
+        .map(|run| run.row)
+        .collect();
+    rows.sort_unstable();
+    rows.dedup();
+    let picked: Vec<bool> = runs
+        .iter()
+        .map(|run| keys.binary_search(&run.key).is_ok() || rows.binary_search(&run.row).is_ok())
+        .collect();
     let mut glyphs = vec![FrameGlyph::Background {
         bounds: region,
         color: frame.background,

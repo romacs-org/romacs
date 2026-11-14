@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use romacs_display_protocol::frame_glyphs::{FrameGlyphBuffer, GlyphRowRole};
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
 use romacs_display_protocol::types::{Color, DisplayWindowId, FaceId, Rect};
 
 use super::{Indexed, Plan, agree, merge, nested_agree, plan, repeats, runs};
@@ -219,4 +219,24 @@ fn changes_on_too_many_runs_are_a_whole_repaint_before_they_are_joined() {
         f
     };
     assert_eq!(planned(&tall(false), &tall(true)), Plan::Whole);
+}
+
+#[test]
+fn text_runs_that_overlap_in_one_window_share_a_row_and_nothing_else_does() {
+    let mut f = frame(&["ab", "cd"], &["ef"]);
+    // The first row's second glyph two pixels shorter: a run of its own,
+    // inside its row.
+    if let Some(FrameGlyph::Char { height, .. }) = f.glyphs.iter_mut().filter(|g| matches!(g, FrameGlyph::Char { .. })).nth(1) {
+        *height = ROW - 2.0;
+    }
+    let runs = runs(&f.glyphs);
+    let row_of = |ch: char| {
+        let at = f.glyphs.iter().position(|g| matches!(g, FrameGlyph::Char { char: c, .. } if *c == ch)).unwrap();
+        runs.iter().find(|run| run.glyphs.contains(&at)).unwrap().row
+    };
+    assert_eq!(row_of('a'), row_of('b'), "two heights, one row");
+    assert_ne!(row_of('a'), row_of('c'), "rows that only meet are apart");
+    assert_ne!(row_of('a'), row_of('e'), "the other window's row is its own");
+    let backgrounds: Vec<usize> = runs.iter().filter(|run| !run.text).map(|run| run.row).collect();
+    assert!(backgrounds.iter().all(|row| runs.iter().filter(|run| run.row == *row).count() == 1));
 }

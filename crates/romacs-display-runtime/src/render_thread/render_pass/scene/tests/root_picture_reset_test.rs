@@ -6,6 +6,7 @@ use romacs_display_protocol::frame_glyphs::{CursorStyle, DisplaySlotId, GlyphRow
 
 /// Rows of coloured cells with a box cursor, the second row's cells in
 /// SECOND's order of colours (no font: this crate's tests have none).
+#[expect(clippy::cast_precision_loss, reason = "a test surface's few pixels")]
 fn text(second: &str) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
     (frame.char_width, frame.char_height) = (7.0, 12.0);
@@ -42,7 +43,7 @@ fn text(second: &str) -> FrameGlyphBuffer {
 
 /// A renderer whose pixels depend on nothing but the frames it draws.
 fn still(renderer: &mut WgpuRenderer) {
-    renderer.effects = Default::default();
+    renderer.effects = romacs_display_protocol::EffectsConfig::default();
     renderer.effects.cursor_color_cycle.enabled = false;
 }
 
@@ -55,6 +56,7 @@ fn root(renderer: &mut WgpuRenderer, render: &mut GuiFrameRenderState, frame: &F
 }
 
 #[test]
+#[expect(clippy::default_trait_access, reason = "a pending window's chrome, as the device-recreation test builds it")]
 fn a_reset_drops_the_root_picture_and_the_next_frame_is_drawn_whole() {
     let mut a = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real device A required");
     still(&mut a);
