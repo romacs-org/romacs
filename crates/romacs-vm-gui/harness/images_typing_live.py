@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Typing while large images open in another window: key latency.
+"""Typing while large images open in another window: the evaluator's work.
 
-One fresh private headless labwc session (perkey_live's) runs
-`romacs-vm-gui -Q --loadup --trace-latency` on a text file, its frame
-split side by side: the left window shows the file, the right a buffer
-for the images.  One M-: inserts IMAGES (by default a PNG and an SVG, each
-`:max-width' 600) into the right window's buffer and returns; the harness
-then at once types --keys `x' keys --gap seconds apart into the left
-window while the images decode.  Every key's latency is the session's own
-trace, key enqueue to render observed (`latency-key').  After typing, a
-second M-: asks `image-size' of each image (a query waits for its
-decode) and the report gives the sizes and the time from the insert to
-the first paint after it with each image's pixels.
+One fresh private headless labwc session (perkey_live's counted session)
+runs `romacs-vm-gui -Q --loadup` on a text file, its frame split side by
+side: the left window shows the file, the right a buffer for the images.
+Twice, an M-: inserts into the right window's buffer and returns, and the
+harness at once types --keys `x' keys --gap seconds apart into the left
+window: first a control that inserts as many newlines and no image, then
+IMAGES (a PNG and an SVG, say, each `:max-width' 600), which decode while
+the keys are typed.  perf counts the evaluator thread's instructions from
+each M-:'s RET to the paint after its last key, less the session's idle
+rate (perkey_live's idle phases).  Decoding off the evaluator, the images'
+span costs about what the control's does: one decoded on the evaluator,
+or a key that waits on a decode, adds its work there.  After typing, a
+third M-: asks `image-size' of each image (a query waits for its decode).
+
+Work, not wall time, is the verdict: on a loaded host every key's latency
+stretches whatever the evaluator does.  The keys' paints are counted; the
+report gives each span's seconds for reference.
 
 The image files are copied into the session's private directory before
 it starts: their first read is the session's (the page cache may already
@@ -23,11 +29,12 @@ images' boxes are read from the layout (`posn-at-point', which does not
 wait), the file is removed with no further input, and the report says
 whether a paint followed.
 
-Reports the redisplay after the M-: insert (where the images are looked up), the typed keys' p50/p99/max, and the
-keys over 16 ms.  Exits nonzero when any is over --budget ms.
+Exits nonzero when the images' span costs more than --slack (a fraction)
+over the control's, a key went unanswered, no paint followed the last
+key, or the idle phases disagree (work the session went on doing).
 
 usage: images_typing_live.py --binary PATH --output DIR --image FILE...
-                             [--keys 60] [--gap 0.05] [--budget 16] [--tools DIR:DIR]
+                             [--keys 60] [--gap 0.05] [--slack 0.25] [--tools DIR:DIR]
 """
 import argparse
 import hashlib
@@ -41,7 +48,8 @@ import time
 
 import perkey_live as perkey
 
-SPLIT = ('(progn (select-window (split-window-right)) (switch-to-buffer (get-buffer-create "*images*"))'
+# The cursor stops blinking: its timer's work would land in the idle phases.
+SPLIT = ('(progn (blink-cursor-mode -1) (select-window (split-window-right)) (switch-to-buffer (get-buffer-create "*images*"))'
          ' (other-window 1) t)')
 
 
@@ -56,9 +64,9 @@ def sizes_form(files):
     return f'(message "images-typing-sizes %S" (list {sizes}))'
 
 
-def percentile(values, fraction):
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(fraction * len(ordered)))]
+def control_form(files):
+    lines = ' '.join('(insert "\\n")' for _ in files)
+    return f'(with-current-buffer "*images*" {lines} t)'
 
 
 class Session(perkey.Session):
@@ -88,55 +96,69 @@ class Session(perkey.Session):
         return {'held_boxes': boxes.read_text(), 'repainted_after_release_s': repainted}
 
     def eval_form(self, form):
+        return self.read_form(form)()
+
+    def read_form(self, form):
+        """Type M-: FORM, all but its RET: a function that types the RET and
+        returns the M-:'s reply once it has run."""
         before = len(perkey.records(self.stdout))
         self.type(['-M', 'alt', ':', '-m', 'alt'])
         time.sleep(.2)
         self.type([form])
-        self.type(['-k', 'Return'])
-        done = lambda: [r for r in perkey.records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
-        self.wait(done, self.args.timeout, f'M-: {form[:40]}')
-        if any(r.get('signal') or r.get('native_error') for r in done()):
-            raise perkey.Invalid(f'M-: {form[:60]} signalled: {done()}')
-        return done()[0]
+
+        def finish():
+            self.type(['-k', 'Return'])
+            done = lambda: [r for r in perkey.records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+            self.wait(done, self.args.timeout, f'M-: {form[:40]}')
+            if any(r.get('signal') or r.get('native_error') for r in done()):
+                raise perkey.Invalid(f'M-: {form[:60]} signalled: {done()}')
+            return done()[0]
+        return finish
+
+    def span(self, form):
+        """The evaluator's instructions and seconds from FORM's RET to the
+        paint after --keys typed keys, its reply, the keys' replies and paints."""
+        finish = self.read_form(form)
+        self.quiesce()
+        start = len(perkey.records(self.stderr))
+        count, seconds, (reply, replies) = self.counted(lambda: (finish(), self.run_keys(['x'], self.args.keys)))
+        paints = sum(1 for r in perkey.records(self.stderr)[start:] if r.get('diagnostic') == 'paint')
+        typed = sum(1 for r in replies if r.get('native_command') == 'self-insert-command')
+        return {'instructions': count, 'seconds': round(seconds, 2), 'reply': reply.get('native_command'),
+                'typed': typed, 'paints': paints}
+
+    def idle(self):
+        self.quiesce()
+        count, seconds, _ = self.counted(lambda: time.sleep(self.args.keys * self.args.gap), idle=True)
+        return count, seconds
 
     def measure(self, files):
         self.eval_form(SPLIT)
-        self.quiesce()
-        start = len(perkey.records(self.stderr))
-        inserted_at = time.monotonic()
-        reply = self.eval_form(insert_form(files))
-        replies = self.run_keys(['x'], self.args.keys)
-        typed_s = time.monotonic() - inserted_at
-        samples = [r for r in perkey.records(self.stderr)[start:] if r.get('diagnostic') == 'latency-key']
+        idles = [self.idle()]
+        control = self.span(control_form(files))
+        images = self.span(insert_form(files))
         held = self.held() if self.args.hold else {}
-        key_ms = [s['key_to_render_observed_ns'] / 1e6 for s in samples if s.get('key_to_render_observed_ns') is not None]
+        # The query waits for every decode: none lands in the idle phase.
         self.eval_form(sizes_form(files))
+        idles.append(self.idle())
+        rate = perkey.idle_rate(idles)
+        for span in (control, images):
+            span['per_key'] = round((span['instructions'] - rate * span['seconds']) / self.args.keys)
         messages = self.root / 'messages.txt'
         self.eval_form(f'(with-current-buffer (messages-buffer) (write-region nil nil {json.dumps(str(messages))}))')
         logged = messages.read_text(errors='replace') if messages.exists() else ''
         sizes = next((l for l in logged.splitlines() if l.startswith('images-typing-sizes')), None)
         problems = []
-        typed = [r for r in replies if r.get('native_command') == 'self-insert-command']
-        if len(typed) != self.args.keys:
-            problems.append(f'{len(typed)} self-insert replies for {self.args.keys} keys')
-        # The M-: Return's own sample is the first after the form was typed;
-        # the typed keys follow it.
-        # The M-:'s command time holds the minibuffer read (the form being
-        # typed); its redisplay, which looks the images up, is its own.
-        insert_ms = samples[0]['snapshot_ns'] / 1e6 if samples else None
-        typed_ms = key_ms[1:]
-        if len(typed_ms) < self.args.keys:
-            problems.append(f'{len(typed_ms)} latency samples for {self.args.keys} keys')
+        for name, span in (('control', control), ('images', images)):
+            if span['typed'] != self.args.keys:
+                problems.append(f"{name}: {span['typed']} self-insert replies for {self.args.keys} keys")
+        if images['per_key'] > control['per_key'] * (1 + self.args.slack):
+            problems.append(f"the images' span cost {images['per_key']} instructions a key, "
+                            f"over {1 + self.args.slack:.2f} times the control's {control['per_key']}")
         if self.args.hold and held.get('repainted_after_release_s') is None:
             problems.append('no paint after the release')
-        return {**held, 'insert_reply': reply.get('native_command'), 'insert_ms': insert_ms, 'typed_s': typed_s,
-                'key_ms': [round(k, 2) for k in typed_ms], 'sizes': sizes,
-                'messages': logged[-2000:],
-                'summary': {'keys': len(typed_ms), 'p50': percentile(typed_ms, .5) if typed_ms else None,
-                            'p99': percentile(typed_ms, .99) if typed_ms else None,
-                            'max': max(typed_ms, default=None),
-                            'over_budget': sum(1 for k in typed_ms if k > self.args.budget)},
-                'problems': problems}
+        return {**held, 'idle_rate': rate, 'control': control, 'images': images, 'sizes': sizes,
+                'messages': logged[-2000:], 'problems': problems}
 
 
 def main():
@@ -146,7 +168,8 @@ def main():
     parser.add_argument('--image', type=Path, action='append', required=True)
     parser.add_argument('--keys', type=int, default=60)
     parser.add_argument('--gap', type=float, default=.05)
-    parser.add_argument('--budget', type=float, default=16, help='ms a key may take')
+    parser.add_argument('--slack', type=float, default=.25,
+                        help="the fraction the images' span may cost over the control's, per key")
     parser.add_argument('--hold', action='store_true', help='hold the decodes until the keys are typed')
     parser.add_argument('--settle', type=float, default=3)
     parser.add_argument('--timeout', type=float, default=240)
@@ -167,12 +190,12 @@ def main():
         files = [Path(shutil.copy(f, images / f.name)) for f in args.image]
         if args.hold:
             (root / 'hold').write_text('')
-        session = Session(args, root, True)
+        session = Session(args, root, False)
         try:
             session.start()
             result = session.measure(files)
         except (perkey.Invalid, AssertionError, subprocess.SubprocessError) as error:
-            result = {'problems': [repr(error)], 'summary': None}
+            result = {'problems': [repr(error)]}
         finally:
             session.stop()
             for name in ('binary.stdout', 'binary.stderr', 'compositor.log'):
@@ -180,13 +203,10 @@ def main():
                     shutil.copy(root / name, args.output / name)
     report = {'binary': str(args.binary), 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
               'images': [{'name': f.name, 'bytes': f.stat().st_size} for f in args.image],
-              'keys': args.keys, 'gap': args.gap, 'budget_ms': args.budget, **result}
+              'keys': args.keys, 'gap': args.gap, 'slack': args.slack, 'load': os.getloadavg(), **result}
     (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
-    print(json.dumps({k: report.get(k) for k in ('insert_ms', 'summary', 'sizes', 'problems')}, indent=1))
-    summary = report.get('summary')
-    ok = summary and not report['problems'] and summary['over_budget'] == 0 \
-        and (report.get('insert_ms') or 0) <= args.budget
-    return 0 if ok else 1
+    print(json.dumps({k: report.get(k) for k in ('control', 'images', 'sizes', 'problems')}, indent=1))
+    return 0 if 'images' in report and not report['problems'] else 1
 
 
 if __name__ == '__main__':
