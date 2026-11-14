@@ -13,7 +13,7 @@ def frame(scenes=1, result='Submitted', **counts):
     scene's ingestion, unless COUNTS say otherwise."""
     line = {'diagnostic': 'frame-cost', 'presentation': 1, 'work': 'rebuild', 'result': result, 'scenes': scenes,
             'ingest_instructions': 100, 'frame_instructions': 900, 'acquire_instructions': 50, 'submit_instructions': 300,
-            'present_instructions': 50, 'rows': 46, 'rows_tessellated': 46, 'rows_reused': 0, 'rows_unmarked': 46,
+            'present_instructions': 50, 'rows': 46, 'rows_tessellated': 46, 'rows_reused': 0, 'rows_unmarked': 46, 'cursor_rows': 1,
             'glyphs_walked': 3000, 'font_identities': 6000, 'bytes_uploaded': 800_000}
     return {**line, **counts}
 
@@ -68,7 +68,7 @@ class Bars(unittest.TestCase):
         self.assertEqual((row['status'], row['off'], len(row['frames'])), ('PASS', [], 2))
 
     def test_rows_are_held_as_counted_and_costs_with_a_margin(self):
-        self.assertEqual((self.bars['rows'], self.bars['rows_tessellated'], self.bars['rows_reused']), (46, 46, 0))
+        self.assertEqual((self.bars['rows'], self.bars['rows_tessellated'], self.bars['rows_reused'], self.bars['cursor_rows']), (46, 46, 0, 1))
         self.assertEqual((self.bars['own_instructions'], self.bars['glyphs_walked'], self.bars['extra_frames']), (660, 3300, 0))
         self.assertEqual((r.ceiling('own_instructions', 5_234_567), r.ceiling('rows', 46), r.ceiling('bytes_uploaded', 0)), (5_760_000, 46, 0))
 
@@ -96,8 +96,8 @@ class Bars(unittest.TestCase):
 
     def test_the_table_shows_figures_or_the_reason(self):
         text = r.table([r.verdict(TYPED, self.text, 2, {'typed': self.bars}), r.verdict({'name': 'gone'}, '', 2, {})])
-        self.assertIn('| typed | 46 | 46 | 0 | 3000 | 6000 | 781K | 0.00M | 0.00M | 0.0/step | 0.00M | PASS |', text)
-        self.assertIn('| gone | - | - | - | - | - | - | - | - | - | - | FAIL — 0 scene frames for 2 steps |', text)
+        self.assertIn('| typed | 46 | 46 | 0 | 1 | 3000 | 6000 | 781K | 0.00M | 0.00M | 0.0/step | 0.00M | PASS |', text)
+        self.assertIn('| gone | - | - | - | - | - | - | - | - | - | - | - | FAIL — 0 scene frames for 2 steps |', text)
 
 
 if __name__ == '__main__':

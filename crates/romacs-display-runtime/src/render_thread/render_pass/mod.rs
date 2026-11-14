@@ -47,7 +47,6 @@ mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
 mod retained_scroll;
-pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
 pub(super) use retained_scroll::RetainedScroll;
 mod scene;
