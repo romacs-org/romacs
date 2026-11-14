@@ -188,11 +188,25 @@ a time, `allow' marks it allowed."
         (romacs-agent-tools--arm-resume session 43.0)
         (romacs-agent-tools--limit-on-event session '(:type input))
         (should-not (romacs-agent-resume-time session))
-        ;; Turned off, nothing is scheduled.
+        ;; A reset already used schedules nothing again.
+        (spend "claude" soon 13.0) (spend "claude2" (+ soon 600) 13.0)
+        (puthash session soon romacs-agent-tools--resets-used)
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should-not (romacs-agent-resume-time session))
+        ;; Turned off: nothing scheduled, none fires, none kept is armed again.
         (let ((romacs-agent-resume-at-reset nil))
-          (spend "claude2" (+ (float-time) 600) 12.0)
+          (spend "claude" (+ soon 1000) 14.0)
           (romacs-agent-tools--switch-on-limit session '(:limit t))
-          (should-not (romacs-agent-resume-time session)))))))
+          (should-not (romacs-agent-resume-time session))
+          (setq told nil moved nil)
+          (romacs-agent-tools--arm-resume session 44.0)
+          (romacs-agent-tools--resume session 44.0)
+          (should-not (or told moved))
+          (romacs-agent-tools--keep-resume "r" 45.0)
+          (romacs-agent-tools--rearm-resumes)
+          (should-not (romacs-agent-resume-time session))
+          (should-not (with-temp-buffer (insert-file-contents (romacs-agent-tools--resumes-file))
+                                        (read (current-buffer)))))))))
 
 (ert-deftest romacs-agent-pools-a-wait-is-its-limits-alone ()
   (romacs-agent-pools-tests--with
@@ -237,8 +251,14 @@ a time, `allow' marks it allowed."
       (romacs-agent--with-lock file (lambda () (setq seen (file-directory-p lock))))
       (should seen)
       (should-not (file-exists-p lock))
-      ;; A crashed writer's lock is taken over.
+      ;; Held by another: not run, tried again shortly.
       (make-directory lock t)
+      (let ((retried nil))
+        (cl-letf (((symbol-function 'run-at-time) (lambda (&rest args) (setq retried args))))
+          (romacs-agent--with-lock file (lambda () (setq seen 'unlocked))))
+        (should-not (eq seen 'unlocked))
+        (should (eq (nth 2 retried) #'romacs-agent--with-lock)))
+      ;; A crashed writer's lock is taken over.
       (set-file-times lock (time-subtract (current-time) 60))
       (romacs-agent--with-lock file (lambda () (setq seen 'ran)))
       (should (eq seen 'ran))

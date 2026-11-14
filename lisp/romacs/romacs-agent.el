@@ -2211,21 +2211,18 @@ a restarted server knows which accounts are spent.")
   romacs-agent--room)
 
 (defun romacs-agent--with-lock (file function)
-  "Call FUNCTION holding FILE's lock, a directory FILE.lock made atomically:
-one process at a time reads, merges and replaces FILE.  A lock older than
-10 s is a crashed writer's, taken over; after 2 s of waiting, FUNCTION
-runs anyway rather than lose what it keeps."
-  (let ((lock (concat file ".lock")) (tries 40) (held nil))
+  "Call FUNCTION holding FILE's lock, a directory FILE.lock made atomically,
+so one process at a time reads, merges and replaces FILE.  Held by
+another, FUNCTION is tried again shortly, never run without the lock and
+never waited for on the command loop; a lock older than 10 s is a crashed
+writer's, taken over."
+  (let ((lock (concat file ".lock")))
     (make-directory (file-name-directory file) t)
-    (while (and (not held) (> tries 0))
-      (condition-case nil (progn (make-directory lock) (setq held t))
-        (file-already-exists
-         (let ((made (file-attribute-modification-time (file-attributes lock))))
-           (if (and made (> (float-time (time-since made)) 10))
-               (ignore-errors (delete-directory lock))
-             (sleep-for 0.05) (cl-decf tries))))))
-    (unwind-protect (funcall function)
-      (when held (ignore-errors (delete-directory lock))))))
+    (let ((made (file-attribute-modification-time (file-attributes lock))))
+      (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
+    (if (condition-case nil (progn (make-directory lock) t) (file-already-exists nil))
+        (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
+      (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
 
 (defun romacs-agent--keep-room ()
   "Write `romacs-agent--room' to its file, merged with what another server

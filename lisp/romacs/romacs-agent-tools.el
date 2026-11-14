@@ -971,6 +971,10 @@ left with room, goes on by itself once the first of their limits resets
 (defvar romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key)
   "Each session waiting to resume to (TIME . TIMER).")
 
+(defvar romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key)
+  "Each session to the reset its last resume was scheduled for: another
+needs a newer one reported, so a limit that stays never schedules again.")
+
 (defun romacs-agent-resume-time (session)
   "When SESSION resumes by itself at its limit's reset, or nil."
   (car (gethash session romacs-agent-tools--resumes)))
@@ -1001,7 +1005,9 @@ restarted server re-arms them from, under its lock."
 at the earliest reset plus the margin, journaled, unless that is unknown
 or `romacs-agent-resume-at-reset' is off."
   (when-let* (((and romacs-agent-resume-at-reset (not (romacs-agent-resume-time session))))
-              (resets (romacs-agent--earliest-reset (romacs-agent-harness session))))
+              (resets (romacs-agent--earliest-reset (romacs-agent-harness session)))
+              ((> resets (gethash session romacs-agent-tools--resets-used 0))))
+    (puthash session resets romacs-agent-tools--resets-used)
     (let ((time (max (+ resets romacs-agent-resume-margin) (+ (float-time) romacs-agent-switch-delay))))
       (romacs-agent-tools--arm-resume session time)
       (romacs-agent-tools--keep-resume (romacs-agent-id session) time)
@@ -1021,10 +1027,15 @@ or `romacs-agent-resume-at-reset' is off."
 under the first account of its pool with room, told to; else nothing.
 An account still spent (its report not yet renewed) waits for the next
 reset, once."
-  (when (equal (romacs-agent-resume-time session) time)
+  (cond
+   ((not (equal (romacs-agent-resume-time session) time)))
+   ;; Its journal still replaying: what it is at is not yet known.
+   ((and (process-live-p (romacs-agent-connection session)) (not (romacs-agent-caught-up session)))
+    (romacs-agent-tools--arm-resume session time))
+   (t
     (remhash session romacs-agent-tools--resumes)
     (romacs-agent-tools--keep-resume (romacs-agent-id session) nil)
-    (when (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+    (when (and romacs-agent-resume-at-reset (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
                (not (romacs-agent-stopped session)) (romacs-agent-limited session)
                (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
       (let ((target (romacs-agent-pool-pick (romacs-agent-harness session))))
@@ -1033,14 +1044,16 @@ reset, once."
           (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "fired" "on" (plist-get target :name)))
           (if (equal (plist-get target :name) (romacs-agent-provider session))
               (romacs-agent-tools--tell session romacs-agent-tools--resumed)
-            (romacs-agent-move-on session "limit reset")))))))
+            (romacs-agent-move-on session "limit reset"))))))))
 
 (defun romacs-agent-tools--rearm-resumes ()
-  "After a restart: arm again the resumes the last server left waiting."
+  "After a restart: arm again the resumes the last server left waiting;
+with `romacs-agent-resume-at-reset' off, forget them."
   (pcase-dolist (`(,id . ,time) (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--resumes-file))
                                                                  (read (current-buffer)))))
-    (when-let* ((session (romacs-agent-get id)) ((not (romacs-agent-resume-time session))))
-      (romacs-agent-tools--arm-resume session time))))
+    (if (not romacs-agent-resume-at-reset) (romacs-agent-tools--keep-resume id nil)
+      (when-let* ((session (romacs-agent-get id)) ((not (romacs-agent-resume-time session))))
+        (romacs-agent-tools--arm-resume session time)))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--rearm-resumes)
 
