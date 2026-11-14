@@ -709,20 +709,24 @@ or a repeat."
       (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
 
 (defvar romacs-agent-ui--turn-starts (make-hash-table :test #'eq :weakness 'key)
-  "Each session's last turn start seen live, by its time.")
+  "Each session's last turn start seen live: (TIME . DONE-SEQ), the turn
+end it came after.")
 
 (defun romacs-agent-ui--see-failed-children (session event)
-  "SESSION's live turn starts at EVENT: a failure of a task it delegated
-that was there when its turn before started has been in view a whole turn,
-and is seen now, as opening the task's chat sees it."
+  "SESSION's live turn starts at EVENT, a message after a turn's end (one
+steering the turn under way starts none): a failure of a task it
+delegated that was there when its turn before started has been in view a
+whole turn, and is seen now, as opening the task's chat sees it."
   (when (and (eq (plist-get event :type) 'input) (romacs-agent--live-p session))
     (let ((before (gethash session romacs-agent-ui--turn-starts)))
-      (when before
-        (dolist (child (romacs-agent-children session))
-          (when (and (eq (romacs-agent-ui--state-key child) 'failed)
-                     (<= (or (romacs-agent-last-time child) 0) before))
-            (romacs-agent-mark-seen child))))
-      (puthash session (or (plist-get event :time) (float-time)) romacs-agent-ui--turn-starts))))
+      (unless (and before (eql (cdr before) (romacs-agent-done-seq session)))
+        (when before
+          (dolist (child (romacs-agent-children session))
+            (when (and (eq (romacs-agent-ui--state-key child) 'failed)
+                       (<= (or (romacs-agent-last-time child) 0) (car before)))
+              (romacs-agent-mark-seen child))))
+        (puthash session (cons (or (plist-get event :time) (float-time)) (romacs-agent-done-seq session))
+                 romacs-agent-ui--turn-starts)))))
 
 (defun romacs-agent-ui--on-event (session event)
   (romacs-agent-ui--see-failed-children session event)
@@ -792,7 +796,7 @@ and the parent of one whose state that changed, in the next batch."
         (when (and (member (plist-get event :name) romacs-agent-ui--subagent-tools)
                    (not (plist-get event :parent)))
           (unless table (setq table (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
-          (puthash id (list :tool id :state "running" :time (plist-get event :time)
+          (puthash id (list :tool id :subagent t :state "running" :time (plist-get event :time)
                             :title (car (romacs-agent-ui--delegation (plist-get event :name) (plist-get event :input))))
                    table)
           (romacs-agent-ui--children-changed session))
@@ -958,7 +962,8 @@ then its delegated threads still live.")
   (let ((key (plist-get row :key)))
     (delq nil (list (and (memq key '(approval question failed)) key)
                     (cond ((plist-get row :session) (and (memq key romacs-agent-ui--live-keys) 'threads))
-                          ((eq key 'working) 'subagents))))))
+                          ;; A command the harness runs is no subagent.
+                          ((and (eq key 'working) (plist-get row :subagent)) 'subagents))))))
 
 (defun romacs-agent-ui--workers-summary (rows)
   "ROWS, a session's workers ranked, as its header's counts by kind

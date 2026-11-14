@@ -313,7 +313,8 @@
     (romacs-agent-ui--track-children parent '(:type task :task "b1" :state backgrounded))
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :title) "make test"))
-    (should (equal (romacs-agent-children-tests--summary parent) "1 working"))
+    ;; A worker, not a subagent: the header counts none.
+    (should (equal (romacs-agent-children-tests--summary parent) ""))
     (romacs-agent-ui--track-children parent '(:type exit))
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
@@ -394,6 +395,15 @@
         (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval 2 threads live"))
         (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "Working"))))))
 
+(ert-deftest romacs-agent-children-a-command-is-no-subagent ()
+  ;; A command the harness runs in the background is a worker, not a subagent.
+  (romacs-agent-children-tests--with
+    (romacs-agent-ui--track-task parent '(:type task :id "c1" :state started :task "b1" :title "make test" :background t))
+    (should (equal (romacs-agent-children-tests--summary parent) ""))
+    (should (= (length (romacs-agent-children-rows parent)) 1))
+    (romacs-agent-ui--track-subagent parent '(:type tool :id "s1" :state started :name "Agent" :input nil))
+    (should (equal (romacs-agent-children-tests--summary parent) "1 working"))))
+
 (ert-deftest romacs-agent-children-an-old-failure-is-seen-after-a-turn ()
   ;; Tasks that failed long ago: news while the parent's turn that knew of
   ;; them runs, seen once its next turn starts.
@@ -406,14 +416,17 @@
       (cl-letf (((symbol-function 'romacs-agent--manifest-put) #'ignore))
         (should (equal (romacs-agent-children-tests--summary parent) "2 failed"))
         (romacs-agent-ui--see-failed-children parent '(:type input :time 200.0))
-        ;; The turn that knew of them runs: still news.
+        ;; The turn that knew of them runs, steered: still news.
+        (romacs-agent-ui--see-failed-children parent '(:type input :time 210.0))
         (should (equal (romacs-agent-children-tests--summary parent) "2 failed"))
+        (setf (romacs-agent-done-seq parent) 9)
         ;; A failure during that turn stays news through the next.
         (setq seen (child 'idle :failed t :done-seq 5 :last-time 250.0))
         (romacs-agent-ui--see-failed-children parent '(:type input :time 300.0))
         (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
         (should-not (romacs-agent-unseen-p old))
         (should (romacs-agent-unseen-p seen))
+        (setf (romacs-agent-done-seq parent) 11)
         ;; A copy replaying a parent's journal sees nothing.
         (setf (romacs-agent-caught-up parent) nil)
         (romacs-agent-ui--see-failed-children parent '(:type input :time 400.0))
