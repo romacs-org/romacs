@@ -1,5 +1,6 @@
-//! Markdown in buffers: a region parsed as one document (`crate::markdown`),
-//! its runs written as `face` properties and its blocks returned as Lisp
+//! Markdown in buffers: a region parsed as one document, or a buffer by the
+//! blocks its index (`crate::markdown::Index`) says hold a region; the runs
+//! written as `face` properties, blocks, links and code returned as Lisp
 //! values. Positions here are the buffer's; the module's are byte offsets
 //! into the region's text.
 use super::{Fault, Leaf};

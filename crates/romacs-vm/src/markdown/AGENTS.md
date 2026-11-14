@@ -1,7 +1,7 @@
 # crates/romacs-vm/src/markdown
 Romacs's one Markdown mechanism: pulldown-cmark parses CommonMark with GFM
 tables, strikethrough and task lists, and this module turns its events into
-face runs, block structure and table grids.
+face runs, block structure and table grids, and keeps a buffer's block index.
 
 ## Boundary
 - Functions here are pure over a `&str`, and positions are byte offsets into
@@ -9,7 +9,10 @@ face runs, block structure and table grids.
   `crates/romacs-vm/src/prim/leaf/markdown.rs`, the primitives to
   `crates/romacs-vm/src/prims/markdown.rs`.
 - Faces, and which kind of element gets which (`romacs-markdown-faces`),
-  belong to `lisp/romacs/romacs-markdown.el`.
+  belong to `lisp/romacs/romacs-markdown.el`; the editing mode is
+  `lisp/romacs/romacs-markdown-mode.el`.
+- A buffer's `Index` lives on its text (`crates/romacs-vm/src/text.rs`,
+  `edit_derived`), empty until Markdown is asked of it; it holds no text.
 - The dialect is `spans::options()` alone.
 - Markdown anywhere in Romacs goes through here: no second parser or regexp
   fontifier for it.
@@ -21,13 +24,17 @@ face runs, block structure and table grids.
   last call refaces the document whole.
 - Runs are ascending and disjoint, and each run's kinds come innermost first,
   as a `face` list orders them; markup is innermost.
-- The face writes are silent: `romacs-markdown--fontify` refuses to run
-  unless modification hooks are inhibited and undo is off.
+- The face writes are silent: the fontify primitives refuse to run unless
+  modification hooks are inhibited and undo is off.
+- `Index::sync` leaves the block starts a fresh read of the text finds
+  (`index_follows_edits`); what it read again outside the asked blocks
+  loses `fontified`, so redisplay asks for it.
 
 ## Tests
 - `python3 tools/dev-loop romacs-vm --profile gate -E 'test(markdown)'`.
 - On a built host, `python3 tools/test-ert --file
   test/romacs/lisp/romacs-markdown-tests.el --file
+  test/romacs/lisp/romacs-markdown-mode-tests.el --file
   test/romacs/lisp/romacs-agent-markdown-tests.el`.
 - A new kind of element: a `Kind` variant in `Kind::ALL`, its default face
   in `lisp/romacs/romacs-markdown.el`, and a test by kind.
@@ -41,5 +48,6 @@ face runs, block structure and table grids.
 ## Decisions
 - pulldown-cmark over tree-sitter-md: tree-sitter-md agreed with the spec
   examples on 89.6% and cost about 1G instructions a key on a 1 MB file.
-  pulldown-cmark passes the examples. It parses a region whole; `restart`
-  limits only which faces are written again.
+  pulldown-cmark passes the examples. A region is parsed whole and `restart`
+  limits which faces are written again; a buffer is parsed by the blocks its
+  index says hold the asked region.

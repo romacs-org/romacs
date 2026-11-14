@@ -200,7 +200,8 @@ buffer, as their languages."
 Only `face' changes, and no undo is recorded.  With FROM, the text before
 FROM has not changed since the last call on this region: the blocks from
 the one before FROM's are refaced, the others are left as they are.
-Return the position the faces were rewritten from."
+Code blocks are coloured as their language.  Return the position the
+faces were rewritten from."
   (with-silent-modifications
     (pcase-let ((`(,start . ,codes) (romacs-markdown--fontify beg end romacs-markdown-faces from)))
       (romacs-markdown--colour-codes codes)
