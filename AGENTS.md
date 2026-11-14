@@ -20,6 +20,29 @@ measure for a text-terminal display. Romacs *contains* a terminal emulator
 program. Pinned GNU may be run `-nw` as an oracle when no GUI comparison is
 possible; say so where you do.
 
+## Where a rule goes
+
+- A rule that holds across the repository goes in this file.
+- A rule about one subsystem (its boundary, its contracts, how to test it, its
+  traps, its local decisions) goes in that subsystem's own `AGENTS.md`, beside
+  its code, and never here. Read the ones over the paths you touch:
+  `python3 tools/lib/agents_md.py notes` prints them for a branch, and so does
+  the MCP tool `romacs_dev_guide` given a worktree.
+- A module's file opens with `# ` and its directory from the root (as
+  `# crates/romacs-vm`), then says in a line or two what the module is. Its
+  sections, each only when it has something to say: `## Boundary` (what it owns
+  and what it may not touch), `## Contracts` (what its callers rely on),
+  `## Tests` (the commands that check a change to it), `## Traps` (what has
+  bitten), `## Decisions` (what was decided here, and why).
+- It stays short, about 40 lines and at most 60, and repeats nothing of this
+  file. A rule that comes to hold for two modules moves here.
+- What a file names in backticks must exist: a path from the repository root, a
+  make target, a package's test target, a live harness. An upper-case word is a
+  placeholder. `python3 tools/lib/agents_md.py check` holds every file to it,
+  and `python3 tools/dev-check` runs that.
+- No list of the module files is kept: `python3 tools/lib/agents_md.py list`
+  prints them.
+
 ## Development
 
 - Optimize for useful capabilities, easy modification, and a short feedback loop.
@@ -60,7 +83,7 @@ possible; say so where you do.
   (`Cell`, `RefCell`, `Mutex`, `OnceLock`, ...) around what it holds carries
   `// CELL(Class)` in the comment lines directly above it: what the collector
   must know of it, `Plain` when it holds no Lisp value. The classes are `Behind`'s
-  in `tests/no_remote_references.rs`, which checks each.
+  in `crates/romacs-vm/tests/no_remote_references.rs`, which checks each.
 - A host query or effect (files, environment, clocks, processes) outside
   `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
   comment lines directly above it; the `host_boundary_lint` test checks each.
@@ -82,7 +105,7 @@ possible; say so where you do.
 - `tools/lib/smells.py` (also run by `tools/check-derived`) counts the
   smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines,
   unsafe sites, every rustc and Clippy pedantic warning by lint, tracked files
-  that say a tool wrote them, and primitives declared outside `src/prims/` or
+  that say a tool wrote them, and primitives declared outside `crates/romacs-vm/src/prims/` or
   through lib.rs's own enum. It holds the workspace's totals to the merge-base
   with the trunk (`ROMACS_BASE`, default `beta`), both counted from the trees:
   a total above the merge-base's fails, a drop needs no record, and nothing
@@ -183,10 +206,10 @@ the pinned oracle.
 
 The gates, small and whole for each side:
 
-- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
-  in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
-  everything, so give a branch of a branch its real base.
+- Rust, small: `make gate-small`. The tests the change since beta, or since
+  `BASE=REV`, can reach, and the structural rules whatever changed: one map from
+  paths to tests and harnesses, `tools/lib/impact.py` (tools/AGENTS.md). A change it
+  cannot map runs everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
 - Lisp, one module: `make check-MODULE`.
 - Lisp, whole: `make check`.
@@ -198,7 +221,7 @@ The other commands:
   (`crates/romacs-vm/tests/all/`), so a check builds one executable, not one a file. The gates build and
   run what `python3 tools/lib/test_modules.py targets romacs-vm` prints, and a test is `FILE::TEST_NAME`
   there. `all` lists the directory's files when it builds; a file that cannot be a module is named,
-  with its reason, in `tests/all/standalone.txt`.
+  with its reason, in `crates/romacs-vm/tests/all/standalone.txt`.
 - Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
@@ -292,8 +315,8 @@ standalone Cargo execution without it.
   `beta` in as it moves.
 - Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
   in a Romacs session): the merge forecast with `beta`, tracked generated files,
-  the lint of the Lisp the branch touches, and the structural rules, each finding
-  with its fix.
+  the lint of the Lisp the branch touches, and the Rust tests the change can reach
+  (`tools/lib/impact.py`), each finding with its fix.
 - A branch lands through the merge queue: signed commits, the full check, then
   a submitted request. The queue merges requests onto `beta` in order and
   reruns what each merge changes.

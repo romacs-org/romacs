@@ -40,6 +40,9 @@ mod exit;
 mod preparing;
 mod quit;
 mod client;
+#[cfg(test)]
+#[path = "../tests/support/home.rs"]
+mod test_home;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -1727,9 +1730,10 @@ fn evaluate(
                     for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
                 }
             }
-            // Pixels landed, a parse a window waits on did, or a publication
-            // left images to send: paint again.
-            if vm.land_images()? || vm.land_treesit() || images.borrow().behind() { live_presentation.changed(); }
+            // Pixels landed, a parse a window waits on did, a publication
+            // left images to send, or the renderer lost its images (a
+            // device reset woke this wait): paint again.
+            if vm.land_images()? || vm.land_treesit() || images.borrow().must_repaint(sender.as_ref()) { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }

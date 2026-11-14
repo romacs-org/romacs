@@ -17,6 +17,7 @@ pub mod backend;
 pub(crate) mod clipboard;
 pub mod host_types;
 mod menu_bar;
+pub mod input_bridge;
 pub mod paint_host;
 mod presentation;
 mod presentation_feedback;

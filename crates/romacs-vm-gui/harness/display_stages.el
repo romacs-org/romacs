@@ -146,6 +146,29 @@ Org's own news file, whose 15 headings fold 329 KB."
     (goto-char (point-min))
     (current-buffer)))
 
+(defun display-stages--image (name)
+  "A buffer NAME showing a large image between two lines, decoded; return
+it.  The image is an SVG of 3000x2000 pixels and 4,000 circles, sized by
+its root so that it decodes off the evaluator, shown at most 600 pixels
+wide; `image-size' waits for its decode."
+  (let ((svg (with-temp-buffer
+               (insert "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"3000\" height=\"2000\">")
+               (dotimes (i 4000)
+                 (insert (format "<circle cx=\"%d\" cy=\"%d\" r=\"%d\" fill=\"#%06x\" fill-opacity=\"0.5\"/>"
+                                 (% (* i 7919) 3000) (% (* i 104729) 2000) (+ 20 (% i 180)) (% (* i 40503) #x1000000))))
+               (insert "</svg>")
+               (buffer-string))))
+    (with-current-buffer (get-buffer-create name)
+      (erase-buffer)
+      (insert "Before the image\n")
+      (insert-image (create-image svg 'svg t :max-width 600))
+      (insert "\nAfter the image\n")
+      (let ((size (image-size (create-image svg 'svg t :max-width 600) t)))
+        (unless (equal size '(600 . 400))
+          (error "The stages image decoded as %S, not 600x400" size)))
+      (goto-char (point-min))
+      (current-buffer))))
+
 (defun display-stages--elisp (name n)
   "An Emacs Lisp buffer NAME of N generated forms, point mid-buffer at a
 line's end; return it."
@@ -161,6 +184,10 @@ line's end; return it."
 ;; A timer ran and nothing changed: the frame is frozen and compared.
 (display-stages-scenario plain-idle
   :setup (display-stages--show (scaling--lines-buffer "stages" 20000))
+  :body nil)
+;; The same in a window showing a large image whose decode has landed.
+(display-stages-scenario image-idle
+  :setup (display-stages--show (display-stages--image "stages"))
   :body nil)
 ;; The same in an agent chat of 1,000-character lines.
 (display-stages-scenario chat-idle

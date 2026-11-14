@@ -1,3 +1,4 @@
+use crate::thread_comm::Reply;
 use super::*;
 
 struct BlockingClipboard {
@@ -74,25 +75,22 @@ impl ClipboardBackend for ExpiringClipboard {
 fn submitting_a_slow_native_read_never_blocks_the_caller() {
     let (started, has_started) = crossbeam_channel::bounded(1);
     let (release, may_finish) = crossbeam_channel::bounded(1);
+    let (answers, result) = crossbeam_channel::unbounded();
     let service = ClipboardService::with_backend(BlockingClipboard {
         started,
         release: may_finish,
-    });
-    let (reply, result) = crossbeam_channel::bounded(1);
+    }, answers);
 
     service.submit(ClipboardCommand::GetText {
         selection: ClipboardSelection::Clipboard,
         expires_at: std::time::Instant::now() + Duration::from_secs(5),
-        reply,
+        request: 1,
     });
 
     has_started.recv().unwrap();
-    assert_eq!(
-        result.try_recv(),
-        Err(crossbeam_channel::TryRecvError::Empty)
-    );
+    assert!(result.try_recv().is_err());
     release.send(()).unwrap();
-    assert_eq!(result.recv().unwrap(), Ok(Some("released".to_owned())));
+    assert_eq!(reply(&result, 1), Reply::Text(Ok(Some("released".to_owned()))));
 }
 
 #[test]
@@ -102,7 +100,7 @@ fn service_shutdown_is_bounded_even_when_native_backend_drop_stalls() {
     let service = ClipboardService::with_backend(BlockingDropClipboard {
         drop_started,
         release_drop: may_finish,
-    });
+    }, crossbeam_channel::unbounded().0);
 
     let started = std::time::Instant::now();
     drop(service);
@@ -120,35 +118,42 @@ fn mutation_that_expires_behind_a_slow_read_is_never_executed() {
     let (read_started, has_started) = crossbeam_channel::bounded(1);
     let (release_read, may_finish) = crossbeam_channel::bounded(1);
     let (writes, recorded_writes) = crossbeam_channel::unbounded();
+    let (answers, result) = crossbeam_channel::unbounded();
     let service = ClipboardService::with_backend(ExpiringClipboard {
         read_started,
         release_read: may_finish,
         writes,
-    });
-    let (read_reply, read_result) = crossbeam_channel::bounded(1);
+    }, answers);
     service.submit(ClipboardCommand::GetText {
         selection: ClipboardSelection::Clipboard,
         expires_at: std::time::Instant::now() + Duration::from_secs(5),
-        reply: read_reply,
+        request: 1,
     });
     has_started.recv().unwrap();
 
-    let (set_reply, set_result) = crossbeam_channel::bounded(1);
     service.submit(ClipboardCommand::SetText {
         selection: ClipboardSelection::Clipboard,
         text: Some("must not be published".to_owned()),
         expires_at: std::time::Instant::now(),
-        reply: set_reply,
+        request: 2,
     });
     release_read.send(()).unwrap();
 
-    assert_eq!(read_result.recv().unwrap(), Ok(None));
+    assert_eq!(reply(&result, 1), Reply::Text(Ok(None)));
     assert_eq!(
-        set_result.recv().unwrap(),
-        Err("clipboard request expired before execution".to_owned())
+        reply(&result, 2),
+        Reply::Done(Err("clipboard request expired before execution".to_owned()))
     );
     assert_eq!(
         recorded_writes.try_recv(),
         Err(crossbeam_channel::TryRecvError::Empty)
     );
+}
+
+/// The answer to REQUEST, as the worker sent it.
+fn reply(answers: &crossbeam_channel::Receiver<crate::thread_comm::Fact>, request: u64) -> Reply {
+    match answers.recv_timeout(Duration::from_secs(5)).unwrap() {
+        crate::thread_comm::Fact::Reply { request: answered, reply } if answered == request => reply,
+        other => panic!("expected the answer to {request}, got {other:?}"),
+    }
 }

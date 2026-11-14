@@ -1,17 +1,11 @@
-use romacs_vm::Vm;
 use std::path::Path;
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
-use gnu_ert_vm::bootstrapped_with;
-
-fn bootstrapped(root: &Path) -> Vm {
-    bootstrapped_with(root, "lisp/romacs/romacs-loadup-bootstrap.el")
-}
+use gnu_ert_vm::bootstrapped;
 
 #[test]
 fn complete_gnu_ert_dependency_closure() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped(&root);
+    let mut vm = bootstrapped();
     assert!(vm.load_report()["steps"].as_array().unwrap().iter().all(|step| step["status"] == "ok"), "strict ERT bootstrap retained a failed load form");
     assert_eq!(vm.eval_source("(list (featurep 'ert) (fboundp 'ert-run-tests-batch))").unwrap().display().unwrap(), "(t t)");
     assert_eq!(vm.eval_source("(list (featurep 'mule) (fboundp 'sgml-html-meta-auto-coding-function))").unwrap().display().unwrap(), "(t t)");
@@ -25,8 +19,7 @@ fn complete_gnu_ert_dependency_closure() {
 // (DIVERGENCES.md VM2-UNIDATA1), give pinned GNU's property values.
 #[test]
 fn unicode_character_properties_match_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped(&root);
+    let mut vm = bootstrapped();
     vm.eval_source("(load \"international/charprop.el\" nil t t)").unwrap();
     let source = "(prin1-to-string (list (mapcar (lambda (c) (mapcar (lambda (p) (get-char-code-property c p)) '(name general-category decomposition bidi-class old-name canonical-combining-class mirroring uppercase))) '(?a #xE9 #xAC01 #xD7A3 #x4E00 #x1F600 #x5D0 #x558 #xFB01 #x2160 #xE0100 #x300)) (mapcar (lambda (p) (char-code-property-description p (get-char-code-property #x5D0 p))) '(general-category bidi-class canonical-combining-class))))";
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
@@ -41,8 +34,7 @@ fn unicode_character_properties_match_gnu() {
 // coding.c's charset coding type, through mule-conf.el's definitions.
 #[test]
 fn charset_coding_systems_match_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped(&root);
+    let mut vm = bootstrapped();
     vm.eval_source("(progn (load \"language/european.el\" nil t t) (load \"language/chinese.el\" nil t t))").unwrap();
     let source = "(prin1-to-string (list (decode-coding-string \"\\341\" 'iso-8859-15) (decode-coding-string \"a\\244\\341\\r\\nb\" 'iso-8859-15-dos) (encode-coding-string \"a\\u00e1\\u20ac\\u0100\" 'iso-8859-15) (encode-coding-string \"\\u00e1\" 'iso-8859-2) (decode-coding-string \"\\x81 a\\xe9\" 'windows-1252) last-coding-system-used (encode-coding-string (string #x3fff81 ?a) 'latin-1) (decode-coding-string \"\\244\\242\" 'chinese-gbk) (encode-coding-string \"\\u4e00\" 'chinese-gbk) (decode-coding-string \"\\201\" 'chinese-gbk) (decode-coding-string \"a\" 'iso-8859-15) (decode-coding-string \"\\xe9\\xe9\" 'cp437)))";
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
@@ -59,8 +51,7 @@ fn charset_coding_systems_match_gnu() {
 // pinned GNU's. Each case writes the file FILE, named by its extension.
 #[test]
 fn write_region_coding_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-write-coding-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let cases: [(&str, &str); 24] = [
@@ -130,8 +121,7 @@ fn write_region_coding_matches_gnu() {
 // must be pinned GNU's.
 #[test]
 fn insert_file_contents_coding_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-insert-coding-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // Only a local buffer-file-coding-system: GNU's startup sets the default
@@ -229,8 +219,7 @@ fn insert_file_contents_coding_matches_gnu() {
 // ISO-2022 codec or raw bytes as eight-bit characters.
 #[test]
 fn insert_file_contents_decodes_as_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-insert-refuse-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // A cookie-less Latin-1 file reads as in pinned GNU: GNU's walk rejects
@@ -274,8 +263,7 @@ fn insert_file_contents_decodes_as_gnu() {
 // (VM2-COMPOSE1) instead of answering nil.
 #[test]
 fn find_composition_refuses_compositions_it_cannot_build() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     for (form, kind) in [
         ("(find-composition-internal 0 1 \"e\\u0301x\" nil)", "with automatic composition"),
         ("(progn (set-window-buffer nil (get-buffer-create \"rt-c\")) (set-buffer \"rt-c\") (insert \"e\\u0301x\") (find-composition-internal 1 nil nil nil))", "with automatic composition"),
@@ -292,8 +280,7 @@ fn find_composition_refuses_compositions_it_cannot_build() {
 
 #[test]
 fn write_region_refuses_unsupported_conversion_before_opening() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-write-refuse-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let setup = r#"(defvar rt-pre-called nil) (defalias 'rt-pre-write (lambda (_from _to) (setq rt-pre-called t) (goto-char (point-min)) (insert "PRE"))) (define-coding-system 'rt-pre-utf-8 "Pre." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :pre-write-conversion 'rt-pre-write) (define-coding-system 'rt-tbl-utf-8 "Tbl." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :encode-translation-table (make-translation-table '((?a . ?b))))"#;
@@ -326,8 +313,7 @@ fn write_region_refuses_unsupported_conversion_before_opening() {
 // restored on return, error and throw unless the buffer was killed.
 #[test]
 fn save_restriction_unibyte_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let setup = r#"(defmacro rt-ub (&rest body)
   `(with-temp-buffer (set-buffer-multibyte nil) (insert "abcdef") (narrow-to-region 3 5) (goto-char 4)
      (list (condition-case e (progn ,@body) (error (list 'E e))) (point-min) (point-max) (point) (save-restriction (widen) (buffer-string)))))"#;
@@ -370,8 +356,7 @@ fn save_restriction_unibyte_matches_gnu() {
 // substrings are unibyte. GNU's coding decision runs set-auto-coding there.
 #[test]
 fn save_excursion_unibyte_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let setup = r#"(defmacro rt-ux (&rest body)
   `(with-temp-buffer (set-buffer-multibyte nil) (insert "ab\351def") (goto-char 4)
      (list (condition-case e (progn ,@body) (error (list 'E e))) (point) (buffer-string))))"#;
@@ -400,8 +385,7 @@ fn save_excursion_unibyte_matches_gnu() {
 // The runtime pieces Gnosis and emacs-hermes reach, on the full loadup chain.
 #[test]
 fn daily_driver_load_slice_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let scratch = std::env::temp_dir().join(format!("rt-recursive-load-{}.el", std::process::id()));
     std::fs::write(&scratch, ";;; -*- lexical-binding: t -*-\n(defvar rt-n 0)\n(setq rt-n (1+ rt-n))\n(when (< rt-n 10) (load load-file-name nil t t))\n").unwrap();
     let recursive = format!("(list (condition-case e (load {:?} nil t t) (error (list (car e) (cadr e) (length (cddr e))))) rt-n)", scratch.to_str().unwrap());
@@ -848,8 +832,7 @@ fn daily_driver_load_slice_matches_gnu() {
 // boundaries and amalgamation give GNU's buffer-undo-list.
 #[test]
 fn edit_undo_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let expressions = [
         r###"(with-temp-buffer (buffer-enable-undo) (insert "hello") (undo-boundary) (insert " world") (undo-boundary) (goto-char 3) (delete-char 2) (undo-boundary) (put-text-property 1 3 'face 'bold) (undo-boundary) (let ((states (list (buffer-string))) (last-command nil)) (undo) (setq states (cons (buffer-string) states)) (let ((last-command 'undo)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states))) (list (nreverse states) (point) (buffer-modified-p))))"###,
         r###"(with-temp-buffer (buffer-enable-undo) (insert "abcdef") (undo-boundary) (let ((m (copy-marker 3)) (n (copy-marker 4 t))) (delete-region 2 5) (undo-boundary) (primitive-undo 1 (cdr buffer-undo-list)) (list (buffer-string) (marker-position m) (marker-position n) (point))))"###,
@@ -905,8 +888,7 @@ fn edit_undo_matches_gnu() {
 // with-timeout can end a wait for a process that never answers.
 #[test]
 fn process_waits_run_timers_like_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let source = r###"(prin1-to-string
  (progn (setq default-directory (file-name-as-directory (getenv "TMPDIR")))
  (list (let ((x 0)) (run-at-time 0.02 nil (lambda () (setq x 1))) (while (= x 0) (accept-process-output nil 0.01)) x)
@@ -931,8 +913,7 @@ fn process_waits_run_timers_like_gnu() {
 // idle timers wait and `current-idle-time' stays nil. Pinned GNU's answers.
 #[test]
 fn timer_order_in_waits_matches_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let source = r###"(prin1-to-string
  (list (let ((log nil))
          (run-at-time 0.03 nil (lambda () (push 'c log)))
@@ -976,8 +957,7 @@ fn timer_order_in_waits_matches_gnu() {
 #[test]
 fn file_names_links_and_copies_match_gnu() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-file-links-{}", std::process::id()));
     const OLD: i64 = 1_000_000_000;
     let fixture = || {
@@ -1120,8 +1100,7 @@ fn file_names_links_and_copies_match_gnu() {
 #[test]
 fn fileio_defuns_match_gnu() {
     use std::os::unix::fs::PermissionsExt;
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("fileio-defuns-{}", std::process::id()));
     let clear = || {
         if dir.join("locked").exists() { std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap(); }
@@ -1213,8 +1192,7 @@ fn fileio_defuns_match_gnu() {
 // pinned GNU's, along with the values and DIR's files afterwards.
 #[test]
 fn file_name_handlers_match_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("fnhandlers-{}", std::process::id()));
     let fixture = || {
         let _ = std::fs::remove_dir_all(&dir);
@@ -1298,8 +1276,7 @@ fn file_name_handlers_match_gnu() {
 // GNU's.
 #[test]
 fn default_directory_and_expansion_match_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = bootstrapped();
     let dir = std::env::temp_dir().join(format!("rt-default-directory-{}", std::process::id()));
     let fixture = || {
         let _ = std::fs::remove_dir_all(&dir);
@@ -1400,8 +1377,7 @@ fn default_directory_and_expansion_match_gnu() {
 // method, which GNU's cl-lib.elc defines because cl-generic is dumped.
 #[test]
 fn ert_bootstrap_preloads_match_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped(&root);
+    let mut vm = bootstrapped();
     let source = "(progn (require 'cl-lib) (cl-deftype rt-digit () '(integer 0 9)) (cl-defgeneric rt-kind (x)) (cl-defmethod rt-kind ((_x rt-digit)) 'digit) (cl-defmethod rt-kind (_x) 'other) (prin1-to-string (list (mapcar #'fboundp '(define-fringe-bitmap font-lock-add-keywords move-to-left-margin)) (mapcar #'boundp '(use-hard-newlines vc-directory-exclusion-list)) (consp image-load-path) custom-delayed-init-variables (rt-kind 3) (rt-kind 30))))";
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();

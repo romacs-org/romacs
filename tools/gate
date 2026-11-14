@@ -659,41 +659,24 @@ def mirror_files(root):
             for p in root.rglob('*')}
 
 
-# The rules a change can break anywhere, which no module's name would select:
-# what may run Lisp, what may hold a value across it, what each primitive
-# declares, which derived files match.  Together a few minutes at worst, of which
-# compile_boundaries, the compile-fail fixtures of the rooting rules, is most.
-STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules', 'romacs-vm::no_remote_references', 'romacs-vm::heap_boundary',
-              'romacs-vm::oclosure_boundary', 'romacs-vm::gc_threads_forbidden', 'romacs-vm::primitive_registry',
-              'romacs-vm::production_registry', 'romacs-vm::host_boundary_lint', 'romacs-vm::primitive_gc_boundary',
-              'romacs-gui-tests::harness_contract')
+def impact(root=None):
+    """tools/lib/impact.py as a module, the one map from changed paths to what
+    must run: ROOT's, or the one beside this file. Loaded when asked: a run's
+    frozen copy of this file selects nothing."""
+    import importlib.util
+    path = pathlib.Path(root) / 'tools/lib/impact.py' if root else pathlib.Path(__file__).resolve().parent / 'lib/impact.py'
+    spec = importlib.util.spec_from_file_location('romacs_impact', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-# The structural rules whose compile-fail fixtures run the compiler: minutes
-# when their inputs changed, where the rest take seconds once the test target
-# is built. A check a lane runs before it submits leaves them to the queue.
-SLOW_RULES = ('romacs-vm::compile_boundaries', 'romacs-vm::primitive_gc_boundary')
-
-# A rule that scans one crate's sources, kept as a unit test of that crate:
-# its package, and the nextest filter of the rule.  It runs when the crate
-# changes, so a small gate does not build every such crate's tests.
-CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test(/(^|::)time_discipline_test::/)'}
-
-
-# The packages whose test files are also modules of one `all` target
-# (tools/lib/test_modules.py's PACKAGES).
-ALL_TARGETS = ('romacs-vm',)
-
-
-def test_file(binary):
-    """Nextest filter for the tests of the test file BINARY, `PACKAGE::FILE`:
-    its own target and, in a package that has an `all` target, its module
-    there (tools/lib/test_modules.py). A run builds one of the two. Nextest
-    refuses a filter naming a binary no package has, so a package without
-    `all` is not asked for one."""
-    package, file = binary.split('::')
-    alone = f'binary_id({binary})'
-    return f'{alone} | (binary_id({package}::all) & test(/^{file}::/))' if package in ALL_TARGETS else alone
+def __getattr__(name):
+    """The structural rules and the test-file filter, which tools/dev-check
+    reads here: impact.py's."""
+    if name in ('STRUCTURAL', 'SLOW_RULES', 'CRATE_RULES', 'test_file'):
+        return getattr(impact(), name)
+    raise AttributeError(name)
 
 
 def trunk(wt, base='beta'):
@@ -711,43 +694,26 @@ def changed_names(wt, base='beta'):
     return names | set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
 
 
+def filter_for(names, root=None):
+    """Nextest filter for a change to the paths NAMES of the tree at ROOT (by
+    default this file's): what they can reach (tools/lib/impact.py); None when
+    that is everything. The train asks it of a merged tree's gate."""
+    root = pathlib.Path(root) if root else pathlib.Path(__file__).resolve().parents[1]
+    selector = impact(root)
+    return selector.select(names, root, selector.metadata_of(root))['filter']
+
+
 def changed_filter(wt, base='beta'):
-    """Nextest filter for the small gate: `filter_for` what changed since BASE."""
-    return filter_for(changed_names(wt, base))
+    """Nextest filter for the small gate: `filter_for` the paths WT changes
+    since its merge-base with BASE."""
+    return filter_for(changed_names(wt, base), wt)
 
 
 def crate_rules(names):
-    """The CRATE_RULES a change to the paths NAMES can break: those of the crates it touches."""
-    return {crate: rule for crate, rule in CRATE_RULES.items()
+    """The crate rules (impact.py's CRATE_RULES) a change to the paths NAMES
+    can break: those of the crates it touches."""
+    return {crate: rule for crate, rule in impact().CRATE_RULES.items()
             if any(name.startswith(f'crates/{crate}/') for name in names)}
-
-
-def filter_for(names):
-    """Nextest filter for a change to the paths NAMES: tests named after the
-    Rust modules changed, the structural rules whatever changed, and the
-    rules of the crates changed.
-
-    None (run everything) when a change cannot be mapped to test names. It
-    reads no repository, so a caller that knows the paths, a merge it is about
-    to make, selects exactly as the small gate would.
-    """
-    terms = set()
-    for name in names:
-        if name.startswith(('doc/', 'tools/tests/')) or name.endswith('.md') or name in ('tools/gate', 'Makefile'):
-            continue
-        m = re.match(r'crates/([^/]+)/tests/([^/]+)\.rs$', name)
-        if m:
-            terms.add(test_file(f'{m[1]}::{m[2]}'))
-            continue
-        m = re.match(r'crates/[^/]+/src/(.+)\.rs$', name)
-        if not m:
-            return None
-        parts = [p for p in m[1].split('/') if p not in ('mod', 'lib', 'main', 'tests')]
-        if not parts:
-            return None                           # crate root changed
-        leaf = re.sub(r'_test$', '', parts[-1])
-        terms.add(f'test(/(^|::){re.escape(leaf)}(_test)?(::|$)/)')
-    return ' | '.join(sorted(terms) + [test_file(binary) for binary in STRUCTURAL] + sorted(crate_rules(names).values()))
 
 
 def reuse(wt, args, group):

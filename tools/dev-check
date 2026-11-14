@@ -7,18 +7,25 @@
               deleted or moved it), with how many recent landings touched it:
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
+  agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
   lint        tools/romacs-lint on the files of lisp/romacs the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
-  structural  the rules a Rust change can break anywhere (tools/gate's
-              STRUCTURAL, and the rules of the crates changed), run on this
-              tree into CARGO_TARGET_DIR: seconds once the test target is
-              built. The rules that run the compiler (SLOW_RULES) are the
-              queue's. A change with no Rust skips the stage; so does
-              --no-structural.
+  tests       the Rust tests the change can reach, by tools/lib/impact.py (the
+              packages and test files it selects, and the structural rules),
+              run on this tree into CARGO_TARGET_DIR. The rules that run the
+              compiler (SLOW_RULES) and the live harnesses are the queue's, and
+              the summary names them. A change the map cannot place reaches
+              everything, which is the queue's full check: the stage says so
+              and does not pass. --no-tests leaves the stage out.
 
 One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
+
+cargo and cargo-nextest are looked for on PATH, then in the host's pins
+ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
+where its PATH lacks the toolchain. Found there, they are put on PATH for what
+this check runs.
 """
 import argparse
 from collections import Counter
@@ -35,7 +42,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/lib'))
+import agents_md  # noqa: E402
 import generated_files  # noqa: E402
+import impact  # noqa: E402
 import test_modules  # noqa: E402
 
 LANDINGS = 150
@@ -45,7 +54,7 @@ ADVICE = {'additive': 'both sides add at the same place; fix: merge the trunk in
 
 
 def load_gate(root=ROOT):
-    """tools/gate as a module: the structural rules are its to name."""
+    """tools/gate as a module: the trunk and the paths a branch changes are its to name."""
     loader = importlib.machinery.SourceFileLoader('romacs_gate', str(root / 'tools/gate'))
     gate = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(gate)
@@ -141,6 +150,17 @@ def generated(root):
     return ('FAIL', f'{len(found)} generated file(s) tracked', findings) if found else ('ok', 'no generated file is tracked', [])
 
 
+# The AGENTS.md files.
+
+def agents(root):
+    """(STATUS, SUMMARY, FINDINGS): every AGENTS.md names only what the tree has."""
+    found = agents_md.check(root)
+    count = len(agents_md.files(root))
+    if found:
+        return 'FAIL', f'{len(found)} stale line(s) in the AGENTS.md files', found
+    return 'ok', f'{count} AGENTS.md file(s) name nothing missing', []
+
+
 # The lint.
 
 def lisp_files(names, root):
@@ -175,26 +195,36 @@ def lint(root, names, trunk, binary):
     return lint_stage(done.returncode, done.stdout, done.stderr)
 
 
-# The structural rules.
+# The tests a change can reach.
 
-def plan(gate, names, root):
-    """The runs of the quick structural rules a change to NAMES can break, one
-    a package: (PACKAGE, CARGO TARGET FLAGS, NEXTEST FILTER). None for a change
-    that touches no crate: the rules read Rust."""
-    if not any(name.startswith('crates/') for name in names):
-        return []
-    files = {}
-    for binary in gate.STRUCTURAL:
-        if binary in gate.SLOW_RULES:
-            continue
-        package, file = binary.split('::')
-        files.setdefault(package, []).append(file)
-    runs = [(package,
-             test_modules.targets(root, package) if package in test_modules.PACKAGES
-             else [flag for file in mine for flag in ('--test', file)],
-             ' | '.join(gate.test_file(f'{package}::{file}') for file in mine))
-            for package, mine in files.items()]
-    return runs + [(crate, ['--lib'], rule) for crate, rule in sorted(gate.crate_rules(names).items())]
+def plan(answer, root):
+    """IMPACT's runs for ANSWER, one a package, less what only the queue can run:
+    the rules that run the compiler, and the tests that need the gate's own
+    evidence. None when the change reaches everything."""
+    runs = impact.runs(answer, root, leave=impact.SLOW_RULES)
+    return runs and [(package, flags, f'({rule}) & not {impact.GATE_ONLY}') for package, flags, rule in runs]
+
+
+def queue_runs(answer):
+    """What the queue runs of ANSWER that this check does not, as text."""
+    slow = ', '.join(name.split('::')[1] for name in impact.SLOW_RULES)
+    harnesses = ', '.join(sorted(answer['harnesses']))
+    return f'the queue runs {slow}, the parity ratchets' + (f' and the harnesses {harnesses}' if harnesses else '')
+
+
+def toolchain_path(env):
+    """The PATH ENV's commands find cargo and cargo-nextest on: ENV's own, with
+    the pinned directories (ROMACS_TOOLCHAIN_BIN, ROMACS_NEXTEST_BIN) after it
+    when it lacks either; None when neither way has both. Cargo looks for a
+    subcommand in its home's bin before PATH unless PATH names that directory,
+    so the PATH ends with it: the cargo-nextest found here is the one run."""
+    path = env.get('PATH', '')
+    pins = [env[name] for name in ('ROMACS_TOOLCHAIN_BIN', 'ROMACS_NEXTEST_BIN') if env.get(name)]
+    home = os.path.join(env.get('CARGO_HOME') or os.path.join(env.get('HOME', ''), '.cargo'), 'bin')
+    for candidate in (path, os.pathsep.join([path, *pins]) if pins else None):
+        if candidate is not None and all(shutil.which(tool, path=candidate) for tool in ('cargo', 'cargo-nextest')):
+            return candidate if home in candidate.split(os.pathsep) else os.pathsep.join([candidate, home])
+    return None
 
 
 def failures(log):
@@ -217,19 +247,50 @@ def failures(log):
     return sorted(found.items())
 
 
+def build_errors(log, limit=4):
+    """The compiler's errors in a nextest LOG, each its message and where it is: what a
+    run that did not build says, rather than leaving the log to be read."""
+    lines, found = log.splitlines(), []
+    for index, line in enumerate(lines):
+        # nextest's own closing words are no compiler error.
+        if re.match(r'error(\[E\d+\])?: ', line) and not line.startswith(('error: could not compile', 'error: command', 'error: test run failed')):
+            at = next((after.strip().removeprefix('--> ') for after in lines[index + 1:index + 4] if '-->' in after), '')
+            found.append(f'{at}: {line}' if at else line)
+    return list(dict.fromkeys(found))[:limit]
+
+
 def log_path(root):
     cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'romacs/dev-check'
     cache.mkdir(parents=True, exist_ok=True)
-    return cache / (re.sub(r'[^A-Za-z0-9_.-]', '-', str(root).strip('/')) + '-structural.log')
+    return cache / (re.sub(r'[^A-Za-z0-9_.-]', '-', str(root).strip('/')) + '-tests.log')
 
 
-def structural(root, gate, names, threads):
-    """(STATUS, SUMMARY, FINDINGS) of GATE's structural rules on ROOT's tree, for a change to the paths NAMES."""
-    runs = plan(gate, names, root)
-    if not runs:
-        return 'ok', 'no Rust changed: the rules read Rust', []
-    if not shutil.which('cargo'):
-        return 'SKIP', 'cargo is not on PATH', ['fix: run tools/dev-check from a shell with the toolchain']
+def tests(root, names, threads):
+    """(STATUS, SUMMARY, FINDINGS) of the tests a change to the paths NAMES can reach, on ROOT's tree."""
+    path = toolchain_path(os.environ)
+    if path is None:
+        return 'SKIP', 'incomplete: no cargo (neither PATH nor ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN has cargo and cargo-nextest)', [
+            'fix: set ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN to the pinned toolchain, or put it on PATH']
+    # What the stage runs finds the toolchain on PATH; its caller's PATH is put back.
+    before = os.environ.get('PATH')
+    os.environ['PATH'] = path
+    try:
+        return run_tests(root, names, threads)
+    finally:
+        if before is None:
+            del os.environ['PATH']
+        else:
+            os.environ['PATH'] = before
+
+
+def run_tests(root, names, threads):
+    """The tests stage on ROOT's tree, with the toolchain on PATH."""
+    answer = impact.select(names, root, impact.metadata_of(root))
+    runs = plan(answer, root)
+    if runs is None:
+        why = ', '.join(answer['reasons'][:3]) + (' ...' if len(answer['reasons']) > 3 else '')
+        return 'SKIP', f'the change reaches everything ({why}): the queue runs the full check', [
+            'fix: none needed; submit, or run `python3 tools/gate full` for the whole suite here']
     log, started, status = log_path(root), time.monotonic(), 0
     with log.open('w') as sink, tempfile.TemporaryDirectory(prefix='rdc-', dir=log.parent) as scratch:
         for package, flags, rule in runs:
@@ -240,15 +301,23 @@ def structural(root, gate, names, threads):
             sink.flush()
             status |= subprocess.run(command, cwd=root, env=dict(os.environ, TMPDIR=scratch), stdin=subprocess.DEVNULL,
                                      stdout=sink, stderr=subprocess.STDOUT).returncode
+    reached = f'{len(answer["packages"])} package(s) and {len(answer["files"])} test file(s) reached'
     spent = f'{time.monotonic() - started:.0f} s, log {log}'
     if status == 0:
-        left = ', '.join(binary.split('::')[1] for binary in gate.SLOW_RULES)
-        return 'ok', f'{len(runs)} package(s) hold ({spent}); the queue runs {left}', []
-    failed = failures(log.read_text(errors='replace'))
+        return 'ok', f'{reached} hold ({spent}); {queue_runs(answer)}', []
+    return failed_runs(log.read_text(errors='replace'), spent)
+
+
+def failed_runs(log, spent):
+    """(STATUS, SUMMARY, FINDINGS) of runs that failed, from their nextest LOG: the
+    tests that failed and the compiler's errors, either or both."""
+    failed, errors = failures(log), build_errors(log)
+    findings = [f'{test}: {" ".join(why)[:400] or "see the log"}' for test, why in failed] + \
+               [f'{error}; fix: make it compile' for error in errors]
     if not failed:
-        return 'FAIL', f'the rules did not build or run ({spent})', ['fix: read the log']
-    return 'FAIL', f'{len(failed)} rule(s) broken ({spent})', [
-        f'{test}: {" ".join(why)[:400] or "see the log"}' for test, why in failed]
+        return 'FAIL', f'the tests did not build or run ({spent})', findings or ['fix: read the log']
+    built = '; and a package did not build' if errors else ''
+    return 'FAIL', f'{len(failed)} test(s) failed of what the change reaches{built} ({spent})', findings
 
 
 def report(stages):
@@ -267,16 +336,17 @@ def report(stages):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
-    parser.add_argument('--no-structural', action='store_true', help='leave the structural rules out: they build test targets')
-    parser.add_argument('--threads', type=int, default=8, help='test workers of the structural run')
+    parser.add_argument('--no-tests', action='store_true', help='leave the tests out: they build test targets')
+    parser.add_argument('--threads', type=int, default=8, help='test workers of the tests stage')
     parser.add_argument('--binary', help='the Romacs the lint runs; default as tools/romacs-lint: $ROMACS_TEST_BINARY, else the gate build')
     args = parser.parse_args()
     gate = load_gate()
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
-    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('lint', *lint(ROOT, names, trunk, args.binary))]
-    if not args.no_structural:
-        stages.append(('structural', *structural(ROOT, gate, names, args.threads)))
+    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
+              ('lint', *lint(ROOT, names, trunk, args.binary))]
+    if not args.no_tests:
+        stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)
     print('\n'.join(lines))
     return status

@@ -89,17 +89,21 @@ impl CommandSender {
             // Cancellation is one coalescing bit, independent of FIFO capacity.
             pending.shutdown = true;
         } else {
-            // A paint is a mailbox: it replaces a paint the renderer has not
-            // taken, and goes behind what was sent since, so its producer
-            // never waits for drawing and the renderer draws the newest.
-            let superseded = matches!(command, RenderCommand::Paint(_))
-                .then(|| pending.queue.iter().position(|queued| matches!(queued, RenderCommand::Paint(_))))
-                .flatten();
-            if pending.queue.len() - usize::from(superseded.is_some()) >= limit.min(self.shared.capacity) {
+            // A paint is a mailbox per top-level frame: it replaces a paint
+            // of its own frame the renderer has not taken, and goes behind
+            // what was sent since, so its producer never waits for drawing
+            // and the renderer draws each frame's newest.  Another frame's
+            // paint is never replaced.
+            let superseded = paint_frame(&command)
+                .and_then(|frame| pending.queue.iter().position(|queued| paint_frame(queued) == Some(frame)));
+            if !exempt_from_capacity(&command)
+                && pending.queue.len() - usize::from(superseded.is_some()) >= limit.min(self.shared.capacity)
+            {
                 return Err(TrySendError::Full(command));
             }
             if let Some(index) = superseded { pending.queue.remove(index); }
             pending.queue.push_back(command);
+            coalesce_exempt(&mut pending.queue);
         }
         // Publish and notify under the same lock.
         let _ = self.wake.try_send(());
@@ -113,7 +117,7 @@ impl CommandSender {
                 Err(TrySendError::Full(full)) => command = full,
             }
             let mut pending = self.shared.pending.lock().unwrap();
-            while pending.receiver_alive && pending.queue.len() == self.shared.capacity {
+            while pending.receiver_alive && pending.queue.len() >= self.shared.capacity {
                 pending = self.shared.space.wait(pending).unwrap();
             }
         }
@@ -124,6 +128,52 @@ impl CommandSender {
         let pending = self.shared.pending.lock().unwrap();
         pending.queue.len() + usize::from(pending.shutdown)
     }
+}
+
+/// The top-level frame a paint draws, if COMMAND is one.
+fn paint_frame(command: &RenderCommand) -> Option<u64> {
+    match command {
+        RenderCommand::Paint(scene) => Some(scene.root.frame_placement.frame().get()),
+        _ => None,
+    }
+}
+
+/// Commands too small and rare to bound and never to be refused or kept
+/// waiting, though they keep their place in order: a frame's opacity
+/// setting (each setter counts, GNU's nil keeps the last scalar applied)
+/// and a window's destruction.  A producer of them never blocks on a
+/// render thread that may itself wait on the producer's input.
+fn exempt_from_capacity(command: &RenderCommand) -> bool {
+    matches!(
+        command,
+        RenderCommand::Window(super::WindowCommand::SetFrameAlpha { .. } | super::WindowCommand::DestroyWindow { .. })
+    )
+}
+
+/// Keep the exempt commands bounded without changing what they do, after
+/// the newest was queued: a frame's destruction once, and a frame's alpha
+/// setters only those that decide its state: the last, which sets its pair
+/// and limit, and the last to set each of its active and inactive alphas,
+/// which decide the scalar applied whatever its focus (a negative alpha,
+/// GNU's nil, keeps the scalar the setter before applied).  At most three
+/// setters and one destruction wait per frame however fast Lisp sets them.
+fn coalesce_exempt(queue: &mut VecDeque<RenderCommand>) {
+    use super::WindowCommand::{DestroyWindow, SetFrameAlpha};
+    let keep: Vec<bool> = (0..queue.len()).map(|index| match &queue[index] {
+        RenderCommand::Window(DestroyWindow { frame }) => !queue.iter().skip(index + 1)
+            .any(|later| matches!(later, RenderCommand::Window(DestroyWindow { frame: other }) if other == frame)),
+        RenderCommand::Window(SetFrameAlpha { frame, alpha, .. }) => {
+            let later: Vec<[f32; 2]> = queue.iter().skip(index + 1).filter_map(|later| match later {
+                RenderCommand::Window(SetFrameAlpha { frame: other, alpha, .. }) if other == frame => Some(*alpha),
+                _ => None,
+            }).collect();
+            later.is_empty() || (0..2).any(|side| alpha[side] >= 0.0 && later.iter().all(|next| next[side] < 0.0))
+        }
+        _ => true,
+    }).collect();
+    if keep.iter().all(|kept| *kept) { return; }
+    let mut keep = keep.into_iter();
+    queue.retain(|_| keep.next().unwrap_or(true));
 }
 
 fn startup_command(command: &RenderCommand, daemon: bool) -> bool {
