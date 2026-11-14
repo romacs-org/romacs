@@ -1614,8 +1614,9 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                                                       :time (gethash "t" record))))
               (setq events (cdr events)))
             (when (romacs-agent-caught-up session)
-              ;; A turn or a run ended: its state is kept.
-              (when ends (romacs-agent--keep-soon session))
+              ;; A turn or a run ended: its state is kept, as of the last
+              ;; record handled before the editor is idle.
+              (when (or ends (assq session romacs-agent--keeping)) (romacs-agent--keep-soon session))
               (romacs-agent--step session))))))))
 
 (defun romacs-agent--step-id (object)
@@ -2880,9 +2881,10 @@ wrote or read it: it is not written again for the same seq.")
 (defun romacs-agent--kept-file (session)
   (expand-file-name "state.eld" (romacs-agent-dir session)))
 
-(defun romacs-agent--kept-text (session)
+(defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a
-field holds what cannot be read back (a buffer, a process)."
+field holds what cannot be read back (a buffer, a process).  STATE, when
+given, is its state as its records left it."
   (let ((layout (romacs-agent--slot-names 'romacs-agent)))
     (catch 'unreadable
       (let ((print-circle t) (print-length nil) (print-level nil)
@@ -2892,17 +2894,26 @@ field holds what cannot be read back (a buffer, a process)."
                ;; Folded from its journal (a fork's note), though its options are its manifest's.
                :forked (plist-get (romacs-agent-options session) :forked)
                :fields (cl-loop for slot in layout unless (memq slot romacs-agent--unkept)
-                                collect (cons slot (cl-struct-slot-value 'romacs-agent slot session)))))))))
+                                collect (cons slot (pcase slot
+                                                     ;; As its records left it, not as this
+                                                     ;; process's view of its connection has it.
+                                                     ('state (or state (romacs-agent-state session)))
+                                                     ;; A rollback's hold is this process's own.
+                                                     ('driver-state (romacs-agent--without
+                                                                     (romacs-agent-driver-state session)
+                                                                     '(:rolling-back)))
+                                                     (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
 
-(defun romacs-agent--keep (session)
+(defun romacs-agent--keep (session &optional state)
   "Write SESSION's state, as its records have folded it, to its directory:
 only the registered session's (a copy replaying them keeps nothing), and
-not again for the seq it was kept at."
+not again for the seq it was kept at.  STATE, when given, is its state as
+its records left it (`romacs-agent--keep-soon')."
   (let ((seq (romacs-agent-seq session)))
     (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
                (eq (romacs-agent-get (romacs-agent-id session)) session)
                (not (eql seq (gethash session romacs-agent--kept))))
-      (when-let* ((text (romacs-agent--kept-text session)))
+      (when-let* ((text (romacs-agent--kept-text session state)))
         (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
           (with-temp-file (concat file ".tmp") (insert text))
           (set-file-modes (concat file ".tmp") #o600)
@@ -2910,21 +2921,27 @@ not again for the seq it was kept at."
         (puthash session seq romacs-agent--kept)))))
 
 (defvar romacs-agent--keeping nil
-  "The sessions whose state is kept at the editor's next idle moment.")
+  "The sessions whose state is kept at the editor's next idle moment,
+each (SESSION SEQ STATE): the record it is kept as of, and its state as
+the records left it.")
 
 (defun romacs-agent--keep-soon (session)
   "Keep SESSION's state once the editor is idle: a write costs a few
 milliseconds, tens for a session with a long history, never in the middle
-of what the user is doing; several turn ends meanwhile are written once."
-  (unless (memq session romacs-agent--keeping)
-    (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
-    (push session romacs-agent--keeping)))
+of what the user is doing.  Its state is taken now, as its records leave
+it: a server's view of its connection (detached, ended) is laid over it
+after.  A record handled meanwhile takes this one's place."
+  (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
+  (setq romacs-agent--keeping (cons (list session (romacs-agent-seq session) (romacs-agent-state session))
+                                    (cl-remove session romacs-agent--keeping :key #'car))))
 
 (defun romacs-agent--keep-pending ()
-  "Keep the state of every session waiting to be kept."
-  (let ((sessions (nreverse romacs-agent--keeping)))
+  "Keep the state of every session waiting to be kept, as of the record it
+waits at."
+  (let ((waiting (nreverse romacs-agent--keeping)))
     (setq romacs-agent--keeping nil)
-    (mapc #'romacs-agent--keep sessions)))
+    (pcase-dolist (`(,session ,seq ,state) waiting)
+      (when (eql seq (romacs-agent-seq session)) (romacs-agent--keep session state)))))
 
 (defun romacs-agent--record-line-end (seq)
   "In the current buffer, bytes of a journal, the end of record SEQ's line
@@ -2953,8 +2970,13 @@ record SEQ (`romacs-agent--record-line-end')."
         (set-buffer-multibyte nil)
         (while (not found)
           (let ((start (max 0 (- size span))))
+            (widen)
             (erase-buffer)
             (insert-file-contents-literally journal nil start size)
+            ;; Begun inside a record: its part is no line's start.
+            (when (> start 0)
+              (goto-char (point-min))
+              (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (setq found (let ((end (romacs-agent--record-line-end seq)))
                           (cond (end (min size (+ start end)))
                                 ((= start 0) 'none))))

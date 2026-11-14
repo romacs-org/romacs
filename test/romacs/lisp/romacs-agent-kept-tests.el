@@ -188,11 +188,82 @@ contents, so two equal states print the same."
         (should-not romacs-agent--keeping)
         (romacs-agent--record session (nth 11 records))
         (romacs-agent--record session (nth 12 records))
-        (should (equal romacs-agent--keeping (list session)))
+        ;; Kept as of the last record handled before the editor is idle.
+        (should (equal romacs-agent--keeping (list (list session 13 'idle))))
         (should (= idle 1)))
       (romacs-agent-kept-tests--write dir (cl-subseq records 10 13) t)
       (romacs-agent--keep-pending)
       (should (= (plist-get (romacs-agent--read-kept session) :seq) 13)))))
+
+(ert-deftest romacs-agent-kept-an-end-for-a-busy-parent-survives-a-restart ()
+  ;; A child's turn end handed to a parent at work waits for the parent's
+  ;; turn: kept meanwhile and restarted, it is handed on again.
+  (romacs-agent-kept-tests--with
+    (let ((parent-id "a0a0a0a0-0000-4000-8000-000000000000"))
+      (romacs-agent--manifest-put (romacs-agent--make :dir dir) "options" (romacs-mcp--object "parent" parent-id))
+      (romacs-agent-kept-tests--write dir (cl-subseq (romacs-agent-kept-tests--claude) 0 12))
+      (cl-flet ((restart (then)
+                  (let ((romacs-agent-tools--handed (make-hash-table :test #'eq :weakness 'key))
+                        (romacs-agent-tools--pending (make-hash-table :test #'equal))
+                        (romacs-agent-tools--waking (make-hash-table :test #'equal)))
+                    (let ((child (romacs-agent-kept-tests--load dir))
+                          (parent (romacs-agent--make :id parent-id :harness 'claude :state 'running :dir root)))
+                      (puthash parent-id parent romacs-agent--sessions)
+                      ;; Its wake waits for its turn: none is scheduled here.
+                      (puthash parent-id t romacs-agent-tools--waking)
+                      (romacs-agent-tools--hand-on child)
+                      (funcall then child parent-id)))))
+        (restart (lambda (child _)
+                   ;; Kept while the end waits for the parent.
+                   (remhash child romacs-agent--kept)
+                   (romacs-agent--keep child)))
+        (restart (lambda (child parent-id)
+                   (should (equal (mapcar #'cadr (gethash parent-id romacs-agent-tools--pending)) '(12)))
+                   (should (equal (mapcar #'car (romacs-agent-ends child)) '(12)))))))))
+
+(ert-deftest romacs-agent-kept-is-the-records-state-not-the-connections ()
+  ;; Kept after a turn's end while no supervisor runs (the session shows
+  ;; detached), then its run's exit read on: the turn stays a success.
+  (romacs-agent-kept-tests--with
+    (let* ((records (cl-subseq (romacs-agent-kept-tests--claude) 0 12))
+           (exit (romacs-agent-kept-tests--record 13 "exit" 0)))
+      (romacs-agent-kept-tests--write dir records)
+      (should (eq (romacs-agent-state (romacs-agent-kept-tests--load dir)) 'detached))
+      (romacs-agent-kept-tests--write dir (list exit) t)
+      (let ((restored (romacs-agent-kept-tests--load dir)))
+        (romacs-agent-kept-tests--write twin (append records (list exit)))
+        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
+                          (romacs-agent--load twin))))
+          (should-not (romacs-agent-failed restored))
+          (should (equal (romacs-agent-reply restored) "hello"))
+          (should (equal (romacs-agent-kept-tests--state restored)
+                         (romacs-agent-kept-tests--state replayed))))))))
+
+(ert-deftest romacs-agent-kept-no-rollback-hold ()
+  ;; A rollback under way holds the session in this process alone.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (let ((session (romacs-agent-kept-tests--load dir)))
+      (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolling-back 'token))
+      (remhash session romacs-agent--kept)
+      (romacs-agent--keep session)
+      (should-not (plist-member (cdr (assq 'driver-state (plist-get (romacs-agent--read-kept session) :fields)))
+                                :rolling-back)))))
+
+(ert-deftest romacs-agent-kept-a-span-starting-inside-a-record ()
+  ;; The first span read from the journal's end starts inside a record,
+  ;; at a nested object that looks like a record's start.
+  (romacs-agent-kept-tests--with
+    (let* ((session (romacs-agent--make :dir dir))
+           (first "{\"note\":{\"type\":\"run\"},\"seq\":1,\"t\":1.5}\n")
+           (nested "{\"seq\":1,\"y\":0}")
+           (tail-head ",\"pad\":\"")
+           (tail-end "\"},\"seq\":2,\"t\":2.5}\n")
+           (pad (make-string (- 16384 (length nested) (length tail-head) (length tail-end)) ?b)))
+      (with-temp-file (expand-file-name "journal.jsonl" dir)
+        (set-buffer-multibyte nil)
+        (insert first "{\"out\":{\"a\":\"" (make-string 100 ?a) "\",\"z\":" nested tail-head pad tail-end))
+      (should (= (romacs-agent--journal-after session 1) (length first))))))
 
 (ert-deftest romacs-agent-kept-is-read-only-as-written ()
   ;; Another session record's layout, a seq its journal lacks, or a form
