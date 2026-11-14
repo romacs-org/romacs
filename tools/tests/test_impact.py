@@ -102,6 +102,18 @@ class Select(unittest.TestCase):
         self.assertNotIn('romacs-vm-gui', found['romacs-vm'][1])
         self.assertIsNone(impact.runs(self.select('Cargo.lock'), self.root))
 
+    def test_runs_can_leave_rules_out(self):
+        slow = impact.test_file('romacs-vm::compile_boundaries')
+        # A package the change does not reach runs its rules by name: a rule left is not named.
+        quick = {package: terms for package, _, terms in
+                 impact.runs(self.select('doc/x.org'), self.root, leave=('romacs-vm::compile_boundaries',))}
+        self.assertNotIn(slow, quick['romacs-vm'])
+        self.assertIn(impact.test_file('romacs-vm::reentry_sites'), quick['romacs-vm'])
+        # A package it reaches runs whole, less the rule left.
+        whole = {package: terms for package, _, terms in
+                 impact.runs(self.select('crates/romacs-vm/src/gc.rs'), self.root, leave=('romacs-vm::compile_boundaries',))}
+        self.assertEqual(whole['romacs-vm'], f'(package(romacs-vm)) & not ({slow})')
+
     def test_a_fixture_reaches_the_tests_that_name_it(self):
         self.assertEqual(set(self.select('crates/romacs-vm-gui/tests/fixtures/sample.el')['files']),
                          {'romacs-vm-gui::samples'})
