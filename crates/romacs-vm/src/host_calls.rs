@@ -81,13 +81,14 @@ const SIDES: &[(&str, Side)] = &[
     // presentation, the clipboard, a window made):
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
     ("sender.show_primary", Cross),
-    // and reads of state the render thread writes: its input channel,
-    // the latest rendered presentation, the lost images, the adapter, the
-    // pointer and what it saw of key repeat.
-    ("sender.input", Cross), ("sender.render_poll", Cross), ("sender.take_lost_images", Cross),
-    ("sender.images_reset_pending", Cross), ("sender.software_adapter", Cross), ("sender.pointer", Cross),
-    ("sender.take_key_repeats", Cross),
-    ("sender.model_renderer_live", Cross),
+    // and reads of what the evaluator's own input bridge keeps of the
+    // render thread's events (romacs-display-runtime `input_bridge'): the
+    // queue of the rest, the latest rendered presentation, the lost images,
+    // the adapter, the pointer, key-repeat timing and the model renderer.
+    ("sender.input", Own), ("sender.render_poll", Own), ("sender.take_lost_images", Own),
+    ("sender.images_reset_pending", Own), ("sender.software_adapter", Own), ("sender.pointer", Own),
+    ("sender.take_key_repeats", Own),
+    ("sender.model_renderer_live", Own),
 ];
 
 /// The host.rs results that are the process's own: its clocks, counters,

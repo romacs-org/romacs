@@ -21,6 +21,15 @@ class Counters(unittest.TestCase):
         with self.assertRaises(pk.Invalid):
             pk.perf_count('<not counted>,,instructions:u,5000,100.00,,', idle=True)
 
+    def test_a_count_takes_in_threads_started_inside_it_only_when_it_inherits(self):
+        # perf stat -t counts a thread the counted one starts while it runs:
+        # a decode worker started inside a phase is not the evaluator's work.
+        alone = pk.perf_stat(42, 'out.txt', inherit=False)
+        self.assertIn('--no-inherit', alone)
+        self.assertNotIn('--no-inherit', pk.perf_stat(42, 'out.txt', inherit=True))
+        self.assertEqual(alone[alone.index('-t') + 1], '42')
+        self.assertEqual(alone[alone.index('-o') + 1], 'out.txt')
+
 
 class Expectations(unittest.TestCase):
     def test_points_follow_insert_goal_column_and_forward_motion(self):

@@ -187,7 +187,7 @@ impl RenderApp {
                 let emacs_frame_id = frame.raw_id();
                 tracing::info!("DestroyWindow request: frame_id=0x{:x}", emacs_frame_id);
                 // A retired window's PointerLeft is discarded.
-                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.pointer.set(None); }
+                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.send_input(InputEvent::PointerOver { at: None }); }
                 // Cancel CPU preparation immediately, not after GPU readiness.
                 self.frame_windows.pending_creates.retain(|request| {
                     request.emacs_frame_id != emacs_frame_id
