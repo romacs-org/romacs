@@ -1,51 +1,48 @@
-# Test tools
+# tools
+The checks and runners of the tree: what a branch runs before it is submitted,
+and what the merge queue holds it to.
 
-What runs for a change, and how. The root AGENTS.md's testing rules hold here;
-this file says where each piece lives, so a tool gains no second copy of a rule.
+## Boundary
+- A check lives here as a command a person, a lane and the queue run alike; its
+  rules and lists live in `tools/lib/`, each with its tests in `tools/tests/`.
+- `tools/lib/impact.py` is the one map from changed paths to what must run: the
+  Rust tests (whole packages, single test files), the live harnesses, the
+  runtime Lisp for the Lisp tier, and the structural rules (`STRUCTURAL`,
+  `SLOW_RULES`, `CRATE_RULES`, `HARNESSES`). `tools/gate`, `tools/dev-check` and
+  the train's tier 1 ask it; `python3 -B tools/lib/impact.py plan` prints it for
+  a shell. A rule about what reaches what goes there, with a case in
+  `tools/tests/test_impact.py`; no tool keeps a path list of its own.
+- `tools/lib/test_modules.py` folds a package's test files into one executable,
+  `all`, or `gnu` for a file that boots GNU's Lisp; `targets` names what a check
+  builds.
+- `tools/gate` runs its inner half from a frozen copy of itself outside the
+  tree, so that half imports nothing from `tools/lib/`.
 
-## One map from a change to what must run
+## Contracts
+- A finding is one line that says where, what, and after `; fix:` how.
+  `tools/romacs-lint` compares findings without their line number and fix, so
+  a finding that only moved is not new.
+- A stage that could not run leaves its check incomplete, never passed:
+  `tools/dev-check` exits 2 for it, 1 for a failure.
+- A check holds a branch to its merge-base with the trunk, not to the trunk's
+  tip.
+- What `impact.py` cannot place runs everything, and it says which path did.
+  Within a crate's sources it selects the whole crate and its dependents: a
+  module-level guess can miss a test.
 
-`tools/lib/impact.py` answers what a change can reach: the Rust tests (whole
-packages, single test files), the live harnesses, the runtime Lisp for the Lisp
-tier, and the structural rules. Its docstring states the rule by path. The
-small gate (`tools/gate changed`, `make gate-small`), dev-check and the train's
-tier 1 ask it: import `select(paths, root, metadata)`; shell callers run
-`python3 -B tools/lib/impact.py select [--base REV] [PATH...]`, which prints the
-same answer as JSON.
+## Tests
+- `python3 tools/check-derived` runs the test files under `tools/tests/` that
+  no Rust test already runs (`tools/lib/python_tests.py` says which).
+- One file: `python3 -m unittest tools/tests/test_dev_check.py`.
 
-- A rule about what reaches what goes in `impact.py`, with a case in
-  `tools/tests/test_impact.py`. No tool keeps its own path list.
-- It reads the workspace graph from `cargo metadata --no-deps`; a new crate needs
-  no entry.
-- Within a crate's `src/` it selects the whole crate and its dependents: a
-  module-level guess can miss a test, and a missed test lands a break.
-- What it cannot place runs everything, and says which path did.
-- `STRUCTURAL`, `SLOW_RULES`, `CRATE_RULES` and `HARNESSES` live there too.
-  `tools/gate` forwards the first three, for callers that read them there.
+## Traps
+- Nextest refuses a whole filter over one `binary_id` no package has. Only a
+  package with an `all` test target is asked for it.
+- Git quotes a path that has a quote, a backslash or a byte past ASCII. Read
+  its NUL-delimited output (`-z`) wherever a path is used again.
 
-## Test targets
-
-`tools/lib/test_modules.py` folds a package's test files into one executable:
-`all`, or `gnu` for a file that boots GNU's Lisp (it includes
-`support/gnu_lisp.rs` or a file built on it), whose tests restore that boot from
-a world. `crates/romacs-vm-test-build` applies the same rule when the tests
-build. `targets` names what a check builds and runs; `equal` proves the folded
-targets hold exactly their files' tests.
-
-## Live harnesses
-
-`crates/romacs-vm-gui/harness/NAME_live.py`, each taking `--binary B --output
-DIR`, in a private headless compositor and HOME. A harness compares Romacs
-with pinned GNU through the editors' own state where it can
-(`parity_live.py`'s engines); it reads pixels only for what only pixels show.
-Its verdict rests on work (instructions, paints), not wall time, which load
-stretches. Which harnesses a change calls for is `impact.py`'s (`HARNESSES`,
-`HARNESS_RULES`).
-
-## The rest
-
-- `tools/gate`: the acceptance gate (full, focused, changed).
-- `tools/dev-check`: what would send a branch back, before it is submitted.
-- `tools/check-derived`: derived artifacts, floors and the Python tests.
-- `tools/test-ert`, `make check-MODULE`: bundled packages' ERT suites.
-- `tools/dev-loop`: focused crate tests during edits.
+## Decisions
+- The structural rules that run the compiler (`SLOW_RULES`) are the queue's:
+  `tools/dev-check` runs the rest of what `impact.py` selects.
+- A live harness's verdict rests on work (instructions, paints), not wall time,
+  which load stretches.

@@ -293,6 +293,53 @@ fn a_frame_waits_for_no_first_parse() {
     assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
 }
 
+/// romacs-treesit-code.el: a code block takes its language's faces in front
+/// of the faces it has, as a buffer of its own would give them, so an
+/// unclosed brace in one block leaves the next alone; a block that grows
+/// takes the faces of what it grew by; text in no buffer gets the same; a
+/// language with no grammar or mode leaves the text alone.
+#[test]
+fn code_blocks_take_their_languages_faces() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(load \"romacs-treesit-code\" nil t)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (set-buffer (get-buffer-create \"md\")) \
+        (insert \"intro\\nint b = {{\\nint c;\\n\") \
+        (put-text-property 1 (point-max) 'face 'shadow) \
+        (setq md-b (cons 7 17) md-c (cons 17 23)) \
+        (defalias 'md-faces (lambda (beg end) \
+          (let (runs) (while (< beg end) (push (get-text-property beg 'face) runs) (setq beg (1+ beg))) (nreverse runs)))))");
+    vm.eval_source(&setup).unwrap();
+    let check = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(check(&mut vm, "(list (romacs-treesit-fontify-code 'c (car md-b) (cdr md-b)) \
+        (romacs-treesit-fontify-code 'c (car md-c) (cdr md-c)) \
+        (equal (md-faces (car md-c) (cdr md-c)) \
+               (let ((alone (romacs-treesit-fontify-string 'c (propertize \"int c;\" 'face 'shadow)))) \
+                 (with-temp-buffer (insert alone) (md-faces 1 (point-max))))) \
+        (get-text-property (car md-c) 'face))"), "(nil nil t (font-lock-type-face shadow))");
+    assert_eq!(check(&mut vm, "(progn (goto-char (cdr md-c)) (insert \"int d;\") \
+        (put-text-property (cdr md-c) (point) 'face 'shadow) \
+        (romacs-treesit-fontify-code 'c (car md-c) (point) (cdr md-c)) \
+        (list (get-text-property (cdr md-c) 'face) (get-text-property (1- (cdr md-c)) 'face)))"),
+        "((font-lock-type-face shadow) shadow)");
+    assert_eq!(check(&mut vm, "(let ((before (buffer-string))) \
+        (list (romacs-treesit-fontify-code 'no-such-language 1 6) (equal-including-properties before (buffer-string))))"), "(nil t)");
+    // No user hook runs for the hidden buffer; its owner's mode change, or
+    // killing the owner, kills it.
+    assert_eq!(check(&mut vm, "(let ((runs 0)) \
+        (add-hook 'change-major-mode-hook (lambda () (setq runs (1+ runs)))) \
+        (add-hook 'after-change-major-mode-hook (lambda () (setq runs (1+ runs)))) \
+        (with-current-buffer (get-buffer-create \"owner\") (insert \"int x;\") (setq runs 0) (romacs-treesit-fontify-code 'c 1 7) \
+          (let ((hidden (cdr (assq 'c romacs-treesit--code-buffers))) (during runs)) \
+            (fundamental-mode) \
+            (list during (romacs-treesit-code-language-p 'c) (romacs-treesit-code-language-p 'no-such-language) \
+                  (buffer-live-p hidden) \
+                  (progn (romacs-treesit-fontify-code 'c 1 7) \
+                         (let ((again (cdr (assq 'c romacs-treesit--code-buffers)))) (kill-buffer) (buffer-live-p again)))))))"),
+        "(0 t nil nil nil)");
+}
+
 /// `redisplay' between a deferred frame and the next tells the hooks what
 /// changed: the next frame does not tell them again.
 #[test]
