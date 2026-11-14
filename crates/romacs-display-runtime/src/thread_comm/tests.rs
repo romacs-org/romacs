@@ -848,14 +848,14 @@ fn thread_comms_cmd_channel_bounded_capacity() {
     for _ in 0..COMMAND_CHANNEL_CAPACITY {
         comms
             .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
             .unwrap();
     }
 
     // Next ordinary try_send should fail (channel full)
     let result = comms
         .cmd_tx
-        .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity));
+        .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }));
     assert!(
         result.is_err(),
         "cmd channel should be full after {} sends",
@@ -873,7 +873,7 @@ fn channel_sends_multiple_commands_in_order() {
         .unwrap();
     comms
         .cmd_tx
-        .send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
         .unwrap();
     comms
         .cmd_tx
@@ -887,7 +887,7 @@ fn channel_sends_multiple_commands_in_order() {
         other => panic!("Expected Shutdown, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity) => {}
+        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }) => {}
         other => panic!("Expected RefreshFrameOpacity, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {
