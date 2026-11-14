@@ -335,6 +335,8 @@ impl RenderApp {
     /// Feeding it the frame sample would make it read zero every time.
     pub(super) fn begin_fps_cpu_span(fps: &mut FpsCounter) {
         if fps.enabled {
+            // CLOCK: starts a stopwatch over CPU render work; a constant
+            // frame sample would make it read zero.
             fps.cpu_span_start = std::time::Instant::now();
         }
     }

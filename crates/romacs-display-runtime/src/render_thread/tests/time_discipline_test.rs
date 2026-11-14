@@ -7,47 +7,25 @@
 //! reaching for the wall clock again, and a clock read is easy to add and hard
 //! to notice in review.
 //!
-//! So this test enumerates every remaining raw clock read and demands a reason
-//! for each. Adding one fails the build until it is listed here with a
-//! justification, which is the point: the cost of a new clock read should be
-//! writing down why it is not a frame sample.
+//! So every remaining raw clock read says why, where it is: a `// CLOCK:
+//! reason` in the comment lines directly above it. Adding a read fails until
+//! it has one, which is the point: the cost of a new clock read should be
+//! writing down, beside it, why it is not a frame sample. A reason that
+//! outlives its read fails too.
 //!
 //! `.elapsed()` is checked alongside `Instant::now()` because it is the same
 //! read wearing a different name, and it is the form that hid most of the
 //! original sites.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Directories whose production sources must not read the wall clock.
 const GUARDED_DIRS: [&str; 2] = ["src/render_thread", "src/core"];
 
-/// Every sanctioned raw clock read, as `file` -> why it is allowed.
-///
-/// Keep the justifications specific. "It's fine" is not a justification; the
-/// entry should say what the read measures and why a frame sample would be
-/// wrong for it.
-fn allowlist() -> BTreeMap<&'static str, &'static str> {
-    BTreeMap::from([
-        (
-            "src/render_thread/state.rs",
-            "ImageRenderState::wait_for_terminal is a Condvar::wait_timeout run on the \
-             Lisp thread, not the render loop; FpsCounter::cpu_span_start seeds the \
-             CPU work stopwatch.",
-        ),
-        (
-            "src/render_thread/frame_state.rs",
-            "begin_fps_cpu_span starts a stopwatch over CPU render work; a constant \
-             frame sample would make it read zero.",
-        ),
-        (
-            "src/render_thread/render_pass/chrome/transient_overlays.rs",
-            "draw_fps closes the CPU render-work span begun by \
-             begin_fps_cpu_span; the frame sample is the same for both ends of \
-             that span, so it cannot measure it.",
-        ),
-    ])
-}
+/// What a raw clock read carries in the comment lines directly above it,
+/// followed by what the read measures and why a frame sample would be wrong
+/// for it.
+const MARK: &str = "// CLOCK:";
 
 fn crate_root() -> PathBuf {
     romacs_infra::crate_root!()
@@ -91,68 +69,97 @@ fn guarded_files() -> Vec<String> {
     rel
 }
 
-/// Lines that read a clock, ignoring comments and doc comments.
-fn clock_reads(source: &str) -> Vec<(usize, String)> {
-    source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| {
-            let trimmed = line.trim_start();
-            !trimmed.starts_with("//")
-                && (line.contains("Instant::now()") || line.contains(".elapsed()"))
-        })
-        .map(|(i, line)| (i + 1, line.trim().to_string()))
-        .collect()
+fn is_comment(line: &str) -> bool {
+    line.trim_start().starts_with("//")
+}
+
+fn reads_a_clock(line: &str) -> bool {
+    !is_comment(line) && (line.contains("Instant::now()") || line.contains(".elapsed()"))
+}
+
+/// What is wrong with FILE's clock reads, given its SOURCE: a read with no
+/// `// CLOCK:` in the comment lines directly above it, a `// CLOCK:` with no
+/// reason, and one with no read directly below its comment.
+fn problems(file: &str, source: &str) -> Vec<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut found = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if reads_a_clock(line) {
+            let justified = lines[..index]
+                .iter()
+                .rev()
+                .take_while(|above| is_comment(above))
+                .any(|above| above.trim_start().starts_with(MARK));
+            if !justified {
+                found.push(format!(
+                    "  unjustified {file}:{}  {}",
+                    index + 1,
+                    line.trim()
+                ));
+            }
+        }
+        if let Some(reason) = line.trim_start().strip_prefix(MARK) {
+            let below = lines[index + 1..].iter().find(|below| !is_comment(below));
+            if reason.trim().is_empty() {
+                found.push(format!("  no reason {file}:{}", index + 1));
+            } else if !below.is_some_and(|below| reads_a_clock(below)) {
+                found.push(format!(
+                    "  covers nothing {file}:{}  {}",
+                    index + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    found
 }
 
 #[test]
 fn every_raw_clock_read_in_the_render_thread_is_justified() {
-    let allowed = allowlist();
     let root = crate_root();
-    let mut unjustified = Vec::new();
-
-    for file in guarded_files() {
-        let Ok(source) = std::fs::read_to_string(root.join(&file)) else {
-            continue;
-        };
-        let reads = clock_reads(&source);
-        if reads.is_empty() || allowed.contains_key(file.as_str()) {
-            continue;
-        }
-        for (line, text) in reads {
-            unjustified.push(format!("  {file}:{line}  {text}"));
-        }
-    }
-
+    let found: Vec<String> = guarded_files()
+        .iter()
+        .filter_map(|file| {
+            Some(problems(
+                file,
+                &std::fs::read_to_string(root.join(file)).ok()?,
+            ))
+        })
+        .flatten()
+        .collect();
     assert!(
-        unjustified.is_empty(),
-        "these read the wall clock but are not justified in time_discipline_test.rs.\n\
-         Temporal code should take a FrameSample (visual sampling), an EventTime \
-         (an observation) or a FutureDeadline (a wakeup). If this read genuinely \
-         cannot be one of those, add its file to the allowlist with a reason.\n{}",
-        unjustified.join("\n")
+        found.is_empty(),
+        "Temporal code should take a FrameSample (visual sampling), an EventTime \
+         (an observation) or a FutureDeadline (a wakeup). If a read genuinely \
+         cannot be one of those, write `{MARK} reason` in the comment lines \
+         directly above it: what it measures, and why a frame sample would be \
+         wrong. Delete a `{MARK}` whose read is gone.\n{}",
+        found.join("\n")
     );
 }
 
 #[test]
-fn the_allowlist_has_no_stale_entries() {
-    // An allowlist that outlives its reason is worse than none: it silently
-    // re-permits the thing it was meant to bound.
-    let root = crate_root();
-    let mut stale = Vec::new();
-    for (file, _) in allowlist() {
-        let Ok(source) = std::fs::read_to_string(root.join(file)) else {
-            stale.push(format!("  {file} (no longer exists)"));
-            continue;
-        };
-        if clock_reads(&source).is_empty() {
-            stale.push(format!("  {file} (no longer reads a clock)"));
-        }
-    }
-    assert!(
-        stale.is_empty(),
-        "these allowlist entries are no longer needed and should be deleted:\n{}",
-        stale.join("\n")
+fn each_rule_of_the_discipline_fires() {
+    let source = "\
+fn f() {
+    let a = std::time::Instant::now();
+    // CLOCK: a stopwatch over CPU work.
+    // It spans the frame.
+    let b = a.elapsed();
+    // CLOCK:
+    let c = a.elapsed();
+    // CLOCK: nothing reads a clock below.
+    let d = 1;
+    // Instant::now() in a comment is no read.
+}
+";
+    assert_eq!(
+        problems("src/x.rs", source),
+        [
+            "  unjustified src/x.rs:2  let a = std::time::Instant::now();",
+            "  no reason src/x.rs:6",
+            "  covers nothing src/x.rs:8  // CLOCK: nothing reads a clock below.",
+        ]
     );
 }
 

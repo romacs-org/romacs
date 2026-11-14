@@ -7,6 +7,8 @@
 //! What is not carried is named in the image; a blocked buffer refuses
 //! the image; a damaged image or a buffer that cannot come back keeps the
 //! image and never loses its text.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -30,10 +32,10 @@ fn batch(dir: &Path, source: &str) -> String {
     let script = dir.join(format!("script-{}.el", source.len()));
     std::fs::write(&script, format!("(setq load-path (cons {} load-path))\n(load {} nil t)\n{source}\n",
                                     lisp(Path::new(ROMACS_LISP)), lisp(Path::new(FIXTURE)))).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let output = Command::new(installed::romacs())
         .args(["-Q", "--batch", "-l"]).arg(&script).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state")).env("ROMACS_WORLD", "off")
+        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
         .output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(output.status.success(), "batch failed: {}\n{stdout}\n{}", output.status, String::from_utf8_lossy(&output.stderr));
