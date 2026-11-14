@@ -374,6 +374,8 @@ fn render_frame_window_contents_reserved(
     feature_plan.prepare_frame(&mut frame);
     render.begin_presentable_render();
     if extra_line_spacing != 0.0 || extra_letter_spacing != 0.0 {
+        // Moved glyphs are no longer the layout's (see `layout_identity`).
+        frame.layout_identity = 0;
         RenderApp::apply_extra_spacing(
             &mut frame.glyphs,
             &mut frame.window_cursors,
