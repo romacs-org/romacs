@@ -14,7 +14,7 @@
     "romacs-record": {"sites": 2, "undocumented": 0},
     "romacs-regex": {"sites": 6, "undocumented": 0},
     "romacs-renderer-wgpu": {"sites": 18, "undocumented": 0},
-    "romacs-snapshot": {"sites": 14, "undocumented": 0},
+    "romacs-snapshot": {"sites": 12, "undocumented": 0},
     "romacs-video": {"sites": 28, "undocumented": 0},
     "romacs-vm": {"sites": 649, "undocumented": 316},
     "romacs-vm-gui": {"sites": 6, "undocumented": 0}

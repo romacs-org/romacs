@@ -302,7 +302,7 @@ impl Vm {
     /// of one do, read from where they are kept: a mark can run no Lisp.
     pub(super) fn undo_view(&mut self) -> UndoView {
         let object = |vm: &mut Vm, name: &str| {
-            let fwd = vm.forwarded.lookup(name).expect("declared");
+            let fwd = crate::forwarded::Forwarded::lookup(name).expect("declared");
             vm.forwarded_value(fwd).expect("a global object")
         };
         let (outer, function) = (object(self, "undo-outer-limit"), object(self, "undo-outer-limit-function"));

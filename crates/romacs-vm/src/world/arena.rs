@@ -30,11 +30,12 @@
 //! range refuses the image (`Restore::Map`), with the step and error that
 //! found it so (`map_failure`). Everything else a
 //! world process maps stays randomized, the executable too. What an image holds of the
-//! executable is read-only data: string literals, constant tables and the
-//! empty hash table group in its first segment, vtables and `&'static`
-//! tables in its RELRO segment. A process that maps an image maps a copy of
-//! those two segments where the builder's executable had them, and nothing
-//! else there (`shadow_executable`). An image holds no code or writable
+//! executable is read-only data that plain types of the standard library and
+//! other crates point to, such as the empty hash table group in its first
+//! segment; Romacs's own types hold no `&'static` reference (romacs-snapshot
+//! admits none). A process that maps an image maps a copy of its
+//! executable's read-only segments, the first and RELRO, where the
+//! builder's had them, and nothing else there (`shadow_executable`). An image holds no code or writable
 //! static address: a VM at rest keeps no lowered code (`world_normalize`)
 //! and no host attachment (`world_quiescent`), and nothing in the VM's
 //! types holds a function pointer or a reference to a writable static.

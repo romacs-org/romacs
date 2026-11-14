@@ -160,9 +160,19 @@ fn table_entries_are_unique_and_cite_gnu() {
         let (file, line) = v.gnu.split_once(':').expect("FILE:LINE");
         assert!(file.ends_with(".c") && line.parse::<u32>().is_ok(), "{}: {}", v.name, v.gnu);
     }
+    // Every name has a place, and the place is its own: `PLACES' numbers
+    // each kind's storage in the order the store makes it.
     let store = Forwarded::default();
     for v in C_VARIABLES {
-        assert!(store.lookup(v.name).is_some());
+        let place = Forwarded::lookup(v.name).unwrap_or_else(|| panic!("{} has no place", v.name));
+        let held = match (place, &v.kind) {
+            (Fwd::Obj(i), Kind::Lisp(_)) => C_VARIABLES[store.object_vars[i as usize]].name == v.name,
+            (Fwd::Buffer(i), Kind::PerBuffer { .. }) => C_VARIABLES[store.buffer_vars[i as usize]].name == v.name,
+            (Fwd::Bool(i), Kind::Bool(initial)) => store.bools[i as usize] == *initial,
+            (Fwd::Int(i), Kind::Int(initial)) => store.ints[i as usize] == *initial,
+            _ => false,
+        };
+        assert!(held, "{}'s place {place:?} is another variable's", v.name);
     }
 }
 

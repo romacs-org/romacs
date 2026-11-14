@@ -115,8 +115,8 @@ impl Height {
 pub enum Value {
     /// A family, foundry or colour name.
     Str(Arc<str>),
-    /// A weight, slant or width name from GNU's font.c tables.
-    Symbol(&'static str),
+    /// A weight, slant or width name from GNU's font.c tables, as given.
+    Symbol(Arc<str>),
     Height(Height),
     /// `t` or `nil` for the boolean-ish attributes.
     Bool(bool),
@@ -372,9 +372,12 @@ const WIDTHS: &[&str] = &[
     "wide",
 ];
 
-fn table_name(table: &'static [&'static str], value: &Datum) -> Option<&'static str> {
-    let name = value.as_symbol()?;
-    table.iter().copied().find(|n| *n == name)
+/// VALUE's own name, when it is a symbol TABLE lists.
+fn table_name(table: &[&str], value: &Datum) -> Option<Arc<str>> {
+    match value {
+        Datum::Symbol(name) if table.contains(&&**name) => Some(name.clone()),
+        _ => None,
+    }
 }
 
 /// Validate one attribute value the way GNU's

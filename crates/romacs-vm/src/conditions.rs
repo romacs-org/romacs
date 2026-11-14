@@ -21,7 +21,10 @@ impl SymbolId {
 pub(super) struct Entry {
     pub(super) properties: Vec<(Value, Value)>,
     ancestry: Option<Vec<SymbolId>>,
-    builtin: Option<(Vec<SymbolId>, &'static str)>,
+    /// A built-in condition's ancestry as declared; its message is found
+    /// by the condition's name (`builtin_message`), so the entry holds no
+    /// reference into the executable.
+    builtin: Option<Vec<SymbolId>>,
 }
 romacs_snapshot::snapshot_struct!(Entry { properties, ancestry, builtin });
 #[derive(Default)]
@@ -66,6 +69,17 @@ impl Fault {
 }
 type Checked<T> = std::result::Result<T, Fault>;
 
+/// Romacs's own built-in condition, beside GNU's catalog.
+const NOT_UNICODE: (&str, &str) = ("not-unicode-string", "String is not Unicode text");
+
+/// The message of the built-in condition NAME.
+fn builtin_message(name: &str) -> Option<&'static str> {
+    if name == NOT_UNICODE.0 {
+        return Some(NOT_UNICODE.1);
+    }
+    builtins::BUILTINS.iter().find(|(builtin, _, _)| *builtin == name).map(|&(_, _, text)| text)
+}
+
 impl Vm {
     fn intern_symbol(&mut self, name: &str) -> Value {
         match name {
@@ -80,13 +94,13 @@ impl Vm {
     pub(super) fn initialize_conditions(&mut self) {
         self.intern_symbol("error-conditions");
         self.intern_symbol("error-message");
-        let symbol = self.intern_symbol("not-unicode-string");
+        let symbol = self.intern_symbol(NOT_UNICODE.0);
         let error = self.intern_symbol("error");
         let ancestors = vec![SymbolId::new(symbol).unwrap(), SymbolId::new(error).unwrap()];
         self.conditions.entries.insert(SymbolId::new(symbol).unwrap(), Entry {
-            ancestry: Some(ancestors.clone()), builtin: Some((ancestors, "String is not Unicode text")), ..Entry::default()
+            ancestry: Some(ancestors.clone()), builtin: Some(ancestors), ..Entry::default()
         });
-        for &(name, ancestors, text) in builtins::BUILTINS {
+        for &(name, ancestors, _) in builtins::BUILTINS {
             let symbol = self.intern_symbol(name);
             let id = SymbolId::new(symbol).unwrap();
             let ancestors = ancestors
@@ -95,7 +109,7 @@ impl Vm {
                 .collect::<Vec<_>>();
             let entry = self.conditions.entries.entry(id).or_default();
             entry.ancestry = Some(ancestors.clone());
-            entry.builtin = Some((ancestors, text));
+            entry.builtin = Some(ancestors);
         }
     }
     fn get_property(&mut self, id: SymbolId, property: Value) -> Value {
@@ -107,7 +121,7 @@ impl Vm {
         }) {
             return value;
         }
-        let Some((ancestors, text)) = self
+        let Some(ancestors) = self
             .conditions
             .entries
             .get(&id)
@@ -123,9 +137,8 @@ impl Vm {
                     .collect::<Vec<_>>(),
             )
         } else if property == self.intern_symbol("error-message") {
-            self.allocate_object(data::Object::String(Box::new(data::LispString::new(
-                text,
-            ))))
+            let Some(text) = self.symbol_name_of(id.value()).as_deref().and_then(builtin_message) else { return Value::NIL };
+            self.allocate_object(data::Object::String(Box::new(data::LispString::new(text))))
         } else {
             return Value::NIL;
         };
@@ -135,7 +148,7 @@ impl Vm {
     fn unobserved_condition_ancestry(&self, id: SymbolId, property: Value) -> Option<&[SymbolId]> {
         let entry = self.conditions.entries.get(&id)?;
         if entry.properties.iter().any(|(key, _)| *key == property) { return None; }
-        entry.builtin.as_ref().map(|(ancestry, _)| ancestry.as_slice())
+        entry.builtin.as_deref()
     }
     // Search retains this projection when a returning handler replaces its property.
     pub(super) fn signal_conditions(&mut self, condition: Value) -> Value {
