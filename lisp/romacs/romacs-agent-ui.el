@@ -2338,7 +2338,7 @@ view."
   "R" ("Rename" romacs-agent-chat-rename)
   "f" ("Fork" romacs-agent-chat-fork
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-ui--session))))
-  "N" ("Renew: a new conversation, briefed" romacs-agent-chat-renew
+  "F" ("Fresh conversation: renew, briefed" romacs-agent-chat-renew
        :inapt-if (lambda () (not (and (romacs-agent--harness-get romacs-agent-ui--session :renew)
                                       (romacs-agent--harness-free-p romacs-agent-ui--session)))))
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
