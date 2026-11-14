@@ -470,6 +470,7 @@ fn a_scrolled_window_beside_an_underlined_neighbour_equals_it_drawn_whole() {
 }
 
 #[test]
+#[expect(clippy::cast_precision_loss, reason = "the test surface's few pixels")]
 fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
     // At 7x a pane 9 logical pixels tall has its bottom edge on device row
     // 62, a seventh of a pixel above its end. Rows three tall move from 1
