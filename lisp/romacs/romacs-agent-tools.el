@@ -903,13 +903,14 @@ a sibling's message, sent to TARGET."
                                   nil text)
             (list :wake (list :state "sent" :chars (length text) :to (romacs-agent-id target))))))
 
-(defun romacs-agent-tools--message (kind sender &optional in-reply-to)
+(defun romacs-agent-tools--message (kind sender &optional in-reply-to by-user)
   "A new message (`romacs-agent-make-message'): from SENDER, a session (nil: one
 outside Romacs), what it is to the receiver KIND, answering message
-IN-REPLY-TO."
+IN-REPLY-TO; BY-USER, its user wrote it in SENDER's chat."
   (romacs-agent-make-message (concat "m-" (romacs-agent--uuid)) kind
                         (and sender (list :session (romacs-agent-id sender)
-                                          :name (or (romacs-agent-title sender) (romacs-agent-id sender))))
+                                          :name (or (romacs-agent-title sender) (romacs-agent-id sender))
+                                          :by-user by-user))
                         in-reply-to))
 
 (defun romacs-agent-tools--kind (sender target)
@@ -922,17 +923,17 @@ child, sibling, or external."
           ((and (funcall parent-of target) (equal (funcall parent-of target) (funcall parent-of sender))) "sibling")
           (t "external"))))
 
-(defun romacs-agent-tools--message-to (sender target text mode &optional in-reply-to)
+(defun romacs-agent-tools--message-to (sender target text mode &optional in-reply-to by-user)
   "Send TEXT from SENDER (a session, or nil) to TARGET as a message by MODE
-\(`romacs-agent-tools--send-modes'), answering IN-REPLY-TO when given.
-A sibling's parent gets a copy with its next wake.  Answer TARGET's task
-record and the message's id."
+\(`romacs-agent-tools--send-modes'), answering IN-REPLY-TO when given;
+BY-USER, SENDER's user wrote it.  A sibling's parent gets a copy with
+its next wake.  Answer TARGET's task record and the message's id."
   (when (string-empty-p (string-trim (or text ""))) (user-error "message is empty"))
   (unless (member mode romacs-agent-tools--send-modes)
     (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
   (let* ((caller (and sender (romacs-agent-id sender)))
          (kind (romacs-agent-tools--kind sender target))
-         (message (romacs-agent-tools--message kind sender in-reply-to))
+         (message (romacs-agent-tools--message kind sender in-reply-to by-user))
          (key (cons (romacs-agent-id target) caller))
          (generation (if (equal mode "replace")
                          (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
@@ -959,13 +960,15 @@ another task of the caller's parent, its parent then copied."
     (romacs-agent-tools--message-to (and caller (romacs-agent-get caller)) task (gethash "message" arguments)
                                     (or (gethash "mode" arguments) "queue") (gethash "inReplyTo" arguments))))
 
-(defun romacs-agent-tools--reply (arguments)
-  "Answer the message messageId the caller received, routed to its sender."
-  (romacs-mcp--instance arguments)
-  (let* ((caller (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
-                     (user-error "romacs_task_reply answers a message an agent session received: you are none")))
-         (id (or (gethash "messageId" arguments) (user-error "messageId is required")))
-         (message (or (romacs-agent-received-message caller id)
+(defun romacs-agent-answer (session id text &optional mode by-user)
+  "Answer the message ID SESSION received with TEXT, routed to its sender
+whatever it is to SESSION, by MODE (`romacs-agent-tools--send-modes',
+default queue), linked to ID.  BY-USER: SESSION's user wrote it (its
+chat), said so to the sender, and SESSION's journal keeps that it was
+answered.  Return the sender's task record with the answer's messageId;
+a `user-error' for a message SESSION did not receive, one from outside
+Romacs (its own channel's reply line says how), or a sender gone."
+  (let* ((message (or (romacs-agent-received-message session id)
                       (user-error "No message %s among the ones this session received" id)))
          (sender-id (plist-get (plist-get message :from) :session))
          (sender (cond ((null sender-id)
@@ -973,9 +976,22 @@ another task of the caller's parent, its parent then copied."
                         (user-error "Message %s came from outside Romacs. %s" id
                                     (romacs-agent--message-reply-line message)))
                        ((romacs-agent-get sender-id))
-                       (t (user-error "Message %s's sender, session %s, is gone" id sender-id)))))
-    (romacs-agent-tools--message-to caller sender (gethash "text" arguments)
-                                    (or (gethash "mode" arguments) "queue") id)))
+                       (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
+         (record (romacs-agent-tools--message-to session sender text (or mode "queue") id by-user)))
+    ;; An agent's answer is its tool call, in its journal; its user's is
+    ;; this note.
+    (when by-user
+      (romacs-agent--note session (romacs-mcp--object "type" "replied" "message" id "reply" (gethash "messageId" record)
+                                                      "byUser" t)))
+    record))
+
+(defun romacs-agent-tools--reply (arguments)
+  "Answer the message messageId the caller received (`romacs-agent-answer')."
+  (romacs-mcp--instance arguments)
+  (romacs-agent-answer (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
+                           (user-error "romacs_task_reply answers a message an agent session received: you are none"))
+                       (or (gethash "messageId" arguments) (user-error "messageId is required"))
+                       (gethash "text" arguments) (gethash "mode" arguments)))
 
 (defun romacs-agent-tools--same-directory-p (a b)
   (equal (file-name-as-directory (file-truename a)) (file-name-as-directory (file-truename b))))

@@ -590,6 +590,33 @@ message's record for TEXT, `interrupted' each interrupted."
       (should (romacs-agent-received-message session (plist-get next :id)))
       (should (romacs-agent-received-message session (plist-get (car (last many)) :id))))))
 
+(ert-deftest romacs-agent-delegate-the-user-answers-a-message ()
+  ;; Its user answers a message in its chat: routed as an agent's answer,
+  ;; said to be the user's, and kept in its journal as answered.
+  (romacs-agent-delegate-tests--sending a
+    (setf (romacs-agent-dir a) (make-temp-file "a-" t))
+    (let ((asked (romacs-agent-tools--message "sibling" b)) (seen nil))
+      (romacs-agent-delegate-tests--receive a asked "your interface?")
+      (let* ((romacs-agent-event-functions (list (lambda (_s event) (push event seen))))
+             (record (romacs-agent-answer a (plist-get asked :id) "X, from me" "steer" t)))
+        (should (equal (car written) '("b" . "X, from me")))
+        (let ((answer (cdar messages)))
+          (should (plist-get (plist-get answer :from) :by-user))
+          (should (equal (plist-get answer :in-reply-to) (plist-get asked :id)))
+          (should (string-search "by-user=\"true\"" (romacs-agent--message-envelope answer "X, from me")))
+          (should (eq (gethash "byUser" (gethash "from" (romacs-agent--message-json answer))) t))
+          (should (plist-get (plist-get (romacs-agent--message-of (romacs-agent--message-json answer)) :from) :by-user))
+          (let ((replied (cl-find 'replied seen :key (lambda (e) (plist-get e :type)))))
+            (should (equal (plist-get replied :message) (plist-get asked :id)))
+            (should (equal (plist-get replied :reply) (gethash "messageId" record)))
+            (should (plist-get replied :by-user))))))
+    ;; The tool is the same answer, an agent's: no note.
+    (let ((asked (romacs-agent-tools--message "sibling" b)))
+      (romacs-agent-delegate-tests--receive a asked "again?")
+      (cl-letf (((symbol-function 'romacs-agent--note) (lambda (&rest _) (error "No note for an agent's answer"))))
+        (romacs-agent-tools--reply (romacs-mcp--object "messageId" (plist-get asked :id) "text" "Y" "mode" "steer")))
+      (should-not (plist-get (plist-get (cdar messages) :from) :by-user)))))
+
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none
   ;; delegated: said to be external.

@@ -1270,7 +1270,8 @@ or a copy of a message between tasks, adds :wake (:state, :chars and, for
 a copy, :to)."
   (list :id id :kind kind
         :from (list :session (plist-get from :session) :name (or (plist-get from :name) "a session outside Romacs")
-                    :address (plist-get from :address) :claude-session (plist-get from :claude-session))
+                    :address (plist-get from :address) :claude-session (plist-get from :claude-session)
+                    :by-user (plist-get from :by-user))
         :in-reply-to in-reply-to :text text))
 
 (defun romacs-agent--message-json (message)
@@ -1282,6 +1283,7 @@ a copy, :to)."
                                      "text" (or (plist-get message :text) "") "t" (or (plist-get message :time) :null))))
     (when (plist-get from :address) (puthash "address" (plist-get from :address) sender))
     (when (plist-get from :claude-session) (puthash "claudeSession" (plist-get from :claude-session) sender))
+    (when (plist-get from :by-user) (puthash "byUser" t sender))
     (when-let* ((wake (plist-get message :wake)))
       (puthash "wake" (let ((w (romacs-mcp--object "state" (plist-get wake :state) "chars" (plist-get wake :chars))))
                         (when (plist-get wake :to) (puthash "to" (plist-get wake :to) w))
@@ -1297,7 +1299,8 @@ a copy, :to)."
                              (list :session (romacs-agent--value (gethash "session" from))
                                    :name (romacs-agent--value (gethash "name" from))
                                    :address (romacs-agent--value (gethash "address" from))
-                                   :claude-session (romacs-agent--value (gethash "claudeSession" from))))
+                                   :claude-session (romacs-agent--value (gethash "claudeSession" from))
+                                   :by-user (eq (gethash "byUser" from) t)))
                   :in-reply-to (romacs-agent--value (gethash "inReplyTo" object))
                   :text (romacs-agent--value (gethash "text" object))
                   :time (romacs-agent--value (gethash "t" object)))
@@ -1331,6 +1334,8 @@ The body cannot close the envelope early."
                     (romacs-agent--attribute (plist-get message :id)) (romacs-agent--attribute (plist-get message :kind))
                     (romacs-agent--attribute (or (plist-get from :name) "unknown")))
             (if (plist-get from :session) (format " from-session=\"%s\"" (romacs-agent--attribute (plist-get from :session))) "")
+            ;; Its user wrote it, in that session's chat.
+            (if (plist-get from :by-user) " by-user=\"true\"" "")
             (if reply (format " in-reply-to=\"%s\"" (romacs-agent--attribute reply)) "")
             ">\n" (replace-regexp-in-string "</romacs-message" "<\\/romacs-message" text t t)
             "\n</romacs-message>\n" (romacs-agent--message-reply-line message))))
@@ -1766,6 +1771,9 @@ before while `romacs-agent--received-limit' lasts."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ;; Its user answered a message from another session.
+                               ("replied" (list (list :type 'replied :message (gethash "message" note)
+                                                      :reply (gethash "reply" note) :by-user (eq (gethash "byUser" note) t))))
                                ("messages" (list (list :type 'incoming :text (gethash "text" note) :prompt (gethash "prompt" note)
                                                        :messages (romacs-agent--messages-of (gethash "messages" note)))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
