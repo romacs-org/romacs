@@ -55,10 +55,7 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 24, 10).unwrap();
             vm.set_display_host(Some(Box::new(Display::new().unwrap())));
-            let home = std::env::temp_dir().join(format!("romacs-census-{predicate}-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                    home.display())).unwrap();
+            let home = crate::test_home::private_home(&mut vm, &format!("census-{predicate}"));
             let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
             crate::startup::finish_loadup(&mut vm, &started).unwrap();
             // The Lisp halves primitives install on first use (the command

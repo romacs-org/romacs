@@ -5,7 +5,8 @@
 ;;; Commentary:
 ;; romacs_dev_check runs a source tree's own `tools/dev-check' (the merge
 ;; forecast with the trunk, the generated-file check, the lint of the
-;; Lisp the branch touches, run by this Romacs, and the structural rules)
+;; Lisp the branch touches, run by this Romacs, and the Rust tests the change
+;; can reach)
 ;; and answers with its report when it ends.  The tree's tool
 ;; decides what is checked; this file starts it and reads it.  It runs as
 ;; a subprocess, so the command loop goes on meanwhile; a request that is
@@ -17,7 +18,7 @@
 ;;
 ;; The check's subprocess has this Romacs's environment.  A session started
 ;; without the Rust toolchain on its PATH gets the forecast and the
-;; generated-file check, and is told the structural rules did not run.
+;; generated-file check, and is told the tests did not run.
 
 ;;; Code:
 
@@ -37,7 +38,7 @@ the command loop waits behind it, twenty times a second.")
     ;; The lint's host is this Romacs: it is the machine the branch is held to.
     (append (list tool "--binary" (expand-file-name invocation-name invocation-directory))
             (and trunk (list "--trunk" trunk))
-            (and (eq (gethash "structural" arguments) :false) (list "--no-structural")))))
+            (and (eq (gethash "tests" arguments) :false) (list "--no-tests")))))
 
 (defun romacs-mcp-dev--result (status report)
   "The tool's answer for a check that exited with STATUS and printed REPORT."
@@ -119,9 +120,9 @@ name and the empty query are answered at once."
   (interactive)
   (romacs-mcp-register-tool
    "romacs_dev_check"
-   "Check a Romacs worktree before its branch is submitted, cheapest first: the merge forecast with the trunk (each conflicting file as additive, overlap or whole), tracked generated files, romacs-lint on the Lisp it touches (run by this Romacs), then, for a change to Rust, the quick structural rules (they build test targets into targetDir, default this Romacs's CARGO_TARGET_DIR; structural false leaves them out). Answers when done with verdict (ok, fail, incomplete) and the report: a line a stage and a finding, each with its fix."
+   "Check a Romacs worktree before its branch is submitted, cheapest first: the merge forecast with the trunk (each conflicting file as additive, overlap or whole), tracked generated files, romacs-lint on the Lisp it touches (run by this Romacs), then the Rust tests the change can reach (tools/lib/impact.py; they build test targets into targetDir, default this Romacs's CARGO_TARGET_DIR; tests false leaves them out). Answers when done with verdict (ok, fail, incomplete) and the report: a line a stage and a finding, each with its fix."
    (romacs-mcp--schema '(("instance" . "string") ("worktree" . "string") ("trunk" . "string")
-                         ("structural" . "boolean") ("targetDir" . "string"))
+                         ("tests" . "boolean") ("targetDir" . "string"))
                        '("worktree"))
    #'romacs-mcp-dev--check (romacs-mcp--object "readOnlyHint" t))
   (romacs-mcp-register-tool

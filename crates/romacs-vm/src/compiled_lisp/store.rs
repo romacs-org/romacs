@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 const MAGIC: &[u8] = b"RLC4\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 4\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 5\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
