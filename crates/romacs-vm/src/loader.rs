@@ -262,10 +262,12 @@ impl Vm {
                 .into_iter()
                 .map(|v| {
                     if v == Value::NIL {
-                        Ok(PathBuf::from("."))
-                    } else {
-                        Ok(PathBuf::from(self.source_string(v)?))
+                        return Ok(PathBuf::from("."));
                     }
+                    // openp expands the name against each entry, so an
+                    // entry under `~' searches the home directory.
+                    let dir = self.source_string(v)?.to_owned();
+                    Ok(PathBuf::from(self.expand_home_name(&dir)?.unwrap_or(dir)))
                 })
                 .collect::<Result<Vec<_>>>()?
         };

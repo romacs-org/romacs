@@ -37,11 +37,13 @@ enum ServiceCommand {
 /// isolating that wait keeps rendering and input responsive.
 pub(crate) struct ClipboardService {
     commands: Sender<ServiceCommand>,
+    /// Where requests are answered (`Fact::Reply`).
+    answers: Answers,
     worker: Option<JoinHandle<()>>,
 }
 
 impl ClipboardService {
-    pub(crate) fn for_display(display: OwnedDisplayHandle) -> Result<Self, String> {
+    pub(crate) fn for_display(display: OwnedDisplayHandle, answers: Sender<crate::thread_comm::Fact>) -> Result<Self, String> {
         std::cfg_select! {
             target_os = "linux" => {
                 let raw_display = display
@@ -57,7 +59,7 @@ impl ClipboardService {
                     let clipboard = unsafe {
                         smithay_clipboard::Clipboard::new(raw_display.display.as_ptr())
                     };
-                    return Self::start(WaylandClipboard::new(clipboard, display));
+                    return Self::start(WaylandClipboard::new(clipboard, display), answers);
                 }
             }
             _ => {
@@ -66,36 +68,39 @@ impl ClipboardService {
         }
 
         tracing::info!("Clipboard service using the arboard platform backend");
-        Self::start(ArboardClipboard::new()?)
+        Self::start(ArboardClipboard::new()?, answers)
     }
 
-    fn start(backend: impl ClipboardBackend + 'static) -> Result<Self, String> {
+    fn start(backend: impl ClipboardBackend + 'static, answers: Sender<crate::thread_comm::Fact>) -> Result<Self, String> {
         let (commands, receiver) = crossbeam_channel::bounded(REQUEST_QUEUE_CAPACITY);
+        let answers = Answers(std::sync::Arc::new(std::sync::Mutex::new(Some(answers))));
+        let worker_answers = answers.clone();
         let worker = std::thread::Builder::new()
             .name("romacs-clipboard".to_owned())
-            .spawn(move || run_worker(Box::new(backend), receiver))
+            .spawn(move || run_worker(Box::new(backend), receiver, &worker_answers))
             .map_err(|err| format!("failed to start clipboard worker: {err}"))?;
         Ok(Self {
             commands,
+            answers,
             worker: Some(worker),
         })
     }
 
     #[cfg(test)]
-    fn with_backend(backend: impl ClipboardBackend + 'static) -> Self {
-        Self::start(backend).expect("clipboard worker should start")
+    fn with_backend(backend: impl ClipboardBackend + 'static, answers: Sender<crate::thread_comm::Fact>) -> Self {
+        Self::start(backend, answers).expect("clipboard worker should start")
     }
 
     pub(crate) fn submit(&self, command: ClipboardCommand) {
         match self.commands.try_send(ServiceCommand::Request(command)) {
             Ok(()) => {}
             Err(crossbeam_channel::TrySendError::Full(ServiceCommand::Request(command))) => {
-                reject_command(command, "clipboard worker queue is full".to_owned());
+                self.answers.send(reject_command(command, "clipboard worker queue is full".to_owned()));
             }
             Err(crossbeam_channel::TrySendError::Disconnected(ServiceCommand::Request(
                 command,
             ))) => {
-                reject_command(command, "clipboard worker is unavailable".to_owned());
+                self.answers.send(reject_command(command, "clipboard worker is unavailable".to_owned()));
             }
             Err(_) => unreachable!("submit only sends clipboard requests"),
         }
@@ -104,6 +109,9 @@ impl ClipboardService {
 
 impl Drop for ClipboardService {
     fn drop(&mut self) {
+        // A worker detached below must not keep the render side's input
+        // channel open: its waiters are answered by that channel's close.
+        self.answers.close();
         let Some(worker) = self.worker.take() else {
             return;
         };
@@ -143,16 +151,16 @@ impl Drop for ClipboardService {
     }
 }
 
-fn run_worker(mut backend: Box<dyn ClipboardBackend>, commands: Receiver<ServiceCommand>) {
+fn run_worker(mut backend: Box<dyn ClipboardBackend>, commands: Receiver<ServiceCommand>, answers: &Answers) {
     while let Ok(command) = commands.recv() {
         match command {
             ServiceCommand::Request(command) if command.is_expired() => {
-                reject_command(
+                answers.send(reject_command(
                     command,
                     "clipboard request expired before execution".to_owned(),
-                );
+                ));
             }
-            ServiceCommand::Request(command) => execute_command(backend.as_mut(), command),
+            ServiceCommand::Request(command) => answers.send(execute_command(backend.as_mut(), command)),
             ServiceCommand::Shutdown { acknowledged } => {
                 // Acknowledgement means the native backend (including
                 // smithay-clipboard's internal worker) has fully stopped.
@@ -166,25 +174,18 @@ fn run_worker(mut backend: Box<dyn ClipboardBackend>, commands: Receiver<Service
     }
 }
 
-fn execute_command(backend: &mut dyn ClipboardBackend, command: ClipboardCommand) {
+/// Run COMMAND on BACKEND: its request and its answer.
+fn execute_command(backend: &mut dyn ClipboardBackend, command: ClipboardCommand) -> (u64, crate::thread_comm::Reply) {
+    use crate::thread_comm::Reply;
     match command {
-        ClipboardCommand::SetText {
-            selection,
-            text,
-            reply,
-            ..
-        } => {
+        ClipboardCommand::SetText { selection, text, request, .. } => {
             let result = backend.set_text(selection, text.as_deref());
             if let Err(err) = &result {
                 tracing::warn!(?selection, "clipboard set failed: {err}");
             }
-            if reply.send(result).is_err() {
-                tracing::debug!("clipboard set reply receiver was dropped");
-            }
+            (request, Reply::Done(result))
         }
-        ClipboardCommand::GetText {
-            selection, reply, ..
-        } => {
+        ClipboardCommand::GetText { selection, request, .. } => {
             // The evaluator-facing wire carries text or absence; the two
             // absence reasons stay inside the runtime (see `text_policy`).
             let result = backend
@@ -193,21 +194,33 @@ fn execute_command(backend: &mut dyn ClipboardBackend, command: ClipboardCommand
             if let Err(err) = &result {
                 tracing::warn!(?selection, "clipboard read failed: {err}");
             }
-            if reply.send(result).is_err() {
-                tracing::debug!("clipboard get reply receiver was dropped");
-            }
+            (request, Reply::Text(result))
         }
     }
 }
 
-pub(crate) fn reject_command(command: ClipboardCommand, error: String) {
+/// COMMAND refused for ERROR: its request and its answer.
+pub(crate) fn reject_command(command: ClipboardCommand, error: String) -> (u64, crate::thread_comm::Reply) {
+    use crate::thread_comm::Reply;
     match command {
-        ClipboardCommand::SetText { reply, .. } => {
-            let _ = reply.send(Err(error));
-        }
-        ClipboardCommand::GetText { reply, .. } => {
-            let _ = reply.send(Err(error));
-        }
+        ClipboardCommand::SetText { request, .. } => (request, Reply::Done(Err(error))),
+        ClipboardCommand::GetText { request, .. } => (request, Reply::Text(Err(error))),
+    }
+}
+
+/// Where the service's answers go, until the service is dropped.
+#[derive(Clone)]
+struct Answers(std::sync::Arc<std::sync::Mutex<Option<Sender<crate::thread_comm::Fact>>>>);
+
+impl Answers {
+    fn send(&self, (request, reply): (u64, crate::thread_comm::Reply)) {
+        let answers = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let sent = answers.as_ref().is_some_and(|answers| answers.send(crate::thread_comm::Fact::Reply { request, reply }).is_ok());
+        if !sent { tracing::debug!("clipboard answer: nobody waits for it now"); }
+    }
+
+    fn close(&self) {
+        *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 }
 

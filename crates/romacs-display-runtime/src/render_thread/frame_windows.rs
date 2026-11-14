@@ -268,7 +268,7 @@ pub(crate) struct GuiFrameRenderState {
     /// The Emacs frame_id that owns this window (used for routing).
     pub emacs_frame_id: u64,
     pub(super) trace_last_drawn: Option<romacs_display_protocol::PresentationId>,
-    /// The newest presentation reported drawn (`InputEvent::PresentationRendered`).
+    /// The newest presentation reported drawn (`Fact::PresentationRendered`).
     pub(super) reported_presentation: u64,
     /// Chromeless glyph composition and rendering state.
     pub compositor: FrameCompositor,
@@ -1771,7 +1771,10 @@ pub(crate) struct GuiFrameWindowManager {
     pub pending_creates: Vec<PendingWindow>,
     /// Pending window destruction requests
     pub pending_destroys: Vec<u64>,
-    ready_replies: HashMap<u64, crossbeam_channel::Sender<Result<(), String>>>,
+    /// The request awaiting each frame's readiness, by frame.
+    ready_replies: HashMap<u64, u64>,
+    /// Readiness answers to send, by request (`take_answers`).
+    answers: Vec<(u64, Result<(), String>)>,
     /// Native chrome defaults applied to future secondary frame windows.
     pub(super) chrome_defaults: WindowChrome,
     /// Whether future secondary frame windows should start with FPS enabled.
@@ -1797,6 +1800,7 @@ impl GuiFrameWindowManager {
             pending_creates: Vec::new(),
             pending_destroys: Vec::new(),
             ready_replies: HashMap::new(),
+            answers: Vec::new(),
             chrome_defaults: WindowChrome::default(),
             fps_enabled: false,
         }
@@ -1938,30 +1942,30 @@ impl GuiFrameWindowManager {
         self.pending_destroys.contains(&emacs_frame_id)
     }
 
-    pub(crate) fn await_ready(
-        &mut self,
-        frame: u64,
-        reply: crossbeam_channel::Sender<Result<(), String>>,
-    ) {
+    /// Answer REQUEST once FRAME's window is active, or why it is not.
+    pub(crate) fn await_ready(&mut self, frame: u64, request: u64) {
         if self
             .get(frame)
             .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }))
         {
-            if reply.send(Ok(())).is_err() {
-                self.request_destroy(frame);
-            }
+            self.answers.push((request, Ok(())));
         } else if self.get(frame).is_some()
             || self
                 .pending_creates
                 .iter()
                 .any(|request| request.emacs_frame_id == frame)
         {
-            self.ready_replies.insert(frame, reply);
+            if let Some(superseded) = self.ready_replies.insert(frame, request) {
+                self.answers.push((superseded, Err(format!("Native window for frame {frame}: a later request superseded this one"))));
+            }
         } else {
-            let _ = reply.send(Err(format!(
-                "Native window for frame {frame} was not realized"
-            )));
+            self.answers.push((request, Err(format!("Native window for frame {frame} was not realized"))));
         }
+    }
+
+    /// The readiness answers decided since the last call.
+    pub(crate) fn take_answers(&mut self) -> Vec<(u64, Result<(), String>)> {
+        std::mem::take(&mut self.answers)
     }
 
     /// Process pending window creations. Must be called from the event loop
@@ -2164,8 +2168,8 @@ impl GuiFrameWindowManager {
     }
 
     pub(super) fn reject_ready(&mut self, frame: u64, error: &str) {
-        if let Some(reply) = self.ready_replies.remove(&frame) {
-            let _ = reply.try_send(Err(error.to_owned()));
+        if let Some(request) = self.ready_replies.remove(&frame) {
+            self.answers.push((request, Err(error.to_owned())));
         }
     }
 
@@ -2202,7 +2206,7 @@ impl GuiFrameWindowManager {
     }
 
     fn settle_ready_replies(&mut self) {
-        for (frame, reply) in std::mem::take(&mut self.ready_replies) {
+        for (frame, request) in std::mem::take(&mut self.ready_replies) {
             let ready = self
                 .get(frame)
                 .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }));
@@ -2213,9 +2217,7 @@ impl GuiFrameWindowManager {
                     "Native window/surface creation failed for frame {frame}"
                 ))
             };
-            if reply.send(result).is_err() && ready {
-                self.request_destroy(frame);
-            }
+            self.answers.push((request, result));
         }
     }
 
@@ -2240,7 +2242,9 @@ impl GuiFrameWindowManager {
     pub(crate) fn destroy_all(&mut self) {
         self.pending_creates.clear();
         self.pending_destroys.clear();
-        self.ready_replies.clear();
+        for (_, request) in std::mem::take(&mut self.ready_replies) {
+            self.answers.push((request, Err("Native windows destroyed".to_owned())));
+        }
         self.winit_to_emacs.clear();
         self.primary_winit_id = None;
         self.primary_emacs_frame_id = None;

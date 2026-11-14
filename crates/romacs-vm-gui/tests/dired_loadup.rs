@@ -3,6 +3,8 @@
 //! read-only listing. Compared with pinned GNU -Q --batch on the same form.
 use romacs_vm_gui::startup;
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 /// The bench's 3.2/3.3 steps, with dired.el loaded first as eshell, vc or
 /// an init loads it: in a directory's Dired buffer, `m` on
@@ -45,6 +47,7 @@ fn dired_marks_and_copies_through_gnu_dired_mode_map() {
     let mine = std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        home::private_home(&mut vm, "dired");
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(setq inhibit-startup-screen t)").unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();

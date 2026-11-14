@@ -33,15 +33,15 @@
 
 (ert-deftest romacs-mcp-dev-tests-verdict-and-report ()
   "The check's exit is the verdict and its output the report; it runs in
-the tree, with the trunk, the target and the structural switch it was given."
+the tree, with the trunk, the target and the tests switch it was given."
   (let ((tree (romacs-mcp-dev-tests--tree 1)))
     (unwind-protect
-        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree "trunk" "main" "structural" :false
+        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree "trunk" "main" "tests" :false
                                                   "targetDir" "/somewhere/target")))
           (should (equal (gethash "verdict" answer) "fail"))
           (should (equal (gethash "exit" answer) 1))
           (should (equal (gethash "report" answer)
-                         (format "args:--binary %s --trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                         (format "args:--binary %s --trunk main --no-tests\ntarget:/somewhere/target\nin:%s\n"
                                  (expand-file-name invocation-name invocation-directory)
                                  (directory-file-name (file-truename tree))))))
       (delete-directory tree t))))

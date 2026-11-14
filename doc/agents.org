@@ -1,0 +1,65 @@
+#+title: Agents in Romacs
+
+Romacs runs coding-agent harnesses (Claude Code, Codex) as agent sessions:
+each one a chat buffer, kept by a supervisor that outlives the editor, so a
+session survives a restart.  ~C-c C-; n~ starts one, and ~C-c C-; a~ shows
+every session on the agent board.
+
+* Accounts and usage limits
+
+Each harness has a pool of the accounts set up for it, in priority order.
+Every place that asks for a provider names the harness (~claude~, ~codex~),
+and the pool picks the account: new work starts on the first account that
+has room under its usage limit.  When that account's limit resets, new work
+goes back to it.
+
+This is a convenience for people who pay for more than one account of a
+harness, for instance a personal and a work account: they can use them
+from one place without choosing one each time.  Each account keeps its own
+usage limits, and Romacs respects them.
+
+- *Accounts* are the harness's provider instances: those configured in
+  ~romacs-agent-providers~, or read from T3 Code's settings.  Each has its own
+  configuration directory, credentials and conversations.
+- *The order* is ~romacs-agent-pools~, for instance
+  ~'((claude "claude" "claude2"))~; by default it is the order the accounts
+  are configured in.
+- *Pinning an account*: set ~romacs-agent-pick-accounts~, or start a session
+  with ~C-u C-u~, to choose an account rather than a harness.  An agent's
+  tool call pins one by naming its instance.
+
+** When an account reaches its limit
+
+A session whose turn ends because its account reached its usage limit can
+go on under the next account of the pool that still has room.  This is on
+by default (~romacs-agent-switch-on-limit~); set it to ~nil~ to keep sessions
+where they are.
+
+- Romacs waits ~romacs-agent-switch-delay~ seconds (30 by default) before
+  moving a session, and moves it at most once for each time it reaches a
+  limit.
+- It never moves a session to an account that is itself at its limit.  When
+  every account is at its limit, the session stays, and its chat says when
+  the first account's limit resets.
+- A session moves only between turns, with its conversation as it is: the
+  requests of one turn always go to one account.
+- Every move is recorded in the session's chat and journal, with the
+  account it left, the limit it reached and when that limit resets.
+- When every account is at its limit, the session can resume by itself
+  once the first of them resets: ~romacs-agent-resume-at-reset~ (on by
+  default) waits for the reset the provider reported, plus
+  ~romacs-agent-resume-margin~ seconds (60), then goes on under the first
+  account with room.  The chat's header shows the time (⏰); *z* in its
+  actions menu cancels it, as does sending the session a message.  A
+  restarted Romacs keeps the time.
+
+With automatic moves off, the chat's actions menu (~C-c C-o~) moves a session
+by hand: *N* goes on under the next account with room.
+
+** Seeing the limits
+
+The status bar shows a harness's pool when one of its accounts nears or
+reaches its limit, as ~⛽claude 2/3~: two of its three accounts have room.
+Hovering over it lists each account, its status, how much of its window
+it has used and when it resets.  Agents read the same through the
+~romacs_orchestrator_capabilities~ tool.
