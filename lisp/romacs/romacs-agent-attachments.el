@@ -154,11 +154,20 @@ turn known."
                                     (lambda () (funcall finish (list :error "Attaching took too long; try again"))))
                        (run-at-time 1 1 (lambda () (when (romacs-agent-attachments--gone-p job)
                                                      (funcall finish (list :error "cancelled")))))))
+      ;; Its session's end, and its note read back, are watched from now:
+      ;; an end while hashing gives it up too.
+      (romacs-agent-attachments--await
+       job caller id
+       (lambda (journaled)
+         (funcall finish (if journaled (list :done)
+                           (list :error "Its harness ended before the attachments were journaled")))))
       (cl-mapc (lambda (item file)
                  (romacs-agent-attachments--hash
                   job (plist-get file :path) (plist-get file :bytes)
                   (lambda (sha)
                     (cond
+                     ;; Its request gone (cancelled, its caller away): no further.
+                     ((romacs-agent-attachments--gone-p job) (funcall finish (list :error "cancelled")))
                      ;; Hashed as it was when checked, or not at all.
                      ((not (equal (romacs-attach--identity (plist-get file :path)) (plist-get file :identity)))
                       (funcall finish (list :error (format "%s changed while it was attached: attach it again"
@@ -167,11 +176,8 @@ turn known."
                       (when sha (puthash "sha" sha item))
                       (when (zerop (cl-decf waiting))
                         (condition-case err
-                            (progn (romacs-agent-attachments--await
-                                    job caller id
-                                    (lambda (journaled)
-                                      (funcall finish (if journaled (list :done)
-                                                        (list :error "Its harness ended before the attachments were journaled")))))
+                            (progn (when (or (romacs-agent-attachments--gone-p job) (plist-get job :over))
+                                     (error "cancelled"))
                                    (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "id" id
                                                                                   "items" (vconcat items)
                                                                                   "compare" (if compare (vconcat compare) :null))))

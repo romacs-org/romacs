@@ -159,4 +159,25 @@ its journal's records raise."
     ;; Only the fixture's own collector is left: no waiter.
     (should (= (length romacs-agent-event-functions) 1))))
 
+(ert-deftest romacs-agent-attachments-cancelled-or-ended-while-hashing ()
+  ;; Cancelled, or its session's harness ending, while its files hash: it
+  ;; answers no success and journals nothing, whenever the hash ends.
+  (romacs-agent-attachments-tests--with
+    (dolist (stop (list (lambda (request _s) (plist-put request :cancelled t))
+                        (lambda (_request s) (romacs-agent--raise s (list :type 'exit :status 1 :seq 70)))))
+      (let* ((request (list :peer nil :cancelled nil))
+             (romacs-mcp--active request)
+             (noted nil) (settle nil))
+        (cl-letf (((symbol-function 'romacs-mcp--live-p) (lambda (&rest _) t))
+                  ((symbol-function 'romacs-agent--note) (lambda (&rest _) (setq noted t)))
+                  ((symbol-function 'romacs-agent-attachments--hash)
+                   (lambda (_job _file _size then) (setq settle then))))
+          (let ((deferred (romacs-agent-attachments--tool (romacs-mcp--object "paths" (vector notes)))))
+            (funcall stop request session)
+            ;; The hash ends before any check of the request's.
+            (funcall settle "0000000000000000000000000000000000000000000000000000000000000000")
+            (should (eq (car (condition-case err (funcall (nth 1 deferred)) (user-error (list :refused))))
+                        :refused))
+            (should-not noted)))))))
+
 ;;; romacs-agent-attachments-tests.el ends here
