@@ -80,6 +80,26 @@ one that could not start."
               (should (= (buffers) before))))
         (delete-directory tree t)))))
 
+(ert-deftest romacs-mcp-dev-tests-guide-at-once ()
+  "A function by name, and no query, are answered at once."
+  (should (string-prefix-p "car (list): primitive" (romacs-mcp-dev--guide (romacs-mcp--object "query" "car"))))
+  (should (string-prefix-p "What callers of a function are told" (romacs-mcp-dev--guide (romacs-mcp--object)))))
+
+(defun romacs-mcp-dev-tests--defined-since-boot (thing)
+  "Return THING, for an aardwolf: no world was built with this function."
+  thing)
+
+(ert-deftest romacs-mcp-dev-tests-guide-search-in-steps ()
+  "A search of docstrings is answered over polls of the request, each a
+short step, and sees a function defined since this Romacs started."
+  (let* ((deferred (romacs-mcp-dev--guide (romacs-mcp--object "query" "aardwolf world" "limit" 3)))
+         (polls 0) (result nil))
+    (should (eq (car deferred) 'romacs-mcp--deferred))
+    (while (not (setq result (funcall (cadr deferred)))) (setq polls (1+ polls)))
+    (should (> polls 1))
+    (should (string-prefix-p "romacs-mcp-dev-tests--defined-since-boot (function): Return THING, for an aardwolf: no world was built with this function.\n"
+                             (car result)))))
+
 (ert-deftest romacs-mcp-dev-tests-no-tool ()
   "A tree without the check is refused, with what to do."
   (let ((tree (file-name-as-directory (make-temp-file "romacs-mcp-dev-tests-" t))))
