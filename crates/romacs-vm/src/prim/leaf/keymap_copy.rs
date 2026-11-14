@@ -88,7 +88,10 @@ impl Leaf<'_> {
     pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
         -> std::result::Result<std::result::Result<Value, (Value, Value, Value)>, Fault> {
         self.vm.lookup_key_walk(map, key, defaults, filters).map_err(|e| {
-            if e == "keymap required" { Fault::Wrong("keymapp", map) } else { Fault::Error(e) }
+            // get_keymap and CHECK_VECTOR_OR_STRING (keymap.c lookup_key_1).
+            if e == "keymap required" { Fault::Wrong("keymapp", map) }
+            else if e == "key sequence string or vector required" { Fault::Wrong("arrayp", key) }
+            else { Fault::Error(e) }
         })
     }
 }

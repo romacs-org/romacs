@@ -14,20 +14,54 @@ fn bundled_fonts_dir() -> std::path::PathBuf {
     romacs_vm::host::runtime_root().join("assets/fonts")
 }
 
+/// Where Romacs Icons, which this binary holds (romacs-icon-font), may be
+/// written for Fontconfig, which reads fonts from files, in the order
+/// tried: Romacs's cache (`startup::cache_dir`), then a directory of this
+/// user's own in the temporary directory, for a home that cannot be
+/// written.
+#[must_use]
+pub fn icon_font_dirs() -> Vec<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    // The user: the owner of this process's /proc entry.
+    let user = std::fs::metadata("/proc/self").map_or(0, |entry| entry.uid());
+    let temporary = std::env::temp_dir().join(format!("romacs-{user}/fonts"));
+    crate::startup::cache_dir(|name| std::env::var_os(name)).map(|cache| cache.join("fonts")).into_iter()
+        .chain([temporary]).collect()
+}
+
+/// Romacs Icons as a file in the first of `icon_font_dirs` that takes it,
+/// or why none did.
+fn icon_font_file() -> Result<std::path::PathBuf, String> {
+    let mut failures = Vec::new();
+    for dir in icon_font_dirs() {
+        match romacs_icon_font::file_in(&dir) {
+            Ok(file) => return Ok(file),
+            Err(error) => failures.push(format!("{}: {error}", dir.display())),
+        }
+    }
+    Err(format!("the icon font could not be written ({})", failures.join("; ")))
+}
+
 /// Make every font Romacs ships a Fontconfig application font, for this
 /// process only: the icon font, so a character only it has resolves to it
 /// as any font's fallback does, and Iosevka, the default face's family,
 /// which wins a tie with a system copy of the same face. Nothing is
 /// installed into a font directory. Run before a resolver is built, so
-/// none has cached a codepoint or family as missing. The files Fontconfig
-/// refused; none when the directory is absent.
-pub fn register_bundled_fonts() -> Vec<std::path::PathBuf> {
+/// none has cached a codepoint or family as missing. What went wrong, one
+/// line each: a font Fontconfig refused, an icon font that could not be
+/// written.
+pub fn register_bundled_fonts() -> Vec<String> {
     let mut fonts: Vec<_> = std::fs::read_dir(bundled_fonts_dir()).into_iter().flatten()
         .filter_map(|entry| Some(entry.ok()?.path()))
         .filter(|path| path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext, "ttf" | "otf" | "ttc")))
         .collect();
     fonts.sort();
-    fonts.into_iter().filter(|font| !romacs_font::register_font_file(font)).collect()
+    let icons = icon_font_file();
+    fonts.extend(icons.as_ref().ok().cloned());
+    let mut problems: Vec<String> = fonts.into_iter().filter(|font| !romacs_font::register_font_file(font))
+        .map(|font| format!("Fontconfig refused the bundled font {}", font.display())).collect();
+    problems.extend(icons.err());
+    problems
 }
 
 /// The decoded pixels this display keeps for the renderer.
@@ -235,8 +269,8 @@ impl Display {
             max_width: i64::from(metrics.max_width),
             space_width: i64::from(metrics.space_width),
             average_width: i64::from(metrics.average_width),
-            otf: romacs_font::probe::otf_capability(&entity.file, entity.index & 0xffff)
-                .map_or_else(Default::default, |otf| (otf_table(otf.gsub), otf_table(otf.gpos))),
+            otf: std::sync::Arc::new(romacs_font::probe::otf_capability(&entity.file, entity.index & 0xffff)
+                .map_or_else(Default::default, |otf| (otf_table(otf.gsub), otf_table(otf.gpos)))),
         })
     }
     fn char_font_uncached(&mut self, face: &romacs_vm::FaceFont, ch: char) -> Option<(OpenedFont, u32)> {
@@ -476,12 +510,12 @@ mod tests {
     }
 
     /// A character in the icons' range resolves to Romacs's icon font
-    /// (RomacsIcons.ttf, DIVERGENCES.md VM2-MODE-LINE), for a face of any
+    /// (romacs-icon-font, DIVERGENCES.md VM2-MODE-LINE), for a face of any
     /// family: it is the only font with it.
     #[test]
     fn an_icon_resolves_to_the_icon_font() {
-        assert_eq!(register_bundled_fonts(), Vec::<std::path::PathBuf>::new());
-        let icon_font = || bundled_fonts_dir().join("RomacsIcons.ttf");
+        assert_eq!(register_bundled_fonts(), Vec::<String>::new());
+        let icon_font = || icon_font_file().unwrap();
         assert!(icon_font().is_file());
         let mut resolver = FontResolver::new().unwrap();
         for family in ["Liberation Mono", "PlemolJP Console NF"] {
@@ -594,6 +628,26 @@ mod tests {
         assert_eq!(printed(&mut vm, "(equal (font-xlfd-name (font-at 1 nil \"a\\u03bb\")) (frame-parameter nil 'font))"), "t");
     }
 
+    /// font.c `font_open_entity`: a font opened again at its size is the
+    /// object opened first, until `clear-font-cache`. So asking for one
+    /// is a lookup: `char-displayable-p` (`internal-char-font`) in a header
+    /// line, evaluated at every redisplay, made a whole font-object each
+    /// time (its names and OpenType tables), the most garbage an idle
+    /// session made.
+    #[test]
+    fn a_font_opened_again_is_the_same_object() {
+        let mut vm = displayed();
+        vm.open_display();
+        assert_eq!(printed(&mut vm, "(let* ((first (car (internal-char-font nil ?a))) (before (memory-use-counts)))
+            (dotimes (_ 50) (internal-char-font nil 955))
+            (list (eq first (car (internal-char-font nil 955)))
+                  (< (- (car (memory-use-counts)) (car before)) 200)
+                  (= (nth 4 (memory-use-counts)) (nth 4 before))
+                  (progn (clear-font-cache) (eq first (car (internal-char-font nil ?a))))
+                  (equal (font-xlfd-name first) (font-xlfd-name (car (internal-char-font nil ?a))))))"),
+                   "(t t t nil t)");
+    }
+
     /// xfaces.c Fface_font: on the display every face names the font
     /// painting draws it with, from the face's family and pixel size, and
     /// that font opens, so `window-font-width' (font.c `font-info' of
@@ -625,10 +679,7 @@ mod tests {
         for screen in ["nil", "t"] {
             let answer = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
                 let mut vm = displayed();
-                let home = std::env::temp_dir().join(format!("romacs-fonts-alists-{}-{screen}", std::process::id()));
-                std::fs::create_dir_all(&home).unwrap();
-                vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                        home.display())).unwrap();
+                let home = crate::test_home::private_home(&mut vm, &format!("fonts-alists-{screen}"));
                 let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
                 printed(&mut vm, &format!("(progn (setq inhibit-startup-screen {screen})
                     (setf (alist-get 'alpha-background default-frame-alist) 80)
@@ -665,10 +716,7 @@ mod tests {
     fn loadup_on_the_display_finishes_startup_with_the_prettify_init() {
         let answer = std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
             let mut vm = displayed();
-            let home = std::env::temp_dir().join(format!("romacs-fonts-prettify-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                    home.display())).unwrap();
+            let home = crate::test_home::private_home(&mut vm, "fonts-prettify");
             let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
             printed(&mut vm, "(progn (add-hook 'emacs-lisp-mode-hook #'prettify-symbols-mode)
                 (add-hook 'emacs-startup-hook (lambda () (setq prettify-startup-ran t))) t)");

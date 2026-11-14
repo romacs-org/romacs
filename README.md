@@ -16,7 +16,7 @@ init and your muscle memory come with you.
 | Uncompiled Lisp, one function call | **16.2 ns** | 257 ns |
 
 The clip is the real program; the race runs at real speed.  Every number, losses
-included, is in [doc/benchmarks.md](doc/benchmarks.md).
+included, is in [the benchmark tables](crates/romacs-vm-gui/harness/README.md#latest-results).
 
 - **Worker VMs.**  Searches, syncs and background loads run off the main VM, and
   `C-g` reaches long work.
@@ -40,7 +40,8 @@ checks the download against its `SHA256SUMS`, installs under `~/.local`, and
 asks before using `sudo`, only to add missing system libraries.
 
 Options go after `bash -s --`.  `--nightly` installs the rolling build of
-`master`, and `--uninstall` removes Romacs and leaves your init and data:
+`beta`, the development branch, and `--uninstall` removes Romacs and leaves
+your init and data:
 
 ```sh
 curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly

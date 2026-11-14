@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 fn cases() -> Vec<&'static str> {
     vec![
@@ -83,7 +85,7 @@ fn environment_snapshot_is_local_to_each_vm() {
     }
     use std::os::unix::ffi::OsStringExt;
     let result = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "environment_snapshot_is_local_to_each_vm"])
+        .args(["--exact", &own_test::name(module_path!(), "environment_snapshot_is_local_to_each_vm")])
         .env_clear().env("ROMACS_ENVIRONMENT_CHILD", "1")
         .env("ROMACS_ENV_TEST", "launch")
         .env("ROMACS_ENV_BYTES", std::ffi::OsString::from_vec(vec![255, 254]))
@@ -118,7 +120,7 @@ fn exec_path_decodes_the_launch_path_like_gnu() {
         let gnu = gnu.output().unwrap();
         assert!(gnu.status.success(), "oracle failed for {path:?}");
         let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-        child.args(["--exact", "exec_path_decodes_the_launch_path_like_gnu", "--nocapture"]).env("ROMACS_EXEC_PATH_CHILD", "1");
+        child.args(["--exact", &own_test::name(module_path!(), "exec_path_decodes_the_launch_path_like_gnu"), "--nocapture"]).env("ROMACS_EXEC_PATH_CHILD", "1");
         configure(&mut child);
         child.env("ROMACS_EXEC_PATH_CHILD", "1");
         let child = child.output().unwrap();
@@ -127,4 +129,20 @@ fn exec_path_decodes_the_launch_path_like_gnu() {
         let romacs = stdout.split("ROMACS-EXEC-PATH:").nth(1).unwrap_or("").lines().next().unwrap_or("");
         assert_eq!(romacs, String::from_utf8_lossy(&gnu.stdout), "PATH={path:?}");
     }
+}
+
+/// A primitive that resolves an environment variable reads the session's
+/// `process-environment`, as `getenv` does, never the process's own: the
+/// keeper's socket lies in the `XDG_RUNTIME_DIR` the session names, and a
+/// session that unsets it has no place for one.
+#[test]
+fn the_keepers_socket_lies_in_the_sessions_runtime_directory() {
+    let mut vm = Vm::new();
+    let mut shown = |form: &str| vm.eval_source(form).unwrap().display().unwrap();
+    let named = shown(r#"(let ((process-environment (cons "XDG_RUNTIME_DIR=/romacs-env-test/run" process-environment)))
+                           (romacs--keeper-call 'socket "s"))"#);
+    assert!(named.starts_with("\"/romacs-env-test/run/"), "{named}");
+    let unset = shown(r#"(let ((process-environment (cons "XDG_RUNTIME_DIR" process-environment)))
+                           (condition-case e (romacs--keeper-call 'socket "s") (error (list 'failed (car (cdr e))))))"#);
+    assert!(unset.starts_with("(failed \"XDG_RUNTIME_DIR is not set"), "{unset}");
 }

@@ -18,10 +18,12 @@ mod char_table;
 mod graphics;
 mod width_rule;
 mod map_keymap;
+mod where_is;
 #[cfg(test)]
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod command_set;
 mod command;
 mod interpreted_closure;
 mod oclosure;
@@ -77,6 +79,13 @@ pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
 // SAFETY: its own seed is a number, and its shared seed the one `default`
 // leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
+impl romacs_snapshot::Schema for NameState {
+    const LEAF: bool = true;
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 impl Default for NameState {
     fn default() -> Self {
@@ -110,6 +119,9 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod functions;
+mod epoch;
+mod slots;
 mod gc_mark;
 mod table;
 mod handle;
@@ -117,11 +129,13 @@ pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
 mod isolate;
+mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
 pub mod anchors;
+mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
@@ -137,6 +151,7 @@ mod lstring;
 mod let_forms;
 mod symkey;
 mod display;
+mod display_stats;
 mod fringe;
 mod tab_bar;
 mod overlay_order;
@@ -154,6 +169,7 @@ mod threaded;
 
 mod expand;
 mod save_excursion;
+mod closure_key;
 mod numbers;
 mod metadata;
 mod variable_definitions;
@@ -362,7 +378,7 @@ impl Value {
         self.integer_value()
             .ok_or_else(|| "integer required".into())
     }
-    fn reference(index: usize, tag: u64) -> Self {
+    const fn reference(index: usize, tag: u64) -> Self {
         if tag == 5 {
             Self((((index as u64) + 1) << 3) | 2)
         } else {
@@ -580,7 +596,6 @@ enum Primitive {
     DefineKey,
     MakeSparseKeymap,
     Keymapp,
-    KeyBinding,
     LookupKey,
     GlobalSetKey,
     CurrentGlobalMap,
@@ -845,7 +860,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("define-key", Primitive::DefineKey),
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
-    ("key-binding", Primitive::KeyBinding),
     // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
     ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
@@ -1049,8 +1063,13 @@ struct Function {
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
+    /// Its structural key (`closure_key`): closures of two lambdas with the
+    /// same key and `equal` captures are `equal`, as GNU's are. None where
+    /// the source has no canonical spelling; such closures compare by
+    /// identity.
+    key: Option<u128>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params, key });
 /// A function body a compiled load left in its artifact's bytes
 /// (`Vm::decode_pending`), with what the body names: a collection keeps
 /// its VALUES (moving them with the heap) and CHILDREN alive, and its
@@ -1323,6 +1342,7 @@ pub struct Vm {
     /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
     /// Off in redisplay, which never unwinds half done.
     motion_quit: bool,
+    // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -1333,8 +1353,13 @@ pub struct Vm {
     disable_inline: bool,
     #[cfg(test)]
     speculative_misses: usize,
+    /// Times `buffer_index` resolved the current buffer afresh.
+    #[cfg(test)]
+    buffer_resolutions: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
+    /// The char tables read as flat rows (`char_table::flat`).
+    flat_tables: char_table::FlatTables,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1430,7 +1455,7 @@ pub struct Vm {
     /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
-    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
+    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<prim::prims::doc::DocFile>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: NameSet<String>,
@@ -1487,6 +1512,10 @@ pub struct Vm {
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
+    /// Consumed by the next lambda compiled: the closure slots `closure`
+    /// takes out of its body (an interactive spec and its modes), which its
+    /// structural key covers as GNU's `equal` compares them (`closure_key`).
+    closure_key_extra: Vec<Form>,
     /// Eager `lambda' bodies being compiled around the current form.
     lambda_depth: usize,
     /// The windows the last window change functions run saw
@@ -1502,10 +1531,18 @@ pub struct Vm {
     region_collect: bool,
     /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
     isolates: isolate::Isolates,
+    /// This session's keeper, once attached (`keeper.rs`).
+    keeper: Option<keeper::Link>,
     /// GNU inotify.c inotifyfd: the file notification instance, made by
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
+    /// The current buffer as `buffer_index` last resolved it: the slot's
+    /// value then, a live buffer, and its object index. Kept by value, not
+    /// by writer: `let` and its unwinding write the slot like any special
+    /// variable, and a different value simply resolves again. Killing a
+    /// buffer and a collection (which may move buffers) drop it.
+    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
@@ -1514,6 +1551,9 @@ pub struct Vm {
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
     fixnum_slots: [usize; 2],
+    /// `char-property-alias-alist' and `default-text-properties', which
+    /// textget reads for every property a character does not have.
+    textget_slots: [usize; 2],
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
@@ -1570,11 +1610,12 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
-    slots: Vec<Slot>,
+    slots: slots::Slots,
     specials: NameSet<String>,
     /// Bumped whenever a symbol stops being special or an uninterned one's
     /// declaration changes: with the size of `specials', which an insertion
@@ -1583,7 +1624,7 @@ pub struct Vm {
     /// Per slot, `slot_is_special''s last answer and the key it held under
     /// (`Vm::special_key'), for the late bindings' check at each `let'.
     special_cache: Vec<u64>,
-    functions: Vec<Arc<Function>>,
+    functions: functions::Functions,
     request_code: request_code::RequestCode,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
@@ -1621,8 +1662,9 @@ pub struct Vm {
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
-    /// `referrers` lists them again after a collection moved objects; it
-    /// may name dead ones.
+    /// `referrers` first lists them; a collection keeps it, without what
+    /// died and with what moved where it went (`Referrers::forget`,
+    /// `Referrers::forward`). A chain may name a member that left it.
     referrers: Option<buffer::Referrers>,
     /// The slots of the variables each buffer, by its index in `objects`,
     /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
@@ -1634,6 +1676,8 @@ pub struct Vm {
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
     completion_walks: u64,
+    /// The symbols M-x lists (`command_set.rs`).
+    command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
@@ -1646,6 +1690,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// A collection found a list for `undo-outer-limit-function`, and the
+    /// aftermath has not looked (`Vm::take_undo_offer`).
+    undo_offers_due: bool,
     /// Escapes being unwound, in any engine: routing takes it, the driver gives
     /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
     unwinding: usize,
@@ -1699,6 +1746,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     #[cfg(test)] inline_hits,
     #[cfg(test)] disable_inline,
     #[cfg(test)] speculative_misses,
+    #[cfg(test)] buffer_resolutions,
     regexp,
     execution_fatal,
     loader,
@@ -1735,17 +1783,20 @@ romacs_snapshot::snapshot_fields!(Vm {
     reached_generated,
     loader_order_request,
     keep_captures,
+    closure_key_extra,
     lambda_depth,
     window_change_seen,
     expanded_macros,
     expanded_symbols,
     buffer_slot,
+    resolved_buffer,
     multibyte_slot,
     truncate_lines_slot,
     defun_start_epoch,
     variable_redirects,
     forwarded,
     fixnum_slots,
+    textget_slots,
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
@@ -1795,6 +1846,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     referrers,
     local_owners,
     completion_walks,
+    command_set,
     completion_case_memo,
     caches,
     stack,
@@ -1802,6 +1854,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
+    undo_offers_due,
     unwinding,
     aftermath_runs,
     keymap_filters,
@@ -1823,6 +1876,7 @@ romacs_snapshot::snapshot_fields!(Vm {
 } at_rest {
     site_leaf,
     regexp_cache,
+    flat_tables,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1842,6 +1896,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     region_free,
     region_collect,
     isolates,
+    keeper,
     inotify,
     fence,
     pending,
@@ -1900,8 +1955,11 @@ impl Vm {
             disable_inline: false,
             #[cfg(test)]
             speculative_misses: 0,
+            #[cfg(test)]
+            buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            flat_tables: char_table::FlatTables::default(),
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
@@ -1963,6 +2021,7 @@ impl Vm {
             reached_generated: None,
             loader_order_request: false,
             keep_captures: false,
+            closure_key_extra: Vec::new(),
             lambda_depth: 0,
             window_change_seen: Vec::new(),
             expanded_macros: vec![],
@@ -1972,14 +2031,17 @@ impl Vm {
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
+            keeper: None,
             inotify: None,
             buffer_slot: 0,
+            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
+            textget_slots: [usize::MAX; 2],
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
@@ -2008,11 +2070,11 @@ impl Vm {
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::default(),
             generated_slots: HashMap::default(),
-            slots: vec![],
+            slots: slots::Slots::default(),
             specials: NameSet::default(),
             special_changes: 0,
             special_cache: Vec::new(),
-            functions: vec![],
+            functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
@@ -2033,6 +2095,7 @@ impl Vm {
             referrers: None,
             local_owners: None,
             completion_walks: 0,
+            command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
             stack: vec![],
@@ -2040,6 +2103,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
+            undo_offers_due: false,
             unwinding: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],
@@ -2050,6 +2114,11 @@ impl Vm {
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
         };
+        // The built-in property keys are the first symbols, each at its
+        // place among them: Rust names them as constants.
+        for (index, name) in properties::Key::BUILTIN.iter().enumerate() {
+            assert_eq!(vm.slot(name), index, "the built-in property key `{name}' is not symbol {index}");
+        }
         for index in 0..PRIMITIVES.len() {
             let d = prim::descriptor(index).unwrap();
             let i = vm.slot(d.name());
@@ -2077,6 +2146,8 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
+        // HOST(slot:exec-path, slot:initial-environment, slot:process-environment): declares the
+        // environment specials by name; reads no slot
         vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
         // C specials are special before their symbols are first interned, so
         // already-read forms compile their bindings dynamically.
@@ -2091,6 +2162,7 @@ impl Vm {
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
         vm.declare_special_raw("default-text-properties", Value::NIL);
         vm.declare_special_raw("char-property-alias-alist", Value::NIL);
+        vm.textget_slots = [vm.slot("char-property-alias-alist"), vm.slot("default-text-properties")];
         vm.specials.insert("text-property-default-nonsticky".into());
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());
@@ -2157,6 +2229,7 @@ impl Vm {
         let ignore = vm.intern("ignore");
         vm.declare_special_raw("pre-redisplay-function", ignore);
         vm.declare_special_raw("this-command-keys-shift-translated", Value::NIL);
+        // HOST(delayed-variable): declares the variable; reads no slot
         vm.declare_special_raw("transient-mark-mode", Value::NIL);
         vm.declare_special_raw("standard-input", Value::TRUE);
         for name in ["print-length", "print-level", "print-escape-nonascii", "print-escape-multibyte", "print-escape-control-characters", "print-circle", "print-escape-newlines", "menu-bar-mode", "truncate-lines"] {
@@ -2203,12 +2276,17 @@ impl Vm {
             self.macros.remove(&slot);
         }
         self.world_version = world;
+        self.command_set.changed(slot);
         Ok(())
     }
     /// Record whether `names' maps SLOT's name to SLOT.
     fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
         if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
         self.initial_obarray[slot] = interned;
+        // A void symbol's interning changes no command.
+        if self.slots.get(slot).is_some_and(|s| !matches!(s.function, Value::NIL | Value::UNBOUND)) {
+            self.command_set.changed(slot);
+        }
     }
     /// Whether SLOT's symbol is interned in the initial obarray.
     fn in_initial_obarray(&self, slot: usize) -> bool {
@@ -2322,6 +2400,7 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
@@ -2493,6 +2572,7 @@ impl Vm {
             pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
         Ok((id, names))
     }
@@ -2551,6 +2631,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2587,6 +2668,7 @@ impl Vm {
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();
@@ -2653,7 +2735,9 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
-        self.functions[id] = Arc::new(function);
+        // The closure stays the one its key named before its first call.
+        function.key = self.functions[id].key;
+        self.functions.set(id, Arc::new(function));
         Ok(())
     }
     fn expr(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
@@ -3729,6 +3813,7 @@ impl Vm {
     /// whose variable became local) restores through set_default_internal,
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
         let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());

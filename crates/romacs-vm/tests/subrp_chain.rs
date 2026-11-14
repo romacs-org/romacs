@@ -77,16 +77,16 @@ fn measure_subrp_chain_frontier() {
                 assert_eq!(steps.len(), 178);
             }
             "cl-lib.el" | "ert.el" => {
-                let (count, ordinal, line) = if name == "cl-lib.el" {
-                    (94, 95, 599)
+                let (count, ordinal, head) = if name == "cl-lib.el" {
+                    (94, 95, "(define-minor-mode cl-old-struct-compat-mode")
                 } else {
-                    (0, 1, 57)
+                    (0, 1, "(require 'cl-lib)")
                 };
                 assert_eq!(completed, count, "completed {name} frontier");
                 assert_eq!(steps.len(), count + 1);
                 let failed = steps.iter().find(|s| s["status"] == "error").unwrap();
                 assert_eq!(failed["ordinal"], ordinal);
-                assert_eq!(failed["line"], line);
+                assert!(failed["source"].as_str().unwrap().starts_with(head), "failing form of {name}: {failed}");
                 assert!(
                     failed["error"]
                         .as_str()

@@ -20,12 +20,12 @@ fn inline_dependency_frontier() {
     let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp/ert.el")).map(|_| ());
     println!("ERT: {result:?}");
     let report = vm.load_report();
-    for (name, completed, total, ordinal, line) in [
-        ("inline.el", 22, 22, 0, 0),
-        ("macroexp.el", 50, 50, 0, 0),
-        ("cl-macs.el", 178, 178, 0, 0),
-        ("cl-lib.el", 94, 97, 95, 599),
-        ("ert.el", 0, 204, 1, 57),
+    for (name, completed, total, ordinal, head) in [
+        ("inline.el", 22, 22, 0, ""),
+        ("macroexp.el", 50, 50, 0, ""),
+        ("cl-macs.el", 178, 178, 0, ""),
+        ("cl-lib.el", 94, 97, 95, "(define-minor-mode cl-old-struct-compat-mode"),
+        ("ert.el", 0, 204, 1, "(require 'cl-lib)"),
     ] {
         let steps: Vec<_> = report["steps"].as_array().unwrap().iter()
             .filter(|s| s["file"].as_str().unwrap().ends_with(&format!("/{name}")))
@@ -35,7 +35,7 @@ fn inline_dependency_frontier() {
         if ordinal != 0 {
             let failed = steps.iter().find(|s| s["status"] != "ok").unwrap();
             assert_eq!(failed["ordinal"], ordinal);
-            assert_eq!(failed["line"], line);
+            assert!(failed["source"].as_str().unwrap().starts_with(head), "failing form of {name}: {failed}");
             assert!(failed["error"].as_str().unwrap().ends_with("(void-function define-minor-mode)"));
         }
     }

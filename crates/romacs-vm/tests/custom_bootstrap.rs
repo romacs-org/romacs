@@ -16,7 +16,8 @@ fn custom_loads_and_files_frontier_is_pinned() {
         assert_eq!(completed, expected, "CUSTOM_BOOTSTRAP_FRONTIER_MOVED {relative}: {result:?}");
         if relative == "lisp/gnu/files.el" {
             let error = result.unwrap_err();
-            assert!(error.contains("line 494 form 50:") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "CUSTOM_FILES_FRONTIER_MOVED: {error}");
+            assert!(error.contains(" form 50: ") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "CUSTOM_FILES_FRONTIER_MOVED: {error}");
+            assert!(report["steps"].as_array().unwrap().iter().any(|s| s["file"] == canonical && s["status"] == "error" && s["source"].as_str().unwrap().starts_with("(define-minor-mode auto-save-visited-mode")), "CUSTOM_FILES_FRONTIER_MOVED: {error}");
         } else {
             assert!(result.is_ok(), "CUSTOM_BOOTSTRAP_LOAD_FAILED: {result:?}");
         }

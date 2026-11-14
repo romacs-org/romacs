@@ -60,9 +60,9 @@ impl Ahead {
             let text = text;
             let old = job.old.tree();
             let mut parser = native::Parser::new();
-            let tree = (parser.set_language(job.language) && parser.set_included_ranges(&job.ranges)).then(|| {
-                let mut reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-                parser.parse(Some(&old), &mut reader).map(|new| {
+            let tree = (parser.set_language(&job.language) && parser.set_included_ranges(&job.ranges)).then(|| {
+                let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+                parser.parse(Some(&old), &reader).map(|new| {
                     let changed = new.changed_since(&old);
                     (new.loose(), changed)
                 })
@@ -174,7 +174,8 @@ impl Vm {
             data::Object::Treesit(object) => match &**object {
                 super::Object::Parser(p) if !p.deleted && !p.within_reparse => {
                     let native = p.native.borrow();
-                    (native.language(), native.included_ranges())
+                    let Some(language) = native.language() else { return Ok(false) };
+                    (language, native.included_ranges())
                 }
                 _ => return Ok(false),
             },

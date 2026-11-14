@@ -32,7 +32,6 @@ user's own (`romacs-usage-log-user-error-p'), as a JSON object, or nil.")
 buffer's end, a refusing command), as a JSON object, or nil.")
 (defvar romacs-mcp-session--error-count 0)
 (defvar romacs-mcp-session--last-backtrace nil)
-(defvar romacs-mcp-session--previous-command-error nil)
 
 ;;; Plain values
 
@@ -286,7 +285,7 @@ only when asked for.")
   "BUFFER's kind: agent, chat, mail, file, directory, process or other;
 PROCESSES is the set of buffers a process has."
   (with-current-buffer buffer
-    (cond ((or (derived-mode-p 'romacs-agent-chat-mode 'romacs-agents-mode)
+    (cond ((or (derived-mode-p 'romacs-agent-chat-mode 'romacs-agent-board-mode)
                (string-match-p "\\`\\*\\(agent\\|history\\): " (buffer-name)))
            "agent")
           ((or (derived-mode-p 'jabber-chat-mode 'jabber-roster-mode 'erc-mode 'rcirc-mode)
@@ -330,8 +329,9 @@ those of KIND (bufferKind) or matching bufferRegexp, conversations'
 
 ;;; Errors
 
-(defun romacs-mcp-session--command-error (data context caller)
-  "Record DATA, the error the command loop reports, then report it as before."
+(defun romacs-mcp-session--command-error (data context _caller)
+  "Record DATA, the error the command loop reports: `:before' advice on
+`command-error-function', which then reports it as before."
   (let ((record (romacs-mcp--object
                  "serial" (cl-incf romacs-mcp-session--error-count)
                  "message" (romacs-mcp-session--string (error-message-string data))
@@ -340,9 +340,7 @@ those of KIND (bufferKind) or matching bufferRegexp, conversations'
                  "command" (romacs-mcp-session--print this-command))))
     (if (romacs-usage-log-user-error-p data)
         (setq romacs-mcp-session--last-user-error record)
-      (setq romacs-mcp-session--last-error record)))
-  (funcall (or romacs-mcp-session--previous-command-error #'command-error-default-function)
-           data context caller))
+      (setq romacs-mcp-session--last-error record))))
 
 (defun romacs-mcp-session--debugger (&rest arguments)
   "Record a backtrace for the signal ARGUMENTS describe; let it proceed."
@@ -477,9 +475,9 @@ At `timeout', answer with which of those had not happened."
 (defun romacs-mcp-enable-session-tools ()
   "Register the input, settling and observation tools; record command errors."
   (interactive)
-  (unless (eq command-error-function #'romacs-mcp-session--command-error)
-    (setq romacs-mcp-session--previous-command-error command-error-function
-          command-error-function #'romacs-mcp-session--command-error))
+  ;; Advice, as the usage log's: enabling again, before or after another
+  ;; recorder, leaves one of each around the report.
+  (add-function :before command-error-function #'romacs-mcp-session--command-error)
   (let ((instance '("instance" . "string")))
     (romacs-mcp-register-tool
      "romacs_send_keys"

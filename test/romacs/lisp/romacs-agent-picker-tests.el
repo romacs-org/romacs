@@ -11,7 +11,12 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
-  (require 'romacs-agent-ui))
+  (require 'romacs-agent-ui)
+  (require 'romacs-agent-board))
+
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
 
 (defmacro romacs-agent-picker--with (bindings &rest body)
   "BODY in a private state directory, with `root' its temporary root and
@@ -123,8 +128,13 @@
        (romacs-agent-models '((claude ("a" :label "Model A" :efforts ("low" "high")))
                               (codex ("b" :label "Model B")))))
     (make-directory claude)
+    ;; Each harness once, its pool its provider, the default's first.
     (let* ((rows (romacs-agent--picker-rows)) (texts (mapcar #'car rows)))
-      ;; The default instance first, the disabled not at all, alike ones apart.
+      (should (equal texts '("Codex · default" "Codex · Model B" "Claude Code · default" "Claude Code · Model A")))
+      (should (equal (delete-dups (mapcar (lambda (row) (plist-get (cdr row) :provider)) rows)) '(codex claude)))
+      (should (equal (plist-get (cdr (assoc "Claude Code · default" rows)) :note) "a · high")))
+    ;; Accounts, asked for: the default instance first, the disabled not at all, alike ones apart.
+    (let* ((rows (romacs-agent--picker-rows t)) (texts (mapcar #'car rows)))
       (should (equal texts '("Codex · default" "Codex · Model B" "Claude · default" "Claude · Model A"
                              "Claude (claude2) · default" "Claude (claude2) · Model A")))
       (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "harness's own"))
@@ -160,36 +170,36 @@ affixation it saw pushed on the list in cell ASKED."
        (answers (list nil)) (asked (list nil)))
     (cl-letf (((symbol-function 'completing-read) (romacs-agent-picker--reader answers asked)))
       ;; RET on a row: its model, no effort asked: the harness's.
-      (setcar answers (list "Claude · A"))
-      (should (equal (romacs-agent--read-selection nil) '("claude" :model "a")))
+      (setcar answers (list "Claude Code · A"))
+      (should (equal (romacs-agent--read-selection nil) '(claude :model "a")))
       (pcase-let ((`(,prompt ,group ,note ,all) (car (car asked))))
-        (should (string-match-p "Agent.*Claude · default" prompt))
-        (should (string-prefix-p "Claude  " group))
+        (should (string-match-p "Agent.*Claude Code · default" prompt))
+        (should (string-prefix-p "Claude Code" group))
         (should (string-search "effort low...high" note))
-        (should (equal (car all) "Claude · default")))
+        (should (equal (car all) "Claude Code · default")))
       ;; An instance's defaults: nothing named.
       (setcar answers (list "Codex · default"))
-      (should (equal (romacs-agent--read-selection nil) '("codex")))
+      (should (equal (romacs-agent--read-selection nil) '(codex)))
       ;; C-u asks for the effort, the model's default offered.
-      (setcar answers (list "Claude · A" "low"))
+      (setcar answers (list "Claude Code · A" "low"))
       (setcar asked nil)
-      (should (equal (romacs-agent--read-selection '(4)) '("claude" :model "a" :effort "low")))
+      (should (equal (romacs-agent--read-selection '(4)) '(claude :model "a" :effort "low")))
       (should (string-match-p "Effort.*high" (car (car (car asked)))))
       (should (equal (nth 3 (car (car asked))) '("low" "high")))
       ;; No default anywhere: asked without C-u.
-      (setcar answers (list "Claude · B" "low"))
-      (should (equal (romacs-agent--read-selection nil) '("claude" :model "b" :effort "low")))
+      (setcar answers (list "Claude Code · B" "low"))
+      (should (equal (romacs-agent--read-selection nil) '(claude :model "b" :effort "low")))
       ;; A model with no efforts asks none, even with C-u.
       (setcar answers (list "Codex · C"))
-      (should (equal (romacs-agent--read-selection '(4)) '("codex" :model "c"))))))
+      (should (equal (romacs-agent--read-selection '(4)) '(codex :model "c"))))))
 
 (ert-deftest romacs-agent-picker-one-instance-asks-nothing ()
   (romacs-agent-picker--with
       ((romacs-agent-providers `(("claude" :config-dir ,root :program ,program)
                                  ("codex" :config-dir ,root :program ,program :enabled nil)))
-       (answers (list (list "Claude · default"))) (asked (list nil)))
+       (answers (list (list "Claude Code · default"))) (asked (list nil)))
     (cl-letf (((symbol-function 'completing-read) (romacs-agent-picker--reader answers asked)))
-      (should (equal (romacs-agent--read-selection nil) '("claude")))
+      (should (equal (romacs-agent--read-selection nil) '(claude)))
       (should-not (car asked))
       ;; C-u shows the palette anyway.
       (romacs-agent--read-selection '(4))
@@ -226,19 +236,21 @@ affixation it saw pushed on the list in cell ASKED."
        (offered nil) (started nil))
     (cl-letf (((symbol-function 'romacs-agent--project-default) (lambda () (expand-file-name "repository/" root)))
               ((symbol-function 'read-directory-name) (lambda (_prompt directory) (setq offered directory)))
-              ((symbol-function 'romacs-agent--read-selection) (lambda (_ask) '("claude")))
+              ((symbol-function 'romacs-agent--read-selection) (lambda (&rest _) '("claude")))
               ((symbol-function 'read-string) (lambda (_prompt) ""))
               ((symbol-function 'romacs-agent-start)
                (lambda (&rest _) (interactive) (setq started (called-interactively-p 'any)))))
       (with-temp-buffer
-        (insert (propertize "row\n" 'romacs-agents-project (directory-file-name sub)))
+        (insert (propertize "row\n" 'romacs-agent-board-row (list :kind 'project :cwd (directory-file-name sub))))
         (goto-char (point-min))
-        (romacs-agents-new)
-        (should (equal offered sub))
-        (should started)
-        ;; Off every section: the current project's.
-        (goto-char (point-max))
-        (romacs-agents-new)
+        ;; The board hides first; then the prompt, where the user was.
+        (cl-letf (((symbol-function 'romacs-popup-then) #'funcall))
+          (romacs-agent-board-new)
+          (should (equal offered sub))
+          (should started)
+          ;; Off every section: the current project's.
+          (goto-char (point-max))
+          (romacs-agent-board-new))
         (should (equal offered (expand-file-name "repository/" root))))
       (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)

@@ -34,6 +34,7 @@ const CASES: &str = r###"
 (progn (insert "abc" (propertize "hidden" 'invisible t) "de\nfg") (list (window-text-pixel-size) (window-text-pixel-size nil 1 5) (window-text-pixel-size nil 4 10) (window-text-pixel-size nil 5 12)))
 (progn (insert "abc" (propertize "hidden" 'invisible 'h) "de") (add-to-invisibility-spec '(h . t)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 5) (window-text-pixel-size nil 1 10) (window-text-pixel-size nil 4 10)))
 (progn (insert "one\n" (propertize "two\nthree\n" 'invisible t) "four") (list (window-text-pixel-size) (window-text-pixel-size nil 5 15) (window-text-pixel-size nil 15)))
+(progn (insert "abchiddende\nfg\nhi") (put 'wtps-hide 'invisible t) (overlay-put (make-overlay 4 10) 'category 'wtps-hide) (set (make-local-variable 'char-property-alias-alist) '((invisible fold))) (overlay-put (make-overlay 13 16) 'fold t) (list (window-text-pixel-size) (window-text-pixel-size nil 1 5) (window-text-pixel-size nil 4 12) (window-text-pixel-size nil 12)))
 (progn (insert "ab" (propertize "XYZ" 'display "disp") "cd") (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 1 4) (window-text-pixel-size nil 4 6) (window-text-pixel-size nil 3 6) (window-text-pixel-size nil 6 8)))
 (progn (insert "ab" (propertize "X" 'display "line1\nline2") "cd") (list (window-text-pixel-size) (window-text-pixel-size nil 3 4) (window-text-pixel-size nil 4)))
 (progn (insert "a" (propertize " " 'display '(space :align-to 10)) "b" (propertize "x" 'display '(space :width 3.7)) (propertize "x" 'display '(space :width (5))) (propertize "y" 'display '(space))) (window-text-pixel-size))
@@ -105,10 +106,6 @@ fn oracle(expression: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn booted() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el")
-}
 
 fn romacs(vm: &mut Vm, expression: &str) -> String {
     let source = format!("(progn {SETUP} (encode-coding-string (condition-case e (prin1-to-string {expression}) (error (format \"signal %S\" e))) 'utf-8))");
@@ -129,12 +126,12 @@ fn compare(vm: &mut Vm, cases: &str) {
 
 #[test]
 fn batch_text_pixel_sizes_match_pinned_gnu() {
-    compare(&mut booted(), CASES);
+    compare(&mut gnu_ert_vm::bootstrapped(), CASES);
 }
 
 #[test]
 fn window_el_fits_side_windows_as_pinned_gnu() {
-    compare(&mut booted(), CONSUMERS);
+    compare(&mut gnu_ert_vm::bootstrapped(), CONSUMERS);
 }
 
 /// keymap-popup shows its popup in a bottom side window and fits it.
@@ -163,7 +160,7 @@ fn window_el_fits_a_bottom_side_window_under_the_status_bar() {
 fn keymap_popup_window_matches_pinned_gnu() {
     let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs/emacs-lisp/keymap-popup.el");
     let journey = format!(r#"(progn (load {:?} nil t) (eval '(keymap-popup-define wtps-test-map "Test popup." :group "Files" "f" ("Find file" ignore) "s" ("Save" ignore) :group "Other" "x" ("Extra" ignore) "l" ("A longer description of a command" ignore)) t) (keymap-popup wtps-test-map) (prog1 (let ((w (cadr (window-list)))) (list (length (window-list)) (window-total-height w) (window-body-height w) (window-text-pixel-size w nil t nil (frame-pixel-height) t) (with-current-buffer (window-buffer w) (buffer-substring-no-properties (point-min) (point-max))))) (keymap-popup-dismiss)))"#, library.canonicalize().unwrap().display().to_string());
-    compare(&mut booted(), &journey);
+    compare(&mut gnu_ert_vm::bootstrapped(), &journey);
 }
 
 
@@ -171,7 +168,7 @@ fn keymap_popup_window_matches_pinned_gnu() {
 /// returning numbers GNU would not.
 #[test]
 fn unsupported_display_features_refuse() {
-    let mut vm = booted();
+    let mut vm = gnu_ert_vm::bootstrapped();
     let refusal = |vm: &mut Vm, body: &str| romacs(vm, &format!("(progn {body} (condition-case e (window-text-pixel-size) (error (cadr e))))"));
     for (body, what) in [
         ("(insert \"a\" (propertize \"b\" 'display '(when (> 2 1) . \"Q\")))", "of a `(when FORM ...)' display specification"),
@@ -191,7 +188,7 @@ fn unsupported_display_features_refuse() {
 /// Without that order, strings from overlays sharing a start refuse.
 #[test]
 fn overlays_sharing_a_start_refuse() {
-    let mut vm = booted();
+    let mut vm = gnu_ert_vm::bootstrapped();
     let moved = r###"(progn (insert "abcd") (let ((m (make-overlay 1 1))) (overlay-put m 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (move-overlay m 2 2)) (window-text-pixel-size))"###;
     assert_eq!(oracle(moved), "(11 . 1)");
     let refused = "signal (error \"VM2 window-text-pixel-size of strings from overlays that share a start is unsupported\")";
@@ -236,7 +233,7 @@ fn displayed_window_refuses_after_a_host_layout() {
 /// form differs from its twin without the feature, which matches.
 #[test]
 fn strings_refuse_as_buffer_text_does() {
-    let mut vm = booted();
+    let mut vm = gnu_ert_vm::bootstrapped();
     let composed = "(propertize \"abc\" 'composition '((3)))";
     for (refused, plain, what) in [
         (format!("(insert \"a\" (propertize \"X\" 'display {composed}) \"b\")"), "(insert \"a\" (propertize \"X\" 'display \"abc\") \"b\")".to_owned(), "of composed text (the `composition' property)"),

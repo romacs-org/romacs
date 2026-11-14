@@ -327,12 +327,13 @@ fn divergences_are_loud_and_pinned() {
         ),
         "(error \"VM2 does not support user-defined hash table tests\" my-test)"
     );
-    // H3: GNU compares closures element-wise; VM2 requires the same lambda site.
+    // Closures of two lambdas with the same source are equal keys, as GNU's
+    // element-wise `equal' makes them (closure_key.rs).
     assert_eq!(
         eval(
             &mut vm,
             "(let ((h (make-hash-table :test 'equal)) (make (lambda () (lambda (x) x)))) (puthash (lambda (x) x) 'first h) (list (gethash (lambda (x) x) h) (progn (puthash (funcall make) 'site h) (gethash (funcall make) h))))"
         ),
-        "(nil site)"
+        "(first site)"
     );
 }

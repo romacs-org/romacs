@@ -4,28 +4,9 @@
 //! Every case binds its keys in a private global map and empties *scratch*.
 use romacs_vm::Vm;
 use std::path::Path;
-
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    // GNU batch, as the gnu-ert runner sets it before the chain loads.
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// Run BODY with a private global map over GNU's, then empty *scratch*.
 const PRELUDE: &str = "(defmacro kt-case (&rest body)
@@ -315,6 +296,28 @@ const CASES: &[&str] = &[
     ("greek-polytonic" "a'e[") ("greek-polytonic" ":a;w") ("bulgarian-phonetic" "abvgd shch")
     ("TeX" "\\alpha x^2 \\to \\sum") ("latin-1-prefix" "'a\"o~n") ("latin-postfix" "a'o\"n~")
     ("chinese-py" "ni hao ") ("chinese-py" "ni1hao2") ("german-postfix" "ae ue oe") ("rfc1345" "&a:")))"#,
+    // A batch read with nothing queued waits while a timer or a process
+    // filter can still queue input, as batch GNU's kbd_buffer_get_event does.
+    r"(progn (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?a)))) (read-event))",
+    r#"(let (got)
+  (global-set-key "q" (lambda () (interactive) (setq got 'left) (exit-recursive-edit)))
+  (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?q))))
+  (recursive-edit)
+  got)"#,
+    r#"(let ((p (make-process :name "kt-input" :command '("sh" "-c" "sleep 0.05; echo x")
+                        :filter (lambda (_p _s) (setq unread-command-events (list ?b))))))
+  (prog1 (read-event) (delete-process p)))"#,
+    r#"(progn (make-process :name "kt-exit" :command '("sh" "-c" "sleep 0.05")
+                       :sentinel (lambda (_p _e) (setq unread-command-events (list ?s))))
+       (read-event))"#,
+    r"(progn (run-with-idle-timer 0.05 nil (lambda () (setq unread-command-events (list ?i))))
+       (read-event))",
+    r"(let ((timer (run-at-time 0.05 0.05 (lambda () (setq unread-command-events (list ?r))))))
+  (prog1 (read-event) (cancel-timer timer)))",
+    r#"(let ((romacs-batch-read-horizon 0.2))
+  (make-process :name "kt-late" :command '("sh" "-c" "sleep 0.4; echo x")
+                :filter (lambda (_p _s) (setq unread-command-events (list ?p))))
+  (read-event))"#,
 ];
 
 fn gnu_results(root: &Path) -> Vec<String> {
@@ -337,7 +340,7 @@ fn keyboard_macros_match_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let expected = gnu_results(&root);
     assert_eq!(expected.len(), CASES.len());
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PRELUDE).unwrap();
     for (case, gnu) in CASES.iter().zip(&expected) {
         let printed = match vm.eval_source(&format!("(kt-case (prin1-to-string {case}))")) {
@@ -349,16 +352,47 @@ fn keyboard_macros_match_gnu() {
     }
 }
 
-/// DIVERGENCES.md VM2-KBD1: where batch GNU would block for terminal input
-/// (no unread event, no macro input left, no host keyboard), VM2 signals
+/// VM2-KBD1: where batch GNU would block for terminal input forever (no
+/// unread event, no macro input left, no host keyboard, and nothing that
+/// may queue input within `romacs-batch-read-horizon`), VM2 signals
 /// `end-of-file`, from the innermost recursive edit when there is one.
 #[test]
 fn reading_past_the_input_signals_end_of_file() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PRELUDE).unwrap();
     for (source, expected) in [
         ("(condition-case e (read-event) (error e))", "(end-of-file \"Error reading from stdin\")"),
+        // Where batch GNU would wait forever, end of input comes within
+        // the horizon: a repeating timer that queues nothing, a process
+        // that ends without queuing, undo's ten-second boundary timer after
+        // an edit, a timer an hour away.  A stray entry in the timer list
+        // is not a timer.
+        ("(let* ((romacs-batch-read-horizon 0.2) (start (float-time))
+                (timer (run-at-time 0 0.05 #'ignore)))
+            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 1))
+              (cancel-timer timer)))",
+         "(end-of-file t)"),
+        ("(let ((start (float-time)))
+            (make-process :name \"kt-quiet\" :command '(\"sh\" \"-c\" \"sleep 0.05\"))
+            (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 2)))",
+         "(end-of-file t)"),
+        ("(let ((start (float-time)))
+            (with-current-buffer (get-buffer-create \"kt-undo\") (buffer-enable-undo) (insert \"a\"))
+            (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.9)))",
+         "(end-of-file t)"),
+        ("(let* ((start (float-time)) (timer (run-at-time 3600 nil #'ignore)))
+            (prog1 (list (condition-case e (read-event) (error (car e))) (< (- (float-time) start) 0.9))
+              (cancel-timer timer)))",
+         "(end-of-file t)"),
+        ("(let ((timer-list (cons 'not-a-timer timer-list)))
+            (condition-case e (read-event) (error (car e))))",
+         "end-of-file"),
+        // A read idles only while it waits.
+        ("(list (condition-case e (read-event) (error (car e))) (current-idle-time)
+                (progn (run-at-time 0.05 nil (lambda () (setq unread-command-events (list ?k))))
+                       (read-event))
+                (current-idle-time))",
+         "(end-of-file nil 107 nil)"),
         ("(list (read-event nil nil 0.01) (read-char nil nil 0) (read-char-exclusive nil nil 0))", "(nil nil nil)"),
         ("(let (got) (global-set-key \"r\" (lambda () (interactive) (setq got (list (read-event) (read-event)))))
             (list (condition-case e (execute-kbd-macro \"rx\") (error e)) got))",

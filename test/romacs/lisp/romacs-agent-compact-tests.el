@@ -1,6 +1,7 @@
 ;;; romacs-agent-compact-tests.el --- Compaction and thinking in the transcript -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
@@ -103,7 +104,7 @@
       (kill-buffer "*agent compaction*"))))
 
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
-  (let* ((root (make-temp-file "rs" t)) (routes (expand-file-name "route/" root))
+  (let* ((root (romacs-test-socket-directory "rs")) (routes (expand-file-name "route/" root))
          (live (expand-file-name "live.sock" root)) (server nil)
          (answering (expand-file-name "a.sock" routes)) (dead (expand-file-name "d.sock" routes)))
     (unwind-protect

@@ -450,6 +450,9 @@ an approval or questions for the user, anything else refused."
          (ms (gethash "durationMs" turn)))
     (list :type 'done :text (romacs-agent-reply session) :error (not (equal status "completed"))
           :reason reason :duration (and (numberp ms) (/ ms 1000.0))
+          ;; Refused at its account's usage limit.
+          :limit (let ((error (gethash "error" turn)))
+                   (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
           :context-window (plist-get (romacs-agent-driver-state session) :window))))
 
 (defun romacs-agent--codex-notified (session method params)
@@ -478,6 +481,27 @@ an approval or questions for the user, anything else refused."
       ("item/reasoning/summaryPartAdded"
        (when (> (gethash "summaryIndex" params 0) 0) (list (list :type 'thinking :text "\n\n"))))
       ("turn/plan/updated" (list (list :type 'status :text (romacs-agent--codex-plan params))))
+      ;; Its account's usage: the fuller of its windows, which binds first.
+      ("account/rateLimits/updated"
+       (let* ((limits (gethash "rateLimits" params))
+              (windows (and (hash-table-p limits)
+                            (cl-remove-if-not (lambda (w) (and (hash-table-p w) (numberp (gethash "usedPercent" w))))
+                                              (list (gethash "primary" limits) (gethash "secondary" limits)))))
+              ;; Spent windows bind until the last of them resets; else the fullest tells.
+              (spent (cl-remove-if-not (lambda (w) (>= (gethash "usedPercent" w) 100)) windows))
+              (fullest (car (sort (or spent windows)
+                                  (if spent
+                                      (lambda (a b) (> (or (romacs-agent--value (gethash "resetsAt" a)) 0)
+                                                       (or (romacs-agent--value (gethash "resetsAt" b)) 0)))
+                                    (lambda (a b) (> (gethash "usedPercent" a) (gethash "usedPercent" b))))))))
+         (when fullest
+           (let ((used (gethash "usedPercent" fullest)))
+             (list (list :type 'rate-limit
+                         :status (if (>= used 100) 'rejected 'allowed)
+                         :used (/ used 100.0)
+                         :resets (romacs-agent--value (gethash "resetsAt" fullest))
+                         :window (let ((mins (romacs-agent--value (gethash "windowDurationMins" fullest))))
+                                   (and (numberp mins) (format "%d minutes" mins)))))))))
       ("thread/tokenUsage/updated"
        (let* ((usage (gethash "tokenUsage" params))
               (window (romacs-agent--value (gethash "modelContextWindow" usage))))
@@ -550,6 +574,13 @@ line an earlier `codex exec' run journaled)."
           (method (romacs-agent--codex-notified session method (gethash "params" line)))
           (t (romacs-agent--codex-answer session id line)))))
 
+(defun romacs-agent--codex-conversation-files (home session)
+  "The files under HOME, relative to it, that hold SESSION's Codex
+thread: its rollout, wherever its day put it."
+  (when-let* ((thread (romacs-agent-harness-session session)))
+    (mapcar (lambda (rollout) (file-relative-name rollout home))
+            (file-expand-wildcards (expand-file-name (format "sessions/*/*/*/rollout-*-%s.jsonl" thread) home)))))
+
 (romacs-agent-define-harness 'codex
   :display "Codex" :icon "◎" :t3-driver "codex"
   :config-variable "CODEX_HOME" :config-default "~/.codex"
@@ -559,6 +590,7 @@ line an earlier `codex exec' run journaled)."
   :scrub '("CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS" "CODEX_CI" "CODEX_SANDBOX_NETWORK_DISABLED"
            "CODEX_SESSION_ID" "CODEX_THREAD_ID" "CODEX_TOOL_CALL_ID" "CODEX_VERSION")
   :lifetime 'persistent :forks #'romacs-agent--codex-forking
+  :conversation-files #'romacs-agent--codex-conversation-files
   :rollback #'romacs-agent--codex-rollback
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv

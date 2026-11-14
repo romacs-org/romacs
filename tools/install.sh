@@ -5,7 +5,7 @@
 #
 # Arguments, after `bash -s --' when piped:
 #
-#   --nightly     the rolling build of master, not the latest stable release
+#   --nightly     the rolling build of beta, not the latest stable release
 #   --no-compile  skip compiling the Lisp ahead of use; Romacs compiles
 #                 what it loads as you go, so early sessions are slower
 #   --uninstall   remove the installation; your init and data stay
@@ -149,9 +149,15 @@ place_release() {
     fi
 }
 
-# Build the GUI world, so the first launch restores it.
+# Build the worlds, so the first launch and the first batch session
+# restore: the installation's batch world beside the binary, which a batch
+# session of the same user under any HOME reads, then the GUI's, which
+# finds that batch world and builds no second one. Without the batch
+# world, batch sessions boot from source: a warning, not a failed install.
 build_world() {
-    say 'Building the startup image'
+    say 'Building the startup images'
+    "$prefix/bin/romacs" --world-store "$prefix/bin/romacs-vm-gui.worlds" --world-build --batch ||
+        warn "the batch startup image was not built; batch sessions start from source."
     "$prefix/bin/romacs" -Q --loadup --world-build
 }
 

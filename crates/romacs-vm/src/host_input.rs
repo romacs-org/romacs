@@ -119,6 +119,12 @@ pub trait HostInput {
     fn pointer(&mut self) -> Option<(i32, i32)> {
         None
     }
+
+    /// What the host's display saw of native key repeat since the last
+    /// take (`romacs--take-key-repeats`), None with no display.
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -205,11 +211,14 @@ impl Vm {
         }
         Ok(work)
     }
-    /// Every leaf window of every frame, the mini-windows too: what any
-    /// redisplay may show.
+    /// Every leaf window of every frame shown, the mini-windows too: what
+    /// any redisplay may show. A hidden frame (a child frame kept for a
+    /// layer, a toast or a chip between uses) is not redisplayed, as GNU
+    /// redisplays only visible frames, so its windows run no
+    /// `pre-redisplay-functions`.
     pub(crate) fn displayed_windows(&self) -> Vec<Value> {
         let mut out = vec![];
-        for frame in self.frames() {
+        for frame in self.frames().into_iter().filter(|&frame| self.frame_shown(frame)) {
             let Ok(f) = self.frame(frame) else { continue };
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {
@@ -254,8 +263,11 @@ impl Vm {
     }
 
     /// A redisplay took TOOK: the first after `romacs--redisplay-since-mark's
-    /// mark is what the command that marked it cost the display.
+    /// mark is what the command that marked it cost the display. Ends the
+    /// cycle `redisplay_begin' began (`romacs--display-stats').
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
+        let conses = self.allocation.consed.conses;
+        self.display_state.stats.end(conses);
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }
@@ -561,6 +573,22 @@ mod tests {
         assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
         let first: u64 = words[2].parse().expect(&got);
         assert!((5_000..40_000).contains(&first), "{got}");
+    }
+
+    /// A read that waits for input redisplays inside the bracket
+    /// `romacs--display-stats` counts: a cycle a read, each visiting the
+    /// frame's windows.
+    #[test]
+    fn a_reads_redisplay_is_a_counted_cycle() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120, 121], vec![0, 0]))));
+        let got = vm
+            .eval_source("(progn (romacs--read-host-event) (romacs--read-host-event)
+                                 (let ((stats (romacs--display-stats)))
+                                   (list (cdr (assq 'cycles stats)) (> (cdr (assq 'windows-visited stats)) 1))))")
+            .unwrap();
+        assert_eq!(got.display().unwrap(), "(2 t)");
     }
 
     /// A collection in a prompt's redisplay runs with the host taken for the

@@ -14,6 +14,8 @@
 
 (require 'sasl-scram-rfc)
 
+(declare-function romacs-pbkdf2-hmac "prims/digest.rs" (algorithm password salt iterations))
+
 (defvar sasl-scram-max-iterations 100000
   "The largest SCRAM iteration count a login accepts.
 The key derivation is synchronous; at this count it takes about 50 ms.")

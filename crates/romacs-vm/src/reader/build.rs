@@ -384,19 +384,13 @@ pub(super) fn property_string(vm: &mut Vm, roots: &[usize]) -> Built {
                 return Err(error(vm, "Odd length text property list".into(), false));
             }
             let (val, tail) = vm.cons_pair(tail).map_err(plain)?;
-            let name = if key == Value::NIL {
-                "nil".to_owned()
-            } else if key == Value::TRUE {
-                "t".to_owned()
-            } else if key.tag() == 7 {
-                vm.symbol_names[key.index(7).map_err(plain)? - 1].clone()
-            } else {
-                return Err(plain("reader properties require interned symbol keys".into()));
+            let Some(key) = crate::properties::Key::of(key) else {
+                return Err(plain("reader properties require symbol keys".into()));
             };
-            if pairs.iter().any(|(previous, _)| previous == &name) {
+            if pairs.iter().any(|(previous, _)| *previous == key) {
                 return Err(error(vm, "Reader cannot retain duplicate text property keys".into(), false));
             }
-            pairs.push((name, val));
+            pairs.push((key, val));
             cursor = tail;
             if pairs.len() > vm.list_limit() {
                 return Err(plain("circular property list".into()));
@@ -408,12 +402,10 @@ pub(super) fn property_string(vm: &mut Vm, roots: &[usize]) -> Built {
         if let Object::String(s) | Object::RawString(s) = vm.object(value).map_err(plain)? {
             string.properties = s.properties.clone();
         }
-        for key in string.properties.properties_keys() {
-            string.properties.remove(range.clone(), &key);
-        }
+        string.properties.clear(range.clone());
         // Reverse insertion preserves the plist's printed key order.
         for (key, val) in pairs.into_iter().rev() {
-            string.properties.put(range.clone(), &key, val);
+            string.properties.put(range.clone(), key, val);
         }
         *vm.objects.entry_mut(value.index(0).map_err(plain)? - 1) = if string.is_utf8() {
             Object::String(Box::new(string))

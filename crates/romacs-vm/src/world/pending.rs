@@ -50,6 +50,7 @@ impl Vm {
                 Some(pending) => { pending.entry = entry; true }
                 None => false,
             },
+            // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
             None | Some(VariableRedirect::Plain) if !self.dynamic.iter().any(|binding| binding.0 == slot) => {
                 if self.variable_redirects.len() <= slot {
                     self.variable_redirects.resize(slot + 1, None);

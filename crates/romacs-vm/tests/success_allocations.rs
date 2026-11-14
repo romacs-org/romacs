@@ -89,3 +89,103 @@ fn numeric_type_tests_do_not_allocate_errors() {
         "{allocations} allocations for 1000 n-ary additions"
     );
 }
+
+/// A property write costs the runs it touches: it copies no run of its
+/// range into a list, compares no key by name and edits the leaf holding
+/// its runs in place, so what 1000 writes allocate is bounded, and the same
+/// whether the text has a thousand runs or 64 thousand, five other
+/// properties or 640.  Each round of writes changes what the last one left:
+/// a run's value, nothing, a second property, and a part of a run.
+#[test]
+fn property_writes_allocate_for_the_runs_they_touch_not_for_the_text() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    vm.eval_source("(defvar ROUND 0)").unwrap();
+    let mut counts = Vec::new();
+    for (name, runs, others) in [("small", 1_000, 5), ("large", 64_000, 5), ("many-keys", 64_000, 640)] {
+        vm.eval_source(&format!(
+            "(with-current-buffer (get-buffer-create {name:?}) (setq buffer-undo-list t) (insert (make-string {} ?x)) \
+               (dotimes (i {runs}) \
+                 (put-text-property (+ 1 (* i 10)) (+ 6 (* i 10)) 'face (if (= 0 (% i 2)) 'bold 'italic)) \
+                 (when (= 0 (% i 50)) \
+                   (put-text-property (+ 3 (* i 10)) (+ 9 (* i 10)) (intern (format \"other-%d\" (% i {others}))) i))) \
+               nil)",
+            runs * 10
+        ))
+        .unwrap();
+        let source = format!(
+            "(with-current-buffer {name:?} \
+               (let ((inhibit-modification-hooks t) (i 0) (even (= 0 (% ROUND 2)))) \
+                 (while (< i 1000) \
+                   (let ((p (+ 1 (* 10 (% (* i 7919) {runs})))) (k (% i 4))) \
+                     (cond ((= k 0) (put-text-property p (+ p 5) 'face (if even 'underline 'shadow))) \
+                           ((= k 1) (put-text-property p (+ p 5) 'face (get-text-property p 'face))) \
+                           ((= k 2) (put-text-property p (+ p 7) 'written ROUND)) \
+                           (t (put-text-property (+ p 1) (+ p 3) 'face (if even 'bold 'italic))))) \
+                   (setq i (1+ i))) \
+                 (setq ROUND (1+ ROUND)) \
+                 i))"
+        );
+        counts.push((name, count(&mut vm, &source)));
+    }
+    for (name, allocations) in &counts {
+        assert!(*allocations <= 100, "{name}: {allocations} allocations for 1000 property writes: {counts:?}");
+    }
+}
+
+/// The allocations of a thousand evaluations of BODY, which the loop's
+/// last value must show to be EXPECTED.
+fn count_calls(vm: &mut Vm, body: &str, expected: &str) -> usize {
+    let source = format!("(let ((i 0) (r nil)) (while (< i 1000) (setq r {body}) (setq i (1+ i))) r)");
+    let f = vm.compile_source(&source).unwrap();
+    vm.execute(f).unwrap();
+    ALLOCS.with(|n| n.set(0));
+    TRACK.with(|active| active.set(true));
+    let result = std::hint::black_box(vm.execute(f)).and_then(romacs_vm::Local::display);
+    TRACK.with(|active| active.set(false));
+    assert_eq!(result.as_deref(), Ok(expected), "{body}");
+    ALLOCS.with(Cell::get)
+}
+
+/// A search or a syntax scan that calls no Lisp allocates nothing, as
+/// GNU's works in its C frame and one global set of registers: in a
+/// multibyte buffer with its own syntax table, `syntax-table` properties
+/// honoured and propertized to the end.
+#[test]
+fn searches_and_scans_allocate_nothing_per_call() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    vm.eval_source(
+        r#"(progn
+             (set-buffer (get-buffer-create "entry"))
+             (let ((i 0)) (while (< i 50) (insert "  (defun exämple (arg)) ;; comment here\n") (setq i (1+ i))))
+             (let ((table (make-char-table 'syntax-table)))
+               (set-char-table-parent table (standard-syntax-table))
+               (modify-syntax-entry ?\; "<" table) (modify-syntax-entry ?\n ">" table)
+               (set-syntax-table table))
+             (make-local-variable 'parse-sexp-ignore-comments) (setq parse-sexp-ignore-comments t)
+             (make-local-variable 'parse-sexp-lookup-properties) (setq parse-sexp-lookup-properties t)
+             (put-text-property 3 4 'syntax-table '(4 . 41))
+             (setq syntax-propertize--done most-positive-fixnum)
+             (goto-char 10))"#,
+    )
+    .unwrap();
+    for (body, expected) in [
+        (r#"(progn (goto-char 3) (looking-at "(def\\(un\\)"))"#, "t"),
+        (r#"(progn (goto-char 10) (re-search-forward "ex\\(ä\\)mple" nil t))"#, "17"),
+        (r#"(progn (goto-char 30) (re-search-backward "ex\\(ä\\)mple" 5 t))"#, "10"),
+        (r#"(progn (goto-char 10) (search-forward "mple" nil t))"#, "17"),
+        (r#"(string-match "b+\\(ä\\)" "aäbbäcc")"#, "2"),
+        (r#"(progn (goto-char 24) (skip-syntax-forward "^w") (point))"#, "28"),
+        (r#"(progn (goto-char 24) (skip-syntax-backward "w_") (point))"#, "24"),
+        ("(progn (goto-char 24) (forward-comment 1) (point))", "41"),
+        // Past no character beyond ASCII: a table allocates to give those.
+        ("(scan-sexps 18 1)", "23"),
+        ("(scan-lists 18 1 0)", "23"),
+        ("(progn (goto-char 12) (backward-prefix-chars) (point))", "12"),
+    ] {
+        let allocations = count_calls(&mut vm, body, expected);
+        // The execution frame may be allocated once; a call allocates nothing.
+        assert!(allocations <= 8, "{body}: {allocations} allocations for 1000 calls");
+    }
+}

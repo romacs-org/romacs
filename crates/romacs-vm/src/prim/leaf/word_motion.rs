@@ -7,7 +7,6 @@
 //! `forward-word' and the case commands to lisp/romacs/vm/prelude.el's scan.
 //! The regex default boundary lookup is also a no-op, not a script provider.
 use super::*;
-use crate::prim::leaf::Kind;
 use crate::coordinates::{ByteOffset, CharOffset};
 use romacs_regex::{SyntaxClass, SyntaxLookup};
 
@@ -112,9 +111,24 @@ impl Leaf<'_> {
     /// syntax.c skip_syntaxes: move point across characters whose syntax
     /// class is (or with a leading ^ is not) named in SYNTAX, up to LIMIT.
     pub fn skip_syntax(&mut self, syntax: Value, limit: Value, forward: bool) -> super::super::Out {
-        if !matches!(self.kind(syntax), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", syntax)); }
-        // A multibyte spec is made unibyte first (string_make_unibyte).
-        let spec: Vec<u8> = self.string_view(syntax)?.chars().map(|c| c as u8).collect();
+        // A multibyte spec is made unibyte first (string_make_unibyte): the
+        // low byte of each character, read where the string lies.
+        // The classes named, a bit each, and whether a leading ^ has the
+        // skip pass every other class instead.
+        let (named, negate) = {
+            let spec = self.vm.str_view(syntax).ok_or(Fault::Wrong("stringp", syntax))?;
+            let (mut named, mut negate, mut first) = (0_u32, false, true);
+            for c in spec.chars() {
+                let designator = c as u8;
+                if std::mem::take(&mut first) && designator == b'^' {
+                    negate = true;
+                } else if let Some(class) = syntax_spec_code(designator) {
+                    named |= 1 << class;
+                }
+            }
+            (named, negate)
+        };
+        let skipped = |class: SyntaxClass| ((named >> (class as u32)) & 1 == 1) != negate;
         let limit = if limit == Value::NIL { None } else if let Some(n) = limit.integer_value() { Some(n) } else {
             match self.marker_position(limit) {
                 Some(Some(n)) => Some(n),
@@ -122,31 +136,45 @@ impl Leaf<'_> {
                 None => return Err(Fault::Wrong("integer-or-marker-p", limit)),
             }
         };
-        let negate = spec.first() == Some(&b'^');
-        let mut classes = [negate; 256];
-        for &c in &spec[usize::from(negate)..] { classes[syntax_spec_code(c)] = !negate; }
         let source = self.vm.word_motion_syntax()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = crate::regexp::VmSyntax::new(self.vm, source);
-        // Character positions walked from point, as skip_chars does; the
-        // syntax lookup takes byte offsets relative to the accessible start.
-        let (start, at, point) = match &self.vm.objects[index] {
+        // Walked from point a character at a time, in bytes: nothing is
+        // counted but the characters crossed, and only a LIMIT, a
+        // position Lisp gave, is converted. The syntax lookup takes byte
+        // offsets relative to the accessible start.
+        let (moved, point) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
-                let low = buffer.char_of_byte(accessible.start).map_err(Fault::Error)?.0;
-                let high = buffer.char_of_byte(accessible.end).map_err(Fault::Error)?.0;
-                let start = buffer.char_of_byte(buffer.point).map_err(Fault::Error)?.0;
-                let bound = limit.unwrap_or(if forward { high as i64 + 1 } else { low as i64 + 1 })
-                    .clamp(low as i64 + 1, high as i64 + 1) as usize - 1;
-                let mut at = start;
-                while if forward { at < bound } else { at > bound } {
-                    let character = if forward { at } else { at - 1 };
-                    let Some(ch) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
-                    let offset = buffer.byte_of_char(CharOffset(character)).map_err(Fault::Error)?.0 - accessible.start.0;
-                    if !classes[syntax.code_syntax_at(ch, offset) as usize] { break; }
-                    if forward { at += 1; } else { at -= 1; }
+                let (low, high) = (accessible.start.0, accessible.end.0);
+                let bound = match limit {
+                    None => if forward { high } else { low },
+                    Some(limit) => {
+                        let before = usize::try_from(limit - 1).unwrap_or(0);
+                        let byte = if before < buffer.len_chars() { buffer.byte_of_char(CharOffset(before)).map_err(Fault::Error)?.0 } else { buffer.len_bytes() };
+                        byte.clamp(low, high)
+                    }
+                };
+                let class_at = |byte: usize| -> std::result::Result<Option<(u32, bool)>, Fault> {
+                    let code = buffer.character_at(ByteOffset(byte)).map_err(Fault::Error)?;
+                    Ok(code.map(|code| (code as u32, skipped(syntax.code_syntax_at(code as u32, byte - low)))))
+                };
+                let (mut at, mut moved) = (buffer.point.0, 0_i64);
+                if forward {
+                    while at < bound {
+                        let Some((code, true)) = class_at(at)? else { break };
+                        at += crate::lstring::char_string(code, &mut [0; 5]);
+                        moved += 1;
+                    }
+                } else {
+                    while at > bound {
+                        let before = buffer.char_start_before(at);
+                        let Some((_, true)) = class_at(before)? else { break };
+                        at = before;
+                        moved -= 1;
+                    }
                 }
-                (start, at, buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?)
+                (moved, ByteOffset(at))
             }
             data::Object::ByteBuffer(buffer) => {
                 let (low, high) = (buffer.restriction.start.0, buffer.restriction.end.0);
@@ -156,10 +184,10 @@ impl Leaf<'_> {
                 let mut at = start;
                 while if forward { at < bound } else { at > bound } {
                     let character = if forward { at } else { at - 1 };
-                    if !classes[syntax.char_syntax_at(char::from(buffer.bytes[character]), character - low) as usize] { break; }
+                    if !skipped(syntax.char_syntax_at(char::from(buffer.bytes[character]), character - low)) { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
-                (start, at, ByteOffset(at))
+                (at as i64 - start as i64, ByteOffset(at))
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
@@ -169,15 +197,15 @@ impl Leaf<'_> {
             data::Object::ByteBuffer(buffer) => buffer.point = point,
             _ => unreachable!("matched above"),
         }
-        Value::integer(at as i64 - start as i64).map_err(Fault::Error)
+        Value::integer(moved).map_err(Fault::Error)
     }
 }
 
-/// syntax.c syntax_spec_code: a designator's class, 255 for none.
-fn syntax_spec_code(c: u8) -> usize {
-    match c {
+/// syntax.c `syntax_spec_code`: a designator's class, if it names one.
+fn syntax_spec_code(c: u8) -> Option<u32> {
+    Some(match c {
         b' ' | b'-' => 0, b'.' => 1, b'w' => 2, b'_' => 3, b'(' => 4, b')' => 5,
         b'\'' => 6, b'"' => 7, b'$' => 8, b'\\' => 9, b'/' => 10, b'<' => 11,
-        b'>' => 12, b'@' => 13, b'!' => 14, b'|' => 15, _ => 255,
-    }
+        b'>' => 12, b'@' => 13, b'!' => 14, b'|' => 15, _ => return None,
+    })
 }

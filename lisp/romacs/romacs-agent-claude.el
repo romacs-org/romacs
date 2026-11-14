@@ -98,6 +98,7 @@ RESUME is non-nil."
                     (resume (list "--resume" (romacs-agent--native-id session)))
                     (t (list "--session-id" (romacs-agent-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
+            (romacs-agent--suggestion-words session)
             (plist-get instance :arguments))))
 
 (defun romacs-agent--claude-image (file)
@@ -300,6 +301,11 @@ cache, it reports none) or does not say."
       ("result"
        (list (list :type 'done :cost (gethash "total_cost_usd" line)
                    :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+                   ;; Refused at a usage limit: its instance's, or its model's
+                   ;; alone (one that needs usage credits the account has spent;
+                   ;; its other models still run).
+                   :limit (pcase (gethash "api_error" line)
+                            ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
                    :reason (romacs-agent--claude-reason line)
                    :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
                    :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
@@ -349,7 +355,20 @@ cache, it reports none) or does not say."
                ((and id (string-prefix-p "romacs-mode-" id) (equal (gethash "subtype" response) "error"))
                 (cl-return-from romacs-agent--claude-events (romacs-agent--claude-mode-refused session id response))))
          nil))
-      ("rate_limit_event" nil)
+      ("prompt_suggestion"
+       (let ((text (romacs-agent--value (gethash "suggestion" line))))
+         (and (stringp text) (not (string-empty-p (setq text (string-trim text))))
+              (list (list :type 'suggestion :text text)))))
+      ;; Its instance's usage, after each request.
+      ("rate_limit_event"
+       (let ((info (gethash "rate_limit_info" line)))
+         (when (hash-table-p info)
+           (list (list :type 'rate-limit
+                       :status (pcase (gethash "status" info)
+                                 ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed))
+                       :used (romacs-agent--value (gethash "utilization" info))
+                       :resets (romacs-agent--value (gethash "resetsAt" info))
+                       :window (romacs-agent--value (gethash "rateLimitType" info)))))))
       (_ (list (list :type 'unknown :raw line))))))
 
 (defun romacs-agent--claude-models (answer)
@@ -519,6 +538,20 @@ answers in its input, and for the session when asked."
                                                        "updatedPermissions" (romacs-agent--claude-session-rules request)))
                                   (t (romacs-mcp--object "behavior" "allow" "updatedInput" input)))))))
 
+(defun romacs-agent--claude-conversation-files (home session)
+  "The files under HOME, relative to it, that hold SESSION's Claude Code
+conversation: its transcript and the directory beside it (tool results,
+subagents), its file history (what a rewind restores) and its shell
+environment."
+  (let ((id (romacs-agent--native-id session)))
+    (cl-remove-if-not (lambda (file) (file-exists-p (expand-file-name file home)))
+                (append (mapcar (lambda (transcript) (file-relative-name transcript home))
+                                (file-expand-wildcards (expand-file-name (format "projects/*/%s.jsonl" id) home)))
+                        (mapcar (lambda (dir) (file-relative-name dir home))
+                                (cl-remove-if-not #'file-directory-p
+                                                  (file-expand-wildcards (expand-file-name (format "projects/*/%s" id) home))))
+                        (list (concat "file-history/" id) (concat "session-env/" id))))))
+
 (romacs-agent-define-harness 'claude
   :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
@@ -528,6 +561,7 @@ answers in its input, and for the session when asked."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
+  :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
@@ -540,6 +574,8 @@ answers in its input, and for the session when asked."
   :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
+  ;; After a turn's end, at times, a prompt_suggestion line.
+  :suggestions '("--prompt-suggestions")
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
              :keep romacs-agent-history--claude-keep

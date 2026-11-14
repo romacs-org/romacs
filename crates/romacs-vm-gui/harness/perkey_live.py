@@ -9,8 +9,17 @@ typed text lands in the second idle phase.  A session runs, in order:
 
   idle, self-insert (N x `a'), C-n (N), C-f (N), idle, then C-x C-s.
 
-Counted sessions count the evaluator thread alone (`perf stat -t`,
-instructions:u) over each phase; latency sessions run without perf and
+Its C-n steps that scroll do so under Romacs's `scroll-conservatively'
+101 (just enough to show point), the cost of that path alone: GNU's
+default 0 recentres instead, a different and cheaper redisplay
+(scroll_invisible_live runs both).
+
+Counted sessions count the evaluator thread alone (`perf stat -t
+--no-inherit`, instructions:u) over each phase: a worker the evaluator
+starts during a phase (an image decoder, a tree-sitter parse, a process's
+watcher) does work of its own, which is not the keys'.  With --inherit the
+count takes in such threads too, as `perf stat' does by default, for the
+whole work a phase set going.  Latency sessions run without perf and
 with --trace-latency, and read key-enqueue -> render-observed samples: one
 per key, each rendered or explicitly unchanged, or the phase is refused.
 
@@ -73,7 +82,7 @@ usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
                       [--mode WxH] [--populate] [--line-numbers TYPE] [--sample FILE]
-                      [--host-calls] [--setup FORM]...
+                      [--host-calls] [--setup FORM]... [--inherit]
 """
 import argparse
 import hashlib
@@ -164,6 +173,16 @@ def perf_count(output, idle=False):
                 raise Invalid(f'counter ran under 100%: {line}')
             return int(fields[0])
     raise Invalid(f'no instructions line: {output!r}')
+
+
+def perf_stat(tid, out, inherit=True):
+    """The command counting thread TID's instructions into OUT until it is
+    interrupted.  With INHERIT the count takes in the threads TID starts
+    while it runs, as `perf stat' does by default; a thread already running
+    is never counted, so what that adds is whatever happens to start in
+    the counted interval."""
+    return ['perf', 'stat', '-x,', *([] if inherit else ['--no-inherit']),
+            '-e', 'instructions:u', '-t', str(tid), '-o', str(out)]
 
 
 def delivery(replies, command, keys):
@@ -364,6 +383,10 @@ def text_point(stderr_records):
 class Session:
     def __init__(self, args, root, latency):
         self.args, self.root, self.latency = args, root, latency
+        # Whether a count takes in the threads the evaluator starts during
+        # it (`perf_stat'): only when asked, here or by a harness's own
+        # options naming `inherit'.
+        self.inherit = getattr(args, 'inherit', False)
         self.compositor = self.keyboard = self.process = None
 
     def env(self):
@@ -555,8 +578,7 @@ class Session:
             result = action()
             return None, time.monotonic() - started, result
         out = self.root / f'perf-{time.monotonic_ns()}.txt'
-        perf = subprocess.Popen(['perf', 'stat', '-x,', '-e', 'instructions:u', '-t', str(self.tid), '-o', str(out)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        perf = subprocess.Popen(perf_stat(self.tid, out, self.inherit), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(.3)
         started = time.monotonic()
         result = action()
@@ -722,7 +744,8 @@ def latencies(sessions):
     return found
 
 
-def main():
+def arguments(argv=None):
+    """The command line ARGV (default the process's), parsed and checked."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -746,9 +769,16 @@ def main():
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
     parser.add_argument('--setup', action='append', help='a form the M-: setup also evaluates (--regime loadup)')
     parser.add_argument('--host-calls', action='store_true', help='count the calls out of the VM per command, by side')
-    args = parser.parse_args()
+    parser.add_argument('--inherit', action='store_true',
+                        help='also count the threads the evaluator starts during a phase (default: the evaluator alone)')
+    args = parser.parse_args(argv)
     if (args.line_numbers or args.setup) and args.regime != 'loadup':
         parser.error('--line-numbers and --setup need --regime loadup, whose M-: setup evaluates them')
+    return args
+
+
+def main():
+    args = arguments()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
@@ -759,7 +789,7 @@ def main():
     good = [r for r in counted if not invalid(r)]
     report = {'binary': str(args.binary), 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
               'regime': args.regime, 'lines': args.lines, 'sample': str(args.sample) if args.sample else None, 'keys_per_phase': args.keys, 'gap_s': args.gap,
-              'counter': 'instructions:u, evaluator thread, idle-subtracted',
+              'counter': f"instructions:u, evaluator thread{' and the threads it starts' if args.inherit else ' alone'}, idle-subtracted",
               'latency': 'key enqueue to render observed (--trace-latency), perf-free sessions',
               'instructions_per_key': per_key(good, args.keys) if good else None,
               'refused_phases': {f'{kind}-{i}': {n: p['problems'] for n, p in r['phases'].items() if p['problems']}

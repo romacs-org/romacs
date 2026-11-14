@@ -20,6 +20,29 @@ measure for a text-terminal display. Romacs *contains* a terminal emulator
 program. Pinned GNU may be run `-nw` as an oracle when no GUI comparison is
 possible; say so where you do.
 
+## Where a rule goes
+
+- A rule that holds across the repository goes in this file.
+- A rule about one subsystem (its boundary, its contracts, how to test it, its
+  traps, its local decisions) goes in that subsystem's own `AGENTS.md`, beside
+  its code, and never here. Read the ones over the paths you touch:
+  `python3 tools/lib/agents_md.py notes` prints them for a branch, and so does
+  the MCP tool `romacs_dev_guide` given a worktree.
+- A module's file opens with `# ` and its directory from the root (as
+  `# crates/romacs-vm`), then says in a line or two what the module is. Its
+  sections, each only when it has something to say: `## Boundary` (what it owns
+  and what it may not touch), `## Contracts` (what its callers rely on),
+  `## Tests` (the commands that check a change to it), `## Traps` (what has
+  bitten), `## Decisions` (what was decided here, and why).
+- It stays short, about 40 lines and at most 60, and repeats nothing of this
+  file. A rule that comes to hold for two modules moves here.
+- What a file names in backticks must exist: a path from the repository root, a
+  make target, a package's test target, a live harness. An upper-case word is a
+  placeholder. `python3 tools/lib/agents_md.py check` holds every file to it,
+  and `python3 tools/dev-check` runs that.
+- No list of the module files is kept: `python3 tools/lib/agents_md.py list`
+  prints them.
+
 ## Development
 
 - Optimize for useful capabilities, easy modification, and a short feedback loop.
@@ -30,30 +53,69 @@ possible; say so where you do.
   `substitute-command-keys` or `help-key-binding`, mode-line and status text in
   named faces that inherit theme faces. A command that only makes sense in a mode
   declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
+- Romacs's own Lisp passes `tools/romacs-lint` with no new finding: Romacs loads
+  each touched file and holds what it names to what the machine defines (functions
+  and their argument counts, free and unused variables), and the check's Lisp tier
+  holds a file to its base. A `declare-function` is for a function the file does
+  not load, and must be true: it names the library that defines the function, or
+  a primitive's Rust file. What a caller should know of a function is put on the
+  function, beside the better path's definition, and the lint tells each caller:
+  `(put 'FUNCTION 'romacs-lint-hint "...")`.
+- Ask the machine what it offers before writing Lisp for it: `(romacs-dev-guide
+  "QUERY")`, or the MCP tool `romacs_dev_guide`, describes a function (a
+  primitive's effect class and Rust file, what callers are told of it) or
+  finds the functions whose name or docstring has the query's words.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
+- Reach for a safe API before `unsafe`. A new unsafe site needs a stated
+  reason, in its comment or its module's doc, that no crate in `Cargo.lock`
+  covers the call safely: rustix for system calls, memmap2 for mappings,
+  libloading for libraries, the tree-sitter crate for parse trees. Keep what
+  remains in one small safe wrapper per module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
-  the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
-  each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
-  deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
-  lowered floors with the change. Raising a floor is a deliberate commit.
-- `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
-  smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines, every
-  rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
-  primitives declared outside `src/prims/` or through lib.rs's own enum. It
-  holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
-  `beta`): a count above the merge-base's own fails. A drop needs no
-  record, and a branch never lowers a floor. Adding a smell takes raising its
-  floor in `ledger/smell-floors.json` by as much, and a new top-level entry takes
-  listing it there: a deliberate commit with its reason. `smells.py check
-  --absolute` holds the trunk to that file at a checkpoint, where `lower`
-  records the drops. The file merges by its meaning, each side's raise added:
-  `tools/derived setup` installs the merge driver once per repository, and
-  `python3 tools/lib/smells.py resolve` does the same by hand. The same setup
-  installs the driver that merges the host boundary allow-list entry by
-  entry (`tools/lib/host_allow.py`).
+  the keyword, and declares itself there with `UNSAFE(reason)`: the stated
+  reason above. The smells ratchet (below) holds the workspace's undeclared and
+  undocumented sites to the merge-base's; `tools/lib/unsafe_census.py` says
+  what counts.
+- In `crates/romacs-vm/src`, a field, enum or alias that puts a cell or lock
+  (`Cell`, `RefCell`, `Mutex`, `OnceLock`, ...) around what it holds carries
+  `// CELL(Class)` in the comment lines directly above it: what the collector
+  must know of it, `Plain` when it holds no Lisp value. The classes are `Behind`'s
+  in `crates/romacs-vm/tests/no_remote_references.rs`, which checks each.
+- A host query or effect (files, environment, clocks, processes) outside
+  `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
+  comment lines directly above it; the `host_boundary_lint` test checks each.
+- The render thread takes its time from the frame: a `FrameSample`, an
+  `EventTime` or a `FutureDeadline`. A raw clock read there (`Instant::now()`,
+  `.elapsed()`) carries `// CLOCK: reason` in the comment lines directly above
+  it; the `time_discipline` test checks each.
+- No generated file is committed. A file a tool of ours makes from the
+  repository's sources is made where it is consumed: a build script writes it
+  into `OUT_DIR` for the binary or a test target to include, Lisp computes it
+  as it loads (a world build keys what it read), a check computes its ledger.
+  Committed copies conflict on every merge of two branches that each change
+  their sources. Recordings of pinned GNU and imports from outside
+  sources are not made from the repository: they stay committed, beside
+  their recorder. `tools/lib/generated_files.py` (run by
+  `tools/check-derived`) fails while git tracks a known generator's output.
+- No test pins a source line number. Name a declaration by its file and a
+  form by its text: a line moves whenever anything above it changes.
+- `tools/lib/smells.py` (also run by `tools/check-derived`) counts the
+  smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines,
+  unsafe sites, every rustc and Clippy pedantic warning by lint, tracked files
+  that say a tool wrote them, and primitives declared outside `crates/romacs-vm/src/prims/` or
+  through lib.rs's own enum. It holds the workspace's totals to the merge-base
+  with the trunk (`ROMACS_BASE`, default `beta`), both counted from the trees:
+  a total above the merge-base's fails, a drop needs no record, and nothing
+  is stored. A deliberate new instance is declared where it occurs, and is
+  not counted: `#[expect(lint, reason = "...")]` for a lint or an allow
+  (rustc warns once it no longer fires), `TODO(#N)` naming its tracker issue,
+  `UNSAFE(reason)` beside a SAFETY comment, and
+  `SMELL(long-file|primitive|generated): reason` for the rest. Every
+  top-level entry is named in `ARCHITECTURE.md`'s Top level section, and
+  every workspace member lives under `crates/`.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -87,7 +149,10 @@ possible; say so where you do.
   Every new collection-holding subsystem adds a scaling probe, one file under
   `crates/romacs-vm-gui/harness/scaling/probes/`. A probe over its exponent
   budget is fixed, or carries `:known` with a ticket. Raising its budget is
-  not a fix.
+  not a fix. A probe whose claim is that N costs nothing is held by `:slope`
+  (instructions per unit of N a step) instead, its budget the measured residue
+  with a margin and the reason written beside the probe; turning a failing
+  probe into a slope probe is not a fix either.
 - Attack cost in this order: complexity (never worse than GNU's; pick the
   textbook structure: interval trees, ropes, indexes, dependency graphs),
   then incremental work (recompute only what a change dirties, in dependency
@@ -117,8 +182,8 @@ possible; say so where you do.
 4. Broaden checks when the change crosses an ownership boundary, affects shared
    runtime behavior, or reveals another failure. GC, evaluation, loading, protocol,
    and lifecycle changes need evidence for the relevant interactions.
-5. Before final verification, inspect the diff, regenerate affected derived
-   artifacts, pass focused checks, and obtain fresh read-only review for nontrivial
+5. Before final verification, inspect the diff, update affected ledgers,
+   pass focused checks, and obtain fresh read-only review for nontrivial
    changes. Freeze the candidate before running the required full project gate.
 6. Reserve the full gate for the final combined candidate. Rerun affected checks
    after a correction; do not repeatedly gate unchanged inputs or rerun failures
@@ -141,10 +206,10 @@ the pinned oracle.
 
 The gates, small and whole for each side:
 
-- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
-  in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
-  everything, so give a branch of a branch its real base.
+- Rust, small: `make gate-small`. The tests the change since beta, or since
+  `BASE=REV`, can reach, and the structural rules whatever changed: one map from
+  paths to tests and harnesses, `tools/lib/impact.py` (tools/AGENTS.md). A change it
+  cannot map runs everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
 - Lisp, one module: `make check-MODULE`.
 - Lisp, whole: `make check`.
@@ -152,11 +217,19 @@ The gates, small and whole for each side:
 The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
+- romacs-vm's whole suite: each `tests/FILE.rs` is also the module `FILE` of one test target, `all`
+  (`crates/romacs-vm/tests/all/`), so a check builds one executable, not one a file. The gates build and
+  run what `python3 tools/lib/test_modules.py targets romacs-vm` prints, and a test is `FILE::TEST_NAME`
+  there. `all` lists the directory's files when it builds; a file that cannot be a module is named,
+  with its reason, in `crates/romacs-vm/tests/all/standalone.txt`.
 - Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
   It preserves `CARGO_TARGET_DIR` and defaults to `dev-fast`. Use `--profile gate`
   for compute-heavy GNU loading and oracle tests, with the same focused selectors.
+- Lisp lint on a prebuilt or installed host: `python3 tools/romacs-lint FILE ...`,
+  what the change adds since its merge-base with beta. `--all` shows older findings
+  too, `--binary` names the host; an installed host answers in about a second.
 - Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
@@ -173,9 +246,8 @@ The other commands:
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The
   gate runs the batch probes (`romacs-vm-gui` test `scaling`).
-- Derived artifacts, source/floor validation and the Python unit tests: `python3 tools/check-derived`.
+- Untracked generated files, source validation, the smells ratchet and the Python unit tests: `python3 tools/check-derived`.
   It runs every tracked `test_*.py`/`*_test.py` that no Rust test owns (`tools/lib/python_tests.py`).
-  It can regenerate stale output; inspect and stage only task-owned changes.
 - Combined verification: `python3 tools/gate focused 'EXPR'`, then
   `python3 tools/gate full` for final acceptance. Inspect `--help` and select
   resource bounds for the current machine. Defaults keep outer VM and display
@@ -231,3 +303,22 @@ standalone Cargo execution without it.
   owned paths. Push, publication, activation, service restarts, and real mail
   require explicit authorization.
 - Report what changed, what actually ran, its result, and any remaining limit.
+
+## Landing work
+
+- `beta` is the development branch. `master` holds releases only: a release
+  fast-forwards it to a fully checked `beta` commit and tags it.
+- Never commit to, merge into or reset `beta` or `master`. A local
+  reference-transaction hook refuses it (`tools/hooks/`, installed by
+  `tools/git-setup`).
+- Work on your own branch in its own worktree, started from `beta`, and merge
+  `beta` in as it moves.
+- Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
+  in a Romacs session): the merge forecast with `beta`, tracked generated files,
+  the lint of the Lisp the branch touches, and the Rust tests the change can reach
+  (`tools/lib/impact.py`), each finding with its fix.
+- A branch lands through the merge queue: signed commits, the full check, then
+  a submitted request. The queue merges requests onto `beta` in order and
+  reruns what each merge changes.
+- A session without the queue's tools leaves its branch committed and checked,
+  and reports the branch name.

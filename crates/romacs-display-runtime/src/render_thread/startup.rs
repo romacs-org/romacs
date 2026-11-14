@@ -1,9 +1,5 @@
 //! Native event-loop startup before font-owned window geometry is available.
 
-#[cfg(test)]
-#[path = "startup/tests/first_frame.rs"]
-mod first_frame_tests;
-
 use super::RenderApp;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use std::{cell::RefCell, rc::Rc};
@@ -90,8 +86,8 @@ pub enum RenderLoopError {
 pub enum RenderLoopExit {
     /// The loop ended for this cause, or for none it recorded.
     Finished(Option<super::RenderShutdownReason>),
-    /// Native resources have been released, but a driver worker may still be
-    /// inside foreign code. Process exit must bypass library exit callbacks.
+    /// The window closed while the GPU was still starting: the startup was
+    /// cancelled, and its workers joined before the loop returned.
     GpuStartupCancelled,
 }
 
@@ -173,7 +169,21 @@ impl ApplicationHandler for StartingApp {
         }
     }
 
+    // Both startup replies and render commands are drained at about_to_wait,
+    // after native dispatch, using the same wake-only contract as RenderApp.
+    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {}
+
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.prepare_or_run(event_loop);
+        // Readiness decided in this pass goes out with it.
+        if let Phase::Preparing { app, .. } | Phase::Running(app) = &mut self.phase {
+            app.send_answers();
+        }
+    }
+}
+
+impl StartingApp {
+    fn prepare_or_run(&mut self, event_loop: &dyn ActiveEventLoop) {
         if let Phase::Preparing { initial, app } = &mut self.phase {
             // Consume CPU-owned configuration and frame identity even while no
             // initial geometry exists. The bounded producer cannot deadlock the
@@ -233,7 +243,7 @@ impl ApplicationHandler for StartingApp {
                 || (app.comms.keep_alive_without_frames
                     && app.frame_windows.primary_window().is_none())
             {
-                // Geometry can precede consumption (or outlive revocation) of
+                // Geometry can precede consumption of
                 // RealizeFrame. Keep the healthy root idle until a live frame
                 // transaction has supplied the primary, including at staging pressure.
                 event_loop.set_control_flow(app.startup_control_flow());
@@ -314,10 +324,6 @@ impl ApplicationHandler for StartingApp {
             }
         }
     }
-
-    // Both startup replies and render commands are drained at about_to_wait,
-    // after native dispatch, using the same wake-only contract as RenderApp.
-    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {}
 }
 
 pub(super) fn run(

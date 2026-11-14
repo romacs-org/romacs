@@ -139,11 +139,12 @@ JOURNAL-EVENTS, what its journal holds (`romacs-agent-events')."
                       (car read))))
           journal-events))
 
-(defun romacs-agent-handoff (session events provider model next)
+(defun romacs-agent-handoff (session events provider model next &optional options)
   "Go on with SESSION's thread, EVENTS (`romacs-agent-handoff-thread'),
 under instance PROVIDER on MODEL (nil for its own), in a new session on
 SESSION's project, to do NEXT: started on a brief of the thread
-\(`romacs-agent-handoff-brief').  Return the new session."
+\(`romacs-agent-handoff-brief'), with start OPTIONS besides; a task's
+parent, wake rule, role and worktree carry over.  Return the new session."
   (let ((from (mapconcat #'identity (delq nil (list (romacs-agent-provider session)
                                                     (or (romacs-agent-model session)
                                                         (plist-get (romacs-agent-options session) :model))))
@@ -151,7 +152,11 @@ SESSION's project, to do NEXT: started on a brief of the thread
     (romacs-agent-start (romacs-agent-cwd session)
                         (romacs-agent-handoff-brief (romacs-agent-handoff-items events) from next)
                         (format "%s (→ %s)" (romacs-agent-title session) provider)
-                        provider (and model (list :model model)))))
+                        provider (append (and model (list :model model)) options
+                                         ;; A task goes on as the same parent's, by its rule.
+                                         (cl-loop for key in '(:parent :wake :role :worktree :branch)
+                                                  when (plist-get (romacs-agent-options session) key)
+                                                  append (list key (plist-get (romacs-agent-options session) key)))))))
 
 (provide 'romacs-agent-handoff)
 ;;; romacs-agent-handoff.el ends here

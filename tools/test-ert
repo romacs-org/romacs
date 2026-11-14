@@ -25,7 +25,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'test/gnu'))
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
-from bundled_autoloads import directories
 
 SELECTOR_DEFAULT = '(not (or (tag :expensive-test) (tag :unstable)))'
 TIMEOUT_DEFAULT = 600.0
@@ -35,6 +34,19 @@ SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'EMACSLOAD
 EMPTY_SELECTION = 'empty or invalid selection inventory'
 NOTHING = dict(selected=0, started=0, completed=0, passed=0, failed=0, skipped=0)
 XDG = ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME')
+
+
+def directories(root):
+    """The bundled package directories (lisp/bundled.json): each root, then its
+    immediate subdirectories but the excluded ones, in runtime_load_path order
+    (crates/romacs-vm-gui/src/startup.rs)."""
+    found = []
+    for entry in json.loads((root / 'lisp/bundled.json').read_text())['roots']:
+        base = root / entry['path']
+        if base.is_dir():
+            found.append(base)
+            found.extend(sorted(p for p in base.iterdir() if p.is_dir() and p.name not in entry['exclude']))
+    return found
 
 
 def is_suite(path):

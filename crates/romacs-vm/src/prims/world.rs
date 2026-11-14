@@ -11,6 +11,14 @@ fn startup_phase(cx, on: Value) {
     Ok(Value::NIL)
 }}
 
+// Romacs-only. Whether this process builds a world that ends at GNU's
+// dump point (`host::end_at_dump_point'): romacs-loadup-bootstrap.el then
+// stops before the startup steps, as loadup.el does under `dump-mode'.
+defsubr! { name = "romacs--dumping", gnu = "loadup.el:607", effect = Reads,
+fn dumping(_cx) {
+    Ok(if crate::host::dumping() { Value::TRUE } else { Value::NIL })
+}}
+
 // Romacs-only. lisp/romacs/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
 // the user's init gave `eval-after-load' PRINTED for FILE (a feature, or a
 // file named by a string), not loaded yet: noted for its layer's plan

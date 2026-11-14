@@ -14,8 +14,9 @@
 
 ;;; Commentary:
 
-;; Verify the independent Elisp FSRS-6 kernel against the language-neutral
-;; corpus generated through the pinned fsrs-rs oracle.
+;; Verify Gnosis's FSRS-6 transitions, computed by the fsrs-rs crate through
+;; Romacs's primitives, against the language-neutral corpus generated
+;; through the pinned fsrs-rs oracle.
 
 ;;; Code:
 
@@ -31,6 +32,13 @@
 
 (defconst gnosis-test-fsrs--tolerance 0.001
   "Pinned maximum absolute error for corpus float comparisons.")
+
+(defun gnosis-test-fsrs--f32 (value)
+  "Return VALUE rounded to an IEEE-754 single-precision float."
+  (if (zerop value)
+      0.0
+    (let* ((parts (frexp value)))
+      (ldexp (round (* (car parts) 16777216.0)) (- (cdr parts) 24)))))
 
 (defun gnosis-test-fsrs--corpus ()
   "Return the parsed FSRS conformance corpus."
@@ -170,7 +178,7 @@
     (should-error (gnosis-test-fsrs--validate-corpus corpus))))
 
 (ert-deftest gnosis-test-fsrs-sequential-replay ()
-  "Feed every Elisp transition into the next canonical history step."
+  "Feed every transition into the next canonical history step."
   (let* ((corpus (gnosis-test-fsrs--corpus))
          (oracle (alist-get 'oracle corpus))
          (retention (alist-get 'desired_retention oracle))

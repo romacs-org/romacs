@@ -1,6 +1,8 @@
 //! UTF-8 rope storage; properties and restrictions remain byte-canonical.
 //! The cached ASCII property changes conversion cost, never the payload type.
 use crate::properties::Properties;
+#[cfg(test)]
+use crate::properties::Key;
 use crate::{Result, Value, coordinates::*, indirect::Shared};
 use std::borrow::Cow;
 use std::ops::Range;
@@ -25,6 +27,16 @@ pub(crate) fn count_copied(n: usize) {
 #[cfg(test)]
 pub(crate) fn copied_bytes() -> usize {
     COPIED.with(|c| c.get())
+}
+#[cfg(test)]
+thread_local! {
+    /// Byte positions this thread's texts converted to characters.
+    static CHAR_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The byte positions this thread's texts have converted so far.
+#[cfg(test)]
+pub(crate) fn char_conversions() -> usize {
+    CHAR_CONVERSIONS.with(std::cell::Cell::get)
 }
 
 #[derive(Clone, Default)]
@@ -73,24 +85,33 @@ pub struct TextBody {
     chars_len: usize,
     tail: String,
     tail_chars: usize,
+    // CELL(Plain)
     flat: std::sync::OnceLock<String>,
     /// Bytes edits have moved in `flat' since it was last read.
+    // CELL(Plain)
     flat_moved: std::cell::Cell<usize>,
     /// The byte offsets of the placeholders standing for raw bytes
     /// (`internal_to_rope`), sorted; empty for pure Unicode text.
     raw: Vec<u32>,
     /// `bytes()` in GNU's internal form, built once `raw` is non-empty.
+    // CELL(Plain)
     flat_internal: std::sync::OnceLock<Vec<u8>>,
     /// The text kept contiguous for searches across edits (text_gap.rs).
     search: gap::SearchView,
     is_ascii: bool,
+    // CELL(Plain)
     coordinate: std::cell::Cell<(usize, usize)>,
+    // CELL(Plain)
     chunk: std::cell::RefCell<ChunkCursor>,
+    // CELL(Plain)
     cold_chunks: std::cell::RefCell<std::collections::BTreeMap<usize, ChunkCursor>>,
+    // CELL(Plain)
     cold_order: std::cell::RefCell<std::collections::VecDeque<usize>>,
+    // CELL(Plain)
     #[cfg(test)]
     scanned_bytes: std::cell::Cell<usize>,
-    pub(crate) properties: Properties,
+    pub(crate) properties: crate::properties::BodyProperties,
+    // CELL(Plain)
     #[cfg(test)]
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -99,6 +120,7 @@ pub struct TextBody {
     /// `ts_parser_list'), whose trees every change edits.
     pub(crate) treesit: crate::treesit::Registry,
     /// The parse-state summaries of this text, which every change edits.
+    // CELL(Plain): Parse-state summaries: positions and syntax codes, no Value.
     pub(crate) syntax: std::cell::RefCell<crate::syntax_index::SyntaxIndex>,
 }
 romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax });
@@ -292,6 +314,8 @@ pub(crate) fn octets_as_multibyte(octets: &[u8]) -> (Vec<u8>, Vec<usize>) {
 /// buffer's own point, narrowing, syntax and category tables and identity.
 #[derive(Clone)]
 pub struct Text {
+    // CELL(Held): Text shared by indirect buffers, its properties among it: `TextBody`'s own write
+    // methods.
     body: Shared<TextBody>,
     restriction: Range<ByteOffset>,
     pub(crate) state: crate::bytes::BufferState,
@@ -306,11 +330,13 @@ pub struct Text {
 romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table, ts_linecols });
 impl std::ops::Deref for Text {
     type Target = TextBody;
+    #[inline]
     fn deref(&self) -> &TextBody {
         &self.body
     }
 }
 impl std::ops::DerefMut for Text {
+    #[inline]
     fn deref_mut(&mut self) -> &mut TextBody {
         &mut self.body
     }
@@ -339,7 +365,7 @@ impl Text {
                 cold_order: std::cell::RefCell::new(std::collections::VecDeque::new()),
                 #[cfg(test)]
                 scanned_bytes: std::cell::Cell::new(0),
-                properties: Properties::new(),
+                properties: crate::properties::BodyProperties::new(Properties::new()),
                 #[cfg(test)]
                 coordinate_steps: std::cell::Cell::new(0),
                 #[cfg(test)]
@@ -441,13 +467,13 @@ impl Text {
         text.syntax_table = b.syntax_table;
         text.category_table = b.category_table;
         text.restriction = map(b.restriction.start)..map(b.restriction.end);
-        text.properties = Properties::from_map(&properties);
+        text.properties = crate::properties::BodyProperties::new(Properties::from_map(&properties));
         for (&at, values) in &properties {
             if at.0 < text.len_bytes() {
                 let width = text.as_str()[at.0..].chars().next().unwrap().len_utf8();
                 for (key, value) in values {
                     text.properties
-                        .put(at..ByteOffset(at.0 + width), key, *value);
+                        .put(at..ByteOffset(at.0 + width), *key, *value);
                 }
             }
         }
@@ -674,14 +700,15 @@ impl TextBody {
         if changes.all {
             self.syntax.get_mut().forget();
         }
+        self.syntax.get_mut().stats.log_overflows += u64::from(changes.hull);
         for range in changes.ranges {
             let char_of = |byte: usize| self.char_of_byte(ByteOffset(byte.min(self.bytes_len))).map_or(self.chars_len, |c| c.0);
             let (start, end) = (char_of(range.start), char_of(range.end));
             self.syntax.get_mut().touch(start, end);
         }
     }
-    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.properties.visit_values(visit);
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
+        self.properties.visit_values(reading, visit);
         self.treesit.visit_values(visit);
     }
     /// The bytes from AT to the end of its rope chunk (or the tail), for a
@@ -772,7 +799,7 @@ impl TextBody {
     #[cfg(test)]
     pub(crate) fn property(&self, at: ByteOffset, key: &str) -> Result<Option<Value>> {
         self.boundary(at)?;
-        Ok(self.properties.get_property(at, key))
+        Ok(self.properties.get_property(at, Key::test(key)))
     }
     #[cfg(test)]
     pub(crate) fn put_property(
@@ -782,12 +809,7 @@ impl TextBody {
         value: Value,
     ) -> Result<()> {
         self.validate_range(&range)?;
-        self.properties.put(range, key, value);
-        Ok(())
-    }
-    pub fn remove_property(&mut self, range: Range<ByteOffset>, key: &str) -> Result<()> {
-        self.validate_range(&range)?;
-        self.properties.remove(range, key);
+        self.properties.put(range, Key::test(key), value);
         Ok(())
     }
     pub fn next_property_change(&self, at: ByteOffset, limit: ByteOffset) -> Result<ByteOffset> {
@@ -928,6 +950,8 @@ impl TextBody {
         Ok(ByteOffset(chunk.byte + at))
     }
     pub fn char_of_byte(&self, b: ByteOffset) -> Result<CharOffset> {
+        #[cfg(test)]
+        CHAR_CONVERSIONS.with(|c| c.set(c.get() + 1));
         if b.0 > self.bytes_len {
             return Err("index out of range".into());
         }
@@ -1083,6 +1107,17 @@ impl TextBody {
         } else {
             Err("index out of range".into())
         }
+    }
+    /// Byte AT of the text, None at or past its end: read where
+    /// `character_at` reads, in the tail or the cached chunk.
+    #[inline]
+    pub(crate) fn byte_at(&self, at: usize) -> Option<u8> {
+        let prefix = self.bytes_len - self.tail.len();
+        if at >= prefix {
+            return self.tail.as_bytes().get(at - prefix).copied();
+        }
+        let chunk = self.chunk_for_byte(at);
+        chunk.text.as_bytes().get(at - chunk.byte).copied()
     }
     #[inline]
     pub fn character_at(&self, b: ByteOffset) -> Result<Option<i64>> {
@@ -1489,7 +1524,7 @@ mod tests {
             for p in r {
                 let b = ByteOffset(self.byte_of_char(p).unwrap());
                 let end = ByteOffset(self.byte_of_char(p + 1).unwrap());
-                self.properties.put(b..end, k, Value::integer(v).unwrap());
+                self.properties.put(b..end, Key::test(k), Value::integer(v).unwrap());
             }
             Ok(())
         }
@@ -1501,7 +1536,7 @@ mod tests {
             bad(Text::character_at(self, p))?;
             Ok(self
                 .properties
-                .get_property(ByteOffset(self.byte_of_char(p).unwrap()), k)
+                .get_property(ByteOffset(self.byte_of_char(p).unwrap()), Key::test(k))
                 .map(|v| v.as_integer().unwrap()))
         }
     }
@@ -1542,7 +1577,7 @@ mod tests {
         let mut text = crate::text::Text::new(&vec![b'a'; 8192]).unwrap();
         for at in (0..8192).step_by(8) {
             text.properties
-                .put(ByteOffset(at)..ByteOffset(at + 1), "x", Value::TRUE);
+                .put(ByteOffset(at)..ByteOffset(at + 1), Key::test("x"), Value::TRUE);
         }
         text.replace(ByteOffset(0)..ByteOffset(0), b"prefix")
             .unwrap();
@@ -1553,7 +1588,7 @@ mod tests {
         );
         for at in (0..8192).step_by(8) {
             assert_eq!(
-                text.properties.get_property(ByteOffset(at + 6), "x"),
+                text.properties.get_property(ByteOffset(at + 6), Key::test("x")),
                 Some(Value::TRUE)
             );
         }

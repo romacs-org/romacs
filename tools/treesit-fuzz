@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""treesit-fuzz [--edits N] [--seeds S,...] [FILE...]: do the tree-sitter
+runtime Romacs links (crates/vendor/tree-sitter) and the published one build
+the same trees?
+
+Builds tools/lib/treesit-fuzz twice, against each runtime, with the grammars
+Romacs ships, and runs both over the same seeded typing-like edits of each
+FILE, a reparse from the edited tree after every edit. Any edit after which
+the two trees differ fails the run. Run it whenever the vendored runtime, its
+patches or a shipped grammar change (crates/vendor/tree-sitter/ROMACS.md).
+
+FILE defaults to a C, a Rust and a Python file: xdisp.c from
+$ROMACS_GNU_SOURCE when it is set, and two files of this tree. Builds go to
+$CARGO_TARGET_DIR/treesit-fuzz, else target/treesit-fuzz."""
+import argparse, os, statistics, subprocess, sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+MANIFEST = ROOT / 'tools/lib/treesit-fuzz/Cargo.toml'
+VENDORED = ROOT / 'crates/vendor/tree-sitter'
+
+
+def build(target, patched):
+    patch = ['--config', f'patch.crates-io.tree-sitter.path="{VENDORED}"'] if patched else []
+    subprocess.run(['cargo', 'build', '--release', '--offline', '--quiet', '--manifest-path', str(MANIFEST),
+                    '--target-dir', str(target), *patch], check=True)
+    return target / 'release/treesit-fuzz'
+
+
+def run(binary, path, edits, seed):
+    """[(digest, microseconds)] per state."""
+    out = subprocess.run([str(binary), str(path), str(edits), str(seed)], check=True, capture_output=True, text=True).stdout
+    return [(fields[1], int(fields[2])) for fields in (line.split() for line in out.splitlines())]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--edits', type=int, default=200)
+    parser.add_argument('--seeds', default='1,2,3')
+    parser.add_argument('files', nargs='*', type=Path)
+    args = parser.parse_args()
+    files = args.files or [ROOT / 'crates/romacs-vm/src/threaded.rs', ROOT / 'crates/romacs-vm-gui/harness/agent_live.py']
+    if not args.files and os.environ.get('ROMACS_GNU_SOURCE'):
+        files.insert(0, Path(os.environ['ROMACS_GNU_SOURCE']) / 'src/xdisp.c')
+    base = Path(os.environ.get('CARGO_TARGET_DIR') or ROOT / 'target') / 'treesit-fuzz'
+    published, vendored = build(base / 'published', False), build(base / 'vendored', True)
+    failed = False
+    for path in files:
+        for seed in (int(s) for s in args.seeds.split(',')):
+            a, b = run(published, path, args.edits, seed), run(vendored, path, args.edits, seed)
+            differ = [i for i, (x, y) in enumerate(zip(a, b)) if x[0] != y[0]]
+            failed |= bool(differ) or len(a) != len(b)
+            median = lambda states: statistics.median(us for _, us in states[1:]) / 1000  # noqa: E731
+            print(f'{path.name} seed {seed}: {len(a) - 1} edits, trees differ after {len(differ)}'
+                  + (f' (first: edit {differ[0]})' if differ else '')
+                  + f'; median reparse {median(a):.3f} ms published, {median(b):.3f} ms vendored')
+    print('FAIL: the vendored runtime built other trees' if failed else 'ok: the same trees after every edit')
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

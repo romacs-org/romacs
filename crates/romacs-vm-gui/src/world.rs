@@ -66,14 +66,18 @@ pub const INTERPROGRAM: &str = "(defvar interprogram-cut-function 'romacs-clipbo
 /// The world of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR, in
 /// STORE, resolved against this process's directory (`World::new`).
 pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Result<World, String> {
+    World::new(store, recipe(width, height, floor)?).map_err(|e| e.to_string())
+}
+
+/// The recipe of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR.
+fn recipe(width: u32, height: u32, floor: Option<usize>) -> Result<Vec<String>, String> {
     let font = launch_font()?.map_or("font default".to_owned(), |(source, _)| format!("font {source}"));
     let dir = startup::lisp_root(&startup::lisp_dir())?;
-    let recipe = vec![
+    Ok(vec![
         "consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("geometry {width} {height}"),
         format!("floor {floor:?}"), font, format!("lisp {}", dir.display()),
         font_environment(|name| std::env::var_os(name)),
-    ];
-    World::new(store, recipe).map_err(|e| e.to_string())
+    ])
 }
 
 /// What chooses Fontconfig's configuration and the launch font, from GET:
@@ -109,9 +113,7 @@ fn user_font_configuration(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> 
 /// base directory default), from GET. None without an absolute directory
 /// to put it in.
 pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let cache = get("XDG_CACHE_HOME").map(PathBuf::from).filter(|p| p.is_absolute())
-        .or_else(|| get("HOME").map(PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".cache")))?;
-    Some(cache.join("romacs/worlds"))
+    Some(startup::cache_dir(get)?.join("worlds"))
 }
 
 /// This launch with WORLD: the restored VM and its carry, or None to boot
@@ -376,6 +378,18 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
     false
 }
 
+/// `--world-census`: the census (`romacs_vm::world::image::census`) of the
+/// base world in STORE of a live `--loadup` launch of WIDTH by HEIGHT with
+/// FLOOR, restored read only as it was published, before anything of this
+/// process runs in it. Nothing is written to the store.
+pub fn census(store: &Path, width: u32, height: u32, floor: Option<usize>) -> Result<serde_json::Value, String> {
+    let (vm, carry) = World::restore_read_only::<Carry>(store, recipe(width, height, floor)?).map_err(|reason| reason.to_string())?;
+    let census = romacs_vm::world::image::census(&vm, &carry);
+    // The process exits next: the image need not be taken apart.
+    std::mem::forget((vm, carry));
+    Ok(census)
+}
+
 /// `--world-build`'s second half: INIT's layer over BASE made usable too,
 /// when the store holds INIT's plan and the init is the one planned.
 pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: Option<usize>) {
@@ -424,7 +438,10 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
 pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = vec![dir.to_owned()];
     roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/romacs")));
+    // The bundled layout, which the bundled autoloads' scan reads.
+    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
+    roots.extend(crate::fonts::icon_font_dirs());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
         roots.extend([home.join(".local/share/fonts"), home.join(".fonts"), home.join(".cache/fontconfig")]);
@@ -523,6 +540,16 @@ mod tests {
             "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
         assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// The bundled autoloads' scan reads the layout beside lisp/romacs, which a
+    /// confined build reads only inside its roots.
+    #[test]
+    fn a_build_reads_the_bundled_trees_and_their_layout() {
+        let roots = build_roots(std::path::Path::new("/r/lisp/gnu"));
+        for path in ["/r/lisp/gnu", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
+            assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
+        }
     }
 
     #[test]

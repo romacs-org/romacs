@@ -201,17 +201,27 @@ impl Leaf<'_> {
         self.vm.native_case_roots[kind].upgrade().is_some_and(|root| std::sync::Arc::ptr_eq(&root, table.root()))
     }
 
-    pub(crate) fn completion_upcase(&mut self, code: u32) -> std::result::Result<u32, Fault> {
-        self.case_mapping_character(code, false)
+    /// The current buffer's downcase (DOWN) or upcase table to read a
+    /// character after another: its flat view (`crate::char_table::flat`)
+    /// is made current, and holds until the VM is next written.
+    pub(crate) fn case_table(&mut self, down: bool) -> std::result::Result<super::casing::CaseTable, Fault> {
+        let table = self.current_case_mapping(down)?;
+        self.vm.flatten_table(table);
+        let native = self.native_case_mapping(table, if down { 0 } else { 1 });
+        Ok(super::casing::CaseTable { table, native, down })
     }
 
+    /// `upcase' or `downcase' of the character CODE in the current buffer.
     pub(crate) fn case_mapping_character(&mut self, code: u32, down: bool) -> std::result::Result<u32, Fault> {
-        let table = self.current_case_mapping(down)?;
-        let kind = if down { 0 } else { 1 };
-        if self.char_table_element(table, code as usize)? == Value::NIL && (code < 128 || !self.native_case_mapping(table, kind)) {
-            return Ok(code);
-        }
-        Ok(self.case_convert(Value::integer(i64::from(code)).unwrap(), down)?.integer_value().unwrap() as u32)
+        let (table, multibyte) = (self.case_table(down)?, self.buffer_multibyte()?);
+        table.reader(self.vm).character(code, multibyte)
+    }
+
+    /// `case_mapping_character` of each of CODES, the table found once.
+    pub(crate) fn case_mapping_characters(&mut self, codes: &[u32], down: bool) -> std::result::Result<Vec<u32>, Fault> {
+        let (table, multibyte) = (self.case_table(down)?, self.buffer_multibyte()?);
+        let table = table.reader(self.vm);
+        codes.iter().map(|&code| table.character(code, multibyte)).collect()
     }
 
     fn case_set(

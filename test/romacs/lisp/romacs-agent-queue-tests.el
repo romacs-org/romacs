@@ -8,6 +8,10 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+;; These tests start no supervisor or harness: the build's own (beside the
+;; binary) are not needed to make a session.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
 ;; Codex's app-server driver is persistent: a per-turn harness is a test
 ;; harness's.
 (romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"

@@ -28,10 +28,23 @@ use std::rc::Rc;
 /// the one split borrow of the arena (`threaded::quiet_insert`) pairs a
 /// string with a buffer. So a mutable reference to a cell's value never
 /// coexists with another reference to it.
+// CELL(Generic)
 pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>);
 // SAFETY: the cell's value is SnapshotSafe, and a world image maps the Rc
 // and its value back where they were.
 unsafe impl<T: romacs_snapshot::SnapshotSafe> romacs_snapshot::SnapshotSafe for Shared<T> {}
+/// A cell shared by several holders is walked once, as an `Rc` is.
+impl<T: romacs_snapshot::Schema> romacs_snapshot::Schema for Shared<T> {
+    fn walk(&self, w: &mut romacs_snapshot::Walk<'_>) {
+        if w.first_share(Rc::as_ptr(&self.0).cast::<u8>() as usize) {
+            w.own(std::mem::size_of::<T>() + 2 * std::mem::size_of::<usize>());
+            w.value(&**self);
+        }
+    }
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 impl<T> Shared<T> {
     pub(crate) fn new(value: T) -> Self {
@@ -177,6 +190,9 @@ impl Vm {
         }).collect();
         overlays.sort_by_key(|&(_, start, _, inserted)| (start, std::cmp::Reverse(inserted)));
         per_buffer.reset_visit();
+        // Its list is its base's (`per_buffer_owner'): a copy of the head
+        // would hold the history as it stands now, past any cut.
+        per_buffer.clear_local(self.undo_list_index());
         let mark = per_buffer.editor_mark();
         let Object::Buffer(to) = self.objects.entry_mut(arena(buffer)?) else { return Err("buffer required".into()) };
         to.per_buffer = per_buffer;
@@ -253,7 +269,8 @@ impl Vm {
             b.evaporating.insert(start, copy);
         }
         b.intervals.insert(copy, start, end, &b.anchors);
-        self.note_overlay_insertion(buffer, copy)
+        self.note_overlay_insertion(buffer, copy)?;
+        self.overlay_changed(copy)
     }
 
     /// Fkill_buffer (buffer.c:2019): killing a base buffer kills its
@@ -325,9 +342,10 @@ mod tests {
         let base = vm.create_named_buffer("gc-base", false).unwrap();
         let leaf = vm.allocate_object(Object::String(Box::new(crate::data::LispString::new("λ"))));
         let vector = vm.allocate_object(Object::Vector(vec![leaf, Value::integer(7).unwrap()]));
+        let key = vm.intern_property_key("probe");
         let Object::Buffer(b) = vm.objects.entry_mut(arena(base).unwrap()) else { panic!() };
         assert!(b.replace(ByteOffset(0)..ByteOffset(0), "aλЖz".as_bytes()).is_ok());
-        b.properties.put(ByteOffset(1)..ByteOffset(5), "probe", vector);
+        b.properties.put(ByteOffset(1)..ByteOffset(5), key, vector);
         let indirect = vm.make_indirect_buffer(base, "gc-indirect", false).unwrap();
         unlist(&mut vm, "gc-base");
         unlist(&mut vm, "gc-indirect");
@@ -338,7 +356,7 @@ mod tests {
         let Object::Buffer(b) = vm.object(base).unwrap() else { panic!("base buffer reclaimed") };
         assert!(b.shares_body(i) && b.indirect == [roots[0]]);
         // The shared properties were rewritten once, from the base.
-        let probe = i.properties.get_property(ByteOffset(1), "probe").unwrap();
+        let probe = i.properties.get_property(ByteOffset(1), key).unwrap();
         let Object::Vector(v) = vm.object(probe).unwrap() else { panic!("property value lost") };
         assert!(matches!(vm.object(v[0]).unwrap(), Object::String(s) if s.as_str() == "λ"));
         assert_eq!(v[1], Value::integer(7).unwrap());

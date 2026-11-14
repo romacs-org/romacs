@@ -171,21 +171,32 @@ impl FrameSnapshot {
     /// Whether OTHER lays out to the same glyphs as this frame, cursors
     /// aside: equal but for publication versions and cursor visibility.
     /// Child frames lay out apart, so they do not count.
-    pub fn lays_out_like(&self, other: &Self) -> bool {
+    #[must_use]
+    pub fn lays_out_like(&self, other: &Self) -> bool { self.lays_out_like_with(other, true) }
+
+    /// `lays_out_like`, points aside unless POINT: equal but for where
+    /// point is in windows where point moves no glyph (`point_moves_glyphs`).
+    #[must_use]
+    pub fn lays_out_like_with(&self, other: &Self, point: bool) -> bool {
+        self.tab_bar == other.tab_bar && self.status_bar == other.status_bar && self.windows_lay_out_like(other, point)
+    }
+
+    /// Whether OTHER's windows lay out to the same glyphs as this frame's,
+    /// cursors and bars aside, points too unless POINT.
+    #[must_use]
+    pub fn windows_lay_out_like(&self, other: &Self, point: bool) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
             && self.fontsets == other.fontsets
-            && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
-            && self.status_bar == other.status_bar
             && self.no_font == other.no_font
-            && windows_lay_out_like(&self.windows, &other.windows)
+            && windows_lay_out_like(&self.windows, &other.windows, point)
     }
 }
 
 /// Whether window lists A and B lay out alike (`WindowSnapshot::lays_out_like').
-pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot], point: bool) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like_with(&b.snapshot, point))
 }
 
 /// A child frame (GNU's `parent-frame'): its own windows in a rect over the
@@ -913,12 +924,25 @@ impl WindowSnapshot {
     /// for `buffer_version' (the VM's conservative redraw signal, which also
     /// moves when nothing shown changed) and `cursor_off' (a blink, which
     /// the last layout shows less that cursor).
-    pub fn lays_out_like(&self, other: &Self) -> bool {
+    #[must_use]
+    pub fn lays_out_like(&self, other: &Self) -> bool { self.lays_out_like_with(other, true) }
+
+    /// Whether where point is can move a glyph of this window: only under
+    /// `auto-hscroll-mode` `current-line`, which scrolls point's line apart
+    /// from the others (`Hscroll`).
+    #[must_use]
+    pub fn point_moves_glyphs(&self) -> bool { self.hscroll.point_row != self.hscroll.rows }
+
+    /// `lays_out_like`, point aside unless POINT or point can move a glyph.
+    #[must_use]
+    pub fn lays_out_like_with(&self, other: &Self, point: bool) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
             text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
-        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
-            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
+        let point = point || self.point_moves_glyphs();
+        (*id, *width, *height, *start_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
+            && (!point || *point_byte == other.point_byte)
             && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && faces_agree(faces, &other.faces) && *chrome == other.chrome
             && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
             && *cursor == other.cursor

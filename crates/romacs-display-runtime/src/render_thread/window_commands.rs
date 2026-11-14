@@ -5,35 +5,17 @@ use crate::thread_comm::{InputEvent, WindowCommand};
 use winit::window::UserAttentionType;
 
 impl RenderApp {
-    pub(super) fn retire_cancelled_frames(&mut self) {
-        let cancelled: Vec<_> = self
-            .frame_leases
-            .iter()
-            .filter_map(|(frame, live)| {
-                (!live.load(std::sync::atomic::Ordering::Acquire)).then_some(*frame)
-            })
-            .collect();
-        for frame in cancelled {
-            self.frame_leases.remove(&frame);
-            if let Some(waits) = &self.comms.native_window_waits {
-                waits.remove(frame);
-            }
-            self.handle_window(WindowCommand::DestroyWindow {
-                frame: crate::thread_comm::FrameRef::Frame(frame),
-            });
+    /// Answer the window-readiness requests decided since the last pass.
+    pub(super) fn send_answers(&mut self) {
+        for (request, made) in self.frame_windows.take_answers() {
+            self.comms.tell(crate::thread_comm::Fact::Reply { request, reply: crate::thread_comm::Reply::Done(made) });
         }
     }
 
     pub(super) fn refresh_frame_opacity(&mut self) {
-        // Never hold this CPU lock across GPU work or callback-capable code.
-        let controls = self
-            .comms
-            .frame_opacity
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         for window in self.frame_windows.windows.values_mut() {
             let composites = window.lifecycle.native().is_some_and(|native| native.composites_alpha());
-            if window.render.apply_surface_frame_opacity(&controls, composites) {
+            if window.render.apply_surface_frame_opacity(&self.frame_opacity, composites) {
                 window.request_redraw();
             }
         }
@@ -72,7 +54,10 @@ impl RenderApp {
             _ => false,
         };
         match cmd {
-            WindowCommand::RefreshFrameOpacity => self.refresh_frame_opacity(),
+            WindowCommand::SetFrameAlpha { frame, alpha, limit } => {
+                self.frame_opacity.accept(frame, alpha, limit);
+                self.refresh_frame_opacity();
+            }
             WindowCommand::SetWindowTitle { title } => {
                 if let Some(primary_state) = self.frame_windows.primary_window_mut() {
                     primary_state.chrome_mut().title = title.clone();
@@ -130,33 +115,9 @@ impl RenderApp {
                 geometry_hints,
                 visual,
                 adopt_primary,
-                reply,
-                live,
-                deadline,
+                request,
             } => {
-                if !live.load(std::sync::atomic::Ordering::Acquire) {
-                    // Legacy adoption owns the pre-existing initial window.
-                    // Never let a stale cancellation retire a newer identity.
-                    if adopt_primary && self.frame_windows.primary_frame_id().is_none() {
-                        self.handle_window(WindowCommand::DestroyWindow {
-                            frame: crate::thread_comm::FrameRef::Primary,
-                        });
-                    }
-                    return;
-                }
                 let id = frame.raw_id();
-                if let Some(waits) = &self.comms.native_window_waits {
-                    if waits.terminal() {
-                        if let Some(reply) = reply {
-                            let _ = reply.send(Err(
-                                "Native connection closed during frame preparation".into(),
-                            ));
-                        }
-                        return;
-                    }
-                    waits.register(id, live.clone(), deadline);
-                }
-                self.frame_leases.insert(id, live);
                 if let Some(visual) = visual {
                     self.handle_config(crate::thread_comm::ConfigCommand::SetVisualConfig(visual));
                 }
@@ -185,8 +146,8 @@ impl RenderApp {
                         geometry_hints,
                     });
                 }
-                if let Some(reply) = reply {
-                    self.frame_windows.await_ready(id, reply);
+                if let Some(request) = request {
+                    self.frame_windows.await_ready(id, request);
                 }
             }
             WindowCommand::CreateWindow {
@@ -230,7 +191,7 @@ impl RenderApp {
                 let emacs_frame_id = frame.raw_id();
                 tracing::info!("DestroyWindow request: frame_id=0x{:x}", emacs_frame_id);
                 // A retired window's PointerLeft is discarded.
-                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.pointer.set(None); }
+                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.tell(crate::thread_comm::Fact::PointerOver { at: None }); }
                 // Cancel CPU preparation immediately, not after GPU readiness.
                 self.frame_windows.pending_creates.retain(|request| {
                     request.emacs_frame_id != emacs_frame_id
@@ -279,11 +240,7 @@ impl RenderApp {
                     .and_then(|state| state.window())
                     .is_some_and(|window| window.has_focus())
                 {
-                    self.comms
-                        .frame_opacity
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .focus(emacs_frame_id, true);
+                    self.frame_opacity.focus(emacs_frame_id, true);
                     self.refresh_frame_opacity();
                 }
                 // The window's scheduling identity moves from the pending id

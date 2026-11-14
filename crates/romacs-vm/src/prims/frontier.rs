@@ -96,23 +96,18 @@ fn propertize(cx, string: Value; rest properties) {
     cx.propertized_copy(string, &keyed)
 }}
 
-/// VM2 string properties are keyed by interned symbol name. GNU accepts any
-/// object compared with `eq`; VM2 refuses other keys, and an uninterned
-/// symbol, rather than conflating it with its interned namesake (VM2-FR5-3).
+/// A property is keyed by its symbol's identity. GNU accepts any object
+/// compared with `eq`; an object that is no symbol is refused (VM2-FR5-3).
 /// The refusal is a plain `error` carrying the key: no type contract is
 /// invented for an argument GNU accepts.
-fn property_key(cx: &mut Leaf<'_>, key: Value) -> Result<String, Fault> {
-    let name = cx.symbol_name(key).ok();
-    match name {
-        Some(name) if cx.obarray_lookup(&name) == Some(key) => Ok(name),
-        _ => {
-            let message = cx.string("VM2 string properties need an interned symbol key");
-            let data = cx.cons(key, Value::NIL);
-            let data = cx.cons(message, data);
-            let error = cx.intern("error");
-            Err(Fault::Signal(error, data))
-        }
-    }
+fn property_key(cx: &mut Leaf<'_>, key: Value) -> Result<crate::properties::Key, Fault> {
+    crate::properties::Key::of(key).ok_or_else(|| {
+        let message = cx.string("VM2 string properties need a symbol key");
+        let data = cx.cons(key, Value::NIL);
+        let data = cx.cons(message, data);
+        let error = cx.intern("error");
+        Fault::Signal(error, data)
+    })
 }
 
 defsubr! { name = "secure-hash-algorithms", gnu = "fns.c:6092", effect = Pure,

@@ -31,13 +31,14 @@ python3 "$V/gen_cases.py" --check
 cargo test --locked -p romacs-vm --test varh
 cargo build --locked -p romacs-vm --bin romacs-vm
 python3 "$V/varh.py" replay --fresh --vm2 "${CARGO_TARGET_DIR:-target}/debug/romacs-vm"
-python3 crates/romacs-vm/tools/primh/render_replay.py varh --out "$V/../../tests/varh.rs"
 ```
 
-The historical `--vm2` option is retained by the byte-pinned recorder. Use
-`render_replay.py` for generated Rust targeting the current crate: it validates
-through the original producer, then adapts emitted imports and value-display
-calls without rewriting recording provenance.
+The historical `--vm2` option is retained by the byte-pinned recorder.
+`tests/varh.rs` is `replay.rs.in` itself, rendered for the current crate when
+the test builds (`romacs_vm_test_build::varh_harness!()`): its inputs named
+as `varh.py rust` names them, the crate import and value-display calls
+adapted, the recording provenance untouched. Do not run `varh.py rust`: it
+would write the unadapted render over `tests/varh.rs`.
 
 ## Recording and review
 

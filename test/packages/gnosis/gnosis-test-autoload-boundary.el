@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Exercise public commands from generated loaddefs in a fresh Emacs process.
+;; Exercise public commands from the bundled autoloads in a fresh Emacs process.
 
 ;;; Code:
 

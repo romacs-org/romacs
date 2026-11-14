@@ -66,7 +66,7 @@ impl Vm {
         let id = if request
             && let Some(id) = code.free.pop()
         {
-            self.functions[id] = Arc::new(function);
+            self.functions.set(id, Arc::new(function));
             code.live[id] = true;
             id
         } else {
@@ -249,7 +249,7 @@ impl Vm {
     /// The moved code keeps its child function IDs and cache ordinals.
     pub(super) fn take_compiled_function(&mut self, id: usize) -> Function {
         let function = std::mem::replace(
-            Arc::get_mut(&mut self.functions[id]).expect("fresh code is private"),
+            Arc::get_mut(self.functions.change(id)).expect("fresh code is private"),
             Function {
                 capture_mutations: Vec::new(),
                 mapped_code: None,
@@ -264,6 +264,7 @@ impl Vm {
                 pending: None,
                 dynamic: None,
                 params: None,
+                key: None,
             },
         );
         if self.request_code.live[id] && !self.request_code.permanent[id] {
@@ -415,7 +416,7 @@ impl Vm {
                 self.request_code.free_caches.push(cache);
             }
         }
-        let f = Arc::get_mut(&mut self.functions[id]).expect("request code is private at a wait point");
+        let f = Arc::get_mut(self.functions.change(id)).expect("request code is private at a wait point");
         f.code = Vec::new();
         f.sites = Vec::new();
         f.capture_mutations = Vec::new();

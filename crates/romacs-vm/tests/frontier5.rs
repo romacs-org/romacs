@@ -196,15 +196,16 @@ fn propertize_result_retains_property_values_across_collection() {
               "(4000 113 \"ab\")", 2, 4000);
 }
 
-/// VM2-FR5-3: keys VM2 cannot represent are refused loudly, never merged.
-/// These are VM2's answers, deliberately not GNU's (GNU accepts any key).
+/// VM2-FR5-3: a key is its symbol, so an object that is no symbol is
+/// refused loudly. These are VM2's answers, deliberately not GNU's (GNU
+/// accepts any key). An uninterned symbol is its own key, as in GNU.
 #[test]
-fn propertize_unrepresentable_keys_are_refused_not_merged() {
+fn propertize_keys_that_are_no_symbols_are_refused() {
     check(&[
-        ("(propertize \"a\" 7 1)", "(sig (error \"VM2 string properties need an interned symbol key\" 7))"),
-        ("(propertize \"a\" \"str\" 1)", "(sig (error \"VM2 string properties need an interned symbol key\" \"str\"))"),
+        ("(propertize \"a\" 7 1)", "(sig (error \"VM2 string properties need a symbol key\" 7))"),
+        ("(propertize \"a\" \"str\" 1)", "(sig (error \"VM2 string properties need a symbol key\" \"str\"))"),
         // `car` is interned in every VM, so a merge would be observable here.
-        ("(propertize \"a\" (make-symbol \"car\") 1)", "(sig (error \"VM2 string properties need an interned symbol key\" car))"),
+        ("(let* ((u (make-symbol \"car\")) (s (propertize \"a\" u 1 'car 2))) (list (get-text-property 0 u s) (get-text-property 0 'car s)))", "(ok (1 2))"),
         ("(text-properties-at 0 (propertize \"a\" nil 1 :kw 2))", "(ok (nil 1 :kw 2))"),
     ]);
 }

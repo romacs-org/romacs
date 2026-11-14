@@ -2,6 +2,8 @@
 //! Lisp, takes GNU's arguments: its `func-arity' in a batch session equals
 //! the DEFUN's MIN and MAX at the Lisp pin (tests/fixtures/gnu_defun_arity.json
 //! in romacs-vm, from tools/lib/gnu_arity.py).
+#[path = "support/installed.rs"]
+mod installed;
 use std::collections::BTreeMap;
 use std::process::Command;
 
@@ -31,10 +33,10 @@ fn every_gnu_defun_romacs_defines_has_gnus_arity() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("probe.el"), SCRIPT).unwrap();
     std::fs::write(dir.join("names"), gnu.keys().cloned().collect::<Vec<_>>().join("\n")).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui")).args(["-Q", "--batch", "-l", "probe.el"])
+    let output = Command::new(installed::romacs()).args(["-Q", "--batch", "-l", "probe.el"])
         .current_dir(&dir).env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config"))
         .env("XDG_CACHE_HOME", dir.join("cache")).env("XDG_DATA_HOME", dir.join("data"))
-        .env("XDG_STATE_HOME", dir.join("state")).env("ROMACS_WORLD", "off")
+        .env("XDG_STATE_HOME", dir.join("state"))
         .output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     let stdout = String::from_utf8_lossy(&output.stdout);

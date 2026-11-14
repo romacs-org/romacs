@@ -454,7 +454,7 @@ impl Vm {
         // A string without properties shows none; of NAMES, only those it
         // carries somewhere are read per run.
         let names: Vec<&'static str> = match self.object_if(value) {
-            Some(data::Object::String(s)) if !s.properties.is_empty() => names.iter().copied().filter(|name| s.properties.has_key(name)).collect(),
+            Some(data::Object::String(s)) if !s.properties.is_empty() => names.iter().copied().filter(|name| self.property_key(name).is_some_and(|key| s.properties.has_key(key))).collect(),
             _ => return Ok(None),
         };
         if self.string_bytes(value)?.is_empty() { return Ok(None); }
@@ -529,6 +529,7 @@ impl Vm {
 
     /// Expand a whole mode-line format for the window whose buffer is current.
     pub(super) fn mode_line_band(&mut self, format: &Form, state: &SpecState) -> Result<Band> {
+        self.display_state.stats.bands += 1;
         self.mode_line_expand(format, state, Target::Display)
     }
 

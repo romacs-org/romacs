@@ -3,30 +3,9 @@
 //! against pinned byte-compiled GNU: the frames a callback sees, nonlocal
 //! exits through and around the walk, redefinition and advice of the
 //! mapping function, and every sequence type.
-use romacs_vm::Vm;
-use std::path::Path;
-
-// The loadup bootstrap (subr.el, nadvice.el, cl-lib.el), as tests/sealed_primitives.rs.
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 fn compare(name: &str, source: &str) {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
@@ -40,10 +19,9 @@ fn compare(name: &str, source: &str) {
         .unwrap();
     assert!(output.status.success(), "{name}: {}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let source = format!("(prin1-to-string (progn (defun bt-compile (function) function) {source}))");
     let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = bootstrapped(&root);
+        let mut vm = gnu_lisp(&[]);
         vm.eval_source(&source).and_then(|v| v.display()).map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap();
     assert_eq!(actual.as_deref(), Ok(expected.as_str()), "{name}");

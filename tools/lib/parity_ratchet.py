@@ -322,6 +322,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
         # The binary is copied so a concurrent rebuild cannot swap it mid-run.
         copy = pathlib.Path(tmp) / 'romacs-vm-census'
         shutil.copy2(binary, copy)
+        name_runtime(pathlib.Path(tmp), root)
         digest = hashlib.sha256(copy.read_bytes()).hexdigest()
         load_paths = lc.load_path(root)
         preload = lc.bootstrap_chain(root) if mode == 'warm' else ()
@@ -1127,10 +1128,18 @@ def confirm_losses(root: pathlib.Path, data: dict, m: dict, gnu_ert, census, job
     return forgive(m, conf['forgiven'], again.get('classes'))
 
 
-def freeze(binary: str | None, into: pathlib.Path, name: str) -> str | None:
-    """A private copy used for every run of this check, so no rebuild can mix runs."""
+def name_runtime(directory: pathlib.Path, root: pathlib.Path) -> None:
+    """Say beside the executables copied into DIRECTORY that ROOT is their runtime tree: a copy
+    has left its build, and no longer assumes the tree it was built in."""
+    (directory / 'romacs-runtime-root').write_text(f'{root}\n')
+
+
+def freeze(binary: str | None, into: pathlib.Path, name: str, root: pathlib.Path) -> str | None:
+    """A private copy used for every run of this check, so no rebuild can mix runs. It runs on
+    ROOT's runtime tree."""
     if not binary or not pathlib.Path(binary).is_file():
         return binary  # measure_* refuses a missing binary itself
+    name_runtime(into, root)
     return str(shutil.copy2(binary, into / name))
 
 
@@ -1145,9 +1154,9 @@ def cmd_check(args) -> int:
         census = str(cargo_build(root, ['-p', 'romacs-vm', '--bin', 'romacs-vm-census']) / 'romacs-vm-census')
     with tempfile.TemporaryDirectory(prefix='parity-check-bin-') as frozen:
         if any(u.startswith('gnu-') for u in units):
-            gnu_ert = freeze(gnu_ert, pathlib.Path(frozen), 'romacs-gnu-ert')
+            gnu_ert = freeze(gnu_ert, pathlib.Path(frozen), 'romacs-gnu-ert', root)
         if any(u.startswith('census-') for u in units):
-            census = freeze(census, pathlib.Path(frozen), 'romacs-vm-census')
+            census = freeze(census, pathlib.Path(frozen), 'romacs-vm-census', root)
         fingerprint = input_fingerprint(root)
         # Always measured here, never replayed from a file: a saved measurement
         # could say anything, so there is no option to supply one.
@@ -1294,8 +1303,8 @@ def cmd_record(args) -> int:
     # Freeze both binaries for the WHOLE recording: every run uses these copies
     # and the provenance hashes them, so a concurrent rebuild cannot mix runs.
     frozen = tempfile.TemporaryDirectory(prefix='parity-record-bin-')
-    gnu_ert = str(shutil.copy2(gnu_ert, pathlib.Path(frozen.name) / 'romacs-gnu-ert'))
-    census = str(shutil.copy2(census, pathlib.Path(frozen.name) / 'romacs-vm-census'))
+    gnu_ert = freeze(gnu_ert, pathlib.Path(frozen.name), 'romacs-gnu-ert', root)
+    census = freeze(census, pathlib.Path(frozen.name), 'romacs-vm-census', root)
     frozen_sha = {b: hashlib.sha256(pathlib.Path(b).read_bytes()).hexdigest() for b in (gnu_ert, census)}
     commit_before = git(root, 'rev-parse', 'HEAD').strip()
     files = suite_files(root)

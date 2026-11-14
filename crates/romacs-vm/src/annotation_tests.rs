@@ -15,7 +15,7 @@ fn keymap_query_preserves_the_threaded_register_allocation() {
     vm.stack.shrink_to_fit();
     let registers = vm.stack.as_ptr();
     let capacity = vm.stack.capacity();
-    assert_eq!(vm.keymap_at_point(property).unwrap(), map);
+    assert!(vm.keymap_at_point(property).is_ok_and(|found| found == map));
     // A native leaf call cannot invalidate the interpreter's cached registers.
     assert_eq!(vm.stack.as_ptr(), registers);
     assert_eq!(vm.stack.capacity(), capacity);
@@ -111,9 +111,10 @@ fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
     )
     .unwrap();
     let string = vm.allocate_object(Object::String(Box::new(data::LispString::new("λ"))));
+    let key = vm.intern_property_key("overlay");
     if let Object::String(s) = vm.objects.entry_mut(string.index(0).unwrap() - 1) {
         s.properties
-            .put(ByteOffset(0)..ByteOffset(2), "overlay", overlay);
+            .put(ByteOffset(0)..ByteOffset(2), key, overlay);
     }
     let property = vm.allocate_object(Object::Vector(vec![marker, overlay, buffer, string]));
     let slot = vm.slot("annotation-test");
@@ -144,7 +145,7 @@ fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
         panic!()
     };
     assert_eq!(
-        s.properties.get_property(ByteOffset(0), "overlay"),
+        s.properties.get_property(ByteOffset(0), key),
         Some(overlay)
     );
     assert_eq!(vm.marker(marker).unwrap().buffer, roots[0]);

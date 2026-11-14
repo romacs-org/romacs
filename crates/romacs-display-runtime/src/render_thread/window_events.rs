@@ -252,6 +252,7 @@ impl RenderApp {
             // work class renders fully.
             let result = self.render_frame_window_hinted(emacs_fid, &plan);
             let finished = romacs_display_protocol::frame_time::observe_platform_now();
+            super::frame_stats::count_drawn(&plan, result);
             if emacs_fid == self.frame_windows.primary_event_frame_id()
                 && self.scene != super::state::SceneDraw::Drawn
             {
@@ -301,7 +302,9 @@ impl RenderApp {
         // release/focus loss cannot leave repeat authority behind there.
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
-                self.key_repeats.release(window_id, event.physical_key);
+                if let Some(held) = self.key_repeats.release(window_id, event.physical_key, romacs_display_protocol::frame_time::observe_platform_now()) {
+                    self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Held(held)));
+                }
             }
             WindowEvent::Focused(false) | WindowEvent::Destroyed => {
                 self.key_repeats.retire_window(window_id);
@@ -428,11 +431,7 @@ impl RenderApp {
                 };
                 // GNU whole-frame active/inactive alpha follows native focus,
                 // including a loss with no evaluator content change.
-                self.comms
-                    .frame_opacity
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .focus(emacs_fid, focused);
+                self.frame_opacity.focus(emacs_fid, focused);
                 self.refresh_frame_opacity();
                 self.comms.send_input(InputEvent::WindowFocus {
                     focused,
@@ -473,6 +472,11 @@ impl RenderApp {
                     && !self.key_repeats.admit(window_id, physical_key, repeat)
                 {
                     return;
+                }
+                if state == ElementState::Pressed
+                    && let Some(after) = self.key_repeats.pressed(window_id, physical_key, repeat, romacs_display_protocol::frame_time::observe_platform_now())
+                {
+                    self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Repeat(after)));
                 }
                 if state == ElementState::Pressed {
                     tracing::debug!(

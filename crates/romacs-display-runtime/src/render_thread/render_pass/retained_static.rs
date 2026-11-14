@@ -54,7 +54,6 @@ pub(super) fn is_eligible(
     render: &GuiFrameRenderState,
 ) -> bool {
     compositor_only_hint
-        && !render.compositor.input_scroll.active()
         && pane_placements.is_empty()
         && !render.compositor.transitions.has_active()
         && !window_has_active_overlays(render)
@@ -429,6 +428,15 @@ pub(super) fn ensure_retained_static_texture(
     );
     let bind_group = renderer.create_texture_bind_group(texture.view());
     render.compositor.retained_static = Some(RetainedStatic::new(texture, bind_group));
+}
+
+// Inactive parameters do not affect body pixels. In particular, startup's
+// Lisp gallery rounds colors through sRGB strings even for disabled effects.
+// Check activation rather than comparing complete configuration snapshots.
+pub(super) fn static_body_effects(effects: &romacs_display_protocol::EffectsConfig) -> bool {
+    !effects.has_enabled_effects_other_than_cursor_color_cycle()
+        && effects.bg_pattern.style == 0
+        && effects.mode_line_separator.style == 0
 }
 
 #[cfg(test)]

@@ -7,6 +7,8 @@
 //! and `fit-window-to-buffer' alike, on the GUI's display with its layout.
 use romacs_vm_gui::{fonts, measure, startup};
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 fn forms(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter(|line| !line.is_empty() && !line.starts_with(';'))
@@ -25,6 +27,7 @@ fn bold_rows_measure_and_lay_out_as_gnu() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "bold-metrics");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));

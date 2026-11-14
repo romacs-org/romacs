@@ -6,6 +6,8 @@
 //! window, markers, empty overlays, the narrowing; and the running choice
 //! of `get-char-property' and `get-pos-property'), `plist-get' PREDICATE, `local-variable-if-set-p' BUFFER and
 //! `make-interpreted-closure' with its optional DOCSTRING and IFORM.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 const OVERLAYS: &str = r#";;; -*- lexical-binding: t -*-
@@ -107,7 +109,6 @@ fn run(binary: &str, dir: &std::path::Path) -> (Option<i32>, String, String) {
     let output = Command::new(binary).args(["-Q", "--batch", "-l", "probe.el"]).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
-        .env("ROMACS_WORLD", "off")
         .output().unwrap();
     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
     (output.status.code(), text(output.stdout), text(output.stderr))
@@ -119,7 +120,7 @@ fn matches_gnu(name: &str, script: &str) {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("probe.el"), script).unwrap();
     let expected = run(&gnu, &dir);
-    let actual = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir);
+    let actual = run(installed::romacs(), &dir);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(expected.0, Some(0), "GNU: {}", expected.2);
     assert_eq!((actual.0, &actual.1), (expected.0, &expected.1), "Romacs stderr: {}", actual.2);

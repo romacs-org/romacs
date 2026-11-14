@@ -421,7 +421,11 @@ delivers SIGINT."
   "Retire the native session when its terminal buffer is killed."
   (when romacs-term-session
     (romacs--term-close romacs-term-session)
-    (setq romacs-term-session nil)))
+    (setq romacs-term-session nil))
+  ;; The session told the helper to end; the keeper lets go of it.
+  (when romacs-term-handle
+    (condition-case nil (romacs--keeper-call 'close romacs-term-handle nil) (error nil))
+    (setq romacs-term-handle nil)))
 
 (defun romacs-term--hint ()
   "The mode line's keys."
@@ -477,6 +481,43 @@ window a plain Emacs buffer until you type or press C-c C-j again."
       (romacs-term--retire (get-buffer name))
       (romacs-term--start name shell directory))))
 
+(defvar romacs-term-handle nil
+  "The keeper handle of this terminal's helper process.
+Nil for a terminal whose helper belongs to this session alone, and so
+ends with it.  Local to a terminal buffer.")
+
+(defvar romacs-term-open-function nil
+  "Function that starts a terminal in the current buffer, or nil.
+Called with the shell and the directory; returns the session.  With nil
+the terminal's helper process belongs to this session alone.
+`romacs-term-keep' sets it, so terminals outlive the session.")
+
+(defun romacs-term--open (shell directory)
+  "Start SHELL in DIRECTORY as the current buffer's terminal; its session."
+  (if romacs-term-open-function
+      (funcall romacs-term-open-function shell directory)
+    (romacs--term-create shell directory)))
+
+(defun romacs-term--prepare (directory)
+  "Make the current buffer a terminal buffer in DIRECTORY, with no session yet."
+  (make-local-variable 'romacs-term-session)
+  (make-local-variable 'romacs-term-handle)
+  (make-local-variable 'default-directory)
+  (make-local-variable 'mode-line-format)
+  (make-local-variable 'kill-buffer-hook)
+  (make-local-variable 'kill-buffer-query-functions)
+  (setq default-directory directory
+        major-mode 'romacs-term-mode mode-name "Term"
+        buffer-file-name nil buffer-read-only t)
+  (use-local-map romacs-term-mode-map))
+
+(defun romacs-term--bound ()
+  "Finish the current buffer once it has its session."
+  (setq kill-buffer-hook '(romacs-term--close)
+        kill-buffer-query-functions '(romacs-term--kill-query)
+        mode-line-format romacs-term--mode-line)
+  (run-hooks 'romacs-term-mode-hook))
+
 (defun romacs-term--start (name shell directory)
   "Start a terminal running SHELL in DIRECTORY, in a new buffer called NAME,
 and show it."
@@ -484,25 +525,13 @@ and show it."
          (completed nil))
     (unwind-protect
         (progn
-          (with-current-buffer buffer
-            (make-local-variable 'romacs-term-session)
-            (make-local-variable 'default-directory)
-            (make-local-variable 'mode-line-format)
-            (make-local-variable 'kill-buffer-hook)
-            (make-local-variable 'kill-buffer-query-functions)
-            (setq default-directory directory
-                  major-mode 'romacs-term-mode mode-name "Term"
-                  buffer-file-name nil buffer-read-only t)
-            (use-local-map romacs-term-mode-map))
+          (with-current-buffer buffer (romacs-term--prepare directory))
           ;; Shown first, so the session takes the size of the window that
           ;; shows it (with a one-line mini-window), not the caller's.
           (romacs-select-buffer buffer)
           (with-current-buffer buffer
-            (setq romacs-term-session (romacs--term-create (or shell romacs-term-shell "") directory))
-            (setq kill-buffer-hook '(romacs-term--close)
-                  kill-buffer-query-functions '(romacs-term--kill-query)
-                  mode-line-format romacs-term--mode-line)
-            (run-hooks 'romacs-term-mode-hook))
+            (setq romacs-term-session (romacs-term--open (or shell romacs-term-shell "") directory))
+            (romacs-term--bound))
           (setq completed t)
           buffer)
       (unless completed

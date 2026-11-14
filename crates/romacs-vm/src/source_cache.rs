@@ -50,6 +50,13 @@ enum LambdaNode {
 // SAFETY: at rest in a world image (`world_quiescent' requires the map
 // empty); a moving collection rewrites its Values (`LambdaList::visit_values`).
 unsafe impl romacs_snapshot::SnapshotSafe for LambdaList {}
+// An image holds none (`world_quiescent`): nothing to walk.
+impl romacs_snapshot::Schema for LambdaList {
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 impl LambdaList {
     /// Each Value the entry holds, to VISIT: its closure and every object
     /// and child its snapshot names. The collector traces them while the

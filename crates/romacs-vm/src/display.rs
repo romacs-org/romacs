@@ -1,5 +1,5 @@
 //! G1a's single VM-owned frame/window. Only owned data leaves this module.
-use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, *};
+use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, properties::Key, *};
 #[cfg(test)]
 #[path = "display_tests.rs"]
 mod tests;
@@ -9,6 +9,8 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
+#[path = "display_check.rs"]
+mod display_check;
 pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Base, BoundedDatum, FaceDef, LispGraph, LiveView, NodeView,
@@ -21,21 +23,27 @@ use romacs_layout_input::{BandStretches, Face, FaceHandle, FaceRun, StatusBarSna
 /// (`Vm::named'). A handle means one face for the table's life, and a face
 /// change drops the table: the work follows what shows, not what exists.
 pub(super) struct FaceTable {
+    // CELL(Plain)
     faces: std::cell::RefCell<Vec<Face>>,
     /// Each name asked for: its handle, or None for no such face.
+    // CELL(Plain)
     index: std::cell::RefCell<std::collections::HashMap<String, Option<u32>>>,
     /// Each band's face asked for, then each name shown over it: its handle.
+    // CELL(Plain)
     over: std::cell::RefCell<std::collections::HashMap<String, std::collections::HashMap<String, Option<u32>>>>,
     /// The faces merged for text, by content: windows share one index
     /// space, since a band's handle outlives the window text it came with.
+    // CELL(Plain)
     merged: std::cell::RefCell<std::collections::HashMap<u64, Vec<u32>>>,
     /// The definitions and the buffer's `face-remapping-alist' its faces
     /// realize through (xfaces.c lookup_basic_face, get_lface_attributes).
+    // CELL(Plain)
     view: std::cell::RefCell<LiveView>,
     /// Which table this is: a window's text is laid out again when its
     /// buffer's remapping makes it another.
     pub(crate) id: u64,
     /// The host row height of its default face (the row floor), once asked.
+    // CELL(Plain)
     floor: std::cell::Cell<Option<(u64, u32)>>,
 }
 impl FaceTable {
@@ -250,8 +258,9 @@ pub(super) struct DisplayState {
     /// `shown' when a frame last skipped the hooks (`Vm::defer_parse'), until
     /// the hooks run: they are told what changed since they last ran.
     hooked: Option<std::collections::BTreeMap<u64, Shown>>,
-    /// Advanced by every overlay change: overlays are display state no
-    /// buffer modification tick counts.
+    /// The last overlay revision given (`Vm::overlay_changed`): overlays
+    /// are display state no buffer modification tick counts, and each
+    /// buffer's windows read its own revision.
     pub(super) overlays: u64,
     /// Per window id, how its last publication's display text maps to
     /// buffer text, when overlay strings were spliced in.
@@ -276,14 +285,20 @@ pub(super) struct DisplayState {
     pub(super) width: u32,
     pub(super) height: u32,
     building_band: bool,
+    // CELL(Plain)
     diagnostics: std::cell::RefCell<Vec<String>>,
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
     /// The layout questions displayed windows answered by approximation
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
+    /// What redisplay did, counted (`romacs--display-stats`).
+    pub(super) stats: crate::display_stats::DisplayStats,
+    /// Per window id, the causes the reuse check has told of it
+    /// (`Vm::check_reuse`), a bit each.
+    check_told: std::collections::BTreeMap<u64, u16>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats, check_told });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -334,6 +349,7 @@ impl DisplayState {
         self.shown.remove(&id);
         self.segments.remove(&id);
         self.bases.remove(&id);
+        self.check_told.remove(&id);
     }
     /// How window ID's last publication maps display bytes to buffer bytes.
     pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
@@ -364,7 +380,7 @@ impl DisplayState {
                 Attribute::Background => FaceValue::Str("#000000".into()),
                 Attribute::Height => FaceValue::Height(romacs_face::Height::Absolute(150)),
                 Attribute::Width | Attribute::Weight | Attribute::Slant => {
-                    FaceValue::Symbol("normal")
+                    FaceValue::Symbol("normal".into())
                 }
                 _ => FaceValue::Bool(false),
             };
@@ -399,6 +415,8 @@ impl DisplayState {
             diagnostics: Default::default(),
             mode_line_evals: 0,
             refusals: vec![],
+            stats: crate::display_stats::DisplayStats::default(),
+            check_told: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -406,6 +424,8 @@ impl DisplayState {
 /// read, besides its buffer's text and the window itself.
 const DISPLAY_VARIABLES: [&str; 29] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
+    // HOST(delayed-variable): the window record's display variables, read through variable_value,
+    // which checks the fence
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
     "cursor-type", "show-trailing-whitespace", "buffer-display-table", "fontification-functions",
@@ -1247,12 +1267,12 @@ impl Vm {
     pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
-    /// Read-only: the display version a renderer uses to decide whether to repaint.
     /// How many times a mode-line expansion entered the evaluator: its
     /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
     pub fn mode_line_evals(&self) -> u64 {
         self.display_state.mode_line_evals
     }
+    /// Read-only: the display version a renderer uses to decide whether to repaint.
     pub fn display_version(&self) -> u64 {
         self.display_state.version
     }
@@ -1360,6 +1380,7 @@ impl Vm {
         self.slots[self.buffer_slot].value = buffer;
         let active = (|| -> Result<bool> {
             let mark = self.slot("mark-active");
+            // HOST(delayed-variable): reads through variable_value, which checks the fence
             let transient = self.slot("transient-mark-mode");
             Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
         })();
@@ -1377,6 +1398,52 @@ impl Vm {
             .clamp(accessible.start.0, accessible.end.0);
         Ok(Some(mark.min(point)..mark.max(point)))
     }
+    /// The mini-window's text with its overlay strings spliced in: SHOWN's
+    /// text, start and point become what the window shows, and the answer
+    /// is how that text maps to the buffer's. None, SHOWN as it was, where
+    /// no overlay has a string to show.
+    fn splice_mini_window(&mut self, window: Value, buffer: Value, shown: &mut ShownText) -> Result<Option<Vec<mini_window::Segment>>> {
+        let spliced = self.splice_overlay_strings(window, buffer, &shown.text.utf8)?;
+        if !spliced.has_strings() { return Ok(None); }
+        let TextSlice { utf8, face_runs, raw, extends } = &shown.text;
+        let mut strings = vec![];
+        for (bytes, value) in &spliced.string_faces {
+            strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&shown.table, &shown.faces, &mut shown.merged, *value) });
+        }
+        let runs = mini_window::display_face_runs(face_runs, &spliced.segments, strings);
+        // Each buffer segment's raw bytes, where the splice put it.
+        let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
+            let (display, from, len) = (s.display, s.buffer, s.len);
+            raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
+        }).collect();
+        // Each buffer newline's end-of-line face where the splice put
+        // it, the end's at the new end, and a string's newlines in
+        // the string's face (extend_face_to_end_of_line's `it->s').
+        let end = utf8.len() as u32;
+        let mut moved: Vec<romacs_layout_input::Extend> = vec![];
+        for s in &spliced.segments {
+            if s.string {
+                for (offset, c) in spliced.text.get(s.display..s.display + s.len).unwrap_or("").char_indices() {
+                    let byte = s.display + offset;
+                    let face = runs.iter().find(|run| run.bytes.contains(&byte)).map_or(FaceHandle(0), |run| run.face);
+                    if c == '\n' && (face != FaceHandle(0) || decorated(&shown.faces.default)) {
+                        moved.push(romacs_layout_input::Extend { byte: byte as u32, face });
+                    }
+                }
+            } else {
+                let (from, len, display) = (s.buffer as u32, s.len as u32, s.display as u32);
+                moved.extend(extends.iter().filter(|e| e.byte != end && (from..from + len).contains(&e.byte))
+                    .map(|e| romacs_layout_input::Extend { byte: e.byte - from + display, face: e.face }));
+            }
+        }
+        moved.extend(extends.iter().filter(|e| e.byte == end).map(|e| romacs_layout_input::Extend { byte: spliced.text.len() as u32, face: e.face }));
+        moved.sort_by_key(|e| e.byte);
+        moved.dedup_by_key(|e| e.byte);
+        let (start, point) = (spliced.before_strings(shown.start_byte), spliced.cursor(shown.point_byte));
+        shown.text = TextSlice { utf8: spliced.text, face_runs: runs, raw, extends: moved };
+        (shown.start_byte, shown.point_byte) = (start, point);
+        Ok(Some(spliced.segments))
+    }
     fn snapshot_window_inner(
         &mut self,
         root: usize,
@@ -1384,9 +1451,20 @@ impl Vm {
         width: u32,
         height: u32,
     ) -> Result<WindowSnapshot> {
-        if let Some(snapshot) = self.reuse_shown(root, slot, width, height)? {
-            return Ok(self.publish_window(snapshot));
+        match self.reuse_shown(root, slot, width, height)? {
+            Some(snapshot) => {
+                self.display_state.stats.reused += 1;
+                self.check_reuse(self.slots[root].value, height, &snapshot);
+                Ok(self.publish_window(snapshot))
+            }
+            None => self.rebuild_window(root, slot, width, height),
         }
+    }
+    /// The window in ROOT redisplayed in full: its point kept visible, its
+    /// text fontified and read, its bands expanded, and the record made
+    /// that the next redisplay reuses it by.
+    fn rebuild_window(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<WindowSnapshot> {
+        self.display_state.stats.rebuilt += 1;
         let bands = self.redisplay_and_build_mode_line(root, slot, height, true)?;
         let window = self.slots[root].value;
         let band_face = self.mode_line_face_name(window)?;
@@ -1397,13 +1475,14 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, faces, base, at_zv, table, mut merged, segments, stretches, images, wrap_flips, line_numbers }
-            = self.window_text(window, height, None)?;
+        let mut shown = self.window_text(window, height, None)?;
+        // The mini-window shows its overlay strings (icomplete's candidates).
+        let segments = if mini { self.splice_mini_window(window, buffer, &mut shown)? } else { shown.segments.take() };
+        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, faces, base, at_zv, table, merged: _, segments: _, stretches, images, wrap_flips, line_numbers } = shown;
         self.display_state.bases.insert(id, base);
         match segments {
             Some(segments) => { self.display_state.segments.insert(id, segments); }
-            None if !mini => { self.display_state.segments.remove(&id); }
-            None => {}
+            None => { self.display_state.segments.remove(&id); }
         }
         // No version bump here: this runs once per WINDOW, and
         // `display_state.width/height` is frame-wide, so each window's own
@@ -1414,53 +1493,6 @@ impl Vm {
         // the snapshot and so are compared per window below.
         self.display_state.width = width;
         self.display_state.height = height;
-        // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, raw, extends, start_byte, point_byte) = if mini {
-            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
-            if spliced.has_strings() {
-                let mut strings = vec![];
-                for (bytes, value) in &spliced.string_faces {
-                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &faces, &mut merged, *value) });
-                }
-                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
-                // Each buffer segment's raw bytes, where the splice put it.
-                let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
-                    let (display, from, len) = (s.display, s.buffer, s.len);
-                    raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
-                }).collect();
-                // Each buffer newline's end-of-line face where the splice put
-                // it, the end's at the new end, and a string's newlines in
-                // the string's face (extend_face_to_end_of_line's `it->s').
-                let end = utf8.len() as u32;
-                let mut moved: Vec<romacs_layout_input::Extend> = vec![];
-                for s in &spliced.segments {
-                    if s.string {
-                        for (offset, c) in spliced.text.get(s.display..s.display + s.len).unwrap_or("").char_indices() {
-                            let byte = s.display + offset;
-                            let face = runs.iter().find(|run| run.bytes.contains(&byte)).map_or(FaceHandle(0), |run| run.face);
-                            if c == '\n' && (face != FaceHandle(0) || decorated(&faces.default)) {
-                                moved.push(romacs_layout_input::Extend { byte: byte as u32, face });
-                            }
-                        }
-                    } else {
-                        let (from, len, display) = (s.buffer as u32, s.len as u32, s.display as u32);
-                        moved.extend(extends.iter().filter(|e| e.byte != end && (from..from + len).contains(&e.byte))
-                            .map(|e| romacs_layout_input::Extend { byte: e.byte - from + display, face: e.face }));
-                    }
-                }
-                moved.extend(extends.iter().filter(|e| e.byte == end).map(|e| romacs_layout_input::Extend { byte: spliced.text.len() as u32, face: e.face }));
-                moved.sort_by_key(|e| e.byte);
-                moved.dedup_by_key(|e| e.byte);
-                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
-                self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, raw, moved, start, point)
-            } else {
-                self.display_state.segments.remove(&id);
-                (utf8, face_runs, raw, extends, start_byte, point_byte)
-            }
-        } else {
-            (utf8, face_runs, raw, extends, start_byte, point_byte)
-        };
         let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands, &band_face, &header_face)?;
         // Before FACES is published: what it asks for is realised as it asks.
         let chrome = self.text_chrome(window, &table, base, at_zv)?;
@@ -2072,7 +2104,8 @@ impl Vm {
         let around = ByteOffset(low)..ByteOffset(high);
         for name in ["display", "invisible", "category"] {
             if b.properties.is_empty() { break; }
-            if b.properties.get_property(at, name).is_some() || b.properties.next_single_change(at, name, end) < end { return Ok(true); }
+            let Some(key) = self.property_key(name) else { continue };
+            if b.properties.get_property(at, key).is_some() || b.properties.next_single_change(at, key, end) < end { return Ok(true); }
         }
         let aliases = self.list_values(self.annotation_variable("char-property-alias-alist"))?;
         for entry in aliases {
@@ -2154,7 +2187,7 @@ impl Vm {
         let selected = self.selected_window_value()?;
         Ok(ShownKey {
             collections: self.gc_stats.collections,
-            overlays: self.display_state.overlays,
+            overlays: self.overlay_store(buffer).map_or(0, |store| store.overlay_revision),
             hosted: self.display_state.hosted,
             buffer,
             shows: self.window(window)?.shows,
@@ -2470,19 +2503,19 @@ impl Vm {
         outcome
     }
     /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
-    /// the current buffer, which a window shows. The walk over unfontified
-    /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
-    /// lisp/romacs/vm/prelude.el), so nothing is held across them; a signal is
-    /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic. False when `fontification-functions` is nil,
-    /// so no Lisp ran.
-    fn fontify_range(&mut self, start: usize, end: usize) -> Result<bool> {
+    /// the current buffer, which WINDOW shows. The walk over the positions
+    /// the display iterator would call at and the calls are Lisp
+    /// (`romacs--redisplay-fontify`, lisp/romacs/vm/prelude.el), so nothing
+    /// is held across them; a signal is logged there and never ends
+    /// redisplay, and any other failure becomes a display diagnostic. False
+    /// when `fontification-functions` is nil, so no Lisp ran.
+    fn fontify_range(&mut self, window: Value, start: usize, end: usize) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
             return Ok(false);
         }
-        let args = [Value::integer(start as i64)?, Value::integer(end as i64)?];
-        let call = "(lambda (start end) (romacs--redisplay-fontify start end))";
+        let args = [window, Value::integer(start as i64)?, Value::integer(end as i64)?];
+        let call = "(lambda (window start end) (romacs--redisplay-fontify window start end))";
         if let Err(error) = self.call_prepared_source_raw(call, &args) {
             self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
         }
@@ -2509,7 +2542,7 @@ impl Vm {
         let mut tries = 1;
         while let Some((start, end)) = range {
             let shown = self.window_text_state(root)?;
-            let ran = self.fontify_range(start, end)?;
+            let ran = self.fontify_range(self.slots[root].value, start, end)?;
             let w = self.window(self.slots[root].value)?;
             if !w.live() {
                 return Ok(false);
@@ -2833,9 +2866,9 @@ impl Vm {
                 None => (face != Value::NIL).then_some(face),
             };
             // A later put lists its property first.
-            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), "face", face); }
-            if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
-            if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
+            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), Key::FACE, face); }
+            if let Some(n) = elt { string.properties.put(range.clone(), Key::MODE_LINE_ELT_NO, Value::integer(n)?); }
+            if own.is_some() && let Some(face) = added { string.properties.put(range, Key::FACE, face); }
         }
         let string = self.allocate_object(Object::String(Box::new(string)));
         if band.props.is_empty() { return Ok(string); }
@@ -2849,14 +2882,14 @@ impl Vm {
             let mut made: std::collections::HashMap<(*const Form, &'static str), Value> = std::collections::HashMap::new();
             for (range, projected) in &band.props {
                 for (name, form) in projected.iter() {
-                    self.intern(name);
+                    let property = self.intern_property_key(name);
                     let key = (std::rc::Rc::as_ptr(form), *name);
                     let value = match made.get(&key) {
                         Some(&value) => value,
                         None => { let value = self.ml_prop_value(form)?; made.insert(key, value); value }
                     };
                     let Object::String(s) = self.object_mut(self.slots[slot].value)? else { return Err("mode-line string required".into()) };
-                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), name, value);
+                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), property, value);
                 }
             }
             Ok(())
@@ -3288,12 +3321,9 @@ impl Vm {
             let text_face = match self.shown_text(sources.buffer) {
                 Ok(_) if at >= sources.end => Value::NIL,
                 // The property itself, where nothing could stand in for it.
-                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
-                    b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
-                Ok(b) => {
-                    let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                    self.annotation_resolve(&raw, sources.face)?
-                }
+                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), Key::CATEGORY).is_none() =>
+                    b.properties.get_property(ByteOffset(at), Key::FACE).unwrap_or(Value::NIL),
+                Ok(b) => self.annotation_resolve(&b.properties.properties_at(ByteOffset(at)), sources.face)?,
                 _ => return Err("Unicode display buffer required".into()),
             };
             let end = sources.end.max(at + 1);

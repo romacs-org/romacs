@@ -286,6 +286,7 @@ impl Worker {
 #[derive(Default)]
 struct PoolMemory {
     /// The processes to measure, as the evaluator last saw them.
+    // CELL(Plain)
     pids: std::sync::Mutex<Vec<i32>>,
     /// Their proportional memory together, in kilobytes.
     kilobytes: std::sync::atomic::AtomicU64,
@@ -565,6 +566,7 @@ impl Vm {
         self.finalizers.clear();
         self.doomed_finalizers.clear();
         self.post_gc_due = false;
+        self.undo_offers_due = false;
         let hello = Payload::Text(hello("fork"));
         self.isolates.parent.as_ref().expect("adopted").send(Kind::Hello, 0, &hello, true).map_err(|e| e.to_string())
     }

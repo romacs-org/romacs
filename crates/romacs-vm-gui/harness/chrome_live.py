@@ -68,8 +68,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
-import tempfile
 import time
 
 import live_oracle as live
@@ -260,8 +260,6 @@ def main():
     ap.add_argument('--themes', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--scenes', action='store_true')
     ap.add_argument('--top', action='store_true', help="the status bar at the top (`romacs-status-bar-position')")
-    ap.add_argument('--labwc', default=live.LABWC)
-    ap.add_argument('--wlr-randr', default=live.RANDR)
     args = ap.parse_args()
     if args.gpu_frames and args.gpu_frames < MEASURED:
         ap.error(f'--gpu-frames measures the last {MEASURED} presentations')
@@ -278,203 +276,183 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'classic': args.classic, 'scale': args.scale, 'slowdown': args.slowdown, 'checks': {}}
     checks = report['checks']
-    comp = kb = proc = None
-    tmp = None
-    try:
-        with tempfile.TemporaryDirectory(prefix='chr-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as tmp:
-            root = Path(tmp)
-            root.chmod(0o700)
-            home, config, notes = root / 'home', root / 'config', root / 'notes'
-            for d in (home, config, notes):
-                d.mkdir()
-            (config / 'rc.xml').write_text(live.RC_XML)
-            (home / 'config' / 'romacs').mkdir(parents=True)
-            init = INIT
-            if args.light:
-                init += '(set-face-attribute \'default nil :foreground "#202020" :background "#f0f0f0")\n'
-            if args.theme:
-                init += f"(load-theme '{args.theme} t)\n"
-            if args.classic:
-                init += '(romacs-classic-chrome 1)\n'
-            if args.top:
-                init += "(setopt romacs-status-bar-position 'top)\n"
-            if args.slowdown != 1:
-                init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
-            for i, theme in enumerate(themes):
-                init += THEME.replace('{at}', str(13 + 3 * i)).replace('{theme}', theme)
-            at = str(13 + 3 * len(themes))
-            end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
-                   else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
-            if args.scenes:
-                end = SCENES.replace('@FIXTURE@', json.dumps(str(Path(__file__).resolve().parent / 'keymap_popup_fixture.el'))) + '(run-at-time 52 nil (lambda () (kill-emacs 0)))\n'
-                repo = home / 'repo'
-                repo.mkdir()
-                (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
-                git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
-                for command in (['init', '-q', '-b', 'main'], ['add', 'a.el'], ['commit', '-q', '-m', 'a']):
-                    subprocess.run(git + command, check=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home)})
-            (home / 'config' / 'romacs' / 'init.el').write_text(init + STEPS + end)
-            stats = out / 'frame-stats.txt'
-            if stats.exists():
-                stats.unlink()
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
-                   'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
-                   'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
-                   'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
-                   'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-                   'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
-                   'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '15',
-                   'ROMACS_FRAME_STATS': str(stats), 'CHROME_LIVE_DIR': str(notes)}
-            if args.gpu_frames:
-                env.update(ROMACS_GPU_FRAME_TIMING='1', ROMACS_PRESENT_TRACE=str(out / 'trace.jsonl'))
-            for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD'):
-                if k in os.environ:
-                    env[k] = os.environ[k]
-            wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
-            report['compositor_renderer'] = wlr.get('WLR_RENDERER', 'pixman')
-            log_path = out / 'binary.stderr'
-            with (out / 'compositor.log').open('w') as clog, log_path.open('w') as log:
-                comp = subprocess.Popen([args.labwc, '-C', str(config)], env=env | wlr, stdout=clog, stderr=clog)
-                wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'compositor', comp)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                subprocess.run([args.wlr_randr, '--output', 'HEADLESS-1', '--custom-mode', args.mode,
-                                '--scale', str(args.scale)], env=env, check=True, timeout=15)
-                kb = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
-                                      stdout=log, stderr=log)
-                time.sleep(.3)
-                proc = subprocess.Popen([str(binary), '--loadup'], env=env, cwd=home,
-                                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+    init = INIT
+    if args.light:
+        init += '(set-face-attribute \'default nil :foreground "#202020" :background "#f0f0f0")\n'
+    if args.theme:
+        init += f"(load-theme '{args.theme} t)\n"
+    if args.classic:
+        init += '(romacs-classic-chrome 1)\n'
+    if args.top:
+        init += "(setopt romacs-status-bar-position 'top)\n"
+    if args.slowdown != 1:
+        init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
+    for i, theme in enumerate(themes):
+        init += THEME.replace('{at}', str(13 + 3 * i)).replace('{theme}', theme)
+    at = str(13 + 3 * len(themes))
+    end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
+           else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
+    if args.scenes:
+        end = SCENES.replace('@FIXTURE@', json.dumps(str(Path(__file__).resolve().parent / 'keymap_popup_fixture.el'))) + '(run-at-time 52 nil (lambda () (kill-emacs 0)))\n'
+    notes = None
 
-                def shot(name):
-                    path = out / f'{name}.png'
-                    subprocess.run(['/usr/bin/grim', str(path)], env=env, check=True, timeout=30)
-                    return path
+    def prepare(s):
+        nonlocal notes
+        notes = s.root / 'notes'
+        notes.mkdir()
+        # The init writes its records where the session's env says.
+        s.env['CHROME_LIVE_DIR'] = str(notes)
+        if args.scenes:
+            repo = s.home / 'repo'
+            repo.mkdir()
+            (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
+            git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+            for command in (['init', '-q', '-b', 'main'], ['add', 'a.el'], ['commit', '-q', '-m', 'a']):
+                subprocess.run(git + command, check=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(s.home)})
+        (s.home / 'config' / 'romacs' / 'init.el').write_text(init + STEPS + end)
 
-                for step in ['1', '2', '3'] + themes:
-                    note = notes / f'{step}.json'
-                    wait(note.exists, args.timeout, f'record {step}', proc)
-                    if step == '3' and args.slowdown != 1:
-                        time.sleep(.2 * args.slowdown / 3)
-                        shot(f'panes-{step}-mid')
-                    time.sleep(1.2)
-                    png = shot(f'panes-{step}')
-                    state = json.loads(note.read_text())
-                    report[f'state-{step}'] = state
-                    first = state['windows'][0]
-                    selected = next(w for w in state['windows'] if w['selected'])
-                    s = args.scale
-                    if not args.classic and step != '1':
-                        left, top, right, bottom = first['edges']
-                        dx, dy = round((right - state['right_divider'] / 2) * s), round((top + bottom) / 2 * s)
-                        checks[f'divider-{step}'] = [pixel(png, dx, dy), state['background']]
-                    if not args.classic:
-                        left, top, right, bottom = selected['edges']
-                        fx, fy = round(left * s), round((top + bottom) / 2 * s)
-                        checks[f'focus-{step}'] = [pixel(png, fx, fy), state['focus']]
-                        checks[f'corner-{step}'] = [pixel(png, round(left * s), round(top * s)), state['background']]
-                        # The line the selected window's mode line is, or
-                        # the bar: its background in the middle, and the
-                        # accent block at its left edge.
-                        x0, x1, top, height = state['border'], state['native_width'] - state['border'], state['bar_top'], state['bar_height']
-                        mid = round((top + height / 2) * s)
-                        # The middle of the line, above the identity's pill.
-                        checks[f'line-{step}'] = [pixel(png, round((x0 + x1) / 2 * s), round((top + 2) * s)), state['bar_background']]
-                        checks[f'accent-{step}'] = [pixel(png, round((x0 + 1) * s), mid), state['focus']]
-                        # No window draws a band of its own: the bar is the mode line.
-                        checks[f'bands-{step}'] = [str(sum(w['mode_line'] for w in state['windows'])), '0']
-                for scene in (('vc', 'modified', 'flymake', 'prompt') if args.scenes else ()):
-                    note = notes / f'{scene}.json'
-                    wait(note.exists, args.timeout, f'record {scene}', proc)
-                    if scene == 'prompt':
-                        subprocess.run(['/usr/bin/wtype', '-M', 'alt', 'x', '-m', 'alt'], env=env, timeout=10)
-                    time.sleep(1.5)
-                    shot(f'scene-{scene}')
-                    report[f'state-{scene}'] = json.loads(note.read_text())
-                    if scene == 'prompt':
-                        subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', 'g', '-m', 'ctrl'], env=env, timeout=10)
-                if args.scenes:
-                    toasts = notes / 'toasts.json'
-                    wait(toasts.exists, args.timeout, 'toasts', proc)
-                    time.sleep(1.5)
-                    png = shot('scene-toasts')
-                    found = json.loads(toasts.read_text())
-                    report['toasts'] = found
-                    shown = [t for t in found['toasts'] if t[2]]
-                    checks['toasts-above-lines'] = ['ok' if shown and all(t[1] <= found['bottom'] for t in shown) else 'covered', 'ok']
-                    if not args.classic:
-                        # The selected line (or bar) still shows under them.
-                        state = report['state-3']
-                        lx, ly = state['native_width'] / 2, state['bar_top'] + 2
-                        checks['line-under-toasts'] = [pixel(png, round(lx * args.scale), round(ly * args.scale)), state['bar_background']]
-                    # A narrow window's line: its segments dropped by priority.
-                    narrow = notes / 'narrow.json'
-                    wait(narrow.exists, args.timeout, 'narrow', proc)
-                    time.sleep(1.5)
-                    shot('scene-narrow')
-                    report['state-narrow'] = json.loads(narrow.read_text())
-                    # A popup's own line stays out of the bar.
-                    popup = notes / 'popup.json'
-                    wait(popup.exists, args.timeout, 'popup', proc)
-                    time.sleep(1.5)
-                    shot('scene-popup')
-                    report['state-popup'] = json.loads(popup.read_text())
-                    # An evaluation's value, then an error, in a chip after the sexp.
-                    evaluate = notes / 'eval.json'
-                    wait(evaluate.exists, args.timeout, 'eval', proc)
-                    time.sleep(.5)
-                    ctrl = lambda *keys: subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', *[k for key in keys for k in ('-k', key)], '-m', 'ctrl'],
-                                                        env=env, timeout=10)
-                    ctrl('x', 'e')
-                    time.sleep(1)
-                    shot('scene-eval')
-                    ctrl('n', 'e')
-                    ctrl('x', 'e')
-                    time.sleep(1)
-                    shot('scene-eval-error')
-                    # keymap-popup's menu as Romacs's bottom panel.
-                    keymap = notes / 'keymap.json'
-                    wait(keymap.exists, args.timeout, 'keymap', proc)
-                    time.sleep(1.5)
-                    shot('scene-keymap')
-                wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
-            if args.gpu_frames:
-                report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)
-            text = stats.read_text() if stats.exists() else ''
-            quads = re.search(r'chrome_divider_quads: (\d+)', text)
-            report['chrome_divider_quads'] = int(quads.group(1)) if quads else None
-            bands = re.search(r'chrome_bar_bands: (\d+)', text)
-            report['chrome_bar_bands'] = int(bands.group(1)) if bands else None
-            state = report['state-1']
-            wanted = (True, 0, 0, 0.0) if args.classic else (False, 6, 6, 0.12)
-            ok = (state['classic'], state['gap'] if not args.classic else state['right_divider'], state['radius'],
-                  float(state['dim'])) == wanted
-            ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
-            # The bar is the mode line in every look (VM2-STATUS-BAR).
-            ok = ok and state['status_bar'] == 1 and (report['chrome_bar_bands'] or 0) > 0
-            # The pills keep the bar's text readable (WCAG AA).
+    def scale(s):
+        subprocess.run([shutil.which('wlr-randr', path=s.env['PATH']) or live.RANDR, '--output', 'HEADLESS-1',
+                        '--scale', str(args.scale)], env=s.env, check=True, timeout=15)
+
+    stats = out / 'frame-stats.txt'
+    if stats.exists():
+        stats.unlink()
+    # No diagnostic output: the run measures presentations without it.
+    env = {'ROMACS_DIAGNOSTICS': '0', 'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '15',
+           'ROMACS_FRAME_STATS': str(stats)}
+    if args.gpu_frames:
+        env.update(ROMACS_GPU_FRAME_TIMING='1', ROMACS_PRESENT_TRACE=str(out / 'trace.jsonl'))
+    if 'CARGO_HOME' in os.environ:
+        env['CARGO_HOME'] = os.environ['CARGO_HOME']
+    wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
+    report['compositor_renderer'] = wlr.get('WLR_RENDERER', 'pixman')
+    report['status'] = 'FAIL'
+    with live.session(binary, out, prefix='chr-', args=('--loadup',), env=env, size=args.mode, prepare=prepare,
+                      report=report, compositor_env=wlr, before_launch=scale) as session:
+        env, proc, log_path = session.env, session.process, session.log
+
+        def shot(name):
+            path = out / f'{name}.png'
+            subprocess.run(['/usr/bin/grim', str(path)], env=env, check=True, timeout=30)
+            return path
+
+        for step in ['1', '2', '3'] + themes:
+            note = notes / f'{step}.json'
+            wait(note.exists, args.timeout, f'record {step}', proc)
+            if step == '3' and args.slowdown != 1:
+                time.sleep(.2 * args.slowdown / 3)
+                shot(f'panes-{step}-mid')
+            time.sleep(1.2)
+            png = shot(f'panes-{step}')
+            state = json.loads(note.read_text())
+            report[f'state-{step}'] = state
+            first = state['windows'][0]
+            selected = next(w for w in state['windows'] if w['selected'])
+            s = args.scale
+            if not args.classic and step != '1':
+                left, top, right, bottom = first['edges']
+                dx, dy = round((right - state['right_divider'] / 2) * s), round((top + bottom) / 2 * s)
+                checks[f'divider-{step}'] = [pixel(png, dx, dy), state['background']]
             if not args.classic:
-                report['pill_contrast'] = [round(contrast(*state['pill']), 2), round(contrast(*state['state_pill']), 2)]
-                ok = ok and min(report['pill_contrast']) >= 4.5
-            for name, (got, want) in checks.items():
-                ok = ok and near(got, want)
-            if themes:
-                focuses = [report[f'state-{step}']['focus'] for step in ['3'] + themes]
-                report['theme_focus'] = dict(zip(['none'] + themes, focuses))
-                ok = ok and len(set(focuses)) == len(focuses)
-            if args.gpu_frames:
-                gpu = report['gpu']
-                ok = ok and gpu['presentations'] == MEASURED and gpu['missing'] == 0
-            report['status'] = 'PASS' if ok else 'FAIL'
-    except Exception as error:
-        report.update(status='FAIL', error=repr(error))
-    finally:
-        for p in (proc, kb, comp):
-            live.stop(p)
-        try:
-            (out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
-            print(json.dumps(report))
-        finally:
-            live.remove_root(tmp)
+                left, top, right, bottom = selected['edges']
+                fx, fy = round(left * s), round((top + bottom) / 2 * s)
+                checks[f'focus-{step}'] = [pixel(png, fx, fy), state['focus']]
+                checks[f'corner-{step}'] = [pixel(png, round(left * s), round(top * s)), state['background']]
+                # The line the selected window's mode line is, or
+                # the bar: its background in the middle, and the
+                # accent block at its left edge.
+                x0, x1, top, height = state['border'], state['native_width'] - state['border'], state['bar_top'], state['bar_height']
+                mid = round((top + height / 2) * s)
+                # The middle of the line, above the identity's pill.
+                checks[f'line-{step}'] = [pixel(png, round((x0 + x1) / 2 * s), round((top + 2) * s)), state['bar_background']]
+                checks[f'accent-{step}'] = [pixel(png, round((x0 + 1) * s), mid), state['focus']]
+                # No window draws a band of its own: the bar is the mode line.
+                checks[f'bands-{step}'] = [str(sum(w['mode_line'] for w in state['windows'])), '0']
+        for scene in (('vc', 'modified', 'flymake', 'prompt') if args.scenes else ()):
+            note = notes / f'{scene}.json'
+            wait(note.exists, args.timeout, f'record {scene}', proc)
+            if scene == 'prompt':
+                subprocess.run(['/usr/bin/wtype', '-M', 'alt', 'x', '-m', 'alt'], env=env, timeout=10)
+            time.sleep(1.5)
+            shot(f'scene-{scene}')
+            report[f'state-{scene}'] = json.loads(note.read_text())
+            if scene == 'prompt':
+                subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', 'g', '-m', 'ctrl'], env=env, timeout=10)
+        if args.scenes:
+            toasts = notes / 'toasts.json'
+            wait(toasts.exists, args.timeout, 'toasts', proc)
+            time.sleep(1.5)
+            png = shot('scene-toasts')
+            found = json.loads(toasts.read_text())
+            report['toasts'] = found
+            shown = [t for t in found['toasts'] if t[2]]
+            checks['toasts-above-lines'] = ['ok' if shown and all(t[1] <= found['bottom'] for t in shown) else 'covered', 'ok']
+            if not args.classic:
+                # The selected line (or bar) still shows under them.
+                state = report['state-3']
+                lx, ly = state['native_width'] / 2, state['bar_top'] + 2
+                checks['line-under-toasts'] = [pixel(png, round(lx * args.scale), round(ly * args.scale)), state['bar_background']]
+            # A narrow window's line: its segments dropped by priority.
+            narrow = notes / 'narrow.json'
+            wait(narrow.exists, args.timeout, 'narrow', proc)
+            time.sleep(1.5)
+            shot('scene-narrow')
+            report['state-narrow'] = json.loads(narrow.read_text())
+            # A popup's own line stays out of the bar.
+            popup = notes / 'popup.json'
+            wait(popup.exists, args.timeout, 'popup', proc)
+            time.sleep(1.5)
+            shot('scene-popup')
+            report['state-popup'] = json.loads(popup.read_text())
+            # An evaluation's value, then an error, in a chip after the sexp.
+            evaluate = notes / 'eval.json'
+            wait(evaluate.exists, args.timeout, 'eval', proc)
+            time.sleep(.5)
+            ctrl = lambda *keys: subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', *[k for key in keys for k in ('-k', key)], '-m', 'ctrl'],
+                                                env=env, timeout=10)
+            ctrl('x', 'e')
+            time.sleep(1)
+            shot('scene-eval')
+            ctrl('n', 'e')
+            ctrl('x', 'e')
+            time.sleep(1)
+            shot('scene-eval-error')
+            # keymap-popup's menu as Romacs's bottom panel.
+            keymap = notes / 'keymap.json'
+            wait(keymap.exists, args.timeout, 'keymap', proc)
+            time.sleep(1.5)
+            shot('scene-keymap')
+        wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
+        if args.gpu_frames:
+            report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)
+        text = stats.read_text() if stats.exists() else ''
+        quads = re.search(r'chrome_divider_quads: (\d+)', text)
+        report['chrome_divider_quads'] = int(quads.group(1)) if quads else None
+        bands = re.search(r'chrome_bar_bands: (\d+)', text)
+        report['chrome_bar_bands'] = int(bands.group(1)) if bands else None
+        state = report['state-1']
+        wanted = (True, 0, 0, 0.0) if args.classic else (False, 6, 6, 0.12)
+        ok = (state['classic'], state['gap'] if not args.classic else state['right_divider'], state['radius'],
+              float(state['dim'])) == wanted
+        ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
+        # The bar is the mode line in every look (VM2-STATUS-BAR).
+        ok = ok and state['status_bar'] == 1 and (report['chrome_bar_bands'] or 0) > 0
+        # The pills keep the bar's text readable (WCAG AA).
+        if not args.classic:
+            report['pill_contrast'] = [round(contrast(*state['pill']), 2), round(contrast(*state['state_pill']), 2)]
+            ok = ok and min(report['pill_contrast']) >= 4.5
+        for name, (got, want) in checks.items():
+            ok = ok and near(got, want)
+        if themes:
+            focuses = [report[f'state-{step}']['focus'] for step in ['3'] + themes]
+            report['theme_focus'] = dict(zip(['none'] + themes, focuses))
+            ok = ok and len(set(focuses)) == len(focuses)
+        if args.gpu_frames:
+            gpu = report['gpu']
+            ok = ok and gpu['presentations'] == MEASURED and gpu['missing'] == 0
+        report['status'] = 'PASS' if ok else 'FAIL'
+    print(json.dumps(report))
     return 0 if report.get('status') == 'PASS' else 1
 
 

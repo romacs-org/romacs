@@ -40,9 +40,9 @@ fn real_pcase_allows_real_gv_to_load_completely() {
 fn assert_identity_frontier(vm: &mut Vm) {
     assert_eq!(vm.eval_source("(list (fboundp 'cl--block-wrapper) (symbol-function 'cl--block-wrapper) (fboundp 'cl--block-throw) (symbol-function 'cl--block-throw) (fboundp 'identity) (cl--block-wrapper 42))").unwrap().display().unwrap(), "(t identity t throw t 42)");
     let report = vm.load_report();
-    for (name, completed, ordinal, line) in [
-        ("cl-lib.el", 91, 92, 553),
-        ("cl-macs.el", 158, 159, 3579),
+    for (name, completed, ordinal, head) in [
+        ("cl-lib.el", 91, 92, "(unless (load \"cl-loaddefs\""),
+        ("cl-macs.el", 158, 159, "(define-inline cl-typep "),
     ] {
         let steps: Vec<_> = report["steps"].as_array().unwrap().iter()
             .filter(|s| s["file"].as_str().unwrap().ends_with(&format!("/{name}"))).collect();
@@ -50,7 +50,7 @@ fn assert_identity_frontier(vm: &mut Vm) {
         assert_eq!(steps.len(), completed + 1, "attempted forms for {name}");
         let failure = steps.iter().find(|s| s["status"] != "ok").unwrap();
         assert_eq!(failure["ordinal"], ordinal);
-        assert_eq!(failure["line"], line);
+        assert!(failure["source"].as_str().unwrap().starts_with(head), "failing form of {name}: {failure}");
         if name == "cl-macs.el" {
             assert_eq!(failure["error"], "(void-function define-inline)");
         } else {
@@ -85,7 +85,6 @@ fn real_ert_frontier_after_identity() {
     assert_eq!(steps.len(), 1, "ERT attempts its first require only");
     assert_eq!(steps[0]["status"], "error");
     assert_eq!(steps[0]["ordinal"], 1);
-    assert_eq!(steps[0]["line"], 57);
     assert_eq!(steps[0]["source"], "(require 'cl-lib)");
     assert!(steps[0]["error"].as_str().unwrap().ends_with("(void-function define-inline)"));
 }

@@ -11,6 +11,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 3 && matches!(args[0].as_str(), "--code" | "--snapshot-code") {
+        // HOST(std::fs): bin adapter that builds no worlds
         let source = std::fs::read(&args[2]).map_err(|e| e.to_string())?;
         let input: serde_json::Value =
             serde_json::from_slice(&source).map_err(|e| e.to_string())?;
@@ -39,6 +40,7 @@ fn run() -> Result<(), String> {
     if args.len() != 2 {
         return Err("usage: romacs-vm-image STORE INPUT.json".into());
     }
+    // HOST(std::fs): bin adapter that builds no worlds
     let source = std::fs::read(&args[1]).map_err(|e| e.to_string())?;
     let strings: Vec<String> = serde_json::from_slice(&source).map_err(|e| e.to_string())?;
     if strings.is_empty() {

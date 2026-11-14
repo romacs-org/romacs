@@ -13,6 +13,9 @@ go through each engine's own command loop, typed by wtype.
   kill-buffer
             C-x k RET on an unmodified file buffer, then on a modified one,
             whose kill GNU's `kill-buffer' asks to confirm.
+  prompt    a prompt read mid-command: C-x C-e on (read-from-minibuffer
+            "Name: ") in *scratch*, abc, RET, which echoes "abc"; then on a
+            read that catches C-g, zz and C-g, which echoes the quit it caught.
   debugger  M-: (car 1), which `eval-expression' runs with the debugger on,
             then q; a command binding `debug-on-error' around (car 1), then
             c, which continues the error to the command loop.
@@ -95,6 +98,7 @@ EVALUATING = '(equal (minibuffer-contents-no-properties) {})'.format
 
 TEXT_IS = '(equal (buffer-substring-no-properties (point-min) (point-max)) {})'.format
 PROMPT_STARTS = '(string-prefix-p {} (or (minibuffer-prompt) ""))'.format
+QUIT_READ = '(condition-case q (read-from-minibuffer "Q: ") (quit (list (quote quit) q)))'
 
 
 def step(name, keys, ready='t', **extra):
@@ -125,6 +129,13 @@ WORKFLOWS = {
         step('modified-prompt', [C('x'), T('k'), T('draft.txt'), K('Return')], PROMPT_STARTS(lisp_string('Buffer')),
              recency=True),
         step('modified-yes', [T('yes'), K('Return')], '(not (get-buffer "draft.txt"))', recency=True),
+    ],
+    'prompt': [
+        step('prompt', [T('(read-from-minibuffer "Name: ")'), C('x'), C('e')], PROMPT_STARTS(lisp_string('Name: '))),
+        step('typed', [T('abc')], EVALUATING(lisp_string('abc'))),
+        step('returned', [K('Return')], ECHO_IS(lisp_string('"abc"'))),
+        step('quit-prompt', [K('Return'), T(QUIT_READ), C('x'), C('e'), T('zz')], EVALUATING(lisp_string('zz'))),
+        step('quit', [C('g')], ECHO_IS(lisp_string('(quit (minibuffer-quit))'))),
     ],
     'debugger': [
         step('eval-expression', [M(':'), T('(car 1)')], EVALUATING(lisp_string('(car 1)')), then=[K('Return')],
@@ -302,7 +313,7 @@ def run_status(engines, entry):
     record['differences'] = parity_live.differences(record['observed']['gnu'], record['observed']['romacs'])
 
 
-RUNNERS = {'autosave': run_autosave, 'sigterm': run_sigterm, 'errors': None, 'macros': None, 'kill-buffer': None, 'debugger': None, 'quit': run_quit, 'status': run_status}
+RUNNERS = {'autosave': run_autosave, 'sigterm': run_sigterm, 'errors': None, 'macros': None, 'kill-buffer': None, 'prompt': None, 'debugger': None, 'quit': run_quit, 'status': run_status}
 
 
 def main():

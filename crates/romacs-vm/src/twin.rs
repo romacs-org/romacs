@@ -7,7 +7,7 @@
 //! forks a child from the state it starts from. In the child, after the
 //! caches a collection drops are dropped (rule M1):
 //! - **the twin's mark:** the collector's own mark (`Vm::mark_only`) with
-//!   every weak entry kept (M2), and, to a fixpoint, every marker and overlay
+//!   every weak entry kept and every undo list whole (M2), and, to a fixpoint, every marker and overlay
 //!   anchored in a buffer it reached and every private symbol with a local
 //!   binding there (M8: what a table walk can hand Lisp is live). Everything
 //!   the reference marker reaches must be in it (`check_reachable`, a floor),
@@ -93,16 +93,28 @@ pub(crate) fn fork_marks(vm: &mut Vm, roots: &[Value]) -> Option<Pending> {
 }
 
 /// Fork a child that runs WORK on its copy of VM and sends what it returns,
-/// or why it failed, as its report.
+/// or why it failed, as its report. The parent records which entries held
+/// an object after the fork, not before it: the record is a flag per entry,
+/// fresh memory a fork made after it would have to copy, or fold into the
+/// heap's file (`romacs_allocator::file_heap`).
 fn spawn(vm: &mut Vm, collection: u64, work: impl FnOnce(&mut Vm) -> Result<Vec<u8>, String>) -> Option<Pending> {
-    let allocated = held(vm);
     let (read, write) = crate::host::pipe().ok()?;
     match crate::host::fork_threaded() {
         Ok(0) => {
             drop(read);
             child(vm, write, work)
         }
-        Ok(child) => Some(Pending { child, report: read.into(), reaped: false, allocated, collection }),
+        Ok(child) => {
+            // Which entries held an object at the fork: this runs before the
+            // parent allocates, frees or marks anything in the four tables,
+            // and nothing may be slipped in between the fork and this line.
+            // `held` reads only each colour's in-use bit, so a mark or a
+            // dirty bit set first would not change its answer; an
+            // allocation or a sweep would, and the record would no longer
+            // be the fork's.
+            let allocated = held(vm);
+            Some(Pending { child, report: read.into(), reaped: false, allocated, collection })
+        }
         Err(_) => None,
     }
 }
@@ -177,10 +189,13 @@ fn child_marks(vm: &mut Vm, roots: &[Value]) -> Result<Vec<u8>, String> {
 /// TWIN, the twin's marks, must be exactly the closure the collection's own
 /// mark finds from ROOTED (the roots and the M8 extras) when every entry of
 /// each weak table the closure reaches is a root too: keeping weak entries
-/// (M2) is all that may add to that mark. The closure is found from the
-/// collection's own marks alone, each adding the entries of the weak tables
-/// it reached first, so no mark of TWIN's vouches for itself. Leaves the
-/// tables marked with the closure; its marks, one per level of weak tables.
+/// (M2) is all that may add to that mark. A buffer's undo list is weak to
+/// the collection's own mark in the same way, and is a root here with them.
+/// The closure is found from the collection's own marks alone, each adding
+/// the entries of the weak tables and the undo lists of the buffers it
+/// reached first, so no mark of TWIN's vouches for itself. Leaves the tables
+/// marked with the closure; its marks, one per level of weak tables and
+/// buffers.
 fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, String> {
     let mut roots = rooted.to_vec();
     let mut promoted = std::collections::HashSet::new();
@@ -194,7 +209,13 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
                 && vm.objects.marked(i) && !promoted.contains(&i))
             .map(|(i, _)| i)
             .collect();
-        if reached.is_empty() {
+        // A buffer's undo list is weak to the collection's own mark as a
+        // weak table's entries are, and the twin's keeps it whole.
+        let buffers: Vec<usize> = vm.objects.iter().enumerate()
+            .filter(|&(i, object)| matches!(object, Object::Buffer(_) | Object::ByteBuffer(_)) && vm.objects.marked(i) && !promoted.contains(&i))
+            .map(|(i, _)| i)
+            .collect();
+        if reached.is_empty() && buffers.is_empty() {
             break marks(vm);
         }
         for i in reached {
@@ -202,6 +223,10 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
             if let Object::HashTable(table) = &vm.objects[i] {
                 roots.extend(table.entries().flat_map(|(_, key, value)| [key, value]));
             }
+        }
+        for i in buffers {
+            promoted.insert(i);
+            roots.push(vm.own_undo_list(i));
         }
     };
     for t in 0..4 {
@@ -402,7 +427,7 @@ fn object_kind(vm: &Vm, i: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Agreed, bound, collect_report, encode, marks, settle, spawn, verdict};
+    use super::{Agreed, DEADLINE, bound, child_marks, collect_report, encode, held, marks, settle, spawn, verdict};
     use crate::{Value, Vm};
     use std::sync::Mutex;
     use std::time::Duration;
@@ -488,6 +513,27 @@ mod tests {
         assert!(bound(&mut vm, &roots, &twin).is_err_and(|e| e.contains("left unmarked")));
     }
 
+    /// A buffer's undo list past its limits, with a marker nothing else
+    /// holds: to the collection's own mark the list is weak, and it decides a
+    /// cut. The twin's mark keeps the whole list, as it keeps weak entries,
+    /// so the reference walk's floor and the bound both hold for it.
+    #[test]
+    fn an_undo_list_past_its_limits_is_whole_to_the_twin() {
+        let mut vm = quiet_vm();
+        vm.eval_source_raw("(progn (set-buffer (get-buffer-create \"undo\")) \
+            (setq undo-limit 40 undo-strong-limit 80 undo-outer-limit 100000) \
+            (let ((buffer-undo-list t)) (insert \"x\")) \
+            (setq buffer-undo-list (list (cons (point-marker) 1) '(1 . 2) nil '(3 . 4) nil '(5 . 6) nil '(7 . 8))) nil)").unwrap();
+        let report = child_marks(&mut vm, &[]);
+        assert!(report.is_ok(), "{report:?}");
+        let twin = twin_marks(&mut vm, &[]);
+        vm.clear_marks();
+        vm.mark_only(&[], false);
+        let plain = marks(&vm);
+        let count = |marks: &[Vec<bool>; 4]| marks[0].iter().filter(|&&marked| marked).count();
+        assert!(count(&plain) < count(&twin), "the plain mark leaves the cut's conses, and the twin's does not");
+    }
+
     /// A weak table reached only through another's entry is a level of its own.
     #[test]
     fn weak_tables_reached_through_weak_tables_are_accounted_for() {
@@ -559,6 +605,27 @@ mod tests {
         let settled = settle(&vm, pending, Duration::from_millis(300));
         assert!(settled.is_err_and(|e| e.starts_with("no report from the twin's child within 0.3 s")));
         assert!(crate::host::kill(child, 0).is_err(), "the child is gone, reaped");
+    }
+
+    /// The parent's record of which entries held an object, taken after the
+    /// fork, is the child's own view of the tables at the fork: nothing in
+    /// the tables changes between the fork and the record. And a collection
+    /// of garbage made before the fork agrees with the twin forked from it.
+    #[test]
+    fn the_record_of_held_entries_is_the_forks_and_its_twin_agrees() {
+        let mut vm = quiet_vm();
+        vm.eval_source_raw("(setq twin-test-kept (let (l) (dotimes (i 500) (push (cons i (make-string 8 ?k)) l)) l))").unwrap();
+        vm.eval_source_raw("(dotimes (i 3000) (cons i (make-string 8 ?g)))").unwrap();
+        let mut seen = spawn(&mut vm, 0, |vm| Ok(held(vm).concat().into_iter().map(u8::from).collect())).expect("a twin");
+        let recorded: Vec<u8> = seen.allocated.concat().into_iter().map(u8::from).collect();
+        let (report, status) = collect_report(&mut seen, DEADLINE).expect("the child's report");
+        assert_eq!((status, report == recorded), (0, true), "the parent's record and the child's view at the fork");
+
+        // A plain collection's roots: the VM's own, and none from a caller.
+        let twin = spawn(&mut vm, 1, |vm| child_marks(vm, &[])).expect("a twin");
+        vm.collect_garbage();
+        let agreed = settle(&vm, twin, DEADLINE).expect("the twin agrees");
+        assert!(agreed.dead >= 3000, "the garbage made before the fork is dead to both: {}", agreed.dead);
     }
 
     /// A process that ends without unwinding in a collection (an isolate job

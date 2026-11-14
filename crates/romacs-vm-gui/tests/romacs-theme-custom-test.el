@@ -486,4 +486,91 @@ bright_cyan = \"#179299\"\nbright_blue = \"#1e66f5\"\nbright_magenta = \"#ea76cb
               (romacs-should (>= (romacs-color-contrast match on) 4.5)))))
       (delete-file file))))
 
+;; romacs-theme-modus.el adapts etc/modus/modus-themes.el as it loads.  A
+;; newer Modus changes what it defines with no diff of its own: these say
+;; what it takes and name what changed.
+
+(defconst romacs-theme-test--modus-taken
+  '((custom-declare-face-loop)
+    ("defface" "modus-themes-bold") ("defface" "modus-themes-slant")
+    ("defface" "modus-themes-fixed-pitch") ("defface" "modus-themes-ui-variable-pitch")
+    ("defface" "modus-themes-reset-soft") ("defface" "modus-themes-button")
+    ("defcustom" "modus-themes-italic-constructs") ("defcustom" "modus-themes-bold-constructs")
+    ("defcustom" "modus-themes-variable-pitch-ui") ("defcustom" "modus-themes-mixed-fonts")
+    ("defconst" "modus-themes--weight-widget") ("defconst" "modus-themes--headings-widget")
+    ("defcustom" "modus-themes-headings") ("defcustom" "modus-themes-common-palette-user")
+    ("defcustom" "modus-themes-common-palette-overrides") ("defconst" "modus-themes-common-palette-mappings")
+    ("defconst" "modus-themes-vivendi-palette") ("defvar" "modus-themes--hex-regexp")
+    ("defun" "modus-themes--color-hex-p") ("defun" "modus-themes--hex-or-name-to-rgb")
+    ("defun" "modus-themes--wcag-contribution") ("defun" "modus-themes-wcag-formula")
+    ("defun" "modus-themes-contrast") ("defun" "modus-themes--color-eight-to-six-digits")
+    ("defun" "modus-themes-adjust-value") ("defun" "modus-themes-retrieve-palette-value")
+    ("defun" "modus-themes-color-dark-p") ("defun" "modus-themes-get-readable-foreground")
+    ("defun" "modus-themes--property-lookup") ("defun" "modus-themes--bold-weight")
+    ("defun" "modus-themes--slant") ("defun" "modus-themes--fixed-pitch")
+    ("defun" "modus-themes--variable-pitch-ui") ("defconst" "modus-themes-weights")
+    ("defun" "modus-themes--weight") ("defun" "modus-themes--heading") ("defun" "modus-themes--box")
+    ("defconst" "modus-themes-faces") ("defconst" "modus-themes-custom-variables")
+    ("defun" "modus-themes-blend") ("defun" "modus-themes-generate-color-blend")
+    ("defun" "modus-themes-generate-color-warmer") ("defun" "modus-themes-generate-color-cooler")
+    ("defun" "modus-themes-color-warm-p") ("defun" "modus-themes-color-is-warm-or-cool-p")
+    ("defun" "modus-themes-generate-color-warmer-or-cooler") ("defun" "modus-themes-generate-palette"))
+  "The Modus forms romacs-theme-modus.el takes from Modus 5.3.0, in order.")
+
+(romacs-deftest romacs-theme-modus-takes-the-forms-of-the-version-it-names ()
+  (require 'romacs-theme-modus)
+  (let ((header (with-temp-buffer
+                  (insert-file-contents (locate-library "romacs-theme-modus.el"))
+                  (and (re-search-forward "^;; Adapted from modus-themes\\.el \\([0-9.]+\\)" nil t)
+                       (match-string 1))))
+        (source (with-temp-buffer
+                  (insert-file-contents romacs-theme-modus-source)
+                  (and (re-search-forward "^;; Version: \\([0-9.]+\\)" nil t) (match-string 1)))))
+    (romacs-should (equal header source)))
+  (let ((case-fold-search nil) (parse-sexp-ignore-comments t))
+    (romacs-should (equal (mapcar #'car (romacs-theme-modus--taken
+                                         (romacs-theme-modus--top-level
+                                          (with-temp-buffer
+                                            (insert-file-contents romacs-theme-modus-source)
+                                            (buffer-string)))))
+                          romacs-theme-test--modus-taken))))
+
+(romacs-deftest romacs-theme-modus-defines-under-romacs-names-with-the-session-s-defaults ()
+  (require 'romacs-theme-modus)
+  ;; Modus's own names all go; the package's name stays, in the options'
+  ;; `:package-version'.
+  (let ((left nil))
+    (dolist (form (romacs-theme-modus-forms))
+      (dolist (atom (flatten-tree form))
+        (when (and (symbolp atom) (string-prefix-p "modus-themes-" (symbol-name atom)))
+          (push atom left))))
+    (romacs-should (null left)))
+  (romacs-should (equal (mapcar #'default-value '(romacs-theme-italic-constructs romacs-theme-bold-constructs
+                                                  romacs-theme-mixed-fonts romacs-theme-variable-pitch-ui))
+                        '(nil nil nil nil)))
+  (romacs-should (equal (default-value 'romacs-theme-headings)
+                        '((1 . (ultrabold 1.35)) (2 . (semibold 1.2)) (agenda-date . (1.2))
+                          (agenda-structure . (variable-pitch light 1.8)) (t . (1.15)))))
+  ;; A caller names the core palette, and the active window's line is
+  ;; `mode-line' itself.
+  (romacs-should (equal (condition-case err (progn (romacs-theme-modus-generate-palette '((bg-main "#000000") (fg-main "#ffffff")) 'warm) nil)
+                          (error (cadr err)))
+                        "A core palette is required"))
+  (romacs-should (member (read "`(mode-line-active ((,c :inherit mode-line)))") romacs-theme-modus-faces)))
+
+(romacs-deftest romacs-theme-modus-scans-modus-as-written-whatever-the-session-s-settings ()
+  (require 'romacs-theme-modus)
+  ;; A comment in a form is skipped, its parenthesis too, and names match
+  ;; case-sensitively, though the default settings say otherwise.
+  (with-temp-buffer
+    (let ((parse-sexp-ignore-comments nil) (case-fold-search t))
+      (romacs-should
+       (equal (mapcar (lambda (entry) (cons (car entry) (cddr entry)))
+                      (romacs-theme-modus--top-level
+                       "(defun modus-themes-a ()\n  ;; (unbalanced\n  1)\n(defvar Modus-themes-b nil)\n"))
+              '((("defun" "modus-themes-a") . "(defun modus-themes-a ()\n  ;; (unbalanced\n  1)")
+                (("defvar" "Modus-themes-b") . "(defvar Modus-themes-b nil)"))))
+      (romacs-should (equal (romacs-theme-modus--adapt '("defvar" "x") "(defvar x '(Modus-themes-b modus-themes-b))")
+                            '(defvar x '(Modus-themes-b romacs-theme-modus-b)))))))
+
 ;;; romacs-theme-custom-test.el ends here

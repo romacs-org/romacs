@@ -32,15 +32,20 @@ pins only if all case results are unchanged.
 To derive new specs, pass the current Cargo build-script output explicitly to
 `primh.py from-manifest MANIFEST --out DIR --gnu "$ROMACS_GNU_ORACLE" --only NAME`.
 Do not copy a fingerprinted OUT_DIR from another build. Every primitive's
-replay is one `#[test]` line of `tests/primh.rs`, under one copy of the
-template: add new ones with
-`python3 "$H/render_replay.py" primh SPEC... --into crates/romacs-vm/tests/primh.rs`, which
-keeps the replays the file has. The replays edited by hand after rendering
-(`primh_eval.rs`, `primh_mapc.rs`, `primh_mapcan.rs`, `primh_map_keymap.rs`,
-`primh_cmdloop_pins.rs`) keep their own files. `--out TEST.rs` renders a file
-of its own. The original producer and template remain byte-pinned recording
-inputs; the renderer adapts only their emitted crate import and value-display
-calls. Review generated changes with the corresponding specs.
+replay is one `#[test]` line of `tests/primh.rs`, as `primh.py rust` writes it:
+`#[test] fn primh_NAME() { replay(include_str!("../tools/primh/evidence/NAME.json"),
+include_bytes!("../tools/primh/DIR/NAME.json")); }`. A symbolic primitive's
+test takes a name of words (`primh_not_equal` for `/=`), and its files the
+name as they are stored (`%2F=.json`). The harness above them is
+`replay.rs.in` itself, rendered for this crate when the test builds
+(`romacs_vm_test_build::primh_harness!()`); no copy of it is committed. The
+original producer and template remain byte-pinned recording inputs; the
+rendering adapts only the crate import, the value-display calls and the
+declaration's location (compared by file, not line). A replay checks its
+evidence's hashes as it runs, so stale evidence fails the test. The replays
+edited by hand after rendering (`primh_eval.rs`, `primh_mapc.rs`,
+`primh_mapcan.rs`, `primh_map_keymap.rs`, `primh_cmdloop_pins.rs`) keep their
+own files. Review replay changes with the corresponding specs.
 
 Run reports belong under `target/evidence/`; the `evidence/` corpus and code
 currently under `logs/` are maintained inputs, not disposable output directories.
