@@ -7,6 +7,7 @@ use std::time::Duration;
 const MAX_JOBS: usize = 16;
 const MAX_INPUT: usize = 1024 * 1024;
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+const MAX_TIMEOUT: Duration = Duration::from_mins(2);
 /// How often a job's worker looks at its cancellation and its child's exit
 /// when its pipes are quiet. Data or room on a pipe wakes it at once.
 const TICK: Duration = Duration::from_millis(5);
@@ -72,7 +73,7 @@ impl Jobs {
         if request.input.len() > MAX_INPUT {
             return Err("CLI job input exceeds 1 MiB".into());
         }
-        if request.timeout.is_zero() || request.timeout > Duration::from_secs(120) {
+        if request.timeout.is_zero() || request.timeout > MAX_TIMEOUT {
             return Err("CLI job timeout must be nonzero and at most 120 seconds".into());
         }
         let id = self.next_id.checked_add(1).ok_or("CLI job IDs exhausted")?;
@@ -242,7 +243,6 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
         .and_then(|()| crate::host::set_nonblocking(stderr.as_fd()))
         .and_then(|()| crate::host::set_nonblocking(stdin.as_ref().unwrap().as_fd()));
     let mut written = 0;
-    let mut open = (true, true);
     if let Err(error) = &setup {
         output.error = Some(error.to_string());
     }
@@ -256,15 +256,15 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
             output.error = Some("CLI job timed out".into());
             break;
         }
-        match drain(&mut stdout, &mut output.stdout)
+        let open = match drain(&mut stdout, &mut output.stdout)
             .and_then(|out| Ok((out, drain(&mut stderr, &mut output.stderr)?)))
         {
-            Ok(still) => open = still,
+            Ok(open) => open,
             Err(error) => {
                 output.error = Some(error);
                 break;
             }
-        }
+        };
         if written == request.input.len() {
             stdin.take();
         } else if let Some(pipe) = stdin.as_mut() {
@@ -303,7 +303,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
         .into_iter()
         .flatten()
         .collect();
-        if let Err(error) = crate::subprocess::poll(&watched, Some(TICK.min(request.timeout - elapsed))) {
+        if let Err(error) = crate::subprocess::poll(&watched, Some(TICK.min(request.timeout.saturating_sub(elapsed)))) {
             output.error = Some(error.to_string());
             break;
         }
@@ -343,14 +343,14 @@ mod tests {
             argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
             input: Vec::new(),
             directory: PathBuf::from("/"),
-            timeout: Duration::from_secs(120),
+            timeout: MAX_TIMEOUT,
         }
     }
 
     /// The job's output once it ends. Its worker ends it by its timeout at
     /// the latest, so the deadline only guards against a worker that hangs.
     fn wait(jobs: &mut Jobs, id: u64) -> Arc<Output> {
-        let deadline = Instant::now() + Duration::from_secs(130);
+        let deadline = Instant::now() + MAX_TIMEOUT + Duration::from_secs(10);
         loop {
             if let Some(output) = jobs.result(id).unwrap() {
                 return output;
