@@ -194,6 +194,7 @@ pub(crate) struct VmSyntax<'a> {
     /// The classes of the ASCII characters this call has read: an entry
     /// is a cons a program may alter without writing the table, so its
     /// class is read from it once a call, during which no program runs.
+    // CELL(Plain)
     ascii: [std::cell::Cell<Option<SyntaxClass>>; 128],
     subject: Option<PropertySubject>,
     /// The subject's `syntax-table` runs, for a text or string: a search

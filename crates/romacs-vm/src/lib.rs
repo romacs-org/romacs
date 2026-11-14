@@ -79,6 +79,13 @@ pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
 // SAFETY: its own seed is a number, and its shared seed the one `default`
 // leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
+impl romacs_snapshot::Schema for NameState {
+    const LEAF: bool = true;
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 impl Default for NameState {
     fn default() -> Self {
@@ -1328,6 +1335,7 @@ pub struct Vm {
     /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
     /// Off in redisplay, which never unwinds half done.
     motion_quit: bool,
+    // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -1591,6 +1599,7 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,

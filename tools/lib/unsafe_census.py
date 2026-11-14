@@ -191,15 +191,20 @@ def file_census(src):
     return sites, len(LINT_ALLOW.findall(code))
 
 
+# Upstream packages carried with patches of ours (crates/vendor/*/ROMACS.md):
+# their code is upstream's, so no census of ours counts it.
+VENDOR = 'crates/vendor/'
+
+
 def packages(root):
-    """{package directory relative to ROOT: package name}."""
+    """{package directory relative to ROOT: package name}, those under VENDOR left out."""
     listed = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z',
                              '--', 'Cargo.toml', '*/Cargo.toml'],
                             cwd=root, check=True, stdout=subprocess.PIPE).stdout.decode()
     found = {}
     for name in filter(None, listed.split('\0')):
         path = Path(root) / name
-        if not path.is_file():
+        if name.startswith(VENDOR) or not path.is_file():
             continue
         manifest = tomllib.loads(path.read_text())
         if 'package' in manifest:

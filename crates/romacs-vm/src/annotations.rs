@@ -1215,11 +1215,13 @@ pub(crate) struct AnnotatedBuffer {
     text: Text,
     /// The markers and overlay ends of the text, shared with the buffer's
     /// indirect buffers as GNU's marker chain is (`BUF_MARKERS`).
+    // CELL(Plain)
     pub anchors: Shared<AnchorTree>,
     pub intervals: crate::intervals::IntervalIndex,
     /// Overlay starts whose overlay would turn over at an insertion, of
     /// every buffer sharing the text: GNU adjusts every member's overlays
     /// for an insertion in any (`adjust_overlays_for_insert`).
+    // CELL(Plain)
     pub reversed_pairs: Shared<std::collections::HashMap<Anchor, Anchor>>,
     pub evaporating: std::collections::HashMap<Anchor, Value>,
     pub local_keymap: Value,

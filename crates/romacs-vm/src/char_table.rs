@@ -520,8 +520,13 @@ pub(crate) fn uniprop_block(codes: &[u32]) -> Result<Vec<Value>> {
 /// Cloning a handle retains native storage after its parent slot is replaced.
 /// A detached handle's Lisp payloads must also be rooted and forwarded through
 /// `collector_visit_node`; an Arc alone is not a Lisp GC root.
+// CELL(Held): Char table nodes, shared between tables, sub-char-tables, views and keymap cursors:
+// five declarations for one lock. Every write through it goes through char_table.rs's funnel (`wrote`),
+// and only the collector's own visits write past it (PAST_THE_BARRIER); every field of `CharTable`
+// and `CharTableNode` is private to that file.
 pub(super) type CharTableNodeHandle = Arc<Mutex<CharTableNode>>;
 
+// CELL(Held)
 #[derive(Clone)]
 pub(super) enum CharTableSlot {
     Value(Value),
@@ -950,6 +955,7 @@ fn span(root: &CharTableNodeHandle, ascii: &CharTableSlot, default: Value, index
 /// `char-width-table` through these, its parents' after it.
 #[derive(Clone)]
 pub(crate) struct CharTableView {
+    // CELL(Held)
     root: CharTableNodeHandle,
     ascii: CharTableSlot,
     default: Value,
@@ -964,6 +970,7 @@ impl CharTableView {
 
 pub(super) struct CharTable {
     purpose: Value,
+    // CELL(Held)
     root: CharTableNodeHandle,
     ascii: CharTableSlot,
     default: Value,

@@ -33,6 +33,10 @@ impl Key {
     const fn builtin(index: usize) -> Self {
         Self(Value::reference(index + 1, 7))
     }
+    /// Whether this is a built-in key, whose symbol has a fixed slot.
+    pub(crate) fn is_builtin(self) -> bool {
+        self.0.index_if(7).is_some_and(|slot| (1..=Self::BUILTIN.len()).contains(&slot))
+    }
     /// A key for NAME where no `Vm` interns it: its built-in key, else the
     /// key of NAME's place among the names tests have asked for, past the
     /// built-ins, so that two names are always two keys.
@@ -895,6 +899,8 @@ impl Plist for At<'_> {
 pub(crate) struct KeyReader<'a> {
     root: Option<&'a Tree>,
     /// The last run read: its start, end and value.
+    // CELL(Passing): A reader borrowing its tree, so no collection runs while it holds the run it
+    // read.
     run: std::cell::Cell<(usize, usize, Option<Value>)>,
 }
 impl KeyReader<'_> {

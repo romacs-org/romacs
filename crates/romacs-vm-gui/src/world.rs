@@ -66,14 +66,18 @@ pub const INTERPROGRAM: &str = "(defvar interprogram-cut-function 'romacs-clipbo
 /// The world of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR, in
 /// STORE, resolved against this process's directory (`World::new`).
 pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Result<World, String> {
+    World::new(store, recipe(width, height, floor)?).map_err(|e| e.to_string())
+}
+
+/// The recipe of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR.
+fn recipe(width: u32, height: u32, floor: Option<usize>) -> Result<Vec<String>, String> {
     let font = launch_font()?.map_or("font default".to_owned(), |(source, _)| format!("font {source}"));
     let dir = startup::lisp_root(&startup::lisp_dir())?;
-    let recipe = vec![
+    Ok(vec![
         "consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("geometry {width} {height}"),
         format!("floor {floor:?}"), font, format!("lisp {}", dir.display()),
         font_environment(|name| std::env::var_os(name)),
-    ];
-    World::new(store, recipe).map_err(|e| e.to_string())
+    ])
 }
 
 /// What chooses Fontconfig's configuration and the launch font, from GET:
@@ -372,6 +376,18 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
         }
     }
     false
+}
+
+/// `--world-census`: the census (`romacs_vm::world::image::census`) of the
+/// base world in STORE of a live `--loadup` launch of WIDTH by HEIGHT with
+/// FLOOR, restored read only as it was published, before anything of this
+/// process runs in it. Nothing is written to the store.
+pub fn census(store: &Path, width: u32, height: u32, floor: Option<usize>) -> Result<serde_json::Value, String> {
+    let (vm, carry) = World::restore_read_only::<Carry>(store, recipe(width, height, floor)?).map_err(|reason| reason.to_string())?;
+    let census = romacs_vm::world::image::census(&vm, &carry);
+    // The process exits next: the image need not be taken apart.
+    std::mem::forget((vm, carry));
+    Ok(census)
 }
 
 /// `--world-build`'s second half: INIT's layer over BASE made usable too,

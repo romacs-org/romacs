@@ -151,6 +151,45 @@ pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &
     written
 }
 
+/// The census of VM and CARRY as an image holds them
+/// (`romacs_snapshot::Walk`): every kind with its count, bytes and layout;
+/// the values that name something by an ordinal of this build's tables,
+/// which another build numbers otherwise; and, in a process that mapped
+/// the image, its arena's own counts of the bytes in use and free, against
+/// which the walk's owned bytes show how much of the image is the values
+/// it holds. The ordinals noted are the types `ordinals` names: a type that
+/// comes to hold another is noted when it is added there.
+#[must_use]
+pub fn census<T: super::safe::Schema>(vm: &Vm, carry: &T) -> serde_json::Value {
+    let mut observe = |value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes| ordinals(value, notes);
+    let mut walk = romacs_snapshot::Walk::new(&mut observe);
+    walk.value(vm);
+    walk.value(carry);
+    let mut census = walk.census();
+    census["image"] = arena::image_census().map_or(serde_json::Value::Null, |arena| serde_json::json!({
+        "used": arena.used, "small_free": arena.small_free, "slab_rest": arena.slab_rest,
+        "runs_kept": arena.runs_kept, "runs_released": arena.runs_released,
+    }));
+    census
+}
+
+/// Count VALUE's ordinals of this build's tables into NOTES.
+fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
+    if let Some(value) = value.downcast_ref::<Value>() {
+        if value.index_if(6).is_some() {
+            notes.add("ordinal: a primitive, by its index in the primitive table", 1);
+        }
+    } else if value.downcast_ref::<crate::forwarded::Fwd>().is_some() {
+        notes.add("ordinal: a forwarded variable, by its place in C_VARIABLES", 1);
+    } else if let Some(slots) = value.downcast_ref::<crate::forwarded::PerBuffer>() {
+        notes.add("ordinal: a buffer's per-buffer slots, by forwarded place", slots.slots() as u64);
+    } else if value.downcast_ref::<crate::properties::Key>().is_some_and(|key| key.is_builtin()) {
+        notes.add("ordinal: a built-in property key, at its fixed symbol slot", 1);
+    } else if value.downcast_ref::<crate::PendingBody>().is_some() {
+        notes.add("ordinal: a pending compiled body, its primitives as raw bits", 1);
+    }
+}
+
 /// The VM and carry of the image this process mapped, when it was made for
 /// KEY, with the process-global counters it depends on restored. Taken once.
 ///
@@ -201,6 +240,18 @@ mod tests {
             vm = vm.at_rest_for_image().expect("a VM at rest").0;
             assert!(vm.generations_settled());
         }
+    }
+
+    /// A census meets the VM once and counts what it names by this build's
+    /// tables: a fresh VM's function cells name every primitive. (Its
+    /// forwarded variables' places are made as variables are first read.)
+    #[test]
+    fn a_census_counts_the_vm_and_its_ordinals() {
+        let census = super::census(&Vm::new(), &());
+        let vm = census["kinds"].as_array().unwrap().iter().find(|kind| kind["type"] == "romacs_vm::Vm").unwrap();
+        assert_eq!(vm["count"], 1);
+        let primitives = census["notes"]["ordinal: a primitive, by its index in the primitive table"].as_u64().unwrap_or(0);
+        assert!(primitives >= crate::prim::count() as u64, "{}", census["notes"]);
     }
 
     #[test]

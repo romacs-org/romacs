@@ -25,7 +25,7 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
     let layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("lisp/bundled.json")).unwrap()).unwrap();
     let autoloads = root.join(layout["autoloads"].as_str().unwrap());
     let home = std::env::temp_dir().join(format!("romacs-bundled-autoloads-{}/", std::process::id()));
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     vm.load_file(&autoloads).unwrap();
     // The package directories it scanned, in their order, as --loadup's load-path has them.
     let root_name = format!("{:?}", root.to_string_lossy());
@@ -57,7 +57,7 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
 #[test]
 fn a_world_build_records_what_the_bundled_scan_reads() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     host::enter_build(Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] });
     let loaded = vm.load_file(&root.join("lisp/romacs/romacs-bundled-autoloads.el"));
     let trace = host::leave_build().expect("a build was recording");
@@ -93,7 +93,7 @@ fn the_scan_yields_the_forms_loaddefs_generate_writes() {
     ] {
         std::fs::write(dir.join(name), text).unwrap();
     }
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     vm.load_file(&root.join("lisp/romacs/romacs-bundled-autoloads.el")).unwrap();
     let dir_name = format!("{:?}", dir.to_string_lossy());
     let found = query(&mut vm, &format!("(let* ((dir {dir_name}) (output (expand-file-name \"=loaddefs.el\" dir)))

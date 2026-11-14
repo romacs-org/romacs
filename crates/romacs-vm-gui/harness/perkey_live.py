@@ -171,6 +171,16 @@ def perf_count(output, idle=False):
     raise Invalid(f'no instructions line: {output!r}')
 
 
+def perf_stat(tid, out, inherit=True):
+    """The command counting thread TID's instructions into OUT until it is
+    interrupted.  With INHERIT the count takes in the threads TID starts
+    while it runs, as `perf stat' does by default; a thread already running
+    is never counted, so what that adds is whatever happens to start in
+    the counted interval."""
+    return ['perf', 'stat', '-x,', *([] if inherit else ['--no-inherit']),
+            '-e', 'instructions:u', '-t', str(tid), '-o', str(out)]
+
+
 def delivery(replies, command, keys):
     """Problems with the command replies of one phase, which ran KEYS keys of COMMAND."""
     problems = []
@@ -367,6 +377,10 @@ def text_point(stderr_records):
 # The live session.
 
 class Session:
+    # Whether a count takes in the threads the evaluator starts during it
+    # (`perf_stat').
+    inherit = True
+
     def __init__(self, args, root, latency):
         self.args, self.root, self.latency = args, root, latency
         self.compositor = self.keyboard = self.process = None
@@ -560,8 +574,7 @@ class Session:
             result = action()
             return None, time.monotonic() - started, result
         out = self.root / f'perf-{time.monotonic_ns()}.txt'
-        perf = subprocess.Popen(['perf', 'stat', '-x,', '-e', 'instructions:u', '-t', str(self.tid), '-o', str(out)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        perf = subprocess.Popen(perf_stat(self.tid, out, self.inherit), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(.3)
         started = time.monotonic()
         result = action()

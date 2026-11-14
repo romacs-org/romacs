@@ -53,6 +53,7 @@ impl super::gc::Consed {
     }
 }
 
+// CELL(Held)
 #[derive(Clone)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex::SyntaxClass>),
@@ -152,9 +153,12 @@ pub(super) struct LispString {
     chars: usize,
     flags: u8,
     pub(crate) properties: crate::properties::Properties,
+    // CELL(Plain)
     cursors: [std::cell::Cell<(usize, usize)>; 2],
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) scanned: std::cell::Cell<usize>,
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) flag_scanned: std::cell::Cell<usize>,
 }

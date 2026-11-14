@@ -286,6 +286,7 @@ impl Worker {
 #[derive(Default)]
 struct PoolMemory {
     /// The processes to measure, as the evaluator last saw them.
+    // CELL(Plain)
     pids: std::sync::Mutex<Vec<i32>>,
     /// Their proportional memory together, in kilobytes.
     kilobytes: std::sync::atomic::AtomicU64,
