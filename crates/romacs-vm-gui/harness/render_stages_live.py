@@ -208,11 +208,20 @@ def measure(gui, scenario, args):
     """SCENARIO's session's stderr, its frames' costs in it; profiled under --record."""
     name = scenario['name']
     prefix, env, data = stages.recording(args.output, gui.home, name) if args.record else ((), {}, None)
-    _, stderr_text = gui.session(name, lambda out: f'(display-stages-start (quote {name}) "{out}" {args.steps})',
-                                 loads=SCENARIOS, env={'ROMACS_DIAGNOSTICS': '1', **env}, prefix=prefix, wait=args.timeout)
+    # The session appends to its stderr file: its own lines are those after
+    # the file's end as it stands now.
+    log = gui.home / f'{name}.stderr'
+    start = log.stat().st_size if log.exists() else 0
+    gui.session(name, lambda out: f'(display-stages-start (quote {name}) "{out}" {args.steps})',
+                loads=SCENARIOS, env={'ROMACS_DIAGNOSTICS': '1', **env}, prefix=prefix, wait=args.timeout)
     if data:
         stages.callgraph(data, args.timeout)
-    return stderr_text
+    return since(log.read_bytes(), start)
+
+
+def since(data, start):
+    """The text of DATA, a session's stderr file, from byte START on."""
+    return data[start:].decode(errors='replace')
 
 
 def run(binary, home, selected, bars, args):

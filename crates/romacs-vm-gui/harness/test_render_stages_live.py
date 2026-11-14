@@ -30,6 +30,12 @@ class Frames(unittest.TestCase):
         self.assertEqual([(f['rows'], f['scenes']) for f in drawn], [(46, 1), (46, 0), (47, 1)])
         self.assertEqual(r.frames(stderr(frame(), start=False)), [])
 
+    def test_a_session_without_a_start_mark_after_a_good_one_has_no_frames(self):
+        earlier = stderr(*[frame()] * 30).encode()
+        markerless = 'the session died early\n'.encode()
+        self.assertEqual(r.frames(r.since(earlier + markerless, len(earlier))), [])
+        self.assertEqual(len(r.frames(r.since(earlier, 0))), 30)
+
     def test_an_earlier_session_in_the_same_stderr_is_not_counted(self):
         both = stderr(*[frame()] * 30) + stderr(frame(rows=47))
         self.assertEqual([f['rows'] for f in r.frames(both)], [47])
