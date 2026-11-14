@@ -51,6 +51,7 @@ mod tests {
     }
 
     /// A counter that retires 100 instructions between two reads.
+    #[expect(clippy::unnecessary_wraps, reason = "a Counter's signature")]
     fn stepping() -> Option<u64> {
         READS.set(READS.get() + 1);
         Some(READS.get() * 100)

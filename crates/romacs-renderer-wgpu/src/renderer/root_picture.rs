@@ -111,12 +111,14 @@ impl RootPicture {
     }
 
     /// Its texture, for the GPU budget's census.
+    #[must_use]
     pub fn texture(&self) -> &FullFrameTexture {
         &self.texture
     }
 
     /// Whether it can picture a surface of SIZE (in its renderer's format,
     /// which is the renderer's for its life).
+    #[must_use]
     pub fn fits(&self, size: SnapshotSize) -> bool {
         self.texture.size() == size
     }
@@ -428,6 +430,12 @@ fn region_glyphs(shown: &Indexed, region: Rect, reach: Reach, anchors: &[usize])
 /// A physical scissor (x, y, width, height) and the logical region it
 /// covers: EXTENT grown to whole device pixels at SCALE, within DEVICE.
 /// None when nothing of it is on the surface.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "device pixels: whole numbers clamped to the surface, far below f32's exact range"
+)]
 fn pixel_region(
     extent: Rect,
     scale: f32,

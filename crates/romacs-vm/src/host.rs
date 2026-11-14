@@ -1833,6 +1833,7 @@ pub(crate) fn thread_instructions() -> Option<u64> {
 /// calls. What a meter hands on to Lisp is a host result, and logged
 /// there. A session installs it as the render thread's meter too
 /// (`romacs_display_protocol::meter`).
+#[must_use]
 pub fn instruction_count() -> Option<u64> {
     INSTRUCTION_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();

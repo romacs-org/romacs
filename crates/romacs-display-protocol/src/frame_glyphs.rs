@@ -1296,8 +1296,9 @@ impl FrameGlyphBuffer {
     /// Whether SELF and OTHER set their glyphs alike: every field a pass
     /// over a frame's glyphs reads besides the glyphs themselves, their
     /// font tables and their cursors is equal. The fields are destructured
-    /// whole, so one added to the frame is placed here on purpose: compared,
-    /// or named with why a pass's pixels do not depend on it. A field
+    /// whole, so one added to the frame is placed here on purpose: compared
+    /// (lengths bit for bit), or named with why a pass's pixels do not
+    /// depend on it. A field
     /// compared here is one [`Self::glyph_pass_copy`] keeps.
     #[must_use]
     pub fn sets_glyphs_like(&self, other: &Self) -> bool {
@@ -1361,13 +1362,13 @@ impl FrameGlyphBuffer {
             current_row_role: _,
             current_clip_rect: _,
         } = self;
-        *width == other.width
-            && *height == other.height
-            && *char_width == other.char_width
-            && *char_height == other.char_height
-            && *font_pixel_size == other.font_pixel_size
+        width.to_bits() == other.width.to_bits()
+            && height.to_bits() == other.height.to_bits()
+            && char_width.to_bits() == other.char_width.to_bits()
+            && char_height.to_bits() == other.char_height.to_bits()
+            && font_pixel_size.to_bits() == other.font_pixel_size.to_bits()
             && *background == other.background
-            && *background_alpha == other.background_alpha
+            && background_alpha.to_bits() == other.background_alpha.to_bits()
             && *text_over_backgrounds == other.text_over_backgrounds
             && *frame_chrome == other.frame_chrome
             && *panes == other.panes
@@ -2343,9 +2344,10 @@ impl FrameGlyphBuffer {
     }
 
     /// The position of the glyph [`Self::cursor_draw_rect`] reads to place a
-    /// cursor on SLOT_ID: the slot's own glyph, else the nearest glyph before
-    /// it in its row. A frame that holds it places the cursor where this one
-    /// does.
+    /// cursor on `slot_id`: the slot's own glyph, else the nearest glyph
+    /// before it in its row. A frame that holds it places the cursor where
+    /// this one does.
+    #[must_use]
     pub fn cursor_anchor(&self, slot_id: DisplaySlotId) -> Option<usize> {
         let in_slot = |glyph: &FrameGlyph| glyph.slot_id() == Some(slot_id);
         self.glyphs.iter().position(in_slot).or_else(|| {

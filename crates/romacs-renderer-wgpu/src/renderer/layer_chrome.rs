@@ -157,7 +157,7 @@ impl WgpuRenderer {
         // window's box lands on its glyph cell just like the selected one,
         // under line numbers or scaled fonts.
         for cursor in &frame_glyphs.window_cursors {
-            self.emit_window_cursor(frame_glyphs, cursor, cursor_visible, animated_cursor, &mut layers);
+            self.emit_window_cursor(frame_glyphs, cursor, cursor_visible, animated_cursor.as_ref(), &mut layers);
         }
         layers
     }
@@ -168,9 +168,10 @@ impl WgpuRenderer {
         frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         cursor: &romacs_display_protocol::frame_glyphs::WindowCursor,
         cursor_visible: bool,
-        animated_cursor: &Option<romacs_display_protocol::types::AnimatedCursor>,
+        animated_cursor: Option<&romacs_display_protocol::types::AnimatedCursor>,
         layers: &mut ChromeLayerVertices,
     ) {
+        let animated_cursor = &animated_cursor.copied();
         let cursor_effects = frame
             .effective_window_cursor_effects(cursor.window_id, &self.effects)
             .clone();
@@ -206,7 +207,6 @@ impl WgpuRenderer {
         cursor_visible: bool,
         animated_cursor: Option<&romacs_display_protocol::types::AnimatedCursor>,
     ) -> Vec<Option<romacs_display_protocol::types::Rect>> {
-        let animated_cursor = animated_cursor.copied();
         frame
             .window_cursors
             .iter()
@@ -217,7 +217,7 @@ impl WgpuRenderer {
                     cursor_glow: Vec::new(),
                     cursors: Vec::new(),
                 };
-                self.emit_window_cursor(frame, cursor, cursor_visible, &animated_cursor, &mut layers);
+                self.emit_window_cursor(frame, cursor, cursor_visible, animated_cursor, &mut layers);
                 bounding_box(
                     layers
                         .cursor_bg

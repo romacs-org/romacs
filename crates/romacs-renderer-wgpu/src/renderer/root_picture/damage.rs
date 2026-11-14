@@ -22,7 +22,7 @@ use std::ops::Range;
 use rustc_hash::FxHashMap;
 
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
-use romacs_display_protocol::types::Rect;
+use romacs_display_protocol::types::{DisplayWindowId, Rect};
 
 /// A group's name: its window (0 for glyphs of none) and its glyphs' span.
 type Key = (i64, u32, u32);
@@ -42,6 +42,7 @@ pub(crate) struct Indexed {
 }
 
 impl Indexed {
+    #[cfg(test)]
     pub(crate) fn new(frame: FrameGlyphBuffer) -> Self {
         let runs = runs(&frame.glyphs);
         Self { frame, runs }
@@ -53,8 +54,8 @@ impl Indexed {
 pub(crate) enum Plan {
     /// Nothing the picture shows changed. ROWS text rows are kept.
     Clean { rows: usize },
-    /// Repaint REGIONS (logical pixels, disjoint). ROWS_KEPT text rows of the
-    /// next frame lie outside them.
+    /// Repaint `regions` (logical pixels, disjoint). `rows_kept` text rows of
+    /// the next frame lie outside them.
     Regions { regions: Vec<Rect>, rows_kept: usize },
     /// Repaint all of it.
     Whole,
@@ -85,7 +86,7 @@ pub(crate) fn text_rows(indexed: &Indexed, kept: impl Fn(&Run) -> bool) -> usize
     keys.len()
 }
 
-/// What a picture of OLD repaints to show NEW, NEW_RUNS its runs.
+/// What a picture of OLD repaints to show NEW, whose runs are `new_runs`.
 pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> Plan {
     let rows = |runs: &[Run], kept: &dyn Fn(&Run) -> bool| {
         let mut keys: Vec<Key> = runs
@@ -151,7 +152,7 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     for (at, glyph) in glyphs.iter().enumerate() {
         let bounds = glyph.geometry().unwrap_or_default();
         let key = (
-            glyph.window_id().map_or(0, |w| w.get()),
+            glyph.window_id().map_or(0, DisplayWindowId::get),
             bounds.y.to_bits(),
             bounds.height.to_bits(),
         );

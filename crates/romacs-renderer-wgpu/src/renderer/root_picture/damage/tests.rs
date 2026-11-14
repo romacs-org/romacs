@@ -9,6 +9,7 @@ const ROW: f32 = 20.0;
 
 /// A 400x400 frame: window 1 on its left half shows LEFT, window 2 on its
 /// right half RIGHT, rows 20 px tall, each window's background first.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
 fn frame(left: &[&str], right: &[&str]) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(400.0, 400.0);
     frame.background = Color::BLACK;

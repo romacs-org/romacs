@@ -46,8 +46,15 @@ fn face(frame: &mut FrameGlyphBuffer, id: u32, fg: Color, bg: Color) {
     );
 }
 
-/// SCENE's frame at SCALE; with SHARED_SLOTS, a frame cell taller than its
-/// rows, so glyphs of two rows can share a slot id (derived from pixels).
+/// SCENE's frame at SCALE; with `shared_slots`, a frame cell taller than
+/// its rows, so glyphs of two rows can share a slot id (derived from pixels).
+#[expect(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "one scene's whole frame, built in one place from a test's few rows and columns"
+)]
 fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(W as f32 / scale, H as f32 / scale);
     (frame.char_width, frame.char_height) = (CELL, if shared_slots { 2.0 * ROW } else { ROW });
