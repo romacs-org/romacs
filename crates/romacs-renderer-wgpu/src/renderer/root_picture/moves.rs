@@ -14,7 +14,8 @@
 //!    them then lies on a half pixel and moves by exactly the distance.
 //! 2. The same rows: each of the band's visual rows is entire, and is the
 //!    old frame's row the distance away, glyph for glyph but y and slot
-//!    (`moved`, `whole_rows`).
+//!    (`moved`, `whole_rows`). A row draws with its whole visual row and
+//!    nothing else: underline runs and box runs end at a window's edge.
 //! 3. Nothing drawn from y: no face with a background gradient, no tiled
 //!    fringe bitmap, no strike-through or wave underline (placed off the
 //!    half-pixel grid), no clip cutting the band's ink in either place

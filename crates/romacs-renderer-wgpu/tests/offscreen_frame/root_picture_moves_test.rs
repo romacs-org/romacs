@@ -356,3 +356,153 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_an_unde
     // face as the row moves; its shorter tail does not change.
     scrolled_through_picture_equals_whole(1.0, Extras { underlined: true, ..Extras::default() });
 }
+
+/// Two underlined faces whose lines lie two pixels apart in a 12-pixel row.
+const SEAM_LEFT: u32 = 10;
+const SEAM_RIGHT: u32 = 11;
+const SEAM_ROW: f32 = 12.0;
+const SEAM_CELL: f32 = 7.0;
+
+/// Two windows side by side, each row underlined: the left one row at the
+/// top ending at x 50, the right one from x 50 showing ROWS from FIRST.
+/// Without LEFT, the right window alone.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
+fn seam_frame(rows: &[&str], first: usize, left: bool) -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    (frame.char_width, frame.char_height) = (SEAM_CELL, SEAM_ROW);
+    frame.background = BG;
+    for (id, offset) in [(SEAM_LEFT, 1), (SEAM_RIGHT, 3)] {
+        text_face(&mut frame, id, BG);
+        let face = frame.faces.get_mut(&FaceId::new(id)).unwrap();
+        face.attributes |= FaceAttributes::UNDERLINE;
+        face.underline_style = romacs_display_protocol::face::UnderlineStyle::Line;
+        face.underline_color = Some(Color::rgb(0.3, 0.9, 0.3));
+        face.underline_placement = romacs_display_protocol::face::UnderlinePosition::FontMetric { offset_from_baseline: offset };
+        face.underline_thickness = 1;
+    }
+    let body = 4.0 * SEAM_ROW;
+    let put = |frame: &mut FrameGlyphBuffer, window: i64, x0: f32, y: f32, text: &str, face: u32| {
+        frame.set_draw_context(DisplayWindowId::new(window), GlyphRowRole::Text, None);
+        for (col, ch) in text.chars().enumerate() {
+            frame.add_char(ch, x0 + col as f32 * SEAM_CELL, y, SEAM_CELL, SEAM_ROW, 8.0, false);
+            if let Some(FrameGlyph::Char { face_id, .. }) = frame.glyphs.last_mut() {
+                *face_id = FaceId::new(face);
+            }
+        }
+    };
+    if left {
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        frame.add_background(0.0, 0.0, 50.0, body, BG);
+        put(&mut frame, 1, 1.0, 0.0, "leftwin", SEAM_LEFT);
+    }
+    frame.set_draw_context(DisplayWindowId::new(2), GlyphRowRole::Text, None);
+    frame.add_background(50.0, 0.0, W as f32 - 50.0, body, BG);
+    for (row, text) in rows.iter().skip(first).take(4).enumerate() {
+        put(&mut frame, 2, 50.0, row as f32 * SEAM_ROW, text, SEAM_RIGHT);
+    }
+    frame
+}
+
+const SEAM_ROWS: [&str; 6] = ["wren", "mink", "vole", "hare", "lynx", "orca"];
+
+/// FRAME drawn whole at 1x.
+fn drawn_whole(h: &mut Harness, frame: &FrameGlyphBuffer) -> Vec<u8> {
+    let mapping = mapping_for_scale(frame, W, H, 1.0);
+    h.atlas.set_current_frame_fonts(frame.font_bindings());
+    let (texture, view) = make_tex(&h.renderer, "whole");
+    h.renderer.render_frame_glyphs(&view, frame, &mut h.atlas, mapping, false, None, None, None, None);
+    read_tex(&h.renderer, &texture)
+}
+
+/// FRAMES painted in turn through one picture at SCALE, each against it
+/// drawn whole, byte for byte; the bands the picture moved.
+fn through_picture(h: &mut Harness, frames: &[FrameGlyphBuffer], scale: f32) -> u64 {
+    h.renderer.set_scale_factor(scale);
+    let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
+    let bands = call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED);
+    for (at, frame) in frames.iter().enumerate() {
+        let mapping = mapping_for_scale(frame, W, H, scale);
+        h.atlas.set_current_frame_fonts(frame.font_bindings());
+        let (whole_texture, whole_view) = make_tex(&h.renderer, "whole");
+        h.renderer.render_frame_glyphs(&whole_view, frame, &mut h.atlas, mapping, false, None, None, None, None);
+        let whole = read_tex(&h.renderer, &whole_texture);
+        let (texture, view) = make_tex(&h.renderer, "through-picture");
+        let target = PaintTarget { view: &view, mapping, cursor_visible: false, animated_cursor: None };
+        let painted = picture.paint(&mut h.renderer, &mut h.atlas, frame, target);
+        let through = read_tex(&h.renderer, &texture);
+        let differing: Vec<u32> = (0..W * H)
+            .filter(|&i| whole[i as usize * 4..i as usize * 4 + 4] != through[i as usize * 4..i as usize * 4 + 4])
+            .collect();
+        assert!(
+            differing.is_empty(),
+            "frame {at} at {scale}, {painted:?}: {} pixels differ, at {:?}",
+            differing.len(),
+            differing.iter().map(|i| (i % W, i / W)).collect::<Vec<_>>(),
+        );
+    }
+    call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED) - bands
+}
+
+#[test]
+fn a_window_s_underline_does_not_join_its_neighbour_s() {
+    // The left window's underlined row ends where the right window's
+    // starts, under the same rule: the right one draws its own line.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let both = drawn_whole(&mut h, &seam_frame(&SEAM_ROWS, 0, true));
+    let alone = drawn_whole(&mut h, &seam_frame(&SEAM_ROWS, 0, false));
+    let right = |pixels: &[u8]| -> Vec<u8> {
+        (0..H).flat_map(|y| pixels[((y * W + 50) * 4) as usize..((y * W + W) * 4) as usize].to_vec()).collect()
+    };
+    assert!(right(&both) == right(&alone), "the right window's pixels depend on the left window's underline");
+}
+
+#[test]
+fn a_scrolled_window_beside_an_underlined_neighbour_equals_it_drawn_whole() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frames = [0, 0, 1].map(|first| seam_frame(&SEAM_ROWS, first, true));
+    assert!(through_picture(&mut h, &frames, 1.0) > 0, "the right window's rows move");
+}
+
+#[test]
+fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
+    // At 7x a pane 9 logical pixels tall has its bottom edge on device row
+    // 62, a seventh of a pixel above its end. Rows three tall move from 1
+    // and 4 to 3 and 6, into the edge: the edge is drawn over them, and the
+    // dim on the row above the edge once.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frame = |rows: [(f32, &str); 2]| {
+        let mut frame = FrameGlyphBuffer::with_size(W as f32 / 7.0, H as f32 / 7.0);
+        (frame.char_width, frame.char_height) = (2.0, 3.0);
+        // The dim pulls toward the frame's background: unlike the window's,
+        // so a second dim shows.
+        frame.background = Color::rgb(0.0, 0.0, 0.4);
+        text_face(&mut frame, NORMAL, BG);
+        frame.faces.get_mut(&FaceId::new(NORMAL)).unwrap().font_size = 2.0;
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        frame.add_background(0.0, 0.0, 13.0, 9.0, BG);
+        for (y, text) in rows {
+            for (col, ch) in text.chars().enumerate() {
+                frame.add_char(ch, 2.0 + 2.0 * f32::from(u8::try_from(col).unwrap()), y, 2.0, 3.0, 2.0, false);
+            }
+        }
+        frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
+            bounds: Rect::new(0.0, 0.0, 13.0, 9.0),
+            radius: 0.0,
+            edge: Some(Color::rgb(0.9, 0.9, 0.2)),
+            dim: 0.3,
+        });
+        frame
+    };
+    let old = frame([(1.0, "ab"), (4.0, "cd")]);
+    let new = frame([(3.0, "ab"), (6.0, "cd")]);
+    assert!(through_picture(&mut h, &[old.clone(), old, new], 7.0) > 0, "the rows move");
+}
