@@ -41,7 +41,8 @@ the tree, with the trunk, the target and the structural switch it was given."
           (should (equal (gethash "verdict" answer) "fail"))
           (should (equal (gethash "exit" answer) 1))
           (should (equal (gethash "report" answer)
-                         (format "args:--trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                         (format "args:--binary %s --trunk main --no-structural\ntarget:/somewhere/target\nin:%s\n"
+                                 (expand-file-name invocation-name invocation-directory)
                                  (directory-file-name (file-truename tree))))))
       (delete-directory tree t))))
 
@@ -51,7 +52,8 @@ the tree, with the trunk, the target and the structural switch it was given."
     (unwind-protect
         (let ((answer (romacs-mcp-dev-tests--call "worktree" tree)))
           (should (equal (gethash "verdict" answer) "ok"))
-          (should (string-prefix-p "args:\n" (gethash "report" answer))))
+          (should (string-prefix-p (format "args:--binary %s\n" (expand-file-name invocation-name invocation-directory))
+                                   (gethash "report" answer))))
       (delete-directory tree t))))
 
 (ert-deftest romacs-mcp-dev-tests-incomplete ()
@@ -77,6 +79,26 @@ one that could not start."
               (should-error (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree)))
               (should (= (buffers) before))))
         (delete-directory tree t)))))
+
+(ert-deftest romacs-mcp-dev-tests-guide-at-once ()
+  "A function by name, and no query, are answered at once."
+  (should (string-prefix-p "car (list): primitive" (romacs-mcp-dev--guide (romacs-mcp--object "query" "car"))))
+  (should (string-prefix-p "What callers of a function are told" (romacs-mcp-dev--guide (romacs-mcp--object)))))
+
+(defun romacs-mcp-dev-tests--defined-since-boot (thing)
+  "Return THING, for an aardwolf: no world was built with this function."
+  thing)
+
+(ert-deftest romacs-mcp-dev-tests-guide-search-in-steps ()
+  "A search of docstrings is answered over polls of the request, each a
+short step, and sees a function defined since this Romacs started."
+  (let* ((deferred (romacs-mcp-dev--guide (romacs-mcp--object "query" "aardwolf world" "limit" 3)))
+         (polls 0) (result nil))
+    (should (eq (car deferred) 'romacs-mcp--deferred))
+    (while (not (setq result (funcall (cadr deferred)))) (setq polls (1+ polls)))
+    (should (> polls 1))
+    (should (string-prefix-p "romacs-mcp-dev-tests--defined-since-boot (function): Return THING, for an aardwolf: no world was built with this function.\n"
+                             (car result)))))
 
 (ert-deftest romacs-mcp-dev-tests-no-tool ()
   "A tree without the check is refused, with what to do."

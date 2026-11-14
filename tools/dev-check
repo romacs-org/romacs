@@ -7,6 +7,9 @@
               deleted or moved it), with how many recent landings touched it:
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
+  lint        tools/romacs-lint on the files of lisp/romacs the change touches:
+              what it adds since the merge-base, as the queue's Lisp tier holds
+              it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
   structural  the rules a Rust change can break anywhere (tools/gate's
               STRUCTURAL, and the rules of the crates changed), run on this
               tree into CARGO_TARGET_DIR: seconds once the test target is
@@ -138,6 +141,40 @@ def generated(root):
     return ('FAIL', f'{len(found)} generated file(s) tracked', findings) if found else ('ok', 'no generated file is tracked', [])
 
 
+# The lint.
+
+def lisp_files(names, root):
+    """The files of Romacs's own Lisp among the changed paths NAMES that ROOT still has."""
+    return sorted(name for name in names if name.startswith('lisp/romacs/') and name.endswith('.el') and (root / name).is_file())
+
+
+def lint_stage(status, output, errors):
+    """(STATUS, SUMMARY, FINDINGS) of a tools/romacs-lint run that exited with STATUS:
+    its closing line is the summary, the lines before it the findings."""
+    lines = output.splitlines()
+    if status not in (0, 1) or not lines:
+        why = (errors.strip().splitlines() or ['no output'])[-1]
+        return 'SKIP', 'tools/romacs-lint gave no result', [f'{why}; fix: pass --binary HOST, or build one (cargo build --profile gate -p romacs-vm-gui)']
+    return ('FAIL' if status else 'ok'), lines[-1].removeprefix('romacs-lint: '), lines[:-1]
+
+
+def lint_command(root, files, base, binary):
+    """The tools/romacs-lint run of FILES against the revision BASE, by the host BINARY or the lint's own choice."""
+    return [sys.executable, '-B', str(root / 'tools/romacs-lint'), '--base', base, *(['--binary', binary] if binary else []), *files]
+
+
+def lint(root, names, trunk, binary):
+    """(STATUS, SUMMARY, FINDINGS) of the lint on the Lisp among the changed paths NAMES:
+    what the branch adds since its merge-base with TRUNK, the base the paths were taken from."""
+    files = lisp_files(names, root)
+    if not files:
+        return 'ok', 'no file of lisp/romacs changed', []
+    base = git(root, 'merge-base', 'HEAD', trunk).stdout.strip()
+    done = subprocess.run(lint_command(root, files, base, binary), cwd=root, capture_output=True, text=True,
+                          errors='replace', stdin=subprocess.DEVNULL)
+    return lint_stage(done.returncode, done.stdout, done.stderr)
+
+
 # The structural rules.
 
 def plan(gate, names, root):
@@ -186,10 +223,9 @@ def log_path(root):
     return cache / (re.sub(r'[^A-Za-z0-9_.-]', '-', str(root).strip('/')) + '-structural.log')
 
 
-def structural(root, trunk, threads):
-    """(STATUS, SUMMARY, FINDINGS) of the structural rules on ROOT's tree."""
-    gate = load_gate(root)
-    runs = plan(gate, gate.changed_names(root, trunk), root)
+def structural(root, gate, names, threads):
+    """(STATUS, SUMMARY, FINDINGS) of GATE's structural rules on ROOT's tree, for a change to the paths NAMES."""
+    runs = plan(gate, names, root)
     if not runs:
         return 'ok', 'no Rust changed: the rules read Rust', []
     if not shutil.which('cargo'):
@@ -233,11 +269,14 @@ def main():
     parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
     parser.add_argument('--no-structural', action='store_true', help='leave the structural rules out: they build test targets')
     parser.add_argument('--threads', type=int, default=8, help='test workers of the structural run')
+    parser.add_argument('--binary', help='the Romacs the lint runs; default as tools/romacs-lint: $ROMACS_TEST_BINARY, else the gate build')
     args = parser.parse_args()
-    trunk = load_gate().trunk(ROOT, args.trunk)
-    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT))]
+    gate = load_gate()
+    trunk = gate.trunk(ROOT, args.trunk)
+    names = gate.changed_names(ROOT, trunk)
+    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('lint', *lint(ROOT, names, trunk, args.binary))]
     if not args.no_structural:
-        stages.append(('structural', *structural(ROOT, trunk, args.threads)))
+        stages.append(('structural', *structural(ROOT, gate, names, args.threads)))
     lines, status = report(stages)
     print('\n'.join(lines))
     return status

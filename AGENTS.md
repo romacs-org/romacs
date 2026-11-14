@@ -38,6 +38,10 @@ possible; say so where you do.
   a primitive's Rust file. What a caller should know of a function is put on the
   function, beside the better path's definition, and the lint tells each caller:
   `(put 'FUNCTION 'romacs-lint-hint "...")`.
+- Ask the machine what it offers before writing Lisp for it: `(romacs-dev-guide
+  "QUERY")`, or the MCP tool `romacs_dev_guide`, describes a function (a
+  primitive's effect class and Rust file, what callers are told of it) or
+  finds the functions whose name or docstring has the query's words.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
@@ -288,7 +292,8 @@ standalone Cargo execution without it.
   `beta` in as it moves.
 - Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
   in a Romacs session): the merge forecast with `beta`, tracked generated files,
-  and the structural rules, each finding with its fix.
+  the lint of the Lisp the branch touches, and the structural rules, each finding
+  with its fix.
 - A branch lands through the merge queue: signed commits, the full check, then
   a submitted request. The queue merges requests onto `beta` in order and
   reruns what each merge changes.
