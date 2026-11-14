@@ -175,14 +175,14 @@ impl RenderApp {
     /// (a settling `View`, then `Readiness{current: nil}`) goes out on the
     /// ordered input channel now, ahead of any later key.
     pub(super) fn note_models_renderer_lost(&mut self) {
-        self.comms.model_renderer.store(false, std::sync::atomic::Ordering::Release);
+        self.comms.tell(crate::thread_comm::Fact::ModelRenderer { live: false });
         self.models.renderer_lost();
         self.flush_model_events();
     }
 
     /// A renderer is live: publish it and upload what it lacks.
     pub(super) fn note_models_renderer_ready(&mut self) {
-        self.comms.model_renderer.store(true, std::sync::atomic::Ordering::Release);
+        self.comms.tell(crate::thread_comm::Fact::ModelRenderer { live: true });
         self.service_models(romacs_display_protocol::frame_time::observe_platform_now());
     }
 

@@ -1496,6 +1496,17 @@ impl Vm {
         // Forward each physical native slot once, even when several live
         // cursors retain the same subtree (possibly detached from its table).
         native_nodes.clear();
+        // Keyed by object index, as `cell_pairs' by cell: what died leaves
+        // it, the rest follow their objects.
+        if let Some(referrers) = &mut self.referrers {
+            let objects = &self.objects;
+            referrers.forward(|i| {
+                if !objects.marked(i) { return None; }
+                let mut object = Value::reference(i + 1, 0);
+                rewrite(&mut object);
+                object.index_if(0)?.checked_sub(1)
+            });
+        }
         let whole = properties::Reading { since: self.allocation.since, whole: true };
         self.objects.collector_compact(|object| {
                 match object {
@@ -1531,7 +1542,6 @@ impl Vm {
                     | data::Object::SyntaxTable(_) => {}
                 }
         });
-        self.referrers = None;
         self.local_owners = None;
         for f in self.functions.collector_iter_mut() {
             // Function Arcs are private to this VM; no executable shares IR.
@@ -1656,6 +1666,7 @@ impl Vm {
     fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker, dead: &[u32]) {
         let cells = &self.cells;
         self.cell_pairs.retain(|&i, _| cells.marked(i));
+        if let Some(referrers) = &mut self.referrers { referrers.forget(dead, &self.objects); }
         for &i in dead {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
@@ -1668,7 +1679,6 @@ impl Vm {
         marking.finish(own);
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
-        self.referrers = None;
         self.local_owners = None;
     }
     /// A minor collection: what was made since the last collection and is
