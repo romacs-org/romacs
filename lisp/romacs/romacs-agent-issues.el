@@ -121,8 +121,13 @@ text is kept: only its size."
        ((eq type 'unstarted)
         (when (eq (romacs-agent-get (romacs-agent-id session)) session)
           (romacs-agent-issues-record 'resume-failed session :text (plist-get event :text))))
-       ((not (romacs-agent--live-p session)))
+       ;; What a turn answers is state, replayed too (its answer may be
+       ;; live); only logging waits for live events.
        ((eq type 'input) (when delegated (puthash session t romacs-agent-issues--asked)))
+       ((not (romacs-agent--live-p session))
+        (when (memq type '(done exit))
+          (remhash session romacs-agent-issues--asked)
+          (remhash session romacs-agent-issues--told)))
        ((eq type 'done)
         (if delegated (romacs-agent-issues--end session event)
           (when (plist-get event :limit)

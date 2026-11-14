@@ -89,6 +89,18 @@ delegated review task of a registered parent."
     (romacs-agent-issues-tests--turn task 7 "VERDICT: CHANGES\nS1.")
     (should-not (romacs-agent-issues-read))))
 
+(ert-deftest romacs-agent-issues-a-replayed-question-judges-its-live-answer ()
+  ;; Restored mid-turn: the question is replayed, its answer comes live.
+  (romacs-agent-issues-tests--with
+    (setf (romacs-agent-caught-up task) nil)
+    (romacs-agent-issues-tests--event task :type 'input :text "review it" :seq 2)
+    ;; An earlier turn replayed whole logs nothing, and ends its question.
+    (romacs-agent-issues-tests--event task :type 'done :seq 1 :text "")
+    (romacs-agent-issues-tests--event task :type 'input :text "review it again" :seq 4)
+    (setf (romacs-agent-caught-up task) t)
+    (romacs-agent-issues-tests--event task :type 'done :seq 5 :text "Looks fine.")
+    (should (equal (romacs-agent-issues-tests--kinds) '("result-shape")))))
+
 (ert-deftest romacs-agent-issues-a-harness-exit-mid-turn ()
   (romacs-agent-issues-tests--with
     ;; Idle when it exits: no turn was cut.
