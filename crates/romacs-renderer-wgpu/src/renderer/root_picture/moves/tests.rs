@@ -3,7 +3,7 @@ use romacs_display_protocol::types::{Color, DisplayWindowId, Rect};
 
 use super::super::damage::{self, Indexed, Plan};
 use super::super::reach::Reach;
-use super::{Move, moved_glyph, snaps, snapped, whole};
+use super::{Move, moved_glyph, on_pixels, outward};
 
 const ROW: f32 = 10.0;
 
@@ -79,13 +79,14 @@ fn a_row_moved_across_its_clip_is_repainted() {
 }
 
 #[test]
-fn a_distance_is_whole_device_pixels_and_a_band_snaps_out_at_its_sides_and_in_at_its_ends() {
-    assert!(whole(-10.0, 1.5) && !whole(-11.0, 1.5) && whole(-11.0, 1.0));
-    // At 1.5, 0.75..15.75 and 1.5..31.5 device pixels: 0..16 and 2..31.
-    let band = snapped(Rect::new(0.5, 1.0, 10.0, 20.0), 1.5).unwrap();
+fn a_distance_is_whole_device_pixels_exactly_and_a_band_grows_out_to_them() {
+    assert!(on_pixels(-10.0, 1.5) && !on_pixels(-11.0, 1.5) && on_pixels(-11.0, 1.0));
+    // A hair from twelve device pixels at 1.25 is not twelve.
+    assert!(!on_pixels(-9.6001, 1.25));
+    // At 1.5, 0.75..15.75 and 1.5..31.5 device pixels: 0..16 and 1..32.
+    let band = outward(Rect::new(0.5, 1.0, 10.0, 20.0), 1.5);
     let device = [band.x, band.y, band.x + band.width, band.y + band.height].map(|v| (v * 1.5).round());
-    assert_eq!(device, [0.0, 2.0, 16.0, 31.0]);
-    assert_eq!(snapped(Rect::new(0.0, 0.0, 10.0, 0.5), 1.0), None);
+    assert_eq!(device, [0.0, 1.0, 16.0, 32.0]);
 }
 
 #[test]
@@ -149,15 +150,17 @@ fn a_row_moves_whole_or_not_at_all() {
     shape(&mut old, 2.0, None);
     let mut new = window(&LINES, 1, 5);
     shape(&mut new, 1.0, Some(FaceId::new(7)));
-    let Plan::Regions { moves, regions, .. } = plan(&old, &new, 1.0) else {
-        panic!("a scroll is a move and regions");
-    };
-    assert_eq!(moves.iter().map(|m| m.dy).collect::<Vec<_>>(), [-ROW]);
+    // The row lies among the rows that moved: no band moves round it, and
+    // its tail is repainted with its head.
     let tail = Rect::new(13.0, ROW, 18.0, ROW - 1.0);
-    assert!(
-        regions.iter().any(|r| r.x <= tail.x && r.y <= tail.y && r.x + r.width >= tail.x + tail.width && r.y + r.height >= tail.y + tail.height),
-        "the tail is repainted with its head: {regions:?}"
-    );
+    match plan(&old, &new, 1.0) {
+        Plan::Whole => {}
+        Plan::Regions { regions, .. } => assert!(
+            regions.iter().any(|r| r.x <= tail.x && r.y <= tail.y && r.x + r.width >= tail.x + tail.width && r.y + r.height >= tail.y + tail.height),
+            "the tail is repainted with its head: {regions:?}"
+        ),
+        Plan::Clean { .. } => panic!("the frame changed"),
+    }
 }
 
 #[test]
@@ -177,48 +180,50 @@ fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
 }
 
 #[test]
-fn a_pane_s_corners_and_edges_are_repainted_where_rows_move_under_them() {
-    // The window's pane: rounded corners and an edge, drawn over the rows
-    // and fixed where they move.
-    let mut old = window(&LINES, 0, 5);
-    let mut new = window(&LINES, 1, 5);
-    for frame in [&mut old, &mut new] {
-        frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
-            bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
-            radius: 6.0,
-            edge: Some(Color::WHITE),
-            dim: 0.0,
-        });
-    }
-    let Plan::Regions { moves, regions, .. } = plan(&old, &new, 1.0) else {
-        panic!("a scroll is a move and regions");
+fn a_band_moves_under_a_pane_only_clear_of_its_edges_and_corners() {
+    // The pane's chrome is drawn over the rows and stays where they move:
+    // with its top edge and corners on the rows, nothing moves; with the
+    // pane round the rows, clear of them, the rows move.
+    let moves = |pane: Rect| {
+        let mut old = window(&LINES, 0, 5);
+        let mut new = window(&LINES, 1, 5);
+        for frame in [&mut old, &mut new] {
+            frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
+                bounds: pane,
+                radius: 6.0,
+                edge: Some(Color::WHITE),
+                dim: 0.0,
+            });
+        }
+        match plan(&old, &new, 1.0) {
+            Plan::Regions { moves, .. } => moves.len(),
+            _ => 0,
+        }
     };
-    assert_eq!(moves.len(), 1);
-    let covered = |x: f32, y: f32| regions.iter().any(|r| r.x <= x && x < r.x + r.width && r.y <= y && y < r.y + r.height);
-    assert!(covered(1.0, 1.0) && covered(1.0, 45.0), "the top and bottom left corners: {regions:?}");
-    assert!(covered(50.0, 0.5), "the top edge: {regions:?}");
+    assert_eq!(moves(Rect::new(0.0, 0.0, 100.0, 50.0)), 0);
+    assert_eq!(moves(Rect::new(-20.0, -20.0, 140.0, 100.0)), 1);
 }
 
 #[test]
-fn a_distance_moves_only_where_it_is_exact_on_the_device() {
+fn a_band_moves_only_on_whole_device_pixels_at_a_whole_scale() {
     use romacs_display_protocol::frame_glyphs::FrameGlyph;
-    // Rows 9.6001 tall at 1.25: a hair from twelve device pixels is not
-    // twelve, and a baseline at device 58.5001 snaps to 59 while the same
-    // baseline a row up, at 46.49997, snaps to 46: thirteen apart.
-    let dy = -9.6001;
-    assert!(!whole(dy, 1.25) && whole(-8.0, 1.5));
-    let frame = window(&LINES, 0, 1);
-    let old = frame.glyphs.iter().find(|g| matches!(g, FrameGlyph::Char { .. })).unwrap().clone();
-    let at = |baseline: f32| {
-        let mut glyph = old.clone();
-        if let FrameGlyph::Char { baseline: b, .. } = &mut glyph {
-            *b = baseline;
-        }
-        glyph
+    let moves = |old: &FrameGlyphBuffer, new: &FrameGlyphBuffer, scale| match plan(old, new, scale) {
+        Plan::Regions { moves, .. } => moves.len(),
+        _ => 0,
     };
-    let was = 58.5001 / 1.25;
-    assert!(!snaps(&at(was), &at(was + dy), dy, 1.25));
-    assert!(snaps(&at(10.0), &at(2.0), -8.0, 1.5));
+    let (old, new) = (window(&LINES, 0, 5), window(&LINES, 1, 5));
+    assert_eq!((moves(&old, &new, 1.0), moves(&old, &new, 2.0)), (1, 1));
+    assert_eq!(moves(&old, &new, 1.5), 0, "a scale that is no whole number");
+    // A baseline half a pixel off the device grid: its row is drawn anew.
+    let (mut old, mut new) = (old, new);
+    for frame in [&mut old, &mut new] {
+        for glyph in &mut frame.glyphs {
+            if let FrameGlyph::Char { baseline, .. } = glyph {
+                *baseline += 0.5;
+            }
+        }
+    }
+    assert_eq!(moves(&old, &new, 1.0), 0);
 }
 
 #[test]

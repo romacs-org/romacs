@@ -2,8 +2,8 @@
 //! byte for byte: scrolls up and down by a line, by several and by more
 //! than a window, over rows of mixed heights, past an image whose box is
 //! larger than it and a fringe bitmap wider than its column, with the
-//! cursor moving as it scrolls; at a whole and at a fractional device
-//! scale, with ink that leaves its rows, with a fringe bitmap that tiles in
+//! cursor moving as it scrolls; at device scales one, two and one and a
+//! half (where nothing moves), with ink that leaves its rows, with a fringe bitmap that tiles in
 //! a period the rows' heights are no multiple of, with a border its clip
 //! cuts, and with an underline whose first glyphs change face as its row
 //! moves. A scroll by a line repaints the row that entered and no other.
@@ -303,7 +303,14 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole() {
 }
 
 #[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_at_a_scale_of_two() {
+    scrolled_through_picture_equals_whole(2.0, Extras::default());
+}
+
+#[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_at_a_fractional_scale() {
+    // No band moves at a scale that is no whole number: every frame is
+    // repainted, and still equals the frame drawn whole.
     scrolled_through_picture_equals_whole(1.5, Extras::default());
 }
 

@@ -9,6 +9,8 @@ use romacs_display_protocol::call_count;
 pub const ROWS_TESSELLATED: &str = "render.rows-tessellated";
 /// Text rows the root picture kept from an earlier frame instead.
 pub const ROWS_REUSED: &str = "render.rows-reused";
+/// Bands of rows the root picture moved, copied a distance away.
+pub const BANDS_MOVED: &str = "render.bands-moved";
 /// Rows tessellated to draw a cursor over the root picture: the glyphs
 /// under it, which it paints in its own colours. Counted apart from the
 /// rows above, which are the frame's.
@@ -24,9 +26,10 @@ pub const BYTES_UPLOADED: &str = "render.bytes-uploaded";
 pub const SUBMIT_INSTRUCTIONS: &str = "render.submit-instructions";
 
 /// Every count above.
-pub const COUNTS: [&str; 7] = [
+pub const COUNTS: [&str; 8] = [
     ROWS_TESSELLATED,
     ROWS_REUSED,
+    BANDS_MOVED,
     CURSOR_ROWS,
     GLYPHS_WALKED,
     FONT_IDENTITIES,

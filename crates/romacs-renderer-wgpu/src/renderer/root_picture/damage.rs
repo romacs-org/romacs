@@ -171,7 +171,6 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reac
             );
         }
     }
-    damaged.extend(moved.damage);
     // Past this many changed runs the frame changed nearly everywhere, and
     // joining them pairwise would cost more than the whole repaint saves.
     if damaged.len() > MAX_DAMAGED_RUNS {

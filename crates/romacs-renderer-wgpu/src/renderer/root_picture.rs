@@ -286,6 +286,7 @@ impl RootPicture {
             encoder.copy_texture_to_texture(at(scratch, origin), at(picture, wgpu::Origin3d { y: to, ..origin }), extent);
         }
         renderer.submit_commands([encoder.finish()]);
+        crate::cost::add(crate::cost::BANDS_MOVED, moves.len());
         true
     }
 
