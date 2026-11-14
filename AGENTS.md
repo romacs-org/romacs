@@ -217,11 +217,13 @@ The gates, small and whole for each side:
 The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
-- romacs-vm's whole suite: each `tests/FILE.rs` is also the module `FILE` of one test target, `all`
-  (`crates/romacs-vm/tests/all/`), so a check builds one executable, not one a file. The gates build and
-  run what `python3 tools/lib/test_modules.py targets romacs-vm` prints, and a test is `FILE::TEST_NAME`
-  there. `all` lists the directory's files when it builds; a file that cannot be a module is named,
-  with its reason, in `crates/romacs-vm/tests/all/standalone.txt`.
+- romacs-vm's and romacs-vm-gui's whole suites: each `tests/FILE.rs` is also the module `FILE` of one
+  test target, `all` (`crates/PACKAGE/tests/all/`; romacs-vm's files that boot GNU's Lisp are in `gnu`), so a
+  check builds one executable, not one a file. The gates build and run what
+  `python3 tools/lib/test_modules.py targets PACKAGE` prints, and a test is `FILE::TEST_NAME` there. `all`
+  lists the directory's files when it builds; a file that cannot be a module is named, with its reason, in
+  `crates/PACKAGE/tests/all/standalone.txt`. A test that runs itself again in a child names itself with
+  `crates/romacs-vm/tests/support/own_test.rs`.
 - Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.

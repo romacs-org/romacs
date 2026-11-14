@@ -1,0 +1,3 @@
+# Test files that cannot be a module of `all`, one `FILE: reason` a line.
+# Each stays a test target of its own, which a check runs beside `all`
+# (tools/lib/test_modules.py targets romacs-vm-gui).
