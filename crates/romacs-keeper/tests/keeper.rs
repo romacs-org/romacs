@@ -30,11 +30,14 @@ struct Fixture { socket: PathBuf, dir: PathBuf }
 static FIXTURES: AtomicU32 = AtomicU32::new(0);
 
 impl Fixture {
-    fn start(idle_ms: u64) -> Self {
+    fn start(idle_ms: u64) -> Self { Self::under(Path::new(""), idle_ms) }
+
+    /// A keeper whose socket is DEPTH below the fixture's own directory.
+    fn under(depth: &Path, idle_ms: u64) -> Self {
         let runtime = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
         let dir = runtime.join(format!("rk{}-{}", std::process::id(), FIXTURES.fetch_add(1, Ordering::SeqCst)));
-        std::fs::create_dir_all(&dir).unwrap();
-        let socket = dir.join("keeper.sock");
+        std::fs::create_dir_all(dir.join(depth)).unwrap();
+        let socket = dir.join(depth).join("keeper.sock");
         let idle = idle_ms.to_string();
         let status = if std::env::var_os("ROMACS_KEEPER_TEST_UNIT").is_some() {
             Command::new("systemd-run").args(["--user", "--quiet", "--collect", "--"]).arg(KEEPER)
@@ -385,6 +388,27 @@ fn a_second_keeper_for_a_socket_leaves_the_first_in_place() {
     assert_eq!(keeper.client().info().unwrap().pid, pid);
 }
 
+/// A runtime directory deeper than a socket address holds: the keeper
+/// starts, sessions attach and are told apart by pidfd, a second keeper
+/// for the socket stays out, and an exec in place keeps the listener.
+#[test]
+fn a_socket_deeper_than_an_address_serves_like_any_other() {
+    let keeper = Fixture::under(&Path::new(&"d".repeat(60)).join("e".repeat(60)), 60_000);
+    assert!(keeper.socket.as_os_str().len() > 107, "{}", keeper.socket.display());
+    let mut client = keeper.client();
+    let pid = client.info().unwrap().pid;
+    let (row, _fds) = client.spawn("test", 1, b"", false, &shell("sleep 600")).unwrap();
+    let mut other = keeper.session();
+    assert_eq!(other.ask(&format!("claim {}", row.handle)),
+               format!("error handle {} is owned by session {}, which is alive", row.handle, std::process::id()));
+    assert!(Command::new(KEEPER).args(["--socket", keeper.socket.to_str().unwrap()]).status().unwrap().success());
+    let (spawned, _) = keeper.session().spawn("sleep 600");
+    assert!(self::row(&mut client, spawned).is_some(), "a session that came later reaches the same keeper");
+    client.exec(Path::new(NEXT)).unwrap();
+    assert_eq!(client.info().unwrap().pid, pid, "reconnected to the same keeper");
+    assert_eq!(self::row(&mut client, row.handle).unwrap().status, Status::Running);
+}
+
 /// A session built with one more version of the keeper class and one more
 /// class attaches and uses what both know; a class with no version in
 /// common is refused by name.
@@ -406,7 +430,7 @@ fn a_newer_session_uses_the_classes_both_know() {
 #[test]
 fn another_framing_is_refused_with_both_hashes() {
     let keeper = Fixture::start(60_000);
-    let mut socket = std::os::unix::net::UnixStream::connect(&keeper.socket).unwrap();
+    let mut socket = romacs_keeper::address::connect(&keeper.socket).unwrap();
     let mut hello = romacs_record::Hello { epoch: 0, pid: 1, classes: vec![proto::class()] }.record();
     hello.payload[8] ^= 1;
     let mut wire = Vec::new();

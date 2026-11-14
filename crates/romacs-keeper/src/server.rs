@@ -572,7 +572,7 @@ impl Keeper {
 /// The system's refusal to bind or listen.
 pub fn fresh(path: &std::path::Path) -> io::Result<Table> {
     let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)?;
+    let listener = crate::address::bind(path)?;
     let mut entropy = [0u8; 8];
     let _ = rustix::rand::getrandom(&mut entropy, rustix::rand::GetRandomFlags::empty());
     Ok(Table { epoch: u64::from_ne_bytes(entropy) | 1, listener: Some(listener.into()), socket_path: path.as_os_str().as_encoded_bytes().to_vec(),

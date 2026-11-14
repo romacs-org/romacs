@@ -688,8 +688,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
-    for refused in fonts::register_bundled_fonts() {
-        eprintln!("romacs: Fontconfig refused the bundled font {}", refused.display());
+    for problem in fonts::register_bundled_fonts() {
+        eprintln!("romacs: {problem}");
     }
     let mut args = argv.into_iter();
     let mut serve = None;
@@ -1722,6 +1722,7 @@ fn evaluate(
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
+                vm.redisplay_begin();
                 vm.defer_parse()?;
                 let next = frame(&mut vm, g1, width, height)?;
                 title::consider(&mut vm, sender, &host);

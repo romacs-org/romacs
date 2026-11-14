@@ -433,7 +433,8 @@ an imported session's own turns know better."
         (:model (setf (romacs-agent-model session) (plist-get facts key)))
         (:permission-mode (setf (romacs-agent-permission-mode session) (plist-get facts key)))
         (:context-used (setf (romacs-agent-context-used session) (plist-get facts key)))
-        (:context-window (setf (romacs-agent-context-window session) (plist-get facts key)))))))
+        (:context-window (setf (romacs-agent-context-window session) (plist-get facts key))))))
+  (romacs-agent--changed session))
 
 (defun romacs-agent-history-first-request (harness imported)
   "The first request of the transcript IMPORTED names, read from its head
@@ -528,7 +529,8 @@ buffer, for SESSION: its end, from a prompt on."
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer)
       (with-current-buffer buffer
-        (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))))
+        (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))
+        (romacs-agent-ui--header-show)))
     (pop-to-buffer buffer)
     (goto-char (point-max))
     (recenter -1)

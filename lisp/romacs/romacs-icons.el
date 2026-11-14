@@ -3,8 +3,8 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; An icon is a character of Romacs Icons (assets/fonts/RomacsIcons.ttf,
-;; built from assets/icons by tools/build-icon-font), in the
+;; An icon is a character of Romacs Icons (RomacsIcons.ttf, built from
+;; assets/icons by crates/romacs-icon-font), in the
 ;; Supplementary Private Use Area-A, U+FE000-U+FE0FF.  The GUI host
 ;; makes the font a Fontconfig application font at startup, so the
 ;; character resolves to it in any face, as any character a face's own

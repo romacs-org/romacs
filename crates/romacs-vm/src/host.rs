@@ -1825,10 +1825,18 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    crate::flight::value("instructions", || INSTRUCTION_COUNTER.with(|counter| {
+    crate::flight::value("instructions", instruction_count)
+}
+
+/// `thread_instructions` as a meter reads it (redisplay's bracket, twice
+/// a cycle): neither logged for a replay nor counted among the host
+/// calls. What a meter hands on to Lisp is a host result, and logged
+/// there.
+pub(crate) fn instruction_count() -> Option<u64> {
+    INSTRUCTION_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();
         counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
-    }))
+    })
 }
 
 thread_local! {
@@ -3560,4 +3568,15 @@ pub fn keeper_attach(path: &Path) -> Result<romacs_keeper::Client, String> {
 pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String> {
     effect(|| format!("keeper {}", bytes(client.path()))).map_err(|e| e.to_string())?;
     client.reconnect()
+}
+
+/// Have CLIENT's keeper exec the binary at PROGRAM in place, and find it
+/// again where it listens.
+///
+/// # Errors
+/// A refused effect, the keeper's refusal of PROGRAM, or no keeper of the
+/// same epoch after it, in words.
+pub fn keeper_exec(client: &mut romacs_keeper::Client, program: &Path) -> Result<(), String> {
+    effect(|| format!("keeper {} exec {}", bytes(client.path()), bytes(program))).map_err(|e| e.to_string())?;
+    client.exec(program)
 }

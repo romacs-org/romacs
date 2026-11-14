@@ -12,7 +12,10 @@ synthetic store (notmuch_fixture.py) and a vc log.  In each it types
 C-n, C-p, M->, M-<, an isearch (C-s, a word, C-s, C-g) and C-SPC C-n
 M-w.  The session's usage log (ROMACS_USAGE_LOG) must hold no error;
 the layout questions answered by approximation, its `refusal' records,
-are reported by class and major mode.
+are reported by class and major mode.  `romacs-display-check' is on: every
+window redisplay reused must show what a full build of its text would
+(`stale' counts those that did not; their `display-check:' lines are in
+engine.log).
 
 usage: layout_journey_live.py --binary PATH --output DIR [--tools DIR] [--timeout S]
        (--romacs is an alias of --binary)
@@ -150,7 +153,7 @@ def main():
     usage = root / 'usage.jsonl'
     env.update(ROMACS_USAGE_LOG=str(usage), JOURNEY_PROSE=PROSE, JOURNEY_TREE=str(tree), JOURNEY_REPO=str(repo))
     report = {'romacs': str(args.romacs), 'scenes': [], 'errors': [], 'refusals': []}
-    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools)
+    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools, check=True)
     try:
         for scene in SCENE_NAMES:
             mode = engine.ask(f'(progn (journey-{scene}) (redisplay) (symbol-name major-mode))', timeout=120)
@@ -160,6 +163,10 @@ def main():
             report['scenes'].append({'scene': scene, 'mode': mode, 'after-C-n': moved,
                                      'end': engine.ask('(list (window-point) (window-start) (buffer-size))')})
         engine.ask('(progn (romacs-usage-log-flush) t)')
+        # `romacs-display-check' is on: the windows redisplay answered from
+        # their last snapshot, and those a full build contradicted.
+        report['reused'], report['stale'] = engine.ask(
+            "(let ((stats (romacs--display-stats))) (list (cdr (assq 'windows-reused stats)) (cdr (assq 'check-mismatches stats))))")
     finally:
         engine.stop()
         # What a run leaves is its evidence in OUTPUT, and no home in TMPDIR.
@@ -182,9 +189,11 @@ def main():
     # (`press' already waits for every key, so the threshold only guards
     # against an empty log.)
     moved = all(s['after-C-n'] > 1 for s in report['scenes'])
-    report['status'] = 'PASS' if not report['errors'] and len(report['scenes']) == len(SCENE_NAMES) and moved and commands > 100 else 'FAIL'
+    checked = report.get('reused', 0) > 0 and report.get('stale') == 0
+    report['status'] = 'PASS' if not report['errors'] and len(report['scenes']) == len(SCENE_NAMES) and moved and commands > 100 and checked else 'FAIL'
     (args.output / 'report.json').write_text(json.dumps(report, indent=1))
     print(report['status'], json.dumps({'commands': commands, 'errors': report['errors'], 'refusals': report['refusals'],
+                                        'reused': report.get('reused'), 'stale': report.get('stale'),
                                         'moved': [(s['scene'], s['mode'], s['after-C-n']) for s in report['scenes']]}))
     return 0 if report['status'] == 'PASS' else 1
 

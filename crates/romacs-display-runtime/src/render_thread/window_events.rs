@@ -302,7 +302,9 @@ impl RenderApp {
         // release/focus loss cannot leave repeat authority behind there.
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
-                self.key_repeats.release(window_id, event.physical_key);
+                if let Some(held) = self.key_repeats.release(window_id, event.physical_key, romacs_display_protocol::frame_time::observe_platform_now()) {
+                    self.comms.key_repeats.released(held);
+                }
             }
             WindowEvent::Focused(false) | WindowEvent::Destroyed => {
                 self.key_repeats.retire_window(window_id);
@@ -474,6 +476,11 @@ impl RenderApp {
                     && !self.key_repeats.admit(window_id, physical_key, repeat)
                 {
                     return;
+                }
+                if state == ElementState::Pressed
+                    && let Some(after) = self.key_repeats.pressed(window_id, physical_key, repeat, romacs_display_protocol::frame_time::observe_platform_now())
+                {
+                    self.comms.key_repeats.repeat(after);
                 }
                 if state == ElementState::Pressed {
                     tracing::debug!(

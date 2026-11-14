@@ -109,9 +109,7 @@ fn user_font_configuration(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> 
 /// base directory default), from GET. None without an absolute directory
 /// to put it in.
 pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let cache = get("XDG_CACHE_HOME").map(PathBuf::from).filter(|p| p.is_absolute())
-        .or_else(|| get("HOME").map(PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".cache")))?;
-    Some(cache.join("romacs/worlds"))
+    Some(startup::cache_dir(get)?.join("worlds"))
 }
 
 /// This launch with WORLD: the restored VM and its carry, or None to boot
@@ -427,6 +425,7 @@ pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     // The bundled layout, which the bundled autoloads' scan reads.
     roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
+    roots.extend(crate::fonts::icon_font_dirs());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
         roots.extend([home.join(".local/share/fonts"), home.join(".fonts"), home.join(".cache/fontconfig")]);

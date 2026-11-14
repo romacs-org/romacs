@@ -39,6 +39,31 @@
        (should (> (plist-get record :live_bytes_est) (plist-get record :live_objects)))
        (should-not (plist-get record :met))))))
 
+(ert-deftest romacs-usage-log-records-key-repeat ()
+  ;; The display's key repeat since the last write is one `repeat' line,
+  ;; its delays in the gap buckets; none without a display, or when it saw
+  ;; no key held or repeated.
+  (romacs-usage-log-test--isolated
+   (let ((file (expand-file-name "usage.jsonl" state))
+         (repeats (lambda (lines) (seq-filter (lambda (line) (equal (plist-get line :kind) "repeat")) lines))))
+     (should-not (romacs--take-key-repeats))
+     (romacs-usage-log--enable file)
+     (romacs-usage-log-flush)
+     (should-not (funcall repeats (romacs-usage-log-test--lines file)))
+     (let ((after (make-vector 17 0)))
+       (aset after 9 4)
+       (aset after 10 1)
+       (cl-letf (((symbol-function 'romacs--take-key-repeats) (lambda () (list 5 after 640))))
+         (romacs-usage-log-flush))
+       (cl-letf (((symbol-function 'romacs--take-key-repeats) (lambda () (list 0 (make-vector 17 0) 0))))
+         (romacs-usage-log-flush))
+       (let ((records (funcall repeats (romacs-usage-log-test--lines file))))
+         (should (= (length records) 1))
+         (should (= (plist-get (car records) :n) 5))
+         (should (equal (plist-get (car records) :after_press_ms) after))
+         (should (equal (plist-get (car records) :bounds_ms) romacs-usage-log--gap-bounds))
+         (should (= (plist-get (car records) :longest_hold_ms) 640)))))))
+
 (ert-deftest romacs-usage-log-server-keeps-its-own-session-record ()
   (romacs-usage-log-test--isolated
    (let* ((root (expand-file-name "romacs/sessions/" state)))
