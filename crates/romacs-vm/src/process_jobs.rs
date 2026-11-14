@@ -7,6 +7,10 @@ use std::time::Duration;
 const MAX_JOBS: usize = 16;
 const MAX_INPUT: usize = 1024 * 1024;
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+const MAX_TIMEOUT: Duration = Duration::from_mins(2);
+/// How often a job's worker looks at its cancellation and its child's exit
+/// when its pipes are quiet. Data or room on a pipe wakes it at once.
+const TICK: Duration = Duration::from_millis(5);
 
 pub struct Request {
     pub argv: Vec<String>,
@@ -69,7 +73,7 @@ impl Jobs {
         if request.input.len() > MAX_INPUT {
             return Err("CLI job input exceeds 1 MiB".into());
         }
-        if request.timeout.is_zero() || request.timeout > Duration::from_secs(120) {
+        if request.timeout.is_zero() || request.timeout > MAX_TIMEOUT {
             return Err("CLI job timeout must be nonzero and at most 120 seconds".into());
         }
         let id = self.next_id.checked_add(1).ok_or("CLI job IDs exhausted")?;
@@ -181,14 +185,15 @@ fn run(_: Request, _: std::process::Command, _: Arc<AtomicBool>) -> Output {
 #[cfg(target_os = "linux")]
 fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
-    use std::os::fd::AsFd;
+    use std::os::fd::{AsFd, AsRawFd};
     use std::os::unix::process::CommandExt;
 
-    fn drain(reader: &mut impl Read, bytes: &mut Vec<u8>) -> Result<(), String> {
+    /// Read what READER holds into BYTES: whether it is still open.
+    fn drain(reader: &mut impl Read, bytes: &mut Vec<u8>) -> Result<bool, String> {
         let mut buffer = [0; 8192];
         loop {
             match reader.read(&mut buffer) {
-                Ok(0) => return Ok(()),
+                Ok(0) => return Ok(false),
                 Ok(count) => {
                     let remaining = MAX_OUTPUT - bytes.len();
                     bytes.extend_from_slice(&buffer[..count.min(remaining)]);
@@ -196,7 +201,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
                         return Err("CLI job output exceeds 4 MiB per stream".into());
                     }
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(true),
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(error.to_string()),
             }
@@ -246,16 +251,20 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
             output.error = Some("CLI job cancelled".into());
             break;
         }
-        if crate::host::monotonic().saturating_duration_since(started) >= request.timeout {
+        let elapsed = crate::host::monotonic().saturating_duration_since(started);
+        if elapsed >= request.timeout {
             output.error = Some("CLI job timed out".into());
             break;
         }
-        if let Err(error) = drain(&mut stdout, &mut output.stdout)
-            .and_then(|()| drain(&mut stderr, &mut output.stderr))
+        let open = match drain(&mut stdout, &mut output.stdout)
+            .and_then(|out| Ok((out, drain(&mut stderr, &mut output.stderr)?)))
         {
-            output.error = Some(error);
-            break;
-        }
+            Ok(open) => open,
+            Err(error) => {
+                output.error = Some(error);
+                break;
+            }
+        };
         if written == request.input.len() {
             stdin.take();
         } else if let Some(pipe) = stdin.as_mut() {
@@ -280,7 +289,24 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
                 break;
             }
         }
-        std::thread::sleep(Duration::from_millis(5));
+        // Wait for a pipe to have data or room, at most a tick: a child's
+        // output is read as fast as it writes it, not a pipe's buffer a tick,
+        // which bounded a job to some 13 MiB/s and let a loaded host's late
+        // wakes run a fast producer out of its time. A closed pipe is not
+        // watched, as it would wake every call.
+        let pending = stdin.as_ref().filter(|_| written < request.input.len());
+        let watched: Vec<_> = [
+            open.0.then_some((stdout.as_raw_fd(), libc::POLLIN)),
+            open.1.then_some((stderr.as_raw_fd(), libc::POLLIN)),
+            pending.map(|pipe| (pipe.as_raw_fd(), libc::POLLOUT)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if let Err(error) = crate::subprocess::poll(&watched, Some(TICK.min(request.timeout.saturating_sub(elapsed)))) {
+            output.error = Some(error.to_string());
+            break;
+        }
     }
     // Keep the leader unreaped until its group is killed, pinning the numeric PID.
     let _ = crate::host::kill(-pid, libc::SIGKILL);
@@ -297,7 +323,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
     // Never await EOF: a descendant may have escaped the group with inherited pipes.
     if setup.is_ok()
         && let Err(error) = drain(&mut stdout, &mut output.stdout)
-            .and_then(|()| drain(&mut stderr, &mut output.stderr))
+            .and_then(|_| drain(&mut stderr, &mut output.stderr))
     {
         output.error.get_or_insert(error);
     }
@@ -309,17 +335,22 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    /// A job of SCRIPT with the longest timeout a job may have: a test of
+    /// what a job does must not race its clock on a loaded host (the output
+    /// caps once lost to a 2 s timeout). The timeout's own test sets a short one.
     fn request(script: &str) -> Request {
         Request {
             argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
             input: Vec::new(),
             directory: PathBuf::from("/"),
-            timeout: Duration::from_secs(2),
+            timeout: MAX_TIMEOUT,
         }
     }
 
+    /// The job's output once it ends. Its worker ends it by its timeout at
+    /// the latest, so the deadline only guards against a worker that hangs.
     fn wait(jobs: &mut Jobs, id: u64) -> Arc<Output> {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + MAX_TIMEOUT + Duration::from_secs(10);
         loop {
             if let Some(output) = jobs.result(id).unwrap() {
                 return output;
@@ -367,7 +398,7 @@ mod tests {
         for script in ["yes x", "yes x >&2"] {
             let id = jobs.start(request(script)).unwrap();
             let output = wait(&mut jobs, id);
-            assert!(output.error.as_ref().unwrap().contains("4 MiB"));
+            assert!(output.error.as_ref().unwrap().contains("4 MiB"), "{script}: {:?}", output.error);
             assert!(output.stdout.len() <= MAX_OUTPUT && output.stderr.len() <= MAX_OUTPUT);
         }
     }
@@ -401,6 +432,23 @@ mod tests {
         assert!(jobs.start(request("true")).is_err());
     }
 
+    /// The process group of a test's job, killed however the test ends, so a
+    /// failing one leaves no sleep behind (the job's leader is its group's
+    /// leader).
+    struct Group(i32);
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            let _ = crate::host::kill(-self.0, libc::SIGKILL);
+        }
+    }
+
+    /// Forgetting a job, or dropping its owner, kills its group and reaps
+    /// it, without waiting for its end. That is shown by state, not a clock:
+    /// the group's sleep, and the job's timeout, would end it only long after
+    /// the hang guard, so a reaped leader and a dead descendant within the
+    /// guard are the kill's work, and the calls cannot have waited for the
+    /// job. A drop returns only once the leader is reaped.
     #[test]
     fn forgotten_and_dropped_processes_are_reaped() {
         for drop_owner in [false, true] {
@@ -412,10 +460,10 @@ mod tests {
             let path = directory.join("pids");
             let _ = std::fs::remove_file(&path);
             let mut jobs = Jobs::default();
-            let mut req = request("echo $$ > pids; sleep 30 & echo $! >> pids; wait");
+            let mut req = request("echo $$ > pids; sleep 300 & echo $! >> pids; wait");
             req.directory = directory.clone();
             let id = jobs.start(req).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_mins(1);
             let pids = loop {
                 let pids: Vec<i32> = std::fs::read_to_string(&path)
                     .unwrap_or_default()
@@ -428,7 +476,7 @@ mod tests {
                 assert!(Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(5));
             };
-            let before = Instant::now();
+            let _group = Group(pids[0]);
             if drop_owner {
                 drop(jobs);
                 let reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
@@ -444,19 +492,17 @@ mod tests {
             } else {
                 jobs.forget(id).unwrap();
             }
-            assert!(before.elapsed() < Duration::from_millis(100));
+            assert!(Instant::now() < deadline, "forgetting or dropping the job waited for its end");
             loop {
+                let within = Instant::now() < deadline;
                 let leader_reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
                 let descendant_dead = std::fs::read_to_string(format!("/proc/{}/stat", pids[1]))
                     .map(|stat| stat.split_once(") ").unwrap().1.starts_with('Z'))
                     .unwrap_or(true);
+                assert!(within, "owned leader not reaped or group descendant alive");
                 if leader_reaped && descendant_dead {
                     break;
                 }
-                assert!(
-                    Instant::now() < deadline,
-                    "owned leader not reaped or group descendant alive"
-                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             std::fs::remove_dir_all(directory).unwrap();

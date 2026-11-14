@@ -15,3 +15,6 @@ pub mod terminal_helper;
 pub mod terminal_proto;
 pub mod terminal_service;
 pub mod terminal_wait;
+#[cfg(test)]
+#[path = "../tests/support/home.rs"]
+mod test_home;

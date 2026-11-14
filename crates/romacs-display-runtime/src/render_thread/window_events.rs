@@ -303,7 +303,7 @@ impl RenderApp {
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
                 if let Some(held) = self.key_repeats.release(window_id, event.physical_key, romacs_display_protocol::frame_time::observe_platform_now()) {
-                    self.comms.send_input(InputEvent::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Held(held)));
+                    self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Held(held)));
                 }
             }
             WindowEvent::Focused(false) | WindowEvent::Destroyed => {
@@ -431,11 +431,7 @@ impl RenderApp {
                 };
                 // GNU whole-frame active/inactive alpha follows native focus,
                 // including a loss with no evaluator content change.
-                self.comms
-                    .frame_opacity
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .focus(emacs_fid, focused);
+                self.frame_opacity.focus(emacs_fid, focused);
                 self.refresh_frame_opacity();
                 self.comms.send_input(InputEvent::WindowFocus {
                     focused,
@@ -480,7 +476,7 @@ impl RenderApp {
                 if state == ElementState::Pressed
                     && let Some(after) = self.key_repeats.pressed(window_id, physical_key, repeat, romacs_display_protocol::frame_time::observe_platform_now())
                 {
-                    self.comms.send_input(InputEvent::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Repeat(after)));
+                    self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Repeat(after)));
                 }
                 if state == ElementState::Pressed {
                     tracing::debug!(
