@@ -587,7 +587,7 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
         let base = self.ts_base(buffer);
-        if self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending()) {
+        if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
             return Ok(Value::TRUE);
         }
         Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))

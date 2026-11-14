@@ -33,8 +33,10 @@ pub(crate) struct Ahead {
     visible: (i64, i64),
     changes: Vec<Change>,
     result: mpsc::Receiver<Option<Landed>>,
-    /// What the thread sent, once `ready` saw it.
-    landed: Option<Option<Landed>>,
+    /// What the thread sent, once `ready` saw it: none for a failed parse.
+    landed: Option<Landed>,
+    /// Whether `ready` saw the thread's result.
+    done: bool,
     restarts: u8,
 }
 
@@ -42,6 +44,10 @@ pub(crate) struct Ahead {
 /// from the tree it started from (`Tree::changed_since`), which are the
 /// parser's changed ranges when the text has not changed since.
 type Landed = (native::Loose, Vec<(u32, u32)>);
+
+/// What `Ahead::finish` gives: the tree, the region the text's changes left
+/// it, whether there were any, and the changed ranges of a parser's next tree.
+type Finished = (native::Tree, (i64, i64), bool, Option<Vec<(u32, u32)>>);
 
 /// What a parser needs of the thread: its language, its included ranges
 /// and its tree, edited up to the text the thread reads.
@@ -64,7 +70,8 @@ impl Ahead {
             let old = job.old.tree();
             let mut parser = native::Parser::new();
             let tree = (parser.set_language(&job.language) && parser.set_included_ranges(&job.ranges)).then(|| {
-                let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+                let offset = |position: i64| usize::try_from(position - 1).unwrap_or(0);
+                let reader = Reader::new(Some(&text), (offset(visible.0), offset(visible.1)));
                 parser.parse(Some(&old), &reader).map(|new| {
                     let changed = new.changed_since(&old);
                     (new.loose(), changed)
@@ -76,14 +83,18 @@ impl Ahead {
             note_early_landed();
             wake();
         }).ok()?;
-        Some(Self { visible, changes: Vec::new(), result, landed: None, restarts })
+        Some(Self { visible, changes: Vec::new(), result, landed: None, done: false, restarts })
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
-        if self.landed.is_none() {
-            self.landed = self.result.try_recv().ok();
+        if !self.done {
+            match self.result.try_recv() {
+                Ok(landed) => (self.landed, self.done) = (landed, true),
+                Err(mpsc::TryRecvError::Disconnected) => self.done = true,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
         }
-        self.landed.is_some()
+        self.done
     }
     /// A change of the text since the parse started. False past the limit:
     /// the parse is of no more use.
@@ -95,8 +106,8 @@ impl Ahead {
     /// the parse started, with the region those left it, whether there were
     /// any (such a tree is an old one, nearer the text than the parser's
     /// own) and, when it is the parser's next tree, its changed ranges.
-    pub(crate) fn finish(mut self, text: &TextBody) -> Option<(native::Tree, (i64, i64), bool, Option<Vec<(u32, u32)>>)> {
-        let (tree, changed) = self.landed.take().or_else(|| self.result.recv().ok()).flatten()?;
+    pub(crate) fn finish(mut self, text: &TextBody) -> Option<Finished> {
+        let (tree, changed) = if self.done { self.landed.take() } else { self.result.recv().ok().flatten() }?;
         let tree = tree.tree();
         let mut core = Core::new(self.visible, None);
         core.tree = Some(Rc::new(tree));
@@ -140,7 +151,7 @@ impl Vm {
         let cores = self.treesit_cores(buffer)?;
         let mut state = State::None;
         for (parser, core) in cores {
-            let landed = core.borrow_mut().ahead.as_mut().map(|ahead| ahead.ready());
+            let landed = core.borrow_mut().ahead.as_mut().map(Ahead::ready);
             let restarts = match landed {
                 Some(false) => {
                     state = State::Running;
@@ -148,12 +159,11 @@ impl Vm {
                 }
                 Some(true) => {
                     let ahead = core.borrow().ahead.as_ref().map(|ahead| (ahead.changes.is_empty(), ahead.restarts));
-                    match ahead {
-                        Some((false, restarts)) => restarts.saturating_add(1),
-                        _ => {
-                            if state == State::None { state = State::Landed; }
-                            continue;
-                        }
+                    if let Some((false, restarts)) = ahead {
+                        restarts.saturating_add(1)
+                    } else {
+                        if state == State::None { state = State::Landed; }
+                        continue;
                     }
                 }
                 None if start => 0,

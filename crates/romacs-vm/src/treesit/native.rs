@@ -135,7 +135,7 @@ impl Tree {
     pub(crate) fn loose(self) -> Loose {
         Loose(self.0.into_inner())
     }
-    /// ts_tree_copy for another thread to parse from: a tree of its own,
+    /// `ts_tree_copy` for another thread to parse from: a tree of its own,
     /// sharing this one's subtrees. No node is made of it here.
     pub(crate) fn share(&self) -> Loose {
         Loose(self.0.borrow().clone())
@@ -202,9 +202,10 @@ impl Parser {
         }).collect();
         self.0.set_included_ranges(&ranges).is_ok()
     }
-    /// ts_parser_included_ranges, as `set_included_ranges` takes them.
+    /// `ts_parser_included_ranges`, as `set_included_ranges` takes them.
     pub(crate) fn included_ranges(&self) -> Vec<(u32, u32)> {
-        self.0.included_ranges().iter().map(|range| (range.start_byte as u32, range.end_byte as u32)).collect()
+        let byte = |offset: usize| u32::try_from(offset).unwrap_or(u32::MAX);
+        self.0.included_ranges().iter().map(|range| (byte(range.start_byte), byte(range.end_byte))).collect()
     }
     /// Whether its included ranges show all of a text of LENGTH bytes: the
     /// runtime's default, or one range that covers it.

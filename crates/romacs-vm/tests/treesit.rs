@@ -150,7 +150,7 @@ fn a_small_edit_is_parsed_off_the_evaluator() {
     vm.eval_source(&setup).unwrap();
     vm.set_background_wake(std::sync::Arc::new(|| {}));
     vm.frame_snapshot(800, 600).unwrap();
-    let counts = |vm: &mut Vm| vm.eval_source("(list parsed pre (> fontified 0))").and_then(|v| v.display()).unwrap();
+    let counts = |vm: &mut Vm| vm.eval_source("(list parsed pre (> fontified 0))").and_then(romacs_vm::Local::display).unwrap();
     assert_eq!(counts(&mut vm), "(1 1 t)");
     let landed = |vm: &mut Vm| {
         for _ in 0..20_000 {
@@ -187,21 +187,21 @@ fn a_small_edit_is_parsed_off_the_evaluator() {
         landed(&mut vm);
         frame(&mut vm);
     }
-    assert_eq!(vm.eval_source("(list parsed (> fontified 0))").and_then(|v| v.display()).unwrap(), "(3 t)",
+    assert_eq!(vm.eval_source("(list parsed (> fontified 0))").and_then(romacs_vm::Local::display).unwrap(), "(3 t)",
         "one reparse for Lisp, however many the thread ran");
     assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the evaluator parsed nothing");
     // The trees are the ones a parse of the text gives.
     let same = vm.eval_source("(let ((fresh (treesit-parser-create 'c nil t))) \
         (list (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) (treesit-node-string (treesit-parser-root-node fresh))) \
               (equal (treesit-node-string (treesit-parser-root-node treesit-test-twin)) (treesit-node-string (treesit-parser-root-node fresh))) \
-              (buffer-substring 1 20)))").and_then(|v| v.display()).unwrap();
+              (buffer-substring 1 20)))").and_then(romacs_vm::Local::display).unwrap();
     assert_eq!(same, "(t t \"int f0 (xyzint a) {\")");
     // What asks for the tree while its parse runs waits for it, and gets it.
     vm.eval_source("(insert \"w\")").unwrap();
     frame(&mut vm);
     let asked = vm.eval_source("(list (treesit-node-text (treesit-node-at 9 treesit-test-parser)) \
         (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) \
-               (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c nil t)))))").and_then(|v| v.display()).unwrap();
+               (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c nil t)))))").and_then(romacs_vm::Local::display).unwrap();
     assert_eq!(asked, "(\"xyzwint\" t)");
 }
 
