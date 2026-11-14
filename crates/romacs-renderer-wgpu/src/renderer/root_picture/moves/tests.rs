@@ -116,10 +116,46 @@ fn rows_alike_at_their_ends_still_move_the_way_they_went() {
     // Every row has three glyphs, an "a" first and a "z" last: their
     // signatures agree, and votes tie between the two directions.
     let lines = ["a0z", "a1z", "a2z", "a3z", "a4z", "a5z", "a6z"];
-    for (old, new, dy) in [(1, 0, ROW), (0, 1, -ROW)] {
+    for (old, new, dy) in [(1, 0, ROW), (0, 1, -ROW), (2, 0, 2.0 * ROW), (0, 2, -2.0 * ROW)] {
         let Plan::Regions { moves, .. } = plan(&window(&lines, old, 5), &window(&lines, new, 5), 1.0) else {
             panic!("a scroll is a move");
         };
         assert_eq!(moves.iter().map(|m| m.dy).collect::<Vec<_>>(), [dy], "from line {old} to {new}");
     }
+}
+
+#[test]
+fn a_row_moves_whole_or_not_at_all() {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    use romacs_display_protocol::types::FaceId;
+    // "three" set as two groups of one visual row: its tail a pixel
+    // shorter. As the window scrolls a line, its head changes face; its tail
+    // does not, but draws with its head (an underline takes its line from
+    // the run's first glyph), so it is repainted, not moved.
+    let shape = |frame: &mut FrameGlyphBuffer, row: f32, face: Option<FaceId>| {
+        for glyph in &mut frame.glyphs {
+            if let FrameGlyph::Char { x, y, height, face_id, .. } = glyph
+                && (*y - row * ROW).abs() < 0.5
+            {
+                if *x >= 13.0 {
+                    *height = ROW - 1.0;
+                } else if let Some(face) = face {
+                    *face_id = face;
+                }
+            }
+        }
+    };
+    let mut old = window(&LINES, 0, 5);
+    shape(&mut old, 2.0, None);
+    let mut new = window(&LINES, 1, 5);
+    shape(&mut new, 1.0, Some(FaceId::new(7)));
+    let Plan::Regions { moves, regions, .. } = plan(&old, &new, 1.0) else {
+        panic!("a scroll is a move and regions");
+    };
+    assert_eq!(moves.iter().map(|m| m.dy).collect::<Vec<_>>(), [-ROW]);
+    let tail = Rect::new(13.0, ROW, 18.0, ROW - 1.0);
+    assert!(
+        regions.iter().any(|r| r.x <= tail.x && r.y <= tail.y && r.x + r.width >= tail.x + tail.width && r.y + r.height >= tail.y + tail.height),
+        "the tail is repainted with its head: {regions:?}"
+    );
 }

@@ -54,8 +54,9 @@ pub(crate) struct Found {
 /// Fewest groups a move carries: one alone is as cheap repainted.
 const MIN_GROUPS: usize = 2;
 /// Most distances checked per window, best voted first: signatures can
-/// agree on rows that differ, so the best voted can prove wrong.
-const MAX_TRIES: usize = 3;
+/// agree on rows that differ, so the best voted can prove wrong. A wrong
+/// one costs a few glyphs a row: a row that did not move differs early.
+const MAX_TRIES: usize = 8;
 
 /// The moves that bring a picture of SIDES' old frame toward its new one,
 /// whose groups at CHANGED (sorted) differ in place; REACH is how far ink
@@ -67,23 +68,24 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
     windows.dedup();
     for window in windows {
         // The first distance, best voted first, that places enough groups.
-        let Some((dy, mut placed)) = candidates
+        let Some((dy, placed)) = candidates
             .iter()
             .filter(|c| c.0 == window)
             .take(MAX_TRIES)
             .find_map(|&(_, dy)| {
-                let placed: Vec<Key> = sides
+                let mut placed: Vec<Key> = sides
                     .after
                     .keys()
                     .filter(|key| key.0 == window && moved(sides, **key, dy, reach))
                     .copied()
                     .collect();
+                placed.sort_unstable();
+                let placed = whole_rows(sides, &placed, dy);
                 (placed.len() >= MIN_GROUPS).then_some((dy, placed))
             })
         else {
             continue;
         };
-        placed.sort_unstable();
         let Some(band) = placed
             .iter()
             .flat_map(|key| sides.after[key].iter().map(|&at| sides.runs[at].bounds))
@@ -109,6 +111,42 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
     }
     found.placed.sort_unstable();
     found
+}
+
+/// Of PLACED (sorted), the groups whose whole visual row moved DY from a
+/// whole visual row: a row's groups draw together (an underline run keeps
+/// its first glyph's line, a box spans them), so a group moves only with
+/// every group of its row, from a row of exactly their sources.
+fn whole_rows(sides: &Sides<'_>, placed: &[Key], dy: f32) -> Vec<Key> {
+    let source = |key: &Key| (key.0, (f32::from_bits(key.1) - dy).to_bits(), key.2);
+    // Each frame's visual rows, as the sorted keys of their groups.
+    let rows = |runs: &[Run]| {
+        let mut rows: FxHashMap<usize, Vec<Key>> = FxHashMap::default();
+        for run in runs {
+            rows.entry(run.row).or_default().push(run.key);
+        }
+        for keys in rows.values_mut() {
+            keys.sort_unstable();
+            keys.dedup();
+        }
+        rows
+    };
+    let (new_rows, old_rows) = (rows(sides.runs), rows(&sides.old.runs));
+    let old_row_of: FxHashMap<Key, usize> = sides.old.runs.iter().map(|run| (run.key, run.row)).collect();
+    let whole = |keys: &Vec<Key>| {
+        let mut sources: Vec<Key> = keys.iter().map(source).collect();
+        sources.sort_unstable();
+        keys.iter().all(|key| placed.binary_search(key).is_ok())
+            && old_row_of.get(&sources[0]).is_some_and(|row| old_rows[row] == sources)
+    };
+    let mut kept: Vec<Key> = new_rows
+        .values()
+        .filter(|keys| keys.iter().any(|key| placed.binary_search(key).is_ok()) && whole(keys))
+        .flatten()
+        .copied()
+        .collect();
+    kept.sort_unstable();
+    kept
 }
 
 /// The distances changed text groups moved by, by window and best voted
@@ -164,15 +202,15 @@ fn whole(dy: f32, scale: f32) -> bool {
 }
 
 /// A hash of the glyphs at AT of FRAME's RUNS that leaves their y out: of
-/// how many there are and of the first and the last.
+/// how many there are and of the first, the middle and the last.
 fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
     let mut hasher = FxHasher::default();
-    let mut glyphs = at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
+    let glyphs = || at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
     let count: usize = at.iter().map(|&i| runs[i].glyphs.len()).sum();
     count.hash(&mut hasher);
-    // Its count and its ends: what tells most rows apart, and costs the
-    // same however long the row; `moved` checks every glyph.
-    for glyph in [glyphs.next(), glyphs.last()].into_iter().flatten() {
+    // Its count, its ends and its middle: what tells most rows apart, and
+    // costs the same however long the row; `moved` checks every glyph.
+    for glyph in [glyphs().next(), glyphs().nth(count / 2), glyphs().last()].into_iter().flatten() {
         std::mem::discriminant(glyph).hash(&mut hasher);
         if let FrameGlyph::Char { char, face_id, .. } = glyph {
             char.hash(&mut hasher);
@@ -377,6 +415,13 @@ fn face(glyph: &FrameGlyph) -> Option<romacs_display_protocol::types::FaceId> {
     }
 }
 
+/// Where A and B overlap, if they do.
+fn intersection(a: Rect, b: Rect) -> Option<Rect> {
+    let (x0, y0) = (a.x.max(b.x), a.y.max(b.y));
+    let (x1, y1) = ((a.x + a.width).min(b.x + b.width), (a.y + a.height).min(b.y + b.height));
+    (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+}
+
 /// Whether OUTER holds INNER.
 pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
     outer.x <= inner.x
@@ -434,13 +479,22 @@ fn spoiled(sides: &Sides<'_>, placed: &[Key], band: Rect, from: Rect, dy: f32, r
         keys.sort_unstable();
         keys
     };
+    // A solid rectangle looks alike moved within itself: one that spans
+    // both places, as it is drawn (a border, cut by its clip).
+    let alike = |glyph: &FrameGlyph| {
+        let painted = match glyph {
+            FrameGlyph::Background { bounds, .. } => Some(*bounds),
+            FrameGlyph::Border { x, y, width, height, clip_rect, .. } => {
+                let bounds = Rect::new(*x, *y, *width, *height);
+                clip_rect.map_or(Some(bounds), |clip| intersection(bounds, clip))
+            }
+            _ => return false,
+        };
+        painted.is_none_or(|r| r.y <= span.0 && r.y + r.height >= span.1)
+    };
     let spoils = |frame: &FrameGlyphBuffer, run: &Run, area: Rect| {
-        let solid = frame.glyphs[run.glyphs.clone()]
-            .iter()
-            .all(|g| matches!(g, FrameGlyph::Background { .. } | FrameGlyph::Border { .. }));
-        if solid {
-            damage::overlaps(run.bounds, area)
-                && !(run.bounds.y <= span.0 && run.bounds.y + run.bounds.height >= span.1)
+        if frame.glyphs[run.glyphs.clone()].iter().all(alike) {
+            false
         } else {
             damage::overlaps(reach.grow(run.bounds), area)
         }

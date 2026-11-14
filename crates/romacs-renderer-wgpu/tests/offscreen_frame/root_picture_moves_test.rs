@@ -3,9 +3,10 @@
 //! than a window, over rows of mixed heights, past an image whose box is
 //! larger than it and a fringe bitmap wider than its column, with the
 //! cursor moving as it scrolls; at a whole and at a fractional device
-//! scale, with ink that leaves its rows, and with a fringe bitmap that
-//! tiles in a period the rows' heights are no multiple of. A scroll by a line repaints
-//! the row that entered and no other.
+//! scale, with ink that leaves its rows, with a fringe bitmap that tiles in
+//! a period the rows' heights are no multiple of, with a border its clip
+//! cuts, and with an underline whose first glyphs change face as its row
+//! moves. A scroll by a line repaints the row that entered and no other.
 use super::*;
 use romacs_display_protocol::call_count;
 use romacs_display_protocol::frame_glyphs::{FringeBitmapData, FringeSide};
@@ -18,6 +19,12 @@ const NORMAL: u32 = 0;
 const MODE: u32 = 1;
 const PICTURE: u32 = 2;
 const BIG: u32 = 3;
+/// Two underlined faces whose lines lie apart.
+const UNDER: u32 = 4;
+const UNDER_LOW: u32 = 5;
+/// The line underlined, its tail set a pixel shorter: one underline run
+/// over glyphs of two heights, which takes its line from its first glyph.
+const UNDERLINED_LINE: usize = 3;
 const IMAGE: u32 = 702;
 /// The line that holds an image.
 const IMAGE_LINE: usize = 4;
@@ -33,16 +40,32 @@ const TILED_LINE: usize = 1;
 const TALL: [(usize, f32); 3] = [(9, 16.0), (10, 12.0), (11, 13.0)];
 const BG: Color = Color::rgb(0.1, 0.12, 0.16);
 
-/// Where the window shows its text from, and where its cursor is.
+/// Where the window shows its text from, where its cursor is, and the face
+/// the underlined line starts in.
 #[derive(Clone, Copy)]
 struct View {
     first: usize,
     cursor: (usize, usize),
+    lead: u32,
+}
+
+/// What a session's frames hold besides plain text.
+#[derive(Clone, Copy, Default)]
+struct Extras {
+    /// A line whose glyphs leave its row.
+    inky: bool,
+    /// A fringe bitmap that tiles.
+    tiled: bool,
+    /// A border its clip cuts to the middle of the window.
+    bordered: bool,
+    /// An underlined line, its tail shorter.
+    underlined: bool,
 }
 
 fn line(at: usize) -> String {
     match at {
-        3 => String::new(),
+        3 => "underlined text".to_owned(),
+        15 => String::new(),
         _ => format!("{at}: {}", "abcdefghij".chars().cycle().skip(at).take(4 + at % 7).collect::<String>()),
     }
 }
@@ -56,16 +79,15 @@ fn text_face(frame: &mut FrameGlyphBuffer, id: u32, bg: Color) {
     frame.faces.get_mut(&FaceId::new(id)).unwrap().font_size = 6.0;
 }
 
-/// VIEW's frame at SCALE: one window of text above a mode line; with
-/// INKY, a line whose glyphs leave its row; with TILED, a fringe bitmap
-/// that tiles.
+/// VIEW's frame at SCALE: one window of text above a mode line, with
+/// EXTRAS.
 #[expect(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "one view's whole frame, built in one place from a test's few rows and columns"
 )]
-fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuffer {
+fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
     let (width, height_all) = (W as f32 / scale, H as f32 / scale);
     let body = height_all - ROW;
     let mut frame = FrameGlyphBuffer::with_size(width, height_all);
@@ -77,6 +99,16 @@ fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuff
     frame.faces.insert(FaceId::new(PICTURE), picture);
     text_face(&mut frame, BIG, BG);
     frame.faces.get_mut(&FaceId::new(BIG)).unwrap().font_size = 15.0;
+    // Both lines inside the cell, a pixel apart: no ink leaves the row.
+    for (id, position) in [(UNDER, 0), (UNDER_LOW, 1)] {
+        text_face(&mut frame, id, BG);
+        let face = frame.faces.get_mut(&FaceId::new(id)).unwrap();
+        face.attributes |= FaceAttributes::UNDERLINE;
+        face.underline_style = romacs_display_protocol::face::UnderlineStyle::Line;
+        face.underline_color = Some(Color::rgb(0.3, 0.9, 0.3));
+        face.underline_placement = romacs_display_protocol::face::UnderlinePosition::FontMetric { offset_from_baseline: position };
+        face.underline_thickness = 1;
+    }
     text_face(&mut frame, NORMAL, BG);
     frame.register_fringe_bitmap(
         1,
@@ -100,8 +132,13 @@ fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuff
         }
         let text = line(at);
         for (col, ch) in text.chars().enumerate() {
-            frame.add_char(ch, 2.0 + col as f32 * CELL, y, CELL, h, 6.0, false);
-            if inky && at == INKY_LINE
+            let underlined = extras.underlined && at == UNDERLINED_LINE;
+            let short = if underlined && col >= 4 { 1.0 } else { 0.0 };
+            frame.add_char(ch, 2.0 + col as f32 * CELL, y, CELL, h - short, 6.0, false);
+            if underlined && let Some(FrameGlyph::Char { face_id, .. }) = frame.glyphs.last_mut() {
+                *face_id = FaceId::new(if col < 4 { view.lead } else { UNDER });
+            }
+            if extras.inky && at == INKY_LINE
                 && let Some(FrameGlyph::Char { face_id, .. }) = frame.glyphs.last_mut()
             {
                 *face_id = FaceId::new(BIG);
@@ -110,7 +147,7 @@ fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuff
         if at == FRINGE_LINE {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 1, FaceId::new(NORMAL), FringeSide::Left);
         }
-        if tiled && at == TILED_LINE {
+        if extras.tiled && at == TILED_LINE {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 2, FaceId::new(NORMAL), FringeSide::Left);
         }
         let end = 2.0 + text.chars().count() as f32 * CELL;
@@ -135,6 +172,10 @@ fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuff
             });
         }
         y += h;
+    }
+    if extras.bordered {
+        frame.set_draw_context(window, GlyphRowRole::Text, Some(Rect::new(0.0, 2.0 * ROW, width, 2.0 * ROW)));
+        frame.add_border(width - 6.0, 0.0, 2.0, body, Color::rgb(0.8, 0.2, 0.2));
     }
     frame.set_draw_context(window, GlyphRowRole::ModeLine, None);
     frame.add_stretch(0.0, body, width, ROW, Color::rgb(0.35, 0.35, 0.4), FaceId::new(MODE), false);
@@ -166,13 +207,15 @@ fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuff
 /// The views a session scrolls through, and the text rows a scroll by a
 /// line repaints at a whole scale, where it moves the rest.
 fn scrolls() -> Vec<(&'static str, View, Option<u64>)> {
-    let at = |first, cursor| View { first, cursor };
+    let at = |first, cursor| View { first, cursor, lead: UNDER };
     vec![
         ("start", at(0, (0, 0)), None),
         ("the start again", at(0, (0, 0)), None),
         ("down a line", at(1, (0, 0)), Some(1)),
         ("down a line past the image", at(2, (0, 0)), Some(1)),
         ("up a line", at(1, (0, 0)), Some(1)),
+        ("up a line as the underline's head changes face", View { lead: UNDER_LOW, ..at(0, (0, 0)) }, None),
+        ("down a line again", at(1, (0, 0)), None),
         ("down three lines", at(4, (0, 0)), Some(2)),
         ("down a line onto the taller lines", at(5, (1, 2)), None),
         ("down a line with the cursor moving", at(6, (2, 3)), None),
@@ -202,7 +245,7 @@ fn load_image(h: &mut Harness) {
     assert!(h.renderer.is_image_ready(ImageId::new(IMAGE)), "test image must decode");
 }
 
-fn scrolled_through_picture_equals_whole(scale: f32, inky: bool, tiled: bool) {
+fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
     let Some(mut h) = try_harness() else {
         eprintln!("SKIP: no GPU adapter");
         return;
@@ -212,7 +255,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool, tiled: bool) {
     load_image(&mut h);
     let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
     for (name, view, entered) in scrolls() {
-        let frame = view_frame(view, scale, inky, tiled);
+        let frame = view_frame(view, scale, extras);
         let mapping = mapping_for_scale(&frame, W, H, scale);
         h.atlas.set_current_frame_fonts(frame.font_bindings());
         let (whole_texture, whole_view) = make_tex(&h.renderer, "whole");
@@ -235,7 +278,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool, tiled: bool) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !inky && !tiled) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined)) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
@@ -244,21 +287,35 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool, tiled: bool) {
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole() {
-    scrolled_through_picture_equals_whole(1.0, false, false);
+    scrolled_through_picture_equals_whole(1.0, Extras::default());
 }
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_at_a_fractional_scale() {
-    scrolled_through_picture_equals_whole(1.5, false, false);
+    scrolled_through_picture_equals_whole(1.5, Extras::default());
 }
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_ink_leaves_its_rows() {
-    scrolled_through_picture_equals_whole(1.0, true, false);
+    scrolled_through_picture_equals_whole(1.0, Extras { inky: true, ..Extras::default() });
 }
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_a_fringe_tiles() {
     // A row moves by eight pixels, the tiles' phase by two of three.
-    scrolled_through_picture_equals_whole(1.0, false, true);
+    scrolled_through_picture_equals_whole(1.0, Extras { tiled: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_a_border_is_clipped() {
+    // The border runs the window's height, its clip two rows of it: moved
+    // with the rows, its visible stretch would move too.
+    scrolled_through_picture_equals_whole(1.0, Extras { bordered: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_an_underline_changes_its_head() {
+    // The underline run takes its line from its first glyphs, which change
+    // face as the row moves; its shorter tail does not change.
+    scrolled_through_picture_equals_whole(1.0, Extras { underlined: true, ..Extras::default() });
 }
