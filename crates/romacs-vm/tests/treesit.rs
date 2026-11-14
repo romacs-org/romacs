@@ -6,7 +6,6 @@
 //! copies of the json, python and rust grammars (never a user's
 //! directory), the cases on those run too.
 use romacs_vm::Vm;
-use std::path::Path;
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;
 use gnu_lisp::gnu_lisp;
@@ -230,8 +229,7 @@ impl romacs_vm::LayoutHost for Cells {
 /// itself.
 #[test]
 fn twin_parsers_parse_an_edit_once() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'treesit)").unwrap();
     let setup = format!("(progn {SYSTEM_SETUP} \
         (set-buffer (get-buffer-create \"twin\")) (insert \"int a;\\nint b = ;\\nint c;\\n\") \
