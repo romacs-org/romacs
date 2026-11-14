@@ -86,12 +86,34 @@ this process's own, outliving a restart of the harness.")
     (romacs-agent-renew--hold session nil)
     (when (romacs-agent-queue session) (romacs-agent--send-next session nil))))
 
+(defvar romacs-agent-renew--written (make-hash-table :test #'eq :weakness 'key)
+  "Sessions to the request id of the last prompt written to their harness
+and not yet read back from its journal: a turn on its way.")
+
+(defun romacs-agent-renew--wrote (session id)
+  (puthash session id romacs-agent-renew--written))
+
+(defun romacs-agent-renew--read-back (session event)
+  "A prompt's echo (EVENT, an input) read back: no longer on its way."
+  (when (and (eq (plist-get event :type) 'input)
+             (equal (plist-get event :request) (gethash session romacs-agent-renew--written)))
+    (remhash session romacs-agent-renew--written)))
+
+(defun romacs-agent-renew--unechoed-p (session)
+  "Whether a prompt written to SESSION's harness has not been read back:
+its turn is on its way."
+  (gethash session romacs-agent-renew--written))
+
+(add-hook 'romacs-agent-input-functions #'romacs-agent-renew--wrote)
+(add-hook 'romacs-agent-event-functions #'romacs-agent-renew--read-back)
+
 (defun romacs-agent-renew--check (session)
   "Refuse (`user-error') to renew SESSION now."
   (unless (romacs-agent--harness-get session :renew)
     (user-error "%s cannot renew a conversation" (romacs-agent--harness-get session :display)))
   (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-interrupted session))
-               (not (romacs-agent-pending-selection session)))
+               (not (romacs-agent-pending-selection session))
+               (not (romacs-agent-renew--unechoed-p session)))
     (user-error "Session %s is busy: renew it when it is idle" (romacs-agent-title session)))
   (when (romacs-agent--held-p session)
     (user-error "Session %s is renewing or rolling back already" (romacs-agent-title session))))
@@ -191,10 +213,17 @@ else none.  The turn failing, or its harness ending, gives none."
                 (romacs-agent--harness-live-p session) (romacs-agent--ready-p session)))
       (funcall then nil "selection"))
      (t
-      (letrec ((waiter (lambda (seen event)
+      ;; Its own turn's end only: begun by the note's prompt read back.
+      (letrec ((asked nil)
+               (waiter (lambda (seen event)
                          (cond ((not (eq (romacs-agent-renew--holder session) token))
                                 (remove-hook 'romacs-agent-event-functions waiter))
-                               ((and (eq seen session) (memq (plist-get event :type) '(done exit)))
+                               ((not (eq seen session)))
+                               ((and (eq (plist-get event :type) 'input) (equal (plist-get event :own) "renew-note"))
+                                (setq asked t))
+                               ((and (eq (plist-get event :type) 'done)
+                                     (not (and asked (equal (romacs-agent-own-turn session) "renew-note")))))
+                               ((memq (plist-get event :type) '(done exit))
                                 (remove-hook 'romacs-agent-event-functions waiter)
                                 (let ((note (and (eq (plist-get event :type) 'done) (not (plist-get event :error))
                                                  (stringp (plist-get event :text))
@@ -220,6 +249,11 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
     ;; Failing before a run is under way: none is, and it may be tried again.
     (condition-case err
         (progn (romacs-agent-renew--commit session native)
+               ;; What its harness was owed as turns of their own goes to
+               ;; the new conversation first: its next run would lose it.
+               (when-let* ((owed (funcall (or (romacs-agent--harness-get session :owed-turns) #'ignore) session)))
+                 (dolist (turn (reverse owed))
+                   (romacs-agent--enqueue-first session (list (car turn) nil nil (cadr turn)))))
                (romacs-agent--relaunch session))
       (error (remhash session romacs-agent-renew--finishing)
              (signal (car err) (cdr err))))))

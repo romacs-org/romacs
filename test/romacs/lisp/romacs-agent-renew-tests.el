@@ -209,7 +209,9 @@ state root that has said two things, its writes to its harness in
                                                            (romacs-mcp--object "type" "result" "result" "docs written")))
                                  "")
                       nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
-        (setf (romacs-agent-seq session) (+ seq 2)))
+        (setf (romacs-agent-seq session) (+ seq 2))
+        ;; Read back, as its journal now says.
+        (remhash session romacs-agent-renew--written))
       (romacs-agent-renew-tests--run session)
       (let ((second (romacs-agent-brief session)))
         (should (string-search (string-trim first) second))
@@ -486,5 +488,51 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
     (should (= relaunched 0))
     (romacs-agent-renew--restored)
     (should (= relaunched 1))))
+
+(ert-deftest romacs-agent-renew-waits-for-a-prompt-on-its-way ()
+  ;; A prompt written and not read back yet: its turn is on its way, the
+  ;; renewal waits.  Read back, it may go.
+  (romacs-agent-renew-tests--with 'claude
+    (run-hook-with-args 'romacs-agent-input-functions session 7)
+    (should (string-match-p "busy" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))
+    (romacs-agent--raise session (list :type 'input :text "go" :request 7 :seq 30))
+    (setf (romacs-agent-state session) 'idle (romacs-agent-done-seq session) 31)
+    (should (eq (car (romacs-agent-renew-tests--run session)) :done))))
+
+(ert-deftest romacs-agent-renew-takes-only-its-own-turns-end ()
+  ;; Another turn's end while the note is asked (one that was on its way
+  ;; regardless) is not the note.
+  (romacs-agent-renew-tests--asking
+    (let ((end (+ (float-time) 30)))
+      (while (and (not (cl-find-if (lambda (w) (hash-table-p (cdr w))) written)) (< (float-time) end))
+        (accept-process-output nil 0.05)))
+    (setcar live nil)
+    (romacs-agent--raise session (list :type 'done :seq 19 :text "The follow-up was handled"))
+    (accept-process-output nil 0.1)
+    (should-not (car outcome))
+    (romacs-agent--raise session (list :type 'input :text "note?" :own "renew-note" :seq 20))
+    (romacs-agent--raise session (list :type 'done :seq 21 :text "Goal: X."))
+    (let ((end (+ (float-time) 30)))
+      (while (and (not (car outcome)) (< (float-time) end)) (accept-process-output nil 0.05)))
+    (let ((note (car (romacs-agent-renew-tests--notes session))))
+      (should (string-search "Goal: X." (gethash "brief" note)))
+      (should-not (string-search "The follow-up was handled" (gethash "brief" note))))))
+
+(ert-deftest romacs-agent-renew-keeps-a-missed-steer-for-the-new-conversation ()
+  ;; Codex owes a missed steer a turn of its own: not written while a
+  ;; renewal holds the session (a refusal still is), and sent to the new
+  ;; conversation first.
+  (require 'romacs-agent-codex)
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-driver-state session)
+          (list :thread "th" :ready t :owed (list (list :turn "turn/steer:4" "late words" nil)
+                                                (list :reply 9 "item/tool/call"))))
+    (romacs-agent-renew--hold session (list 'test))
+    (should (eq (car (romacs-agent--codex-owed-now session)) :reply))
+    (romacs-agent-renew--hold session nil)
+    (should (eq (car (romacs-agent--codex-owed-now session)) :turn))
+    (romacs-agent--enqueue session (list "waiting" nil nil nil))
+    (romacs-agent-renew--finish session nil)
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words" "waiting")))))
 
 ;;; romacs-agent-renew-tests.el ends here

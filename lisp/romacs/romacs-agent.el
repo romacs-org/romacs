@@ -806,6 +806,9 @@ instances) is derived again when it changes.")
       (relaunch [BEFORE]), its next run starting there, BEFORE (when
       given) called once the rollback is journaled and before that run;
       a `user-error' when it cannot;
+  :owed-turns (SESSION)   optional: the messages SESSION's harness is owed
+      as turns of their own, each (TEXT IMAGES), that its next run would
+      lose (a missed steer's): a renewal sends them to the new one;
   :renew (SESSION)   present when SESSION can go on in a new conversation
       (romacs-agent-renew.el): the id its next run begins it under, or
       nil when the harness names it as it starts;
@@ -2381,9 +2384,8 @@ ends, now when none runs; FIRST puts it ahead of the messages already
 waiting."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
       (romacs-agent-send session text nil nil images)
-    (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil nil images) (romacs-agent-queue session))
-               (cl-incf (romacs-agent-queue-length session)))
+    (if first
+        (romacs-agent--enqueue-first session (list text nil nil images))
       (romacs-agent--enqueue session (list text nil nil images)))))
 
 ;;; Lifecycle
@@ -2790,6 +2792,12 @@ attached to it."
          (romacs-agent--enqueue session (list text delivered valid images)))
         (t (romacs-agent--turn session text images)
            (when delivered (funcall delivered)))))
+
+(defun romacs-agent--enqueue-first (session item)
+  "Put ITEM ahead of what waits for SESSION's harness."
+  (push item (romacs-agent-queue session))
+  (cl-incf (romacs-agent-queue-length session))
+  (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session))))
 
 (defun romacs-agent--enqueue (session item)
   (cl-incf (romacs-agent-queue-length session))
