@@ -6,6 +6,10 @@
 //! windows (DIVERGENCES.md VM2-CHILD-FRAME).
 use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
+/// keyboard.c internal_last_event_frame.
+const LAST_EVENT_FRAME: &str = "#:vm2-last-event-frame";
+/// keyboard.c unread_switch_frame.
+const UNREAD_SWITCH_FRAME: &str = "#:vm2-unread-switch-frame";
 /// The fringe width a frame parameter of nil or a non-integer gives
 /// (frame.c gui_set_left_fringe).
 pub(crate) const DEFAULT_FRINGE: u32 = 8;
@@ -295,6 +299,61 @@ impl Vm {
         self.display_state.version += 1;
         Ok(frame)
     }
+    /// keyboard.c internal_last_event_frame: the frame the last input
+    /// event came from, nil before any.
+    pub(crate) fn last_event_frame(&self) -> Value {
+        self.names.get(LAST_EVENT_FRAME).map(|&i| self.slots[i].value).filter(|&v| v != Value::UNBOUND).unwrap_or(Value::NIL)
+    }
+    /// Note FRAME as the last event's, and `last-event-frame' with it.
+    fn set_last_event_frame(&mut self, frame: Value) {
+        for name in [LAST_EVENT_FRAME, "last-event-frame"] {
+            let slot = self.slot(name);
+            self.slots[slot].value = frame;
+        }
+    }
+    /// keyboard.c make_lispy_switch_frame: `(switch-frame FRAME)'.
+    fn switch_frame_event(&mut self, frame: Value) -> Value {
+        let head = self.intern("switch-frame");
+        self.list_value(&[head, frame])
+    }
+    /// kbd_buffer_get_event for an event from the frame whose id is ID: its
+    /// focus frame (`redirect-frame-focus'), else it, becomes the last
+    /// event's; when that is neither the last event's nor the selected
+    /// frame, the `switch-frame' event that is read before it.
+    pub(crate) fn note_event_frame(&mut self, id: u64) -> Option<Value> {
+        let frame = self.frame_of_id(id).ok()?;
+        let focus = self.frame(frame).map_or(Value::NIL, |f| f.focus);
+        let frame = if focus != Value::NIL && self.frame(focus).is_ok_and(|f| f.live) { focus } else { frame };
+        let switching = frame != self.last_event_frame() && frame != self.frame_value_peek();
+        self.set_last_event_frame(frame);
+        switching.then(|| self.switch_frame_event(frame))
+    }
+    /// keyboard.c Finternal_handle_focus_in for FRAME: the focus moving to
+    /// a frame neither the last event's nor selected queues its
+    /// `switch-frame' (`unread_switch_frame'), as one already queued is
+    /// replaced.
+    pub(crate) fn handle_focus_in(&mut self, frame: Value) {
+        let switching = frame != self.last_event_frame() && frame != self.frame_value_peek();
+        self.set_last_event_frame(frame);
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        if switching || !matches!(self.slots[slot].value, Value::NIL | Value::UNBOUND) {
+            let event = self.switch_frame_event(frame);
+            let slot = self.slot(UNREAD_SWITCH_FRAME);
+            self.slots[slot].value = event;
+        }
+    }
+    /// read_char's `unread_switch_frame', taken: the `switch-frame' event a
+    /// focus change or a delayed key sequence left, else nil.
+    pub(crate) fn take_unread_switch_frame(&mut self) -> Value {
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        match std::mem::replace(&mut self.slots[slot].value, Value::NIL) { Value::UNBOUND => Value::NIL, event => event }
+    }
+    /// read_key_sequence's `delayed_switch_frame' at its end: EVENT is
+    /// read next.
+    pub(crate) fn set_unread_switch_frame(&mut self, event: Value) {
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        self.slots[slot].value = event;
+    }
     /// Whether the host shows more top-level frames than the first.
     pub(crate) fn host_top_level_frames(&mut self) -> bool {
         self.host_input.as_mut().is_some_and(|host| host.top_level_frames())
@@ -552,6 +611,10 @@ fn internal(e: String) -> Fault { Fault::Error(e) }
 /// The frame surface `prims/frame.rs' declares beyond window.rs's: child
 /// frames (GNU frame.c and pgtkfns.c x-create-frame).
 impl crate::window::Windows<'_> {
+    /// Finternal_handle_focus_in for FRAME (frame.rs `Vm::handle_focus_in').
+    pub(crate) fn handle_focus_in(&mut self, frame: Value) { self.vm.handle_focus_in(frame) }
+    pub(crate) fn take_unread_switch_frame(&mut self) -> Value { self.vm.take_unread_switch_frame() }
+    pub(crate) fn set_unread_switch_frame(&mut self, event: Value) { self.vm.set_unread_switch_frame(event) }
     /// Whether the host shows top-level frames beyond the first.
     pub(crate) fn host_top_level_frames(&mut self) -> bool {
         self.vm.host_top_level_frames()
@@ -559,6 +622,10 @@ impl crate::window::Windows<'_> {
     /// The selected frame's top-level frame.
     pub(crate) fn selected_top_frame(&mut self) -> Value {
         self.vm.selected_top_frame()
+    }
+    /// FRAME's display identity (`frame-id').
+    pub(crate) fn frame_display_id(&mut self, frame: Value) -> std::result::Result<u64, Fault> {
+        Ok(self.vm.frame(frame).map_err(internal)?.id)
     }
     /// The frame window V is on.
     pub(crate) fn window_frame_of(&mut self, v: Value) -> Out {

@@ -609,6 +609,12 @@ fn delete_after_hook(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 }
 fn deleted(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
+// frame.c Fframe_id: the frame's display identity, unique in the session.
+defsubr! { name = "frame-id", gnu = "frame.c:345", effect = Reads,
+fn frame_id(cx; optional frame: Value) {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    Ok(Value::integer(cx.windows().frame_display_id(frame)? as i64).unwrap())
+}}
 defsubr! { name = "frame-parent", gnu = "frame.c:2180", effect = Reads,
 fn frame_parent(cx; optional frame: Value) { cx.windows().frame_parent(frame) }}
 defsubr! { name = "frame-ancestor-p", gnu = "frame.c:2242", effect = Reads,
@@ -719,15 +725,26 @@ fn current_message(cx) {
 }}
 defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
 fn internal_handle_focus_in(cx, event: Value) {
-    // GNU queues a switch-frame event when the focused frame is not the
-    // selected one; a VM2 session has one frame (`frame-list'), always
-    // selected, so there is never one to queue.
+    // The focus moving to a frame neither the last event's nor selected
+    // queues the `switch-frame' read_char reads next.
     let focus_in = cx.intern("focus-in");
     let frame = cx.pair(event).filter(|&(head, _)| head == focus_in).and_then(|(_, rest)| cx.pair(rest)).map(|(frame, _)| frame);
-    if !frame.is_some_and(|frame| cx.windows().frame_p(frame) != Value::NIL) {
+    let Some(frame) = frame.filter(|&frame| cx.windows().frame_p(frame) != Value::NIL) else {
         return Err(Fault::Error("Invalid focus-in event".into()));
-    }
+    };
+    cx.windows().handle_focus_in(frame);
     Ok(Value::NIL)
+}}
+// keyboard.c read_char's `unread_switch_frame', taken (lisp/romacs/vm/keyboard.el).
+defsubr! { name = "romacs--take-unread-switch-frame", gnu = "keyboard.c:2683", effect = Global,
+fn romacs_take_unread_switch_frame(cx) {
+    Ok(cx.windows().take_unread_switch_frame())
+}}
+// read_key_sequence's `delayed_switch_frame', left for read_char.
+defsubr! { name = "romacs--set-unread-switch-frame", gnu = "keyboard.c:11874", effect = Global,
+fn romacs_set_unread_switch_frame(cx, event: Value) {
+    cx.windows().set_unread_switch_frame(event);
+    Ok(event)
 }}
 defsubr! { name = "internal-show-cursor", gnu = "dispnew.c:7428", effect = Global,
 fn internal_show_cursor(cx, window: Value, show: Value) {
