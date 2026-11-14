@@ -8,6 +8,15 @@ use super::super::vertex::RectVertex;
 use super::WgpuRenderer;
 use super::frame_pass::{ChromeLayerVertices, FrameParams, FramePassCtx};
 
+/// The smallest rectangle holding POINTS; None for none.
+fn bounding_box(points: impl Iterator<Item = [f32; 2]>) -> Option<romacs_display_protocol::types::Rect> {
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for [x, y] in points {
+        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+    }
+    (x1 >= x0 && y1 >= y0).then(|| romacs_display_protocol::types::Rect::new(x0, y0, x1 - x0, y1 - y0))
+}
+
 impl WgpuRenderer {
     /// Collect cursor rects (inverse-video bg, behind-text trail, front
     /// cursors), window borders, and scroll bar tracks/thumbs.
@@ -22,11 +31,11 @@ impl WgpuRenderer {
         // === Collect cursor bg rect for inverse video (drawn before text) ===
         // For filled box cursor (style 0), we draw the cursor background BEFORE text
         // so the character under the cursor can be re-drawn with inverse colors on top.
-        let mut cursor_bg_vertices: Vec<RectVertex> = Vec::new();
-        let mut cursor_glow_vertices = Vec::new();
+        let cursor_bg_vertices: Vec<RectVertex> = Vec::new();
+        let cursor_glow_vertices = Vec::new();
 
         // === Collect behind-text cursor shapes (animated trail for filled box) ===
-        let mut behind_text_cursor_vertices: Vec<RectVertex> = Vec::new();
+        let behind_text_cursor_vertices: Vec<RectVertex> = Vec::new();
 
         // === Collect front cursors and borders (drawn after text) ===
         // Bar (1), hbar (2), hollow (3), borders — all drawn on top of text.
@@ -137,43 +146,89 @@ impl WgpuRenderer {
             }
         }
 
+        let mut layers = ChromeLayerVertices {
+            cursor_bg: cursor_bg_vertices,
+            behind_text_cursor: behind_text_cursor_vertices,
+            cursor_glow: cursor_glow_vertices,
+            cursors: cursor_vertices,
+        };
         // One entry per window (selected window's entry is `active`); every
         // cursor draws through the shared cursor_draw_rect, so a non-selected
         // window's box lands on its glyph cell just like the selected one,
         // under line numbers or scaled fonts.
         for cursor in &frame_glyphs.window_cursors {
-            let cursor_effects = frame_glyphs
-                .effective_window_cursor_effects(cursor.window_id, &self.effects)
-                .clone();
-            self.emit_cursor_visual(
-                cursor.window_id,
-                frame_glyphs.cursor_draw_rect(
-                    cursor.slot_id,
-                    cursor.style,
-                    cursor.ascent,
-                    (cursor.x, cursor.y, cursor.width, cursor.height),
-                ),
+            self.emit_window_cursor(frame_glyphs, cursor, cursor_visible, animated_cursor, &mut layers);
+        }
+        layers
+    }
+
+    /// CURSOR of FRAME's visuals into LAYERS.
+    fn emit_window_cursor(
+        &mut self,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+        cursor: &romacs_display_protocol::frame_glyphs::WindowCursor,
+        cursor_visible: bool,
+        animated_cursor: &Option<romacs_display_protocol::types::AnimatedCursor>,
+        layers: &mut ChromeLayerVertices,
+    ) {
+        let cursor_effects = frame
+            .effective_window_cursor_effects(cursor.window_id, &self.effects)
+            .clone();
+        self.emit_cursor_visual(
+            cursor.window_id,
+            frame.cursor_draw_rect(
                 cursor.slot_id,
                 cursor.style,
-                &cursor.color,
-                cursor.cursor_fg,
-                &cursor_effects,
-                cursor_visible,
-                animated_cursor,
-                cursor.active,
-                &mut cursor_bg_vertices,
-                &mut behind_text_cursor_vertices,
-                &mut cursor_glow_vertices,
-                &mut cursor_vertices,
-            );
-        }
+                cursor.ascent,
+                (cursor.x, cursor.y, cursor.width, cursor.height),
+            ),
+            cursor.slot_id,
+            cursor.style,
+            &cursor.color,
+            cursor.cursor_fg,
+            &cursor_effects,
+            cursor_visible,
+            animated_cursor,
+            cursor.active,
+            &mut layers.cursor_bg,
+            &mut layers.behind_text_cursor,
+            &mut layers.cursor_glow,
+            &mut layers.cursors,
+        );
+    }
 
-        ChromeLayerVertices {
-            cursor_bg: cursor_bg_vertices,
-            behind_text_cursor: behind_text_cursor_vertices,
-            cursor_glow: cursor_glow_vertices,
-            cursors: cursor_vertices,
-        }
+    /// Where each cursor of FRAME draws this frame, in `window_cursors`'
+    /// order: the box of every vertex its layers emit (body, inverse-video
+    /// background, trail, light), None for one that draws nothing.
+    pub(crate) fn cursor_extents(
+        &mut self,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+        cursor_visible: bool,
+        animated_cursor: Option<&romacs_display_protocol::types::AnimatedCursor>,
+    ) -> Vec<Option<romacs_display_protocol::types::Rect>> {
+        let animated_cursor = animated_cursor.copied();
+        frame
+            .window_cursors
+            .iter()
+            .map(|cursor| {
+                let mut layers = ChromeLayerVertices {
+                    cursor_bg: Vec::new(),
+                    behind_text_cursor: Vec::new(),
+                    cursor_glow: Vec::new(),
+                    cursors: Vec::new(),
+                };
+                self.emit_window_cursor(frame, cursor, cursor_visible, &animated_cursor, &mut layers);
+                bounding_box(
+                    layers
+                        .cursor_bg
+                        .iter()
+                        .chain(&layers.behind_text_cursor)
+                        .chain(&layers.cursors)
+                        .map(|v| v.position)
+                        .chain(layers.cursor_glow.iter().map(|v| v.position)),
+                )
+            })
+            .collect()
     }
 
     pub(super) fn draw_pre_text_cursor_layers(

@@ -16,6 +16,8 @@ mod fade_edges_test;
 mod menu_test;
 #[path = "offscreen_frame/opacity_test.rs"]
 mod opacity_test;
+#[path = "offscreen_frame/root_picture_test.rs"]
+mod root_picture_test;
 #[path = "offscreen_frame/scroll_texture_test.rs"]
 mod scroll_texture_test;
 use romacs_display_protocol::frame_chrome::PresentationId;

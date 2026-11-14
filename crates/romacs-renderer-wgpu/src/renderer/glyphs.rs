@@ -1554,7 +1554,7 @@ impl WgpuRenderer {
     // boundary; a local alias would only hide this one site.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn render_frame_glyphs_impl(
+    pub(super) fn render_frame_glyphs_impl(
         &mut self,
         view: &wgpu::TextureView,
         frame_glyphs: &FrameGlyphBuffer,
