@@ -30,8 +30,10 @@ pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'
 pub(crate) fn read_string<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Option<Gc<'_, 'b>>, (root, start, end): (usize, usize, usize), b: B,
     then: impl FnOnce(&mut Vm, B, Read) -> R + Copy + 'static) -> R {
     let byte = m.leaf((root, start), |vm, (root, start)| {
-        let view = vm.str_view(vm.external_roots[root]).expect("a string stream");
-        if view.is_multibyte() { view.chars().take(start).map(|c| crate::lstring::char_string(c, &mut [0; 5])).sum() } else { start }
+        // START's byte through the string's own cursor (`Vm::str_view_from`).
+        let stream = vm.external_roots[root];
+        let all = vm.str_view(stream).expect("a string stream").bytes.len();
+        all - vm.str_view_from(stream, start).expect("a string stream").bytes.len()
     });
     parse::read_input(m, gc, Input::String { root, byte, character: start, end }, b, then)
 }

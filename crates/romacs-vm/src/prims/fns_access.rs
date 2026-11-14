@@ -33,7 +33,6 @@ fn elt(cx, sequence: Value, index: Value) {
     if kind == Kind::Vector {
         return cx.vector_get(sequence, index);
     }
-    let string = cx.string_view(sequence)?;
-    let code = string.chars().nth(n).ok_or(Fault::Range(sequence, index))?;
+    let code = cx.string_char(sequence, n)?.ok_or(Fault::Range(sequence, index))?;
     Ok(Value::integer(i64::from(code)).unwrap())
 }}
