@@ -708,7 +708,24 @@ or a repeat."
       (romacs-agent-ui--composer-update)
       (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
 
+(defvar romacs-agent-ui--turn-starts (make-hash-table :test #'eq :weakness 'key)
+  "Each session's last turn start seen live, by its time.")
+
+(defun romacs-agent-ui--see-failed-children (session event)
+  "SESSION's live turn starts at EVENT: a failure of a task it delegated
+that was there when its turn before started has been in view a whole turn,
+and is seen now, as opening the task's chat sees it."
+  (when (and (eq (plist-get event :type) 'input) (romacs-agent--live-p session))
+    (let ((before (gethash session romacs-agent-ui--turn-starts)))
+      (when before
+        (dolist (child (romacs-agent-children session))
+          (when (and (eq (romacs-agent-ui--state-key child) 'failed)
+                     (<= (or (romacs-agent-last-time child) 0) before))
+            (romacs-agent-mark-seen child))))
+      (puthash session (or (plist-get event :time) (float-time)) romacs-agent-ui--turn-starts))))
+
 (defun romacs-agent-ui--on-event (session event)
+  (romacs-agent-ui--see-failed-children session event)
   (let ((moved (romacs-agent-ui--track-children session event)))
     (romacs-agent-ui--render session event)
     (romacs-agent-ui--header-refresh session)
@@ -924,7 +941,40 @@ turn of its session starts, a completion never (its session's turn tells it)."
                        (let ((x (romacs-agent-ui--row-rank a)) (y (romacs-agent-ui--row-rank b)))
                          (if (= x y) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0)) (< x y)))))
           (romacs-agent-children-summary session)
-          (romacs-agent-ui--rollup (mapcar (lambda (row) (plist-get row :key)) rows)))))
+          (romacs-agent-ui--workers-summary (romacs-agent-children-rows session)))))
+
+(defconst romacs-agent-ui--worker-kinds
+  '((approval "✋" "Needs approval" romacs-agent-approval)
+    (question "❓" "Asks you" romacs-agent-approval)
+    (failed "❗" "Failed" romacs-agent-error)
+    (subagents "🤖" "Working" romacs-agent-running)
+    (threads "🧵" "Threads live" romacs-agent-running))
+  "What a session's header counts of its workers, as (KIND GLYPH WORD
+FACE): what wants the user, then its harness's own subagents running,
+then its delegated threads still live.")
+
+(defun romacs-agent-ui--worker-kind (row)
+  "The kinds worker ROW counts as (`romacs-agent-ui--worker-kinds')."
+  (let ((key (plist-get row :key)))
+    (delq nil (list (and (memq key '(approval question failed)) key)
+                    (cond ((plist-get row :session) (and (memq key romacs-agent-ui--live-keys) 'threads))
+                          ((eq key 'working) 'subagents))))))
+
+(defun romacs-agent-ui--workers-summary (rows)
+  "ROWS, a session's workers ranked, as its header's counts by kind
+\(`romacs-agent-ui--worker-kinds'), or nil when none counts: hovering lists
+every worker by title and state."
+  (let* ((kinds (mapcan #'romacs-agent-ui--worker-kind rows))
+         (parts (delq nil (mapcar (lambda (kind) (let ((count (cl-count (car kind) kinds)))
+                                                   (and (> count 0) (romacs-agent-ui--count kind count))))
+                                  romacs-agent-ui--worker-kinds))))
+    (when parts
+      (let ((text (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))
+            (listing (mapconcat (lambda (row) (format "%s: %s" (or (plist-get row :title) "task")
+                                                      (downcase (nth 2 (romacs-agent-ui--state-of (plist-get row :key))))))
+                                (seq-take rows 20) "\n")))
+        (add-text-properties 0 (length text) (list 'help-echo listing) text)
+        text))))
 
 ;;; A session's state
 ;;

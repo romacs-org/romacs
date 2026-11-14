@@ -43,7 +43,7 @@
     (child 'running) (child 'starting) (child 'waiting-approval)
     (child 'idle :failed t :done-seq 3)
     (child 'idle :turns 1 :done-seq 3 :seen-seq 3)
-    (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval · 1 failed · 2 working"))
+    (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval · 1 failed · 3 threads live"))
     ;; What wants the user first, then what runs, then the rest.
     (should (equal (mapcar (lambda (row) (plist-get row :key)) (romacs-agent-children-rows parent))
                    '(approval failed working working idle)))))
@@ -53,7 +53,7 @@
     (child 'running) (child 'waiting-approval) (child 'idle :failed t :done-seq 3)
     (romacs-agent-ui--summarize-children parent)
     (let ((summary (romacs-agent-children-summary parent)))
-      (should (eq (get-text-property (string-search "working" summary) 'face summary) 'romacs-agent-running))
+      (should (eq (get-text-property (string-search "threads" summary) 'face summary) 'romacs-agent-running))
       (should (eq (get-text-property (string-search "approval" summary) 'face summary) 'romacs-agent-approval))
       (should (eq (get-text-property (string-search "failed" summary) 'face summary) 'romacs-agent-error)))))
 
@@ -222,7 +222,7 @@
       (romacs-agent-ui--summarize-children parent)
       (with-temp-buffer
         (let ((romacs-agent-ui--session parent))
-          (should (string-prefix-p "Workers 1 needs approval · 1 working" (romacs-agent-ui--children-title)))
+          (should (string-prefix-p "Workers 1 needs approval · 2 threads live" (romacs-agent-ui--children-title)))
           (should (string-search "task 1" (romacs-agent-ui--child-label 0)))
           (should (string-search "Needs approval" (romacs-agent-ui--child-label 0)))
           (should-not (romacs-agent-ui--child-label 2))
@@ -377,20 +377,47 @@
     (child 'running) (child 'waiting-approval)
     (let ((romacs-agent-glyphs t))
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
-        (should (equal (romacs-agent-children-tests--summary parent) "✋1 🤖1"))
-        (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent)) "1 needs approval"))
+        (should (equal (romacs-agent-children-tests--summary parent) "✋1 🧵2"))
+        ;; Hovering lists them, what wants the user first.
+        (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent))
+                       "task 2: needs approval\ntask 1: working"))
         (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🤖")))
       ;; Turned off, a summary made before says words at once.
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))
         (romacs-agent-ui--summarize-children parent)
         (customize-set-variable 'romacs-agent-glyphs nil)
-        (should (equal (substring-no-properties (romacs-agent-children-summary parent)) "1 needs approval · 1 working"))
+        (should (equal (substring-no-properties (romacs-agent-children-summary parent)) "1 needs approval · 2 threads live"))
         (customize-set-variable 'romacs-agent-glyphs t))
       ;; A frame that cannot draw them gets the words.
       (cl-letf (((symbol-function 'char-displayable-p) #'ignore))
-        (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval 1 working"))
+        (should (equal (romacs-agent-children-tests--summary parent) "1 needs approval 2 threads live"))
         (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "Working"))))))
+
+(ert-deftest romacs-agent-children-an-old-failure-is-seen-after-a-turn ()
+  ;; Tasks that failed long ago: news while the parent's turn that knew of
+  ;; them runs, seen once its next turn starts.
+  (romacs-agent-children-tests--with
+    (let ((romacs-agent-ui--turn-starts (make-hash-table :test #'eq :weakness 'key))
+          (old (child 'idle :failed t :done-seq 3 :last-time 100.0))
+          (seen nil))
+      (child 'idle :failed t :done-seq 4 :last-time 100.0)
+      (setf (romacs-agent-caught-up parent) t)
+      (cl-letf (((symbol-function 'romacs-agent--manifest-put) #'ignore))
+        (should (equal (romacs-agent-children-tests--summary parent) "2 failed"))
+        (romacs-agent-ui--see-failed-children parent '(:type input :time 200.0))
+        ;; The turn that knew of them runs: still news.
+        (should (equal (romacs-agent-children-tests--summary parent) "2 failed"))
+        ;; A failure during that turn stays news through the next.
+        (setq seen (child 'idle :failed t :done-seq 5 :last-time 250.0))
+        (romacs-agent-ui--see-failed-children parent '(:type input :time 300.0))
+        (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
+        (should-not (romacs-agent-unseen-p old))
+        (should (romacs-agent-unseen-p seen))
+        ;; A copy replaying a parent's journal sees nothing.
+        (setf (romacs-agent-caught-up parent) nil)
+        (romacs-agent-ui--see-failed-children parent '(:type input :time 400.0))
+        (should (romacs-agent-unseen-p seen))))))
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here
