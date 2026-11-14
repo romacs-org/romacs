@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -23,8 +24,10 @@
   ;; until a window shows it, then it has its whole transcript, its draft
   ;; kept below it.
   (let* ((root (make-temp-file "romacs-restored-" t))
+         ;; Its sockets' directory is short: TMPDIR may not be.
+         (run (romacs-test-socket-directory "restored-"))
          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
-                                            (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                            (concat "XDG_RUNTIME_DIR=" run))
                                       process-environment))
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (dir (expand-file-name romacs-agent-restored-chat-tests--id (romacs-agent--state-root)))
@@ -86,6 +89,7 @@
                 (romacs-agent-show session)
                 (should (string-match-p "^! its supervisor never started$" (with-current-buffer again (buffer-string))))
                 (kill-buffer again)))))
-      (delete-directory root t))))
+      (delete-directory root t)
+      (delete-directory run t))))
 
 ;;; romacs-agent-restored-chat-tests.el ends here
