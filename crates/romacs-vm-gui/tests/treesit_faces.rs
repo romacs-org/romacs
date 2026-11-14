@@ -10,6 +10,8 @@
 //! sample run pinned GNU as
 //! `TREESIT_FACES_GRAMMARS=DIR TREESIT_FACES_FILE=sample.EXT emacs -Q --batch
 //! --eval "$(cat faces.form)" > sample.EXT.faces` in that directory.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -43,7 +45,7 @@ impl Drop for Home {
 /// Every per-user directory is HOME's, so no grammar directory or world
 /// cache of the user running the test is read or written.
 fn romacs_runs(sample: &Path, home: &Path) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let output = Command::new(installed::romacs())
         .args(["-Q", "--batch", "--eval", FORM])
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
