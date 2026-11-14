@@ -1651,8 +1651,9 @@ pub struct Vm {
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
-    /// `referrers` lists them again after a collection moved objects; it
-    /// may name dead ones.
+    /// `referrers` first lists them; a collection keeps it, without what
+    /// died and with what moved where it went (`Referrers::forget`,
+    /// `Referrers::forward`). A chain may name a member that left it.
     referrers: Option<buffer::Referrers>,
     /// The slots of the variables each buffer, by its index in `objects`,
     /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
