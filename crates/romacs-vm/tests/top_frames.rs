@@ -179,3 +179,33 @@ fn closing_one_of_two_frames_is_a_delete_frame_event() {
     let mut vm = two_frames(|_, g| vec![(HostEvent::Closed, g)]);
     assert_eq!(eval(&mut vm, "(let ((e (romacs--read-host-event))) (list (car-safe e) (eq (car (car (cdr e))) G)))"), "(delete-frame t)");
 }
+
+/// A focus-in from the host for another frame, then a key from it: the
+/// wait ends on the `switch-frame' the focus queued, which is read before
+/// the key, so the key reaches the frame it was typed in.
+#[test]
+fn a_host_focus_in_is_read_as_a_switch_before_the_next_key() {
+    let mut vm = two_frames(|_, g| vec![(HostEvent::Focus(true), g), (key('a'), g)]);
+    vm.eval_source("(defun handle-focus-in (event) (interactive \"e\") (internal-handle-focus-in event))").unwrap();
+    assert_eq!(eval(&mut vm, "(let* ((e1 (read-event)) (e2 (read-event))) (list (car-safe e1) (eq (car (cdr e1)) G) e2))"), "(switch-frame t 97)");
+}
+
+/// do_switch_frame: selecting another frame from Lisp forgets the last
+/// event's frame, so the next key from the frame typed in brings its
+/// `switch-frame' back.
+#[test]
+fn selecting_a_frame_makes_the_next_key_name_its_own() {
+    let mut vm = two_frames(|f, _| vec![(key('a'), f), (key('b'), f)]);
+    assert_eq!(eval(&mut vm, "(read-event)"), "97");
+    assert_eq!(eval(&mut vm, "(progn (select-frame G) (let* ((e1 (read-event)) (e2 (read-event))) (list (car-safe e1) (eq (car (cdr e1)) F) e2)))"),
+               "(switch-frame t 98)");
+}
+
+/// The key a `switch-frame' went before is pending input until it is read,
+/// though the host has nothing more.
+#[test]
+fn a_key_behind_its_switch_frame_is_pending() {
+    let mut vm = two_frames(|_, g| vec![(key('a'), g)]);
+    assert_eq!(eval(&mut vm, "(let* ((e (read-event)) (p (input-pending-p)) (k (read-event))) (list (car-safe e) p k (input-pending-p)))"),
+               "(switch-frame t 97 nil)");
+}

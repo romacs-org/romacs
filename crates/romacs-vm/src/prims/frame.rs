@@ -740,6 +740,11 @@ defsubr! { name = "romacs--take-unread-switch-frame", gnu = "keyboard.c:2683", e
 fn romacs_take_unread_switch_frame(cx) {
     Ok(cx.windows().take_unread_switch_frame())
 }}
+// Whether read_char's `unread_switch_frame' holds an event.
+defsubr! { name = "romacs--unread-switch-frame-p", gnu = "keyboard.c:2683", effect = Reads,
+fn romacs_unread_switch_frame_p(cx) {
+    Ok(if cx.windows().unread_switch_frame_pending() { Value::TRUE } else { Value::NIL })
+}}
 // read_key_sequence's `delayed_switch_frame', left for read_char.
 defsubr! { name = "romacs--set-unread-switch-frame", gnu = "keyboard.c:11874", effect = Global,
 fn romacs_set_unread_switch_frame(cx, event: Value) {

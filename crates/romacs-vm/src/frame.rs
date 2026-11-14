@@ -304,6 +304,12 @@ impl Vm {
     pub(crate) fn last_event_frame(&self) -> Value {
         self.names.get(LAST_EVENT_FRAME).map(|&i| self.slots[i].value).filter(|&v| v != Value::UNBOUND).unwrap_or(Value::NIL)
     }
+    /// Forget the last event's frame (internal_last_event_frame nil), so the
+    /// next event names its frame anew; `last-event-frame' keeps it.
+    fn forget_last_event_frame(&mut self) {
+        let slot = self.slot(LAST_EVENT_FRAME);
+        self.slots[slot].value = Value::NIL;
+    }
     /// Note FRAME as the last event's, and `last-event-frame' with it.
     fn set_last_event_frame(&mut self, frame: Value) {
         for name in [LAST_EVENT_FRAME, "last-event-frame"] {
@@ -536,8 +542,17 @@ impl Vm {
     }
     /// Select FRAME and its selected window (frame.c do_switch_frame).
     pub(super) fn select_frame_value(&mut self, frame: Value, record: bool) -> Result<()> {
+        let previous = self.frame_value_peek();
         let window = self.frame(frame)?.selected;
         self.select_window_value(window, record)?;
+        // do_switch_frame: the next event makes a `switch-frame' to the
+        // frame it comes from, so typing selecting a frame (`(select-window
+        // (frame-root-window (make-frame)))') did not follow still reaches
+        // the frame typed in; selecting an ancestor of the frame before
+        // keeps it, as typing in a child frame is its root's.
+        if frame != previous && !self.frame_ancestors(previous).contains(&frame) {
+            self.forget_last_event_frame();
+        }
         // do_switch_frame: no frame here is minibuffer-only.
         let slot = self.slot("#:vm2-last-nonminibuffer-frame");
         self.slots[slot].value = frame;
@@ -614,6 +629,10 @@ impl crate::window::Windows<'_> {
     /// Finternal_handle_focus_in for FRAME (frame.rs `Vm::handle_focus_in').
     pub(crate) fn handle_focus_in(&mut self, frame: Value) { self.vm.handle_focus_in(frame) }
     pub(crate) fn take_unread_switch_frame(&mut self) -> Value { self.vm.take_unread_switch_frame() }
+    pub(crate) fn unread_switch_frame_pending(&mut self) -> bool {
+        let slot = self.vm.slot(UNREAD_SWITCH_FRAME);
+        !matches!(self.vm.slots[slot].value, Value::NIL | Value::UNBOUND)
+    }
     pub(crate) fn set_unread_switch_frame(&mut self, event: Value) { self.vm.set_unread_switch_frame(event) }
     /// Whether the host shows top-level frames beyond the first.
     pub(crate) fn host_top_level_frames(&mut self) -> bool {

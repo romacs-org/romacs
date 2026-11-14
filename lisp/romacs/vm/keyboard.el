@@ -344,8 +344,10 @@ all a collection there reclaims."
         (if (> left 0) left t)))))
 
 (defun romacs--unread-p ()
-  "Whether read_char has a requeued event: in any of its unread queues."
-  (or unread-post-input-method-events unread-command-events unread-input-method-events))
+  "Whether read_char has a requeued event: in any of its unread queues, or
+a `switch-frame' a focus change queued (`unread_switch_frame')."
+  (or unread-post-input-method-events unread-command-events unread-input-method-events
+      (romacs--unread-switch-frame-p)))
 
 (defun romacs--unwrap-menu-event (c)
   "read_char's undoing of read_char_x_menu_prompt: (EVENT) is EVENT."
