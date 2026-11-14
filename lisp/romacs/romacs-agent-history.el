@@ -484,6 +484,8 @@ buffer, for SESSION: its end, from a prompt on."
           ;; A result whose call the cut left out shows nothing.
           (unless (gethash (plist-get event :id) started) (setq event nil))))
       (when event (romacs-agent-ui--draw session event (current-buffer))))
+    ;; A transcript is whole: its last steps are done.
+    (romacs-agent-ui--run-settle)
     (romacs-agent-history--keep-facts session facts)))
 
 (defvar-local romacs-agent-history--item nil "The transcript this view shows.")
