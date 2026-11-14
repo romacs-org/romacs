@@ -432,11 +432,23 @@ mod tests {
         assert!(jobs.start(request("true")).is_err());
     }
 
+    /// The process group of a test's job, killed however the test ends, so a
+    /// failing one leaves no sleep behind (the job's leader is its group's
+    /// leader).
+    struct Group(i32);
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            let _ = crate::host::kill(-self.0, libc::SIGKILL);
+        }
+    }
+
     /// Forgetting a job, or dropping its owner, kills its group and reaps
     /// it, without waiting for its end. That is shown by state, not a clock:
-    /// the group's sleep would end itself only long after the hang guard, so a
-    /// reaped leader and a dead descendant are the kill's work. A drop returns
-    /// only once the leader is reaped.
+    /// the group's sleep, and the job's timeout, would end it only long after
+    /// the hang guard, so a reaped leader and a dead descendant within the
+    /// guard are the kill's work, and the calls cannot have waited for the
+    /// job. A drop returns only once the leader is reaped.
     #[test]
     fn forgotten_and_dropped_processes_are_reaped() {
         for drop_owner in [false, true] {
@@ -464,6 +476,7 @@ mod tests {
                 assert!(Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(5));
             };
+            let _group = Group(pids[0]);
             if drop_owner {
                 drop(jobs);
                 let reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
@@ -479,18 +492,17 @@ mod tests {
             } else {
                 jobs.forget(id).unwrap();
             }
+            assert!(Instant::now() < deadline, "forgetting or dropping the job waited for its end");
             loop {
+                let within = Instant::now() < deadline;
                 let leader_reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
                 let descendant_dead = std::fs::read_to_string(format!("/proc/{}/stat", pids[1]))
                     .map(|stat| stat.split_once(") ").unwrap().1.starts_with('Z'))
                     .unwrap_or(true);
+                assert!(within, "owned leader not reaped or group descendant alive");
                 if leader_reaped && descendant_dead {
                     break;
                 }
-                assert!(
-                    Instant::now() < deadline,
-                    "owned leader not reaped or group descendant alive"
-                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             std::fs::remove_dir_all(directory).unwrap();
