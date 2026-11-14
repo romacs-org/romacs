@@ -368,11 +368,7 @@ message's record for TEXT, `interrupted' each interrupted."
       (let ((wake (romacs-agent-tools--wake-parse (car delivered))))
         (should (equal (plist-get wake :reply-to) (plist-get asked :id)))
         (should (equal (plist-get wake :result) "main"))))
-    ;; A prompt into the turn under way changes nothing; the user's own
-    ;; prompt beginning the next answers no message.
-    (romacs-agent-delegate-tests--receive a nil "go on")
-    (should (romacs-agent-answering a))
-    (setf (romacs-agent-completed-seq a) 41)
+    ;; The user's own prompt beginning the next turn answers no message.
     (romacs-agent-delegate-tests--receive a nil "go on")
     (should-not (romacs-agent-answering a))))
 
@@ -502,16 +498,34 @@ message's record for TEXT, `interrupted' each interrupted."
               (should (equal (plist-get input :text) "the interface?"))
               (should (equal (plist-get (car (plist-get input :messages)) :id) (plist-get message :id))))
             (should (romacs-agent-received-message session (plist-get message :id)))
+            (should-not (romacs-agent-incoming session))
+            ;; A launch that failed leaves its messages to no later prompt.
+            (cl-letf (((symbol-function 'romacs-agent--per-turn-p) (lambda (_) t))
+                      ((symbol-function 'romacs-agent--check-config-dir) (lambda (&rest _) (error "No config"))))
+              (should-error (romacs-agent--turn session "lost" nil (list message))))
+            (setq seen nil)
+            (let ((romacs-agent-event-functions (list (lambda (_s event) (push event seen)))))
+              (romacs-agent--record session (romacs-mcp--object "seq" 9 "t" 9.0 "in"
+                                                                (romacs-mcp--object "prompt" "my own\nwords" "images" []))))
+            (let ((input (cl-find 'input seen :key (lambda (e) (plist-get e :type)))))
+              (should (equal (plist-get input :text) "my own\nwords"))
+              (should-not (plist-get input :messages)))
             (should-not (romacs-agent-incoming session))))
       (delete-directory root t))))
 
 (ert-deftest romacs-agent-delegate-a-resumed-run-answers-the-next-message ()
   ;; Resumed: running as its harness starts, no turn under way; the
   ;; message it is sent then begins its turn, and is what it answers.
-  (let ((session (romacs-agent--make :id "x" :harness 'codex :state 'running :input-seq 5 :completed-seq 6))
+  (let ((session (romacs-agent--make :id "x" :harness 'codex :state 'running :input-seq 5 :completed-seq 6 :done-seq 6))
         (message (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead"))))
     (romacs-agent--raise session (list :type 'input :text "go" :messages (list message) :seq 8))
-    (should (equal (romacs-agent-answering session) (plist-get message :id)))))
+    (should (equal (romacs-agent-answering session) (plist-get message :id)))
+    ;; A per-turn harness's run that ended mid-turn: its turn is over, the
+    ;; next message begins another.
+    (setf (romacs-agent-done-seq session) 9)
+    (let ((next (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead"))))
+      (romacs-agent--raise session (list :type 'input :text "again" :messages (list next) :seq 10))
+      (should (equal (romacs-agent-answering session) (plist-get next :id))))))
 
 (ert-deftest romacs-agent-delegate-switch-next-says-who-sent-it ()
   (romacs-agent-delegate-tests--sending parent

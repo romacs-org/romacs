@@ -1343,16 +1343,6 @@ another session in its envelope; a delegated task's results (each with
       (concat text "\n\n" (mapconcat #'romacs-agent--message-reply-line messages "\n"))
     (mapconcat (lambda (m) (romacs-agent--message-envelope m (or (plist-get m :text) text))) messages "\n\n")))
 
-(defun romacs-agent--message-body (envelope)
-  "The text ENVELOPE (`romacs-agent--message-envelope') wraps."
-  (let ((start (1+ (or (string-search "\n" envelope) -1)))
-        (end (let ((at nil) (from 0))
-               (while (setq from (string-search "\n</romacs-message>" envelope from))
-                 (setq at from from (1+ from)))
-               at)))
-    (replace-regexp-in-string "<\\\\/romacs-message" "</romacs-message"
-                              (substring envelope start (or end (length envelope))) t t)))
-
 (defun romacs-agent--stamped (messages text)
   "MESSAGES with their text (TEXT when one has none) and the time now."
   (let ((now (float-time)))
@@ -1426,10 +1416,14 @@ on whatever becomes of this server."
   (when messages
     ;; Its prompt's record is the supervisor's: the messages' go before
     ;; it, read with it (`romacs-agent--record').
-    (let ((messages (romacs-agent--stamped messages text)))
+    ;; Named by its prompt: only that prompt takes them (a launch that
+    ;; failed leaves them to no later one).
+    (let* ((messages (romacs-agent--stamped messages text))
+           (prompt (romacs-agent--messages-text messages text)))
       (romacs-agent--note session (romacs-mcp--object "type" "messages" "text" text
+                                                      "prompt" (secure-hash 'sha1 prompt)
                                                       "messages" (vconcat (mapcar #'romacs-agent--message-json messages))))
-      (setq text (romacs-agent--messages-text messages text))))
+      (setq text prompt)))
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (let ((input (expand-file-name "input" (romacs-agent-dir session)))
         (images (romacs-agent--sendable-images images)))
@@ -1462,7 +1456,7 @@ on whatever becomes of this server."
                 (romacs-agent--mode-seen session (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
     ;; The message a per-turn harness's next prompt is.
-    ('incoming (setf (romacs-agent-incoming session) (list :text (plist-get event :text)
+    ('incoming (setf (romacs-agent-incoming session) (list :text (plist-get event :text) :prompt (plist-get event :prompt)
                                                            :messages (plist-get event :messages))))
     ;; A request: when the prompt cache it wrote expires, or unknown.
     ('cache (setf (romacs-agent-driver-state session)
@@ -1509,10 +1503,9 @@ on whatever becomes of this server."
             ;; answers it (a steer into a running turn does not).
             (let ((messages (plist-get event :messages)))
               (dolist (message messages) (romacs-agent--received session message))
-              (when (and messages (eq messages (plist-get (romacs-agent-incoming session) :messages)))
-                (setf (romacs-agent-incoming session) nil))
-              ;; A turn begun by an earlier prompt and not ended yet: a steer.
-              (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
+              ;; A turn begun by an earlier prompt and not ended yet: a
+              ;; steer.  An exit mid-turn ends it too (its done-seq).
+              (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
                 (setf (romacs-agent-answering session) (plist-get (car messages) :id))))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
@@ -1737,7 +1730,13 @@ answered."
                             ((stringp out) (list (list :type 'unknown :raw out)))
                             ;; A per-turn prompt: the supervisor's own record.
                             ((and (hash-table-p in) (stringp (gethash "prompt" in)))
-                             (let ((incoming (romacs-agent-incoming session)))
+                             (let ((incoming (let ((kept (romacs-agent-incoming session)))
+                                               ;; Its own prompt's only.
+                                               (and kept (equal (plist-get kept :prompt)
+                                                                (secure-hash 'sha1 (gethash "prompt" in)))
+                                                    kept))))
+                               ;; Taken, or left by a launch that failed: done with.
+                               (setf (romacs-agent-incoming session) nil)
                                (list (append (list :type 'input
                                                    ;; Its own text, as the note kept it.
                                                    :text (if incoming (plist-get incoming :text) (gethash "prompt" in))
@@ -1764,7 +1763,7 @@ answered."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
-                               ("messages" (list (list :type 'incoming :text (gethash "text" note)
+                               ("messages" (list (list :type 'incoming :text (gethash "text" note) :prompt (gethash "prompt" note)
                                                        :messages (romacs-agent--messages-of (gethash "messages" note)))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
