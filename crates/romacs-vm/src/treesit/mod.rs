@@ -81,6 +81,7 @@ pub(crate) struct Change {
 /// first, and the text's linecol caches.
 #[derive(Default)]
 pub(crate) struct Registry {
+    // CELL(Plain): Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
@@ -88,6 +89,7 @@ pub(crate) struct Registry {
     /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
     /// parser out of view may never catch up, and one a query runs is not
     /// the frame.
+    // CELL(Plain)
     pub edited: std::cell::Cell<i64>,
 }
 /// A copy of a text (a snapshot or a cloned buffer) has no parsers.
@@ -100,6 +102,13 @@ impl Clone for Registry {
 // capture (`Object::foreign_resource`) and `world_quiescent` an early
 // parse, so a captured registry is empty.
 unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
+// An image holds it empty: nothing to walk.
+impl romacs_snapshot::Schema for Registry {
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 /// The most first parses running at once, whatever a session visits.
 const EARLY_LIMIT: usize = 4;
@@ -146,6 +155,7 @@ pub(crate) struct Early {
     pub language: native::Language,
     pub visible: (i64, i64),
     /// The text's changes since the copy; None past EARLY_CHANGES_LIMIT.
+    // CELL(Plain)
     changes: RefCell<Option<Vec<Change>>>,
     result: mpsc::Receiver<Option<native::Loose>>,
     /// What the thread sent, once `ready' saw it.
@@ -445,7 +455,9 @@ pub(crate) struct Parser {
     pub embed_level: Value,
     pub notifiers: Value,
     pub last_set_ranges: Value,
+    // CELL(Plain)
     pub native: Rc<RefCell<native::Parser>>,
+    // CELL(Plain)
     pub core: Rc<RefCell<Core>>,
     pub timestamp: u64,
     pub deleted: bool,
@@ -520,6 +532,7 @@ impl Compiled {
 #[derive(Clone)]
 pub(crate) struct Task {
     pub values: Vec<Value>,
+    // CELL(Plain)
     pub state: Rc<RefCell<TaskState>>,
 }
 

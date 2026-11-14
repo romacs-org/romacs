@@ -15,8 +15,10 @@
 ;; Until the tree lands, redisplay shows the text plain and keys run: its
 ;; landing brings the faces (`treesit_parse_pending' in display.rs).  What
 ;; runs by itself must not ask for the tree meanwhile, or it waits for the
-;; parse with the keys behind it: `show-paren-mode's idle timer is the one
-;; such asker, and highlights no paren until the tree is there.
+;; parse with the keys behind it.  Two things do: tree-sitter's own
+;; `pre-redisplay-functions' entry, which the frame the landing wakes runs
+;; with every change since, and `show-paren-mode's idle timer, which
+;; highlights no paren until the tree is there.
 
 ;; A typed character does not wait for its parse either.  A frame shows an
 ;; edit of `romacs-treesit-show-before-parse' bytes or fewer as the text
@@ -34,14 +36,7 @@ waits for every parse, as GNU does."
   :type 'integer
   :group 'treesit)
 
-(defconst romacs-treesit--mode-languages
-  '((bash-ts-mode . bash) (c-ts-mode . c) (c++-ts-mode . cpp)
-    (c-or-c++-ts-mode . c) (css-ts-mode . css) (go-ts-mode . go)
-    (js-ts-mode . javascript) (json-ts-mode . json)
-    (mhtml-ts-mode . html) (python-ts-mode . python)
-    (rust-ts-mode . rust) (toml-ts-mode . toml) (tsx-ts-mode . tsx)
-    (typescript-ts-mode . typescript) (yaml-ts-mode . yaml))
-  "The language each tree-sitter mode's primary parser reads.")
+(require 'romacs-treesit-code)    ; `romacs-treesit--mode-languages'
 
 (defconst romacs-treesit--early-minimum 4096
   "The fewest bytes worth a thread: a smaller file parses in less time.")
@@ -79,6 +74,7 @@ A parse no parser came for is abandoned, its thread left to end."
 (when (fboundp 'advice-add)
   (advice-add 'after-find-file :around #'romacs-treesit--visit)
   (with-eval-after-load 'treesit
+    (advice-add 'treesit--pre-redisplay :before-while #'romacs-treesit--no-parse-p)
     (advice-add 'treesit-show-paren-data :before-while #'romacs-treesit--no-parse-p)))
 
 (provide 'romacs-treesit)

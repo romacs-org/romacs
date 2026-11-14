@@ -1,3 +1,5 @@
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 
 const SETUP: &str = r#"
@@ -68,14 +70,12 @@ fn nil_coding_and_utf8_roundtrip_are_real_conversions() {
 
 #[test]
 fn string_coding_matches_pinned_gnu() {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in expressions() {
-        let source = format!("(condition-case e {expression} (error (list 'signal (car e))))");
-        let output = std::process::Command::new(&binary)
-            .args(["-Q", "--batch", "--eval", &format!("(progn {SETUP} (prin1 {source}))")]).output().unwrap();
-        assert!(output.status.success(), "native coding probe failed: {}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
+    let source = |expression: &str| format!("(condition-case e {expression} (error (list 'signal (car e))))");
+    let expressions = expressions();
+    let answers = gnu_batch::outputs(&expressions.iter().map(|e| format!("(progn {SETUP} (prin1 {}))", source(e))).collect::<Vec<_>>());
+    for (expression, expected) in expressions.iter().zip(answers) {
+        let source = source(expression);
         let mut vm = Vm::new();
         vm.eval_source(SETUP).unwrap();
         let actual = vm.eval_source(&source).and_then(|v| v.display());

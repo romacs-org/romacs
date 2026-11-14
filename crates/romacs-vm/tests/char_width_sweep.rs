@@ -8,28 +8,9 @@
 //! is two columns in both.  Surrogates, which a Romacs buffer cannot hold
 //! (DIVERGENCES.md VM2-RAWTEXT1), are left out of the column sweep.
 use romacs_vm::Vm;
-use std::path::Path;
-
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 const SWEEP: &str = r#"(let ((runs (lambda (from to width)
                (let ((out nil) (start from) (last (funcall width from)) (c (1+ from)))
@@ -47,7 +28,6 @@ const SWEEP: &str = r#"(let ((runs (lambda (from to width)
 
 #[test]
 fn every_code_points_width_and_column_match_pinned_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let output = std::process::Command::new(&oracle)
         .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {SWEEP}))")])
@@ -55,7 +35,7 @@ fn every_code_points_width_and_column_match_pinned_gnu() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let gnu = String::from_utf8(output.stdout).unwrap();
     let mine = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = bootstrapped(&root);
+        let mut vm = gnu_lisp(&[]);
         vm.eval_source(&format!("(prin1-to-string {SWEEP})")).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap().unwrap();

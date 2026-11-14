@@ -7,7 +7,7 @@
 //! the walk chose, which VM2's refusal names (GNU settles its EOL variant
 //! while decoding).
 use romacs_vm::Vm;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
 
@@ -63,8 +63,7 @@ fn insert_file_contents_detects_coding_systems_as_gnu() {
         // escape scan; the ISO-2022 detector reads the global variable.
         (DECISION, "esc8", "s7-ss2"),
     ];
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     let failures: Vec<String> = cases.iter()
         .map(|(form, file, priority)| format!("(progn {SYSTEM} {})", form.replace("PRIORITY", priority))
             .replace("FILE", &serde_json::to_string(dir.join(file).to_str().unwrap()).unwrap()))

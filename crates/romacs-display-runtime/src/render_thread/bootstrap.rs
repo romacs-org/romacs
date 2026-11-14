@@ -83,9 +83,7 @@ impl RenderApp {
         }
         let backend_profile =
             super::render_quality::RenderBackendProfile::from_device_type(adapter_info.device_type);
-        if let Some(diagnostics) = &self.comms.paint_diagnostics {
-            diagnostics.publish_adapter(adapter_info.device_type == wgpu::DeviceType::Cpu);
-        }
+        self.comms.send_input(InputEvent::AdapterChosen { software: adapter_info.device_type == wgpu::DeviceType::Cpu });
         tracing::info!(
             "wgpu adapter: {} (vendor={:04x}, device={:04x}, type={:?}, backend={:?})",
             adapter_info.name,
@@ -379,7 +377,6 @@ impl RenderApp {
         // next redisplay walk, video memo IDs remain stable for the restored
         // native sessions, the frame shader/images are re-uploaded, and a
         // full redisplay is forced.
-        self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset = true;
         self.comms.send_input(InputEvent::DisplayReset);
         true
     }

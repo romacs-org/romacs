@@ -2,12 +2,14 @@
 //! pinned GNU's: both run every test and pass it.  Then Romacs's own
 //! answers: a primitive's and a forwarded variable's Rust file, visited in
 //! the tree `ROMACS_SOURCE_DIRECTORY' names, and none when it names none.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 fn batch(binary: &str, dir: &std::path::Path, args: &[&str], source: Option<&str>) -> (Option<i32>, String) {
     let mut command = Command::new(binary);
     command.args(["-Q", "--batch"]).args(args)
-        .current_dir(dir).env("HOME", dir).env("TMPDIR", dir).env("XDG_CACHE_HOME", dir.join("cache")).env("ROMACS_WORLD", "off");
+        .current_dir(dir).env("HOME", dir).env("TMPDIR", dir).env("XDG_CACHE_HOME", dir.join("cache"));
     if let Some(source) = source { command.env("ROMACS_SOURCE_DIRECTORY", source); }
     let output = command.output().unwrap();
     (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned() + &String::from_utf8_lossy(&output.stderr))
@@ -31,7 +33,7 @@ fn definition_files_tests_pass_in_romacs_and_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let dir = scratch("ert");
     let expected = ert(&gnu, &dir);
-    let actual = ert(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir);
+    let actual = ert(installed::romacs(), &dir);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(expected, (Some(0), "Ran 3 tests, 3 results as expected, 0 unexpected".to_owned()));
     assert_eq!(actual, expected);
@@ -46,7 +48,7 @@ fn rust_definitions_name_their_files_and_a_missing_tree_says_so() {
         (find-lisp-object-file-name 'fill-column 'defvar)
         (and (stringp source-directory) (file-directory-p (expand-file-name \"crates/romacs-vm/src/prims\" source-directory)))
         (let ((l (find-function-noselect 'read-string))) (with-current-buffer (car l) (line-number-at-pos (cdr l)))))))";
-    let binary = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let binary = installed::romacs();
     // The tree named explicitly: a gate's mirror of it has no `.git', so
     // the build root alone names none there.
     let tree = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).canonicalize().unwrap();
@@ -70,7 +72,7 @@ fn rust_definitions_name_their_files_and_a_missing_tree_says_so() {
     let relative = format!("(progn (require 'find-func) (find-file {:?}) (prin1 (list (file-name-absolute-p source-directory)
         (let ((l (find-function-noselect 'read-string))) (with-current-buffer (car l) (file-name-nondirectory buffer-file-name))))))", visit.display().to_string());
     let output = Command::new(binary).args(["-Q", "--batch", "--eval", &relative]).current_dir(&tree)
-        .env("HOME", &dir).env("TMPDIR", &dir).env("XDG_CACHE_HOME", dir.join("cache")).env("ROMACS_WORLD", "off")
+        .env("HOME", &dir).env("TMPDIR", &dir).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("ROMACS_SOURCE_DIRECTORY", ".").output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout).into_owned() + &String::from_utf8_lossy(&output.stderr);
     assert!(text.ends_with("(t \"minibuf.rs\")"), "{text}");

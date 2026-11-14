@@ -516,12 +516,26 @@ on once; none while CHILD moves on its own at its usage limit."
   (unless (gethash (romacs-agent-id child) romacs-agent-tools--moving)
     (romacs-agent-tools--hand-on child)))
 
+(defvar romacs-agent-tools--handed (make-hash-table :test #'eq :weakness 'key)
+  "A child to the seq of its last turn end handed to its parent's wake by
+this process.  Its ends stay in it until delivered
+\(`romacs-agent-tools--wanted-p'): a restart before then, its state kept,
+hands them on again.")
+
+(defun romacs-agent-tools--unhanded (child)
+  "CHILD's turn ends not yet handed on by this process, oldest first."
+  (let ((handed (gethash child romacs-agent-tools--handed 0)))
+    (cl-remove-if-not (lambda (end) (> (car end) handed)) (reverse (romacs-agent-ends child)))))
+
 (defun romacs-agent-tools--hand-on (child)
   (let ((parent (romacs-agent-get (plist-get (romacs-agent-options child) :parent)))
-        (ends (reverse (romacs-agent-ends child))))
-    (setf (romacs-agent-ends child) nil)
+        (ends (romacs-agent-tools--unhanded child)))
+    ;; Those delivered or done with are let go.
+    (setf (romacs-agent-ends child)
+          (cl-remove-if-not (lambda (end) (romacs-agent-tools--wanted-p child (car end))) (romacs-agent-ends child)))
     (when parent
       (dolist (end ends)
+        (puthash child (car end) romacs-agent-tools--handed)
         (when (romacs-agent-tools--wanted-p child (car end))
           (if (romacs-agent-tools--wakes-p child end)
               ;; Newest first: an end is added in constant time.
@@ -547,7 +561,7 @@ meanwhile go with it."
 ended without its end handed on yet."
   (cl-some (lambda (child) (and (equal (romacs-agent-tools--wake-rule child) "all")
                                 (or (member (romacs-agent-tools--status child) '("running" "waiting"))
-                                    (romacs-agent-ends child)
+                                    (romacs-agent-tools--unhanded child)
                                     (gethash (romacs-agent-id child) romacs-agent-tools--scheduled))))
            (romacs-agent-children parent)))
 
@@ -597,6 +611,7 @@ its parent again."
   (delete-file (romacs-agent-tools--woken-file child))
   (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
   (remhash (romacs-agent-id child) romacs-agent-tools--answered)
+  (remhash child romacs-agent-tools--handed)
   (when-let* ((parent (plist-get (romacs-agent-options child) :parent)))
     (puthash parent (cl-remove child (gethash parent romacs-agent-tools--pending) :key #'car)
              romacs-agent-tools--pending)))
