@@ -2183,12 +2183,13 @@ however they ended."
 (defun romacs-agent-ui--worker-label (row)
   "Worker ROW in a line: its state, what it is doing and when it last did
 something, its title in the room a menu entry leaves
-\(`keymap-popup--max-description-width')."
+\(`keymap-popup--max-description-width'), cut with the session's
+`truncate-string-ellipsis', so the menu's next column stays put."
   (let* ((key (plist-get row :key))
          (activity (and (eq key 'working) (plist-get row :activity)
                         (truncate-string-to-width
                          (replace-regexp-in-string "\\`mcp__[^_]+\\(?:_[^_]+\\)*__" "" (plist-get row :activity))
-                         14 nil nil "…")))
+                         14 nil nil t)))
          (ago (romacs-agent-ui--ago (plist-get row :time)))
          (tail (mapconcat #'identity
                           (delq nil (list (romacs-agent-ui--label (romacs-agent-ui--state-of key))
@@ -2197,7 +2198,7 @@ something, its title in the room a menu entry leaves
                           " ")))
     (concat (truncate-string-to-width (or (plist-get row :title) "task")
                                       (max 8 (- keymap-popup--max-description-width (string-width tail) 1))
-                                      nil nil "…")
+                                      nil nil t)
             " " tail)))
 
 (defun romacs-agent-ui--open-worker (row)
@@ -2254,7 +2255,7 @@ view."
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
-  "H" ("Go on under another instance…" romacs-agent-chat-handoff)
+  "H" ((lambda () (concat "Go on under another instance" (truncate-string-ellipsis))) romacs-agent-chat-handoff)
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))
