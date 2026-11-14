@@ -30,6 +30,10 @@ class Frames(unittest.TestCase):
         self.assertEqual([(f['rows'], f['scenes']) for f in drawn], [(46, 1), (46, 0), (47, 1)])
         self.assertEqual(r.frames(stderr(frame(), start=False)), [])
 
+    def test_an_earlier_session_in_the_same_stderr_is_not_counted(self):
+        both = stderr(*[frame()] * 30) + stderr(frame(rows=47))
+        self.assertEqual([f['rows'] for f in r.frames(both)], [47])
+
     def test_own_instructions_are_the_ingestion_and_the_draw_less_the_drivers_part(self):
         self.assertEqual((r.own(frame()), r.driver(frame())), (600, 400))
 

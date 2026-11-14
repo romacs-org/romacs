@@ -83,8 +83,9 @@ SCENES = 0.9
 # Pure parts: frames, figures, bars and the table.
 
 def frames(stderr_text):
-    """The `frame-cost' lines of STDERR_TEXT from the steps' start mark on
-    that reached the surface."""
+    """The `frame-cost' lines of STDERR_TEXT that reached the surface, from
+    the last steps' start mark on: a session's stderr is appended to, so an
+    earlier session's frames are never this one's."""
     out, started = [], False
     for line in stderr_text.splitlines():
         if not line.startswith('{'):
@@ -94,7 +95,7 @@ def frames(stderr_text):
         except json.JSONDecodeError:
             continue
         if record.get('stages') == 'start':
-            started = True
+            out, started = [], True
         elif started and record.get('diagnostic') == 'frame-cost' and record.get('result') == 'Submitted':
             out.append(record)
     return out
