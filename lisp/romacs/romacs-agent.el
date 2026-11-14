@@ -2370,9 +2370,16 @@ handoff), each a plist of :provider and :lossless."
 
 (defun romacs-agent--note (session note)
   "Journal NOTE in SESSION's journal, in its place: through its supervisor
-when one runs; with none, the journal is the server's to add to."
+when one runs, attached first when it runs detached (its journal is its
+supervisor's, numbered by it); with none, the journal is the server's to
+add to."
   (let ((connection (romacs-agent-connection session)))
-    (if (romacs-agent--harness-live-p session)
+    (when (and (eq (romacs-agent-state session) 'detached) (not (process-live-p connection))
+               (not (romacs-agent--per-turn-p session))
+               (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
+               (processp (romacs-agent--attach session 0)))
+      (setq connection (romacs-agent-connection session)))
+    (if (process-live-p connection)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
       (let* ((seq (1+ (romacs-agent-seq session)))
              (record (romacs-mcp--object "seq" seq "t" (float-time) "note" note))
