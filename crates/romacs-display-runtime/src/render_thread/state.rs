@@ -847,6 +847,8 @@ pub(super) struct RenderApp {
     pub(super) gpu_startup_cancelled: Arc<std::sync::atomic::AtomicBool>,
     pub(super) startup_error: Option<String>,
     pub(super) startup_commands: std::collections::VecDeque<crate::thread_comm::RenderCommand>,
+    /// GNU's whole-frame opacity controls and native focus: the display's own.
+    pub(super) frame_opacity: crate::thread_comm::FrameOpacityState,
     pub(super) renderer: Option<WgpuRenderer>,
     /// Native decoder workers signal this callback after replacing a latest
     /// frame or publishing control state. Production installs a winit proxy;
@@ -1089,6 +1091,7 @@ impl RenderApp {
             gpu_startup_cancelled: Default::default(),
             startup_error: None,
             startup_commands: Default::default(),
+            frame_opacity: Default::default(),
             menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
             #[cfg(feature = "video")]
