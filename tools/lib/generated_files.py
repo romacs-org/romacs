@@ -19,7 +19,7 @@ import sys
 # Output path -> its generator, where it is made instead.
 OUTPUTS = {
     'assets/fonts/RomacsIcons.ttf': 'crates/romacs-icon-font/build.rs, into its OUT_DIR',
-    'crates/romacs-vm/tests/all/modules.rs': 'crates/romacs-vm-test-modules/build.rs, into its OUT_DIR',
+    'crates/romacs-vm/tests/all/modules.rs': 'crates/romacs-vm-test-build/build.rs, into its OUT_DIR',
 }
 
 

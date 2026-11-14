@@ -3900,7 +3900,7 @@ dependencies = [
  "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
- "romacs-vm-test-modules",
+ "romacs-vm-test-build",
  "ropey",
  "rustc-hash 2.1.3",
  "rustix",
@@ -3950,7 +3950,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-vm-test-modules"
+name = "romacs-vm-test-build"
 version = "0.0.20"
 
 [[package]]

@@ -9,7 +9,7 @@ and runs it instead, and the test `NAME` of `tests/FILE.rs` is `FILE::NAME`
 there. The files stay targets too, so `cargo test --test FILE` builds one alone.
 
 `tests/all` declares the modules when it builds, from the directory's files
-(crates/romacs-vm-test-modules, whose build script watches `tests/`; romacs-vm's
+(crates/romacs-vm-test-build, whose build script watches `tests/`; romacs-vm's
 own would rebuild its library on every edit of a test), so a new test file
 edits no list. This tool reads the same files for the checks.
 
