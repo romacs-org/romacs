@@ -18,11 +18,14 @@ use std::sync::mpsc;
 
 /// The most edits a tree catches up with after its parse; more, and the
 /// parser parses for itself.
+///
+/// A parse that lands behind the text starts again from its tree for as
+/// long as keys come faster than the parser, as an editor that parses off
+/// its main thread does: the text typed meanwhile waits for its faces,
+/// never a key for a parse. Parsing on the evaluator instead costs the
+/// same parse, and blocks every key behind it (a file whose reparse takes
+/// a fifth of a second, typed at forty keys a second).
 const CHANGES_LIMIT: usize = 256;
-/// The most times a parse that landed behind the text starts again before
-/// a frame parses for itself: a run of keys faster than the parser cannot
-/// keep the faces away for ever.
-const RESTART_LIMIT: u8 = 2;
 
 /// One reparse on its thread, and the text's changes since it started.
 pub(crate) struct Ahead {
@@ -131,7 +134,7 @@ impl Vm {
     /// Bring the reparses of BUFFER's text up to the frame about to be
     /// built: with START, one begins for each parser an edit left to
     /// reparse and that has none; one that landed behind the text begins
-    /// again from its tree, a bounded number of times.
+    /// again from its tree.
     pub(crate) fn treesit_run_ahead(&mut self, buffer: Value, start: bool) -> crate::Result<State> {
         let Some(wake) = self.process_jobs.wake() else { return Ok(State::None) };
         let cores = self.treesit_cores(buffer)?;
@@ -146,7 +149,7 @@ impl Vm {
                 Some(true) => {
                     let ahead = core.borrow().ahead.as_ref().map(|ahead| (ahead.changes.is_empty(), ahead.restarts));
                     match ahead {
-                        Some((false, restarts)) if restarts < RESTART_LIMIT => restarts + 1,
+                        Some((false, restarts)) => restarts.saturating_add(1),
                         _ => {
                             if state == State::None { state = State::Landed; }
                             continue;
