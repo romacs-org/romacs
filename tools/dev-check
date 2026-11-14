@@ -7,6 +7,7 @@
               deleted or moved it), with how many recent landings touched it:
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
+  agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
   lint        tools/romacs-lint on the files of lisp/romacs the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
@@ -35,6 +36,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/lib'))
+import agents_md  # noqa: E402
 import generated_files  # noqa: E402
 import test_modules  # noqa: E402
 
@@ -139,6 +141,17 @@ def generated(root):
     found = generated_files.tracked(root)
     findings = [f'{name} is tracked; {generated_files.OUTPUTS[name]} makes it; fix: git rm it' for name in found]
     return ('FAIL', f'{len(found)} generated file(s) tracked', findings) if found else ('ok', 'no generated file is tracked', [])
+
+
+# The AGENTS.md files.
+
+def agents(root):
+    """(STATUS, SUMMARY, FINDINGS): every AGENTS.md names only what the tree has."""
+    found = agents_md.check(root)
+    count = len(agents_md.files(root))
+    if found:
+        return 'FAIL', f'{len(found)} stale line(s) in the AGENTS.md files', found
+    return 'ok', f'{count} AGENTS.md file(s) name nothing missing', []
 
 
 # The lint.
@@ -274,7 +287,8 @@ def main():
     gate = load_gate()
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
-    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('lint', *lint(ROOT, names, trunk, args.binary))]
+    stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
+              ('lint', *lint(ROOT, names, trunk, args.binary))]
     if not args.no_structural:
         stages.append(('structural', *structural(ROOT, gate, names, args.threads)))
     lines, status = report(stages)
