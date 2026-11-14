@@ -287,6 +287,26 @@ what waited for that end goes."
       (romacs-agent-tools--answer child 50)
       (should-not (romacs-agent-ends child)))))
 
+(ert-deftest romacs-agent-lead-quiet-ends-leave-the-pile-untouched ()
+  ;; Behind a parent at work, wanted ends pile up; a quiet one, and a
+  ;; replayed batch of them, go without the pile being walked or copied.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-lead-tests--child lead root)))
+      (setf (romacs-agent-state lead) 'running)
+      (dotimes (i 5) (romacs-agent-lead-tests--end child (+ 3 i) "landed"))
+      (let ((pile (romacs-agent-ends child)))
+        (romacs-agent-lead-tests--end child 20 "[quiet] still")
+        (should (eq (romacs-agent-ends child) pile))
+        (push (list 21 "[quiet] a" nil) (romacs-agent-ends child))
+        (push (list 22 "landed again" nil) (romacs-agent-ends child))
+        (push (list 23 "[quiet] b" nil) (romacs-agent-ends child))
+        (romacs-agent-tools--wake child)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 5 4 3)))
+        (should (eq (cdr (romacs-agent-ends child)) pile))
+        ;; A wait answering one of the pile takes it out alone.
+        (romacs-agent-tools--answer child 5)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))))))
+
 ;;; romacs_task_list
 
 (ert-deftest romacs-agent-lead-list-survives-a-restart ()
