@@ -268,6 +268,11 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     // checked on the way down.
     let dir = host::open_store_dir(store, true)?;
     owned_store(&dir, store, home.as_deref())?;
+    // Marked and read under a lock on the directory itself, released as it
+    // closes: processes that start at once on a new store all find it
+    // empty, and one must make and write the marker before any other reads
+    // it, or the others' exclusive creation of it fails (EEXIST).
+    rustix::fs::flock(&dir, rustix::fs::FlockOperation::LockExclusive)?;
     if host::store_dir_is_empty(dir.as_fd())? {
         return write_marker(&dir);
     }
@@ -1415,6 +1420,22 @@ mod tests {
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Launches that start at once on a new store each find it a store:
+    /// one marks it, the others read its marker once written.
+    #[test]
+    fn a_new_store_opened_at_once_by_many_is_marked_once() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-at-once", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        let start = std::sync::Barrier::new(16);
+        let opened: Vec<std::io::Result<()>> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..16).map(|_| scope.spawn(|| { start.wait(); private_store(&store) })).collect();
+            threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        assert!(opened.iter().all(Result::is_ok), "{opened:?}");
+        assert_eq!(std::fs::read_to_string(store.join(MARKER)).unwrap(), MARKER_TEXT);
+        let _ = std::fs::remove_dir_all(store);
     }
 
     #[test]
