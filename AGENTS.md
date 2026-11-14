@@ -44,10 +44,10 @@ possible; say so where you do.
   libloading for libraries, the tree-sitter crate for parse trees. Keep what
   remains in one small safe wrapper per module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
-  the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
-  each crate's unsafe and undocumented sites to `ledger/unsafe-floors.json`. After
-  deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
-  lowered floors with the change. Raising a floor is a deliberate commit.
+  the keyword, and declares itself there with `UNSAFE(reason)`: the stated
+  reason above. The smells ratchet (below) holds the workspace's undeclared and
+  undocumented sites to the merge-base's; `tools/lib/unsafe_census.py` says
+  what counts.
 - A host query or effect (files, environment, clocks, processes) outside
   `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
   comment lines directly above it; the `host_boundary_lint` test checks each.
@@ -56,26 +56,26 @@ possible; say so where you do.
   into `OUT_DIR` for the binary or a test target to include, Lisp computes it
   as it loads (a world build keys what it read), a check computes its ledger.
   Committed copies conflict on every merge of two branches that each change
-  their sources. Ratchet floors that `lower` writes are deliberate records,
-  not generated output. Recordings of pinned GNU and imports from outside
+  their sources. Recordings of pinned GNU and imports from outside
   sources are not made from the repository: they stay committed, beside
   their recorder. `tools/lib/generated_files.py` (run by
   `tools/check-derived`) fails while git tracks a known generator's output.
 - No test pins a source line number. Name a declaration by its file and a
   form by its text: a line moves whenever anything above it changes.
-- `tools/lib/smells.py` (also run by `tools/check-derived`) counts the other
-  smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines, every
-  rustc and Clippy pedantic warning by lint, the tree's top-level entries, and
-  primitives declared outside `src/prims/` or through lib.rs's own enum. It
-  holds a branch to its merge-base with the trunk (`ROMACS_BASE`, default
-  `beta`): a count above the merge-base's own fails. A drop needs no
-  record, and a branch never lowers a floor. Adding a smell takes raising its
-  floor in `ledger/smell-floors.json` by as much, and a new top-level entry takes
-  listing it there: a deliberate commit with its reason. `smells.py check
-  --absolute` holds the trunk to that file at a checkpoint, where `lower`
-  records the drops. The file merges by its meaning, each side's raise added:
-  `tools/git-setup` installs the merge driver once per repository, and
-  `python3 tools/lib/smells.py resolve` does the same by hand.
+- `tools/lib/smells.py` (also run by `tools/check-derived`) counts the
+  smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines,
+  unsafe sites, every rustc and Clippy pedantic warning by lint, tracked files
+  that say a tool wrote them, and primitives declared outside `src/prims/` or
+  through lib.rs's own enum. It holds the workspace's totals to the merge-base
+  with the trunk (`ROMACS_BASE`, default `beta`), both counted from the trees:
+  a total above the merge-base's fails, a drop needs no record, and nothing
+  is stored. A deliberate new instance is declared where it occurs, and is
+  not counted: `#[expect(lint, reason = "...")]` for a lint or an allow
+  (rustc warns once it no longer fires), `TODO(#N)` naming its tracker issue,
+  `UNSAFE(reason)` beside a SAFETY comment, and
+  `SMELL(long-file|primitive|generated): reason` for the rest. Every
+  top-level entry is named in `ARCHITECTURE.md`'s Top level section, and
+  every workspace member lives under `crates/`.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -142,8 +142,8 @@ possible; say so where you do.
 4. Broaden checks when the change crosses an ownership boundary, affects shared
    runtime behavior, or reveals another failure. GC, evaluation, loading, protocol,
    and lifecycle changes need evidence for the relevant interactions.
-5. Before final verification, inspect the diff, update affected ledgers and
-   floors, pass focused checks, and obtain fresh read-only review for nontrivial
+5. Before final verification, inspect the diff, update affected ledgers,
+   pass focused checks, and obtain fresh read-only review for nontrivial
    changes. Freeze the candidate before running the required full project gate.
 6. Reserve the full gate for the final combined candidate. Rerun affected checks
    after a correction; do not repeatedly gate unchanged inputs or rerun failures
@@ -203,7 +203,7 @@ The other commands:
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The
   gate runs the batch probes (`romacs-vm-gui` test `scaling`).
-- Untracked generated files, source/floor validation and the Python unit tests: `python3 tools/check-derived`.
+- Untracked generated files, source validation, the smells ratchet and the Python unit tests: `python3 tools/check-derived`.
   It runs every tracked `test_*.py`/`*_test.py` that no Rust test owns (`tools/lib/python_tests.py`).
 - Combined verification: `python3 tools/gate focused 'EXPR'`, then
   `python3 tools/gate full` for final acceptance. Inspect `--help` and select

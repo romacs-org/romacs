@@ -18,8 +18,7 @@ A branch that merges the move resolves its conflicts, then runs `move' (for
 files it added under an old tree), then `relink', then `check'.
 
 Transition code: it goes, with its test and its line in check-derived, once
-every branch that predates the move has merged it and the smell floors no
-longer list the old trees.
+every branch that predates the move has merged it.
 """
 from __future__ import annotations
 
@@ -33,10 +32,8 @@ MOVES = (('gnu-lisp', 'lisp/gnu'), ('rlisp', 'lisp/romacs'))
 NEW = dict(MOVES)
 
 # GNU's pinned text and the vendored packages; this tool, its test and the
-# layout test, which hold the old names as data; and the smell floors, which
-# keep the old entries until the trunk lowers them at a checkpoint.
-EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'test/gnu/test/', 'ledger/smell-floors.json',
-          'tools/lib/lisp_tree.py', 'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
+# layout test, which hold the old names as data.
+EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'test/gnu/test/', 'tools/lib/lisp_tree.py', 'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
 
 # An old name standing alone: not inside `--gnu-lisp' or `owned_in_rlisp',
 # nor after a backslash, except a string's `\n' or `\t' (`\rlisp' is `\r'

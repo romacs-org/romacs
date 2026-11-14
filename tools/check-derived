@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The tree's source-derived records and floors, before the expensive gate.
+"""The tree's source-derived records and ratchets, before the expensive gate.
 
 No file a tool of ours makes from the repository's sources is tracked
 (tools/lib/generated_files.py); the ledgers and floors agree with the sources
-they record, and the Python unit tests pass.
+they record, no smell rises above the merge-base's, and the Python unit tests pass.
 """
 import pathlib
 import subprocess
@@ -30,7 +30,7 @@ def main():
     tree = subprocess.run([sys.executable, '-B', 'tools/lib/lisp_tree.py', 'check', str(root)], cwd=root)
     if generated.returncode or tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode or names.returncode or tree.returncode:
         return 1
-    print('check-derived: ok, no generated file is tracked; the Python unit tests pass; lisp/gnu and test/gnu/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the bundled fonts, the bundled grammars\' sources, the unsafe floors, the smell floors, the divergence file names and the Lisp trees\' names verified')
+    print('check-derived: ok, no generated file is tracked; the Python unit tests pass; lisp/gnu and test/gnu/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the bundled fonts, the bundled grammars\' sources, every package denying unsafe_op_in_unsafe_fn, no smell or unsafe site above the merge-base's, the divergence file names and the Lisp trees\' names verified')
     return 0
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""tools/git-setup, on a fixture repository: the merge drivers it installs, and
-the hook that keeps the trunk to the merge queue."""
+"""tools/git-setup, on a fixture repository: the retired merge drivers it
+removes, and the hook that keeps the trunk to the merge queue."""
 import os
 from pathlib import Path
 import shutil
@@ -65,15 +65,17 @@ class GitSetupTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f'git {args} never finished')
 
-    def test_setup_installs_the_floors_merge_drivers_and_drops_the_retired_one(self):
-        git(self.root, 'config', '--local', 'merge.romacs-derived.driver', 'python3 tools/derived driver %A %B')
-        git(self.root, 'config', '--local', 'alias.merge-derived', '!python3 tools/derived merge')
+    def test_setup_removes_the_retired_merge_drivers(self):
+        retired = (('merge.romacs-derived.driver', 'python3 tools/derived driver %A %B'),
+                   ('alias.merge-derived', '!python3 tools/derived merge'),
+                   ('merge.romacs-floors.driver', 'python3 -B tools/lib/smells.py merge %O %A %B'),
+                   ('merge.romacs-unsafe-floors.driver', 'python3 -B tools/lib/unsafe_census.py merge %O %A %B'))
+        for key, value in retired:
+            git(self.root, 'config', '--local', key, value)
         run(self.root, sys.executable, 'tools/git-setup')
-        for key in ('merge.romacs-derived.driver', 'alias.merge-derived'):
+        for key, _ in retired:
             self.assertNotEqual(git(self.root, 'config', '--local', key, check=False).returncode, 0, key)
-        self.assertIn('tools/lib/smells.py merge', git(self.root, 'config', 'merge.romacs-floors.driver').stdout)
-        self.assertIn('tools/lib/unsafe_census.py merge',
-                      git(self.root, 'config', 'merge.romacs-unsafe-floors.driver').stdout)
+        run(self.root, sys.executable, 'tools/git-setup')                 # once more: nothing left to remove
 
     def test_setup_installs_the_hook_that_keeps_the_trunk_to_the_queue(self):
         run(self.root, sys.executable, 'tools/git-setup', 'setup')

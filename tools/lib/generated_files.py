@@ -6,8 +6,9 @@ into OUT_DIR, Lisp computes it as it loads, a check computes its ledger.
 OUTPUTS names each output that once was, or would be, a tracked file, and the
 generator that makes it now; `check` fails while git tracks one. GNU's
 recordings and imports from outside sources are not made from the repository:
-they stay committed with their recorder, and tools/lib/smells.py's `generated`
-list holds every tracked file that says a tool wrote it.
+they stay committed with their recorder, and tools/lib/smells.py holds every
+tracked file that says a tool wrote it to its merge-base's, unless it declares
+itself with `SMELL(generated): reason`.
 
 usage: generated_files.py check [--root ROOT]
 """
