@@ -3,7 +3,7 @@ use romacs_display_protocol::types::{Color, DisplayWindowId, Rect};
 
 use super::super::damage::{self, Indexed, Plan};
 use super::super::reach::Reach;
-use super::{Move, moved_glyph, snapped, whole};
+use super::{Move, moved_glyph, snaps, snapped, whole};
 
 const ROW: f32 = 10.0;
 
@@ -158,4 +158,83 @@ fn a_row_moves_whole_or_not_at_all() {
         regions.iter().any(|r| r.x <= tail.x && r.y <= tail.y && r.x + r.width >= tail.x + tail.width && r.y + r.height >= tail.y + tail.height),
         "the tail is repainted with its head: {regions:?}"
     );
+}
+
+#[test]
+fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
+    // The rows that stay end at x=25; ink reaches 10 past a cell, so the band
+    // copied ends at 35. The row that leaves ends at 31: inside the band, its
+    // ink out to 41 is not.
+    let lines = ["gone!", "abc1", "abc2", "abc3", "abc4", "abc5", "abc6"];
+    let old = Indexed::new(window(&lines, 0, 5));
+    let new = window(&lines, 1, 5);
+    let reach = Reach { right: 10.0, ..Reach::default() };
+    let Plan::Regions { moves, regions, .. } = damage::plan(&old, &new, &damage::runs(&new.glyphs), reach, 1.0) else {
+        panic!("a scroll is a move and regions");
+    };
+    assert_eq!(moves.len(), 1);
+    assert!(regions.iter().any(|r| r.y < ROW && r.y + r.height > 0.0), "where the row that left was: {regions:?}");
+}
+
+#[test]
+fn a_frame_with_panes_moves_nothing() {
+    let mut old = window(&LINES, 0, 5);
+    let mut new = window(&LINES, 1, 5);
+    for frame in [&mut old, &mut new] {
+        frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
+            bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+            radius: 6.0,
+            edge: Some(Color::WHITE),
+            dim: 0.0,
+        });
+    }
+    let plan = plan(&old, &new, 1.0);
+    assert!(!matches!(&plan, Plan::Regions { moves, .. } if !moves.is_empty()), "{plan:?}");
+}
+
+#[test]
+fn a_distance_moves_only_where_it_is_exact_on_the_device() {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    // Rows 9.6000996 tall at 1.25: a hair from twelve device pixels is not
+    // twelve, and a baseline at device 58.500122 snaps to 59 while the
+    // same baseline a row up, at 46.499996, snaps to 46: thirteen apart.
+    let dy = -9.600_099_6;
+    assert!(!whole(dy, 1.25) && whole(-8.0, 1.5));
+    let frame = window(&LINES, 0, 1);
+    let old = frame.glyphs.iter().find(|g| matches!(g, FrameGlyph::Char { .. })).unwrap().clone();
+    let at = |baseline: f32| {
+        let mut glyph = old.clone();
+        if let FrameGlyph::Char { baseline: b, .. } = &mut glyph {
+            *b = baseline;
+        }
+        glyph
+    };
+    let was = 58.500_122 / 1.25;
+    assert!(!snaps(&at(was), &at(was + dy), dy, 1.25));
+    assert!(snaps(&at(10.0), &at(2.0), -8.0, 1.5));
+}
+
+#[test]
+fn rows_alike_but_inside_still_find_a_scroll_of_many_lines() {
+    // Fifteen rows alike at their ends and middles, told apart by one
+    // character each: a scroll of five lines either way is found.
+    let lines: Vec<String> = (0..15).map(|i| format!("a{}m{}z", (b'a' + i) as char, (b'a' + i) as char)).collect();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let lines = &lines[..];
+    let tall = |first| {
+        let mut frame = FrameGlyphBuffer::with_size(100.0, ROW * 11.0);
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, Some(Rect::new(0.0, 0.0, 100.0, ROW * 10.0)));
+        for (row, line) in lines.iter().skip(first).take(10).enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                frame.add_char(ch, 1.0 + 6.0 * col as f32, ROW * row as f32, 6.0, ROW, 8.0, false);
+            }
+        }
+        frame
+    };
+    for (old, new, dy) in [(5, 0, 5.0 * ROW), (0, 5, -5.0 * ROW)] {
+        let Plan::Regions { moves, .. } = plan(&tall(old), &tall(new), 1.0) else {
+            panic!("a scroll is a move");
+        };
+        assert_eq!(moves.iter().map(|m| m.dy).collect::<Vec<_>>(), [dy], "from line {old} to {new}");
+    }
 }

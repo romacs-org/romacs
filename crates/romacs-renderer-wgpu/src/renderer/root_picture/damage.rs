@@ -154,7 +154,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reac
     let moved = moves::find(&sides, &changed, reach, scale);
     let placed = |key: &Key| moved.placed.binary_search(key).is_ok();
     // A changed group the moves place needs no repaint; nor does one of the
-    // old frame inside a band a move overwrites.
+    // old frame whose ink lies inside a band a move overwrites.
     let mut damaged: Vec<Rect> = Vec::new();
     for (key, indices) in after {
         if !same(key) && !placed(key) {
@@ -167,7 +167,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reac
                 indices
                     .iter()
                     .map(|&i| old.runs[i].bounds)
-                    .filter(|bounds| !moved.bands.iter().any(|band| moves::contains(*band, *bounds))),
+                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, reach, new))),
             );
         }
     }

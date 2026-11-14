@@ -63,6 +63,11 @@ const MAX_TRIES: usize = 8;
 /// leaves its cells, SCALE the device pixels per logical one.
 pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32) -> Found {
     let mut found = Found::default();
+    // Panes draw their edges and corners over the rows, fixed where the
+    // rows move: a frame with panes is repainted.
+    if !sides.new.panes.is_empty() || !sides.old.frame.panes.is_empty() {
+        return found;
+    }
     let candidates = distances(sides, changed, scale);
     let mut windows: Vec<i64> = candidates.iter().map(|c| c.0).collect();
     windows.dedup();
@@ -76,7 +81,7 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
                 let mut placed: Vec<Key> = sides
                     .after
                     .keys()
-                    .filter(|key| key.0 == window && moved(sides, **key, dy, reach))
+                    .filter(|key| key.0 == window && moved(sides, **key, dy, reach, scale))
                     .copied()
                     .collect();
                 placed.sort_unstable();
@@ -195,30 +200,27 @@ fn distances(sides: &Sides<'_>, changed: &[Key], scale: f32) -> Vec<(i64, f32)> 
     ranked.into_iter().map(|(window, _, dy)| (window, dy)).collect()
 }
 
-/// Whether DY logical pixels are a whole number of device pixels at SCALE.
+/// Whether DY logical pixels are a whole number of device pixels at SCALE,
+/// exactly.
 fn whole(dy: f32, scale: f32) -> bool {
     let device = dy * scale;
-    (device - device.round()).abs() < 1e-3
+    device.to_bits() == device.round().to_bits()
 }
 
 /// A hash of the glyphs at AT of FRAME's RUNS that leaves their y out: of
-/// how many there are and of the first, the middle and the last.
+/// where they start and of each one's kind, character and face.
 fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
     let mut hasher = FxHasher::default();
-    let glyphs = || at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
-    let count: usize = at.iter().map(|&i| runs[i].glyphs.len()).sum();
-    count.hash(&mut hasher);
-    // Its count, its ends and its middle: what tells most rows apart, and
-    // costs the same however long the row; `moved` checks every glyph.
-    for glyph in [glyphs().next(), glyphs().nth(count / 2), glyphs().last()].into_iter().flatten() {
-        std::mem::discriminant(glyph).hash(&mut hasher);
-        if let FrameGlyph::Char { char, face_id, .. } = glyph {
-            char.hash(&mut hasher);
-            face_id.get().hash(&mut hasher);
-        }
-        if let Some(bounds) = glyph.geometry() {
-            bounds.x.to_bits().hash(&mut hasher);
-            bounds.width.to_bits().hash(&mut hasher);
+    let mut glyphs = at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
+    // Where it starts, then every glyph's kind and character: rows that
+    // sign alike are alike in text, and `moved` checks every field.
+    if let Some(bounds) = glyphs.clone().next().and_then(FrameGlyph::geometry) {
+        bounds.x.to_bits().hash(&mut hasher);
+    }
+    for glyph in &mut glyphs {
+        match glyph {
+            FrameGlyph::Char { char, face_id, .. } => (u32::from(*char), face_id.get()).hash(&mut hasher),
+            _ => std::mem::discriminant(glyph).hash(&mut hasher),
         }
     }
     hasher.finish()
@@ -228,7 +230,7 @@ fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
 /// moved: glyph for glyph equal but for y, each clear of its clip's top and
 /// bottom in both places (its sides cut it alike in either) and of any
 /// gradient.
-fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
+fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach, scale: f32) -> bool {
     let source = (key.0, (f32::from_bits(key.1) - dy).to_bits(), key.2);
     let (Some(was), Some(is)) = (sides.before.get(&source), sides.after.get(&key)) else {
         return false;
@@ -251,9 +253,21 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
     loop {
         match (olds.next(), news.next()) {
             (None, None) => return true,
-            (Some(old), Some(new)) if clear(new) && moved_glyph(old, new, dy) => {}
+            (Some(old), Some(new)) if clear(new) && moved_glyph(old, new, dy) && snaps(old, new, dy, scale) => {}
             _ => return false,
         }
+    }
+}
+
+/// Whether a character NEW, OLD moved DY down, lands DY lower in device
+/// pixels at SCALE: the text pass snaps a baseline to whole device pixels,
+/// and the snapped place of a moved one can round apart from the distance.
+fn snaps(old: &FrameGlyph, new: &FrameGlyph, dy: f32, scale: f32) -> bool {
+    match (old, new) {
+        (FrameGlyph::Char { baseline: was, .. }, FrameGlyph::Char { baseline: is, .. }) => {
+            ((*is * scale).round() - (*was * scale).round()).to_bits() == (dy * scale).to_bits()
+        }
+        _ => true,
     }
 }
 
@@ -422,6 +436,13 @@ fn intersection(a: Rect, b: Rect) -> Option<Rect> {
     (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
 }
 
+/// Whether BAND holds the ink of a group with BOUNDS, ink reaching REACH
+/// past it, on FRAME: ink past the frame's edges is never drawn.
+pub(crate) fn holds_ink(band: Rect, bounds: Rect, reach: Reach, frame: &FrameGlyphBuffer) -> bool {
+    intersection(reach.grow(bounds), Rect::new(0.0, 0.0, frame.width, frame.height))
+        .is_none_or(|ink| contains(band, ink))
+}
+
 /// Whether OUTER holds INNER.
 pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
     outer.x <= inner.x
@@ -435,15 +456,7 @@ pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
 fn snapped(rect: Rect, scale: f32) -> Option<Rect> {
     let snap = |v: f32, up: bool| {
         let device = v * scale;
-        let near = device.round();
-        let device = if (device - near).abs() < 1e-3 {
-            near
-        } else if up {
-            device.ceil()
-        } else {
-            device.floor()
-        };
-        device / scale
+        (if up { device.ceil() } else { device.floor() }) / scale
     };
     let (x0, x1) = (snap(rect.x, false), snap(rect.x + rect.width, true));
     let (y0, y1) = (snap(rect.y, true), snap(rect.y + rect.height, false));
