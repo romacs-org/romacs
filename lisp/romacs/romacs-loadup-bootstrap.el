@@ -130,6 +130,8 @@ and the reader use by default.")
 (with-eval-after-load 'nnheader (require 'romacs-nnheader))
 ;; json.el's reader through the native parser (DIVERGENCES LISP-JSON-READ).
 (romacs-follow-gnu-file 'json "romacs-json")
+;; treesit.el's font-lock loop, run natively (LISP-TREESIT-FONTIFY).
+(romacs-follow-gnu-file 'treesit "romacs-treesit-font-lock")
 (load "simple.el" nil t t)
 ;; The region is drawn natively (`snapshot_region'): no overlay for it.
 (setq redisplay-highlight-region-function #'romacs--native-region)

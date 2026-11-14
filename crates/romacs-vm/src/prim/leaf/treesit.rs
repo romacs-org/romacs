@@ -1180,6 +1180,8 @@ enum Verdict {
 // The task values of treesit-query-capture.
 const CAPTURE_PARSER: usize = 0;
 const CAPTURE_FN: usize = 1;
+/// A fontify task's override (`romacs--treesit-fontify`).
+const CAPTURE_OVERRIDE: usize = 2;
 const CAPTURE_FLAGS: usize = 3;
 
 // treesit-query-capture.
@@ -1193,6 +1195,43 @@ impl Leaf<'_> {
     /// treesit-query-capture on the up-to-date NODE, until its first
     /// `#pred?' call.
     pub(crate) fn ts_capture(&mut self, node: Value, query: Value, beg: Value, end: Value, node_only: Value, grouped: Value) -> R<Next> {
+        let flags = i64::from(node_only != Value::NIL) | i64::from(grouped != Value::NIL) << 1;
+        self.ts_capture_with(node, query, beg, end, flags, None)
+    }
+    /// `romacs--treesit-fontify`: NODE's captures by QUERY between BEG and
+    /// END, as `treesit-query-capture` finds them, its predicates run; done
+    /// with the task itself, whose captures `ts_fontify_next` hands out in
+    /// order for faces between START and END with OVERRIDE.
+    pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), overriding: Value) -> R<Next> {
+        let fontify = ts::Fontify { start: region.0, end: region.1, next: (0, 0) };
+        self.ts_capture_with(node, query, beg, end, 0, Some((fontify, overriding)))
+    }
+    /// The next capture of a finished fontify TASK, as (name, node), and
+    /// the region its faces go in; None when all are applied.
+    pub(crate) fn ts_fontify_next(&mut self, task: Value) -> Option<(Value, Value, i64, i64)> {
+        let (pair, start, end) = {
+            let mut s = self.ts_capture_state(task);
+            let f = s.fontify.as_ref().expect("a fontify task");
+            let (start, end, (mut at, mut pair)) = (f.start, f.end, f.next);
+            let found = loop {
+                let Some(&passed) = s.passed.get(at) else { break None };
+                let (_, first, count) = s.matches[passed];
+                if pair < count {
+                    break Some(first + 2 * pair);
+                }
+                (at, pair) = (at + 1, 0);
+            };
+            s.fontify.as_mut().expect("a fontify task").next = (at, pair + 1);
+            (found?, start, end)
+        };
+        let values = &self.ts_task(task).values;
+        Some((values[pair], values[pair + 1], start, end))
+    }
+    /// The override a fontify TASK applies its faces with.
+    pub(crate) fn ts_fontify_override(&self, task: Value) -> Value {
+        self.ts_task(task).values[CAPTURE_OVERRIDE]
+    }
+    fn ts_capture_with(&mut self, node: Value, query: Value, beg: Value, end: Value, flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let n = self.ts_check_node(node)?;
         let (buffer, visible_beg) = self.ts_node_buffer(&n);
         let beg = if beg == Value::NIL { None } else { Some(self.ts_position(beg, buffer)?) };
@@ -1215,7 +1254,8 @@ impl Leaf<'_> {
         };
         let found = compiled.query.matches(n.node, range);
         let mut names: Vec<Option<Value>> = Vec::new();
-        let mut values = vec![n.parser, Value::NIL, Value::NIL, fixnum(i64::from(node_only != Value::NIL) | i64::from(grouped != Value::NIL) << 1)];
+        let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
+        let mut values = vec![n.parser, Value::NIL, overriding, fixnum(flags)];
         let mut matches = Vec::with_capacity(found.len());
         for m in found {
             let start = values.len();
@@ -1238,7 +1278,7 @@ impl Leaf<'_> {
             matches.push((m.pattern, start, m.captures.len()));
         }
         let timestamp = self.ts_parser(n.parser)?.timestamp;
-        let state = ts::Capture { compiled, matches, at: 0, predicate: 0, passed: Vec::new(), timestamp };
+        let state = ts::Capture { compiled, matches, at: 0, predicate: 0, passed: Vec::new(), timestamp, fontify };
         let task = self.ts_allocate(ts::Object::Task(ts::Task { values, state: Rc::new(RefCell::new(ts::TaskState::Capture(state))) }));
         self.ts_capture_run(task)
     }
@@ -1426,6 +1466,9 @@ impl Leaf<'_> {
         }
     }
     fn ts_capture_finish(&mut self, task: Value) -> R<Next> {
+        if self.ts_capture_state(task).fontify.is_some() {
+            return Ok(Next::Done(task));
+        }
         let flags = self.ts_task(task).values[CAPTURE_FLAGS].integer_value().unwrap_or(0);
         let (node_only, grouped) = (flags & 1 != 0, flags & 2 != 0);
         let (matches, passed) = {

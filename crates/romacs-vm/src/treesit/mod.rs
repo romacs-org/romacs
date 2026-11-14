@@ -543,6 +543,17 @@ pub(crate) struct Capture {
     /// Indices into MATCHES of the matches that passed.
     pub passed: Vec<usize>,
     pub timestamp: u64,
+    /// For `romacs--treesit-fontify`: the region the faces go in, and the
+    /// next capture to apply once the predicates have run, as (index into
+    /// PASSED, capture of that match).
+    pub fontify: Option<Fontify>,
+}
+
+/// The faces part of a capture task (`romacs--treesit-fontify`).
+pub(crate) struct Fontify {
+    pub start: i64,
+    pub end: i64,
+    pub next: (usize, usize),
 }
 
 /// A walk of a tree (search, sparse tree, match) between predicate calls:
