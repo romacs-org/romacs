@@ -125,19 +125,21 @@ fn an_underlined_run_keeps_its_first_glyph_s_underline() {
     let metric = |offset| UnderlinePosition::FontMetric { offset_from_baseline: offset };
     let geometry = |top_y| move || UnderlineGeometry { top_y, thickness: 1.0 };
     let mut run = UnderlineRun::default();
-    assert_eq!(run.geometry(0.0, 10.0, 8.0, metric(1), false, geometry(20.0)).top_y, 20.0);
+    assert_eq!(run.geometry((1, 0.0, 10.0, 8.0), metric(1), false, geometry(20.0)).top_y, 20.0);
     // Another font's metric rule, continuing: the run's line.
-    assert_eq!(run.geometry(8.0, 10.0, 8.0, metric(3), false, geometry(24.0)).top_y, 20.0);
+    assert_eq!(run.geometry((1, 8.0, 10.0, 8.0), metric(3), false, geometry(24.0)).top_y, 20.0);
     // A descent-line rule: its own.
     let at_descent = |pixels_above| UnderlinePosition::DescentLine { pixels_above };
-    assert_eq!(run.geometry(16.0, 10.0, 8.0, at_descent(0), false, geometry(26.0)).top_y, 26.0);
-    assert_eq!(run.geometry(24.0, 10.0, 8.0, at_descent(3), false, geometry(23.0)).top_y, 23.0);
+    assert_eq!(run.geometry((1, 16.0, 10.0, 8.0), at_descent(0), false, geometry(26.0)).top_y, 26.0);
+    assert_eq!(run.geometry((1, 24.0, 10.0, 8.0), at_descent(3), false, geometry(23.0)).top_y, 23.0);
     // A gap, then another row.
-    assert_eq!(run.geometry(40.0, 10.0, 8.0, at_descent(3), false, geometry(22.0)).top_y, 22.0);
-    assert_eq!(run.geometry(48.0, 40.0, 8.0, at_descent(3), false, geometry(52.0)).top_y, 52.0);
+    assert_eq!(run.geometry((1, 40.0, 10.0, 8.0), at_descent(3), false, geometry(22.0)).top_y, 22.0);
+    assert_eq!(run.geometry((1, 48.0, 40.0, 8.0), at_descent(3), false, geometry(52.0)).top_y, 52.0);
     run.end();
-    assert_eq!(run.geometry(56.0, 40.0, 8.0, at_descent(3), false, geometry(50.0)).top_y, 50.0);
+    assert_eq!(run.geometry((1, 56.0, 40.0, 8.0), at_descent(3), false, geometry(50.0)).top_y, 50.0);
     // A wave after a line keeps its own, and the line after it its own.
-    assert_eq!(run.geometry(64.0, 40.0, 8.0, at_descent(3), true, geometry(47.0)).top_y, 47.0);
-    assert_eq!(run.geometry(72.0, 40.0, 8.0, at_descent(3), false, geometry(51.0)).top_y, 51.0);
+    assert_eq!(run.geometry((1, 64.0, 40.0, 8.0), at_descent(3), true, geometry(47.0)).top_y, 47.0);
+    assert_eq!(run.geometry((1, 72.0, 40.0, 8.0), at_descent(3), false, geometry(51.0)).top_y, 51.0);
+    // Another window's glyph beside it, under the same rule: its own.
+    assert_eq!(run.geometry((2, 80.0, 40.0, 8.0), at_descent(3), false, geometry(49.0)).top_y, 49.0);
 }
