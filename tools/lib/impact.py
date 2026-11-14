@@ -129,7 +129,7 @@ def test_file(binary):
     alone = f'binary_id({binary})'
     if package not in test_modules.PACKAGES:
         return alone
-    folded = ' | '.join(f'binary_id({package}::{target})' for target in (test_modules.ALL, test_modules.GNU))
+    folded = ' | '.join(f'binary_id({package}::{target})' for target in test_modules.FOLDED[package])
     return f'{alone} | (({folded}) & test(/^{file}::/))'
 
 
