@@ -623,6 +623,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         exit (what an installer runs); before --batch, the
                         batch world alone (an installation's, in
                         --world-store EXECUTABLE.worlds)
+  --world-census        print what the base world of a live --loadup launch
+                        holds, kind by kind (JSON), reading the store only
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
@@ -712,10 +714,12 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let mut world_store = None;
     let mut world_reset = None;
     let mut world_build = false;
+    let mut world_census = false;
     let mut init_layer = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-build" => world_build = true,
+            "--world-census" => world_census = true,
             // The server a client started (client.rs): no window until a client asks.
             // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
             "--serve" => {
@@ -832,6 +836,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let mut phases = trace_latency.then(startup::Phases::from_exec);
     if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
+    // --world-census: what the base world of this launch holds, kind by
+    // kind, as JSON on standard output; the store is only read.
+    if world_census {
+        if !(live && launch == startup::Launch::Loadup) { return Err("--world-census needs a live --loadup launch".into()); }
+        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+        println!("{}", world::census(&store, width, height, floor)?);
+        return Ok(None);
+    }
     // --world-build: the world this launch would boot from, made usable
     // (built here, or waited for), with no window, and a batch session's
     // beside it (batch.rs); then exit. What an installer runs so a user's

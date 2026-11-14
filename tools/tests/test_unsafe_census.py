@@ -124,6 +124,13 @@ class LintRuleTest(unittest.TestCase):
         (self.root / 'a/src/lib.rs').write_text('#![allow(unsafe_op_in_unsafe_fn)]\n')
         self.assertEqual(self.problems(), ['a does not deny unsafe_op_in_unsafe_fn; deny it'])
 
+    def test_an_upstream_package_under_vendor_is_not_ours_to_count(self):
+        self.crate('crates/vendor/up', '')
+        (self.root / 'crates/vendor/up/src/lib.rs').write_text('pub fn f() { unsafe { g() } }\n')
+        self.assertNotIn('crates/vendor/up', unsafe_census.packages(self.root))
+        self.assertNotIn('up', unsafe_census.census(self.root))
+        self.assertEqual(self.problems(), [])
+
     def test_the_tree_keeps_the_rule(self):
         self.assertEqual(unsafe_census.lint_problems(ROOT, unsafe_census.census(ROOT)), [])
 
