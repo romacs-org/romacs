@@ -581,6 +581,8 @@ already that wide is left alone."
 shown it: the journal's replay and the live records meet without a gap
 or a repeat."
   (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer))
+              ;; Not yet filled: its replay will draw it.
+              ((not (buffer-local-value 'romacs-agent-ui--unfilled buffer)))
               ((> (or (plist-get event :seq) 0) (buffer-local-value 'romacs-agent-ui--shown buffer))))
     (with-current-buffer buffer
       (when (plist-get event :last) (setq romacs-agent-ui--shown (plist-get event :seq)))
@@ -1449,45 +1451,75 @@ The transcript is read-only, its keys its own:
   (add-hook 'window-buffer-change-functions #'romacs-agent-ui--shown-again nil t))
 
 (defun romacs-agent-ui--shown-again (&optional window)
-  "WINDOW shows this chat again: rules drawn while it was hidden fit it,
+  "WINDOW shows this chat again: one made without its transcript gets it
+\(`romacs-agent-ui--fill'), seen; rules drawn while it was hidden fit it,
 and a running turn's live rule ticks."
   (with-current-buffer (if (window-live-p window) (window-buffer window) (current-buffer))
+    (when (and romacs-agent-ui--unfilled romacs-agent-ui--session)
+      (romacs-agent-ui--fill (current-buffer))
+      (when (window-live-p window) (set-window-point window (point-max)))
+      (romacs-agent-mark-seen romacs-agent-ui--session)
+      (romacs-agent-ui--batch))
     (romacs-agent-ui--refit-rules)
     (when (and romacs-agent-ui--session
                (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
       (romacs-agent-ui--composer-update)
       (romacs-agent-ui--tick-start))))
 
+(defvar-local romacs-agent-ui--unfilled nil
+  "Non-nil in a chat made without its transcript (one a restart brings
+back): its journal is replayed the first time a window shows it, and no
+event is drawn in it before.")
+
+(defun romacs-agent-ui--make-chat (session)
+  "SESSION's chat buffer, made empty: its composer, no transcript yet
+\(`romacs-agent-ui--fill')."
+  (romacs-agent-ui--helpers)
+  ;; The session's own buffer: never found by its title, which another
+  ;; session may share.
+  (let ((buffer (generate-new-buffer (format "*agent: %s*" (romacs-agent-title session)))))
+    (setf (romacs-agent-buffer session) buffer)
+    (with-current-buffer buffer
+      (romacs-agent-chat-mode)
+      (setq romacs-agent-ui--session session romacs-agent-ui--unfilled t
+            romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+            romacs-agent-ui--tasks (make-hash-table :test #'equal)
+            romacs-agent-ui--messages (make-hash-table :test #'equal))
+      (let ((inhibit-read-only t)) (erase-buffer))
+      (setq romacs-agent-ui--end (point-marker))
+      (set-marker-insertion-type romacs-agent-ui--end nil)
+      (setq romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
+      ;; Its window is laid out with the header it will have.
+      (romacs-agent-ui--header-show))
+    buffer))
+
+(defun romacs-agent-ui--fill (buffer)
+  "Replay BUFFER's session's journal into it, unless done already."
+  (with-current-buffer buffer
+    (when romacs-agent-ui--unfilled
+      (setq romacs-agent-ui--unfilled nil)
+      (romacs-agent-ui--replay romacs-agent-ui--session)
+      ;; What its journal does not hold, said while it was not shown: its
+      ;; supervisor never coming up.
+      (when (eq (romacs-agent-state romacs-agent-ui--session) 'unstarted)
+        (romacs-agent-ui--render romacs-agent-ui--session
+                                 (list :type 'unstarted :seq (romacs-agent-done-seq romacs-agent-ui--session) :last t
+                                       :text (romacs-agent-reply romacs-agent-ui--session))))
+      (romacs-agent-ui--composer-update)
+      (romacs-agent-ui--summarize-children romacs-agent-ui--session)
+      ;; What the replay drew, seen here, and the rows just made: its
+      ;; events went to the replay alone.
+      (romacs-agent-ui--header-show))))
+
 (defun romacs-agent-show (session)
   "Show SESSION's chat buffer, made from its journal when new."
   (romacs-agent-ui--helpers)
   (let ((buffer (romacs-agent-buffer session)))
-    (unless (buffer-live-p buffer)
-      ;; The session's own buffer: never found by its title, which another
-      ;; session may share.
-      (setq buffer (generate-new-buffer (format "*agent: %s*" (romacs-agent-title session))))
-      (setf (romacs-agent-buffer session) buffer)
-      (with-current-buffer buffer
-        (romacs-agent-chat-mode)
-        (setq romacs-agent-ui--session session
-              romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-              romacs-agent-ui--tasks (make-hash-table :test #'equal)
-              romacs-agent-ui--messages (make-hash-table :test #'equal))
-        (let ((inhibit-read-only t)) (erase-buffer))
-        (setq romacs-agent-ui--end (point-marker))
-        (set-marker-insertion-type romacs-agent-ui--end nil)
-        (setq romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
-        ;; Its window is laid out with the header it will have.
-        (romacs-agent-ui--header-show))
-      ;; Shown first: its rules fit its window.
+    (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
+    ;; Shown first: its rules fit its window.
+    (when (buffer-local-value 'romacs-agent-ui--unfilled buffer)
       (pop-to-buffer buffer)
-      (with-current-buffer buffer
-        (romacs-agent-ui--replay session)
-        (romacs-agent-ui--composer-update)
-        (romacs-agent-ui--summarize-children session)
-        ;; What the replay drew, seen here, and the rows just made: its
-        ;; events went to the replay alone.
-        (romacs-agent-ui--header-show)))
+      (romacs-agent-ui--fill buffer))
     (pop-to-buffer buffer)
     (goto-char (point-max))
     ;; The replay carried the window's start along with the transcript's
@@ -1513,11 +1545,14 @@ and a running turn's live rule ticks."
         :images romacs-agent-ui--draft-images))
 
 (defun romacs-agent-ui-desktop-restore (_file _name misc)
-  "The chat of MISC's session, made anew from its journal, with its draft."
+  "The chat of MISC's session with its draft, its transcript replayed from
+its journal the first time a window shows it: a start brings back every
+chat that was open, and reads no journal for one not looked at."
   (let ((id (plist-get misc :session)))
     (unless (romacs-agent-get id) (romacs-agent-restore))
     (when-let* ((session (romacs-agent-get id))
-                (buffer (save-window-excursion (romacs-agent-show session))))
+                (buffer (let ((live (romacs-agent-buffer session)))
+                          (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer
         (romacs-agent-ui--set-draft-parts (or (plist-get misc :draft) "") (plist-get misc :images)))
       buffer)))
