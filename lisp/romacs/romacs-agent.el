@@ -494,13 +494,20 @@ connection, is answered on catching up."
 (defun romacs-agent--runtime-root ()
   (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR") (format "/tmp/romacs%d" (user-uid)))))
 
-(defun romacs-agent--short (id) (substring id 0 8))
+(defun romacs-agent--short (id) (substring id 0 (min 8 (length id))))
 
 (defun romacs-agent--key (id)
   "ID's name for its supervisor's socket directory and unit: its short
 form, readable, and a digest of all of it, since ids made close together
 \(Codex's time-ordered threads) share their first characters."
   (concat (romacs-agent--short id) "-" (substring (secure-hash 'sha256 id) 0 8)))
+
+(defun romacs-agent--host-socket (id)
+  "Where the supervisor of session ID listens: under this process's
+runtime directory, named by ID alone.  Never read from a record: a copy
+of the state under another runtime directory reaches no supervisor
+outside it."
+  (expand-file-name (concat (romacs-agent--key id) "/host.sock") (romacs-agent--runtime-root)))
 
 (defun romacs-agent--program (name)
   "Romacs's own program NAME, beside the running binary, else on PATH,
@@ -1647,11 +1654,16 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                                        :prompt (gethash "prompt" note) :files (eq (gethash "files" note) t)))))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
-          (while events
-            (romacs-agent--raise session (append (car events) (list :seq seq :last (null (cdr events))
-                                                                    :time (gethash "t" record))))
-            (setq events (cdr events)))
-          (when (romacs-agent-caught-up session) (romacs-agent--step session)))))))
+          (let ((ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
+            (while events
+              (romacs-agent--raise session (append (car events) (list :seq seq :last (null (cdr events))
+                                                                      :time (gethash "t" record))))
+              (setq events (cdr events)))
+            (when (romacs-agent-caught-up session)
+              ;; A turn or a run ended: its state is kept, as of the last
+              ;; record handled before the editor is idle.
+              (when (or ends (assq session romacs-agent--keeping)) (romacs-agent--keep-soon session))
+              (romacs-agent--step session))))))))
 
 (defun romacs-agent--step-id (object)
   "What names a driver line written, to know its echo by: its request id
@@ -1820,6 +1832,7 @@ byte FROM (a record's start) when given."
                    (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
+                 (romacs-agent--keep-soon session)
                  (romacs-agent--seen-caught-up session)
                  (romacs-agent--allow-tool-calls session)
                  (romacs-agent--step session)
@@ -2494,6 +2507,8 @@ waiting."
                        "switch" (romacs-agent--switch-object session)
                        "seenSeq" (or (romacs-agent-seen-seq session) :null)
                        "settledSeq" (or (romacs-agent-settled-seq session) :null)
+                       ;; Read by builds before `romacs-agent--host-socket', a
+                       ;; rollback to one among them.
                        "hostSocket" (romacs-agent-host-socket session))))
 
 (defconst romacs-agent--option-keys
@@ -2700,8 +2715,7 @@ known, with its private directory."
   (let* ((id (plist-get fields :id))
          (session (apply #'romacs-agent--make
                          :dir (expand-file-name id (romacs-agent--state-root))
-                         :host-socket (expand-file-name (concat (romacs-agent--key id) "/host.sock")
-                                                        (romacs-agent--runtime-root))
+                         :host-socket (romacs-agent--host-socket id)
                          fields)))
     (make-directory (romacs-agent-dir session) t)
     (set-file-modes (romacs-agent-dir session) #o700)
@@ -3032,6 +3046,168 @@ neither callback runs after it."
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent--ask-event)
 
+;;; A session's state, kept
+
+;; A server restoring a session reads its journal only after the state
+;; it kept: what the journal's records had folded the session into, as of
+;; one of them (state.eld in its directory).  It is written once the editor
+;; is idle after a record ending a turn or a run where its records are the
+;; live ones, and after a restore or an attachment has caught up with the
+;; journal: a record is handled whole before any timer runs, so the state
+;; then is the fold of every record up to its seq.  A
+;; restore takes it back when this build defines the session record as it
+;; was written, and when the journal still holds the record it ends at;
+;; else the whole journal is read, as before there was one.  Its manifest
+;; keeps what is not folded from records, and this process what is its own.
+
+(defconst romacs-agent--unkept
+  '(;; Its manifest's, read from it.
+    id harness provider config-dir cwd dir host-socket unit title title-auto options
+    seen-seq settled-seq imported cancelled pending-selection journal-start
+    ;; This process's own: its connection, its views, what it sends.
+    connection buffer driver queue queue-tail queue-length dispatch caught-up
+    startup-pending models-request requests children-rows children-summary)
+  "The fields of a session its kept state leaves out (`romacs-agent--keep').
+The others are what its journal's records fold into.")
+
+(defconst romacs-agent--kept-version 1
+  "The form of a kept state this build writes and reads.")
+
+(defvar romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)
+  "Each session to the seq its kept state is at, as this process last
+wrote or read it: it is not written again for the same seq.")
+
+(defun romacs-agent--kept-file (session)
+  (expand-file-name "state.eld" (romacs-agent-dir session)))
+
+(defun romacs-agent--kept-text (session &optional state)
+  "SESSION's state to keep, as text that reads back as it is; nil when a
+field holds what cannot be read back (a buffer, a process).  STATE, when
+given, is its state as its records left it."
+  (let ((layout (romacs-agent--slot-names 'romacs-agent)))
+    (catch 'unreadable
+      (let ((print-circle t) (print-length nil) (print-level nil)
+            (print-unreadable-function (lambda (_object _escape) (throw 'unreadable nil))))
+        (prin1-to-string
+         (list :version romacs-agent--kept-version :layout layout :seq (romacs-agent-seq session)
+               ;; Folded from its journal (a fork's note), though its options are its manifest's.
+               :forked (plist-get (romacs-agent-options session) :forked)
+               :fields (cl-loop for slot in layout unless (memq slot romacs-agent--unkept)
+                                collect (cons slot (pcase slot
+                                                     ;; As its records left it, not as this
+                                                     ;; process's view of its connection has it.
+                                                     ('state (or state (romacs-agent-state session)))
+                                                     ;; A rollback's hold is this process's own.
+                                                     ('driver-state (romacs-agent--without
+                                                                     (romacs-agent-driver-state session)
+                                                                     '(:rolling-back)))
+                                                     (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
+
+(defun romacs-agent--keep (session &optional state)
+  "Write SESSION's state, as its records have folded it, to its directory:
+only the registered session's (a copy replaying them keeps nothing), and
+not again for the seq it was kept at.  STATE, when given, is its state as
+its records left it (`romacs-agent--keep-soon')."
+  (let ((seq (romacs-agent-seq session)))
+    (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
+               (eq (romacs-agent-get (romacs-agent-id session)) session)
+               (not (eql seq (gethash session romacs-agent--kept))))
+      (when-let* ((text (romacs-agent--kept-text session state)))
+        (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
+          (with-temp-file (concat file ".tmp") (insert text))
+          (set-file-modes (concat file ".tmp") #o600)
+          (rename-file (concat file ".tmp") file t))
+        (puthash session seq romacs-agent--kept)))))
+
+(defvar romacs-agent--keeping nil
+  "The sessions whose state is kept at the editor's next idle moment,
+each (SESSION SEQ STATE): the record it is kept as of, and its state as
+the records left it.")
+
+(defun romacs-agent--keep-soon (session)
+  "Keep SESSION's state once the editor is idle: a write costs a few
+milliseconds, tens for a session with a long history, never in the middle
+of what the user is doing.  Its state is taken now, as its records leave
+it: a server's view of its connection (detached, ended) is laid over it
+after.  A record handled meanwhile takes this one's place."
+  (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
+  (setq romacs-agent--keeping (cons (list session (romacs-agent-seq session) (romacs-agent-state session))
+                                    (cl-remove session romacs-agent--keeping :key #'car))))
+
+(defun romacs-agent--keep-pending ()
+  "Keep the state of every session waiting to be kept, as of the record it
+waits at."
+  (let ((waiting (nreverse romacs-agent--keeping)))
+    (setq romacs-agent--keeping nil)
+    (pcase-dolist (`(,session ,seq ,state) waiting)
+      (when (eql seq (romacs-agent-seq session)) (romacs-agent--keep session state)))))
+
+(defun romacs-agent--record-line-end (seq)
+  "In the current buffer, bytes of a journal, the end of record SEQ's line
+nearest its end, or nil.  A record's line ends with its seq and time (the
+supervisor writes its keys sorted), or starts with its seq (written in
+their order): either tells which record a line is without parsing it,
+and nothing nested can stand at a line's start or end."
+  (goto-char (point-max))
+  (let ((sorted (format "\"seq\":%d,\"t\":" seq)) (found nil))
+    (while (and (not found) (search-backward sorted nil t))
+      (when (save-excursion (goto-char (match-end 0)) (looking-at "[-+.0-9eE]+}$"))
+        (setq found (line-end-position))))
+    (or found
+        (progn (goto-char (point-max))
+               (and (re-search-backward (format "^{\"seq\":%d," seq) nil t) (line-end-position))))))
+
+(defun romacs-agent--journal-after (session seq)
+  "The byte at which SESSION's journal goes on after its record SEQ, looked
+for from the journal's end in growing spans; nil when no line there is
+record SEQ (`romacs-agent--record-line-end')."
+  (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         (size (file-attribute-size (file-attributes journal)))
+         (span 16384) (found nil))
+    (when size
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (while (not found)
+          (let ((start (max 0 (- size span))))
+            (widen)
+            (erase-buffer)
+            (insert-file-contents-literally journal nil start size)
+            ;; Begun inside a record: its part is no line's start.
+            (when (> start 0)
+              (goto-char (point-min))
+              (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
+            (setq found (let ((end (romacs-agent--record-line-end seq)))
+                          (cond (end (min size (+ start end)))
+                                ((= start 0) 'none))))
+            (setq span (* 4 span))))))
+    (and (integerp found) found)))
+
+(defun romacs-agent--read-kept (session)
+  "SESSION's kept state as written, or nil when there is none it can read."
+  (let ((file (romacs-agent--kept-file session)))
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+        (ignore-errors (read (current-buffer)))))))
+
+(defun romacs-agent--restore-kept (session)
+  "Put SESSION's kept state back, when this build defines the session
+record as it was written and its journal holds the record it is at:
+the byte its journal goes on from after that record.  Else nil, SESSION
+untouched."
+  (when-let* ((kept (romacs-agent--read-kept session))
+              ((eql (plist-get kept :version) romacs-agent--kept-version))
+              ((equal (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
+              ((integerp (plist-get kept :seq)))
+              (from (romacs-agent--journal-after session (plist-get kept :seq))))
+    ;; The layout is this build's: each field is where it was written.
+    (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
+      (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
+    (when-let* ((forked (plist-get kept :forked)))
+      (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
+    (puthash session (plist-get kept :seq) romacs-agent--kept)
+    from))
+
 ;;; A new server
 
 (defun romacs-agent--load (dir)
@@ -3051,7 +3227,8 @@ neither callback runs after it."
                                        (list :path (gethash "path" imported) :size (gethash "size" imported))))
                       :harness-session (gethash "harnessSession" manifest)
                       :cancelled (file-exists-p (expand-file-name "cancelled" dir))
-                      ;; Should attaching fail, the journal is read from its start.
+                      ;; Should attaching fail, the journal is read from its start
+                      ;; (from where its kept state ends, once that is back).
                       :journal-start 0
                       :cwd (gethash "cwd" manifest) :title (gethash "title" manifest)
                       ;; Earlier records named a session "<dir> <id>": generated.
@@ -3063,14 +3240,20 @@ neither callback runs after it."
                       :dir dir :unit (gethash "unit" manifest)
                       :seen-seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
                       :settled-seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))
-                      :host-socket (gethash "hostSocket" manifest) :state 'detached)))
+                      :host-socket (romacs-agent--host-socket (gethash "id" manifest)) :state 'detached)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
+        ;; Its kept state back, its journal is read on from there: by its
+        ;; supervisor's replay from that record, or here.
+        (when-let* ((from (romacs-agent--restore-kept session)))
+          (setf (romacs-agent-journal-start session) from))
         (if (file-exists-p (romacs-agent-host-socket session))
             (romacs-agent--attach session 0)
           ;; No supervisor: what the journal says is all there is.
           (let ((romacs-agent-event-functions nil))
-            (romacs-agent--read-journal session (lambda (record) (romacs-agent--record session record))))
+            (romacs-agent--read-journal session (lambda (record) (romacs-agent--record session record))
+                                        (romacs-agent-journal-start session)))
+          (romacs-agent--keep-soon session)
           (unless (or (eq (romacs-agent-state session) 'ended)
                       ;; A per-turn harness between turns is idle, not detached.
                       (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle)))

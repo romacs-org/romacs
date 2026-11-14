@@ -86,6 +86,7 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 usage: agent_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -1166,7 +1167,9 @@ def launcher(args, base):
         late_id = '22222222-3333-4444-8555-666666666666'
         late_dir = a.home / '.local/state/romacs/agents' / late_id
         late_dir.mkdir(mode=0o700)
-        late_socket = runtime / 'agents/late.sock'
+        # Where Romacs looks for its supervisor: named by the session id alone.
+        late_socket = runtime / 'agents' / f'{late_id[:8]}-{hashlib.sha256(late_id.encode()).hexdigest()[:8]}' / 'host.sock'
+        late_socket.parent.mkdir(mode=0o700, parents=True)
         late = sockets.socket(sockets.AF_UNIX)
         late.bind(str(late_socket))
         late.listen()
