@@ -1935,6 +1935,7 @@ mod leaf {
     mod host_calls;
     mod display_stats;
     mod fontify_stops;
+    mod markdown;
     mod compiled_lisp;
     mod casetab;
     mod casing;
