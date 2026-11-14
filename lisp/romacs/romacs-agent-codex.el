@@ -592,6 +592,9 @@ thread: its rollout, wherever its day put it."
   :lifetime 'persistent :forks #'romacs-agent--codex-forking
   :conversation-files #'romacs-agent--codex-conversation-files
   :rollback #'romacs-agent--codex-rollback
+  ;; A renewed conversation is a new thread, named once Codex starts it
+  ;; (`romacs-agent--codex-thread').
+  :renew #'ignore
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next

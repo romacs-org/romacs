@@ -1,0 +1,251 @@
+;;; romacs-agent-renew-tests.el --- A session going on in a new conversation -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-mcp)
+
+;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
+;; registrations are left as they were.
+(let ((romacs-mcp-call-function romacs-mcp-call-function)
+      (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+  (require 'romacs-agent)
+  (require 'romacs-agent-claude)
+  (require 'romacs-agent-codex)
+  (require 'romacs-agent-ui))
+
+(defun romacs-agent-renew-tests--journal (session &rest records)
+  "Write RECORDS, objects without their seq, as SESSION's journal."
+  (let ((seq 0) (coding-system-for-write 'utf-8-unix))
+    (write-region (mapconcat (lambda (record)
+                               (puthash "seq" (cl-incf seq) record)
+                               (puthash "t" (float seq) record)
+                               (concat (romacs-agent--json record) "\n"))
+                             records "")
+                  nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) nil 'silent)
+    (setf (romacs-agent-seq session) seq)))
+
+(defun romacs-agent-renew-tests--prompt (request text)
+  (romacs-mcp--object "in" (romacs-mcp--object "type" "user" "romacsRequest" request
+                                               "message" (romacs-mcp--object "role" "user" "content" text))))
+
+(defun romacs-agent-renew-tests--reply (uuid text)
+  (romacs-mcp--object "out" (romacs-mcp--object "type" "result" "uuid" uuid "result" text)))
+
+(defmacro romacs-agent-renew-tests--with (harness &rest body)
+  "BODY with `session', an idle session of HARNESS recorded in a private
+state root that has said two things, its writes to its harness in
+`written' (LINE . RECORD) and its relaunches counted in `relaunched'."
+  (declare (indent 1))
+  `(let* ((root (make-temp-file "romacs-renew-" t))
+          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
+                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                       process-environment))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (written nil) (relaunched 0)
+          (session (romacs-agent--create :id (romacs-agent--uuid) :harness ,harness
+                                         :provider (symbol-name ,harness) :cwd root
+                                         :title "t" :state 'idle :turns 2)))
+     (unwind-protect
+         (progn
+           (romacs-agent--manifest session nil)
+           (romacs-agent-renew-tests--journal
+            session (romacs-agent-renew-tests--prompt 5 "build the parser")
+            (romacs-agent-renew-tests--reply "u1" "the parser is built")
+            (romacs-agent-renew-tests--prompt 9 "now its tests")
+            (romacs-agent-renew-tests--reply "u2" "its tests pass"))
+           (cl-letf (((symbol-function 'romacs-agent--line)
+                      (lambda (_s object &optional record &rest _) (push (cons object record) written)))
+                     ((symbol-function 'romacs-agent--relaunch)
+                      (lambda (_s &optional before) (when before (funcall before)) (cl-incf relaunched))))
+             ,@body))
+       (delete-directory root t))))
+
+(defun romacs-agent-renew-tests--run (session &optional why)
+  "`romacs-agent-renew''s outcome, waited for."
+  (let ((outcome nil) (end (+ (float-time) 30)))
+    (romacs-agent-renew session why (lambda (result) (setq outcome result)))
+    (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
+    outcome))
+
+(defun romacs-agent-renew-tests--notes (session)
+  (delq nil (mapcar (lambda (record) (and (romacs-agent--note-p record "renew") (gethash "note" record)))
+                    (romacs-agent--journal-records session))))
+
+(defun romacs-agent-renew-tests--manifest (session)
+  (romacs-agent--read-json (expand-file-name "manifest.json" (romacs-agent-dir session))))
+
+(ert-deftest romacs-agent-renew-claude-same-session-new-conversation ()
+  ;; The same session goes on in a new conversation: its id stays, its
+  ;; native id is new, journaled with the brief; its next run begins the
+  ;; new conversation under that id.
+  (romacs-agent-renew-tests--with 'claude
+    (let* ((id (romacs-agent-id session))
+           (outcome (romacs-agent-renew-tests--run session "context full"))
+           (native (cadr outcome))
+           (note (car (romacs-agent-renew-tests--notes session))))
+      (should (eq (car outcome) :done))
+      (should (romacs-agent--uuid-p native))
+      (should-not (equal native id))
+      (should (eq (romacs-agent-get id) session))
+      (should (equal (romacs-agent-harness-session session) native))
+      (should (equal (gethash "harnessSession" (romacs-agent-renew-tests--manifest session)) native))
+      (should (equal (gethash "from" note) id))
+      (should (equal (gethash "to" note) native))
+      (should (equal (gethash "why" note) "context full"))
+      ;; The brief: the first request and the latest turns, then the line.
+      (let ((brief (gethash "brief" note)))
+        (should (string-prefix-p "Renewed conversation" brief))
+        (should (string-search "User: build the parser" brief))
+        (should (string-search "Assistant: its tests pass" brief))
+        (should (string-suffix-p "---\n\n" brief))
+        (should (equal (romacs-agent-brief session) brief)))
+      (should (= relaunched 1))
+      (should-not (romacs-agent--held-p session))
+      (should-not written)
+      ;; Its next run begins the new conversation; one said in goes on.
+      (cl-letf (((symbol-function 'romacs-agent--write-json) #'ignore))
+        (let ((argv (romacs-agent--claude-argv session t)))
+          (should (equal (cadr (member "--session-id" argv)) native))
+          (should-not (member "--resume" argv))))
+      ;; The chat draws it.
+      (let ((buffer (save-window-excursion (romacs-agent-show session))))
+        (unwind-protect
+            (should (string-search "── renewed: a new conversation (context full) ──"
+                                   (with-current-buffer buffer (buffer-string))))
+          (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-renew-brief-goes-with-the-next-message ()
+  ;; Messages sent while it renews wait; the first to go carries the
+  ;; brief.  The journal keeps the message as written, marked.
+  (romacs-agent-renew-tests--with 'claude
+    (let ((outcome nil) (end (+ (float-time) 30))
+          (read (symbol-function 'romacs-agent-events-async)))
+      ;; Its journal read between keystrokes, as a long one is.
+      (cl-letf (((symbol-function 'romacs-agent-events-async)
+                 (lambda (&rest args) (run-at-time 0.05 nil (lambda () (apply read args))))))
+        (romacs-agent-renew session nil (lambda (result) (setq outcome result))))
+      (should (romacs-agent--held-p session))
+      (romacs-agent-send session "meanwhile")
+      (should (equal (car (car (romacs-agent-queue session))) "meanwhile"))
+      (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
+      (should (eq (car outcome) :done))
+      (should (equal (mapcar #'car (romacs-agent-queue session)) '("meanwhile")))
+      (let ((brief (romacs-agent-brief session)))
+        (romacs-agent--input session "meanwhile")
+        (let* ((line (car (car written))) (record (cdr (car written))))
+          (should (equal (romacs-agent--text-of (gethash "content" (gethash "message" line))) (concat brief "meanwhile")))
+          (should (equal (romacs-agent--text-of (gethash "content" (gethash "message" record))) "meanwhile"))
+          (should (eq (gethash "romacsBrief" record) t)))
+        (should-not (romacs-agent-brief session))
+        (setq written nil)
+        (romacs-agent--input session "then")
+        (should (equal (romacs-agent--text-of (gethash "content" (gethash "message" (car (car written))))) "then"))))))
+
+(ert-deftest romacs-agent-renew-folds-from-the-journal ()
+  ;; A restart reads it back: the new native id, and the brief until a
+  ;; message has gone.
+  (romacs-agent-renew-tests--with 'claude
+    (romacs-agent-renew-tests--run session)
+    (let ((native (romacs-agent-harness-session session))
+          (brief (romacs-agent-brief session))
+          (copy (romacs-agent--make :id (romacs-agent-id session) :harness 'claude :dir (romacs-agent-dir session))))
+      (romacs-agent--read-journal copy (lambda (record) (romacs-agent--record copy record)))
+      (should (equal (romacs-agent-harness-session copy) native))
+      (should (equal (romacs-agent-brief copy) brief))
+      (romacs-agent--record copy (romacs-mcp--object "seq" 99 "t" 99.0 "in"
+                                                     (romacs-mcp--object "type" "user" "romacsRequest" 12 "romacsBrief" t
+                                                                         "message" (romacs-mcp--object "role" "user" "content" "go"))))
+      (should-not (romacs-agent-brief copy)))))
+
+(ert-deftest romacs-agent-renew-begins-the-live-records ()
+  ;; Its conversation begins at the note: a rollback reaches no further
+  ;; back, nor to the prompt that carried the brief.
+  (romacs-agent-renew-tests--with 'claude
+    (romacs-agent-renew-tests--run session)
+    (let ((records (romacs-agent--journal-records session)))
+      (should (romacs-agent--note-p (car (romacs-agent--live-records records)) "renew"))
+      (should-not (cl-some #'romacs-agent--record-request (romacs-agent--live-records records))))
+    (romacs-agent-renew-tests--journal
+     session (romacs-agent-renew-tests--prompt 5 "old")
+     (romacs-mcp--object "note" (romacs-mcp--object "type" "renew" "from" "a" "to" "b" "brief" "B"))
+     (romacs-agent-renew-tests--prompt 20 "first after") (romacs-agent-renew-tests--reply "u3" "ok")
+     (romacs-agent-renew-tests--prompt 21 "second after") (romacs-agent-renew-tests--reply "u4" "ok"))
+    (should (string-match-p "no longer" (cadr (should-error (romacs-agent-rollback session 5 #'ignore) :type 'user-error))))
+    (should (string-match-p "began this renewed" (cadr (should-error (romacs-agent-rollback session 20 #'ignore)
+                                                                     :type 'user-error))))))
+
+(ert-deftest romacs-agent-renew-again-carries-the-last-brief ()
+  ;; Renewed twice: the second brief carries the first as it was, then
+  ;; what was said since; nothing from before the first renewal besides.
+  (romacs-agent-renew-tests--with 'claude
+    (romacs-agent-renew-tests--run session)
+    (let ((first (romacs-agent-brief session)))
+      (romacs-agent--input session "write the docs")
+      (let ((seq (romacs-agent-seq session)) (coding-system-for-write 'utf-8-unix))
+        (write-region (mapconcat (lambda (record) (concat (romacs-agent--json record) "\n"))
+                                 (list (romacs-mcp--object "seq" (+ seq 1) "t" 50.0 "in" (cdr (car written)))
+                                       (romacs-mcp--object "seq" (+ seq 2) "t" 51.0 "out"
+                                                           (romacs-mcp--object "type" "result" "result" "docs written")))
+                                 "")
+                      nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+        (setf (romacs-agent-seq session) (+ seq 2)))
+      (romacs-agent-renew-tests--run session)
+      (let ((second (romacs-agent-brief session)))
+        (should (string-search (string-trim first) second))
+        (should (string-search "User: write the docs" second))
+        (should (string-search "Assistant: docs written" second))
+        (should (= 1 (cl-loop with start = 0 while (string-search "User: build the parser" second start)
+                              count t do (setq start (1+ (string-search "User: build the parser" second start))))))))))
+
+(ert-deftest romacs-agent-renew-codex-starts-a-new-thread ()
+  ;; Codex names the new thread as it starts it; a fork is one no more.
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-harness-session session) "thread-old"
+          (romacs-agent-options session) (list :fork "thread-source" :model "m"))
+    (let ((outcome (romacs-agent-renew-tests--run session)))
+      (should (equal outcome '(:done nil)))
+      (should-not (romacs-agent-harness-session session))
+      (should-not (plist-member (romacs-agent-options session) :fork))
+      (should (equal (plist-get (romacs-agent-options session) :model) "m"))
+      (should (null (gethash "harnessSession" (romacs-agent-renew-tests--manifest session) :absent)))
+      (should (equal (gethash "from" (car (romacs-agent-renew-tests--notes session))) "thread-old"))
+      (should (equal (gethash "method" (romacs-agent--codex-thread session 3)) "thread/start")))))
+
+(ert-deftest romacs-agent-renew-refusals ()
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-state session) 'running)
+    (should (string-match-p "busy" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-renew-tests--run session)
+    (cl-letf (((symbol-function 'romacs-agent-events-async) #'ignore))
+      (romacs-agent-renew session)
+      (should (string-match-p "already" (cadr (should-error (romacs-agent-renew session) :type 'user-error))))))
+  (let ((session (romacs-agent--make :id "x" :harness 'claude)))
+    (cl-letf (((symbol-function 'romacs-agent--harness-get) (lambda (_ key) (and (eq key :display) "Fake"))))
+      (should (string-match-p "cannot renew" (cadr (should-error (romacs-agent-renew session) :type 'user-error)))))))
+
+(ert-deftest romacs-agent-renew-soon-waits-for-the-turn-end ()
+  ;; Asked mid-turn (an agent renewing itself), at its turn's end.
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-state session) 'running)
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+      (should (eq (romacs-agent-renew-soon session "its own") 'soon))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (setf (romacs-agent-state session) 'idle)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "its own"))
+      ;; Once: a later end does not renew again.
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (accept-process-output nil 0.2)
+      (should (= relaunched 1)))))
+
+(ert-deftest romacs-agent-renew-keys-and-tool ()
+  (should (eq (lookup-key romacs-agent-chat-actions-map "N") 'romacs-agent-chat-renew))
+  (should (equal (command-modes 'romacs-agent-chat-renew) '(romacs-agent-chat-mode)))
+  (should (functionp (plist-get (cdr (assoc "romacs_task_renew" (let ((romacs-mcp-tools nil)) (load "romacs-agent-tools" nil t) romacs-mcp-tools))) :handler))))
+
+;;; romacs-agent-renew-tests.el ends here

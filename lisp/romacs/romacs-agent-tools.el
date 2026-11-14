@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-renew)
 
 (defcustom romacs-agent-eval-budget 5000
   "Milliseconds an agent's `romacs_eval' may run before it is quit, as
@@ -1042,6 +1043,23 @@ CELL's error as the call's."
                         (funcall (setq next (cadr value)))
                       (list value))))))))))
 
+(defun romacs-agent-tools--renew (arguments)
+  "Renew the task taskId (the caller's own session by default): now, or
+once its running turn ends (`romacs-agent-renew-soon')."
+  (romacs-mcp--instance arguments)
+  (let* ((caller (romacs-agent-tools--caller))
+         (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
+         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
+         (own (equal id caller)))
+    (unless own (romacs-agent-tools--own task caller "renew it"))
+    (let ((when (romacs-agent-renew-soon task (or (gethash "why" arguments) (if own "its own" "its parent's"))))
+          (record (romacs-agent-tools--task task)))
+      (puthash "next" (cond (own "You renew once this turn ends: end your turn now. Your next message carries a brief.")
+                            ((eq when 'now) "It renews now; your next message to it carries a brief of its conversation.")
+                            (t "It renews once its running turn ends; its next end wakes you as before."))
+               record)
+      record)))
+
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
@@ -1383,6 +1401,15 @@ it is given. A task's record names its usage limit and the instances with room."
                        ("effort" . "string") ("next" . "string"))
                      nil)
  #'romacs-agent-tools--switch)
+
+(romacs-mcp-register-tool
+ "romacs_task_renew"
+ "Go on with a task (taskId, default your own session) in a new conversation of its harness, to free its \
+context: the same task, parent, wake rule and worktree; its next message carries a brief of the conversation so \
+far (its first request, the latest turns, its tool calls). Now when it is idle, else once its running turn ends \
+(your own: end your turn). The old conversation stays in its journal."
+ (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string") ("why" . "string")) nil)
+ #'romacs-agent-tools--renew)
 
 (romacs-mcp-register-tool
  "romacs_task_cancel"

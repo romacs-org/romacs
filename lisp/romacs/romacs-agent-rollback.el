@@ -115,6 +115,11 @@ longer its conversation's, or one with no checkpoint when :files."
   (let* ((records (romacs-agent--live-records (romacs-agent--journal-records session)))
          (turns (romacs-agent-rollback--turns records request)))
     (unless (cdr turns) (user-error "That prompt is no longer this session's conversation"))
+    ;; A renewed conversation's first prompt carried its brief: going back
+    ;; before it would leave the conversation without one.
+    (when (and (romacs-agent--note-p (car records) "renew")
+               (equal request (cl-some #'romacs-agent--record-request records)))
+      (user-error "That prompt began this renewed conversation: roll back to a later one"))
     ;; With no snapshot pending, the checkpoints are all there: refuse now.
     ;; Else the start may still be coming: it is looked for behind them.
     (when (and (plist-get options :files) (romacs-agent-diff--settled-p session)
@@ -196,7 +201,7 @@ before the note leaves the conversation as it was, to try again."
            (condition-case err
                (progn (when (eq (car-safe how) 'relaunch)
                         (when (cadr how) (funcall (cadr how)))
-                        (romacs-agent-rollback--relaunch session))
+                        (romacs-agent--relaunch session))
                       (funcall then (list :done (length turns))))
              (error (funcall then (list :error (error-message-string err))))))
          (note ()
@@ -220,20 +225,6 @@ before the note leaves the conversation as it was, to try again."
                                               (if (plist-get event :error) (funcall fail (plist-get event :error)) (note))))
               (romacs-agent--line session how)))
         (error (funcall fail (error-message-string err)))))))
-
-(defun romacs-agent-rollback--relaunch (session)
-  "Run SESSION's harness anew, its conversation where its journal now has
-it: stopped first when it runs."
-  (if (not (process-live-p (romacs-agent-connection session)))
-      (romacs-agent-resume session)
-    (romacs-agent--stop-then session (lambda () (romacs-agent-rollback--resume-when-gone session 50)))))
-
-(defun romacs-agent-rollback--resume-when-gone (session tries)
-  "Resume SESSION once its connection to the stopped supervisor is gone,
-looking again for TRIES tenths of a second."
-  (if (and (process-live-p (romacs-agent-connection session)) (> tries 0))
-      (run-at-time 0.1 nil #'romacs-agent-rollback--resume-when-gone session (1- tries))
-    (romacs-agent-resume session)))
 
 (provide 'romacs-agent-rollback)
 ;;; romacs-agent-rollback.el ends here
