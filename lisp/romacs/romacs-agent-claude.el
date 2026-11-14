@@ -364,12 +364,35 @@ cache, it reports none) or does not say."
        (let ((info (gethash "rate_limit_info" line)))
          (when (hash-table-p info)
            (list (list :type 'rate-limit
-                       :status (pcase (gethash "status" info)
-                                 ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed))
+                       :status (romacs-agent--claude-limit-status (gethash "status" info))
                        :used (romacs-agent--value (gethash "utilization" info))
                        :resets (romacs-agent--value (gethash "resetsAt" info))
-                       :window (romacs-agent--value (gethash "rateLimitType" info)))))))
+                       :window (romacs-agent--value (gethash "rateLimitType" info))
+                       :windows (romacs-agent--claude-windows info))))))
       (_ (list (list :type 'unknown :raw line))))))
+
+(defun romacs-agent--claude-limit-status (status)
+  (pcase status ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed)))
+
+(defun romacs-agent--claude-windows (info)
+  "Each limit window INFO, a rate_limit_info, reports (its unifiedWindows,
+else its one window): plists of :name (five_hour, seven_day...),
+:status, :used (a fraction) and :resets."
+  (let ((windows (gethash "unifiedWindows" info)))
+    (if (hash-table-p windows)
+        (let ((rows nil))
+          (maphash (lambda (name window)
+                     (when (hash-table-p window)
+                       (push (list :name name :status (romacs-agent--claude-limit-status (gethash "status" window))
+                                   :used (romacs-agent--value (gethash "utilization" window))
+                                   :resets (romacs-agent--value (gethash "resetsAt" window)))
+                             rows)))
+                   windows)
+          (nreverse rows))
+      (when-let* ((name (romacs-agent--value (gethash "rateLimitType" info))))
+        (list (list :name name :status (romacs-agent--claude-limit-status (gethash "status" info))
+                    :used (romacs-agent--value (gethash "utilization" info))
+                    :resets (romacs-agent--value (gethash "resetsAt" info))))))))
 
 (defun romacs-agent--claude-models (answer)
   "The model rows in ANSWER, what Claude Code says to `initialize': each

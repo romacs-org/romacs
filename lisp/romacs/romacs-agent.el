@@ -2203,9 +2203,12 @@ there from now on: the same session, its id, title, tasks and records."
 (defvar romacs-agent--room (make-hash-table :test #'equal)
   "An instance's name to the last of its harness's reports of its usage
 limit: a plist of :status (allowed, warning or rejected), :used (a
-fraction), :resets (seconds since the epoch), :window and :time.  Kept on
-disk (`romacs-agent--room-file') as its status, reset or window changes:
-a restarted server knows which accounts are spent.")
+fraction), :resets (seconds since the epoch), :window and :time, and
+:windows, each limit window's last report by its name (five_hour,
+seven_day...): (NAME :status :used :resets :time).  Kept on disk
+\(`romacs-agent--room-file') as a status, reset or window changes: a
+restarted server knows which accounts are spent, and how full each
+window was.")
 
 (defvar romacs-agent--room-loaded nil
   "Whether `romacs-agent--room' holds what was kept on disk.")
@@ -2265,13 +2268,57 @@ credits are refused, and the others run."
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (let ((room (list :status (plist-get event :status) :used (plist-get event :used)
-                        :resets (plist-get event :resets) :window (plist-get event :window) :time time)))
+      (let* ((windows (romacs-agent--room-windows (plist-get known :windows) (plist-get event :windows) time))
+             (room (append (or (romacs-agent--room-binding windows time)
+                               (list :status (plist-get event :status) :used (plist-get event :used)
+                                     :resets (plist-get event :resets) :window (plist-get event :window)))
+                           (list :time time :windows windows))))
         (puthash (romacs-agent-provider session) room table)
-        ;; On disk what a restart needs: not each request's use.
+        ;; On disk what a restart needs: not each request's use, but each
+        ;; window's state, and its use once it is worth a word (every 5%).
         (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
-                                     '(:status :resets :window)))
+                                     '(:status :resets :window))
+                     (equal (romacs-agent--room-gist (plist-get known :windows)) (romacs-agent--room-gist windows)))
           (romacs-agent--keep-room))))))
+
+(defun romacs-agent--room-windows (known reported time)
+  "KNOWN windows (an instance's :windows) with REPORTED ones (a rate-limit
+event's :windows, plists of :name :status :used :resets) as of TIME:
+each window's latest report."
+  ;; Its own cells: the known report stays as it was.
+  (let ((windows (copy-alist known)))
+    (dolist (window reported windows)
+      (when-let* ((name (plist-get window :name)))
+        (setf (alist-get name windows nil nil #'equal)
+              (list :status (plist-get window :status) :used (plist-get window :used)
+                    :resets (plist-get window :resets) :time time))))))
+
+(defun romacs-agent--room-binding (windows now)
+  "The limit WINDOWS (an instance's :windows) bind it by as of NOW: spent,
+until the last of its spent windows resets; else the fullest, its status
+the worst of theirs.  A plist of :status :used :resets :window, or nil
+with no window known."
+  (let* ((live (cl-remove-if (lambda (w) (let ((resets (plist-get (cdr w) :resets)))
+                                           (and (numberp resets) (<= resets now))))
+                             windows))
+         (spent (cl-remove-if-not (lambda (w) (eq (plist-get (cdr w) :status) 'rejected)) live))
+         (pick (car (if spent
+                        (sort (copy-sequence spent) (lambda (a b) (> (or (plist-get (cdr a) :resets) 0)
+                                                                     (or (plist-get (cdr b) :resets) 0))))
+                      (sort (copy-sequence live) (lambda (a b) (> (or (plist-get (cdr a) :used) 0)
+                                                                  (or (plist-get (cdr b) :used) 0))))))))
+    (when pick
+      (list :status (cond (spent 'rejected)
+                          ((cl-some (lambda (w) (eq (plist-get (cdr w) :status) 'warning)) live) 'warning)
+                          (t 'allowed))
+            :used (plist-get (cdr pick) :used) :resets (plist-get (cdr pick) :resets) :window (car pick)))))
+
+(defun romacs-agent--room-gist (windows)
+  "What of WINDOWS a restart needs kept: each one's status, reset, and use
+to the nearest 5%."
+  (mapcar (lambda (w) (list (car w) (plist-get (cdr w) :status) (plist-get (cdr w) :resets)
+                            (and (numberp (plist-get (cdr w) :used)) (round (* 20 (plist-get (cdr w) :used))))))
+          windows))
 
 (defun romacs-agent-room-of (provider)
   "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or nil."
