@@ -72,7 +72,7 @@ pub(crate) fn inspect_answer(socket: &std::path::Path) -> std::io::Result<Vec<u8
     Ok(answer)
 }
 
-/// The native socket of the Romacs server NAME (rlisp/romacs-server.el):
+/// The native socket of the Romacs server NAME (lisp/romacs/romacs-server.el):
 /// `$XDG_RUNTIME_DIR/romacs/NAME/server.sock'.
 #[cfg(unix)]
 pub(crate) fn server_socket(name: &str) -> Option<std::path::PathBuf> {

@@ -1,7 +1,7 @@
 //! Text animations: a block of a window's character cells that the render
 //! thread redraws frame after frame, over the glyphs the evaluator laid
 //! out, with no evaluator work per frame.  Lisp registers one with its
-//! parameters (rlisp/romacs-animate.el) and changes it only when they
+//! parameters (lisp/romacs/romacs-animate.el) and changes it only when they
 //! change; the render thread keeps the clock, the motion time and the
 //! frames.
 use crate::face::Face;

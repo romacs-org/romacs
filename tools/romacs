@@ -43,7 +43,7 @@ if [ "${ROMACS_NO_BUILD:-}" != 1 ]; then
     # scripts require) from the working directory, not from --manifest-path.
     # Never inherit a lane's target dir or git overrides into the build.
     if ! (cd "$root" && env -u GIT_DIR -u GIT_WORK_TREE CARGO_TARGET_DIR="$target" \
-        cargo build --release --locked -p romacs-vm-gui) >"$target/romacs-build.log" 2>&1; then
+        cargo build --release --locked -p romacs-vm-gui -p romacs-keeper) >"$target/romacs-build.log" 2>&1; then
         tail -n 30 "$target/romacs-build.log" >&2
         echo "romacs: build failed; full log $target/romacs-build.log" >&2
         exit 1
@@ -65,11 +65,11 @@ if [ -z "${ROMACS_GUI_FONT:-}" ] && command -v fc-list >/dev/null \
 fi
 
 # GNU's Lisp from this checkout; the GUI loads loadup.el's preload chain.
-export ROMACS_LISP_DIR="$root/gnu-lisp"
+export ROMACS_LISP_DIR="$root/lisp/gnu"
 # A lane's RUST_MIN_STACK must not hide the evaluator's own 64 MiB reservation.
 unset RUST_MIN_STACK
 
-# Server-first (rlisp/romacs-server.el, DIVERGENCES.md SERVER2): connect to
+# Server-first (lisp/romacs/romacs-server.el, DIVERGENCES.md SERVER2): connect to
 # the server named ROMACS_SERVER (default romacs), starting it as a user
 # unit when none runs, and ask it for a window; ROMACS_SERVER=off runs a
 # standalone session as before. Batch and installer runs stay standalone.

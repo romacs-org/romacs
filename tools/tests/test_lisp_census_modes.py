@@ -17,7 +17,7 @@ import unittest
 spec = importlib.util.spec_from_file_location('census', _source := Path(__file__).resolve().parents[1] / 'lisp-census', loader=importlib.machinery.SourceFileLoader('census', str(_source)))
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
-BINARY = Path(os.environ.get('CENSUS_BIN') or Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'target'))) / 'release/romacs-vm-census')
+BINARY = Path(os.environ.get('CENSUS_BIN') or Path(os.environ.get('CENSUS_TARGET_DIR', str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'ledger/parity-reference.toml').is_file()) / 'target'))) / 'release/romacs-vm-census')
 NOT_SPLIT = {'form_count': None, 'status': 'not_split'}
 
 
@@ -147,23 +147,23 @@ class ChainDefinitionTests(unittest.TestCase):
     def test_chain_follows_gnu_loadup_order_and_every_link_exists(self):
         chain = census.bootstrap_chain()
         paths = [p for p in chain if isinstance(p, Path)]
-        names = [str(p.relative_to(census.ROOT / 'gnu-lisp')) for p in paths]
+        names = [str(p.relative_to(census.ROOT / 'lisp/gnu')) for p in paths]
         self.assertEqual(names[:4], ['emacs-lisp/debug-early.el', 'emacs-lisp/byte-run.el', 'emacs-lisp/backquote.el', 'subr.el'])
         for path in paths:
             self.assertTrue(path.is_file(), path)
         macroexp = chain.index(census.macroexp_bootstrap_form())
-        self.assertEqual(chain[macroexp - 1], census.ROOT / 'gnu-lisp/emacs-lisp/macroexp.el')
+        self.assertEqual(chain[macroexp - 1], census.ROOT / 'lisp/gnu/emacs-lisp/macroexp.el')
         self.assertIn("(let ((macroexp--pending-eager-loads '(skip)))", chain[macroexp])
         self.assertIn('(load "emacs-lisp/pcase")', chain[macroexp])
         self.assertIn('(load "emacs-lisp/macroexp")', chain[macroexp])
         gv = chain.index(census.gv_bootstrap_form())
         self.assertIn("(require 'gv)", chain[gv])
-        self.assertEqual(chain[gv + 1], census.ROOT / 'gnu-lisp/emacs-lisp/cl-preloaded.el')
+        self.assertEqual(chain[gv + 1], census.ROOT / 'lisp/gnu/emacs-lisp/cl-preloaded.el')
         self.assertLess(macroexp, gv)
-        self.assertEqual(chain[-1], census.ROOT / 'gnu-lisp/abbrev.el')
+        self.assertEqual(chain[-1], census.ROOT / 'lisp/gnu/abbrev.el')
         self.assertLess(names.index('window.el'), names.index('emacs-lisp/macroexp.el'))
         self.assertLess(names.index('files.el'), names.index('emacs-lisp/macroexp.el'))
-        loadup = (census.ROOT / 'gnu-lisp/loadup.el').read_text()
+        loadup = (census.ROOT / 'lisp/gnu/loadup.el').read_text()
         positions = [loadup.index(f'(load "{n[:-3]}")') for n in names]
         self.assertEqual(positions, sorted(positions), 'chain must keep loadup.el order')
 

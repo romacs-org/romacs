@@ -371,3 +371,28 @@ fn a_limited_producer_leaves_the_rest_of_the_channel() {
     assert!(matches!(sender.try_send(retire(999)), Err(TrySendError::Full(_))));
     assert_eq!(receiver.len(), capacity);
 }
+
+/// Paints are a mailbox: a newer paint replaces one the renderer has not
+/// taken, behind whatever was sent between them, so the producer never
+/// waits for drawing and the renderer draws the newest frame.
+#[test]
+fn a_newer_paint_supersedes_a_queued_one_behind_the_commands_between() {
+    let paint = |width| RenderCommand::Paint(Box::new(romacs_display_protocol::FrameGlyphBuffer::with_size(width, 10.0).into()));
+    let width = |command: RenderCommand| match command {
+        RenderCommand::Paint(scene) => scene.root.width,
+        _ => panic!("not a paint"),
+    };
+    let (sender, receiver) = command_channel(4);
+    sender.try_send(paint(100.0)).unwrap();
+    sender.try_send(asset(7)).unwrap();
+    sender.try_send(paint(200.0)).unwrap();
+    sender.try_send(paint(300.0)).unwrap();
+    assert_eq!(receiver.len(), 2, "one paint waits, beside the asset");
+    assert_eq!(asset_id(receiver.try_recv().unwrap()), IMAGE_7);
+    assert_eq!(width(receiver.try_recv().unwrap()).to_bits(), 300.0_f32.to_bits());
+    // A full channel still takes a paint when one waits to be replaced.
+    for id in 0..3 { sender.try_send(asset(id)).unwrap(); }
+    sender.try_send(paint(400.0)).unwrap();
+    assert!(sender.try_send(paint(500.0)).is_ok(), "a waiting paint makes room for its successor");
+    assert_eq!(receiver.len(), 4);
+}

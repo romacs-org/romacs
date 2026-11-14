@@ -225,6 +225,76 @@ fn decode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value
     convert_string(cx, false, string, coding, nocopy, buffer)
 }}
 
+// Registers of a region conversion between its steps:
+//   [ENCODE, START, END, CODING, DESTINATION]
+fn convert_region(cx: &mut Leaf<'_>, encode: bool, start: Value, end: Value, coding: Value, destination: Value) -> Next {
+    let saved = vec![if encode { Value::TRUE } else { Value::NIL }, start, end, coding, destination];
+    if coding != Value::NIL && cx.kind(coding) == Kind::Symbol && cx.coding_spec(coding)? == Value::NIL {
+        return realize(cx, coding, saved, converted_region);
+    }
+    converted_region(cx, Value::NIL, &saved)
+}
+
+/// coding.c `code_convert_region`: START..END of the current buffer through
+/// CODING. DESTINATION t returns the text and a buffer receives it at its
+/// point. Nil replaces the region as one change (`decode_coding_object`'s
+/// `del_range` and insertion: one before-change over the old text and one
+/// after-change over the new). Markers at its start stay before the new
+/// text and those at its end after it; one inside goes to the start (GNU
+/// puts one that advances on insertion after the new text). Point keeps its place
+/// outside the old text and goes to its start from inside it. The value is
+/// then the new text's length. An empty region that converts to nothing is
+/// no change.
+fn converted_region(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (encode, coding, destination) = (saved[0] != Value::NIL, saved[3], saved[4]);
+    if coding != Value::NIL { cx.coding_check(coding)?; }
+    let own = destination == Value::NIL || destination == cx.current_buffer()?;
+    if !own && destination != Value::TRUE && !matches!(cx.kind(destination), Kind::Buffer | Kind::ByteBuffer) {
+        return Err(Fault::Wrong("bufferp", destination));
+    }
+    let (from, to) = cx.validate_region(saved[1], saved[2])?;
+    // A read-only region refuses before anything is converted or recorded.
+    if own { cx.prepare_change(from, to)?; }
+    let text = cx.region_plain_text(from, to)?;
+    let coding = if coding == Value::NIL { cx.intern("no-conversion") } else { coding };
+    let result = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, encode)?;
+    if destination == Value::TRUE { return Ok(Step::Done(result)); }
+    if !own {
+        return Ok(Step::Call { f: cx.intern("romacs--coding-insert"), args: vec![destination, result], then: done, saved: vec![] });
+    }
+    let length = i64::try_from(cx.string_chars(result).expect("converted text")).expect("string length");
+    if from == to && length == 0 { return Ok(Step::Done(Value::integer(0).expect("fixnum"))); }
+    let (point, _, _) = cx.point_extent()?;
+    let point = if point < from { point } else if point < to { from } else { point + length - (to - from) };
+    let deactivate = cx.intern("deactivate-mark");
+    let kept = cx.variable_value(deactivate)?.unwrap_or(Value::NIL);
+    let position = |n: i64| Value::integer(n).expect("buffer position");
+    Ok(Step::Call {
+        f: cx.intern("romacs--replace-range"),
+        args: vec![position(from), position(to), result, Value::NIL],
+        then: replaced_region,
+        saved: vec![position(point), kept, position(length)],
+    })
+}
+
+fn replaced_region(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (_, begv, zv) = cx.point_extent()?;
+    cx.goto_char_position(saved[0].integer_value().expect("point").clamp(begv, zv))?;
+    let deactivate = cx.intern("deactivate-mark");
+    cx.store_variable(deactivate, saved[1])?;
+    Ok(Step::Done(saved[2]))
+}
+
+defsubr! { name = "decode-coding-region", gnu = "coding.c:9501", effect = Global,
+fn decode_coding_region(cx, start: Value, end: Value, coding: Value; optional destination: Value) -> Step {
+    convert_region(cx, false, start, end, coding, destination)
+}}
+
+defsubr! { name = "encode-coding-region", gnu = "coding.c:9533", effect = Global,
+fn encode_coding_region(cx, start: Value, end: Value, coding: Value; optional destination: Value) -> Step {
+    convert_region(cx, true, start, end, coding, destination)
+}}
+
 defsubr! { name = "set-safe-terminal-coding-system-internal", gnu = "coding.c:10704", effect = Global,
 fn set_safe_terminal_coding_system_internal(cx, coding: Value) {
     // Romacs writes no terminal output; the checked coding is kept for

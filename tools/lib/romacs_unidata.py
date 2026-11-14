@@ -6,7 +6,7 @@
 GNU's unidata-gen.el writes some Unicode property functions into its
 generated tables as byte code. Romacs runs Lisp from source, so each
 top-level `#[...]' literal in those tables is replaced by the name of the
-same function in rlisp/romacs-unidata.el, and the file requires that
+same function in lisp/romacs/romacs-unidata.el, and the file requires that
 library first. Every other byte is GNU's. SOURCE-DIR is lisp/international
 of the pinned GNU build (45b0f76); each input's SHA-256 is checked.
 """
@@ -30,7 +30,7 @@ TABLES = {
 # A get or put function takes (CHAR VAL TABLE); a describer takes (VAL).
 ARITY = {b'771': ('get-', 'put-'), b'257': ('describe-',)}
 FORM = b'(define-char-code-property '
-NOTE = b';; romacs: GNU byte code replaced by rlisp/romacs-unidata.el functions (tools/lib/romacs_unidata.py).\n'
+NOTE = b';; romacs: GNU byte code replaced by lisp/romacs/romacs-unidata.el functions (tools/lib/romacs_unidata.py).\n'
 
 
 def byte_code_spans(text):

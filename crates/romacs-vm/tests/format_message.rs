@@ -54,7 +54,10 @@ fn format_message_declaration_matches_oracle_spec() {
     assert_eq!(spec["arity"], serde_json::json!([declaration["min"], declaration["max"]]));
     assert_eq!(spec["effect"].as_str().unwrap(), declaration["effect"].as_str().unwrap().to_lowercase());
     assert_eq!(spec["gnu_def"], declaration["gnu"]);
-    assert_eq!(spec["rust"], declaration["rust"]);
+    // The file, not its line: a line moves whenever code above the declaration does, and two
+    // branches that each move it would fail on their merge though neither is wrong.
+    let file = |v: &Value| v.as_str().map(|s| s.rsplit_once(':').map_or(s, |(f, _)| f).to_owned());
+    assert_eq!(file(&spec["rust"]), file(&declaration["rust"]));
 }
 
 #[test]

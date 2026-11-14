@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Server-first launch (rlisp/romacs-server.el, src/client.rs) in a private
+"""Server-first launch (lisp/romacs/romacs-server.el, src/client.rs) in a private
 headless labwc, HOME, XDG and TMPDIR (parity_live.py).
 
   lifecycle  `romacs --server S FILE -n' with no server starts one (detached:

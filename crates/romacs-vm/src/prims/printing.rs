@@ -54,7 +54,7 @@ fn print_answered(cx: &mut Leaf<'_>, answers: Value, saved: &[Value]) -> Next {
 /// print.c print_vectorlike_unreadable: while `print-unreadable-function'
 /// (or the OVERRIDES of SAVED binding it) is a function, its value for each
 /// unreadable object the print of SAVED meets, from
-/// `romacs--print-unreadable' (rlisp/vm/prelude.el); THEN prints with that
+/// `romacs--print-unreadable' (lisp/romacs/vm/prelude.el); THEN prints with that
 /// list, or with nil when no call is due.
 fn answered(cx: &mut Leaf<'_>, saved: Vec<Value>, then: Then) -> Next {
     let function = match overridden_function(cx, saved[2])? {

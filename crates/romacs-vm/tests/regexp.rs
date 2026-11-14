@@ -15,9 +15,9 @@ fn replay(family: &str) {
         if row["source"].as_str().unwrap().contains("generate-new-buffer") {
             vm.install_lisp_prelude().unwrap();
             let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-            vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
+            vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
             for file in ["emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el", "emacs-lisp/backquote.el", "subr.el"] {
-                vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
+                vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
             }
         }
         vm.set_collection_floor(1);

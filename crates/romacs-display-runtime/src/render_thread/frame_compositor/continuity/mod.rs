@@ -114,7 +114,6 @@ impl GuiFrameRenderState {
         &mut self,
         projection: Option<romacs_display_protocol::InteractionProjection>,
     ) {
-        self.compositor.input_scroll.submit();
         if let Some(projection) = projection {
             self.compositor.interaction = Some(projection);
         } else if self.compositor.interaction_stale {

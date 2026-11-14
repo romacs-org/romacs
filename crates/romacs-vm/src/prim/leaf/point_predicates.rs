@@ -1,6 +1,7 @@
 //! Owned scalar snapshot; no buffer borrow escapes this non-collecting leaf.
 use super::*;
 use crate::coordinates::CharOffset;
+use std::ops::Range;
 
 impl Leaf<'_> {
     pub fn following_character(&mut self) -> std::result::Result<Value, Fault> {
@@ -61,33 +62,47 @@ impl Leaf<'_> {
         result.map_or(Ok(Value::NIL), |c| Value::integer(c).map_err(Fault::Error))
     }
 
-    pub fn point_boundaries(&mut self) -> std::result::Result<(bool, bool, bool, bool), Fault> {
+    /// The current buffer's index, point and accessible region, in bytes.
+    fn point_in_region(&mut self) -> std::result::Result<(usize, usize, Range<usize>), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let (point, beginning, end, previous_newline, next_newline) = match &self.vm.objects[index] {
+        let (point, region) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
-                let previous = if buffer.point > accessible.start {
-                    let character = buffer.char_of_byte(buffer.point).map_err(Fault::Error)?;
-                    buffer.character_of_char(CharOffset(character.0 - 1)).map_err(Fault::Error)? == Some(u32::from(b'\n'))
-                } else { false };
-                let next = buffer.point < accessible.end
-                    && buffer.character_at(buffer.point).map_err(Fault::Error)? == Some(10);
-                (buffer.point.0, accessible.start.0, accessible.end.0, previous, next)
+                (buffer.point.0, accessible.start.0..accessible.end.0)
             }
-            data::Object::ByteBuffer(buffer) => {
-                let point = buffer.point.0;
-                let beginning = buffer.restriction.start.0;
-                let end = buffer.restriction.end.0;
-                (point, beginning, end,
-                    point > beginning && buffer.bytes.get(point - 1) == Some(&b'\n'),
-                    point < end && buffer.bytes.get(point) == Some(&b'\n'))
-            }
+            data::Object::ByteBuffer(buffer) => (buffer.point.0, buffer.restriction.start.0..buffer.restriction.end.0),
             _ => return Err(Fault::Error("buffer required".into())),
         };
-        // GNU tests adjacent bytes for ASCII newline. The equivalent decoded
-        // character lookup uses rope chunks without materializing the entire
-        // buffer; never treat an Elisp character offset as a byte offset.
-        Ok((point == beginning, point == end, previous_newline, next_newline))
+        Ok((index, point, region))
+    }
+
+    /// Whether byte AT of buffer INDEX is a newline. As GNU's bolp and eolp
+    /// test the adjacent byte: a newline is one byte in the multibyte form
+    /// and never part of another character, so no position is converted.
+    fn newline_byte(&self, index: usize, at: usize) -> bool {
+        match &self.vm.objects[index] {
+            data::Object::Buffer(buffer) => buffer.byte_at(at) == Some(b'\n'),
+            data::Object::ByteBuffer(buffer) => buffer.bytes.get(at) == Some(&b'\n'),
+            _ => false,
+        }
+    }
+
+    /// Whether point is at the accessible region's (beginning, end).
+    pub fn point_at_bounds(&mut self) -> std::result::Result<(bool, bool), Fault> {
+        let (_, point, region) = self.point_in_region()?;
+        Ok((point == region.start, point == region.end))
+    }
+
+    /// Whether point begins a line: at the accessible beginning or after a newline.
+    pub fn point_at_line_start(&mut self) -> std::result::Result<bool, Fault> {
+        let (index, point, region) = self.point_in_region()?;
+        Ok(point == region.start || self.newline_byte(index, point - 1))
+    }
+
+    /// Whether point ends a line: at the accessible end or before a newline.
+    pub fn point_at_line_end(&mut self) -> std::result::Result<bool, Fault> {
+        let (index, point, region) = self.point_in_region()?;
+        Ok(point == region.end || self.newline_byte(index, point))
     }
 }
 

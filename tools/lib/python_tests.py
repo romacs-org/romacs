@@ -22,17 +22,17 @@ import tempfile
 import time
 
 NAME = re.compile(r'(^|/)(test_[^/]*|test-[^/]*|[^/]*_test)\.py$')
-OUTSIDE = ('gnu-lisp/', 'gnu-tests/test/', 'test/')
+OUTSIDE = ('lisp/gnu/', 'test/gnu/test/')
 # Test files another runner owns: path -> the runner that names it.
 ELSEWHERE = {
-    **{f'gnu-tests/tests/{name}.py': 'gnu-tests/runner/tests/python_contract.rs'
+    **{f'test/gnu/tests/{name}.py': 'crates/romacs-gnu-tests/tests/python_contract.rs'
        for name in ('test_run', 'test_ert_report', 'test_real_romacs', 'test_ert_adapter',
                     'test_scoreboard', 'test_vacuity_classifier', 'test_evidence_local',
                     'test_audit_manifest', 'test_gate_vacuity')},
     'crates/romacs-vm-gui/harness/test_fileio_live.py': 'crates/romacs-vm-gui/tests/fileio_observer.rs',
     'crates/romacs-vm-gui/harness/test_find_file_live.py': 'crates/romacs-vm-gui/tests/find_file.rs',
     'crates/romacs-vm-gui/harness/test_scaling_live.py': 'crates/romacs-vm-gui/tests/scaling.rs',
-    'tools/tests/parity_ratchet_test.py': 'gnu-tests/runner/tests/parity_ratchet.rs',
+    'tools/tests/parity_ratchet_test.py': 'crates/romacs-gnu-tests/tests/parity_ratchet.rs',
     'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
     # Needs a built host, which only Cargo can promise.
     'tools/tests/test_elisp_runner.py': 'crates/romacs-vm/tests/elisp_runner.rs',
@@ -73,7 +73,12 @@ def oracle_root():
         Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'gnu-emacs-pin')
 
 
-def run(root, path, timeout=300):
+# What a hung test file takes, not what a quiet host does: gate_test.py
+# runs 66 s on an idle host and 279 s at load 90.
+HANG = 1800
+
+
+def run(root, path, timeout=HANG):
     """(PATH, ok, seconds, output tail) for one test file."""
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='pytest-') as private:

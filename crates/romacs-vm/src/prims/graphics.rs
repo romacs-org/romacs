@@ -52,7 +52,7 @@ fn image_size(cx, spec: Value; optional pixels: Value, frame: Value) -> Step {
 // SVG root's `viewBox', `width' and `height', without decoding it: (WIDTH .
 // HEIGHT), or nil when no window system can read it so (a type its
 // signature does not tell, XBM, XPM, PBM, an SVG without dimensions, a
-// file not found).  It never waits for a decode (rlisp/romacs-attach.el
+// file not found).  It never waits for a decode (lisp/romacs/romacs-attach.el
 // sizes attachments with it).
 defsubr! { name = "romacs-image-header-size", gnu = "romacs:images", effect = Reads,
 fn romacs_image_header_size(cx, file: Value) { cx.image_header_size(file) }}

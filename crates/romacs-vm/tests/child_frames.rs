@@ -71,6 +71,29 @@ fn a_child_frame_has_its_parents_faces() {
     assert_eq!(vm.eval_source(probe).unwrap().display().unwrap(), "(bold bold bold)");
 }
 
+/// Redisplay passes `pre-redisplay-function` the windows of shown frames
+/// only, as GNU redisplays visible frames: a child frame kept hidden
+/// between uses (a layer, a toast) runs no hooks at every redisplay.
+#[test]
+fn a_hidden_child_frame_runs_no_pre_redisplay_hooks() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.eval_source("(progn (setq f (selected-frame) b (get-buffer-create \"shared\")) (switch-to-buffer b) \
+                    (setq c (romacs--create-frame `((parent-frame . ,f) (width . 10) (height . 2)))) \
+                    (set-window-buffer (frame-root-window c) b) \
+                    (setq seen nil pre-redisplay-function (lambda (windows) (push windows seen))))").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    let passed = |vm: &mut Vm| {
+        vm.eval_source("(with-current-buffer b (insert \"x\"))").unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        vm.eval_source("(let ((windows (car seen))) (and (listp windows) (memq (frame-root-window c) windows) t))").unwrap().display().unwrap()
+    };
+    assert_eq!(passed(&mut vm), "t", "a shown child frame's window is redisplayed");
+    vm.eval_source("(make-frame-invisible c)").unwrap();
+    assert_eq!(passed(&mut vm), "nil", "a hidden child frame's window is not");
+}
+
 /// A child frame shows its parent's faces until something sets one on it
 /// alone (VM2-CHILD-FRAME): a face made or set everywhere, or set to what it
 /// already shows, leaves it sharing; a change on it alone gives it its own

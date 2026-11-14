@@ -22,6 +22,8 @@ import sys
 import tempfile
 import time
 
+from live_oracle import stop
+
 HARNESS = Path(__file__).resolve().parent
 ROOT = HARNESS.parents[2]
 PROBE = HARNESS / 'parity_probe.el'
@@ -31,12 +33,12 @@ GRID = (120, 33)  # the root window's body columns and lines in both frames
 # Romacs's interactive defaults off (VM2-OOB-DEFAULTS), in an init that GNU
 # also loads; a -Q session never turns them on.
 ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mode -1))\n"
-# Completion as GNU's engine has it after loading rlisp/romacs-completion-defaults.el,
+# Completion as GNU's engine has it after loading lisp/romacs/romacs-completion-defaults.el,
 # which lacks the fzf style and romacs-complete, set in both engines' inits:
 # Romacs's own defaults complete with fzf (DIVERGENCES.md VM2-FZF-DEFAULT) in
 # romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
 # GNU's completion, displayed by fido-vertical.  Romacs's other interactive
-# defaults (rlisp/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
+# defaults (lisp/romacs/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
 # switch, so both engines edit with GNU's values; Romacs shows GNU's mode
 # line in each window (VM2-MODE-LINE).
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
@@ -158,16 +160,6 @@ def wait(predicate, timeout, what, process=None, interval=.05):
     raise TimeoutError(f'timed out after {timeout}s waiting for {what}')
 
 
-def stop(process):
-    if process is not None and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-
 def ptraceable():
     """For `Popen''s preexec_fn: let a later gdb attach to the child, which
     Yama's ptrace_scope 1 allows only an ancestor (PR_SET_PTRACER_ANY)."""
@@ -181,6 +173,9 @@ class Engine:
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
         self.probe_dir = root / 'probe'
+        # A runtime directory for the editor alone; the compositor keeps
+        # the root, where its socket's path is short enough to bind.
+        self.editor_runtime = None
 
     def start(self, tools):
         """Start the compositor and the editor; a failure leaves neither running."""
@@ -206,6 +201,8 @@ class Engine:
         time.sleep(.3)
         started = time.time()
         output = (self.root / 'engine.log').open('w')
+        if self.editor_runtime:
+            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
@@ -265,6 +262,27 @@ class Engine:
     def keys(self, *groups):
         for group in groups:
             subprocess.run([f'{self.tools}/wtype', *group], env=self.env, check=True, timeout=30)
+
+    def press(self, *groups):
+        """Type each of GROUPS as a person does, once the session has read
+        the one before and run what it completes: its input count has
+        passed that group's events while no command runs (`this-command'
+        nil, which the command loop makes it before reading a key; a probe
+        run inside a command's own wait sees it set).  Nothing is typed but
+        the keys, so no wait of a command under test ends early.  `keys'
+        alone races a slow command: a C-g typed into one quits it half done.
+        A key whose command reads keys itself (`read-key') is typed with
+        `keys'; a group ends at a command that signals, as GNU discards the
+        input typed after one (keyboard.c cmd_error)."""
+        for group in groups:
+            ready = f'(and (>= num-nonmacro-input-events {self.ask("num-nonmacro-input-events") + inputs(group)}) (null this-command))'
+            self.keys(group)
+            try:
+                wait(lambda: self.ask(ready), self.timeout, f'{self.name} to run {" ".join(group)[:60]}', self.process, .02)
+            except TimeoutError:
+                # Keys swallowed or an input thread stuck: leave the stacks to read.
+                self.write_stacks()
+                raise
 
     def fit_grid(self):
         """Size the output so the root window's body is GRID columns and lines."""
@@ -413,11 +431,14 @@ def prepare_world(romacs, env, cwd):
     return round(time.time() - started, 3) if done.returncode == 0 else None
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=()):
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=(), check=False):
     """`romacs-vm-gui --loadup ARGS' on INIT, as ~/.config/romacs/init.el
     unless INIT is None, from a world prepared first (`prepare_world', its
     seconds in `world_seconds'), as a user's HOME holds one; CLS as
-    `gnu_engine'."""
+    `gnu_engine'.  With CHECK, `romacs-display-check' is on: every window
+    redisplay reuses is also built in full, which a harness that measures
+    must not ask for, and one that asks reads `check-mismatches' from
+    `romacs--display-stats' before it ends."""
     (home / '.config/romacs').mkdir()
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
@@ -426,7 +447,8 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup', *args], root, lisp, env, timeout).start(tools)
+    checked = ('--eval', '(setq romacs-display-check t)') if check else ()
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *checked, *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 
@@ -511,6 +533,22 @@ def _pressed(key):
     keysym name (`space', `Return') is pressed with `-k', since typed it
     would be its letters, each with the modifier held."""
     return [key] if len(key) == 1 else ['-k', key]
+
+
+def inputs(group):
+    """How many input events GROUP, wtype's arguments, types: a character
+    apiece and a keysym pressed with `-k' one; a modifier held with
+    `-M'/`-m' and a delay none."""
+    count, args = 0, iter(group)
+    for arg in args:
+        if arg in ('-M', '-m', '-d', '-s'):
+            next(args, None)
+        elif arg == '-k':
+            next(args, None)
+            count += 1
+        else:
+            count += len(arg)
+    return count
 
 
 def M(key):

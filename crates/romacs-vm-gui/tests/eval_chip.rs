@@ -1,5 +1,5 @@
 //! Evaluation results as a chip after the evaluated sexp
-//! (rlisp/romacs-eval-chip.el) on the real --loadup chain with a window
+//! (lisp/romacs/romacs-eval-chip.el) on the real --loadup chain with a window
 //! system: each evaluation command's printed value or error shows once, in
 //! the chip, never also as a toast; the echo area's message and *Messages*
 //! stay GNU's; the next command that moves point or edits hides it; and

@@ -86,6 +86,10 @@ impl Leaf<'_> {
         out.extend(order.into_iter().filter(|b| !led.contains(&b.0)));
         self.vm.set_buffer_order(&out);
     }
+    /// Whether a use of the random state refuses this world build.
+    pub(crate) fn random_fenced(&self) -> bool {
+        self.vm.random_fenced()
+    }
     /// get_random: 62 random bits from the VM's generator.
     pub(crate) fn random_bits(&mut self) -> u64 {
         self.vm.fence_random();

@@ -2,7 +2,7 @@
 # Regenerate the GNU oracle fixtures for romacs-face.
 #   ROMACS_GNU_ORACLE=/abs/path/to/emacs regenerate.sh
 # One isolated `emacs -Q --batch' per theme, throwaway HOME, no network.
-# The oracle is GNU built at the pin (parity-reference.toml), named by
+# The oracle is GNU built at the pin (ledger/parity-reference.toml), named by
 # $ROMACS_GNU_ORACLE and refused by tools/lib/gnu_oracle.py unless the binary
 # itself reports the pin. There is no default: /usr/bin/emacs is 320 GNU
 # commits older and produced the separator-line mismatch (R228).
@@ -34,7 +34,7 @@ for t in nil $themes; do dump "$t" "$theme_dir"; done
 # Rum beside them: its theme file and the Modus it is written for, with the
 # colours Omarchy gives it.  It is the one dump with palette overrides.
 rum=$work/rum-themes; mkdir "$rum"
-cp "$here/inputs/modus-themes.el" "$rum/"
+cp "$here/../../../../etc/modus/modus-themes.el" "$rum/"
 cp "$here/inputs/rum-emacs.el" "$rum/rum-theme.el"
 dump rum "$rum" '(setq omarchy-color-bg "#000000" omarchy-color-fg "#d4c5a0" omarchy-color-bright-black "#756b59" omarchy-color-accent "#d48a20")'
 h=$(mktemp -d "$work/home.XXXX")

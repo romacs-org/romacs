@@ -10,7 +10,7 @@
 //! the decision someone's to take when the field is added.
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
-use rust_tokens::{Token, tokens};
+use rust_tokens::{Token, tokens, tokens_at};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -50,10 +50,16 @@ const FIELDS: &[(&str, Class)] = &[
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
     ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    // The current buffer as last resolved: a collection and a kill clear it,
+    // and a slot holding another value resolves afresh (buffer.rs).
+    ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
+    // Copies of char tables' entries, dropped at every collection
+    // (`clear_collection_caches`) and every char-table write.
+    ("flat_tables", Cache),
     // An entry goes when the value it was converted from dies (gc.rs), and
     // a moving collection rewrites that value.
     ("mode_line_forms", Cache),
@@ -93,12 +99,12 @@ const FIELDS: &[(&str, Class)] = &[
     // and before any heap Value names it, with no collection between
     // (frozen.rs), so no store.
     ("regions", Rescanned),
-    ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("inotify", Free),
+    ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("keeper", Free), ("inotify", Free),
     ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
     ("forwarded", Root),
-    ("fixnum_slots", Free), ("local_binding_slots", Free), ("free_local_binding_slots", Free),
+    ("fixnum_slots", Free), ("textget_slots", Free), ("local_binding_slots", Free), ("free_local_binding_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
     ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
     ("gc_holds", Free), ("running_engines", Free), ("rooted_write", Free), ("gc_stress", Free), ("allocation", Free),
@@ -123,13 +129,13 @@ const FIELDS: &[(&str, Class)] = &[
     ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
-    ("completion_walks", Free), ("completion_case_memo", Free),
+    ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     ("stack", Root), ("external_roots", Root),
     // Not roots: the collector dooms those it does not reach.
     ("finalizers", Cache),
     ("doomed_finalizers", Root),
-    ("post_gc_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
+    ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended_stacks", Root), ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
@@ -350,9 +356,10 @@ fn a_name_past_the_barrier_is_refused() {
 // 1. An inventory of the declarations behind a cell or lock: a field, an
 //    enum's body or an alias, anywhere under `src`. A shared borrow writes
 //    through a cell, so one holding a Value is a store the barrier never sees;
-//    those are `Held`, and their number only falls. A new declaration needs a
-//    row, and its class is the reason. An alias or a generic type that holds a
-//    cell counts as one wherever it is named.
+//    those are `Held`, and their number only falls. A declaration says its
+//    class where it is declared, in a `// CELL(Class)` comment above it, and
+//    its class is the reason. An alias or a generic type that holds a cell
+//    counts as one wherever it is named.
 // 2. The table entry types, enforced: each VM table names its entry type, each
 //    entry enum's variants name their payload types, and an entry type with a
 //    field that isn't private is listed until its fields are all private. A
@@ -407,62 +414,85 @@ use Behind::{Collector, Dead, Generic, Held, Passing, Plain, Rooted};
 /// counted only when followed by `<`.
 const CELL_TYPES: &[&str] = &["Cell", "RefCell", "Mutex", "RwLock", "UnsafeCell", "OnceCell", "OnceLock", "LazyCell", "LazyLock", "Injector"];
 
-/// Every declaration behind a cell, as `FILE:TYPE.FIELD`, or `FILE:NAME` for an
-/// enum's body or an alias.
-const CELLS: &[(&str, Behind)] = &[
-    ("annotations.rs:AnnotatedBuffer.anchors", Plain), ("annotations.rs:AnnotatedBuffer.reversed_pairs", Plain),
-    ("bytes.rs:BufferState.modification", Plain),
-    // Char table nodes, shared between tables, sub-char-tables, views and
-    // keymap cursors: five rows for one lock. Every write through it goes
-    // through char_table.rs's funnel (`wrote`), and only the collector's own
-    // visits write past it (PAST_THE_BARRIER); every field of `CharTable` and
-    // `CharTableNode` is private to that file.
-    ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
-    ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
-    ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
-    ("data.rs:LispString.cursors", Plain), ("data.rs:LispString.scanned", Plain), ("data.rs:LispString.flag_scanned", Plain),
-    ("display.rs:FaceTable.faces", Plain), ("display.rs:FaceTable.index", Plain), ("display.rs:FaceTable.over", Plain),
-    ("display.rs:FaceTable.merged", Plain), ("display.rs:FaceTable.view", Plain), ("display.rs:FaceTable.floor", Plain),
-    ("display.rs:DisplayState.diagnostics", Plain),
-    // The printer's state for one print, which can call Lisp.
-    ("eval_data.rs:Unreadable", Held), ("eval_data.rs:PrintOptions.graph", Held),
-    ("gc_mark.rs:Marking.queue", Collector), ("gc_mark.rs:Marking.serial", Collector),
-    ("gc_mark.rs:Marking.batch", Dead),
-    ("gc_mark.rs:Marking.park", Plain), ("gc_mark.rs:Marking.census", Plain), ("gc_mark.rs:Marking.after_take", Plain),
-    // Root registrations, kept as Value bits.
-    ("handle.rs:RootSet.slots", Rooted),
-    ("handle.rs:Looks.0", Plain),
-    ("host.rs:Waiter.armed", Plain),
-    ("host.rs:InspectStore.queue", Plain),
-    ("indirect.rs:Shared.0", Generic),
-    ("isolate.rs:PoolMemory.pids", Plain),
-    ("lib.rs:Vm.variable_read_probes", Plain),
-    // A reader borrowing its tree, so no collection runs while it holds the run it read.
-    ("properties.rs:KeyReader.run", Passing),
-    ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:StringMatcher.patterns", Plain),
-    ("regexp_syntax.rs:VmSyntax.ascii", Plain),
-    ("subprocess.rs:Reaper.state", Plain),
-    ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),
-    ("text.rs:TextBody.coordinate", Plain), ("text.rs:TextBody.chunk", Plain), ("text.rs:TextBody.cold_chunks", Plain),
-    ("text.rs:TextBody.cold_order", Plain), ("text.rs:TextBody.scanned_bytes", Plain), ("text.rs:TextBody.coordinate_steps", Plain),
-    // Parse-state summaries: positions and syntax codes, no Value.
-    ("text.rs:TextBody.syntax", Plain),
-    // Text shared by indirect buffers, its properties among it: `TextBody`'s own write methods.
-    ("text.rs:Text.body", Held),
-    ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
-    ("compiled_lisp/mod.rs:Configured.identity", Plain),
-    ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
-    // The scanner's test text: syntax codes and positions, no Value.
-    ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
-    ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
-    // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
-    ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
-    ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
-    ("treesit/native.rs:Tree.1", Plain),
-];
+/// What a declaration behind a cell carries in the comment lines directly
+/// above it (its attributes may come between): `// CELL(Class)`, or
+/// `// CELL(Class): why`, with one of `Behind`'s names. A row of the census is
+/// such a declaration, keyed `FILE:TYPE.FIELD`, or `FILE:NAME` for an enum's
+/// body or an alias; no list of them is kept here.
+const CELL_MARK: &str = "// CELL(";
 
-/// How many rows are `Held`. It only falls: a new one fails, and a gone one
-/// fails until this is lowered. It counts declarations, not locks.
+fn behind(name: &str) -> Option<Behind> {
+    [Plain, Held, Rooted, Passing, Collector, Dead, Generic].into_iter().find(|class| format!("{class:?}") == name)
+}
+
+/// The index of the first of LINES at or after FROM that is neither a comment
+/// nor part of an attribute, which may run over several lines.
+fn covered(lines: &[&str], from: usize) -> usize {
+    let mut k = from;
+    while k < lines.len() {
+        let line = lines[k].trim_start();
+        if line.starts_with("#[") {
+            // To the line that closes the attribute's brackets.
+            let mut depth = 0i32;
+            while k < lines.len() {
+                depth += lines[k].chars().map(|c| match c { '[' => 1, ']' => -1, _ => 0 }).sum::<i32>();
+                k += 1;
+                if depth <= 0 { break; }
+            }
+        } else if line.starts_with("//") {
+            k += 1;
+        } else {
+            break;
+        }
+    }
+    k
+}
+
+/// The CELL marks of a file's TEXT: the line each is on, the line it covers
+/// (the first below it that is neither a comment nor an attribute), and the
+/// class it names, as written.
+fn cell_marks(text: &str) -> Vec<(usize, usize, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    lines.iter().enumerate().filter_map(|(i, line)| {
+        let rest = line.trim_start().strip_prefix(CELL_MARK)?;
+        Some((i + 1, covered(&lines, i + 1) + 1, rest.split(')').next().unwrap_or(rest).to_owned()))
+    }).collect()
+}
+
+/// The census's cell rows, read where SOURCES declare them, and what is wrong
+/// with the marks: a declaration behind a cell with none, a mark that names no
+/// class, a mark above nothing that is behind a cell. A declaration without a
+/// class is given `Plain` here, so that it is reported once.
+fn marked_cells(sources: &[(String, String)]) -> (Vec<(String, Behind)>, Vec<String>) {
+    let shapes = shapes(sources);
+    let cells = cell_declarations(&shapes);
+    let (mut rows, mut out) = (std::collections::BTreeMap::new(), vec![]);
+    for (file, text) in sources {
+        let marks = cell_marks(text);
+        let mut used = BTreeSet::new();
+        for s in shapes.iter().filter(|s| &s.file == file) {
+            for ((field, _, _), line) in s.fields.iter().zip(&s.lines) {
+                let key = key(s, field);
+                if !cells.contains(&key) { continue; }
+                let class = if let Some((at, _, name)) = marks.iter().find(|(_, covered, _)| covered == line) {
+                    used.insert(*at);
+                    behind(name).or_else(|| { out.push(format!("{file}:{at}: CELL({name}) names no class of `Behind`")); None })
+                } else {
+                    out.push(format!("{file}:{line}: {key} is behind a cell: say what it holds in a `// CELL(Class)` comment directly above it"));
+                    None
+                };
+                rows.insert(key, class.unwrap_or(Plain));
+            }
+        }
+        out.extend(marks.iter().filter(|(at, _, _)| !used.contains(at))
+            .map(|(at, _, _)| format!("{file}:{at}: a CELL mark above nothing that is behind a cell; delete it")));
+    }
+    (rows.into_iter().collect(), out)
+}
+
+/// How many declarations are marked `Held`. It only falls: a new one fails,
+/// and a gone one fails until this is lowered. It counts declarations, not
+/// locks.
 const HELD: usize = 10;
 
 /// Each `Table` field of the VM, with its entry type as `FILE:TYPE`, or none
@@ -523,6 +553,8 @@ struct Shape {
     kind: Kind,
     generic: bool,
     fields: Vec<(String, bool, Vec<String>)>,
+    /// The line each of `fields` is declared on, from 1.
+    lines: Vec<usize>,
 }
 
 /// What the census is checked against: the lists above, or a test's own.
@@ -540,6 +572,11 @@ fn is_type_name(word: &str) -> bool {
 
 fn words(text: &str) -> Vec<String> {
     tokens(text).into_iter().map(|t| match t { Token::Ident(name) => name, Token::Punct(c) => c.to_string() }).collect()
+}
+
+/// The line each of `words(text)` starts on.
+fn word_lines(text: &str) -> Vec<usize> {
+    tokens_at(text).into_iter().map(|(_, line)| line).collect()
 }
 
 /// The index of the bracket closing the one at I; a `->` closes nothing.
@@ -600,8 +637,9 @@ fn member(mut p: &[String]) -> (bool, &[String]) {
     (false, p)
 }
 
-/// The declarations in a file's words: structs, unions, enums and aliases.
-fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
+/// The declarations in a file's words T, each word on the line AT gives it:
+/// structs, unions, enums and aliases.
+fn declarations(file: &str, t: &[String], at: &[usize]) -> Vec<Shape> {
     let mut out = vec![];
     let mut i = 0;
     while i + 2 < t.len() {
@@ -612,7 +650,7 @@ fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
             _ => None,
         };
         let Some(kind) = kind.filter(|_| is_type_name(&t[i + 1])) else { i += 1; continue };
-        let mut shape = Shape { file: file.to_owned(), name: t[i + 1].clone(), kind, generic: false, fields: vec![] };
+        let mut shape = Shape { file: file.to_owned(), name: t[i + 1].clone(), kind, generic: false, fields: vec![], lines: vec![] };
         let mut j = i + 2;
         if t[j] == "<" {
             let end = close(t, j);
@@ -624,6 +662,7 @@ fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
             if t.get(j).is_some_and(|w| w == "=") {
                 let end = (j..t.len()).find(|&k| t[k] == ";").unwrap_or(t.len());
                 shape.fields.push((String::new(), false, t[j + 1..end].to_vec()));
+                shape.lines.push(at[i + 1]);
                 out.push(shape);
                 i = end;
             } else {
@@ -635,17 +674,27 @@ fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
         if j < t.len() && t[j] != ";" {
             let end = close(t, j);
             let body = &t[j + 1..end];
+            // A part is its words and then a comma: START is where it begins in T,
+            // and a member begins where its attributes and visibility end.
+            let mut start = j + 1;
             if kind == Kind::Enum {
                 shape.fields.push((String::new(), false, body.to_vec()));
+                shape.lines.push(at[i + 1]);
             } else if t[j] == "{" {
                 for part in split_top(body) {
                     let (public, p) = member(&part);
-                    if p.len() >= 2 && p[1] == ":" { shape.fields.push((p[0].clone(), public, p[2..].to_vec())); }
+                    if p.len() >= 2 && p[1] == ":" {
+                        shape.fields.push((p[0].clone(), public, p[2..].to_vec()));
+                        shape.lines.push(at[start + part.len() - p.len()]);
+                    }
+                    start += part.len() + 1;
                 }
             } else {
                 for (n, part) in split_top(body).iter().enumerate() {
                     let (public, p) = member(part);
                     shape.fields.push((n.to_string(), public, p.to_vec()));
+                    shape.lines.push(at[(start + part.len() - p.len()).min(end)]);
+                    start += part.len() + 1;
                 }
             }
             j = end;
@@ -692,7 +741,7 @@ fn key(s: &Shape, field: &str) -> String {
     if s.kind == Kind::Struct { format!("{}:{}.{field}", s.file, s.name) } else { format!("{}:{}", s.file, s.name) }
 }
 
-/// Every declaration in SHAPES behind a cell, keyed as `CELLS` is. A
+/// Every declaration in SHAPES behind a cell, keyed as a census row is. A
 /// declaration found that is an alias or generic makes its own name a cell,
 /// until nothing more is found.
 fn cell_declarations(shapes: &[Shape]) -> BTreeSet<String> {
@@ -829,8 +878,12 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
 }
 
 /// Every way SOURCES differ from CENSUS.
+fn shapes(sources: &[(String, String)]) -> Vec<Shape> {
+    sources.iter().flat_map(|(file, text)| declarations(file, &words(text), &word_lines(text))).collect()
+}
+
 fn problems(sources: &[(String, String)], census: &Census) -> Vec<String> {
-    let shapes: Vec<Shape> = sources.iter().flat_map(|(file, text)| declarations(file, &words(text))).collect();
+    let shapes = shapes(sources);
     let mut out = vec![];
     let listed: BTreeSet<String> = census.cells.iter().map(|(key, _)| (*key).to_owned()).collect();
     if listed.len() != census.cells.len() { out.push("a cell is listed twice".to_owned()); }
@@ -849,12 +902,46 @@ fn problems(sources: &[(String, String)], census: &Census) -> Vec<String> {
     out
 }
 
-const CENSUS: Census = Census { cells: CELLS, held: HELD, tables: TABLES, entries: ENTRIES, public: PUBLIC_ALLOWED };
-
 #[test]
 fn cells_and_public_entry_fields_only_shrink() {
-    let problems = problems(&sources(), &CENSUS);
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let sources = sources();
+    let (cells, mut found) = marked_cells(&sources);
+    let cells: Vec<(&str, Behind)> = cells.iter().map(|(key, class)| (key.as_str(), *class)).collect();
+    found.extend(problems(&sources, &Census { cells: &cells, held: HELD, tables: TABLES, entries: ENTRIES, public: PUBLIC_ALLOWED }));
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
+
+/// A class is read from the comment above a declaration, past its attributes
+/// (one of them over several lines), and each fault of a mark is said where
+/// it is.
+#[test]
+fn each_rule_of_the_marks_fires() {
+    let text = "\
+struct A {
+    // CELL(Held): shared with the views.
+    // More of why.
+    #[cfg(
+        test
+    )]
+    #[doc(hidden)]
+    pub(crate) held: RefCell<Value>,
+    bare: Cell<usize>,
+    // CELL(Sometimes)
+    odd: Mutex<u8>,
+    // CELL(Plain)
+    plain: usize,
+}
+// CELL(Generic)
+struct Shared<T>(Rc<UnsafeCell<T>>);
+";
+    let (cells, found) = marked_cells(&[("a.rs".to_owned(), text.to_owned())]);
+    assert_eq!(cells, [("a.rs:A.bare".to_owned(), Plain), ("a.rs:A.held".to_owned(), Held), ("a.rs:A.odd".to_owned(), Plain),
+                       ("a.rs:Shared.0".to_owned(), Generic)]);
+    assert_eq!(found, [
+        "a.rs:9: a.rs:A.bare is behind a cell: say what it holds in a `// CELL(Class)` comment directly above it",
+        "a.rs:10: CELL(Sometimes) names no class of `Behind`",
+        "a.rs:12: a CELL mark above nothing that is behind a cell; delete it",
+    ]);
 }
 
 /// Every diagnostic can fire: on a source that breaks each rule against a

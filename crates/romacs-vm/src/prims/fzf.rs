@@ -1,4 +1,4 @@
-//! The fzf completion style's matching (rlisp/romacs-fzf.el), each over a
+//! The fzf completion style's matching (lisp/romacs/romacs-fzf.el), each over a
 //! whole candidate list in one call.  Candidates are copied into plain
 //! buffers first (crate::fzf::Corpus), so scoring may use other threads.
 //! QUERY is fzf's extended search syntax; CASE as `fzf_query' takes it;

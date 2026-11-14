@@ -27,7 +27,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-//! fzf's matching for the `fzf' completion style (rlisp/romacs-fzf.el).
+//! fzf's matching for the `fzf' completion style (lisp/romacs/romacs-fzf.el).
 //!
 //! Texts are character codes.  A term that ignores case is matched
 //! against the candidate's case-folded codes, the caller having folded

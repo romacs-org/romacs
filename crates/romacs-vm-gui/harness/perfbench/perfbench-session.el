@@ -19,13 +19,10 @@
 
 (defvar perfbench-session-repo nil "A private clone of the Emacs tree, with src/xdisp.c changed.")
 (defvar perfbench-session-history nil "A clone of the Emacs tree at upstream master, with its history.")
-(defvar perfbench-session-directory nil "The 5,000 files.")
-(defvar perfbench-session-agenda nil "An Org file of scheduled items.")
 (defvar perfbench-session-header nil "A large generated C header.")
 (defvar perfbench-session-cycle nil "Themes to cycle through, each loaded before its row.")
 (defvar perfbench-session-visits nil "Themes not yet loaded, one for each first visit.")
 (defvar perfbench-session--theme nil "The theme the running row should end on.")
-(defconst perfbench-session-commit "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea")
 
 (defun perfbench-session--file (name) (expand-file-name name perfbench-session-repo))
 
@@ -36,13 +33,6 @@
          (or (null text)
              (with-current-buffer buffer
                (save-excursion (goto-char (point-min)) (search-forward text nil t)))))))
-
-(defun perfbench-session--lines (buffer)
-  (with-current-buffer buffer (count-lines (point-min) (point-max))))
-
-(defun perfbench-session--xdisp ()
-  (find-file (perfbench-session--file "src/xdisp.c"))
-  (goto-char (point-min)))
 
 (defun perfbench-session--kill (&rest buffers)
   (dolist (buffer buffers)
@@ -70,27 +60,20 @@ so that comes second."
                (and (not (funcall unfontified (window-end window)))
                     (not (funcall unfontified (window-end window t)))))))))
 
-(defun perfbench-session--open (file name)
-  "The steps of visiting FILE, whose buffer is NAME, to its final faces."
-  (list :setup (lambda () (setq large-file-warning-threshold nil))
+(defun perfbench-session--open-ts (file name)
+  "The steps of visiting FILE, whose buffer is NAME, to its final faces, with
+C files in `c-ts-mode' in either engine."
+  (list :setup (lambda ()
+                 (setq large-file-warning-threshold nil)
+                 (add-to-list 'major-mode-remap-alist '(c-mode . c-ts-mode)))
         :run (lambda () (find-file (funcall file)))
         :shown (lambda () (perfbench-session--shown-p name))
         :ready (lambda () (perfbench-session--faces-p name))
         :check (lambda () (buffer-size (get-buffer name)))
         :detail (lambda () (symbol-name (buffer-local-value 'major-mode (get-buffer name))))
-        :cleanup (lambda () (perfbench-session--kill name))))
-
-(defun perfbench-session--open-ts (file name)
-  "As `perfbench-session--open', with C files in `c-ts-mode' in either engine."
-  (let ((steps (perfbench-session--open file name)))
-    (plist-put steps :setup
-               (lambda ()
-                 (setq large-file-warning-threshold nil)
-                 (add-to-list 'major-mode-remap-alist '(c-mode . c-ts-mode))))
-    (plist-put steps :cleanup
-               (lambda ()
-                 (perfbench-session--kill name)
-                 (setq major-mode-remap-alist (delete '(c-mode . c-ts-mode) major-mode-remap-alist))))))
+        :cleanup (lambda ()
+                   (perfbench-session--kill name)
+                   (setq major-mode-remap-alist (delete '(c-mode . c-ts-mode) major-mode-remap-alist)))))
 
 (defun perfbench-session--switch (theme load)
   "Make THEME the only enabled theme, first loading it when LOAD."
@@ -108,9 +91,7 @@ so that comes second."
 (defconst perfbench-session-log "*vc-change-log*")
 
 (defconst perfbench-session-commands
-  `((open-xdisp . ,(perfbench-session--open (lambda () (perfbench-session--file "src/xdisp.c")) "xdisp.c"))
-    (open-header . ,(perfbench-session--open (lambda () perfbench-session-header) "generated.h"))
-    (open-xdisp-ts . ,(perfbench-session--open-ts (lambda () (perfbench-session--file "src/xdisp.c")) "xdisp.c"))
+  `((open-xdisp-ts . ,(perfbench-session--open-ts (lambda () (perfbench-session--file "src/xdisp.c")) "xdisp.c"))
     (open-header-ts . ,(perfbench-session--open-ts (lambda () perfbench-session-header) "generated.h"))
     (vc-history
      :setup ,(lambda () (require 'vc) (require 'vc-git) (require 'log-view))
@@ -137,109 +118,12 @@ so that comes second."
      ,@(perfbench-session--theme-steps
         (lambda () (setq perfbench-session-cycle (append (cdr perfbench-session-cycle) (list (car perfbench-session-cycle))))
           (car perfbench-session-cycle))
-        nil))
-    (dired
-     :run ,(lambda () (dired perfbench-session-directory))
-     :ready ,(lambda () (derived-mode-p 'dired-mode))
-     :check ,(lambda () (with-current-buffer (window-buffer (selected-window)) (count-lines (point-min) (point-max))))
-     :cleanup ,(lambda () (kill-buffer (window-buffer (selected-window)))))
-    (occur
-     :setup ,#'perfbench-session--xdisp
-     :run ,(lambda () (occur "glyph_row"))
-     :ready ,(lambda () (perfbench-session--filled "*Occur*"))
-     :check ,(lambda () (perfbench-session--lines "*Occur*"))
-     :cleanup ,(lambda () (perfbench-session--kill "*Occur*" "xdisp.c")))
-    (project-find-regexp
-     :setup ,(lambda () (require 'project) (require 'xref)
-               (setq project-list-file (expand-file-name "projects.eld" temporary-file-directory)))
-     :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-repo)))
-                        (project-find-regexp "\\<make_fixnum\\>")))
-     :ready ,(lambda () (perfbench-session--filled "*xref*"))
-     :check ,(lambda () (perfbench-session--lines "*xref*"))
-     :cleanup ,(lambda () (perfbench-session--kill "*xref*")))
-    (project-find-file
-     :setup ,(lambda () (require 'project)
-               (setq project-list-file (expand-file-name "projects.eld" temporary-file-directory)))
-     :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-repo)))
-                        (project-find-file)))
-     :ready ,(lambda () (minibufferp (window-buffer (selected-window))))
-     :check ,(lambda () 1)
-     :cleanup ,#'ignore)
-    (vc-log
-     :setup ,(lambda () (require 'vc) (require 'vc-git))
-     :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-repo)))
-                        (vc-print-log-internal 'Git (list default-directory) perfbench-session-commit t 2000)))
-     :ready ,(lambda () (perfbench-session--filled "*vc-change-log*"))
-     :check ,(lambda () (perfbench-session--lines "*vc-change-log*"))
-     :cleanup ,(lambda () (perfbench-session--kill "*vc-change-log*")))
-    (vc-diff
-     :setup ,(lambda () (require 'vc) (perfbench-session--xdisp))
-     :run ,(lambda () (vc-diff))
-     :ready ,(lambda () (perfbench-session--filled "*vc-diff*" "perfbench"))
-     :check ,(lambda () (perfbench-session--lines "*vc-diff*"))
-     :cleanup ,(lambda () (perfbench-session--kill "*vc-diff*" "xdisp.c")))
-    (vc-dir
-     :setup ,(lambda () (require 'vc-dir))
-     :run ,(lambda () (vc-dir (file-name-as-directory perfbench-session-repo)))
-     :ready ,(lambda () (let ((buffer (window-buffer (selected-window))))
-                          (with-current-buffer buffer
-                            (and (derived-mode-p 'vc-dir-mode) (not (vc-dir-busy))
-                                 (save-excursion (goto-char (point-min)) (search-forward "xdisp.c" nil t))))))
-     :check ,(lambda () 1)
-     :cleanup ,(lambda () (perfbench-session--kill (window-buffer (selected-window)))))
-    (shell
-     :setup ,(lambda () (require 'shell) (setq shell-file-name "/bin/sh" explicit-shell-file-name "/bin/sh"))
-     :run ,(lambda () (shell)
-             (process-send-string (get-buffer-process "*shell*") "echo perfbench$((1+1))\n"))
-     :ready ,(lambda () (let ((buffer (get-buffer "*shell*")))
-                          (and buffer (with-current-buffer buffer
-                                        (save-excursion (goto-char (point-min)) (search-forward "perfbench2" nil t))))))
-     :check ,(lambda () 1)
-     :cleanup ,(lambda () (perfbench-session--kill "*shell*")))
-    (org-agenda
-     :setup ,(lambda () (require 'org-agenda) (setq org-agenda-files (list perfbench-session-agenda)))
-     :run ,(lambda () (org-agenda-list nil "2026-01-01" 'month))
-     :ready ,(lambda () (perfbench-session--filled "*Org Agenda*"))
-     :check ,(lambda () (perfbench-session--lines "*Org Agenda*"))
-     :cleanup ,(lambda () (perfbench-session--kill "*Org Agenda*") (org-release-buffers org-agenda-new-buffers))))
+        nil)))
   "Each session command: its :setup, untimed; :run, bound to F5 and timed
 from that key; :ready, true once its result stands; :check, what it made,
 compared across engines; :cleanup, untimed; :shown, true once it first shows
 anything; :keys, true while keys should be sent into it; :detail, a fact the
 row reports that may differ between engines.")
-
-(defun perfbench-session-text ()
-  "A fresh edit buffer of 600 lines, its point at the start."
-  (perfbench-session--kill "perfbench-edit")
-  (switch-to-buffer (get-buffer-create "perfbench-edit"))
-  (dotimes (line 600) (insert (format "line %d of some ordinary prose text, about sixty bytes long\n" line)))
-  (goto-char (point-min))
-  (setq buffer-undo-list nil))
-
-(defun perfbench-session-kills ()
-  "The edit buffer with something to yank."
-  (perfbench-session-text)
-  (kill-new "line of some ordinary prose text, about sixty bytes long\n"))
-
-(defun perfbench-session-undos ()
-  "The edit buffer with forty changes to undo."
-  (perfbench-session-text)
-  (dotimes (_ 40) (insert "line\n") (undo-boundary)))
-
-(defun perfbench-session-org ()
-  "ORG-NEWS in Org mode, at its first heading."
-  (perfbench-session--kill "ORG-NEWS")
-  (find-file (perfbench-session--file "etc/ORG-NEWS"))
-  (org-mode)
-  (goto-char (point-min))
-  (outline-next-heading))
-
-(defun perfbench-session-visible ()
-  "How many of the next 4,000 characters show, for what Org folding did."
-  (let ((shown 0))
-    (dotimes (offset (min 4000 (- (point-max) (point))))
-      (unless (invisible-p (+ (point) offset)) (setq shown (1+ shown))))
-    shown))
 
 (defvar perfbench-session--state nil "The armed command's steps.")
 (defvar perfbench-session--file nil "Where to write its result.")

@@ -9,7 +9,7 @@ mod string_cursor_tests;
 
 /// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
 /// next collection: a string's text, a vector's or record's slots, a bool
-/// vector's bits.
+/// vector's bits; and a bignum's digits, which live outside the tables.
 /// What the memory profiler charges for OBJECT when it is made: the entry
 /// and the storage `heap_stats' counts as live (GNU's malloc_probe sizes).
 pub(super) fn profiled_bytes(object: &Object) -> usize {
@@ -30,6 +30,7 @@ pub(super) fn payload_bytes(object: &Object) -> usize {
         Object::Bytes(bytes) => bytes.len(),
         Object::BoolVector(bits) => bits.bytes.len(),
         Object::Vector(slots) | Object::Record(slots) => slots.len() * std::mem::size_of::<Value>(),
+        Object::Bignum(digits) => usize::try_from(digits.bits().div_ceil(8)).unwrap_or(usize::MAX),
         _ => 0,
     }
 }
@@ -52,6 +53,7 @@ impl super::gc::Consed {
     }
 }
 
+// CELL(Held)
 #[derive(Clone)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex::SyntaxClass>),
@@ -151,9 +153,12 @@ pub(super) struct LispString {
     chars: usize,
     flags: u8,
     pub(crate) properties: crate::properties::Properties,
+    // CELL(Plain)
     cursors: [std::cell::Cell<(usize, usize)>; 2],
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) scanned: std::cell::Cell<usize>,
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) flag_scanned: std::cell::Cell<usize>,
 }

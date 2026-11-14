@@ -223,7 +223,7 @@ mod tests {
     /// `(byte-defop-compiler SPEC [HANDLER])` rows of the pinned bytecomp.el
     /// that name an opcode: (function, primitive, min, max).
     fn gnu_rows() -> Vec<(String, String, usize, usize)> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../gnu-lisp/emacs-lisp/bytecomp.el");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/gnu/emacs-lisp/bytecomp.el");
         let text = std::fs::read_to_string(path).unwrap();
         let mut rows = vec![];
         for line in text.lines() {

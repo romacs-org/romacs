@@ -356,11 +356,23 @@ impl Px {
     #[must_use]
     pub(crate) fn cells_rounded(self, cell: Px) -> Cell {
         if cell.0 > 0.0 {
-            Cell((self.0 / cell.0).round().max(0.0) as u32)
+            Cell(round_cells(self.0 / cell.0))
         } else {
             Cell(0)
         }
     }
+}
+
+/// `v.round().max(0.0) as u32`, without the library call `round` is on a
+/// baseline x86-64 target: every glyph a layout adds takes two. The cast
+/// truncates a non-negative V (saturating, NaN to 0), and V less its
+/// truncation is exact (Sterbenz: the two are within a factor of two, or
+/// the truncation is 0, or V is a whole number), so comparing that with
+/// one half rounds half away from zero as `round` does.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "the saturating truncation is the point: see above")]
+fn round_cells(v: f32) -> u32 {
+    let whole = v as u32;
+    if v - whole as f32 >= 0.5 { whole.saturating_add(1) } else { whole }
 }
 
 impl Add for Px {
@@ -846,3 +858,22 @@ impl Default for Transform {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod round_cells_tests {
+    /// The rounding a slot id takes, against `round', on every kind of value.
+    #[test]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "the reference is the cast")]
+    fn round_cells_is_round_clamped() {
+        let reference = |v: f32| v.round().max(0.0) as u32;
+        let mut values = vec![0.0, -0.0, 0.5, 0.499_999_97, 1.5, 2.5, -0.4, -0.6, -1.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY,
+            16_777_215.5, 16_777_216.0, 16_777_217.0, 4_294_967_040.0, 4_294_967_296.0, 1e20, f32::MAX, f32::MIN_POSITIVE];
+        let mut x = 0x1234_5678u32;
+        for _ in 0..200_000 {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            values.push(f32::from_bits(x));
+            values.push((x % 100_000) as f32 / 37.0);
+        }
+        for v in values { assert_eq!(super::round_cells(v), reference(v), "{v:?}"); }
+    }
+}

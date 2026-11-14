@@ -2,7 +2,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; gnosis's dashboard menu (rlisp/gnosis/gnosis-dashboard.el), its
+;; gnosis's dashboard menu (lisp/romacs/gnosis/gnosis-dashboard.el), its
 ;; commands inert and its submenus small, for comparing keymap-popup's
 ;; rows and faces in GNU (keymap_popup_oracle.py) and in Romacs's panel
 ;; (popup_live.py --layer, chrome_live.py's keymap scene).

@@ -8,7 +8,7 @@ fn printed(vm: &mut Vm, source: &str) -> String {
 #[test]
 fn jobs_cross_the_lisp_boundary_without_blocking_or_repeating_callbacks() {
     let mut vm = Vm::new();
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
     vm.eval_source(r#"(setq completed nil)
       (setq job (romacs-process-start '("/bin/sh" "-c" "cat; printf ERR >&2; exit 7")
         "hello λ" "/" 2 (lambda (output) (setq completed output) nil)))"#).unwrap();
@@ -25,7 +25,7 @@ fn jobs_cross_the_lisp_boundary_without_blocking_or_repeating_callbacks() {
 #[test]
 fn a_quitting_callback_does_not_strand_other_completed_jobs() {
     let mut vm = Vm::new();
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
     vm.eval_source(r#"(setq delivered nil)
       (setq first (romacs-process-start '("/bin/true") "" "/" 2
                     (lambda (_) (signal 'quit nil))))

@@ -99,3 +99,21 @@ fn only_points_row_scrolls_beyond_the_rows_minimum() {
     let (rows, ..) = lay_out(window("abcdefghijklmn\nabcdefghijklmn\n", 20, (0, 3), true));
     assert_eq!(rows, vec!["abcdefghij", "defghijklm"]);
 }
+
+/// A scrolled row's left truncation glyph is that row's own: the row
+/// below, settled on a taller baseline, leaves it where it is.
+#[test]
+fn a_left_truncation_glyph_stays_on_its_own_row() {
+    use romacs_layout_input::{BoxLine, Decor, FaceRun};
+    let mut snapshot = window("abcdefghij\nklmnopqrst", 0, (2, 2), false);
+    snapshot.faces.push(Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 6, color: None, style: 1 }), ..Default::default() }, ..face() });
+    snapshot.text.face_runs = vec![FaceRun { bytes: 13..20, face: FaceHandle(1) }];
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
+    let marks: Vec<f32> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char: '$', x, y, .. } if *x == 0.0 => Some(*y),
+        _ => None,
+    }).collect();
+    let line = romacs_layout::frame_metrics(&face()).unwrap().0 as f32;
+    assert_eq!(marks.first(), Some(&0.0), "the first row's mark is at its row's top");
+    assert!(marks.len() == 2 && marks[1] >= line, "the second row's mark is on the second row: {marks:?}");
+}

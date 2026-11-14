@@ -16,10 +16,29 @@ use super::arena::{self, ImageFields};
 use crate::{LocalZone, Value, Vm};
 use std::sync::atomic::Ordering;
 
+/// A VM a capture may write. Only `Vm::at_rest_for_image` makes one, and the
+/// image's root is built from nothing else, so a capture that skipped it
+/// would not compile.
+struct AtRest(Vm);
+
+/// The boxed root an image is written for: VM and what the embedder carries.
+fn image_root<T>(vm: AtRest, carry: T) -> usize {
+    Box::into_raw(Box::new((vm.0, carry))) as usize
+}
+
 impl Vm {
+    /// All a capture asks of the VM before it writes it: at rest
+    /// (`world_quiescent`), and its heap one old generation with no log,
+    /// whatever was allocated or stored since the last collection, since to
+    /// the process that restores the image all of it is old.
+    fn at_rest_for_image(mut self) -> Result<AtRest, String> {
+        self.world_quiescent()?;
+        self.settle_generations();
+        Ok(AtRest(self))
+    }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 43] = [
+        let checks: [(&str, bool); 45] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -34,7 +53,7 @@ impl Vm {
             ("layout_host", self.layout_host.is_none()),
             ("display", self.display.is_none()),
             // Restored as the renderer's default, which the options in the
-            // image must then also hold (rlisp/romacs-effects.el).
+            // image must then also hold (lisp/romacs/romacs-effects.el).
             ("visual", *self.visual == romacs_display_protocol::VisualConfig::default()),
             ("session_host", self.session_host.is_none()),
             ("terminal_host", self.terminal_host.is_none()),
@@ -45,6 +64,7 @@ impl Vm {
             // A frozen region is a mapping or a descriptor of this process.
             ("regions", self.regions_empty()),
             ("isolates", self.isolates.is_empty()),
+            ("keeper", self.keeper.is_none()),
             ("inotify", self.inotify.is_none()),
             ("local_zone", matches!(self.local_zone, LocalZone::Process)),
             ("fence", self.fence.is_none()),
@@ -52,6 +72,7 @@ impl Vm {
             ("execution", self.execution.holds_nothing()),
             ("spare_programs", self.spare_programs.is_empty()),
             ("regexp_cache", self.regexp_cache.is_empty()),
+            ("flat_tables", self.flat_tables.is_empty()),
             ("mode_line_forms", self.mode_line_forms.is_empty()),
             ("lambda_lists", self.lambda_lists.is_empty()),
             ("status_bar_line", self.status_bar_line.is_none()),
@@ -84,6 +105,8 @@ impl Vm {
     pub fn world_reinit(&mut self) {
         // The environment lists, from this process's environment.
         self.environment_snapshot = Some(crate::environment::snapshot());
+        // HOST(slot:process-environment): rebuilds the environment lists from this process
+        // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
@@ -108,6 +131,7 @@ impl Vm {
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
         self.reset_collection_counters();
+        self.forget_system_name();
     }
 }
 
@@ -117,14 +141,53 @@ impl Vm {
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
-    vm.world_quiescent()?;
+    let vm = vm.at_rest_for_image()?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
-    let root = Box::into_raw(Box::new((vm, carry))) as usize;
+    let root = image_root(vm, carry);
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
     // The VM stays allocated: the image owns it, and this process exits.
     written
+}
+
+/// The census of VM and CARRY as an image holds them
+/// (`romacs_snapshot::Walk`): every kind with its count, bytes and layout;
+/// the values that name something by an ordinal of this build's tables,
+/// which another build numbers otherwise; and, in a process that mapped
+/// the image, its arena's own counts of the bytes in use and free, against
+/// which the walk's owned bytes show how much of the image is the values
+/// it holds. The ordinals noted are the types `ordinals` names: a type that
+/// comes to hold another is noted when it is added there.
+#[must_use]
+pub fn census<T: super::safe::Schema>(vm: &Vm, carry: &T) -> serde_json::Value {
+    let mut observe = |value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes| ordinals(value, notes);
+    let mut walk = romacs_snapshot::Walk::new(&mut observe);
+    walk.value(vm);
+    walk.value(carry);
+    let mut census = walk.census();
+    census["image"] = arena::image_census().map_or(serde_json::Value::Null, |arena| serde_json::json!({
+        "used": arena.used, "small_free": arena.small_free, "slab_rest": arena.slab_rest,
+        "runs_kept": arena.runs_kept, "runs_released": arena.runs_released,
+    }));
+    census
+}
+
+/// Count VALUE's ordinals of this build's tables into NOTES.
+fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
+    if let Some(value) = value.downcast_ref::<Value>() {
+        if value.index_if(6).is_some() {
+            notes.add("ordinal: a primitive, by its index in the primitive table", 1);
+        }
+    } else if value.downcast_ref::<crate::forwarded::Fwd>().is_some() {
+        notes.add("ordinal: a forwarded variable, by its place in C_VARIABLES", 1);
+    } else if let Some(slots) = value.downcast_ref::<crate::forwarded::PerBuffer>() {
+        notes.add("ordinal: a buffer's per-buffer slots, by forwarded place", slots.slots() as u64);
+    } else if value.downcast_ref::<crate::properties::Key>().is_some_and(|key| key.is_builtin()) {
+        notes.add("ordinal: a built-in property key, at its fixed symbol slot", 1);
+    } else if value.downcast_ref::<crate::PendingBody>().is_some() {
+        notes.add("ordinal: a pending compiled body, its primitives as raw bits", 1);
+    }
 }
 
 /// The VM and carry of the image this process mapped, when it was made for
@@ -141,12 +204,55 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    // With the other counters of the process: what the VM stores from now
+    // on is stamped at or above the epoch its last collection ended at.
+    crate::epoch::raise(root.0.allocation.since);
     Some(*root)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::Vm;
+    use crate::{Value, Vm};
+
+    /// What a capture writes is one old generation: an entry made and a
+    /// store since the last collection are settled before the write. The
+    /// image's root takes only what `at_rest_for_image` returns.
+    #[test]
+    fn a_capture_settles_the_generations_before_it_writes() {
+        use crate::hash::{HashTable, Test, Weakness};
+        let mut vm = Vm::new();
+        let old = vm.alloc_cons(Value::NIL, Value::NIL);
+        let table = vm.allocate_object(crate::data::Object::HashTable(Box::new(HashTable::new(Test::Eq, Weakness::None, 8))));
+        let mut roots = [old, table];
+        vm.collect(&mut roots);
+        assert_eq!(roots[1].index_if(0), Some(1), "the table is the first object");
+        assert!(vm.generations_settled());
+        // Each alone would leave the heap unsettled: a young entry, a dirty
+        // old one, and a log.
+        let unsettle: [fn(&mut Vm, Value); 3] = [
+            |vm, _| { vm.alloc_cons(Value::NIL, Value::NIL); },
+            |vm, old| vm.conses.set_car(old.index_if(3).unwrap(), Value::TRUE),
+            |vm, old| vm.objects.log_a_put(0, old),
+        ];
+        for change in unsettle {
+            change(&mut vm, roots[0]);
+            assert!(!vm.generations_settled());
+            vm = vm.at_rest_for_image().expect("a VM at rest").0;
+            assert!(vm.generations_settled());
+        }
+    }
+
+    /// A census meets the VM once and counts what it names by this build's
+    /// tables: a fresh VM's function cells name every primitive. (Its
+    /// forwarded variables' places are made as variables are first read.)
+    #[test]
+    fn a_census_counts_the_vm_and_its_ordinals() {
+        let census = super::census(&Vm::new(), &());
+        let vm = census["kinds"].as_array().unwrap().iter().find(|kind| kind["type"] == "romacs_vm::Vm").unwrap();
+        assert_eq!(vm["count"], 1);
+        let primitives = census["notes"]["ordinal: a primitive, by its index in the primitive table"].as_u64().unwrap_or(0);
+        assert!(primitives >= crate::prim::count() as u64, "{}", census["notes"]);
+    }
 
     #[test]
     fn the_collectors_reentry_state_is_at_rest_or_refused() {

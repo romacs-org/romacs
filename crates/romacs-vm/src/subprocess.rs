@@ -1,7 +1,7 @@
 //! GNU process.c and callproc.c operating-system mechanics: process objects'
 //! native state, descriptors, spawning, reaping and polling. Nothing here
 //! calls Lisp; the wait loop that runs filters, sentinels and timers is Lisp
-//! (rlisp/vm/subprocess.el) over the leaf primitives in prims/process.rs.
+//! (lisp/romacs/vm/subprocess.el) over the leaf primitives in prims/process.rs.
 use crate::Value;
 use std::collections::BTreeMap;
 use std::io;
@@ -200,6 +200,7 @@ struct Orphan {
 /// reused one.
 #[derive(Default)]
 struct Reaper {
+    // CELL(Plain)
     state: std::sync::Mutex<Reaping>,
 }
 
@@ -541,6 +542,8 @@ pub struct ProcessWatch {
 
 impl ProcessWatch {
     pub fn start(mut fds: Vec<(RawFd, i16)>, ready: impl FnOnce() + Send + 'static) -> io::Result<Self> {
+        // HOST(std::net): ProcessWatch's cancel pair: a socket pair private to this process that
+        // stops its own poll thread; it reaches no host fact
         let (cancel, stop) = std::os::unix::net::UnixStream::pair()?;
         let thread = std::thread::Builder::new().name("process-watch".into()).spawn(move || {
             use std::os::fd::AsRawFd;

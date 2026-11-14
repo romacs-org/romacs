@@ -1,6 +1,6 @@
 ;;; isolate-zygote-check.el --- scaling probe  -*- lexical-binding: t -*-
 
-;; A zygote's validity check before each dispatch (rlisp/vm/isolate.el,
+;; A zygote's validity check before each dispatch (lisp/romacs/vm/isolate.el,
 ;; worker-vms design §2.4): the inherited variables compared, then the
 ;; files it loaded and the `load-path' directories stamped.  Linear in
 ;; each, and in nothing else.

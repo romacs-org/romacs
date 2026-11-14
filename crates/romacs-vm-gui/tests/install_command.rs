@@ -78,9 +78,12 @@ fn install_command_module_activates_during_initialize() {
         return;
     }
     let root = std::env::temp_dir().join(format!("romacs-install-seam-{}", std::process::id()));
-    let modules = root.join("rlisp/romacs-gui-extensions");
-    std::fs::create_dir_all(root.join("gnu-lisp")).unwrap();
+    let modules = root.join("lisp/romacs/romacs-gui-extensions");
+    std::fs::create_dir_all(root.join("lisp/gnu")).unwrap();
     std::fs::create_dir_all(&modules).unwrap();
+    // A runtime tree of this build's generation, as the executable requires of the tree it is given.
+    std::fs::create_dir_all(root.join("etc")).unwrap();
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../etc/romacs-runtime-epoch"), root.join("etc/romacs-runtime-epoch")).unwrap();
     std::fs::write(modules.join("10-setup.el"), "(setq romacs-gui-module-text \"module\")").unwrap();
     std::fs::write(modules.join("20-probe.el"), "(romacs-gui-install-command [24 57345] '(defun romacs-gui-module-probe () (interactive) (insert romacs-gui-module-text)))").unwrap();
     std::fs::write(modules.join("ignored.txt"), "(error \"must not load\")").unwrap();

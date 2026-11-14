@@ -1,5 +1,5 @@
 //! `romacs-agent-host --dir DIR --socket SOCKET -- PROGRAM ARG...`: the
-//! supervisor of one agent session (rlisp/romacs-agent.el). It runs the
+//! supervisor of one agent session (lisp/romacs/romacs-agent.el). It runs the
 //! harness (Claude Code's stream-json CLI, or any program speaking lines),
 //! owns its stdin and stdout, and outlives every Romacs server: a server
 //! attaches over SOCKET, is sent the journal from a sequence number on and

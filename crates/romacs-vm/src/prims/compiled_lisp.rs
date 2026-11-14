@@ -1,5 +1,5 @@
 //! Background compiles of compiled Lisp (`crate::compiled_lisp`), the
-//! switch rlisp/romacs-precompile.el turns. Not in GNU, whose `.elc` files
+//! switch lisp/romacs/romacs-precompile.el turns. Not in GNU, whose `.elc` files
 //! an installation compiles ahead (DIVERGENCES.md VM2-LOADPRECOMPILE).
 use super::*;
 

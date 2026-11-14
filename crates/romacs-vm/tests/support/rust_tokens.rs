@@ -12,7 +12,16 @@ pub enum Token {
 /// identifiers and single punctuation characters, which is all the scan
 /// needs to see calls, declarations and braces.
 pub fn tokens(source: &str) -> Vec<Token> {
+    tokens_at(source).into_iter().map(|(token, _)| token).collect()
+}
+
+/// `tokens`, each with the line it starts on, from 1: for a check that
+/// reads what a comment beside a declaration says of it.
+pub fn tokens_at(source: &str) -> Vec<(Token, usize)> {
     let chars: Vec<char> = source.chars().collect();
+    // The index of each line's first character.
+    let starts: Vec<usize> = std::iter::once(0).chain(chars.iter().enumerate().filter(|(_, c)| **c == '\n').map(|(i, _)| i + 1)).collect();
+    let line = |i: usize| starts.partition_point(|&start| start <= i);
     let mut out = vec![];
     let mut i = 0;
     let at = |i: usize| chars.get(i).copied().unwrap_or('\0');
@@ -58,9 +67,9 @@ pub fn tokens(source: &str) -> Vec<Token> {
         } else if c.is_alphanumeric() || c == '_' {
             let start = i;
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
-            out.push(Token::Ident(chars[start..i].iter().collect()));
+            out.push((Token::Ident(chars[start..i].iter().collect()), line(start)));
         } else {
-            out.push(Token::Punct(c));
+            out.push((Token::Punct(c), line(i)));
             i += 1;
         }
     }

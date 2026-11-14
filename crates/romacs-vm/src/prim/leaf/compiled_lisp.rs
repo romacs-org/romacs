@@ -1,5 +1,5 @@
 //! Background compiles of compiled Lisp (`crate::compiled_lisp`): what
-//! rlisp/romacs-precompile.el's switch asks.
+//! lisp/romacs/romacs-precompile.el's switch asks.
 use super::*;
 
 impl Leaf<'_> {

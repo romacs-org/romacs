@@ -6,8 +6,9 @@
 //! completion's predicate) needs it. Against pinned GNU, on the loadup
 //! chain where nadvice is loaded. A closure inside a `let' still refuses
 //! (VM2-CLOSEQ1).
-use romacs_vm::Vm;
-use std::path::Path;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 const EXPRESSIONS: &[&str] = &[
     "(aref (lambda (x) x) 2)",
@@ -16,31 +17,10 @@ const EXPRESSIONS: &[&str] = &[
     "(progn (defun ce-cmd (x) (interactive (list (+ 1 2))) x) (advice-add 'ce-cmd :around (lambda (f &rest a) (apply f a))) (list (commandp 'ce-cmd) (call-interactively 'ce-cmd) (car (interactive-form 'ce-cmd))))",
 ];
 
-fn romacs() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 #[test]
 fn a_toplevel_closure_environment_matches_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let mut vm = romacs();
+    let mut vm = gnu_lisp(&[]);
     let mut failures = Vec::new();
     for expression in EXPRESSIONS {
         let source = format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");

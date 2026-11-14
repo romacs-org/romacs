@@ -10,12 +10,19 @@
 //! synchronize. A child that must split its output across reads waits for a
 //! line the test sends once the filter has seen the first part; a part has
 //! a newline only at its end, since sh's printf may write before one.
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::Path;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// One expression per line, each with `default-directory' set to a private
 /// directory. Romacs runs them in order in one VM, so each leaves no process.
+/// A pty's name is compared by its shape, /dev/pts/N: its number is whichever
+/// pty the host had free when each side ran.
 const CASES: &str = r###"
 (list (processp 1) (process-list) (get-process "nope") (get-buffer-process "nope") (process-status "nope") (condition-case e (get-process 1) (error e)) (condition-case e (process-name 1) (error e)) (condition-case e (process-status nil) (error e)))
 (list (make-process) (make-pipe-process) (make-network-process) (condition-case e (make-process :command (list "true")) (error e)) (condition-case e (make-process :name 1 :command (list "true")) (error e)) (condition-case e (make-process :name "x" :command (list "true") :stop t) (error e)) (condition-case e (make-process :name "x" :foo) (error e)) (condition-case e (make-process :name "x" :command (list "romacs-no-such-program")) (error e)) (process-list))
@@ -30,7 +37,7 @@ const CASES: &str = r###"
 (romacs-test-chunks "printf 'x\\r'; read x; printf 'y\\r'; read x; printf 'z'" 'utf-8-dos 2)
 (romacs-test-chunks "printf 'x\\r'; read x; printf '\\n'" 'undecided-dos 1)
 (romacs-test-chunks "printf 'x\\r'; read x; printf '\\n'" 'utf-8-unix 1)
-(let ((p (make-process :name "tty" :command (list "sh" "-c" "tty >/dev/null && echo tty || echo notty") :buffer (get-buffer-create "romacs-ttybuf")))) (romacs-test-wait p) (list (with-current-buffer "romacs-ttybuf" (buffer-string)) (stringp (process-tty-name p)) (process-tty-name p 'stderr)))
+(let ((p (make-process :name "tty" :command (list "sh" "-c" "tty >/dev/null && echo tty || echo notty") :buffer (get-buffer-create "romacs-ttybuf")))) (romacs-test-wait p) (list (with-current-buffer "romacs-ttybuf" (buffer-string)) (stringp (process-tty-name p)) (string-match-p "\\`/dev/pts/[0-9]+\\'" (process-tty-name p 'stderr))))
 (let ((p (make-process :name "sg" :command (list "sleep" "10") :connection-type 'pipe))) (list (signal-process p 'TERM) (progn (romacs-test-wait p) (process-status p)) (process-exit-status p) (condition-case e (signal-process 0 'NOSUCHSIG) (error e)) (signal-process "romacs-nope" 0)))
 (let ((p (make-pipe-process :name "pp" :noquery t))) (list (process-status p) (process-id p) (process-contact p) (process-contact p t) (process-type p) (buffer-name (process-buffer p)) (process-query-on-exit-flag p) (progn (stop-process p) (process-status p)) (progn (continue-process p) (process-status p)) (progn (delete-process p) (process-status p)) (process-list)))
 (let* ((buf (get-buffer-create "romacs-pipebuf")) (pipe (make-pipe-process :name "errpipe" :buffer buf :noquery t)) (p (make-process :name "w" :command (list "sh" "-c" "echo e1 >&2; echo o1") :connection-type 'pipe :stderr pipe :buffer (get-buffer-create "romacs-wbuf")))) (romacs-test-wait p) (romacs-test-wait pipe) (list (with-current-buffer buf (buffer-string)) (with-current-buffer "romacs-wbuf" (buffer-string)) (process-status pipe)))
@@ -92,47 +99,23 @@ const PROLOGUE: &str = r#"(progn
       (romacs-test-wait p)
       (reverse chunks))))"#;
 
-/// The loadup chain the daily-driver consumers run on (real_ert_load.rs).
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 /// Run each of EXPRESSIONS in Romacs's VM and in pinned GNU, each in a
 /// private `default-directory' under BASE; the mismatches.
 fn mismatches(vm: &mut Vm, expressions: &[&str], base: &Path) -> Vec<String> {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = |index: usize, side: &str| {
+        let directory = base.join(format!("{index}-{side}"));
+        std::fs::create_dir_all(&directory).unwrap();
+        format!("{}/", directory.display())
+    };
+    // As character codes, as tests/json.rs compares.
+    let source = |index: usize, expression: &str, side: &str| format!(
+        "(progn (setq default-directory {:?}) (append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil))",
+        directory(index, side));
+    let answers = gnu_batch::outputs(&expressions.iter().enumerate()
+        .map(|(index, expression)| format!("(progn {PROLOGUE} (prin1 {}))", source(index, expression, "gnu"))).collect::<Vec<_>>());
     let mut failures = Vec::new();
-    for (index, expression) in expressions.iter().enumerate() {
-        let directory = |side: &str| {
-            let directory = base.join(format!("{index}-{side}"));
-            std::fs::create_dir_all(&directory).unwrap();
-            format!("{}/", directory.display())
-        };
-        // As character codes, as tests/json.rs compares.
-        let source = |side: &str| format!(
-            "(progn (setq default-directory {:?}) (append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil))",
-            directory(side));
-        let output = std::process::Command::new(&binary)
-            .args(["-Q", "--batch", "--eval", PROLOGUE, "--eval", &format!("(prin1 {})", source("gnu"))])
-            .output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
-        let actual = vm.eval_source(&source("romacs")).and_then(|v| v.display());
+    for ((index, expression), expected) in expressions.iter().enumerate().zip(answers) {
+        let actual = vm.eval_source(&source(index, expression, "romacs")).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
                 .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
@@ -149,7 +132,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 #[test]
 fn processes_match_pinned_gnu() {
     let base = scratch("test");
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let cases: Vec<&str> = CASES.lines().filter(|line| !line.is_empty()).collect();
     let failures = mismatches(&mut vm, &cases, &base);
@@ -194,7 +177,7 @@ fn saturated_listener() -> (OwnedFd, Vec<std::net::TcpStream>, u16) {
 fn nowait_connect_does_not_block_like_gnu() {
     let base = scratch("nowait");
     let (_listener, _queued, port) = saturated_listener();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let case = format!("(let* ((t0 (float-time)) (c (make-network-process :name \"sat\" :host \"127.0.0.1\" :service {port} :nowait t :noquery t))) (prog1 (list (process-status c) (< (- (float-time) t0) 1) (progn (accept-process-output nil 0.05) (process-status c)) (process-contact c :remote)) (delete-process c)))");
     let failures = mismatches(&mut vm, &[&case], &base);
@@ -229,7 +212,7 @@ fn local_sockets_match_pinned_gnu() {
     let cases: Vec<String> = LOCAL_CASES.lines().filter(|line| !line.is_empty())
         .map(|line| line.replace("@DIR@", sockets.to_str().unwrap())).collect();
     let cases: Vec<&str> = cases.iter().map(String::as_str).collect();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     let failures = mismatches(&mut vm, &cases, &base);
     drop(vm);
@@ -242,7 +225,7 @@ fn local_sockets_match_pinned_gnu() {
 // still reaped once they exit, not left as zombies.
 #[test]
 fn dropped_vm_children_are_reaped() {
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let pids = vm.eval_source(r#"(progn (setq default-directory "/") (list (process-id (make-process :name "live" :command (list "sleep" "10") :connection-type 'pipe :noquery t))
                                        (let ((p (make-process :name "dead" :command (list "sleep" "10") :connection-type 'pipe :noquery t))) (delete-process p) (process-id p))))"#)
         .and_then(|v| v.display()).unwrap();
@@ -277,7 +260,7 @@ fn dropped_vm_children_share_one_reaper() {
     assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
     // Held open for writing, so each child's open of the FIFO returns.
     let release = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let script = format!("trap '' HUP; echo ready; read x < {}", fifo.display());
     let pids = vm.eval_source(&format!(r#"(progn (setq default-directory "/") (let* ((out "")
             (ps (mapcar (lambda (_) (make-process :name "hup" :command (list "sh" "-c" {script:?}) :connection-type 'pipe :noquery t

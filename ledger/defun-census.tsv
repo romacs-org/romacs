@@ -1,0 +1,489 @@
+# GNU DEFUNs a Romacs session leaves undefined: NAME<TAB>STATUS<TAB>NOTE, sorted by name.
+# STATUS needed (a command or called by shipped Lisp: to implement; NOTE says by whom),
+# elsewhere (in progress in another lane; NOTE says which), or absent (deliberately left out;
+# NOTE is the reason).  crates/romacs-vm-gui/src/defun_census.rs keeps it exact: a name the
+# world defines must leave, a newly undefined DEFUN must come in.
+all-threads	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+android-browse-url-internal	absent	platform: Android build only
+android-clipboard-exists-p	absent	platform: Android build only
+android-clipboard-owner-p	absent	platform: Android build only
+android-detect-keyboard	absent	platform: Android build only
+android-detect-mouse	absent	platform: Android build only
+android-display-monitor-attributes-list	absent	platform: Android build only
+android-enumerate-fonts	absent	platform: Android build only
+android-external-storage-available-p	absent	platform: Android build only
+android-frame-edges	absent	platform: Android build only
+android-frame-geometry	absent	platform: Android build only
+android-frame-list-z-order	absent	platform: Android build only
+android-frame-restack	absent	platform: Android build only
+android-get-clipboard	absent	platform: Android build only
+android-get-clipboard-data	absent	platform: Android build only
+android-get-clipboard-targets	absent	platform: Android build only
+android-get-connection	absent	platform: Android build only
+android-mouse-absolute-pixel-position	absent	platform: Android build only
+android-notifications-notify	absent	platform: Android build only
+android-query-battery	absent	platform: Android build only
+android-recreate-activity	absent	platform: Android build only
+android-relinquish-directory-access	absent	platform: Android build only
+android-request-directory-access	absent	platform: Android build only
+android-request-storage-access	absent	platform: Android build only
+android-set-clipboard	absent	platform: Android build only
+android-set-mouse-absolute-pixel-position	absent	platform: Android build only
+android-toggle-on-screen-keyboard	absent	platform: Android build only
+backtrace--frames-from-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+bidi-find-overridden-directionality	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+bidi-resolved-levels	absent	no shipped Lisp calls it and it is no command
+bitmap-spec-p	absent	no shipped Lisp calls it and it is no command
+buffer-last-name	needed	lane A (editing, windows, frames, minibuffer readers, display)
+buffer-line-statistics	needed	lane A (editing, windows, frames, minibuffer readers, display)
+byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+canvas-refresh	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+ccl-execute	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+ccl-execute-on-string	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+check-coding-systems-region	absent	no shipped Lisp calls it and it is no command
+close-font	absent	no shipped Lisp calls it and it is no command
+color-gray-p	absent	no shipped Lisp calls it and it is no command
+combine-windows	needed	lane A (editing, windows, frames, minibuffer readers, display)
+comp--compile-ctxt-to-file0	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--init-ctxt	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--install-trampoline	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--late-register-subr	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--register-lambda	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--register-subr	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--release-ctxt	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp--subr-signature	absent	native compilation: Romacs compiles Lisp its own way
+comp-el-to-eln-filename	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp-el-to-eln-rel-filename	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+comp-libgccjit-version	absent	native compilation: Romacs compiles Lisp its own way
+comp-native-compiler-options-effective-p	absent	native compilation: Romacs compiles Lisp its own way
+comp-native-driver-options-effective-p	absent	native compilation: Romacs compiles Lisp its own way
+composition-get-gstring	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+composition-sort-rules	absent	no shipped Lisp calls it and it is no command
+compute-motion	needed	lane A (editing, windows, frames, minibuffer readers, display)
+condition-mutex	absent	no shipped Lisp calls it and it is no command
+condition-name	absent	no shipped Lisp calls it and it is no command
+condition-notify	absent	no shipped Lisp calls it and it is no command
+condition-variable-p	absent	no shipped Lisp calls it and it is no command
+condition-wait	absent	no shipped Lisp calls it and it is no command
+coordinates-in-window-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
+current-cpu-time	absent	no shipped Lisp calls it and it is no command
+current-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+cygwin-convert-file-name-from-windows	absent	platform: Cygwin build only
+cygwin-convert-file-name-to-windows	absent	platform: Cygwin build only
+dbus--fd-close	absent	D-Bus: not linked
+dbus--fd-open	absent	D-Bus: not linked
+dbus--init-bus	absent	D-Bus: not linked
+dbus--registered-fds	absent	D-Bus: not linked
+dbus-get-unique-name	absent	D-Bus: not linked
+dbus-message-internal	absent	D-Bus: not linked
+debug-timer-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+debugger-trap	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+declare-equiv-charset	absent	no shipped Lisp calls it and it is no command
+decode-big5-char	absent	no shipped Lisp calls it and it is no command
+decode-sjis-char	absent	no shipped Lisp calls it and it is no command
+default-printer-name	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+delete-xwidget-view	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+display--line-is-continued-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
+display--update-for-mouse-movement	needed	lane A (editing, windows, frames, minibuffer readers, display)
+draw-string	absent	no shipped Lisp calls it and it is no command
+dump-colors	absent	portable dumper: Romacs starts from its own world image
+dump-emacs-portable	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+dump-emacs-portable--sort-predicate	absent	portable dumper: Romacs starts from its own world image
+dump-emacs-portable--sort-predicate-copied	absent	portable dumper: Romacs starts from its own world image
+dump-face	absent	portable dumper: Romacs starts from its own world image
+dump-frame-glyph-matrix	absent	portable dumper: Romacs starts from its own world image
+dump-glyph-matrix	absent	portable dumper: Romacs starts from its own world image
+dump-glyph-row	absent	portable dumper: Romacs starts from its own world image
+dump-redisplay-history	absent	portable dumper: Romacs starts from its own world image
+dump-tab-bar-row	absent	portable dumper: Romacs starts from its own world image
+dump-tool-bar-row	absent	portable dumper: Romacs starts from its own world image
+encode-big5-char	absent	no shipped Lisp calls it and it is no command
+encode-sjis-char	absent	no shipped Lisp calls it and it is no command
+event-convert-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
+file-attributes-lessp	absent	no shipped Lisp calls it and it is no command
+font-drive-otf	absent	no shipped Lisp calls it and it is no command
+font-get-system-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+font-get-system-normal-font	absent	no shipped Lisp calls it and it is no command
+font-otf-alternates	absent	no shipped Lisp calls it and it is no command
+font-shape-gstring	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+font-variation-glyphs	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+fontset-list-all	absent	no shipped Lisp calls it and it is no command
+frame--z-order-lessp	absent	no shipped Lisp calls it and it is no command
+frame-child-frame-border-width	absent	no shipped Lisp calls it and it is no command
+frame-font-cache	absent	no shipped Lisp calls it and it is no command
+frame-id	needed	lane A (editing, windows, frames, minibuffer readers, display)
+frame-pointer-visible-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
+frame-root-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
+frame-scale-factor	absent	no shipped Lisp calls it and it is no command
+frame-scroll-bar-height	needed	lane A (editing, windows, frames, minibuffer readers, display)
+frame-scroll-bar-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
+frame-window-state-change	absent	no shipped Lisp calls it and it is no command
+fringe-bitmaps-at-pos	needed	lane A (editing, windows, frames, minibuffer readers, display)
+funcall-with-delayed-message	needed	lane A (editing, windows, frames, minibuffer readers, display)
+gap-position	absent	no shipped Lisp calls it and it is no command
+garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
+get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+get-display-property	needed	lane A (editing, windows, frames, minibuffer readers, display)
+get-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+get-unused-iso-final-char	absent	no shipped Lisp calls it and it is no command
+gfile-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-monitor-name	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gnutls-asynchronous-parameters	absent	no shipped Lisp calls it and it is no command
+gnutls-ciphers	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+gnutls-digests	absent	no shipped Lisp calls it and it is no command
+gnutls-format-certificate	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+gnutls-hash-digest	absent	no shipped Lisp calls it and it is no command
+gnutls-hash-mac	absent	no shipped Lisp calls it and it is no command
+gnutls-macs	absent	no shipped Lisp calls it and it is no command
+gnutls-symmetric-decrypt	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+gnutls-symmetric-encrypt	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+gpm-mouse-start	needed	lane A (editing, windows, frames, minibuffer readers, display)
+gpm-mouse-stop	needed	lane A (editing, windows, frames, minibuffer readers, display)
+haiku-display-monitor-attributes-list	absent	platform: Haiku build only
+haiku-drag-message	absent	platform: Haiku build only
+haiku-frame-edges	absent	platform: Haiku build only
+haiku-frame-geometry	absent	platform: Haiku build only
+haiku-frame-list-z-order	absent	platform: Haiku build only
+haiku-frame-restack	absent	platform: Haiku build only
+haiku-get-version-string	absent	platform: Haiku build only
+haiku-menu-bar-open	absent	platform: Haiku build only
+haiku-mouse-absolute-pixel-position	absent	platform: Haiku build only
+haiku-notifications-notify	absent	platform: Haiku build only
+haiku-put-resource	absent	platform: Haiku build only
+haiku-read-file-name	absent	platform: Haiku build only
+haiku-roster-launch	absent	platform: Haiku build only
+haiku-save-session-reply	absent	platform: Haiku build only
+haiku-selection-data	absent	platform: Haiku build only
+haiku-selection-owner-p	absent	platform: Haiku build only
+haiku-selection-put	absent	platform: Haiku build only
+haiku-selection-timestamp	absent	platform: Haiku build only
+haiku-send-message	absent	platform: Haiku build only
+haiku-set-mouse-absolute-pixel-position	absent	platform: Haiku build only
+haiku-write-node-attribute	absent	platform: Haiku build only
+handle-save-session	absent	no shipped Lisp calls it and it is no command
+handle-switch-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
+imagemagick-types	absent	pinned GNU is built without ImageMagick: the type is not in image-types
+inotify-allocated-p	absent	inotify debugging helper with no shipped caller
+inotify-watch-list	absent	inotify debugging helper with no shipped caller
+insert-startup-screen	absent	no shipped Lisp calls it and it is no command
+int86	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal--hash-table-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
+internal--hash-table-histogram	absent	GNU hash-table and obarray internals: Romacs's differ
+internal--hash-table-index-size	absent	GNU hash-table and obarray internals: Romacs's differ
+internal--labeled-narrow-to-region	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal--labeled-widen	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal--obarray-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
+internal--set-buffer-modified-tick	absent	no shipped Lisp calls it and it is no command
+internal--track-mouse	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal-decode-string-utf-8	absent	no shipped Lisp calls it and it is no command
+internal-encode-string-utf-8	absent	no shipped Lisp calls it and it is no command
+internal-face-x-get-resource	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+internal-lisp-face-empty-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal-set-lisp-face-attribute-from-resource	needed	lane A (editing, windows, frames, minibuffer readers, display)
+internal-stack-stats	absent	no shipped Lisp calls it and it is no command
+iso-charset	absent	no shipped Lisp calls it and it is no command
+kill-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+kqueue-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+kqueue-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+kqueue-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+lcms-cam02-ucs	absent	Little CMS colour management: not linked
+lcms-cie-de2000	absent	Little CMS colour management: not linked
+lcms-jab->jch	absent	Little CMS colour management: not linked
+lcms-jch->jab	absent	Little CMS colour management: not linked
+lcms-jch->xyz	absent	Little CMS colour management: not linked
+lcms-temp->white-point	absent	Little CMS colour management: not linked
+lcms-xyz->jch	absent	Little CMS colour management: not linked
+lcms2-available-p	absent	Little CMS colour management: not linked
+make-byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+make-closure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+make-condition-variable	absent	no shipped Lisp calls it and it is no command
+make-mutex	absent	no shipped Lisp calls it and it is no command
+make-serial-process	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+make-terminal-frame	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+make-thread	absent	no shipped Lisp calls it and it is no command
+make-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+malloc-info	absent	glibc malloc diagnostics: Romacs's heap is its own arena
+malloc-trim	absent	glibc malloc diagnostics: Romacs's heap is its own arena
+markers-in	absent	no shipped Lisp calls it and it is no command
+menu-bar-menu-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
+menu-or-popup-active-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
+message-box	needed	lane A (editing, windows, frames, minibuffer readers, display)
+message-or-box	absent	no shipped Lisp calls it and it is no command
+module-load	absent	dynamic modules: Romacs loads no native modules
+move-point-visually	needed	lane A (editing, windows, frames, minibuffer readers, display)
+msdos-downcase-filename	absent	platform: MS-DOS build only
+msdos-long-file-names	absent	platform: MS-DOS build only
+msdos-memget	absent	platform: MS-DOS build only
+msdos-memput	absent	platform: MS-DOS build only
+msdos-mouse-disable	absent	platform: MS-DOS build only
+msdos-mouse-enable	absent	platform: MS-DOS build only
+msdos-mouse-init	absent	platform: MS-DOS build only
+msdos-mouse-p	absent	platform: MS-DOS build only
+msdos-remember-default-colors	absent	platform: MS-DOS build only
+msdos-set-keyboard	absent	platform: MS-DOS build only
+msdos-set-mouse-buttons	absent	platform: MS-DOS build only
+mutex-lock	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+mutex-name	absent	no shipped Lisp calls it and it is no command
+mutex-unlock	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+mutexp	absent	no shipped Lisp calls it and it is no command
+native-comp-unit-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+native-comp-unit-set-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+native-elisp-load	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+network-interface-info	absent	no shipped Lisp calls it and it is no command
+network-interface-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+newline-cache-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+next-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
+open-dribble-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+open-termscript	absent	terminal frames: Romacs has none (GUI and batch only)
+other-window-for-scrolling	needed	lane A (editing, windows, frames, minibuffer readers, display)
+overlay-tree	absent	no shipped Lisp calls it and it is no command
+pdumper-stats	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+pgtk-display-monitor-attributes-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
+pgtk-drop-finish	needed	lane A (editing, windows, frames, minibuffer readers, display)
+pgtk-font-name	absent	no shipped Lisp calls it and it is no command
+pgtk-get-page-setup	absent	no shipped Lisp calls it and it is no command
+pgtk-page-setup-dialog	absent	no shipped Lisp calls it and it is no command
+pgtk-print-frames-dialog	absent	GTK print dialog: Romacs draws no GTK dialogs
+pgtk-set-monitor-scale-factor	absent	no shipped Lisp calls it and it is no command
+pgtk-set-resource	absent	no shipped Lisp calls it and it is no command
+pgtk-update-drop-status	needed	lane A (editing, windows, frames, minibuffer readers, display)
+play-sound-internal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+position-symbol	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+posn-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
+previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
+process-connection	absent	no shipped Lisp calls it and it is no command
+process-datagram-address	absent	no shipped Lisp calls it and it is no command
+re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
+read-function	needed	lane A (editing, windows, frames, minibuffer readers, display)
+read-non-nil-coding-system	absent	no shipped Lisp calls it and it is no command
+read-positioning-symbols	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+recent-doskeys	absent	platform: MS-Windows build only
+reconsider-frame-fonts	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+redirect-debugging-output	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+register-code-conversion-map	absent	no shipped Lisp calls it and it is no command
+remember-mouse-glyph	needed	lane A (editing, windows, frames, minibuffer readers, display)
+remove-pos-from-symbol	needed	lane A (editing, windows, frames, minibuffer readers, display)
+resize-mini-window-internal	needed	lane A (editing, windows, frames, minibuffer readers, display)
+serial-process-configure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+set-cursor-size	absent	no shipped Lisp calls it and it is no command
+set-frame-size-and-position-pixelwise	needed	lane A (editing, windows, frames, minibuffer readers, display)
+set-frame-window-state-change	absent	no shipped Lisp calls it and it is no command
+set-input-interrupt-mode	absent	terminal frames: Romacs has none (GUI and batch only)
+set-input-mode	needed	lane A (editing, windows, frames, minibuffer readers, display)
+set-message-beep	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+set-minibuffer-window	needed	lane A (editing, windows, frames, minibuffer readers, display)
+set-network-process-option	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+set-output-flow-control	absent	terminal frames: Romacs has none (GUI and batch only)
+set-process-datagram-address	absent	no shipped Lisp calls it and it is no command
+set-quit-char	absent	terminal frames: Romacs has none (GUI and batch only)
+set-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+set-text-conversion-style	needed	lane A (editing, windows, frames, minibuffer readers, display)
+set-window-cursor-type	absent	no shipped Lisp calls it and it is no command
+set-xwidget-buffer	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+set-xwidget-plist	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+set-xwidget-query-on-exit-flag	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+show-face-resources	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+subr-native-comp-unit	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+symbol-with-pos-pos	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+system-move-file-to-trash	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+thread--blocker	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+thread-buffer-disposition	absent	no shipped Lisp calls it and it is no command
+thread-join	absent	no shipped Lisp calls it and it is no command
+thread-last-error	absent	no shipped Lisp calls it and it is no command
+thread-live-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+thread-name	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+thread-set-buffer-disposition	absent	no shipped Lisp calls it and it is no command
+thread-signal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+thread-yield	absent	no shipped Lisp calls it and it is no command
+threadp	absent	no shipped Lisp calls it and it is no command
+tool-bar-get-system-style	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+tool-bar-height	needed	lane A (editing, windows, frames, minibuffer readers, display)
+tool-bar-pixel-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
+trace-redisplay	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+trace-to-stderr	absent	GNU C core debugging aid: Romacs's diagnostics are its own
+tty--output-buffer-size	absent	terminal frames: Romacs has none (GUI and batch only)
+tty--set-output-buffer-size	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-display-pixel-height	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-display-pixel-width	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-enable-overline	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-frame-at	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-frame-edges	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-frame-geometry	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-frame-list-z-order	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-frame-restack	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-no-underline	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-suppress-bold-inverse-default-colors	absent	terminal frames: Romacs has none (GUI and batch only)
+tty-type	absent	terminal frames: Romacs has none (GUI and batch only)
+uncombine-window	absent	no shipped Lisp calls it and it is no command
+user-ptrp	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
+w16-get-clipboard-data	absent	platform: MS-Windows build only
+w16-selection-exists-p	absent	platform: MS-Windows build only
+w16-set-clipboard-data	absent	platform: MS-Windows build only
+w32--get-clipboard-data-media	absent	platform: MS-Windows build only
+w32--menu-bar-in-use	absent	platform: MS-Windows build only
+w32-application-type	absent	platform: MS-Windows build only
+w32-badge	absent	platform: MS-Windows build only
+w32-battery-status	absent	platform: MS-Windows build only
+w32-block-system-sleep	absent	platform: MS-Windows build only
+w32-define-rgb-color	absent	platform: MS-Windows build only
+w32-display-monitor-attributes-list	absent	platform: MS-Windows build only
+w32-dwrite-available	absent	platform: MS-Windows build only
+w32-dwrite-reinit	absent	platform: MS-Windows build only
+w32-export-frame	absent	platform: MS-Windows build only
+w32-frame-edges	absent	platform: MS-Windows build only
+w32-frame-geometry	absent	platform: MS-Windows build only
+w32-frame-list-z-order	absent	platform: MS-Windows build only
+w32-frame-restack	absent	platform: MS-Windows build only
+w32-get-clipboard-data	absent	platform: MS-Windows build only
+w32-get-codepage-charset	absent	platform: MS-Windows build only
+w32-get-console-codepage	absent	platform: MS-Windows build only
+w32-get-console-output-codepage	absent	platform: MS-Windows build only
+w32-get-current-locale-id	absent	platform: MS-Windows build only
+w32-get-default-locale-id	absent	platform: MS-Windows build only
+w32-get-ime-open-status	absent	platform: MS-Windows build only
+w32-get-keyboard-layout	absent	platform: MS-Windows build only
+w32-get-locale-info	absent	platform: MS-Windows build only
+w32-get-valid-codepages	absent	platform: MS-Windows build only
+w32-get-valid-keyboard-layouts	absent	platform: MS-Windows build only
+w32-get-valid-locale-ids	absent	platform: MS-Windows build only
+w32-has-winsock	absent	platform: MS-Windows build only
+w32-long-file-name	absent	platform: MS-Windows build only
+w32-mouse-absolute-pixel-position	absent	platform: MS-Windows build only
+w32-notification-close	absent	platform: MS-Windows build only
+w32-notification-notify	absent	platform: MS-Windows build only
+w32-progress-indicator	absent	platform: MS-Windows build only
+w32-read-registry	absent	platform: MS-Windows build only
+w32-reconstruct-hot-key	absent	platform: MS-Windows build only
+w32-register-hot-key	absent	platform: MS-Windows build only
+w32-registered-hot-keys	absent	platform: MS-Windows build only
+w32-request-user-attention	absent	platform: MS-Windows build only
+w32-selection-exists-p	absent	platform: MS-Windows build only
+w32-selection-targets	absent	platform: MS-Windows build only
+w32-send-sys-command	absent	platform: MS-Windows build only
+w32-set-clipboard-data	absent	platform: MS-Windows build only
+w32-set-console-codepage	absent	platform: MS-Windows build only
+w32-set-console-output-codepage	absent	platform: MS-Windows build only
+w32-set-current-locale	absent	platform: MS-Windows build only
+w32-set-ime-open-status	absent	platform: MS-Windows build only
+w32-set-keyboard-layout	absent	platform: MS-Windows build only
+w32-set-mouse-absolute-pixel-position	absent	platform: MS-Windows build only
+w32-set-process-priority	absent	platform: MS-Windows build only
+w32-set-wallpaper	absent	platform: MS-Windows build only
+w32-shell-execute	absent	platform: MS-Windows build only
+w32-short-file-name	absent	platform: MS-Windows build only
+w32-sound-volume	absent	platform: MS-Windows build only
+w32-system-idle-time	absent	platform: MS-Windows build only
+w32-system-sleep-block-count	absent	platform: MS-Windows build only
+w32-toggle-lock-key	absent	platform: MS-Windows build only
+w32-unblock-system-sleep	absent	platform: MS-Windows build only
+w32-unload-winsock	absent	platform: MS-Windows build only
+w32-unregister-hot-key	absent	platform: MS-Windows build only
+w32-use-virtual-terminal	absent	platform: MS-Windows build only
+w32-use-virtual-terminal-p	absent	platform: MS-Windows build only
+w32-window-exists-p	absent	platform: MS-Windows build only
+w32image-create-thumbnail	absent	platform: MS-Windows build only
+w32notify-add-watch	absent	platform: MS-Windows build only
+w32notify-rm-watch	absent	platform: MS-Windows build only
+w32notify-valid-p	absent	platform: MS-Windows build only
+window-at	needed	lane A (editing, windows, frames, minibuffer readers, display)
+window-bump-use-time	needed	lane A (editing, windows, frames, minibuffer readers, display)
+window-cursor-info	absent	no shipped Lisp calls it and it is no command
+window-cursor-type	needed	lane A (editing, windows, frames, minibuffer readers, display)
+window-lines-pixel-dimensions	needed	lane A (editing, windows, frames, minibuffer readers, display)
+x-backspace-delete-keys-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-begin-drag	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-change-window-property	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-close-connection	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-create-frame	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-delete-window-property	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-disown-selection-internal	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-backing-store	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-color-cells	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-grayscale-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-list	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-mm-height	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-mm-width	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-monitor-attributes-list	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-pixel-height	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-pixel-width	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-planes	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-save-under	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-screens	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-set-last-user-time	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-display-visual-class	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-double-buffered-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-export-frames	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-family-fonts	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-file-dialog	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-frame-edges	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-frame-geometry	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-frame-list-z-order	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-frame-restack	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-get-atom-name	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-get-local-selection	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-get-modifier-masks	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-get-page-setup	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-get-selection-internal	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-gtk-debug	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-hide-tip	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-internal-focus-input-context	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-load-color-file	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-menu-bar-open-internal	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-mouse-absolute-pixel-position	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-open-connection	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-own-selection-internal	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-page-setup-dialog	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-parse-geometry	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-print-frames-dialog	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-register-dnd-atom	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-select-font	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-selection-exists-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-selection-owner-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-send-client-message	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-server-input-extension-version	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-server-max-request-size	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-server-vendor	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-server-version	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-set-mouse-absolute-pixel-position	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-show-tip	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-synchronize	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-test-string-conversion	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-translate-coordinates	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-uses-old-gtk-dialog	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-window-property	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-window-property-attributes	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+x-wm-set-size-hint	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
+xw-color-defined-p	absent	X11 colour helpers: romacs-frame.el answers the colour queries that call them
+xw-color-values	absent	X11 colour helpers: romacs-frame.el answers the colour queries that call them
+xw-display-color-p	absent	X11 colour helpers: romacs-frame.el answers the colour queries that call them
+xwidget-buffer	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-info	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-live-p	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-perform-lispy-event	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-plist	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-query-on-exit-flag	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-resize	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-size-request	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-view-info	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-view-lookup	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-view-model	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-view-p	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-view-window	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-back-forward-list	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-estimated-load-progress	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-execute-script	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-finish-search	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-goto-history	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-goto-uri	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-load-html	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-next-result	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-previous-result	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-search	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-set-cookie-storage-file	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-stop-loading	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-title	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-uri	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidget-webkit-zoom	absent	xwidgets: not built (no embedded WebKitGTK widgets)
+xwidgetp	absent	xwidgets: not built (no embedded WebKitGTK widgets)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The parity ratchet's own tests (run in the gate by
-gnu-tests/runner/tests/parity_ratchet.rs).
+crates/romacs-gnu-tests/tests/parity_ratchet.rs).
 
     ROMACS_GNU_ERT=<adapter> python3 tools/tests/parity_ratchet_test.py -v
 """
@@ -72,6 +72,12 @@ def run_report(data, unit, m):
         status = pr.report(unit, data, m)
     return status, buf.getvalue()
 
+
+def write_ratchet(root, data):
+    """DATA as ROOT's ratchet file, its directory made."""
+    path = root / pr.RATCHET_NAME
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(data))
 
 class Compare(unittest.TestCase):
     def test_equal_is_pass(self):
@@ -518,15 +524,15 @@ class Provenance(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = pathlib.Path(tmp.name)
-        (root / 'gnu-lisp').mkdir()
-        (root / 'gnu-lisp' / 'a.el').write_text('(a)')
+        (root / 'lisp/gnu').mkdir(parents=True)
+        (root / 'lisp/gnu' / 'a.el').write_text('(a)')
         before = pr.input_fingerprint(root)
-        os.utime(root / 'gnu-lisp' / 'a.el', (1, 1))
+        os.utime(root / 'lisp/gnu' / 'a.el', (1, 1))
         self.assertEqual(pr.input_fingerprint(root), before)
-        (root / 'gnu-lisp' / 'a.el').write_text('(b)')
+        (root / 'lisp/gnu' / 'a.el').write_text('(b)')
         self.assertNotEqual(pr.input_fingerprint(root), before)
-        (root / 'gnu-lisp' / 'a.el').write_text('(a)')
-        (root / 'gnu-lisp' / 'new.el').write_text('')
+        (root / 'lisp/gnu' / 'a.el').write_text('(a)')
+        (root / 'lisp/gnu' / 'new.el').write_text('')
         self.assertNotEqual(pr.input_fingerprint(root), before)
 
     def test_the_ledger_ignores_a_private_home(self):
@@ -577,14 +583,14 @@ class Verify(unittest.TestCase):
         for rel in pr.GATE_TESTS:  # the gate wiring verify also checks
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(base))
+        write_ratchet(root, base)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'lane')
         for i, version in enumerate(branch):  # recordings committed on the lane
-            (root / pr.RATCHET_NAME).write_text(json.dumps(version))
+            write_ratchet(root, version)
             git('commit', '-q', '--no-gpg-sign', '-am', f'lane {i}')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(head))
+        write_ratchet(root, head)
         return root
 
     def verify(self, root, base=None):
@@ -610,6 +616,20 @@ class Verify(unittest.TestCase):
         self.assertEqual(status, pr.EXIT_LOWER, err)
         self.assertIn('lisp/b.el', err)
 
+    def test_a_base_from_before_the_move_still_holds_its_floors(self):
+        from unittest.mock import patch
+        with patch.object(pr, 'RATCHET_NAME', pr.RATCHET_BEFORE):
+            root = self.repo(ratchet(), ratchet())
+        git = lambda *a: subprocess.run(['git', '-C', str(root), '-c', 'user.name=t', '-c', 'user.email=t@t', *a],
+                                        check=True, capture_output=True, env=dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null'))
+        (root / pr.RATCHET_NAME).parent.mkdir(exist_ok=True)
+        git('mv', pr.RATCHET_BEFORE, pr.RATCHET_NAME)
+        write_ratchet(root, ratchet(warm=('lisp/a.el',)))   # the move drops a member
+        git('commit', '-q', '--no-gpg-sign', '-am', 'move')
+        status, err = self.verify(root)
+        self.assertEqual(status, pr.EXIT_LOWER, err)
+        self.assertIn('census-warm: 1 dropped (lisp/b.el)', err)
+
     def test_a_bad_base_is_refused_not_passed_over(self):
         root = self.repo(ratchet(), ratchet())
         with self.assertRaises(pr.Refusal):
@@ -621,7 +641,7 @@ class Verify(unittest.TestCase):
         subprocess.run(['git', '-C', str(root), 'rm', '-q', pr.RATCHET_NAME], check=True)
         subprocess.run(['git', '-C', str(root), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',
                         '--no-gpg-sign', '-m', 'drop'], check=True, env=dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null'))
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         status, err = self.verify(root)
         self.assertEqual(status, pr.EXIT_LOWER, err)
         self.assertIn('was deleted', err)
@@ -684,17 +704,17 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(master_floor))
+        write_ratchet(root, master_floor)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'the ratchet lands on master')
         git('checkout', '-q', 'lane')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', 'master')
         if merge_floor is not None:  # the merge itself resolves to another file
-            (root / pr.RATCHET_NAME).write_text(json.dumps(merge_floor))
+            write_ratchet(root, merge_floor)
             git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge master forward')
         if after_merge is not None:
-            (root / pr.RATCHET_NAME).write_text(json.dumps(after_merge))
+            write_ratchet(root, after_merge)
             git('commit', '-q', '--no-gpg-sign', '-am', 'a lane commit after the merge')
         return root
 
@@ -716,13 +736,13 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'ratchet on master')
         git('checkout', '-q', '-b', 'lane')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+        write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane raises warm by lisp/c.el')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane silently drops lisp/c.el')
         git('checkout', '-q', 'master')
         (root / 'unrelated').write_text('x')
@@ -747,14 +767,14 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'lane')
         git('checkout', '-q', '-b', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+        write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         git('commit', '-q', '--no-gpg-sign', '-am', 'record improvement')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('commit', '-q', '--no-gpg-sign', '-am', 'drop floor silently')
         git('checkout', '-q', 'lane')
         (root / 'work').write_text('x')
@@ -789,17 +809,17 @@ class VerifyForwardMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(base))
+        write_ratchet(root, base)
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(side))
+        write_ratchet(root, side)
         git('commit', '-q', '--no-gpg-sign', '-am', 'side records a cold lowering')
         git('checkout', '-q', '-b', 'lane', 'master')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lane))
+        write_ratchet(root, lane)
         git('commit', '-q', '--no-gpg-sign', '-am', 'lane records a warm lowering')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', '-X', 'ours', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(merged))
+        write_ratchet(root, merged)
         git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge side')
         return root
@@ -856,12 +876,12 @@ class VerifyCandidateMerge(unittest.TestCase):
         for rel in pr.GATE_TESTS:
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text((ROOT / rel).read_text())
-        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        write_ratchet(root, ratchet())
         git('add', '.')
         git('commit', '-q', '--no-gpg-sign', '-m', 'base')
         git('checkout', '-q', '-b', 'side')
         if side_raises:
-            (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+            write_ratchet(root, ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')))
         else:
             (root / 'work').write_text('x')
             git('add', '.')
@@ -870,12 +890,12 @@ class VerifyCandidateMerge(unittest.TestCase):
         lowered = ratchet(warm=('lisp/a.el',))
         lowered['lowerings'] = [{'unit': 'census-warm', 'members': ['lisp/b.el'],
                                  'because': 'lisp/ was replaced by the GNU pin'}]
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        write_ratchet(root, lowered)
         git('commit', '-q', '--no-gpg-sign', '-am', 'master records a lowering')
         base = git('rev-parse', 'HEAD')
         git('checkout', '-q', '-b', 'lane')
         git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', '-X', 'ours', 'side')
-        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        write_ratchet(root, lowered)
         git('add', pr.RATCHET_NAME)
         git('commit', '-q', '--no-gpg-sign', '-m', 'merge side')
         return root, base
@@ -913,14 +933,14 @@ class Wiring(unittest.TestCase):
         return pr.wiring(root)
 
     def test_a_dropped_shard_is_refused(self):
-        problems = self.mutated('gnu-tests/runner/tests/parity_ratchet.rs',
+        problems = self.mutated('crates/romacs-gnu-tests/tests/parity_ratchet.rs',
                                 lambda t: t.replace(f'"gnu-shard:{pr.GATE_SHARDS}/{pr.GATE_SHARDS}"',
                                                     f'"gnu-shard:{pr.GATE_SHARDS - 1}/{pr.GATE_SHARDS}"'))
         self.assertTrue(any('parity_ratchet.rs was edited' in p for p in problems), problems)
 
     def test_a_compiled_out_test_file_is_refused(self):
         for spelling in ('#![cfg(any())]\n', '#! [cfg(any())]\n', '#!/*x*/[cfg(any())]\n'):
-            problems = self.mutated('gnu-tests/runner/tests/parity_ratchet.rs', lambda t: spelling + t)
+            problems = self.mutated('crates/romacs-gnu-tests/tests/parity_ratchet.rs', lambda t: spelling + t)
             self.assertTrue(problems, spelling)
 
     def test_a_shard_without_its_test_attribute_is_refused(self):
@@ -935,7 +955,7 @@ class Wiring(unittest.TestCase):
 
 
 PIN_SHA = 'a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8'
-FNS_BASELINE = ROOT / 'gnu-tests' / 'baseline' / 'src' / 'fns-tests.el.json'
+FNS_BASELINE = ROOT / 'test/gnu' / 'baseline' / 'src' / 'fns-tests.el.json'
 # Until a deliberate re-record of the 565 GNU baselines with the
 # pinned binary, run.py refuses every one of them (they were recorded by the
 # distro /usr/bin/emacs-32.0.50), so nothing can be measured at all.
@@ -944,7 +964,7 @@ BASELINES_PINNED = json.loads(FNS_BASELINE.read_text())['gnu'].get('sha256') == 
 
 def assert_distro_baseline_refused(case, refusal):
     case.assertEqual(refusal.status, pr.EXIT_NOT_MEASURED)
-    case.assertIn('gnu-tests/baseline/src/fns-tests.el.json', str(refusal))
+    case.assertIn('test/gnu/baseline/src/fns-tests.el.json', str(refusal))
     case.assertIn(PIN_SHA, str(refusal))
 
 
@@ -955,13 +975,13 @@ class CensusPopulation(unittest.TestCase):
         self.directory = self.enterContext(tempfile.TemporaryDirectory(prefix='census-population-'))
         base = pathlib.Path(self.directory)
         self.root, self.gnu = base / 'root', base / 'gnu'
-        for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
+        for directory, lisp in ((self.root, 'lisp/gnu'), (self.gnu, 'lisp')):
             (directory / lisp).mkdir(parents=True)
         (self.root / 'tools/lib').mkdir(parents=True)
         import shutil
         shutil.copyfile(ROOT / 'tools/lib/lisp_oracle.py', self.root / 'tools/lib/lisp_oracle.py')
         for name in ('a.el', 'b.el'):
-            for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
+            for directory, lisp in ((self.root, 'lisp/gnu'), (self.gnu, 'lisp')):
                 (directory / lisp / name).write_text('(provide \'fixture)\n')
         def git(*args):
             return subprocess.check_output(['git', '-C', str(self.gnu), *args], text=True).strip()
@@ -972,35 +992,36 @@ class CensusPopulation(unittest.TestCase):
         self.pin = git('rev-parse', 'HEAD')
         self.enterContext(patch.object(pr, 'GNU_PIN', self.pin))
         self.enterContext(patch.object(pr, 'GNU_SOURCE', self.gnu))
-        self.support = 'gnu-lisp/generated.el'
+        self.support = 'lisp/gnu/generated.el'
         (self.root / self.support).write_text('(provide \'generated)\n')
         self.manifest = {'gnu_commit': self.pin,
                          'sources': {'fixture': {'paths': ['lisp/a.el'], 'recipe': 'fixture generator'}},
                          'files': [[self.support, pr.sha256_file(self.root / self.support), 'fixture']]}
-        (self.root / 'LISP-PIN.json').write_text(json.dumps({
+        (self.root / 'ledger').mkdir(exist_ok=True)
+        (self.root / 'ledger/lisp-pin.json').write_text(json.dumps({
             'gnu_commit': self.pin, 'lisp_tree': git('rev-parse', 'HEAD:lisp'),
-            'generated_support': 'LISP-GENERATED.json'}))
+            'generated_support': 'ledger/lisp-generated.json'}))
         self.write_manifest()
 
     def write_manifest(self):
-        (self.root / 'LISP-GENERATED.json').write_text(json.dumps(self.manifest))
+        (self.root / 'ledger/lisp-generated.json').write_text(json.dumps(self.manifest))
 
     def test_population_is_exact_pristine_pin_plus_validated_generated_support(self):
         pristine, support = pr.census_population(self.root)
-        self.assertEqual(pristine, {'gnu-lisp/a.el', 'gnu-lisp/b.el'})
+        self.assertEqual(pristine, {'lisp/gnu/a.el', 'lisp/gnu/b.el'})
         self.assertEqual(support, {self.support})
 
     def test_missing_extra_modified_or_duplicate_population_is_refused(self):
         mutations = ('missing', 'extra', 'modified', 'support-bytes', 'support-pin', 'support-duplicate')
         for mutation in mutations:
             with self.subTest(mutation=mutation):
-                path = self.root / 'gnu-lisp/a.el'
+                path = self.root / 'lisp/gnu/a.el'
                 original = path.read_bytes()
                 saved = copy.deepcopy(self.manifest)
                 if mutation == 'missing':
                     path.unlink()
                 elif mutation == 'extra':
-                    (self.root / 'gnu-lisp/extra.el').write_text('nil')
+                    (self.root / 'lisp/gnu/extra.el').write_text('nil')
                 elif mutation == 'modified':
                     path.write_text('nil')
                 elif mutation == 'support-bytes':
@@ -1013,20 +1034,20 @@ class CensusPopulation(unittest.TestCase):
                 with self.assertRaises(pr.Refusal):
                     pr.census_population(self.root)
                 path.write_bytes(original)
-                (self.root / 'gnu-lisp/extra.el').unlink(missing_ok=True)
+                (self.root / 'lisp/gnu/extra.el').unlink(missing_ok=True)
                 self.manifest = saved
                 self.write_manifest()
 
     def measure(self, oracle_edit=lambda rows: rows, row_edit=lambda row: row):
         from types import SimpleNamespace
-        files = sorted((self.root / 'gnu-lisp').glob('*.el'))
+        files = sorted((self.root / 'lisp/gnu').glob('*.el'))
         oracle = oracle_edit([{'path': str(p), 'form_count': 1, 'status': 'ok'} for p in files])
         self.executed = []
         def run_file(path, entry, *args):
             self.executed.append(path.relative_to(self.root).as_posix())
             return row_edit(dict(file=path.relative_to(self.root).as_posix(), forms_evaluated=1,
                                  total_forms=1, loaded=True, mode='cold'))
-        lc = SimpleNamespace(ROOT=self.root, run_file=run_file, load_path=lambda root: [root / 'gnu-lisp'])
+        lc = SimpleNamespace(ROOT=self.root, run_file=run_file, load_path=lambda root: [root / 'lisp/gnu'])
         load = pr.load_module
         def module(path, name):
             return lc if name == 'lisp_census' else load(path, name)
@@ -1042,12 +1063,12 @@ class CensusPopulation(unittest.TestCase):
 
     def test_all_targets_execute_but_support_is_not_parity_credit(self):
         measured = self.measure()
-        self.assertEqual(sorted(self.executed), ['gnu-lisp/a.el', 'gnu-lisp/b.el', self.support])
+        self.assertEqual(sorted(self.executed), ['lisp/gnu/a.el', 'lisp/gnu/b.el', self.support])
         self.assertEqual(measured['files_executed'], 3)
         self.assertEqual((measured['files_measured'], measured['files_reported']), (2, 2))
         self.assertEqual(measured['members']['census-cold'], ['lisp/a.el', 'lisp/b.el'])
         self.assertEqual(measured['verdicts']['lisp/a.el'], 'loaded')
-        self.assertNotIn('gnu-lisp/a.el', measured['verdicts'])
+        self.assertNotIn('lisp/gnu/a.el', measured['verdicts'])
         self.assertEqual(measured['generated_support'], {
             'total': 1, 'reported': 1, 'loaded': [self.support], 'unreported': []})
 
@@ -1062,7 +1083,7 @@ class CensusPopulation(unittest.TestCase):
             self.measure(row_edit=lambda row: dict(row, file='lisp/a.el'))
 
     def test_partial_pristine_or_support_reports_cannot_pass(self):
-        for missing in ('gnu-lisp/a.el', self.support):
+        for missing in ('lisp/gnu/a.el', self.support):
             with self.subTest(missing=missing):
                 measured = self.measure(row_edit=lambda row: dict(row, forms_evaluated=None, loaded=False)
                                         if row['file'] == missing else row)
@@ -1107,7 +1128,7 @@ class NothingMeasured(unittest.TestCase):
 
     def test_sealed_evidence_must_match_measured_executable(self):
         from unittest.mock import patch
-        sys.path.insert(0, str(ROOT / 'gnu-tests/tools'))
+        sys.path.insert(0, str(ROOT / 'test/gnu/tools'))
         import vacuity_binding
         binary = '/bin/true'
         def measured(command, **kwargs):

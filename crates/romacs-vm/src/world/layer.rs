@@ -668,7 +668,7 @@ impl Vm {
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
         host::layer_begin();
         // As the init's libraries find the live session: interactive
-        // (rlisp/romacs-gui-loadup.el), with the init named before it loads
+        // (lisp/romacs/romacs-gui-loadup.el), with the init named before it loads
         // (romacs-vm-gui user_init.rs). The display stays the chain's.
         let directory = plan.init.parent().map(|d| format!("{}/", d.display())).unwrap_or_default();
         let _ = self.eval_source_raw(&format!("(setq noninteractive nil user-init-file {} user-emacs-directory {})",

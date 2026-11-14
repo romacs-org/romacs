@@ -1,4 +1,4 @@
-//! Renderer effects (rlisp/romacs-effects.el): the properties the renderer
+//! Renderer effects (lisp/romacs/romacs-effects.el): the properties the renderer
 //! defines, published to Lisp and set from it. The evaluator keeps the
 //! requested snapshot; the open display receives each change.
 use super::*;

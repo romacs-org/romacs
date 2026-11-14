@@ -1,7 +1,7 @@
 ;;; usage-log-test.el --- The session's command log  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; ERT tests of rlisp/romacs-usage-log.el, which tests/usage_log.rs runs in
+;; ERT tests of lisp/romacs/romacs-usage-log.el, which tests/usage_log.rs runs in
 ;; Romacs's batch session and in pinned GNU's, with the library loaded first.
 
 (require 'ert)

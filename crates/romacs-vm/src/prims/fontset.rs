@@ -1,7 +1,7 @@
 //! GNU fontset.c: fontsets as `crate::fontsets::Registry` holds them. The
 //! rules live there as plain data; what reads them to paint is romacs-font's
 //! resolver. `set-fontset-font' and `fontset-info' are Lisp over these
-//! leaves (rlisp/romacs-frame.el): a change of a frame's ASCII font goes
+//! leaves (lisp/romacs/romacs-frame.el): a change of a frame's ASCII font goes
 //! through its default face.
 use super::font;
 use super::*;

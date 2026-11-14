@@ -182,6 +182,7 @@ pub fn finish() {
 pub(crate) fn value<T: Logged>(name: &'static str, live: impl FnOnce() -> T) -> T {
     /// What this call does, decided in one look at the flight.
     enum Now<T> { Live, Record, Replayed(T) }
+    crate::host_calls::count(name);
     if !active() {
         return live();
     }
@@ -215,6 +216,7 @@ pub(crate) fn value<T: Logged>(name: &'static str, live: impl FnOnce() -> T) -> 
 /// LIVE's, its WITNESS logged when recording and checked when replaying.
 /// WHAT names its input (a path) in a divergence.
 pub(crate) fn checked<T>(name: &'static str, what: impl Fn() -> String, live: impl FnOnce() -> T, witness: impl FnOnce(&T) -> u64) -> T {
+    crate::host_calls::count(name);
     let value = live();
     if !active() {
         return value;
@@ -250,6 +252,7 @@ pub(crate) fn wrote(path: PathBuf) {
 pub(crate) fn stat(name: &'static str, what: impl Fn() -> String, path: Option<&std::path::Path>, output: bool,
                    mut live: impl FnMut() -> std::io::Result<std::fs::Metadata>,
                    retime: impl FnOnce(i64, i64) -> std::io::Result<()>) -> std::io::Result<std::fs::Metadata> {
+    crate::host_calls::count(name);
     let value = live();
     let logged = FLIGHT.with(|f| match f.borrow_mut().as_mut() {
         None => None,

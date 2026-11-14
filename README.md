@@ -16,7 +16,7 @@ init and your muscle memory come with you.
 | Uncompiled Lisp, one function call | **16.2 ns** | 257 ns |
 
 The clip is the real program; the race runs at real speed.  Every number, losses
-included, is in [doc/benchmarks.md](doc/benchmarks.md).
+included, is in [the benchmark tables](crates/romacs-vm-gui/harness/README.md#latest-results).
 
 - **Worker VMs.**  Searches, syncs and background loads run off the main VM, and
   `C-g` reaches long work.
@@ -47,10 +47,14 @@ curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly
 curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
 ```
 
-## Source layout
+## Where things are
 
-`rlisp/` holds Romacs Lisp, `gnu-lisp/` the pinned GNU sources, and
-`rlisp/deps/` temporary third-party dependencies and their replacement plan.
+`crates/` is the Rust, `lisp/` the Lisp (`lisp/gnu/` GNU's, pinned; `lisp/romacs/`
+Romacs's own and the bundled packages), `test/` the test suites (`test/gnu/` GNU's,
+`test/romacs/` Romacs's, `test/packages/` the bundled packages'), `tools/` the
+scripts, `etc/` and `assets/` runtime data, and `ledger/` the pins and floors we
+hold ourselves to. [ARCHITECTURE.md](ARCHITECTURE.md) says where to look
+for anything else.
 
 ## Build and run
 

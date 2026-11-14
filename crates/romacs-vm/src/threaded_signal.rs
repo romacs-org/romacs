@@ -125,7 +125,7 @@ pub(super) fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
 /// need no Lisp. It is considered with `debug-on-signal', when no handler
 /// catches the error, or when the catching clause lists `debug' (the
 /// command loop's catch-all is `(debug t)', GNU's C handler `error').
-/// `romacs--call-debugger-p' (rlisp/vm/prelude.el) makes the rest.
+/// `romacs--call-debugger-p' (lisp/romacs/vm/prelude.el) makes the rest.
 fn debugger_wanted(e: &mut Engine<'_>) -> bool {
     let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
     let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {

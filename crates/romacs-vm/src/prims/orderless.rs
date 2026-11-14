@@ -1,4 +1,4 @@
-//! Orderless matching (rlisp/romacs-orderless.el) and minibuffer.el's
+//! Orderless matching (lisp/romacs/romacs-orderless.el) and minibuffer.el's
 //! candidate sorts, each over a whole candidate list in one call.
 use super::*;
 use crate::orderless::Style;

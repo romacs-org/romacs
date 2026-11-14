@@ -1,4 +1,4 @@
-//! Romacs's interactive defaults (rlisp/romacs-defaults.el, DIVERGENCES
+//! Romacs's interactive defaults (lisp/romacs/romacs-defaults.el, DIVERGENCES
 //! VM2-OOB-DEFAULTS) on the real --loadup chain with a window system: a
 //! session turns them on before the user's init, as standard values, the
 //! modes the first frame does not need before its first command (whose

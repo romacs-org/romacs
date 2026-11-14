@@ -268,6 +268,8 @@ pub(crate) struct GuiFrameRenderState {
     /// The Emacs frame_id that owns this window (used for routing).
     pub emacs_frame_id: u64,
     pub(super) trace_last_drawn: Option<romacs_display_protocol::PresentationId>,
+    /// The newest presentation reported drawn (`InputEvent::PresentationRendered`).
+    pub(super) reported_presentation: u64,
     /// Chromeless glyph composition and rendering state.
     pub compositor: FrameCompositor,
     /// The one resolved relationship between the live root surface and the
@@ -481,6 +483,7 @@ impl GuiFrameRenderState {
         Self {
             emacs_frame_id,
             trace_last_drawn: None,
+            reported_presentation: 0,
             compositor: FrameCompositor::new(glyph_atlas),
             present_state: GuiFramePresentState::Suspended,
             chrome: ChromeState::default(),
@@ -840,11 +843,6 @@ impl GuiFrameRenderState {
                 requested: presentation,
             });
         }
-        if target_frame_id == self.emacs_frame_id
-            && let Some(hit) = self.compositor.input_scroll.hit(point)
-        {
-            return hit;
-        }
         frame
             .resolve_presented_hit(PresentedHitQuery::new(point))
             .map(|hit| hit.and_then(|hit| hit.semantic()))
@@ -1063,24 +1061,6 @@ impl GuiFrameRenderState {
         &self,
         frame: &FrameGlyphBuffer,
     ) -> Option<romacs_display_protocol::PointerAppearanceSelection> {
-        // The projected frame owns a newly resolved pointer map. Appearance
-        // IDs from the authoritative frame cannot address it; resolve hover
-        // against the exact temporary paint geometry instead.
-        if self.compositor.input_scroll.active() {
-            if !self.pointer_inside || self.presented_press.is_some() {
-                return None;
-            }
-            let (x, y) = self.root_frame_point_from_surface(self.mouse_pos.0, self.mouse_pos.1)?;
-            let point = self.inverse_map(frame, x, y)?;
-            let appearance = frame
-                .resolve_presented_hit(PresentedHitQuery::new(point))
-                .ok()??
-                .appearance()?;
-            return Some(romacs_display_protocol::PointerAppearanceSelection::new(
-                appearance,
-                romacs_display_protocol::PointerAppearancePhase::Hover,
-            ));
-        }
         self.pointer_appearance.selection_for(frame)
     }
 
@@ -1255,13 +1235,6 @@ impl GuiFrameRenderState {
             installed_at,
         )
         .apply(self);
-        if let Some(window) = self.compositor.input_scroll.reconcile(frame.as_ref()) {
-            // Projected motion has already been drawn; do not animate it twice.
-            self.compositor
-                .pending
-                .scrolls
-                .retain(|scroll| scroll.window != window);
-        }
         // Staged, not installed: these describe the incoming presentation, and
         // they become the baseline only if a frame is actually drawn from it.
         self.compositor.incoming_reflow_imprints = reflow_imprints;
@@ -1323,7 +1296,6 @@ impl GuiFrameRenderState {
     ) -> Option<FrameGlyphBuffer> {
         let current_frame = self.compositor.current_frame.as_mut()?;
         let mut frame = Self::take_frame_for_render(current_frame);
-        self.compositor.input_scroll.paint(&mut frame);
         self.compositor.text_animations.paint(&mut frame);
         Some(frame)
     }
@@ -2055,7 +2027,7 @@ impl GuiFrameWindowManager {
             );
             let attrs = crate::window_identity::apply_platform_window_identity(attrs, event_loop);
 
-            match comms.create_window(event_loop, attrs, req.emacs_frame_id) {
+            match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     window_icon.apply(window.as_ref());
@@ -2563,9 +2535,10 @@ impl GuiFrameWindowManager {
             // Glyph atlas textures (recreated against the new device by
             // populate_glyph_atlas / recreate_secondary_native_surfaces).
             render.compositor.glyph_atlas = None;
+            // The rebuilt atlas reports the presentation drawn again.
+            render.reported_presentation = 0;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
-            render.compositor.retained_scroll = None;
             render.compositor.retained_root = None;
             render.compositor.last_root_key = None;
             // Composition ring plus every running transition's leased

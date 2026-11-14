@@ -8,6 +8,8 @@ its tools as a real harness does, and answers control requests.  Its
 
   say TEXT           stream TEXT as the reply, word by word
   slow N             stream N numbered lines, 0.1 s apart (a long turn)
+  wait FILE          a turn held until FILE exists (60 s at most), then
+                     `released': the test ends it when it has looked
   call TOOL JSON     call Romacs tool TOOL with JSON arguments ("instance":"?"
                      is filled from romacs_identity); on `outcome unknown' ask
                      romacs_call_outcome and repeat the call only when it says
@@ -168,6 +170,14 @@ class Harness:
                 self.stream(f'line {n + 1}')
                 time.sleep(.1)
             return self.result('slow done')
+        if verb == 'wait':
+            self.stream('held')
+            deadline = time.monotonic() + 60
+            while not os.path.exists(rest) and time.monotonic() < deadline:
+                if self.interrupted.is_set():
+                    return self.interrupt_done()
+                time.sleep(.05)
+            return self.result('released')
         if verb == 'call':
             name, _, raw = rest.partition(' ')
             reply = self.call(name, json.loads(raw or '{}'))

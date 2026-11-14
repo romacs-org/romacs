@@ -1,6 +1,8 @@
 //! json.c's native JSON functions against pinned GNU: serialization,
 //! parse results, every error with its position, argument errors and
 //! json-parse-buffer's point.
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -116,14 +118,13 @@ const CASES: &str = r###"
 
 #[test]
 fn json_matches_pinned_gnu() {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in CASES.lines().filter(|line| !line.is_empty()) {
-        // As character codes: serialized text is unibyte UTF-8.
-        let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
-        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
+    // As character codes: serialized text is unibyte UTF-8.
+    let source = |expression: &str| format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
+    let expressions: Vec<&str> = CASES.lines().filter(|line| !line.is_empty()).collect();
+    let answers = gnu_batch::outputs(&expressions.iter().map(|e| format!("(prin1 {})", source(e))).collect::<Vec<_>>());
+    for (expression, expected) in expressions.iter().zip(answers) {
+        let source = source(expression);
         let actual = Vm::new().eval_source(&source).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()

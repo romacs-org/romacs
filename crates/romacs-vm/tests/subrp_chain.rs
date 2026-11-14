@@ -44,7 +44,7 @@ fn measure_subrp_chain_frontier() {
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()])
+    vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()])
         .unwrap();
     for file in [
         "emacs-lisp/debug-early.el",
@@ -56,10 +56,10 @@ fn measure_subrp_chain_frontier() {
         "emacs-lisp/gv.el",
         "emacs-lisp/inline.el",
     ] {
-        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
+        vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
     }
     let result = vm
-        .load_file(&root.join("gnu-lisp/emacs-lisp/ert.el"))
+        .load_file(&root.join("lisp/gnu/emacs-lisp/ert.el"))
         .map(|_| ());
     println!("ERT result: {result:?}");
     let report = vm.load_report();
@@ -77,16 +77,16 @@ fn measure_subrp_chain_frontier() {
                 assert_eq!(steps.len(), 178);
             }
             "cl-lib.el" | "ert.el" => {
-                let (count, ordinal, line) = if name == "cl-lib.el" {
-                    (94, 95, 599)
+                let (count, ordinal, head) = if name == "cl-lib.el" {
+                    (94, 95, "(define-minor-mode cl-old-struct-compat-mode")
                 } else {
-                    (0, 1, 57)
+                    (0, 1, "(require 'cl-lib)")
                 };
                 assert_eq!(completed, count, "completed {name} frontier");
                 assert_eq!(steps.len(), count + 1);
                 let failed = steps.iter().find(|s| s["status"] == "error").unwrap();
                 assert_eq!(failed["ordinal"], ordinal);
-                assert_eq!(failed["line"], line);
+                assert!(failed["source"].as_str().unwrap().starts_with(head), "failing form of {name}: {failed}");
                 assert!(
                     failed["error"]
                         .as_str()

@@ -1,6 +1,6 @@
 ;;; romacs-project-enumerations.el --- scaling probe  -*- lexical-binding: t -*-
 
-;; The project commands' record of enumeration times (rlisp/romacs-project.el):
+;; The project commands' record of enumeration times (lisp/romacs/romacs-project.el):
 ;; one entry per project root, each decision one lookup and one stat of the
 ;; root's Git index.
 (scaling-probe romacs-project-enumerations :n 2000

@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 fn cases() -> Vec<&'static str> {
     vec![
@@ -83,7 +85,7 @@ fn environment_snapshot_is_local_to_each_vm() {
     }
     use std::os::unix::ffi::OsStringExt;
     let result = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "environment_snapshot_is_local_to_each_vm"])
+        .args(["--exact", &own_test::name(module_path!(), "environment_snapshot_is_local_to_each_vm")])
         .env_clear().env("ROMACS_ENVIRONMENT_CHILD", "1")
         .env("ROMACS_ENV_TEST", "launch")
         .env("ROMACS_ENV_BYTES", std::ffi::OsString::from_vec(vec![255, 254]))
@@ -118,7 +120,7 @@ fn exec_path_decodes_the_launch_path_like_gnu() {
         let gnu = gnu.output().unwrap();
         assert!(gnu.status.success(), "oracle failed for {path:?}");
         let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-        child.args(["--exact", "exec_path_decodes_the_launch_path_like_gnu", "--nocapture"]).env("ROMACS_EXEC_PATH_CHILD", "1");
+        child.args(["--exact", &own_test::name(module_path!(), "exec_path_decodes_the_launch_path_like_gnu"), "--nocapture"]).env("ROMACS_EXEC_PATH_CHILD", "1");
         configure(&mut child);
         child.env("ROMACS_EXEC_PATH_CHILD", "1");
         let child = child.output().unwrap();

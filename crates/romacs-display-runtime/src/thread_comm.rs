@@ -53,28 +53,6 @@ pub struct PointerPosition {
     pub target_frame_id: u64,
 }
 
-/// Where the pointer is over the primary window, in logical pixels: what a
-/// display answers GNU's `mouse_position_hook' with, read at the moment it
-/// is asked.  Nothing while the pointer is elsewhere.
-#[derive(Debug)]
-pub(crate) struct PointerCell(std::sync::atomic::AtomicU64);
-
-impl Default for PointerCell {
-    fn default() -> Self { Self(std::sync::atomic::AtomicU64::new(Self::OUTSIDE)) }
-}
-
-impl PointerCell {
-    const OUTSIDE: u64 = u64::MAX;
-    pub fn set(&self, at: Option<(i32, i32)>) {
-        let packed = at.map_or(Self::OUTSIDE, |(x, y)| u64::from(x as u32) << 32 | u64::from(y as u32));
-        self.0.store(packed, std::sync::atomic::Ordering::Relaxed);
-    }
-    pub fn get(&self) -> Option<(i32, i32)> {
-        let packed = self.0.load(std::sync::atomic::Ordering::Relaxed);
-        (packed != Self::OUTSIDE).then_some(((packed >> 32) as u32 as i32, packed as u32 as i32))
-    }
-}
-
 /// How a pointer position relates to the immutable presentation on screen.
 ///
 /// `Unpresented` is explicit for exposed/native surface area. A producer cannot
@@ -127,18 +105,10 @@ pub struct PositionedPointerInput {
 /// Input event from render thread to Emacs
 #[derive(Debug, Clone)]
 pub enum InputEvent {
+    /// A pressed key: the evaluator's dropping it marks its receipt taken.
     Tracked {
-        receipt: romacs_display_protocol::input_progress::InputDelivery,
+        delivery: romacs_display_protocol::input_progress::InputDelivery,
         event: Box<InputEvent>,
-    },
-    /// Bytes read directly from a Unix TTY.
-    ///
-    /// This transport fact deliberately carries no terminal-sequence or
-    /// modifier interpretation.  The evaluator applies
-    /// `keyboard-coding-system` and `input-decode-map` in input order.
-    RawTtyBytes {
-        bytes: Vec<u8>,
-        emacs_frame_id: u64,
     },
     Key {
         key: crate::host_types::FrontendKey,
@@ -175,6 +145,24 @@ pub enum InputEvent {
     /// surfaces, the frame post shader) is gone; the evaluator must
     /// re-resolve them and force a full redisplay.
     DisplayReset,
+    /// FRAME's PRESENTATION has drawn: the first time it has, with the
+    /// window atlas's cumulative count of face text it could not resolve.
+    /// The input bridge keeps it (`input_bridge`).
+    PresentationRendered {
+        frame: u64,
+        presentation: u64,
+        unresolved_face_text_total: u64,
+    },
+    /// The windows draw with this adapter: a software rasterizer or not.
+    AdapterChosen { software: bool },
+    /// Whether a GPU renderer is live, so a native model can be drawn.
+    ModelRenderer { live: bool },
+    /// Where the pointer is over the primary window, in logical pixels:
+    /// what a display answers GNU's `mouse_position_hook' with.  Nothing
+    /// while the pointer is elsewhere.
+    PointerOver { at: Option<(i32, i32)> },
+    /// How a held key repeated, for the usage log's `repeat' record.
+    KeyRepeatTiming(crate::input_bridge::RepeatTiming),
     /// Image decoding completed or renderer residency was lost.
     ImageStateChanged {
         event: ImageStateEvent,
@@ -298,6 +286,16 @@ impl From<FrameRef> for u64 {
 
 
 
+/// Whether EVENT may be dropped when its queue is full: pointer motion,
+/// whose next motion replaces it.  Everything else is lossless.
+pub(crate) fn is_lossy_input_event(event: &InputEvent) -> bool {
+    matches!(
+        event,
+        InputEvent::PositionedPointer(PositionedPointerInput { action: PointerAction::Move { .. }, .. })
+            | InputEvent::PointerOver { .. }
+    )
+}
+
 /// Lifecycle commands for the render thread.
 #[derive(Debug)]
 pub(crate) enum LifecycleCommand {
@@ -337,8 +335,6 @@ pub(crate) enum WindowCommand {
         adopt_primary: bool,
         // Deferred realization owns readiness; legacy ownership is admission-only.
         reply: Option<Sender<Result<(), String>>>,
-        live: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        deadline: std::time::Instant,
     },
     /// Associate the already-created primary OS window with its real Emacs frame ID.
     AdoptPrimaryFrame { frame: FrameRef },
@@ -462,7 +458,7 @@ pub(crate) enum RenderCommand {
 // stops reading terminal bytes when the buffer is under pressure rather than
 // silently dropping command input.  Keep Romacs' render-to-evaluator input
 // queue at the same scale and use backpressure for durable user input below.
-const INPUT_CHANNEL_CAPACITY: usize = 4096;
+pub(crate) const INPUT_CHANNEL_CAPACITY: usize = 4096;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
 /// The commands Lisp's model requests may keep waiting.  The rest of the
 /// channel is a publication's (at most 16 asset loads and retirements, its
@@ -472,9 +468,6 @@ pub(crate) const MODEL_REQUEST_ROOM: usize = COMMAND_CHANNEL_CAPACITY / 4;
 
 /// Communication channels between threads
 pub(crate) struct ThreadComms {
-    /// The pointer over the primary window: Render → Emacs.
-    pub pointer: Arc<PointerCell>,
-
     /// Commands: Emacs → Render
     pub cmd_tx: CommandSender,
     pub cmd_rx: CommandReceiver,
@@ -484,19 +477,6 @@ pub(crate) struct ThreadComms {
     pub input_rx: Receiver<InputEvent>,
 
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    /// Whether a GPU renderer is live, so a native model can be drawn: the
-    /// render thread sets it, the evaluator reads it.
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
-}
-
-/// Images the renderer no longer has though nothing retired them: those
-/// it evicted, by id, and whether a GPU rebuild lost every one.  The
-/// render thread records them; the evaluator's residency takes them.
-#[derive(Debug, Default)]
-pub(crate) struct LostImages {
-    pub evicted: Vec<u32>,
-    pub reset: bool,
 }
 
 impl ThreadComms {
@@ -505,38 +485,26 @@ impl ThreadComms {
         let (cmd_tx, cmd_rx) = command_channel(COMMAND_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         Self {
-            pointer: Arc::default(),
             cmd_tx,
             cmd_rx,
             input_tx,
             input_rx,
             frame_opacity: Arc::default(),
-            lost_images: Arc::default(),
-            model_renderer: Arc::default(),
         }
     }
 
     /// Split into Emacs-side and Render-side handles
     pub fn split(self) -> (EmacsComms, RenderComms) {
         let emacs = EmacsComms {
-            pointer: self.pointer.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
-            lost_images: Arc::clone(&self.lost_images),
-            model_renderer: Arc::clone(&self.model_renderer),
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
         };
 
         let render = RenderComms {
-            pointer: self.pointer,
             input_interrupt: None,
             keep_alive_without_frames: false,
-            native_window_waits: None,
-            paint_diagnostics: None,
-            input_stream: Default::default(),
             frame_opacity: self.frame_opacity,
-            lost_images: self.lost_images,
-            model_renderer: self.model_renderer,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
         };
@@ -553,12 +521,9 @@ impl Default for ThreadComms {
 
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
-    pub pointer: Arc<PointerCell>,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The evaluator's out-of-band quit, as the render thread sees it. GNU
@@ -569,45 +534,23 @@ pub trait InputInterrupt: Send + Sync {
     /// Whether the key EVENT was taken as an interrupt instead of being
     /// queued: true only while the evaluator is busy.
     fn interrupt(&self, event: &InputEvent) -> bool;
-    /// The evaluator's busy span, while it is busy: a new one each time it
-    /// leaves a wait for input.
-    fn busy_span(&self) -> Option<u32>;
+    /// How long the evaluator has been busy, while it is: since it last
+    /// left a wait for input.
+    fn busy_for(&self) -> Option<std::time::Duration>;
 }
 
 /// Render thread communication handle
 pub(crate) struct RenderComms {
-    pub pointer: Arc<PointerCell>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
-    pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
     pub keep_alive_without_frames: bool,
-    pub native_window_waits: Option<Arc<crate::native_window_wait::NativeWindowWaits>>,
-    input_stream: romacs_display_protocol::input_progress::InputStream,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RenderComms {
-    pub(crate) fn create_window(
-        &self,
-        event_loop: &dyn winit::event_loop::ActiveEventLoop,
-        attrs: winit::window::WindowAttributes,
-        frame: u64,
-    ) -> Result<Box<dyn winit::window::Window>, String> {
-        let create = || {
-            event_loop
-                .create_window(attrs)
-                .map_err(|error| error.to_string())
-        };
-        match &self.native_window_waits {
-            Some(waits) => waits.run(frame, create),
-            None => create(),
-        }
-    }
     /// Record a pressed key's or a scroll's platform receive time in the
     /// presentation trace, when one is open.
     fn trace_input_received(event: &InputEvent) {
@@ -626,30 +569,14 @@ impl RenderComms {
                 }) => position.target_frame_id,
                 _ => return,
             };
-            let mut time = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            // SAFETY: valid out-pointer, POSIX monotonic clock. The
-            // compositor's clock ID must match before subtraction.
-            if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
-                romacs_display_protocol::present_trace::input_received(
-                    frame,
-                    libc::CLOCK_MONOTONIC as u32,
-                    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
-                );
-            }
+            // The compositor's clock ID must match before subtraction.
+            let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+            romacs_display_protocol::present_trace::input_received(
+                frame,
+                libc::CLOCK_MONOTONIC as u32,
+                time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
+            );
         }
-    }
-
-    fn is_lossy_input_event(event: &InputEvent) -> bool {
-        matches!(
-            event,
-            InputEvent::PositionedPointer(PositionedPointerInput {
-                action: PointerAction::Move { .. },
-                ..
-            })
-        )
     }
 
     fn should_log_delivery(event: &InputEvent) -> bool {
@@ -666,7 +593,6 @@ impl RenderComms {
     fn event_name(event: &InputEvent) -> &'static str {
         match event {
             InputEvent::Tracked { event, .. } => Self::event_name(event),
-            InputEvent::RawTtyBytes { .. } => "raw-tty-bytes",
             InputEvent::Key { .. } => "key",
             InputEvent::PositionedPointer(PositionedPointerInput { action, .. }) => match action {
                 PointerAction::Button { .. } => "positioned-pointer-button",
@@ -678,6 +604,11 @@ impl RenderComms {
             InputEvent::WindowFocus { .. } => "window-focus",
             InputEvent::MonitorsChanged { .. } => "monitors-changed",
             InputEvent::DisplayReset => "display-reset",
+            InputEvent::PresentationRendered { .. } => "presentation-rendered",
+            InputEvent::AdapterChosen { .. } => "adapter-chosen",
+            InputEvent::ModelRenderer { .. } => "model-renderer",
+            InputEvent::PointerOver { .. } => "pointer-over",
+            InputEvent::KeyRepeatTiming(_) => "key-repeat-timing",
             InputEvent::ImageStateChanged { .. } => "image-state-changed",
             InputEvent::SurfaceCreateFailed { .. } => "surface-create-failed",
             InputEvent::Model { .. } => "model",
@@ -693,9 +624,9 @@ impl RenderComms {
         }
     }
 
-    /// The evaluator's busy span, while it is busy (`InputInterrupt').
-    pub(crate) fn evaluator_busy_span(&self) -> Option<u32> {
-        self.input_interrupt.as_ref().and_then(|hook| hook.busy_span())
+    /// How long the evaluator has been busy, while it is (`InputInterrupt`).
+    pub(crate) fn evaluator_busy_for(&self) -> Option<std::time::Duration> {
+        self.input_interrupt.as_ref().and_then(|hook| hook.busy_for())
     }
 
     /// Queue a display input event for the input bridge.
@@ -703,14 +634,7 @@ impl RenderComms {
     /// After converting the display event, the bridge owns notifying the
     /// evaluator's wait backend.
     pub(crate) fn send_input(&self, event: InputEvent) {
-        let _ = self.send_input_with_receipt(event);
-    }
-
-    pub(crate) fn send_input_with_receipt(
-        &self,
-        event: InputEvent,
-    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
-        self.send_input_with_tracking(event, None)
+        self.queue_input(event, None);
     }
 
     /// Native key repeats use evaluator consumption, not bridge dequeueing,
@@ -723,54 +647,26 @@ impl RenderComms {
             return None;
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
-            .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
-        let read = delivery.as_ref().map(|delivery| delivery.receipt());
-        self.send_input_with_tracking(event, delivery);
-        read
+            .then(romacs_display_protocol::input_progress::InputDelivery::new);
+        let receipt = delivery.as_ref().map(|delivery| delivery.receipt());
+        self.queue_input(event, delivery);
+        receipt
     }
 
-    fn send_input_with_tracking(
+    fn queue_input(
         &self,
         event: InputEvent,
-        read: Option<romacs_display_protocol::input_progress::InputDelivery>,
-    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
-        crate::paint_host::trace_key_enqueue(&event, read.as_ref());
-        let receipt = if matches!(
-            &event,
-            InputEvent::Key {
-                key: crate::host_types::FrontendKey::Keysym(0xff55 | 0xff56),
-                pressed: true,
-                ..
-            } | InputEvent::PositionedPointer(PositionedPointerInput {
-                action: PointerAction::Scroll { .. },
-                ..
-            })
-        ) {
-            self.input_stream.issue()
-        } else {
-            None
-        };
-        let observer = receipt.as_ref().map(|delivery| delivery.receipt());
+        delivery: Option<romacs_display_protocol::input_progress::InputDelivery>,
+    ) {
+        crate::paint_host::trace_key_enqueue(&event, delivery.as_ref());
         Self::trace_input_received(&event);
-        let event = if let Some(receipt) = receipt {
-            InputEvent::Tracked {
-                receipt,
-                event: Box::new(event),
-            }
-        } else {
-            event
-        };
-        let event = if let Some(receipt) = read {
-            InputEvent::Tracked {
-                receipt,
-                event: Box::new(event),
-            }
-        } else {
-            event
+        let event = match delivery {
+            Some(delivery) => InputEvent::Tracked { delivery, event: Box::new(event) },
+            None => event,
         };
         let log_delivery = Self::should_log_delivery(&event);
         let event_name = Self::event_name(&event);
-        if Self::is_lossy_input_event(&event) {
+        if is_lossy_input_event(&event) {
             match self.input_tx.try_send(event) {
                 Ok(()) => {
                     if log_delivery {
@@ -790,7 +686,7 @@ impl RenderComms {
                     );
                 }
             }
-            return observer;
+            return;
         }
 
         match self.input_tx.send(event) {
@@ -806,7 +702,6 @@ impl RenderComms {
                 );
             }
         }
-        observer
     }
 }
 

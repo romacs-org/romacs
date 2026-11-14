@@ -20,7 +20,8 @@ def pinned_fixture(test, repo):
     binary.parent.mkdir(parents=True, exist_ok=True)
     binary.write_text('fixture ' + FIXTURE_PIN)
     binary.chmod(0o755)
-    (repo / 'parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
+    (repo / 'ledger').mkdir(exist_ok=True)
+    (repo / 'ledger/parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
     test.enterContext(mock.patch.dict(os.environ, {'GNU_ORACLE_ROOT': str(root)}))
     return binary
 
@@ -128,9 +129,12 @@ class StressProtocol(unittest.TestCase):
 class BuildAndRun(unittest.TestCase):
     def setUp(self):
         def source(*args, **kwargs):
+            if args[-2:] == ('tools/lib/test_modules.py', 'modules'):
+                return self.modules
             self.assertEqual(args[-1], 'source')
-            self.assertTrue(args[-2].endswith('/gnu-tests/tools/gate_vacuity.py'))
+            self.assertTrue(args[-2].endswith('/test/gnu/tools/gate_vacuity.py'))
             return b'{}'
+        self.modules = b''
         self.enterContext(mock.patch.object(gate, 'out', side_effect=source))
 
     def test_native_stress_uses_zero_retries_and_retains_all_iterations(self):
@@ -155,6 +159,39 @@ class BuildAndRun(unittest.TestCase):
             self.assertEqual(argv[argv.index('--stress-count') + 1], '2')
             self.assertEqual(argv[argv.index('--retries') + 1], '0')
             self.assertIn('--no-fail-fast', argv)
+
+    def test_a_file_that_is_a_module_of_all_is_neither_built_alone_nor_run_twice(self):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.modules = b'romacs-vm quit\nromacs-vm fileio\n'
+        targets = {'romacs-vm': ('all', 'quit', 'fileio', 'alone'), 'romacs-layout': ('quit', 'rows')}
+        def metadata(*cmd, **kw):
+            if cmd[:2] == ('cargo', 'metadata'):
+                json.dump({'workspace_members': list(targets), 'packages': [
+                    dict(id=name, name=name, targets=[dict(name=name, kind=['lib']), dict(name='tool', kind=['bin']),
+                                                      *(dict(name=test, kind=['test']) for test in tests)])
+                    for name, tests in targets.items()]}, kw['stdout'])
+        builds = []
+        def built(cmd, **kw):
+            builds.append(cmd)
+            # Cargo builds romacs-vm's `quit` too: romacs-layout has a test of that name.
+            ids = ['romacs-vm', 'romacs-vm::all', 'romacs-vm::alone', 'romacs-vm::quit',
+                   'romacs-layout', 'romacs-layout::quit', 'romacs-layout::rows']
+            json.dump({'rust-build-meta': {}, 'rust-binaries': {i: {'binary-id': i} for i in ids}}, kw['stdout'])
+            return 0
+        with mock.patch.multiple(gate, SHORT=root / 'ng', sh=metadata, cargo_flags=lambda s: []), \
+             mock.patch.object(gate.subprocess, 'call', built):
+            self.assertEqual(gate.build_and_run(root, root, 'all()', {}, False, time.monotonic(), {}), [])
+        build = builds[0]
+        self.assertEqual(build[build.index('--lib'):build.index('--list-type')],
+                         ['--lib', '--bins', '--test', 'all', '--test', 'alone',
+                          '--test', 'quit', '--test', 'rows'])
+        ran = {suite: set(json.loads((root / f'{suite}-binaries.json').read_text())['rust-binaries'])
+               for suite in ('vm2', 'display')}
+        self.assertEqual(ran, {'vm2': {'romacs-vm', 'romacs-vm::all', 'romacs-vm::alone'},
+                               'display': {'romacs-layout', 'romacs-layout::quit', 'romacs-layout::rows'}})
+
+    def test_a_tree_without_an_all_target_builds_every_target(self):
+        self.assertEqual(gate.test_targets({'packages': []}, {'romacs-vm'}, set()), [])
 
     def test_stress_zero_exit_cannot_hide_a_failed_body(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -293,7 +330,7 @@ class BuildAndRun(unittest.TestCase):
 
     def test_run_environment_drops_a_running_editors_launch_variables(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
-        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/gnu-lisp',
+        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp/gnu',
                       ROMACS_USAGE_LOG='/sessions/ended/usage.jsonl', ROMACS_GUI_FONT='Iosevka',
                       ROMACS_GUI_FONT_SIZE='15')
         with mock.patch.dict(os.environ, editor):
@@ -447,13 +484,13 @@ class OracleResolution(unittest.TestCase):
             os.chdir(previous)
 
     def test_missing_reference_refuses_with_restoration_action(self):
-        (self.root / 'parity-reference.toml').unlink()
-        with self.assertRaisesRegex(SystemExit, 'cannot read parity-reference.toml.*restore'):
+        (self.root / 'ledger/parity-reference.toml').unlink()
+        with self.assertRaisesRegex(SystemExit, 'cannot read ledger/parity-reference.toml.*restore'):
             gate._pinned_oracle(self.root)
 
     def test_missing_or_malformed_commit_refuses_with_restoration_action(self):
         for text in ('other = 1\n', 'mirror_commit = "not-a-revision"\n'):
-            (self.root / 'parity-reference.toml').write_text(text)
+            (self.root / 'ledger/parity-reference.toml').write_text(text)
             with self.assertRaisesRegex(SystemExit, 'no valid mirror_commit.*restore'):
                 gate._pinned_oracle(self.root)
 
@@ -469,7 +506,7 @@ class OracleResolution(unittest.TestCase):
 
     def test_reference_read_failure_is_actionable(self):
         with mock.patch.object(pathlib.Path, 'read_text', side_effect=PermissionError('denied')):
-            with self.assertRaisesRegex(SystemExit, 'cannot read parity-reference.toml.*denied.*restore'):
+            with self.assertRaisesRegex(SystemExit, 'cannot read ledger/parity-reference.toml.*denied.*restore'):
                 gate._pinned_oracle(self.root)
 
     def test_invalid_override_refuses_before_admission(self):
@@ -589,7 +626,7 @@ class GateArguments(unittest.TestCase):
         with mock.patch.object(gate.sys, 'argv', payload[1:]), \
              mock.patch.object(gate, 'sync'), mock.patch.object(gate, 'sh', side_effect=command), \
              mock.patch.object(gate, 'environment_identity', return_value=('fixture', {}, {})), \
-             mock.patch.object(gate, 'out', return_value=archive), \
+             mock.patch.object(gate, 'out', side_effect=lambda *a, **k: b'' if 'tools/lib/test_modules.py' in a else archive), \
              mock.patch.object(gate.subprocess, 'call', side_effect=listed_binaries) as builds, \
              mock.patch.object(gate.subprocess, 'Popen', side_effect=popen):
             self.assertEqual(gate.main(), 0)
@@ -842,7 +879,7 @@ class Receipts(unittest.TestCase):
     def test_queued_pin_change_cannot_change_frozen_oracle(self):
         pin = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
         other = '1' * 40
-        ref = self.wt / 'parity-reference.toml'
+        ref = self.wt / 'ledger/parity-reference.toml'
         ref.write_text(f'mirror_commit = "{pin}"\n')
         oracle_root = self.root / 'oracle-root'
         for revision in (pin, other):
@@ -858,12 +895,12 @@ class Receipts(unittest.TestCase):
              mock.patch.object(gate, 'ORACLE', None):
             self.assertEqual(self.submit(), 0)
             receipt = json.loads((self.run_dir / 'receipt.json').read_text())
-            self.assertIn(pin, self.git('show', receipt['tree'] + ':parity-reference.toml').decode())
+            self.assertIn(pin, self.git('show', receipt['tree'] + ':ledger/parity-reference.toml').decode())
             self.assertEqual(receipt['oracle_sha'], gate.digest(oracle_root / pin / 'bin/emacs'),
                              'frozen tree A was certified with mutable worktree oracle B')
 
     def test_queued_reference_deletion_keeps_frozen_oracle(self):
-        self.after_submission = lambda: (self.wt / 'parity-reference.toml').unlink()
+        self.after_submission = lambda: (self.wt / 'ledger/parity-reference.toml').unlink()
         try:
             result = self.submit()
         except SystemExit as error:
@@ -885,7 +922,7 @@ class Receipts(unittest.TestCase):
         self.assertEqual(self.reuse('--oracle', str(self.oracle)), 0)
 
     def test_explicit_override_wins_without_a_submitted_reference(self):
-        (self.wt / 'parity-reference.toml').unlink()
+        (self.wt / 'ledger/parity-reference.toml').unlink()
         override = self.root / 'explicit-oracle'
         override.write_text('different diagnostic oracle')
         override.chmod(0o755)
@@ -909,7 +946,7 @@ class Receipts(unittest.TestCase):
     def test_copied_gate_in_fresh_interpreter_resolves_extracted_tree(self):
         self.assertEqual(self.submit(), 0)
         receipt = json.loads((self.run_dir / 'receipt.json').read_text())
-        ref = self.wt / 'parity-reference.toml'
+        ref = self.wt / 'ledger/parity-reference.toml'
         ref.unlink()
         copied = self.run_dir / 'gate'
         help_run = subprocess.run([gate.sys.executable, str(copied), '--help'],
@@ -925,7 +962,7 @@ g.update(HOME=root, CACHE=root / 'cache', RUNNER=sys.argv[1])
 g['environment_identity'] = lambda *a: ('fixture', {}, {})
 def build(src, run_dir, expr, threads, run, t0, suites, repeat=1):
     assert not (src / '.git').exists(), 'test must execute a git-less mirror'
-    assert (src / 'parity-reference.toml').is_file(), 'frozen reference missing from mirror'
+    assert (src / 'ledger/parity-reference.toml').is_file(), 'frozen reference missing from mirror'
     suites.update({'vm2': ['fixture']})
     (run_dir / 'vm2.jsonl').write_text('{"type":"test","event":"ok","name":"fixture"}\n')
     return []

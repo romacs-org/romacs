@@ -80,7 +80,7 @@ fn lifecycle_lisp(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>) -> Next {
     if cx.fboundp(helper) {
         return Ok(Step::Call { f: helper, args, then: return_result, saved: vec![] });
     }
-    let source = cx.string(include_str!("../../../../rlisp/vm/buffer_lifecycle.el"));
+    let source = cx.string(include_str!("../../../../lisp/romacs/vm/buffer_lifecycle.el"));
     let parsed = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let form = cx.pair(parsed).expect("reader result").0;
     let f = cx.intern("eval");

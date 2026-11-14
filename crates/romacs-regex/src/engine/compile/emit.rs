@@ -23,6 +23,7 @@ impl CompiledPattern {
             fastmap_translated: [false; 256],
             fastmap_accurate: false,
             sparse_ascii_fastmap: std::cell::OnceCell::new(),
+            syntax_lead: std::cell::OnceCell::new(),
             folded_scans: FoldedScans::default(),
             posix: false,
             multibyte: true,

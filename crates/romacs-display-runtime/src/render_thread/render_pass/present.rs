@@ -262,16 +262,18 @@ impl RenderApp {
         );
         // Read the actual per-window renderer atlas only after successful drawing
         // and presentation. Missing atlas is missing evidence, never zero.
-        if let Some(diagnostics) = &self.comms.paint_diagnostics
-            && is_primary_frame
-            && let Some(atlas) = self
-                .frame_windows
-                .get(emacs_frame_id)
-                .and_then(|window| window.render.compositor.glyph_atlas.as_ref())
+        // Once per presentation: a frame the render thread draws again on
+        // its own (effects, video) renders nothing new.
+        if let Some(window) = self.frame_windows.get_mut(emacs_frame_id)
+            && window.render.reported_presentation < frame.presentation_id.get()
+            && let Some(atlas) = window.render.compositor.glyph_atlas.as_ref()
         {
-            diagnostics.publish(crate::paint_host::PaintDiagnostic {
+            let unresolved_face_text_total = atlas.unresolved_face_text_total();
+            window.render.reported_presentation = frame.presentation_id.get();
+            self.comms.send_input(crate::thread_comm::InputEvent::PresentationRendered {
+                frame: emacs_frame_id,
                 presentation: frame.presentation_id.get(),
-                unresolved_face_text_total: atlas.unresolved_face_text_total(),
+                unresolved_face_text_total,
             });
         }
         // This projection describes the frame just handed to the compositor.

@@ -1,6 +1,6 @@
 //! GNU process.c and callproc.c primitives that need no Lisp callback
 //! (state in `prim/leaf/process.rs`, descriptors in `subprocess.rs`). What
-//! runs filters, sentinels, timers or hooks is Lisp in rlisp/vm/subprocess.el,
+//! runs filters, sentinels, timers or hooks is Lisp in lisp/romacs/vm/subprocess.el,
 //! composed from the `romacs--proc-*' leaves below.
 use super::*;
 use crate::prim::CallOutput;
@@ -328,7 +328,7 @@ fn internal_default_signal_process(cx, process: Value, sigcode: Value; optional 
     Ok(Value::integer(result).map_err(Fault::Error)?)
 }}
 
-// Internal leaves for rlisp/vm/subprocess.el.
+// Internal leaves for lisp/romacs/vm/subprocess.el.
 
 defsubr! { name = "romacs--get-process", gnu = "romacs:process", effect = Reads,
 fn romacs_get_process(cx, name: Value) { get_process(cx, name) }}

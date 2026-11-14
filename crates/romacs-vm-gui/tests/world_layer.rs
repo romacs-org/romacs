@@ -117,7 +117,7 @@ fn world_build_prepares_the_init_layer_and_rebuilds_it_only_for_its_inputs() {
 #[test]
 fn an_init_layer_loads_cus_start_in_full() {
     let home = Home::new("cus-start");
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
     home.build();
     home.plan_requiring("cus-start", &gnu_lisp);
     let said = home.build();
@@ -174,7 +174,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         after("layer-withheld", "#<after a secret reader>".into()),
     ];
     // As an init's `load-path' is: its own directory before the installation's.
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
     let mut load_path = vec![lisp.display().to_string()];
     let mut dirs = vec![gnu_lisp];
     while let Some(dir) = dirs.pop() {

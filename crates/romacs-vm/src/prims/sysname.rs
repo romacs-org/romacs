@@ -23,7 +23,7 @@ fn emacs_pid(_cx) {
 
 // Fsleep_for: GNU waits in wait_reading_process_output, which also runs
 // timers and reads subprocess output. With the process prelude loaded that
-// wait is rlisp/vm/subprocess.el's; a VM without it sleeps only when no timer
+// wait is lisp/romacs/vm/subprocess.el's; a VM without it sleeps only when no timer
 // is pending, since nothing else would run them.
 defsubr! { name = "sleep-for", gnu = "dispnew.c:6894", effect = Global,
 fn sleep_for(cx, seconds: Value; optional milliseconds: Value) -> Step {

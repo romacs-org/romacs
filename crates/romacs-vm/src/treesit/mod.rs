@@ -20,10 +20,10 @@ use std::sync::mpsc;
 /// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
 /// GNU's language symbol name, its `tree_sitter_LANG` function, and the
 /// repository and commit of its sources.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct BundledGrammar {
     pub name: &'static str,
-    pub language: unsafe extern "C" fn() -> *const (),
+    pub language: tree_sitter_language::LanguageFn,
     pub url: &'static str,
     pub commit: &'static str,
 }
@@ -32,13 +32,7 @@ static BUNDLED: OnceLock<Vec<BundledGrammar>> = OnceLock::new();
 
 /// Make GRAMMARS the executable's bundled grammars, once per process,
 /// before any VM loads a language. A later call is ignored.
-///
-/// # Safety
-/// Each grammar's `language` must be a tree-sitter grammar function
-/// (`tree_sitter_LANG`) linked into this process: callable at any time
-/// from any thread, returning a pointer to a static `TSLanguage` of an
-/// ABI the runtime accepts or rejects through `ts_parser_set_language`.
-pub unsafe fn register_bundled_grammars(grammars: Vec<BundledGrammar>) {
+pub fn register_bundled_grammars(grammars: Vec<BundledGrammar>) {
     let _ = BUNDLED.set(grammars);
 }
 
@@ -87,6 +81,7 @@ pub(crate) struct Change {
 /// first, and the text's linecol caches.
 #[derive(Default)]
 pub(crate) struct Registry {
+    // CELL(Plain): Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
@@ -94,6 +89,7 @@ pub(crate) struct Registry {
     /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
     /// parser out of view may never catch up, and one a query runs is not
     /// the frame.
+    // CELL(Plain)
     pub edited: std::cell::Cell<i64>,
 }
 /// A copy of a text (a snapshot or a cloned buffer) has no parsers.
@@ -106,6 +102,13 @@ impl Clone for Registry {
 // capture (`Object::foreign_resource`) and `world_quiescent` an early
 // parse, so a captured registry is empty.
 unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
+// An image holds it empty: nothing to walk.
+impl romacs_snapshot::Schema for Registry {
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 /// The most first parses running at once, whatever a session visits.
 const EARLY_LIMIT: usize = 4;
@@ -152,6 +155,7 @@ pub(crate) struct Early {
     pub language: native::Language,
     pub visible: (i64, i64),
     /// The text's changes since the copy; None past EARLY_CHANGES_LIMIT.
+    // CELL(Plain)
     changes: RefCell<Option<Vec<Change>>>,
     result: mpsc::Receiver<Option<native::Loose>>,
     /// What the thread sent, once `ready' saw it.
@@ -163,14 +167,15 @@ impl Early {
     pub(crate) fn start(slot: EarlySlot, language: native::Language, text: FrozenText, visible: (i64, i64),
                         wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Self> {
         let (sender, result) = mpsc::channel();
+        let grammar = language.clone();
         std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
             // The slot outlives the text.
             let _slot = slot;
             let text = text;
             let mut parser = native::Parser::new();
-            parser.set_language(language);
-            let mut reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            let _ = sender.send(parser.parse(None, &mut reader).map(Tree::loose));
+            parser.set_language(&grammar);
+            let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+            let _ = sender.send(parser.parse(None, &reader).map(Tree::loose));
             note_early_landed();
             if let Some(wake) = wake { wake(); }
         }).ok()?;
@@ -409,26 +414,22 @@ pub(crate) struct Reader<'a, T> {
     pub text: Option<&'a T>,
     /// 0-based bytes.
     pub visible: (usize, usize),
-    raw: [u8; 2],
 }
 impl<'a, T> Reader<'a, T> {
     pub(crate) fn new(text: Option<&'a T>, visible: (usize, usize)) -> Self {
-        Self { text, visible, raw: [0; 2] }
+        Self { text, visible }
     }
 }
 impl<T: Chunks> native::Source for Reader<'_, T> {
-    fn read(&mut self, offset: usize) -> &[u8] {
+    fn read(&self, offset: usize) -> native::Chunk<'_> {
         let at = self.visible.0 + offset;
-        let Some(text) = self.text.filter(|_| at < self.visible.1) else { return &[] };
+        let Some(text) = self.text.filter(|_| at < self.visible.1) else { return native::Chunk::Text(&[]) };
         let chunk = text.chunk_from(at);
         let chunk = &chunk[..chunk.len().min(self.visible.1 - at)];
         match text.raw_in(at..at + chunk.len()).first() {
-            Some(&p) if p as usize == at => {
-                self.raw = [chunk[0] - crate::text::RAW_LEAD_SHIFT, chunk[1]];
-                &self.raw
-            }
-            Some(&p) => &chunk[..p as usize - at],
-            None => chunk,
+            Some(&p) if p as usize == at => native::Chunk::Raw([chunk[0] - crate::text::RAW_LEAD_SHIFT, chunk[1]]),
+            Some(&p) => native::Chunk::Text(&chunk[..p as usize - at]),
+            None => native::Chunk::Text(chunk),
         }
     }
 }
@@ -454,7 +455,9 @@ pub(crate) struct Parser {
     pub embed_level: Value,
     pub notifiers: Value,
     pub last_set_ranges: Value,
+    // CELL(Plain)
     pub native: Rc<RefCell<native::Parser>>,
+    // CELL(Plain)
     pub core: Rc<RefCell<Core>>,
     pub timestamp: u64,
     pub deleted: bool,
@@ -529,6 +532,7 @@ impl Compiled {
 #[derive(Clone)]
 pub(crate) struct Task {
     pub values: Vec<Value>,
+    // CELL(Plain)
     pub state: Rc<RefCell<TaskState>>,
 }
 

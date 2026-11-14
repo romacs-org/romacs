@@ -136,8 +136,6 @@ mod tests {
 /// editor stamps with, so a key's ingress can be matched with, say, its
 /// byte's arrival at a terminal's pty (`key-ingress' records).
 pub fn monotonic_ns(at: Instant) -> u128 {
-    let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-    // SAFETY: clock_gettime writes the timespec it is given.
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
     (now.tv_sec as u128 * 1_000_000_000 + now.tv_nsec as u128).saturating_sub(at.elapsed().as_nanos())
 }

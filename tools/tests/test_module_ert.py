@@ -36,7 +36,13 @@ class ModuleERT(unittest.TestCase):
 
     def invoke(self, *args, binary=None, make=False):
         env = os.environ.copy()
-        env.update(MODULE='', SELECTOR='t', TEST_FILES='', EMACS_TEST_TIMEOUT='10',
+        # The fixture file runs in a moment on a quiet host; the make target
+        # boots a real session and runs a real module file, about 8 s of CPU.
+        # Both start the host, which a host at load 150 stretches past 20 s.
+        # Each bound is what a hang would take, not what a quiet host takes
+        # (romacs#54).
+        file_timeout, run_timeout = ('300', 600) if make else ('120', 240)
+        env.update(MODULE='', SELECTOR='t', TEST_FILES='', EMACS_TEST_TIMEOUT=file_timeout,
                    ROMACS_TEST_BINARY=str(binary or self.binary))
         if make:
             command = ['make', '--no-print-directory', 'check-gnosis-agent-romacs', *args]
@@ -44,7 +50,7 @@ class ModuleERT(unittest.TestCase):
             command = [sys.executable, str(ROOT / 'tools/test-ert'),
                        '--file', str(self.fixture), *args]
         return subprocess.run(command, cwd=ROOT, env=env, capture_output=True,
-                              text=True, timeout=20)
+                              text=True, timeout=run_timeout)
 
     def test_real_ert_pass_failure_error_and_skips(self):
         for name, success in [('pass', True), ('fail', False), ('error', False)]:

@@ -1,4 +1,4 @@
-//! rlisp/romacs-fzf.el's completion semantics against pinned GNU.  GNU has
+//! lisp/romacs/romacs-fzf.el's completion semantics against pinned GNU.  GNU has
 //! no fzf style, so each case is answered there by GNU's own machinery:
 //! a single fuzzy term by GNU's `flex' style, which matches the same
 //! subsequences, and an extended query by its terms' meaning over the
@@ -9,30 +9,9 @@
 //! the matches (as a set: GNU has no fzf ranking), the base size, and
 //! the try-completion result.  The ranking itself is fzf's own tests'
 //! (src/fzf.rs); here Romacs's metadata sort is checked to give it.
-use romacs_vm::Vm;
-use std::path::Path;
-
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm.load_file(&root.join("rlisp/romacs-fzf.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// GNU's answers.  A query's MEANING is a list of sets, all of which must
 /// match, a set when any of its terms does: (KIND TEXT SENSITIVE) with
@@ -213,9 +192,9 @@ fn run_gnu(binary: &str, program: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn run_romacs(root: std::path::PathBuf, program: String) -> String {
+fn run_romacs(program: String) -> String {
     std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = bootstrapped(&root);
+        let mut vm = gnu_lisp(&["lisp/romacs/romacs-fzf.el"]);
         vm.eval_source(&program).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap().unwrap()
@@ -223,10 +202,9 @@ fn run_romacs(root: std::path::PathBuf, program: String) -> String {
 
 #[test]
 fn fzf_style_keeps_gnu_completion_semantics() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let expected = run_gnu(&binary, &format!("(progn {GNU} {PROGRAM})"));
-    let actual = run_romacs(root, format!("(progn {ROMACS} {PROGRAM})"));
+    let actual = run_romacs(format!("(progn {ROMACS} {PROGRAM})"));
     let (expected, actual): (Vec<&str>, Vec<&str>) = (expected.lines().collect(), actual.lines().collect());
     assert_eq!(expected.len(), actual.len(), "case count");
     let failures: Vec<String> = expected.iter().zip(&actual).filter(|(e, a)| e != a)
@@ -236,11 +214,10 @@ fn fzf_style_keeps_gnu_completion_semantics() {
 
 #[test]
 fn fzf_style_ranks_and_highlights() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let program = format!(
         "(progn (defun oracle--strings (r) (let (out) (while (consp r) (push (car r) out) (setq r (cdr r))) (nreverse out))) \
          (prin1-to-string {ROMACS_ONLY}))");
-    let actual = run_romacs(root, program);
+    let actual = run_romacs(program);
     assert_eq!(actual, concat!(
         r#"(("fuzzy-finder" "fuzzyfinder" "fuzzy-blurry-finder" "xff") "#,
         r#"((0 4 5 6)) ((0 4 5 6)) ("zab" "yab" "xab") ("b" "a") (((2 3 4)) ("sub/" "xsub/")))"#));

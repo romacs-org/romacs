@@ -104,14 +104,14 @@ fn positioned_symbol_chain_frontier() {
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()]).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()]).unwrap();
     for file in ["debug-early.el", "byte-run.el", "backquote.el"] {
-        vm.load_file(&root.join("gnu-lisp/emacs-lisp").join(file)).unwrap();
+        vm.load_file(&root.join("lisp/gnu/emacs-lisp").join(file)).unwrap();
     }
     for file in ["subr.el", "keymap.el", "emacs-lisp/pcase.el", "emacs-lisp/gv.el", "emacs-lisp/inline.el"] {
-        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
+        vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
     }
-    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/ert.el")).map(|_| ());
+    let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp/ert.el")).map(|_| ());
     assert!(result.is_err(), "frontier must be remeasured if ERT loads");
     let report = vm.load_report();
     let cl_macs: Vec<_> = report["steps"].as_array().unwrap().iter()
@@ -119,9 +119,9 @@ fn positioned_symbol_chain_frontier() {
         .collect();
     assert_eq!(cl_macs.len(), 178, "cl-macs now completes after subrp");
     assert!(cl_macs.iter().all(|s| s["status"] == "ok"));
-    for (name, completed, ordinal, line) in [
-        ("cl-lib.el", 94, 95, 599),
-        ("ert.el", 0, 1, 57),
+    for (name, completed, ordinal, head) in [
+        ("cl-lib.el", 94, 95, "(define-minor-mode cl-old-struct-compat-mode"),
+        ("ert.el", 0, 1, "(require 'cl-lib)"),
     ] {
         let steps: Vec<_> = report["steps"].as_array().unwrap().iter()
             .filter(|step| step["file"].as_str().unwrap().ends_with(&format!("/{name}")))
@@ -130,8 +130,8 @@ fn positioned_symbol_chain_frontier() {
         assert_eq!(steps.iter().filter(|step| step["status"] == "ok").count(), completed, "completed frontier for {name}");
         let failed = steps.iter().find(|step| step["status"] == "error").unwrap();
         assert_eq!(failed["ordinal"], ordinal, "frontier ordinal for {name}");
-        assert_eq!(failed["line"], line, "frontier line for {name}");
+        assert!(failed["source"].as_str().unwrap().starts_with(head), "frontier form for {name}: {failed}");
         assert!(failed["error"].as_str().unwrap().ends_with("(void-function define-minor-mode)"), "exact next blocker for {name}: {failed}");
-        println!("{name}: completed={completed}, attempted={}, form={ordinal}, line={line}, next=(void-function define-minor-mode)", steps.len());
+        println!("{name}: completed={completed}, attempted={}, form={ordinal} {head}, next=(void-function define-minor-mode)", steps.len());
     }
 }

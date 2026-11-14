@@ -155,7 +155,7 @@ fn propertized_strings_expand_as_their_text() {
 #[path = "support/gui_probe.rs"]
 mod gui_probe;
 
-/// Romacs's mode line (rlisp/romacs-mode-line.el) enters the evaluator
+/// Romacs's mode line (lisp/romacs/romacs-mode-line.el) enters the evaluator
 /// only where a region shows or a package's element asks: the evaluator
 /// entries `Vm::mode_line_evals' counts for one expansion of the
 /// installed format, over a file buffer, with `vc-mode' set, with a
@@ -165,7 +165,7 @@ mod gui_probe;
 fn romacs_mode_line_enters_the_evaluator_only_where_due() {
     let mut vm = gui_probe::gnu_session();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for file in ["rlisp/romacs-layer.el", "rlisp/romacs-chrome.el", "rlisp/romacs-mode-line.el"] {
+    for file in ["lisp/romacs/romacs-layer.el", "lisp/romacs/romacs-chrome.el", "lisp/romacs/romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
     let eval = |vm: &mut Vm, form: &str| vm.eval_source(form).unwrap_or_else(|e| panic!("{form}: {e}")).display().unwrap();
@@ -205,16 +205,16 @@ fn romacs_mode_line_enters_the_evaluator_only_where_due() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// rlisp/romacs-mode-line.el's own tests (tests/romacs-mode-line-test.el):
+/// lisp/romacs/romacs-mode-line.el's own tests (tests/romacs-mode-line-test.el):
 /// segments refreshed by their hooks, the installed format's components,
 /// and the ownership of `mode-line-format', in a session with GNU's Lisp.
 #[test]
 fn romacs_mode_line_lisp_tests_pass() {
     let mut vm = gui_probe::gnu_session();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    vm.eval_source(&format!("(setq load-path (cons {:?} load-path))", root.join("rlisp").to_str().unwrap())).unwrap();
-    for file in ["rlisp/romacs-test.el", "rlisp/romacs-layer.el", "rlisp/romacs-chrome.el", "rlisp/romacs-icons.el",
-                 "rlisp/romacs-mode-line.el", "crates/romacs-vm/tests/romacs-mode-line-test.el"] {
+    vm.eval_source(&format!("(setq load-path (cons {:?} load-path))", root.join("lisp/romacs").to_str().unwrap())).unwrap();
+    for file in ["lisp/romacs/romacs-test.el", "lisp/romacs/romacs-layer.el", "lisp/romacs/romacs-chrome.el", "lisp/romacs/romacs-icons.el",
+                 "lisp/romacs/romacs-mode-line.el", "crates/romacs-vm/tests/romacs-mode-line-test.el"] {
         vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
     }
     let summary = vm.eval_source("(let ((s (romacs-test-run t))) (format \"%S\" s))").unwrap().display().unwrap();

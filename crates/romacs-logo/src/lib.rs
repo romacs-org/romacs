@@ -7,7 +7,7 @@
 //! rasterising follows drawille's dot layout (asciimoo/drawille, MIT); no
 //! code is taken from it.
 //!
-//! The *Romacs* landing (rlisp/romacs-landing.el) shows a still frame from
+//! The *Romacs* landing (lisp/romacs/romacs-landing.el) shows a still frame from
 //! `romacs--logo-frame`, the render thread draws its motion, and the GUI
 //! host draws it while a first start prepares its world.
 use std::sync::{Arc, Mutex, OnceLock};

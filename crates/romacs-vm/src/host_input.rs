@@ -119,6 +119,12 @@ pub trait HostInput {
     fn pointer(&mut self) -> Option<(i32, i32)> {
         None
     }
+
+    /// What the host's display saw of native key repeat since the last
+    /// take (`romacs--take-key-repeats`), None with no display.
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -140,13 +146,13 @@ impl Vm {
     /// `read-from-minibuffer' outside a keyboard macro reads its keys here.
     pub fn set_host_input(&mut self, host: Option<Box<dyn HostInput>>) {
         let attached = if host.is_some() { Value::TRUE } else { Value::NIL };
-        self.host_input = host;
+        self.host_input = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn HostInput>);
         self.declare_special_raw(HOST_INPUT_VARIABLE, attached);
     }
 
     /// redisplay_internal's run_window_change_functions, which every
     /// redisplay's frame snapshot runs first (display.rs): the command
-    /// loop's Lisp half (rlisp/vm/window-change.el) once it is installed.
+    /// loop's Lisp half (lisp/romacs/vm/window-change.el) once it is installed.
     /// Lisp runs only when the windows differ from what the last run saw,
     /// so a redisplay that changed no window enters no Lisp.
     pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
@@ -205,11 +211,14 @@ impl Vm {
         }
         Ok(work)
     }
-    /// Every leaf window of every frame, the mini-windows too: what any
-    /// redisplay may show.
+    /// Every leaf window of every frame shown, the mini-windows too: what
+    /// any redisplay may show. A hidden frame (a child frame kept for a
+    /// layer, a toast or a chip between uses) is not redisplayed, as GNU
+    /// redisplays only visible frames, so its windows run no
+    /// `pre-redisplay-functions`.
     pub(crate) fn displayed_windows(&self) -> Vec<Value> {
         let mut out = vec![];
-        for frame in self.frames() {
+        for frame in self.frames().into_iter().filter(|&frame| self.frame_shown(frame)) {
             let Ok(f) = self.frame(frame) else { continue };
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {
@@ -254,8 +263,11 @@ impl Vm {
     }
 
     /// A redisplay took TOOK: the first after `romacs--redisplay-since-mark's
-    /// mark is what the command that marked it cost the display.
+    /// mark is what the command that marked it cost the display. Ends the
+    /// cycle `redisplay_begin' began (`romacs--display-stats').
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
+        let conses = self.allocation.consed.conses;
+        self.display_state.stats.end(conses);
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }
@@ -299,7 +311,7 @@ fn host(vm: &mut Vm) -> &mut dyn HostInput {
 }
 
 /// What a host wait's deadline depends on besides the clock, as
-/// `romacs--wait-state` (`rlisp/vm/keyboard.el`) prints it: empty before the
+/// `romacs--wait-state` (`lisp/romacs/vm/keyboard.el`) prints it: empty before the
 /// Lisp half is installed.
 const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
 /// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
@@ -308,7 +320,7 @@ const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--e
 /// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
 /// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
 /// input is pending, then wait for one event, or nil once SECONDS pass; its
-/// value goes to OUT. Lisp runs timers between reads (`rlisp/vm/keyboard.el`).
+/// value goes to OUT. Lisp runs timers between reads (`lisp/romacs/vm/keyboard.el`).
 /// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
 /// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
 pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
@@ -467,10 +479,10 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
         HostEvent::Resize { width, height } => (Some((width, height)), false),
         // A completed background command ends the wait as a timeout does:
         // Lisp may run its callback between commands
-        // (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
         HostEvent::Background => (None, false),
-        // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
+        // Lisp reads it (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
         event => (None, ended(vm, event)),
     })
@@ -561,6 +573,22 @@ mod tests {
         assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
         let first: u64 = words[2].parse().expect(&got);
         assert!((5_000..40_000).contains(&first), "{got}");
+    }
+
+    /// A read that waits for input redisplays inside the bracket
+    /// `romacs--display-stats` counts: a cycle a read, each visiting the
+    /// frame's windows.
+    #[test]
+    fn a_reads_redisplay_is_a_counted_cycle() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120, 121], vec![0, 0]))));
+        let got = vm
+            .eval_source("(progn (romacs--read-host-event) (romacs--read-host-event)
+                                 (let ((stats (romacs--display-stats)))
+                                   (list (cdr (assq 'cycles stats)) (> (cdr (assq 'windows-visited stats)) 1))))")
+            .unwrap();
+        assert_eq!(got.display().unwrap(), "(2 t)");
     }
 
     /// A collection in a prompt's redisplay runs with the host taken for the

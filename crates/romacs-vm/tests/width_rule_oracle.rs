@@ -8,29 +8,9 @@
 //! `format-mode-line''s field width and precision over them.  Automatic
 //! composition is off on both sides (`composition-function-table' empty):
 //! the rule counts characters, not shaped clusters.
-use romacs_vm::Vm;
-use std::path::Path;
-
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// Runs of `string-width' over 0..#x10FFFF, and the first character of
 /// each that is a Unicode scalar, which the other cases mix into their
@@ -77,11 +57,10 @@ fn gnu(oracle: &str, form: &str) -> String {
 
 #[test]
 fn widths_match_pinned_gnu_on_every_path() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let expected: Vec<String> = CASES.iter().map(|form| gnu(&oracle, form)).collect();
     let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = bootstrapped(&root);
+        let mut vm = gnu_lisp(&[]);
         vm.eval_source(SETUP).unwrap();
         CASES.iter().map(|form| vm.eval_source(&format!("(prin1-to-string {form})")).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))).collect::<Vec<_>>()

@@ -1,6 +1,6 @@
 //! A resize before any key reaches the command loop still runs
 //! `window-size-change-functions', once, from the repaint's redisplay: the
-//! session installs window.c's change functions (rlisp/vm/window-change.el)
+//! session installs window.c's change functions (lisp/romacs/vm/window-change.el)
 //! itself rather than waiting for the command loop's first key.
 use romacs_vm_gui::startup;
 use romacs_vm::Vm;

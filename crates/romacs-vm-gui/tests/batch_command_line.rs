@@ -11,6 +11,8 @@
 //! Romacs session boots from its batch world in that HOME's cache
 //! (src/batch.rs), which a first session prepares in the store
 //! `--world-build` made.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::Path;
 use std::process::Command;
 
@@ -74,8 +76,8 @@ fn cases(lib: &Path) -> Vec<Case> {
     ]
 }
 
-/// BINARY with ARGS in DIR, its HOME; a Romacs session from its world in
-/// DIR's cache, or from source without WORLD.
+/// BINARY with ARGS in DIR, its HOME; a Romacs session from a world (DIR's
+/// cache's, else its installation's), or from source without WORLD.
 fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, String, String) {
     let mut command = Command::new(binary);
     command.args(args).current_dir(dir)
@@ -98,8 +100,8 @@ fn a_missing_explicit_init_file_is_an_error() {
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing-init.el");
     let mut child = Command::new(romacs)
-        .arg("--batch").arg(root.join("rlisp")).arg("--init-file").arg(&missing)
-        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("gnu-lisp"))
+        .arg("--batch").arg(root.join("lisp/romacs")).arg("--init-file").arg(&missing)
+        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("lisp/gnu"))
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
         .spawn().unwrap();
     child.stdin.take().unwrap().write_all(b"(boundp 'user-init-file)").unwrap();
@@ -111,11 +113,11 @@ fn a_missing_explicit_init_file_is_an_error() {
 }
 
 /// A batch program's settings stay out of an init, as a session's do
-/// (rlisp/romacs-saved-settings.el, in the chain): `disable-command' creates no
+/// (lisp/romacs/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.
 #[test]
 fn batch_writers_leave_the_init_alone() {
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-batch-init-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let init = dir.join("init.el");
@@ -125,7 +127,7 @@ fn batch_writers_leave_the_init_alone() {
         (customize-save-variable 'kill-ring-max 123)
         (disable-command 'backward-word))", init.display().to_string(), format!("{}/", dir.display()));
     let args = ["-Q", "--batch", "--eval", &program].map(str::to_owned);
-    let (status, stdout, stderr) = run(romacs, &dir, &args, false);
+    let (status, stdout, stderr) = run(romacs, &dir, &args, true);
     assert_eq!(status, Some(0), "{stdout}{stderr}");
     assert!(!dir.join(".emacs").exists(), "a batch program made ~/.emacs");
     assert_eq!(std::fs::read_to_string(&init).unwrap(), INIT);
@@ -146,7 +148,6 @@ fn batch_command_line_matches_pinned_gnu() {
     std::fs::create_dir_all(dir.join(".emacs.d")).unwrap();
     std::fs::write(dir.join(".emacs.d/init.el"), INIT).unwrap();
     world_build(&dir);
-    batch_world(&dir);
     let runs: Vec<_> = cases(&dir.join("lib")).into_iter().map(|case| {
         let (gnu, dir) = (gnu.clone(), dir.clone());
         std::thread::spawn(move || {
@@ -174,31 +175,18 @@ fn batch_command_line_matches_pinned_gnu() {
     let worlds = (stored(&dir, "rwi").len(), stored(&dir, "use").len());
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(worlds, (2, 1), "the sessions restored the batch world the first session prepared");
+    assert_eq!(worlds, (2, 1), "the sessions restored the batch world --world-build prepared");
 }
 
-/// `--world-build` in DIR, the HOME `run` gives: the store and the GUI's
-/// world, no batch world.
+/// `--world-build` in DIR, the HOME `run` gives: the store, the GUI's world
+/// and the batch world.
 fn world_build(dir: &Path) {
     let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui")).args(["--loadup", "--world-build"]).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
         .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY").env_remove("ROMACS_WORLD").output().unwrap();
     assert!(output.status.success(), "--world-build: {}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(stored(dir, "rwi").len(), 1, "--world-build built a batch world");
-}
-
-/// The batch world of `run`'s environment in DIR's store: a first session
-/// boots from source while its builder prepares it, which publishes the
-/// image, then its manifest.
-fn batch_world(dir: &Path) {
-    let (status, _, stderr) = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), dir, &["-Q".into(), "--batch".into()], true);
-    assert_eq!(status, Some(0), "first batch session: {stderr}");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
-    while stored(dir, "rwi").iter().filter(|image| image.with_extension("json").is_file()).count() < 2 {
-        assert!(std::time::Instant::now() < deadline, "no batch world after 600 s");
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
+    assert_eq!(stored(dir, "rwi").len(), 2, "--world-build built the GUI's and the batch world");
 }
 
 /// The files of DIR's default store with SUFFIX, sorted.
@@ -215,7 +203,7 @@ fn stored(dir: &Path, suffix: &str) -> Vec<std::path::PathBuf> {
 #[test]
 fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-batch-huge-{}", std::process::id()));
     let home = dir.join("home");
     std::fs::create_dir_all(&home).unwrap();
@@ -225,8 +213,8 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     let args: Vec<String> = ["-Q", "--batch", "--eval",
         "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
         .iter().map(ToString::to_string).collect();
-    let expected = run(&gnu, &home, &args, false);
-    let actual = run(romacs, &home, &args, false);
+    let expected = run(&gnu, &home, &args, true);
+    let actual = run(romacs, &home, &args, true);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!((expected.0, expected.1.as_str()), (Some(0), "(nil \"~/\" nil)\n"), "GNU {expected:?}");
     assert_eq!((actual.0, actual.1.as_str()), (expected.0, expected.1.as_str()), "Romacs stderr {}", actual.2);
@@ -254,11 +242,12 @@ fn batch_without_worlds_boots_from_source_as_pinned_gnu_does() {
 }
 
 /// In a store that exists, a session without its world boots from source
-/// while a builder prepares it, and the next restores it: one world per
-/// locale, so sessions alternating LANG=C and C.UTF-8 restore both once
-/// each was built, rebuilding neither, and answer as pinned GNU does.
+/// while a builder prepares it, and the next restores it: one world for
+/// every locale, which holds none (the startup steps run after restore),
+/// so sessions alternating LANG=C and C.UTF-8 all restore it once built,
+/// rebuilding nothing, and answer as pinned GNU does.
 #[test]
-fn batch_prepares_its_world_per_locale_in_an_existing_store() {
+fn batch_prepares_one_world_for_every_locale_in_an_existing_store() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
     let dir = std::env::temp_dir().join(format!("romacs-batch-locales-{}", std::process::id()));
@@ -290,16 +279,14 @@ fn batch_prepares_its_world_per_locale_in_an_existing_store() {
     };
     check("C.UTF-8");
     built(1);
-    check("C");
-    built(2);
     assert!(stored(&dir, "use").is_empty(), "a session restored a world it had to build");
     let images: Vec<_> = stored(&dir, "rwi").iter().map(|image| std::fs::metadata(image).unwrap().modified().unwrap()).collect();
-    for lang in ["C.UTF-8", "C", "C.UTF-8", "C"] { check(lang); }
+    for lang in ["C", "C.UTF-8", "C", "C.UTF-8"] { check(lang); }
     let again: Vec<_> = stored(&dir, "rwi").iter().map(|image| std::fs::metadata(image).unwrap().modified().unwrap()).collect();
     let used = stored(&dir, "use").len();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!((used, again), (2, images), "both locales' worlds restored, neither rebuilt");
+    assert_eq!((used, again.len(), again == images), (1, 1, true), "every locale restored the one world, none rebuilt");
 }
 
 /// The processors this process may run on, from /proc/self/status.

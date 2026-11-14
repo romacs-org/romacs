@@ -1,4 +1,4 @@
-//! Native model primitives (rlisp/romacs-model.el, `display_host/models.rs`): Lisp's
+//! Native model primitives (lisp/romacs/romacs-model.el, `display_host/models.rs`): Lisp's
 //! arguments checked and turned into the model protocol's values, then
 //! sent to the open display. Mesh IDs stay in Lisp; the renderer sees
 //! mesh indices only.

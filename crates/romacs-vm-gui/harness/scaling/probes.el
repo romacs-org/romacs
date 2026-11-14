@@ -19,10 +19,22 @@
 ;;           :steps R times from timers, each laid out by the host before
 ;;           the next, `i' bound to the step.
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
+;;   :slope  instead, the most instructions the work may grow by per unit
+;;           of N, per step: (work(K*N) - work(N)) / ((K - 1) * N * steps).
+;;           For a probe whose claim is that N costs nothing, where an
+;;           exponent over total work moves whenever a fixed cost does.
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
+;;   :ready  a GUI probe's condition for its next step, besides the host's
+;;           redisplay of the step before: the chain waits for it, as it
+;;           does for the redisplay, rather than for a time.
 ;;   :gap    how often, in seconds, a GUI probe looks for its step's
 ;;           redisplay (default 0.1).
+;;   :idle   a GUI probe whose steps change nothing shown: each step's
+;;           instructions are reported apart, and the harness counts the
+;;           steps no paint followed (the host repaints for reasons of its
+;;           own now and then), where any other probe's measurement is
+;;           refused unless every step paints.
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -40,13 +52,14 @@
   "The probes, newest first: (NAME . PLIST).")
 
 (defmacro scaling-probe (name &rest plist)
-  "Define probe NAME from PLIST, its :setup and :body forms made functions."
-  (let ((setup (plist-get plist :setup)) (body (plist-get plist :body)))
+  "Define probe NAME from PLIST, its :setup, :body and :ready forms made functions."
+  (let ((setup (plist-get plist :setup)) (body (plist-get plist :body)) (ready (plist-get plist :ready)))
     `(setf (alist-get ',name scaling-probes)
            (list ,@(cl-loop for (key value) on plist by #'cddr
-                            unless (memq key '(:setup :body)) append (list key value))
+                            unless (memq key '(:setup :body :ready)) append (list key value))
                  :setup (lambda (n) (ignore n) ,setup)
-                 :body (lambda (n it &optional i) (ignore n it i) ,body)))))
+                 :body (lambda (n it &optional i) (ignore n it i) ,body)
+                 ,@(and ready `(:ready (lambda () ,ready)))))))
 
 (defvar scaling-stack-marks nil
   "`romacs-native-stack-room' at each `scaling-stack-mark' of a body.")
@@ -93,7 +106,7 @@ thousandth a stack mark."
             names))
     (nreverse names)))
 
-;;;; User options (rlisp/romacs-option.el)
+;;;; User options (lisp/romacs/romacs-option.el)
 
 (defun scaling--declare-options (prefix n)
   "Declare N integer options named from PREFIX in one group, and name them."
@@ -134,9 +147,12 @@ thousandth a stack mark."
 ;; N terminals open, each with a table of its own, which what is shown
 ;; must not walk: an ordinary buffer finds none, the last terminal opened
 ;; finds its own, and a face change makes it again.  Constant in N.
+(defvar romacs-keeper-enabled)
 (defun scaling--terminals (n)
-  "N terminals, each shown once; the last."
+  "N terminals, each shown once; the last.
+In this process: what is measured is their display, not a keeper."
   (require 'romacs-term)
+  (setq romacs-keeper-enabled nil)
   (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
   (current-buffer))
 
@@ -197,9 +213,9 @@ comment and string syntax, its summaries made by one parse to the end."
 
 ;;;; Processes and timers
 
-;;;; Input methods (rlisp/vm/keyboard.el `romacs--read-char')
+;;;; Input methods (lisp/romacs/vm/keyboard.el `romacs--read-char')
 
-;;;; Mode line (rlisp/romacs-mode-line.el)
+;;;; Mode line (lisp/romacs/romacs-mode-line.el)
 
 (defvar scaling-mode-line-hook nil)
 
@@ -218,7 +234,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (setenv "XDG_STATE_HOME" (make-temp-file "scaling-state-" t))
   (require 'romacs-agent))
 
-;; The home page over N projects of one session each, and over N roots in one project.
+;; The agent board over N projects of one session each, and over N roots in one project.
 (defun scaling--agent-sessions (n project)
   (scaling--agent)
   (clrhash romacs-agent--sessions)
@@ -227,7 +243,12 @@ comment and string syntax, its summaries made by one parse to the end."
                                  :title (format "session %d" i) :cwd (funcall project i)
                                  :last-time (+ 1e9 i) :state 'idle :turns 1)))
       (puthash (romacs-agent-id s) s romacs-agent--sessions)))
-  (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+  (scaling--agent-board))
+
+(defun scaling--agent-board ()
+  "The agent board's buffer, not shown."
+  (require 'romacs-agent-board)
+  (romacs-agent-board--buffer))
 
 ;; The harnesses' history: N Claude Code transcripts in one configuration
 ;; directory, listed (stat only) once described, and listed and described anew.
@@ -297,7 +318,7 @@ comment and string syntax, its summaries made by one parse to the end."
 ;; A chat of N characters over a fixed 100 turns.
 (defun scaling--big-chat (n)
   (scaling--agent)
-  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :title "big"
+  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :provider "claude" :title "big"
                                      :dir temporary-file-directory))
         (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
     (romacs-agent-show session)
@@ -308,7 +329,7 @@ comment and string syntax, its summaries made by one parse to the end."
         (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
     (romacs-agent-buffer session)))
 
-;;;; Session images (rlisp/warm-restart.el)
+;;;; Session images (lisp/romacs/warm-restart.el)
 
 (defun scaling--session (n)
   "N text buffers, and a private image directory."
@@ -345,7 +366,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (beginning-of-visual-line)
   (window-text-pixel-size nil (line-beginning-position) (point)))
 
-;;;; Jabber: the archive catch-up's collections (rlisp/jabber/jabber-mam.el,
+;;;; Jabber: the archive catch-up's collections (lisp/romacs/jabber/jabber-mam.el,
 ;;;; jabber-mam-sync.el).  A connection here is an FSM symbol with state
 ;;;; data and no transport: the probes count bookkeeping, not traffic.
 
@@ -416,7 +437,7 @@ comment and string syntax, its summaries made by one parse to the end."
   (goto-char (point-min))
   (current-buffer))
 
-;;;; Attachments (rlisp/romacs-attach.el)
+;;;; Attachments (lisp/romacs/romacs-attach.el)
 
 (defun scaling--attach-files (n)
   "N small distinct PNG files in a temporary directory: their names."
@@ -461,9 +482,9 @@ closures over a mutable variable (each a closure and a cell)."
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
 ;; A session no key has reached has no `romacs--idle-collect' (the lazy
-;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
-;; the one and clears the other.  A step with no collection after the last ends the session,
-;; which fails the measure.  Retirement that scanned its free lists, or
+;; lisp/romacs/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; the one and clears the other.  Each step waits (:ready) for a collection
+;; after the last, however long a loaded host takes to reach one.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
   "`gcs-done' when the last `gc-retired-code' step ended.")
@@ -540,8 +561,10 @@ closures over a mutable variable (each a closure and a cell)."
     (let ((plist (cdr probe)))
       (scaling--print (list :name (symbol-name (car probe)) :n (plist-get plist :n)
                             :k (or (plist-get plist :k) 4) :budget (or (plist-get plist :budget) 1.25)
+                            :slope (plist-get plist :slope)
                             :known (or (plist-get plist :known) nil) :gui (if (plist-get plist :gui) t :json-false)
-                            :steps (or (plist-get plist :steps) 1) :stack (if (plist-get plist :stack) t :json-false))))))
+                            :steps (or (plist-get plist :steps) 1) :stack (if (plist-get plist :stack) t :json-false)
+                            :idle (if (plist-get plist :idle) t :json-false))))))
 
 (defun scaling--perf (command)
   "Send COMMAND to the `perf record --control' fifo SCALING_PERF_CTL names, if any.
@@ -570,9 +593,21 @@ scaling_live.py --record profiles a probe's body alone this way."
                           :instructions (if (and start end) (- end start) nil)
                           :stack (vconcat (nreverse scaling-stack-marks))))))
 
+(defun scaling--quiet ()
+  "Hide the toasts start-up left (the startup message's): one hides
+`romacs-layer-toast-timeout' after it showed, which on a quick host lands
+in the first steps, redisplays its window in each of them and paints once
+as it goes.  Called before a setup: the toasts a setup makes are what its
+probe measures (`toasts-clear', `toasts-follow')."
+  (when (fboundp 'romacs-layer-toast-clear) (romacs-layer-toast-clear)))
+
 (defun scaling--mark (plist)
   "Append PLIST as a JSON line to stderr, among the host's paint diagnostics."
   (write-region (concat (json-encode plist) "\n") nil "/dev/stderr" t 'silent))
+
+(defun scaling--differences (readings)
+  "The differences of consecutive READINGS as a vector, nil where one is nil."
+  (vconcat (cl-mapcar (lambda (before after) (and before after (- after before))) readings (cdr readings))))
 
 (defun scaling-gui-start (name n out)
   "Run GUI probe NAME at size N in this session, then exit.
@@ -580,19 +615,22 @@ Once the session is idle, set the probe up; then run its steps from a chain
 of timers, each after the host's redisplay of the step before: a paint still
 being drawn holds the next one back, so no fixed time means the step was
 laid out.  Count the instructions from before the first step to after the
-last step's layout; write (:name :n :instructions) to OUT as JSON and kill
-Emacs.  Stderr marks the start, each step and the end among the paint
+last step's layout; write (:name :n :instructions), and for an :idle probe
+each step's instructions (:steps), to OUT as JSON and kill Emacs.  Stderr marks the start, each step and the end among the paint
 diagnostics, so the harness can check a paint was submitted after each
 step, before the next step or the count's end."
   (require 'json)
   (let* ((plist (scaling--probe name))
          (steps (or (plist-get plist :steps) 1))
          (body (plist-get plist :body))
-         (gap (or (plist-get plist :gap) 0.1)) it start)
+         (gap (or (plist-get plist :gap) 0.1))
+         (idle (plist-get plist :idle))
+         (ready (or (plist-get plist :ready) #'always)) it start readings)
     (setq blink-cursor-mode nil)
     (run-with-idle-timer
      0.5 nil
      (lambda ()
+       (scaling--quiet)
        (setq it (funcall (plist-get plist :setup) n))
        (garbage-collect)
        (run-with-timer
@@ -602,8 +640,12 @@ step, before the next step or the count's end."
           (setq start (romacs-instructions))
           (let ((step nil) (laid-out nil) (i 0))
             (setq laid-out (lambda ()
-                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
+                             (if (and (romacs--redisplay-since-mark) (funcall ready))
+                                 (funcall step)
+                               (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
+                         ;; An :idle probe's steps are counted one by one.
+                         (when idle (push (romacs-instructions) readings))
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))
                                     (funcall body n it i) (setq i (1+ i))
@@ -612,8 +654,10 @@ step, before the next step or the count's end."
                            (let ((end (romacs-instructions)))
                              (scaling--mark (list :scaling "end"))
                              (with-temp-file out
-                               (insert (json-encode (list :name (symbol-name name) :n n
-                                                          :instructions (and start end (- end start))))))
+                               (insert (json-encode
+                                        `(:name ,(symbol-name name) :n ,n
+                                          :instructions ,(and start end (- end start))
+                                          ,@(and idle (list :steps (scaling--differences (nreverse readings))))))))
                              (kill-emacs 0)))))
             (funcall step))))))))
 

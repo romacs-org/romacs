@@ -19,11 +19,11 @@
 
 # Build products and interpreter caches are never source inputs.
 **/target/
+# tools/treesit-fuzz resolves its own lock at each build.
+/tools/lib/treesit-fuzz/Cargo.lock
 **/__pycache__/
 *.py[cod]
 *.elc
-# Imported bytecode fixtures are intentional test inputs.
-!/test/**/*.elc
 *.eln
 *.profraw
 *.profdata

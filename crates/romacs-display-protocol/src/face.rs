@@ -509,6 +509,14 @@ impl From<BasicFaceId> for FaceId {
     }
 }
 
+impl FaceId {
+    /// The default face's slot in every frame's face table.
+    #[must_use]
+    pub fn of_default() -> Self {
+        BasicFaceId::Default.into()
+    }
+}
+
 /// A face defines text styling (colors, font, decorations)
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

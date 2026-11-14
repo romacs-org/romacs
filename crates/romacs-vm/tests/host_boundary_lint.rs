@@ -1,14 +1,15 @@
 //! Host boundary lint, rules 1 to 4 of the world-snapshot design (§6.1).
 //!
-//! Rule 1: outside `crates/romacs-vm/src/host.rs`, no source in the runner's
-//! dependency closure calls a host query or effect API directly. Rule 2: only
+//! Rule 1: outside `crates/romacs-vm/src/host.rs` and its modules, no
+//! source in the runner's dependency closure calls a host query or effect
+//! API directly. Rule 2: only
 //! the environment owners name the environment slots, and only the per-buffer
-//! accessor looks up `default-directory`'s storage. Rule 3: each source that
-//! names a variable on the B3 trace's delayed list is listed, so no Rust read
-//! of one bypasses the fence. Rule 4: each site that
-//! can reach a saved value of the VM's binding stack (`vm.dynamic`) is
-//! listed, so only specbind, unbind and the saved-binding accessors, which
-//! check the fence (F2), read or write one.
+//! accessor looks up `default-directory`'s storage. Rule 3: each site that
+//! names a variable on the B3 trace's delayed list says why, so no Rust read
+//! of one bypasses the fence. Rule 4: each site that can reach a saved value
+//! of the VM's binding stack (`vm.dynamic`) says why, so only specbind,
+//! unbind and the saved-binding accessors, which check the fence (F2), read
+//! or write one.
 //!
 //! The scan is over the tokens of the compiled module tree of each crate:
 //! comments are removed, string contents are hidden from rule 1, whitespace
@@ -24,12 +25,14 @@
 //! (`type-alias`).
 //! Type-qualified calls are matched in both `Type::f` and `<Type>::f` forms.
 //!
-//! Every match needs an entry in `host_boundary_allow.txt`, one exact
-//! `PATH:LINE API REASON` per line. An entry that matches nothing fails, so
-//! the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` deliberately rewrites the
-//! list for the current tree: a reason follows its site, or an unused entry
-//! with the same path and API, and new matches are marked `pending`, which
-//! fails until it is migrated or given a reason.
+//! Every site needs a comment in the run of comment lines directly above
+//! its line, `// HOST(API): REASON`, naming the API (several separated by
+//! commas) and why the site may call it. The comment moves with its site
+//! through edits and merges, and whoever edits the site reads its reason
+//! there. A comment that names an API its line does not call, names an
+//! unknown API, or gives no reason fails, so the comments cannot rot. A
+//! trailing comment, a doc comment, and a comment in a `#[cfg(test)]` item
+//! cover nothing.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -39,10 +42,11 @@ const CRATES: &[&str] = &[
     "crates/romacs-layout-input",
     "crates/romacs-display-protocol",
     "crates/romacs-regex",
-    "gnu-tests/runner",
+    "crates/romacs-gnu-tests",
 ];
 const BOUNDARY: &str = "crates/romacs-vm/src/host.rs";
-const ALLOW: &str = "crates/romacs-vm/tests/host_boundary_allow.txt";
+/// host.rs's own modules, its C library calls (`host/sys.rs`).
+const BOUNDARY_MODULES: &str = "crates/romacs-vm/src/host/";
 const FIXTURES: &str = "crates/romacs-vm/tests/host_boundary_fixtures";
 const ENVIRONMENT_OWNERS: &[&str] = &[
     "crates/romacs-vm/src/environment.rs",
@@ -87,9 +91,10 @@ macro_rules! path_method {
     };
 }
 /// A `fs::` path naming only data types and extension traits queries nothing;
-/// `File::open` and `File::create` are their own APIs.
+/// `File::open` and `File::create` are their own APIs. rustix's `fs` has its
+/// own row.
 const fn fs_path(needle: &'static [&'static str]) -> Api {
-    Api { unless_pure: true, ..apis("std::fs", needle) }
+    Api { unless_pure: true, unless_after: "rustix::", ..apis("std::fs", needle) }
 }
 const PURE_FS: &[&str] = &["File", "Metadata", "Permissions", "FileType", "FileTimes", "DirEntry", "ReadDir"];
 const fn slot(name: &'static str, needle: &'static [&'static str], owners: &'static [&'static str]) -> Api {
@@ -161,6 +166,24 @@ const APIS: &[Api] = &[
     api!("libc::descriptor", "libc::pipe*", "libc::eventfd", "libc::posix_openpt", "libc::socketpair"),
     api!("libc::socket", "libc::socket", "libc::connect", "libc::bind", "libc::listen", "libc::accept*",
          "libc::getaddrinfo", "libc::gethostbyname*"),
+    // rustix's spellings of the same queries and effects. Its descriptor
+    // calls (read, poll, fcntl, waitpid, termios) act only on what host.rs
+    // returned, as libc's do.
+    api!("rustix::query", "rustix::process::get*", "rustix::process::sched_getaffinity", "rustix::thread::sched_getaffinity",
+         "rustix::system::*", "rustix::param::*", "rustix::time::clock_gettime*", "rustix::rand::*"),
+    api!("rustix::file", "rustix::fs::open*", "rustix::fs::access*", "rustix::fs::chmod*", "rustix::fs::fchmod*",
+         "rustix::fs::chown*", "rustix::fs::fchown*", "rustix::fs::rename*", "rustix::fs::unlink*", "rustix::fs::mkdir*",
+         "rustix::fs::link*", "rustix::fs::symlink*", "rustix::fs::readlink*", "rustix::fs::stat*", "rustix::fs::fstat*",
+         "rustix::fs::lstat*", "rustix::fs::truncate", "rustix::fs::ftruncate", "rustix::fs::utimensat", "rustix::fs::futimens",
+         "rustix::fs::copy_file_range", "rustix::fs::sendfile", "rustix::fs::memfd_create", "rustix::fs::mknod*",
+         "rustix::fs::Dir", "rustix::fs::RawDir", "rustix::fs::getxattr", "rustix::fs::fgetxattr", "rustix::fs::lgetxattr",
+         "rustix::fs::setxattr", "rustix::fs::fsetxattr", "rustix::fs::lsetxattr", "rustix::fs::listxattr",
+         "rustix::fs::flistxattr", "rustix::fs::llistxattr", "rustix::fs::removexattr", "rustix::fs::fremovexattr",
+         "rustix::fs::lremovexattr", "rustix::fs::sync", "rustix::fs::inotify", "rustix::fs::ioctl_ficlone"),
+    api!("rustix::process", "rustix::process::kill*", "rustix::process::test_kill*", "rustix::process::pidfd_*",
+         "rustix::process::set*", "rustix::process::chdir", "rustix::process::fchdir"),
+    api!("rustix::descriptor", "rustix::pipe::*", "rustix::event::eventfd", "rustix::pty::*", "rustix::net::socket*",
+         "rustix::net::connect*", "rustix::net::bind*", "rustix::net::listen", "rustix::net::accept*"),
     slot("slot:process-environment", &["\"process-environment\""], ENVIRONMENT_OWNERS),
     slot("slot:initial-environment", &["\"initial-environment\""], ENVIRONMENT_OWNERS),
     slot("slot:exec-path", &["\"exec-path\""], ENVIRONMENT_OWNERS),
@@ -193,9 +216,12 @@ const HOST_PATHS: &[&[&str]] = &[
     &["std", "env"], &["std", "fs"], &["std", "process"], &["std", "net"],
     &["std", "time", "Instant"], &["std", "time", "SystemTime"], &["std", "path", "absolute"],
     &["std", "os", "unix", "fs"], &["std", "os", "unix", "net"],
+    &["rustix", "fs"], &["rustix", "process"], &["rustix", "thread"], &["rustix", "net"], &["rustix", "pipe"],
+    &["rustix", "pty"], &["rustix", "event"], &["rustix", "system"], &["rustix", "param"], &["rustix", "time"],
+    &["rustix", "rand"],
 ];
 /// The crates whose items no import may rename or glob.
-const ROOTS: &[&str] = &["std", "core", "alloc", "libc"];
+const ROOTS: &[&str] = &["std", "core", "alloc", "libc", "rustix"];
 /// Types with forbidden associated functions, which no type alias may name
 /// and no `use` may rename.
 const TYPES: &[&str] = &[
@@ -213,6 +239,8 @@ fn ident(b: u8) -> bool {
 struct Views {
     code: Vec<u8>,
     text: Vec<u8>,
+    /// Where each real `//` comment starts, outside block comments and literals.
+    line_comments: BTreeSet<usize>,
 }
 
 fn views(src: &str) -> Views {
@@ -224,10 +252,12 @@ fn views(src: &str) -> Views {
             if *b != b'\n' { *b = b' '; }
         }
     };
+    let mut line_comments = BTreeSet::new();
     let mut i = 0;
     while i < s.len() {
         let rest = &s[i..];
         if rest.starts_with(b"//") {
+            line_comments.insert(i);
             let end = rest.iter().position(|&b| b == b'\n').map_or(s.len(), |n| i + n);
             blank(&mut code, i, end);
             blank(&mut text, i, end);
@@ -268,7 +298,7 @@ fn views(src: &str) -> Views {
             i += 1;
         }
     }
-    Views { code, text }
+    Views { code, text, line_comments }
 }
 
 /// `r"`, `r#"`, `br"` …, at an identifier start: the opening quote and the
@@ -365,7 +395,7 @@ fn outline(v: &Views) -> Outline {
                 let body: Vec<Tok> = toks[open + 1..close].iter().map(|t| t.1).collect();
                 let words: Vec<&str> = body.iter().map(|&t| word(t)).collect();
                 if is_cfg_test(&body, &words) {
-                    let end = if inner { v.code.len() } else { item_end(&toks, close + 1, v.code.len()) };
+                    let end = if inner { v.code.len() } else { item_end(&toks, close + 1, v.code.len(), !starts_item(&toks, close + 1, &word)) };
                     out.tests.push((at, end));
                     i = toks.iter().position(|t| t.0 >= end).unwrap_or(toks.len());
                     continue;
@@ -434,9 +464,25 @@ fn matching(toks: &[(usize, Tok)], open: usize) -> usize {
     toks.len() - 1
 }
 
-/// The byte just past the item that starts at token `from`: its closing
-/// brace, or a `;` outside every bracket.
-fn item_end(toks: &[(usize, Tok)], from: usize, len: usize) -> usize {
+/// Whether the tokens at `from` start an item or a `let`, which end as an
+/// item does, not a field, a variant, an argument, a match arm or an
+/// expression.
+fn starts_item<'a>(toks: &[(usize, Tok)], mut from: usize, word: &dyn Fn(Tok) -> &'a str) -> bool {
+    let punct = |j: usize, b: u8| toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b));
+    while punct(from, b'#') { from = matching(toks, from + 1) + 1; }
+    if toks.get(from).is_some_and(|t| word(t.1) == "pub") {
+        from += 1;
+        if punct(from, b'(') { from = matching(toks, from) + 1; }
+    }
+    toks.get(from).is_some_and(|t| matches!(word(t.1), "fn" | "mod" | "use" | "impl" | "struct" | "enum" | "union" | "const"
+        | "static" | "type" | "trait" | "unsafe" | "async" | "extern" | "default" | "macro_rules" | "let"))
+}
+
+/// The byte just past what starts at token `from`: its closing brace, or a
+/// `;` outside every bracket. It ends before a bracket that closes one opened
+/// ahead of it, and, as a MEMBER of a list (a field, a variant, an argument,
+/// a match arm), after a `,` outside every bracket.
+fn item_end(toks: &[(usize, Tok)], from: usize, len: usize, member: bool) -> usize {
     let mut depth = 0;
     let mut j = from;
     while j < toks.len() {
@@ -446,12 +492,14 @@ fn item_end(toks: &[(usize, Tok)], from: usize, len: usize) -> usize {
                 continue;
             }
             Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Tok::Punct(b')' | b']' | b'}') if depth == 0 => return toks[j].0,
             Tok::Punct(b')' | b']') => depth -= 1,
             Tok::Punct(b'}') => {
                 depth -= 1;
                 if depth == 0 { return toks[j].0 + 1; }
             }
             Tok::Punct(b';') if depth == 0 => return toks[j].0 + 1,
+            Tok::Punct(b',') if member && depth == 0 => return toks[j].0 + 1,
             _ => (),
         }
         j += 1;
@@ -459,11 +507,49 @@ fn item_end(toks: &[(usize, Tok)], from: usize, len: usize) -> usize {
     len
 }
 
+/// One site: a line of PATH that spells API.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Violation {
     path: String,
     line: usize,
     api: &'static str,
+}
+
+/// One `// HOST(API, ...): REASON` comment of PATH: its line, the line it
+/// covers (the first below its run of comment lines, when that holds code),
+/// the APIs it names and its reason.
+#[derive(Debug)]
+struct Tag {
+    path: String,
+    line: usize,
+    covers: Option<usize>,
+    apis: Vec<String>,
+    reason: String,
+}
+
+/// The HOST comments of SRC: lines that are one real `//` comment (VIEWS
+/// knows which `//` start one, so a `//` inside a block comment is none).
+fn tags(rel: &str, src: &str, views: &Views) -> Vec<Tag> {
+    let raw: Vec<&str> = src.split('\n').collect();
+    let seen: Vec<&[u8]> = views.text.split(|&b| b == b'\n').collect();
+    let starts: Vec<usize> = raw.iter().scan(0, |at, line| { let here = *at; *at += line.len() + 1; Some(here) }).collect();
+    let blank = |i: usize| seen[i].iter().all(u8::is_ascii_whitespace);
+    let comment = |i: usize| {
+        let indent = raw[i].len() - raw[i].trim_start().len();
+        raw[i].trim_start().starts_with("//") && blank(i) && views.line_comments.contains(&(starts[i] + indent))
+    };
+    (0..raw.len()).filter(|&i| comment(i)).filter_map(|i| {
+        let rest = raw[i].trim_start().strip_prefix("// HOST(")?;
+        let (apis, reason) = rest.split_once(')').unwrap_or((rest, ""));
+        let below = (i + 1..raw.len()).find(|&j| !comment(j)).unwrap_or(raw.len());
+        Some(Tag {
+            path: rel.to_owned(),
+            line: i + 1,
+            covers: (below < raw.len() && !blank(below)).then_some(below + 1),
+            apis: apis.split(',').map(|a| a.trim().to_owned()).collect(),
+            reason: reason.strip_prefix(':').unwrap_or("").trim().to_owned(),
+        })
+    }).collect()
 }
 
 /// The `.rs` files under DIR, recursively.
@@ -495,26 +581,19 @@ fn roots(krate: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// The violations in every non-test module reachable from ROOTS, with paths
-/// relative to BASE.
-fn scan(base: &Path, roots: Vec<PathBuf>) -> Vec<Violation> {
+/// The sites and HOST comments of every non-test module reachable from
+/// ROOTS, with paths relative to BASE.
+fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
     let mut seen = BTreeSet::new();
     let mut work: Vec<(PathBuf, PathBuf)> = roots.into_iter().map(|r| { let d = r.parent().unwrap().to_owned(); (r, d) }).collect();
-    let mut out = Vec::new();
+    let (mut sites, mut comments) = (Vec::new(), Vec::new());
     while let Some((file, dir)) = work.pop() {
         if !seen.insert(file.clone()) { continue; }
         let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        let mut v = views(&src);
-        let outline = outline(&v);
-        for &(from, to) in &outline.tests {
-            for view in [&mut v.code, &mut v.text] {
-                for b in &mut view[from..to] {
-                    if *b != b'\n' { *b = b' '; }
-                }
-            }
-        }
         let rel = file.strip_prefix(base).unwrap().to_string_lossy().into_owned();
-        if rel != BOUNDARY { out.extend(violations(&rel, &v)); }
+        let (found, said, outline) = file_scan(&rel, &src);
+        sites.extend(found);
+        comments.extend(said);
         let here = file.parent().unwrap();
         work.extend(outline.includes.iter().map(|f| (here.join(f), dir.clone())));
         for (inline, name, path) in outline.mods {
@@ -533,24 +612,39 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> Vec<Violation> {
             work.push((child, child_dir));
         }
     }
-    out.sort();
-    out.dedup();
-    out
+    sites.sort();
+    (sites, comments)
+}
+
+/// The sites and HOST comments of the source SRC of REL, and its outline.
+/// `#[cfg(test)]` items hold no site; BOUNDARY and its modules hold none
+/// either.
+fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
+    let mut v = views(src);
+    let said = tags(rel, src, &v);
+    let outline = outline(&v);
+    for &(from, to) in &outline.tests {
+        for view in [&mut v.code, &mut v.text] {
+            for b in &mut view[from..to] {
+                if *b != b'\n' { *b = b' '; }
+            }
+        }
+    }
+    let found = if rel == BOUNDARY || rel.starts_with(BOUNDARY_MODULES) { Vec::new() } else { violations(rel, &v) };
+    (found, said, outline)
 }
 
 /// One view as its tokens joined without whitespace (a space only between
-/// two words), with each byte's source line.
+/// two words), with the source offset of each byte's token.
 struct Compact {
     text: Vec<u8>,
-    lines: Vec<usize>,
+    at: Vec<usize>,
 }
 
 fn compact(view: &[u8], toks: &[(usize, Tok)]) -> Compact {
-    let starts: Vec<usize> = view.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
-    let mut out = Compact { text: Vec::new(), lines: Vec::new() };
+    let mut out = Compact { text: Vec::new(), at: Vec::new() };
     let mut word = false;
     for &(at, tok) in toks {
-        let line = starts.partition_point(|&n| n < at) + 1;
         let bytes: Vec<u8> = match tok {
             Tok::Ident(a, b) => view[a..b].to_vec(),
             Tok::Punct(b) => vec![b],
@@ -559,10 +653,10 @@ fn compact(view: &[u8], toks: &[(usize, Tok)]) -> Compact {
         let is_word = !matches!(tok, Tok::Punct(_));
         if word && is_word {
             out.text.push(b' ');
-            out.lines.push(line);
+            out.at.push(at);
         }
         word = is_word;
-        out.lines.extend(std::iter::repeat_n(line, bytes.len()));
+        out.at.extend(std::iter::repeat_n(at, bytes.len()));
         out.text.extend(bytes);
     }
     out
@@ -616,7 +710,7 @@ fn pure_items(rest: &[u8]) -> bool {
 struct Import {
     path: Vec<String>,
     bind: Bind,
-    line: usize,
+    at: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -632,35 +726,33 @@ fn imports(code: &[u8], toks: &[(usize, Tok)]) -> Vec<Import> {
         Tok::Ident(a, b) => std::str::from_utf8(&code[a..b]).unwrap(),
         _ => "",
     }).collect();
-    let line = |i: usize| code[..toks[i].0].iter().filter(|&&b| b == b'\n').count() + 1;
     let mut out = Vec::new();
     for i in 0..toks.len() {
         if words[i] == "use" {
-            use_tree(&words, toks, i + 1, &mut Vec::new(), &mut out, &line);
+            use_tree(&words, toks, i + 1, &mut Vec::new(), &mut out);
         } else if words[i] == "extern" && words.get(i + 1) == Some(&"crate") && words.get(i + 3) == Some(&"as") {
-            out.push(Import { path: vec![words[i + 2].to_owned()], bind: Bind::Alias, line: line(i + 2) });
+            out.push(Import { path: vec![words[i + 2].to_owned()], bind: Bind::Alias, at: toks[i + 2].0 });
         }
     }
     out
 }
 
 /// Parse the tree at token I under PREFIX into OUT; the index after it.
-fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Vec<String>, out: &mut Vec<Import>,
-            line: &dyn Fn(usize) -> usize) -> usize {
+fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Vec<String>, out: &mut Vec<Import>) -> usize {
     let depth = prefix.len();
     let punct = |i: usize, c: u8| toks.get(i).is_some_and(|t| t.1 == Tok::Punct(c));
     let separator = |i: usize| punct(i, b':') && punct(i + 1, b':');
     if separator(i) { i += 2; }
     loop {
         if punct(i, b'*') {
-            out.push(Import { path: prefix.clone(), bind: Bind::Glob, line: line(i) });
+            out.push(Import { path: prefix.clone(), bind: Bind::Glob, at: toks[i].0 });
             i += 1;
             break;
         }
         if punct(i, b'{') {
             i += 1;
             while !punct(i, b'}') && i < toks.len() {
-                let next = use_tree(words, toks, i, prefix, out, line);
+                let next = use_tree(words, toks, i, prefix, out);
                 i = if next == i { i + 1 } else { next };
                 if punct(i, b',') { i += 1; }
             }
@@ -674,7 +766,7 @@ fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Ve
             i += 3;
             continue;
         }
-        let at = line(i);
+        let at = toks[i].0;
         let mut path = prefix.clone();
         if name != "self" { path.push(name.to_owned()); }
         i += 1;
@@ -682,26 +774,25 @@ fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Ve
             i += 2;
             if words[i - 1] == "_" { Bind::Name } else { Bind::Alias }
         } else { Bind::Name };
-        out.push(Import { path, bind, line: at });
+        out.push(Import { path, bind, at });
         break;
     }
     prefix.truncate(depth);
     i
 }
 
-/// The lines of `type NAME<…> = …;` aliases and associated types that name
+/// The offsets of `type NAME<…> = …;` aliases and associated types that name
 /// one of TYPES.
 fn type_aliases(code: &[u8], toks: &[(usize, Tok)]) -> Vec<usize> {
     let word = |t: Tok| match t {
         Tok::Ident(a, b) => std::str::from_utf8(&code[a..b]).unwrap(),
         _ => "",
     };
-    let line = |at: usize| code[..at].iter().filter(|&&b| b == b'\n').count() + 1;
     let named = |i: usize| toks.get(i + 1).is_some_and(|t| matches!(t.1, Tok::Ident(..)));
     let raw = |i: usize| i > 0 && toks[i - 1].1 == Tok::Punct(b'#');
     (0..toks.len()).filter(|&i| word(toks[i].1) == "type" && named(i) && !raw(i))
         .filter(|&i| toks[i..].iter().map(|t| t.1).take_while(|&t| t != Tok::Punct(b';')).any(|t| TYPES.contains(&word(t))))
-        .map(|i| line(toks[i].0)).collect()
+        .map(|i| toks[i].0).collect()
 }
 
 /// Whether PATH is one of HOST_PATHS, under one, or a module above one. A
@@ -715,32 +806,33 @@ fn host_import(path: &[String]) -> bool {
 fn violations(rel: &str, v: &Views) -> Vec<Violation> {
     let toks = tokens(&v.code);
     let (code, text) = (compact(&v.code, &toks), compact(&v.text, &toks));
-    let mut out = Vec::new();
+    let mut sites: Vec<(usize, &'static str)> = Vec::new();
     for api in APIS.iter().filter(|a| !a.owners.contains(&rel)) {
         let view = if api.strings { &text } else { &code };
-        out.extend(spellings(api, &view.text).into_iter().map(|i| Violation { path: rel.to_owned(), line: view.lines[i], api: api.name }));
+        sites.extend(spellings(api, &view.text).into_iter().map(|i| (view.at[i], api.name)));
     }
     for import in imports(&v.code, &toks) {
         let root = import.path.first().map(String::as_str).unwrap_or("");
         let reaches = ROOTS.contains(&root) || import.path.iter().any(|s| s == "libc");
         let typed = import.path.last().is_some_and(|s| TYPES.contains(&s.as_str()));
         if host_import(&import.path) {
-            out.push(Violation { path: rel.to_owned(), line: import.line, api: USE_HOST });
+            sites.push((import.at, USE_HOST));
         }
         let form = match import.bind {
             Bind::Alias if reaches || typed => Some(USE_ALIAS),
             Bind::Glob if reaches => Some(USE_GLOB),
             _ => None,
         };
-        out.extend(form.map(|api| Violation { path: rel.to_owned(), line: import.line, api }));
+        sites.extend(form.map(|api| (import.at, api)));
         let spelling = import.path.join("::").into_bytes();
-        for api in APIS.iter().filter(|a| !a.strings) {
-            if !spellings(api, &spelling).is_empty() {
-                out.push(Violation { path: rel.to_owned(), line: import.line, api: api.name });
-            }
-        }
+        sites.extend(APIS.iter().filter(|a| !a.strings && !spellings(a, &spelling).is_empty()).map(|a| (import.at, a.name)));
     }
-    out.extend(type_aliases(&v.code, &toks).into_iter().map(|line| Violation { path: rel.to_owned(), line, api: TYPE_ALIAS }));
+    sites.extend(type_aliases(&v.code, &toks).into_iter().map(|at| (at, TYPE_ALIAS)));
+    let newlines: Vec<usize> = v.code.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
+    let line = |at: usize| newlines.partition_point(|&n| n < at) + 1;
+    let mut out: Vec<Violation> = sites.into_iter().map(|(at, api)| Violation { path: rel.to_owned(), line: line(at), api }).collect();
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -748,71 +840,28 @@ fn known(api: &str) -> bool {
     APIS.iter().any(|a| a.name == api) || FORMS.contains(&api)
 }
 
-struct Entry {
-    path: String,
-    line: usize,
-    api: String,
-    reason: String,
-}
 
-impl Entry {
-    fn covers(&self, v: &Violation) -> bool {
-        self.path == v.path && self.line == v.line && self.api == v.api
-    }
-}
-
-/// The entries of TEXT, each with a reason.
-fn parse_allow(text: &str) -> Vec<Entry> {
-    let entries = parse_entries(text);
-    for e in &entries {
-        assert!(!e.reason.is_empty() && e.reason != "pending", "no reason: {}", render(e));
-    }
-    entries
-}
-
-fn parse_entries(text: &str) -> Vec<Entry> {
-    text.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(|l| {
-        let mut words = l.split_whitespace();
-        let (site, api) = (words.next().unwrap(), words.next().unwrap_or_else(|| panic!("no API: {l}")));
-        let reason = words.collect::<Vec<_>>().join(" ");
-        let (path, line) = site.rsplit_once(':').unwrap_or_else(|| panic!("no line: {l}"));
-        assert!(known(api), "unknown API: {l}");
-        Entry {
-            path: path.to_owned(),
-            line: line.parse().unwrap_or_else(|_| panic!("bad line: {l}")),
-            api: api.to_owned(),
-            reason,
+/// What is wrong with SITES and their HOST COMMENTS: a site no comment
+/// covers, and a comment that names an unknown API, an API its line does not
+/// call, or no reason.
+fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
+    let at = |path: &str, line: Option<usize>, api: &str| sites.binary_search_by(|v| {
+        (v.path.as_str(), Some(v.line), v.api).cmp(&(path, line, api))
+    }).is_ok();
+    let covered: BTreeSet<(&str, usize, &str)> = comments.iter()
+        .flat_map(|t| t.apis.iter().filter_map(move |a| Some((t.path.as_str(), t.covers?, a.as_str())))).collect();
+    let mut out: Vec<String> = sites.iter().filter(|v| !covered.contains(&(v.path.as_str(), v.line, v.api)))
+        .map(|v| format!("  uncovered {}:{} {}", v.path, v.line, v.api)).collect();
+    for t in comments {
+        for api in &t.apis {
+            let fault = if !known(api) { Some("unknown API") }
+                else if !at(&t.path, t.covers, api) { Some("covers nothing") }
+                else { None };
+            out.extend(fault.map(|fault| format!("  {fault}: {}:{} HOST({api})", t.path, t.line)));
         }
-    }).collect()
-}
-
-/// The violations no entry covers, and the entries that cover none.
-fn check<'a>(entries: &'a [Entry], found: &'a [Violation]) -> (Vec<&'a Violation>, Vec<&'a Entry>) {
-    let uncovered = found.iter().filter(|v| !entries.iter().any(|e| e.covers(v))).collect();
-    let unused = entries.iter().filter(|e| !found.iter().any(|v| e.covers(v))).collect();
-    (uncovered, unused)
-}
-
-fn render(e: &Entry) -> String {
-    format!("{}:{} {} {}", e.path, e.line, e.api, e.reason)
-}
-
-/// The allowlist for FOUND: one entry per violation, its reason kept from
-/// the entry at the same site, else from an unused entry with the same path
-/// and API, else `pending`.
-fn bless(header: &str, mut entries: Vec<Entry>, found: &[Violation]) -> String {
-    let mut kept: Vec<Option<String>> = found.iter().map(|v| {
-        entries.iter().position(|e| e.covers(v)).map(|i| entries.remove(i).reason)
-    }).collect();
-    for (v, reason) in found.iter().zip(&mut kept) {
-        if reason.is_none() {
-            *reason = entries.iter().position(|e| e.path == v.path && e.api == v.api).map(|i| entries.remove(i).reason);
+        if t.reason.is_empty() || t.reason == "pending" || t.reason.starts_with("pending:") {
+            out.push(format!("  no reason: {}:{} HOST({})", t.path, t.line, t.apis.join(", ")));
         }
-    }
-    let mut out = header.to_owned();
-    for (v, reason) in found.iter().zip(kept) {
-        let e = Entry { path: v.path.clone(), line: v.line, api: v.api.to_owned(), reason: reason.unwrap_or("pending".into()) };
-        out.push_str(&(render(&e) + "\n"));
     }
     out
 }
@@ -821,30 +870,23 @@ fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
+
 #[test]
 fn host_boundary_holds() {
     let base = repository();
-    let found = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
-    let allow = base.join(ALLOW);
-    let mut text = std::fs::read_to_string(&allow).unwrap();
-    if std::env::var_os("ROMACS_HOST_LINT_BLESS").is_some() {
-        let header: String = text.lines().take_while(|l| l.starts_with('#')).map(|l| format!("{l}\n")).collect();
-        text = bless(&header, parse_entries(&text), &found);
-        std::fs::write(&allow, &text).unwrap();
-    }
-    let entries = parse_allow(&text);
-    let (uncovered, unused) = check(&entries, &found);
-    let report: Vec<String> = uncovered.iter().map(|v| format!("  unlisted {}:{} {}", v.path, v.line, v.api))
-        .chain(unused.iter().map(|e| format!("  stale {}", render(e)))).collect();
-    assert!(report.is_empty(), "host boundary ({ALLOW}; ROMACS_HOST_LINT_BLESS=1 regenerates):\n{}", report.join("\n"));
+    let (sites, comments) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
+    let report = problems(&sites, &comments);
+    assert!(report.is_empty(), "host boundary: outside {BOUNDARY}, each site needs `// HOST(API): REASON` in the comment \
+                                lines directly above it, or a call through host.rs:\n{}", report.join("\n"));
 }
+
 
 /// The fixture crate marks each expected violation with `// expect: API`
 /// (several separated by spaces). Its test modules and near misses carry none.
 #[test]
 fn lint_flags_each_planted_violation() {
     let base = repository().join(FIXTURES);
-    let found: BTreeSet<(String, usize, String)> = scan(&base, vec![base.join("src/lib.rs")]).into_iter()
+    let found: BTreeSet<(String, usize, String)> = scan(&base, vec![base.join("src/lib.rs")]).0.into_iter()
         .map(|v| (v.path, v.line, v.api.to_owned())).collect();
     let mut expected = BTreeSet::new();
     let mut walk = vec![base.join("src")];
@@ -864,4 +906,90 @@ fn lint_flags_each_planted_violation() {
     let missing: Vec<&str> = APIS.iter().map(|a| a.name).chain(FORMS.iter().copied()).filter(|n| !planted.contains(n)).collect();
     assert!(missing.is_empty(), "no planted violation for {missing:?}");
     assert_eq!(found, expected);
+}
+
+/// The problems of one source file, `src/lib.rs`.
+fn report(source: &str) -> Vec<String> {
+    let (sites, comments, _) = file_scan("src/lib.rs", source);
+    problems(&sites, &comments)
+}
+
+#[test]
+fn a_comment_above_a_site_covers_it() {
+    let source = "\
+fn read() {
+    // HOST(std::fs): reads the file the caller named
+    let a = std::fs::read(\"a\");
+    // A longer story first.
+    // HOST(std::env::var, std::fs): both, for one reason
+    // that goes on.
+    // SAFETY: nothing unsafe happens here.
+    let b = unsafe { std::fs::read(std::env::var(\"B\").unwrap()) };
+    let c = std::fs::read(
+        // HOST(std::env::var): a site's line, not its statement's
+        std::env::var(\"C\").unwrap(),
+    );
+}
+";
+    assert_eq!(report(source), ["  uncovered src/lib.rs:9 std::fs"]);
+    assert_eq!(report(&source.replace("    let c", "    // HOST(std::fs): reads c\n    let c")), Vec::<String>::new());
+}
+
+#[test]
+fn a_site_no_comment_covers_and_a_comment_that_covers_nothing_fail() {
+    let source = "\
+fn read() {
+    let a = std::fs::read(\"a\");
+    // HOST(std::fs): a blank line away
+
+    let b = std::fs::read(\"b\");
+    let c = std::fs::read(\"c\"); // HOST(std::fs): on the line itself
+    /// HOST(std::fs): a doc comment
+    let d = std::fs::read(\"d\");
+    // HOST(std::env::var): not what the line calls
+    let e = std::fs::read(\"e\");
+    // HOST(std::fs):
+    let f = std::fs::read(\"f\");
+    // HOST(std::fsx): no such API
+    let g = 1;
+}
+#[cfg(test)]
+mod tests {
+    // HOST(std::fs): test code builds no worlds
+    fn t() { std::fs::read(\"t\"); }
+}
+";
+    assert_eq!(report(source), [
+        "  uncovered src/lib.rs:2 std::fs",
+        "  uncovered src/lib.rs:5 std::fs",
+        "  uncovered src/lib.rs:6 std::fs",
+        "  uncovered src/lib.rs:8 std::fs",
+        "  uncovered src/lib.rs:10 std::fs",
+        "  covers nothing: src/lib.rs:3 HOST(std::fs)",
+        "  covers nothing: src/lib.rs:9 HOST(std::env::var)",
+        "  no reason: src/lib.rs:11 HOST(std::fs)",
+        "  unknown API: src/lib.rs:13 HOST(std::fsx)",
+        "  covers nothing: src/lib.rs:18 HOST(std::fs)",
+    ]);
+}
+
+#[test]
+fn a_pending_reason_or_a_comment_inside_a_block_comment_covers_nothing() {
+    let source = "\
+fn read() {
+    // HOST(std::fs): pending
+    let a = std::fs::read(\"a\");
+    // HOST(std::fs): pending: a guessed reason
+    let b = std::fs::read(\"b\");
+    /*
+    // HOST(std::fs): inside a block comment
+    // */
+    let c = std::fs::read(\"c\");
+}
+";
+    assert_eq!(report(source), [
+        "  uncovered src/lib.rs:9 std::fs",
+        "  no reason: src/lib.rs:2 HOST(std::fs)",
+        "  no reason: src/lib.rs:4 HOST(std::fs)",
+    ]);
 }

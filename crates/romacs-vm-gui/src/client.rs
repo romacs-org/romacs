@@ -1,6 +1,6 @@
 //! `romacs --server NAME [OPTION...] [[+LINE[:COLUMN]] FILE...]`: a client
 //! of the named server session. It connects to the server's native socket
-//! (`$XDG_RUNTIME_DIR/romacs/NAME/server.sock`, rlisp/romacs-server.el),
+//! (`$XDG_RUNTIME_DIR/romacs/NAME/server.sock`, lisp/romacs/romacs-server.el),
 //! starting the server first when none listens: as a transient systemd user
 //! unit, `romacs-server-NAME`, else detached with `setsid`. Then it asks
 //! for a window showing FILES (`romacs/frame`), evaluates a form
@@ -186,7 +186,7 @@ fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// Server NAME's session record (rlisp/romacs-usage-log.el) at its unit's
+/// Server NAME's session record (lisp/romacs/romacs-usage-log.el) at its unit's
 /// end, named by STATE/romacs/server-NAME.session for the systemd
 /// INVOCATION that ran it: how systemd says it ended (its status, signal
 /// and core dump: the server's own end cannot know its exit code) goes in

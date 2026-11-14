@@ -1,4 +1,4 @@
-//! Colour arithmetic for rlisp/romacs-theme.el, which keeps the rules: sRGB,
+//! Colour arithmetic for lisp/romacs/romacs-theme.el, which keeps the rules: sRGB,
 //! CIE XYZ and Oklab as GNU's lisp/color.el computes them, in its order of
 //! operations, and WCAG 2's relative luminance.  A theme's contrast floors
 //! ask for thousands of these when it loads.

@@ -3,7 +3,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 ;;
 ;; The look Romacs's stock theme `default' ports: GNU with modus-themes
-;; 5.3.0 (inputs/modus-themes.el), the Rum theme built on it
+;; 5.3.0 (etc/modus/modus-themes.el), the Rum theme built on it
 ;; (inputs/rum-emacs.el, Omarchy's Rum theme file, loaded as Omarchy
 ;; loads it), the Modus options and font faces of the reference
 ;; configuration below, and the notmuch mail reader's faces.  Regenerate

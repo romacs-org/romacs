@@ -53,7 +53,7 @@ fn nconc(cx; rest lists) {
 }}
 
 // `nconc' of the elements of a list: Fmapcan's Fnconc over its results,
-// which the prelude's `mapcan' collects (rlisp/vm/prelude.el).
+// which the prelude's `mapcan' collects (lisp/romacs/vm/prelude.el).
 defsubr! { name = "romacs--nconc-list", gnu = "fns.c:3585", effect = MutatesArgs,
 fn nconc_list(cx, lists: Value) {
     let lists = super::widen::list_elements(cx, lists)?;

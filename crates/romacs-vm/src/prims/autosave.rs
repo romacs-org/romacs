@@ -1,5 +1,5 @@
 //! GNU fileio.c auto-saving and the process-stream DEFUNs. `do-auto-save'
-//! is a subr whose loop is the Lisp half (rlisp/vm/auto-save.el), over
+//! is a subr whose loop is the Lisp half (lisp/romacs/vm/auto-save.el), over
 //! the C state it shares with `write-region': `auto_saving' and
 //! `auto_save_mode_bits' are AUTO_SAVING, nil or the mode bits, read by
 //! the write path (prims/fileio.rs), and `auto_save_failure_time' is
@@ -10,7 +10,7 @@ use super::*;
 /// auto-save file is created with while `do-auto-save' runs.
 pub(super) const AUTO_SAVING: &str = "#:vm2-auto-saving";
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/auto-save.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/auto-save.el");
 
 defsubr! { name = "do-auto-save", gnu = "fileio.c:6315", effect = Global,
 fn do_auto_save(cx; optional no_message: Value, current_only: Value) -> Step {

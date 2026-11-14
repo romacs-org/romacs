@@ -1,5 +1,5 @@
 //! The GUI's commands run through the Lisp command loop
-//! (rlisp/vm/keyboard.el `romacs--host-command'): its reader takes the
+//! (lisp/romacs/vm/keyboard.el `romacs--host-command'): its reader takes the
 //! unread queues, a keyboard macro, then the host keyboard, and applies
 //! the translation maps, as GNU's read_key_sequence does.
 use romacs_vm::{CommandEvent, CommandOutcome, CommandSignal, Vm};

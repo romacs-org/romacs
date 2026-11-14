@@ -122,8 +122,9 @@ def main():
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'files': args.files, 'input': args.input, 'cycles': args.cycles, 'keys': []}
     comp = kb = proc = None
+    tmp = None
     try:
-        with tempfile.TemporaryDirectory(prefix='cpk-', dir=os.environ.get('XDG_RUNTIME_DIR')) as tmp:
+        with tempfile.TemporaryDirectory(prefix='cpk-', dir=os.environ.get('XDG_RUNTIME_DIR'), delete=False) as tmp:
             root = Path(tmp)
             root.chmod(0o700)
             home, work, config = root / 'home', root / 'work', root / 'config'
@@ -159,7 +160,10 @@ def main():
                 kb = subprocess.Popen(['/usr/bin/wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
                                       stdout=log, stderr=log)
                 time.sleep(.3)
-                proc = subprocess.Popen([str(binary), '--loadup', '--trace-latency'], env=env, cwd=work,
+                # The terminal in this process, as these journeys always measured it; a
+                # kept terminal is term_keep_live.py's.  (A host copied alone has no
+                # keeper beside it, and a session meant to use one would refuse.)
+                proc = subprocess.Popen([str(binary), '--loadup', '--eval', '(setq romacs-keeper-enabled nil)', '--trace-latency'], env=env, cwd=work,
                                         stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                 trace = lambda: log_path.read_text(errors='replace')
 
@@ -223,14 +227,12 @@ def main():
         report.update(status='FAIL', error=repr(error))
     finally:
         for p in (proc, kb, comp):
-            if p is not None and p.poll() is None:
-                p.terminate()
-                try:
-                    p.wait(5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-        (out / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
-        print(json.dumps({k: v for k, v in report.items() if k != 'keys'}, ensure_ascii=False))
+            live.stop(p)
+        try:
+            (out / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
+            print(json.dumps({k: v for k, v in report.items() if k != 'keys'}, ensure_ascii=False))
+        finally:
+            live.remove_root(tmp)
     return 0 if report.get('status') == 'PASS' else 1
 
 

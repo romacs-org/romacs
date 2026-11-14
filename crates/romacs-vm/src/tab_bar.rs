@@ -1,5 +1,5 @@
 //! The host frame's tab bar as the frame's snapshot publishes it (xdisp.c
-//! display_tab_bar): the row `romacs--tab-bar-string' (rlisp/vm/prelude.el)
+//! display_tab_bar): the row `romacs--tab-bar-string' (lisp/romacs/vm/prelude.el)
 //! makes of the tab bar keymap's captions, each character in its `face'
 //! property's named face over the `tab-bar' face, `tab-bar-lines' lines
 //! tall. The faces it publishes are the `tab-bar' face first, then those

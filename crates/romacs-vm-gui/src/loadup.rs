@@ -417,7 +417,7 @@ pub fn installed_load_path(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(path.into_iter().map(PathBuf::from).collect())
 }
 
-/// Run `bootstrap` (rlisp/romacs-loadup-bootstrap.el, the chain the batch
+/// Run `bootstrap` (lisp/romacs/romacs-loadup-bootstrap.el, the chain the batch
 /// package runner preloads) on `load_path`, as that runner does: the path is
 /// already GNU's installed one, so the drive adds no subdirs step and no
 /// adaptation of its own; the file's adaptations are its forms. Deviation 1
@@ -487,13 +487,15 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         file: vm.load_step_file(step).to_string_lossy().into_owned(), ordinal: step.ordinal, line: step.line,
         ok: step.status == romacs_vm::LoadStepStatus::Ok, error: step.error.clone(), source: step.source.clone(),
     }).collect();
+    // GNU's directory leads the path in both regimes.
+    let gnu = search.first().map_or(Path::new(""), PathBuf::as_path);
     let mut rows = vec![];
     for site in &sites {
         let entry = log_entry(vm, site.index)?;
         let path = resolve(search, &site.name);
         let window = windows.iter().find(|w| w.0 == site.index).map(|w| (w.1, w.2));
         let (own, nested) = match (window, path.as_ref()) {
-            (Some((from, to)), Some(path)) => split_steps(&steps[from.min(steps.len())..to.min(steps.len())], path),
+            (Some((from, to)), Some(path)) => split_steps(&steps[from.min(steps.len())..to.min(steps.len())], path, gnu),
             _ => (vec![], vec![]),
         };
         let outcome = match entry.as_deref() {
@@ -764,8 +766,14 @@ struct Done {
     source: Option<String>,
 }
 
+/// A nested file as a row names its own: relative to GNU's Lisp directory,
+/// `gnu`. A file outside it keeps its whole name.
+fn nested_name<'a>(file: &'a str, gnu: &Path) -> &'a str {
+    Path::new(file).strip_prefix(gnu).ok().and_then(Path::to_str).unwrap_or(file)
+}
+
 /// Split a site's step window into its own file's steps and nested files.
-fn split_steps(window: &[Done], path: &Path) -> (Vec<Done>, Vec<(String, usize, Option<String>)>) {
+fn split_steps(window: &[Done], path: &Path, gnu: &Path) -> (Vec<Done>, Vec<(String, usize, Option<String>)>) {
     let own_name = path.to_string_lossy();
     let mut own = vec![];
     let mut nested: Vec<(String, usize, Option<String>)> = vec![];
@@ -777,7 +785,7 @@ fn split_steps(window: &[Done], path: &Path) -> (Vec<Done>, Vec<(String, usize, 
             started = true;
             own.push(step.clone());
         } else {
-            let short = file.rsplit("/lisp/").next().unwrap_or(file).to_owned();
+            let short = nested_name(file, gnu).to_owned();
             let ok = step.ok;
             let failure = (!ok).then(|| format!("line {} form {}: {}", step.line, step.ordinal,
                                                  step.error.as_deref().unwrap_or("(entered, never finished)")));
@@ -810,6 +818,13 @@ fn total_forms(vm: &mut Vm, path: &Path) -> Total {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_nested_file_is_named_from_gnus_lisp_directory() {
+        let gnu = Path::new("/usr/share/romacs/lisp/gnu");
+        assert_eq!(nested_name("/usr/share/romacs/lisp/gnu/emacs-lisp/pcase.el", gnu), "emacs-lisp/pcase.el");
+        assert_eq!(nested_name("/usr/share/romacs/lisp/romacs/romacs-test.el", gnu), "/usr/share/romacs/lisp/romacs/romacs-test.el");
+    }
 
     #[test]
     fn definition_spans_do_not_interpret_dynamic_loads() {
@@ -1056,7 +1071,7 @@ fn subdirs_el_text(list: &str) -> String {
     fn subdirs_fixture(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("romacs-subdirs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let lisp = root.join("gnu-lisp");
+        let lisp = root.join("lisp/gnu");
         for d in ["obsolete", "term", "RCS", "CVS", "Old", "=x", "x~", "a.orig", "b.rej", "foo.el", "foo.elc", ".hidden",
                   "alpha", "mh-e", "zeta", "empty", "b/c", "cedet/semantic", "leim/quail"] {
             std::fs::create_dir_all(lisp.join(d)).unwrap();
@@ -1100,7 +1115,7 @@ fn subdirs_el_text(list: &str) -> String {
         assert_eq!(update_subdirs(&lisp.join("cedet")).unwrap(), SubdirsEl::File { list: "\"semantic\" ".into(), names: vec!["semantic".into()] });
         assert_eq!((gnu_subdirs_el(&lisp, &lisp.join("cedet")), gnu_subdirs_el(&lisp, &lisp.join("leim"))), (SubdirsEl::None, SubdirsEl::None));
         assert_eq!(gnu_subdirs_el(&lisp, &lisp.parent().unwrap().join("elsewhere")), SubdirsEl::None);
-        std::fs::remove_dir_all(lisp.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(lisp.ancestors().nth(2).unwrap()).unwrap();
         // This tree's lisp/: GNU's script output on the pin's directories
         // (sha256 c706f2735d0d95e1b5834cabed47c9815ef07632a8bf1021afa6945081f3cb23).
         let ours = text(&crate::startup::lisp_dir().canonicalize().unwrap()).unwrap();
@@ -1130,7 +1145,7 @@ fn subdirs_el_text(list: &str) -> String {
         assert_eq!(add_to_load_path(&mut tail, "/z/", &["d".to_owned()]), Some(1));
         assert_eq!(tail, ["/x", "/y", "/z/d"]);
         assert_eq!(add_to_load_path(&mut vec![], "/z", &["d".to_owned()]), None);
-        std::fs::remove_dir_all(lisp.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(lisp.ancestors().nth(2).unwrap()).unwrap();
     }
 
     /// Symlinked directories: GNU's Makefile finds directories with `find
@@ -1144,11 +1159,11 @@ fn subdirs_el_text(list: &str) -> String {
     fn apply_subdirs_follows_gnus_build_through_symlinks() {
         let root = std::env::temp_dir().join(format!("romacs-subdirs-links-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("gnu-lisp/b/c")).unwrap();
-        std::fs::create_dir_all(root.join("gnu-lisp/cedet/semantic")).unwrap();
-        std::os::unix::fs::symlink("cedet", root.join("gnu-lisp/alias")).unwrap();
-        std::os::unix::fs::symlink("b", root.join("gnu-lisp/balias")).unwrap();
-        let lisp = root.join("gnu-lisp").canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("lisp/gnu/b/c")).unwrap();
+        std::fs::create_dir_all(root.join("lisp/gnu/cedet/semantic")).unwrap();
+        std::os::unix::fs::symlink("cedet", root.join("lisp/gnu/alias")).unwrap();
+        std::os::unix::fs::symlink("b", root.join("lisp/gnu/balias")).unwrap();
+        let lisp = root.join("lisp/gnu").canonicalize().unwrap();
         let at = |rel: &str| if rel == "." { lisp.to_string_lossy().into_owned() } else { lisp.join(rel).to_string_lossy().into_owned() };
         let (path, _, _) = apply_subdirs(vec![at(".")], &lisp);
         std::fs::remove_dir_all(&root).unwrap();
@@ -1176,7 +1191,7 @@ fn subdirs_el_text(list: &str) -> String {
         ];
         let mut results = vec![];
         for (case, dirs) in cases {
-            let lisp = root.join(case).join("gnu-lisp");
+            let lisp = root.join(case).join("lisp/gnu");
             for d in dirs { std::fs::create_dir_all(lisp.join(std::ffi::OsStr::from_bytes(d))).unwrap(); }
             let lisp = lisp.canonicalize().unwrap();
             let top = lisp.to_string_lossy().into_owned();
@@ -1184,7 +1199,7 @@ fn subdirs_el_text(list: &str) -> String {
             results.push((case, path == [top.clone()], applied.is_empty(), skipped.iter().map(|(d, why)| (d == &top, why.clone())).collect::<Vec<_>>()));
         }
         // The space case's inner path, reached as a load-path entry itself.
-        let lisp = root.join("space/gnu-lisp").canonicalize().unwrap();
+        let lisp = root.join("space/lisp/gnu").canonicalize().unwrap();
         let inner = lisp.join("has space").to_string_lossy().into_owned();
         let (path, _, skipped) = apply_subdirs(vec![lisp.to_string_lossy().into_owned(), inner.clone()], &lisp);
         std::fs::remove_dir_all(&root).unwrap();

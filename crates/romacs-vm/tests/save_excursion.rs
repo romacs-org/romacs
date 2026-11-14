@@ -57,12 +57,12 @@ fn gnu_test_remove_overlays_after_subr() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
+    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
     for file in ["emacs-lisp/debug-early", "emacs-lisp/byte-run", "emacs-lisp/backquote", "subr"] {
-        vm.load_file(&root.join(format!("gnu-lisp/{file}.el"))).unwrap();
+        vm.load_file(&root.join(format!("lisp/gnu/{file}.el"))).unwrap();
     }
-    vm.load_file(&root.join("gnu-tests/harness/romacs-mini-ert.el")).unwrap();
-    let file = std::fs::read_to_string(root.join("gnu-tests/test/src/buffer-tests.el")).unwrap();
+    vm.load_file(&root.join("test/gnu/harness/romacs-mini-ert.el")).unwrap();
+    let file = std::fs::read_to_string(root.join("test/gnu/test/src/buffer-tests.el")).unwrap();
     let start = file.find("(ert-deftest test-remove-overlays ()").unwrap();
     let end = start + file[start..].find("\n(defun test-kill-buffer-auto-save").unwrap();
     vm.eval_source(&file[start..end]).unwrap();

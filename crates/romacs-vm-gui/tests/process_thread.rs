@@ -2,6 +2,8 @@
 //! --batch' against pinned GNU's `emacs -Q --batch': the process menu, with
 //! real processes of each kind. Romacs is the threadless build, so the
 //! menu's Thread column is `--' where pinned GNU's is `Main' (VM2-THREAD1).
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 /// An accepted client takes its server's lock: none when the server has
@@ -31,7 +33,7 @@ fn an_accepted_client_keeps_its_servers_lock() {
         assert!(output.status.success(), "{binary}: {}", String::from_utf8_lossy(&output.stderr));
         String::from_utf8(output.stdout).unwrap()
     };
-    assert_eq!(run(env!("CARGO_BIN_EXE_romacs-vm-gui")), run(&gnu));
+    assert_eq!(run(installed::romacs()), run(&gnu));
 }
 
 #[test]
@@ -62,5 +64,5 @@ fn list_processes_shows_a_live_process_as_pinned_gnu() {
         assert!(output.status.success(), "{binary}: {}", String::from_utf8_lossy(&output.stderr));
         String::from_utf8(output.stdout).unwrap()
     };
-    assert_eq!(run(env!("CARGO_BIN_EXE_romacs-vm-gui")), run(&gnu));
+    assert_eq!(run(installed::romacs()), run(&gnu));
 }

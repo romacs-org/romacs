@@ -220,11 +220,13 @@ impl Grave {
 /// All a mark's threads read of the VM. Shared borrows of `Sync' fields, so
 /// this is everything they can reach, and while one lives no `&mut Vm' can.
 pub(super) struct MarkView<'a> {
+    /// A minor's: the slots written since the last collection, which it
+    /// reads in place of every slot.
+    written_slots: Option<Vec<Range<usize>>>,
     slots: &'a [Slot],
     variable_redirects: &'a [Option<VariableRedirect>],
     functions: &'a [Arc<Function>],
     generated_symbols: &'a HashMap<GeneratedName, usize>,
-    caches: &'a [Cache],
     cell_pairs: &'a HashMap<usize, Value>,
     execution: &'a threaded::Program,
     spare_programs: &'a [threaded::Program],
@@ -236,10 +238,13 @@ pub(super) struct MarkView<'a> {
 }
 
 impl Vm {
-    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool]) -> MarkView<'a> {
+    /// What a mark's threads read of the VM. A minor gives the slots it
+    /// reads in place of them all (`Slots::written`).
+    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool], written_slots: Option<Vec<Range<usize>>>) -> MarkView<'a> {
         MarkView {
+            written_slots,
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
-            generated_symbols: &self.generated_symbols, caches: &self.caches, cell_pairs: &self.cell_pairs,
+            generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
             stacks: self.register_roots(),
             in_obarray, local_binding, code_marks,
@@ -277,7 +282,9 @@ pub(super) struct Marking {
     verify: bool,
     n: usize,
     /// Each sweeping thread's graves, for the dropper as one batch.
+    // CELL(Dead)
     batch: Mutex<Vec<Vec<Grave>>>,
+    // CELL(Collector)
     queue: Injector<Work>,
     /// The VM's planted faults (`gc::Faults'), for its own threads only, the
     /// worker panic taken by the first worker to come to it.
@@ -293,13 +300,17 @@ pub(super) struct Marking {
     stop: AtomicBool,
     /// Where a thread with nothing to do waits for a chunk.
     parked: AtomicUsize,
+    // CELL(Plain)
     park: Mutex<()>,
     wake: Condvar,
     /// Claimed entries for the coordinator. The queue itself is the truth: a
     /// separate count of it can be overwritten between take and clear.
+    // CELL(Collector)
     serial: Mutex<Vec<Value>>,
+    // CELL(Plain)
     census: Mutex<Census>,
     /// Run just after the coordinator takes a hand-over: a worker's moment.
+    // CELL(Plain)
     #[cfg(test)]
     after_take: Mutex<Option<Box<dyn FnOnce(&Marking) + Send>>>,
 }
@@ -333,13 +344,17 @@ impl Marking {
     /// and change only in place: no entry allocated, no growth,
     /// sweep, compaction or cut, and no mark begun or cleared but through
     /// this. The collector writes entries in place meanwhile (a dead object
-    /// made `Free', a cell given its value, a weak table pruned), which is
+    /// made `Free', a cell given its value, a weak table pruned, an undo list
+    /// cut), which is
     /// why the borrow is not in the type; `dead_objects' and `sweep' check
     /// shape and marks (`holds') before they read, where a violation would
     /// otherwise become a sweep through freed memory or of the live heap.
-    pub(super) unsafe fn new(vm: &mut Vm, n: usize) -> Self {
+    ///
+    /// MINOR: the mark is a minor collection's, to which every old entry
+    /// counts as reached already.
+    pub(super) unsafe fn new(vm: &mut Vm, n: usize, minor: bool) -> Self {
         // SAFETY: the caller's.
-        let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(), vm.closures.raw(), vm.cells.raw(), vm.objects.raw()) };
+        let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(minor), vm.closures.raw(minor), vm.cells.raw(minor), vm.objects.raw(minor)) };
         Self {
             conses, closures, cells, objects,
             verify: vm.gc_stress.verify, n, batch: Mutex::default(),
@@ -487,8 +502,13 @@ impl Marking {
         for chunk in code.chunks(CHUNK / 8) {
             self.publish(Work::Trace { values: Vec::new(), code: chunk.to_vec() });
         }
-        for from in (0..view.slots.len()).step_by(RANGE) {
-            self.publish(Work::Slots(from..(from + RANGE).min(view.slots.len())));
+        match &view.written_slots {
+            None => for from in (0..view.slots.len()).step_by(RANGE) {
+                self.publish(Work::Slots(from..(from + RANGE).min(view.slots.len())));
+            },
+            Some(written) => for range in written {
+                self.publish(Work::Slots(range.clone()));
+            },
         }
         for (stack, registers) in view.stacks.iter().enumerate() {
             for from in (0..registers.len()).step_by(RANGE) {
@@ -844,16 +864,19 @@ impl Marking {
             op.visit_values(&mut |v| if keep(v) { w.stack.push(*v) });
             // Only a symbol interned in an obarray of its own can die.
             let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
+            // A direct call's cache is not followed: its target is read only
+            // under its slot's version, and then the slot's cell holds it. A
+            // site's lowered entry still names the function it last entered
+            // (`Program::trace_function'), so that function's code, though
+            // not what a closure of it captured, lives until the site runs
+            // again.
             match op {
                 Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _)
                 | Op::BindLate(slot, _) | Op::ReadLate(_, _, slot) | Op::WriteLate(_, _, slot)
                 | Op::Define(slot, _) | Op::DefineMacro(slot, _)
-                | Op::Sealed(_, slot, _, _) => w.stack.extend(symbol(slot)),
+                | Op::Sealed(_, slot, _, _)
+                | Op::Direct(_, slot, _, _, _) => w.stack.extend(symbol(slot)),
                 Op::Closure(_, child, _) => w.code.push(child),
-                Op::Direct(_, slot, cache, _, _) => {
-                    w.stack.extend(symbol(slot));
-                    w.stack.push(view.caches[cache].target);
-                }
                 _ => {}
             }
         }
@@ -927,7 +950,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut own = Worker::default();
         own.serial.push(first);
         marking.hand_over(&mut own);
@@ -944,7 +967,7 @@ mod tests {
     /// A marking of VM's tables for a test that leaves them to it.
     fn marking_of(vm: &mut Vm, n: usize) -> Marking {
         // SAFETY: each test leaves the tables alone until the marking is dropped.
-        unsafe { Marking::new(vm, n) }
+        unsafe { Marking::new(vm, n, false) }
     }
 
     /// A stop ends a thread's walk down a long list at its next chunk.
@@ -958,7 +981,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut w = Worker::default();
         w.stack.push(list);
         marking.stop.store(true, Ordering::Release);
@@ -977,7 +1000,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         marking.outstanding.fetch_add(1, Ordering::AcqRel);
         let (ended, wait) = std::sync::mpsc::channel::<()>();
         let found = std::thread::scope(|scope| {
@@ -1384,7 +1407,7 @@ mod tests {
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
         let mut own = Worker::default();
         own.code = (0..vm.functions.len()).collect();
         let queued = own.code.len();

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Write a perfbench run's results into README.md's lead and the comparison
-tables of doc/benchmarks.md.
+tables of the harness README (crates/romacs-vm-gui/harness/README.md).
 
 Usage: readme.py RESULTS.json [FILE...]
 
@@ -38,14 +38,15 @@ MARGIN = .80
 # (rival, its column, the prefix of its ratios)
 RIVALS = (('GNU', 'gnu', ''), ('GNU native', 'gnu_native', 'native_'), ('neomacs', 'neomacs', 'neomacs_'))
 SUMMARIES = ('elb geometric mean', 'elb median')
-VC_HISTORY = 'session vc-print-root-log whole history'
-OPEN_XDISP = 'session find-file xdisp.c'
-OPEN_HEADER = 'session find-file generated header'
-OPEN_XDISP_TS = 'session find-file xdisp.c, tree-sitter in both'
-OPEN_HEADER_TS = 'session find-file generated header, tree-sitter in both'
+VC_HISTORY = 'vc-print-root-log whole history'
+OPEN_XDISP_TS = 'open xdisp.c c-ts-mode'
+OPEN_HEADER_TS = 'open 15 MB header c-ts-mode'
 UNCOMPILED = {'arith': 'uncompiled arithmetic', 'call': 'uncompiled named call', 'list': 'uncompiled dolist 10'}
-THEME = 'session theme switch, cycled'
-LEAD_ROWS = (VC_HISTORY, OPEN_XDISP, OPEN_HEADER, OPEN_XDISP_TS, OPEN_HEADER_TS, THEME, *UNCOMPILED.values())
+THEME = 'theme switch cycled'
+LEAD_ROWS = (VC_HISTORY, OPEN_XDISP_TS, OPEN_HEADER_TS, THEME, *UNCOMPILED.values())
+DEFAULT_FILES = ('README.md', 'crates/romacs-vm-gui/harness/README.md')
+RERUN = ('python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY',
+         'python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json')
 
 
 def scaled(value, unit):
@@ -86,24 +87,29 @@ def machine():
 
 
 def gnu_engine(meta):
-    """The GNU engine of this run, as a reader must know it: an upgrade moves it."""
+    """The GNU engine of this run, as a reader must know it."""
     build = meta.get('gnu_build')
     if not build:
         return f'pinned GNU Emacs `{meta["fixtures"]["commit"][:8]}`'
+    native = 'natively compiled' if build.get('native') else 'without native compilation'
+    pinned = meta['fixtures']['commit']
+    if build.get('commit') == pinned:
+        return f'GNU Emacs {build["version"]} pinned at commit `{pinned[:8]}`, {native}, the inputs pinned there too'
     commit = f', commit `{build["commit"][:8]}`' if build.get('commit') else ''
     package = f', package {build["package"]}' if build.get('package') else ''
-    native = 'natively compiled' if build.get('native') else 'without native compilation'
     return (f'the installed GNU Emacs {build["version"]}{commit}{package}, {native}; '
-            f'the inputs are pinned at `{meta["fixtures"]["commit"][:8]}`')
+            f'the inputs are pinned at `{pinned[:8]}`')
 
 
 def measured(meta, what):
     started = meta['started']
     date = f'{started[0:4]}-{started[4:6]}-{started[6:8]}'
+    took = f'  The whole run took {meta["seconds"] // 60} min {meta["seconds"] % 60} s.' if meta.get('seconds') else ''
     return (f'Measured {date} on build `{meta["commit"][:8]}` against {gnu_engine(meta)}, on {machine()}.  '
             f'Each {what} ran {meta["runs"]} times per engine in private home directories; '
-            'wall time is the median, and wall times measured above load '
-            f'{meta["max_load"]:g} are left out.')
+            'instructions (`instructions:u`, every thread) are the main figure and wall time the median beside them; '
+            f'wall times measured above load {meta["max_load"]:g} are left out.{took}  '
+            f'Rerun: `{RERUN[0]}`, then `{RERUN[1]}`; one area or row: `--only AREA` or `--only \'ROW\'`.')
 
 
 def installation(meta):
@@ -136,17 +142,19 @@ def section(results):
         + '  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.',
         '',
     ]
-    lines += header('| Workload | Per | GNU | Romacs | ' + ('neomacs | ' if neomacs else '')
-                    + 'Romacs/GNU (time) | Romacs/GNU (instructions) | '
-                    + ('Romacs/neomacs (time) | Romacs/neomacs (instructions) | ' if neomacs else '') + 'Notes |')
+    lines += header('| Workload | Per | GNU instructions | Romacs instructions | Romacs/GNU (instructions) | '
+                    'GNU time | Romacs time | Romacs/GNU (time) | '
+                    + ('neomacs time | Romacs/neomacs (instructions) | Romacs/neomacs (time) | ' if neomacs else '')
+                    + 'Notes |')
     for r in results['rows']:
         if r['group'] in ('elb', 'session'):
             continue
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
-        cells = [r['row'], r['unit'], scaled(gnu.get('wall'), 's'), scaled(romacs.get('wall'), 's')]
-        cells += [scaled((r.get('neomacs') or {}).get('wall'), 's')] if neomacs else []
-        cells += [ratio(r['wall_ratio']), ratio(r['instructions_ratio'])]
-        cells += [ratio(r.get('neomacs_wall_ratio')), ratio(r.get('neomacs_instructions_ratio'))] if neomacs else []
+        cells = [r['row'], r['unit'], scaled(gnu.get('instructions'), 'instructions'),
+                 scaled(romacs.get('instructions'), 'instructions'), ratio(r['instructions_ratio']),
+                 scaled(gnu.get('wall'), 's'), scaled(romacs.get('wall'), 's'), ratio(r['wall_ratio'])]
+        cells += [scaled((r.get('neomacs') or {}).get('wall'), 's'), ratio(r.get('neomacs_instructions_ratio')),
+                  ratio(r.get('neomacs_wall_ratio'))] if neomacs else []
         lines.append('| ' + ' | '.join(cells + [public(r['note'])]) + ' |')
     skipped = [line.split(':', 1)[0] for line in results['skipped'] if not line.startswith('elb')]
     if skipped:
@@ -223,9 +231,9 @@ def lead_values(results):
     size = results['meta'].get('header_bytes')
     return {'vc-history-romacs': figure(VC_HISTORY, 'romacs'), 'vc-history-gnu': figure(VC_HISTORY, 'gnu'),
             'vc-history-commits': commits(rows, results['meta'].get('history_commits')),
-            'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'),
+            'open-xdisp-romacs': figure(OPEN_XDISP_TS, 'romacs'),
             'open-big-size': f'{size / 1e6:.0f} MB' if size else None,
-            'open-big-romacs': figure(OPEN_HEADER, 'romacs'),
+            'open-big-romacs': figure(OPEN_HEADER_TS, 'romacs'),
             'open-xdisp-ts-gnu': figure(OPEN_XDISP_TS, 'gnu'), 'open-big-ts-gnu': figure(OPEN_HEADER_TS, 'gnu'),
             'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu'),
             **{f'uncompiled-call-{engine}': figure(UNCOMPILED['call'], engine) for engine in ('romacs', 'gnu')}}
@@ -267,10 +275,11 @@ def elb_section(results):
            'natively compiled in both columns, as this GNU is built with native compilation.  '
            if native else 'and has no native-compilation column: this GNU is built without it.  ')
         + installation(meta) + rival(meta) + '  A member an engine does not define, or whose run reported an error, '
-        'has no figure there.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.  '
-        'The geometric mean compares Romacs with GNU `.elc` alone.  Every ratio also has a median over the members '
-        'that have it, and the median is the summary to read against native GNU: native compilation reduces some '
-        'members to almost nothing, and one such ratio would decide a mean.',
+        'has no figure there.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.'
+        + ('  The geometric mean compares Romacs with GNU `.elc` alone.  Every ratio also has a median over the members '
+           'that have it, and the median is the summary to read against native GNU: native compilation reduces some '
+           'members to almost nothing, and one such ratio would decide a mean.'
+           if any(r['row'] in SUMMARIES for r in results['rows']) else ''),
         '',
     ]
     lines += header('| Member | GNU .elc | ' + ('GNU native | ' if native else '') + 'Romacs | '
@@ -294,14 +303,6 @@ def elb_section(results):
         cells += [public(r['note'])]
         lines.append('| ' + ' | '.join(cells) + ' |')
     return '\n'.join(lines)
-
-
-def selector(made):
-    """The --only that reruns the row MADE."""
-    if made['group'] == 'gui':
-        return 'launch' if 'launch' in made['row'] or 'world' in made['row'] else 'keys'
-    return {'micro': 'micro', 'elb': 'elb', 'ert': 'ERT 25 files', 'session': 'session', 'init': 'init',
-            'apps': 'apps'}.get(made['group'], made['row'])
 
 
 def wins(results):
@@ -333,7 +334,7 @@ def headlines(results):
     for made, name, instructions, time, block in wins(results):
         third = ' --neomacs NEOMACS' if name == 'neomacs' else ''
         lines.append(f'| {made["row"]} | {name} | {ratio(instructions)} | {ratio(time)} | {ratio(block)} | `{meta["commit"][:8]}` | '
-                     f"`perfbench.py --romacs BINARY{third} --only '{selector(made)}'` |")
+                     f"`perfbench.py --romacs BINARY{third} --only '{made['row']}'` |")
     return '\n'.join(lines)
 
 
@@ -357,7 +358,9 @@ def main(argv):
     if not argv:
         raise SystemExit(__doc__)
     results = json.loads(Path(argv[0]).read_text())
-    paths = [Path(name) for name in argv[1:]] or [Path('README.md'), Path('doc/benchmarks.md')]
+    if results['meta'].get('only'):
+        raise SystemExit(f'{argv[0]}: a run of --only {" ".join(results["meta"]["only"])}; the tables take a whole run')
+    paths = [Path(name) for name in argv[1:] or DEFAULT_FILES]
     texts = {path: path.read_text() for path in paths}
     groups = {r['group'] for r in results['rows']}
     whole = bool(groups - {'elb', 'session'}) and 'elb' in groups

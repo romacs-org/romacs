@@ -18,15 +18,11 @@ use crate::{
 };
 
 /// The byte where the `rows` logical lines from `from` end: after their last
-/// newline, or `zv`.
+/// newline, or `zv`. A vectorised search: in a folded buffer the lines run
+/// through hidden text, which this crosses at a few instructions a byte.
 fn rows_end(text: &str, from: usize, rows: usize, zv: usize) -> usize {
     let Some(last) = rows.checked_sub(1) else { return from };
-    text.as_bytes()[from..zv]
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| **c == b'\n')
-        .nth(last)
-        .map_or(zv, |(i, _)| from + i + 1)
+    memchr::memchr_iter(b'\n', &text.as_bytes()[from..zv]).nth(last).map_or(zv, |i| from + i + 1)
 }
 
 /// The bytes of TEXT a window starting at START can show in ROWS rows,
@@ -783,4 +779,39 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
         chrome: WindowChrome { left_fringe: published.chrome.left_fringe, right_fringe: published.chrome.right_fringe,
             left_margin: published.chrome.left_margin, right_margin: published.chrome.right_margin, ..WindowChrome::default() },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rows_end;
+
+    /// The byte after the ROWS-th newline from FROM, or ZV, one byte at a time.
+    fn by_bytes(text: &str, from: usize, rows: usize, zv: usize) -> usize {
+        let Some(last) = rows.checked_sub(1) else { return from };
+        text.as_bytes()[from..zv].iter().enumerate().filter(|(_, c)| **c == b'\n').nth(last).map_or(zv, |(i, _)| from + i + 1)
+    }
+
+    #[test]
+    fn rows_end_finds_the_rows_th_newline_or_zv() {
+        let text = "ab\ncd\n\nefg\nhi";
+        let zv = text.len();
+        for (from, rows, end, want) in [
+            (0, 0, zv, 0),   // no rows: the start
+            (3, 0, zv, 3),
+            (0, 1, zv, 3),   // one line
+            (0, 4, zv, 11),  // four lines, the fourth ending in a newline
+            (0, 5, zv, zv),  // more rows than lines, the last without a newline: ZV
+            (0, 9, zv, zv),
+            (6, 2, zv, 11),  // from a newline: the empty line counts
+            (zv, 3, zv, zv), // from ZV
+            (0, 4, 8, 8),    // ZV before the rows end
+        ] {
+            assert_eq!(rows_end(text, from, rows, end), want, "from {from} rows {rows} zv {end}");
+            assert_eq!(rows_end(text, from, rows, end), by_bytes(text, from, rows, end));
+        }
+        let long: String = (0..5000).map(|i| if i % 7 == 6 { '\n' } else { 'x' }).collect();
+        for rows in [0, 1, 300, 714, 715, 2000] {
+            assert_eq!(rows_end(&long, 11, rows, long.len()), by_bytes(&long, 11, rows, long.len()), "rows {rows}");
+        }
+    }
 }

@@ -1,8 +1,8 @@
-;;; romacs-idioms-test.el --- rlisp's commands and key hints stay idiomatic -*- lexical-binding: t -*-
+;;; romacs-idioms-test.el --- lisp/romacs's commands and key hints stay idiomatic -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; Two lints over rlisp/romacs-*.el, in a `--loadup' session
+;; Two lints over lisp/romacs/romacs-*.el, in a `--loadup' session
 ;; (gnu_completion.rs `romacs_idioms_tests_pass').  Each checks a property
 ;; it can decide exactly, and says what it does not look at:
 ;;
@@ -33,12 +33,12 @@
   "The Romacs autoloads that declare nothing yet, read before any library loads.")
 
 (defconst romacs-idioms-test--libraries
-  '(romacs-agent-ui romacs-agent-history romacs-attach romacs-video romacs-model
+  '(romacs-agent-ui romacs-agent-board romacs-agent-history romacs-attach romacs-video romacs-model
     romacs-shader-playground romacs-shaders romacs-surface romacs-mcp)
   "The libraries with keymaps a session does not load by itself.")
 
 (defconst romacs-idioms-test--anywhere
-  '((romacs-agent-switch "Reaches a session from any buffer; a chat binds it too"))
+  '()
   "Commands a Romacs keymap binds that apply anywhere, each (COMMAND REASON).")
 
 (defconst romacs-idioms-test--literal-keys
@@ -129,7 +129,7 @@ SHOWING says FORM is inside a call that shows its arguments."
     found))
 
 (defun romacs-idioms-test--sources ()
-  "rlisp/romacs-*.el."
+  "lisp/romacs/romacs-*.el."
   (directory-files (file-name-directory (locate-library "romacs-term")) t "\\`romacs-.*\\.el\\'"))
 
 ;;;; The lints

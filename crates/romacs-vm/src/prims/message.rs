@@ -1,13 +1,13 @@
 //! GNU editfns.c Fmessage through xdisp.c message3: log the text to the
 //! `messages-buffer-name' buffer, then show it unless `inhibit-message'.
 //!
-//! The log is message_dolog's Lisp half (rlisp/vm/message.el), installed by
+//! The log is message_dolog's Lisp half (lisp/romacs/vm/message.el), installed by
 //! one `Step::Call' of `eval' the first time a message is logged, as
 //! insdel.rs installs its own.
 use super::*;
 use std::io::Write;
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/message.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/message.el");
 const DOLOG: &str = "romacs--message-dolog";
 
 // GNU has no message catalog yet: MSGID when N is the fixnum 1, else

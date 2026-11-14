@@ -5,12 +5,12 @@
 //! (`romacs--before-change'), the edit with its undo records, then the after
 //! hooks when any can run (`romacs--after-change').
 //!
-//! The hooks' Lisp half (rlisp/vm/insdel.el) is installed by one
+//! The hooks' Lisp half (lisp/romacs/vm/insdel.el) is installed by one
 //! `Step::Call' of `eval' the first time a change has Lisp to run, as
 //! minibuf.rs installs its own: a bare `Vm::new()' stays bare.
 use super::*;
 
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/insdel.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/insdel.el");
 
 /// Whether the Lisp half must be installed before a change runs Lisp.
 pub(crate) fn half_missing(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {

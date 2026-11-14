@@ -77,7 +77,7 @@ def main():
         for word, file, text in (('read-string', 'crates/romacs-vm/src/prims/minibuf.rs', 'name = "read-string"'),
                                  ('car', 'crates/romacs-vm/src/lib.rs', '("car", Primitive::'),
                                  ('fill-column', 'crates/romacs-vm/src/forwarded.rs', 'CVariable { name: "fill-column"'),
-                                 ('when', 'gnu-lisp/subr.el', '(defmacro when ')):
+                                 ('when', 'lisp/gnu/subr.el', '(defmacro when ')):
             at(engine, word)
             engine.keys(M('.'))
             where = wait(engine, f'(and (not (equal (buffer-name) "*xref-journey*")) {WHERE})')

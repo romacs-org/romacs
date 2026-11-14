@@ -1,0 +1,15 @@
+[package]
+name = "romacs-record"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Flat, versioned records between Romacs's processes: header, hello, handles, shared regions"
+
+[dependencies]
+memmap2.workspace = true
+rustix = { workspace = true, features = ["fs", "net"] }
+
+[lints]
+workspace = true

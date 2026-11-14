@@ -1,4 +1,4 @@
-//! Attachments' Lisp (rlisp/romacs-attach.el, attachments.md stage A1) in a
+//! Attachments' Lisp (lisp/romacs/romacs-attach.el, attachments.md stage A1) in a
 //! `--loadup' session with a window system: items sniffed without decoding,
 //! plans, the pure list operations, the tray's cached string and batch
 //! insertion, edit mode, drafts reconciliation and preparation through the
@@ -29,7 +29,7 @@ fn romacs_attach_lisp_tests_pass() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let tool = helper().map_or("nil".to_owned(), |p| format!("{:?}", p.display().to_string()));
         printed(&mut vm, &format!("(setq romacs-attach-test-helper {tool})"));
-        for file in ["rlisp/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-attach-test.el"] {
+        for file in ["lisp/romacs/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-attach-test.el"] {
             vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         }
         printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")

@@ -1818,7 +1818,7 @@ fn header_layout_equals_the_decoded_layout_for_every_probed_format() {
 /// file, and both extents come from one image.
 #[test]
 fn header_layout_of_the_repository_image_fixture_equals_its_decode() {
-    let fixture = romacs_infra::workspace_root().join("test/data/image/blank-100x200.png");
+    let fixture = romacs_infra::workspace_root().join("test/gnu/test/data/image/blank-100x200.png");
     let path = fixture.to_str().expect("utf8 fixture path");
     let data = std::fs::read(&fixture).expect("fixture bytes");
     let size = ImageSizeSpec::new(AxisSize::AtMost(50), AxisSize::Native);

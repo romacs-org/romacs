@@ -12,7 +12,10 @@ synthetic store (notmuch_fixture.py) and a vc log.  In each it types
 C-n, C-p, M->, M-<, an isearch (C-s, a word, C-s, C-g) and C-SPC C-n
 M-w.  The session's usage log (ROMACS_USAGE_LOG) must hold no error;
 the layout questions answered by approximation, its `refusal' records,
-are reported by class and major mode.
+are reported by class and major mode.  `romacs-display-check' is on: every
+window redisplay reused must show what a full build of its text would
+(`stale' counts those that did not; their `display-check:' lines are in
+engine.log).
 
 usage: layout_journey_live.py --binary PATH --output DIR [--tools DIR] [--timeout S]
        (--romacs is an alias of --binary)
@@ -28,7 +31,7 @@ import sys
 import time
 
 import parity_live
-from parity_live import C, K, M, T, lisp_string, private_tree, romacs_engine
+from parity_live import C, M, T, lisp_string, private_tree, romacs_engine
 import notmuch_fixture
 
 HARNESS = Path(__file__).resolve().parent
@@ -112,33 +115,9 @@ def init_source():
 {NOTMUCH}
 {SCENES}
 (random "layout-journey")
-;; The harness's mark: a key it types after a batch of keys.  Input is read
-;; in order, so the mark's command having run says every key before it was
-;; read and its command run; a probe's answer alone does not, since timers
-;; run while keys are still on their way to the session.
-(defvar journey-marks 0)
-(defun journey-mark () "The harness's mark: count it." (interactive) (setq journey-marks (1+ journey-marks)))
-(global-set-key (kbd "<f9>") #'journey-mark)
 (load {lisp_string(str(parity_live.PROBE))} nil t)
 (with-temp-file (expand-file-name "alive" parity-probe-dir) (insert (number-to-string (float-time))))
 '''
-
-
-def typed(engine, groups, gap=.05):
-    """Type GROUPS into ENGINE's session and return once it has run them
-    all: its command for the mark key typed after them has run."""
-    marks = engine.ask('journey-marks')
-    for group in groups:
-        engine.keys(group)
-        time.sleep(gap)
-    engine.keys(K('F9'))
-    try:
-        parity_live.wait(lambda: engine.ask('journey-marks') > marks, engine.timeout,
-                         'the session to run the keys typed', engine.process, .05)
-    except TimeoutError:
-        # Keys swallowed or an input thread stuck: leave the stacks to read.
-        engine.write_stacks()
-        raise
 
 
 def fixture_tree(home):
@@ -174,16 +153,20 @@ def main():
     usage = root / 'usage.jsonl'
     env.update(ROMACS_USAGE_LOG=str(usage), JOURNEY_PROSE=PROSE, JOURNEY_TREE=str(tree), JOURNEY_REPO=str(repo))
     report = {'romacs': str(args.romacs), 'scenes': [], 'errors': [], 'refusals': []}
-    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools)
+    engine = romacs_engine(str(args.romacs.resolve()), root, home, env, init_source(), None, args.timeout, args.tools, check=True)
     try:
         for scene in SCENE_NAMES:
             mode = engine.ask(f'(progn (journey-{scene}) (redisplay) (symbol-name major-mode))', timeout=120)
-            typed(engine, DOWN)
+            engine.press(*DOWN)
             moved = engine.ask('(window-point)')
-            typed(engine, KEYS)
+            engine.press(*KEYS)
             report['scenes'].append({'scene': scene, 'mode': mode, 'after-C-n': moved,
                                      'end': engine.ask('(list (window-point) (window-start) (buffer-size))')})
         engine.ask('(progn (romacs-usage-log-flush) t)')
+        # `romacs-display-check' is on: the windows redisplay answered from
+        # their last snapshot, and those a full build contradicted.
+        report['reused'], report['stale'] = engine.ask(
+            "(let ((stats (romacs--display-stats))) (list (cdr (assq 'windows-reused stats)) (cdr (assq 'check-mismatches stats))))")
     finally:
         engine.stop()
         # What a run leaves is its evidence in OUTPUT, and no home in TMPDIR.
@@ -203,12 +186,14 @@ def main():
             report['refusals'].append(record)
     report['commands'] = commands
     # Keys reached the session: it logged their commands and C-n moved point.
-    # (The count includes the marks, two a scene; `typed' already waits for
-    # every batch, so the threshold only guards against an empty log.)
+    # (`press' already waits for every key, so the threshold only guards
+    # against an empty log.)
     moved = all(s['after-C-n'] > 1 for s in report['scenes'])
-    report['status'] = 'PASS' if not report['errors'] and len(report['scenes']) == len(SCENE_NAMES) and moved and commands > 100 else 'FAIL'
+    checked = report.get('reused', 0) > 0 and report.get('stale') == 0
+    report['status'] = 'PASS' if not report['errors'] and len(report['scenes']) == len(SCENE_NAMES) and moved and commands > 100 and checked else 'FAIL'
     (args.output / 'report.json').write_text(json.dumps(report, indent=1))
     print(report['status'], json.dumps({'commands': commands, 'errors': report['errors'], 'refusals': report['refusals'],
+                                        'reused': report.get('reused'), 'stale': report.get('stale'),
                                         'moved': [(s['scene'], s['mode'], s['after-C-n']) for s in report['scenes']]}))
     return 0 if report['status'] == 'PASS' else 1
 

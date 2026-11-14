@@ -16,7 +16,7 @@ impl Vm {
     /// Attach (Some) or detach (None) the host layout. While attached, a
     /// window the host has laid out is measured with it.
     pub fn set_layout_host(&mut self, host: Option<Box<dyn LayoutHost>>) {
-        self.layout_host = host;
+        self.layout_host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn LayoutHost>);
     }
     pub(crate) fn has_layout_host(&self) -> bool { self.layout_host.is_some() }
     /// INPUT's host geometry; an error when no host is attached.

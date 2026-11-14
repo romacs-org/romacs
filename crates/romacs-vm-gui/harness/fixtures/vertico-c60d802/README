@@ -2,4 +2,4 @@ vertico.el, extensions/vertico-sort.el and extensions/vertico-directory.el
 exactly as vertico commit c60d80215d19b4b36c0ba49599b6815ed35f2ac1
 (https://github.com/minad/vertico, GPL-3.0-or-later, Copyright (C)
 2021-2026 Free Software Foundation, Inc.).  romacs_complete_vs_gnu.py loads
-them into pinned GNU as the reference rlisp/romacs-complete.el must match.
+them into pinned GNU as the reference lisp/romacs/romacs-complete.el must match.

@@ -3,12 +3,17 @@
 //!
 //! An image is the builder's heap, mapped back where it was. A value in it
 //! means in the restored process what it meant in the builder when every
-//! pointer it holds addresses the arena, or read-only data of the
-//! executable, which a restore maps where the builder had it
-//! (romacs-vm's `world::arena::shadow_executable`); and when it holds no resource of the
-//! builder's process. Function pointers, references to writable statics,
-//! pointers into a library's or C's heap, descriptors, threads, children
-//! and handles of foreign libraries all fail that.
+//! pointer it holds addresses the arena, and when it holds no resource of
+//! the builder's process. Function pointers, references to any static
+//! (string literals and constant tables too), pointers into a library's or
+//! C's heap, descriptors, threads, children and handles of foreign
+//! libraries all fail that. The one exception is not Romacs's to remove: a
+//! plain type of the standard library or another crate may point into the
+//! executable's read-only data, as an empty hash map points to its static
+//! control group, and a restore maps that data where the builder had it
+//! (romacs-vm's `world::arena::shadow_executable`). So nothing here admits
+//! a `&'static` reference: what Romacs's own types hold of a static is its
+//! name or a copy, which another build can read as well.
 //!
 //! The contract is a trait, implemented for a type only by listing it
 //! field by field (`snapshot_struct!`, `snapshot_tuple!`) or variant by
@@ -36,45 +41,43 @@
 /// or into immutable data, and no resource of the process.
 pub unsafe trait SnapshotSafe {}
 
-/// Require VALUE's type to be SnapshotSafe: what the listing macros call
-/// for each field.
-pub fn require<T: SnapshotSafe + ?Sized>(_value: &T) {}
+mod schema;
+pub use schema::{EMPTY_HASH_TABLE, Notes, Schema, TAKEN, Walk};
 
 /// `snapshot_struct!(Name { field, ... } at_rest { field, ... })`: Name is
 /// SnapshotSafe, every field listed, each but the at-rest ones
-/// SnapshotSafe. An at-rest field must be checked by `world_quiescent`.
+/// SnapshotSafe (`Walk::field` requires it). An at-rest field must be
+/// checked by `world_quiescent`. The listing is also Name's `Schema`: its
+/// walk meets each listed field.
 #[macro_export]
 macro_rules! snapshot_struct {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
-        // SAFETY: `fields` below names every field and requires each listed
+        // SAFETY: the walk below names every field and requires each listed
         // one SnapshotSafe; at-rest fields are `world_quiescent`'s to check.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
-                $($(#[$m])* $crate::require($field);)*
-            }
-        };
+        $crate::snapshot_fields!($name { $($(#[$m])* $field),* } $(at_rest { $($(#[$rm])* $rest),* })?);
     };
 }
 
 /// `snapshot_fields!(Name { field, ... } at_rest { field, ... })`: the
-/// listing of `snapshot_struct!`, checked the same way, without making
-/// Name SnapshotSafe. For a value that enters an image only through a
-/// door that validates it, as a world's primary VM does through
-/// romacs-vm's `world::image::capture`: SnapshotSafe would let one in
-/// unvalidated, inside another value.
+/// listing of `snapshot_struct!`, checked the same way and walked the same
+/// way, without making Name SnapshotSafe. For a value that enters an image
+/// only through a door that validates it, as a world's primary VM does
+/// through romacs-vm's `world::image::capture`: SnapshotSafe would let one
+/// in unvalidated, inside another value.
 #[macro_export]
 macro_rules! snapshot_fields {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
-                $($(#[$m])* $crate::require($field);)*
+        impl $crate::Schema for $name {
+            #[allow(unused_variables, reason = "at-rest fields are named, not walked")]
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = self;
+                $($(#[$m])* w.field(stringify!($field), $field);)*
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -82,16 +85,18 @@ macro_rules! snapshot_fields {
 #[macro_export]
 macro_rules! snapshot_tuple {
     ($name:ident ( $($field:ident),* $(,)? )) => {
-        // SAFETY: `fields` below names every field and requires each one
+        // SAFETY: the walk below names every field and requires each one
         // SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                let $name($($field),*) = value;
-                $($crate::require($field);)*
+        impl $crate::Schema for $name {
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                let $name($($field),*) = self;
+                $(w.field(stringify!($field), $field);)*
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -101,15 +106,18 @@ macro_rules! snapshot_tuple {
 #[macro_export]
 macro_rules! snapshot_enum {
     ($name:ty { $($pat:pat => ($($bind:ident),*)),* $(,)? }) => {
-        // SAFETY: `fields` below matches every variant, exhaustively, and
+        // SAFETY: the walk below matches every variant, exhaustively, and
         // requires each binding SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
-        const _: () = {
-            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
-            fn fields(value: &$name) {
-                match value { $($pat => { $($crate::require($bind);)* })* }
+        impl $crate::Schema for $name {
+            #[allow(unused_variables, reason = "an at-rest variant's payload is bound, not walked")]
+            fn walk(&self, w: &mut $crate::Walk<'_>) {
+                match self { $($pat => { w.variant(stringify!($pat)); $(w.field(stringify!($bind), $bind);)* })* }
             }
-        };
+            fn any(&self) -> Option<&dyn ::std::any::Any> {
+                Some(self)
+            }
+        }
     };
 }
 
@@ -140,10 +148,6 @@ plain!(ropey::Rope, num_bigint::BigInt, num_bigint::BigUint, serde_json::Value, 
 // vouches for that itself (romacs-vm's NameState).
 // SAFETY: a JSON map is a heap tree of its keys and values.
 unsafe impl<K: SnapshotSafe, V: SnapshotSafe> SnapshotSafe for serde_json::Map<K, V> {}
-
-// SAFETY: a `'static` string is a literal, in the executable's read-only
-// data, which a restore maps where the builder had it.
-unsafe impl SnapshotSafe for &'static str {}
 
 // Containers: their own storage is the global allocator's heap or inline,
 // and every pointer they hold beyond that is one of their elements'.
@@ -185,18 +189,28 @@ pointers! {
 }
 // SAFETY: no value at all.
 unsafe impl<T: ?Sized> SnapshotSafe for std::marker::PhantomData<T> {}
-// SAFETY: a borrowed Cow borrows `'static` data, read-only data of the
-// executable; an owned one is its owned type, required SnapshotSafe.
-unsafe impl<T: SnapshotSafe + ToOwned + ?Sized> SnapshotSafe for std::borrow::Cow<'static, T> where T::Owned: SnapshotSafe {}
 // SAFETY: a zero-sized marker for a hasher type.
 unsafe impl<H> SnapshotSafe for std::hash::BuildHasherDefault<H> {}
 
+use std::any::Any;
+
 macro_rules! tuples {
-    ($(($($t:ident),+)),* $(,)?) => {
+    ($(($($t:ident $v:ident),+)),* $(,)?) => {
         $(
             // SAFETY: a tuple holds its SnapshotSafe fields inline.
             unsafe impl<$($t: SnapshotSafe),+> SnapshotSafe for ($($t,)+) {}
+            impl<$($t: SnapshotSafe + Schema),+> Schema for ($($t,)+) {
+                fn walk(&self, w: &mut Walk<'_>) {
+                    let ($($v,)+) = self;
+                    $(w.field(stringify!($v), $v);)+
+                }
+                fn any(&self) -> Option<&dyn Any> {
+                    Some(self)
+                }
+            }
         )*
     };
 }
-tuples!((A), (A, B), (A, B, C), (A, B, C, D), (A, B, C, D, E), (A, B, C, D, E, F), (A, B, C, D, E, F, G));
+tuples!((A a), (A a, B b), (A a, B b, C c), (A a, B b, C c, D d), (A a, B b, C c, D d, E e), (A a, B b, C c, D d, E e, F f),
+        (A a, B b, C c, D d, E e, F f, G g));
+

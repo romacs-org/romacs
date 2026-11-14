@@ -1,1 +1,0 @@
-((void-variable r2-fresh) (setting-constant :r2-keyword) (setting-constant :r2-keyword) (ok 2.5) (invalid-function 42) nil (wrong-type-argument number-or-marker-p nil))(nil nil nil t t 2.5)

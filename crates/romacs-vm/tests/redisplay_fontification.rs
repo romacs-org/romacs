@@ -201,7 +201,7 @@ fn deleting_the_window_drops_it_from_the_frame() {
 /// A failure outside the functions themselves is a display diagnostic.
 #[test]
 fn a_failing_walk_is_a_diagnostic() {
-    let mut vm = romacs_vm("(progn (setq fontification-functions (list 'ignore)) (fset 'romacs--redisplay-fontify (lambda (start end) (error \"walk %d %d\" start end))))");
+    let mut vm = romacs_vm("(progn (setq fontification-functions (list 'ignore)) (fset 'romacs--redisplay-fontify (lambda (_window start end) (error \"walk %d %d\" start end))))");
     let snapshot = vm.display_snapshot(400, 200).unwrap();
     assert!(snapshot.text.utf8.starts_with("line 05"));
     assert_eq!(vm.take_display_diagnostics(), ["fontification: walk 196 586"]);
@@ -236,4 +236,99 @@ fn rows_brought_into_view_by_a_deletion_are_fontified() {
     assert_eq!(snapshot.text.utf8[snapshot.start_byte..].lines().next(), Some(format!("line 05 {}", "x".repeat(30)).as_str()));
     assert_eq!(printed(&mut vm, &format!("(funcall {ROWS_FONTIFIED} 10)")), "t");
     assert_eq!(printed(&mut vm, "(length romacs-fl-log)"), "10");
+}
+
+/// Lines 07 to 11 of the window's ten, 195 characters: four chunks of the
+/// chunk function below.
+const HIDE: &str = "(setq romacs-fl-hide (cons (save-excursion (goto-char romacs-fl-start) (forward-line 2) (point)) (save-excursion (goto-char romacs-fl-start) (forward-line 7) (point))))";
+
+/// Fifty characters a call, the first four of them in a face, ending where
+/// `invisible` changes as `jit-lock-function` ends its chunk: a hidden
+/// stretch's first character is then unfontified when the walk reaches it.
+const CHUNK: &str = "(setq fontification-functions (list (lambda (pos) (romacs-fl-log pos) (let ((end (next-single-char-property-change pos 'invisible nil (min (point-max) (+ pos 50))))) (put-text-property pos end 'fontified t) (put-text-property pos (min end (+ pos 4)) 'face 'romacs-fl-face)))))";
+
+/// (name, what hides lines 07 to 11, run after HIDE and CHUNK).
+const HIDDEN_CASES: &[(&str, &str)] = &[
+    ("text-property", "(put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible t)"),
+    ("overlay", "(overlay-put (make-overlay (car romacs-fl-hide) (cdr romacs-fl-hide)) 'invisible t)"),
+    ("overlay-for-this-window", "(let ((o (make-overlay (car romacs-fl-hide) (cdr romacs-fl-hide)))) (overlay-put o 'invisible t) (overlay-put o 'window (selected-window)))"),
+    ("alias", "(progn (set (make-local-variable 'char-property-alias-alist) '((invisible fold-a fold-b))) (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'fold-b t))"),
+    ("overlay-alias", "(progn (set (make-local-variable 'char-property-alias-alist) '((invisible fold))) (overlay-put (make-overlay (car romacs-fl-hide) (cdr romacs-fl-hide)) 'fold t))"),
+    ("category", "(progn (put 'romacs-fl-hidden 'invisible t) (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'category 'romacs-fl-hidden))"),
+    // Two adjacent stretches, the first with an ellipsis: one hidden stretch.
+    ("spec-ellipsis", "(progn (setq buffer-invisibility-spec '((outline . t) other)) (put-text-property (car romacs-fl-hide) (+ (car romacs-fl-hide) 60) 'invisible 'outline) (put-text-property (+ (car romacs-fl-hide) 60) (cdr romacs-fl-hide) 'invisible 'other))"),
+    // A value the spec does not list shows.
+    ("spec-shows", "(progn (setq buffer-invisibility-spec '(outline)) (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible 'other))"),
+    // Its first character already fontified: nothing in it is called at.
+    ("fontified-start", "(progn (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible t) (put-text-property (car romacs-fl-hide) (+ (car romacs-fl-hide) 3) 'fontified t))"),
+    // To the window's end: the walk ends with it.
+    ("to-the-end", "(put-text-property (car romacs-fl-hide) (point-max) 'invisible t)"),
+    // The function hides text just past its first chunk, as Org hides a
+    // link's brackets: the walk steps over what it hid.
+    ("hidden-by-the-call", "(setq fontification-functions (list (lambda (pos) (romacs-fl-log pos) (unless (cdr romacs-fl-log) (put-text-property (+ pos 50) (+ pos 170) 'invisible t)) (put-text-property pos (min (point-max) (+ pos 50)) 'fontified t))))"),
+    // The call at a hidden stretch's first position shows it: the walk
+    // goes on through it as shown text.
+    ("shown-by-the-call", "(progn (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible t) (setq fontification-functions (list (lambda (pos) (romacs-fl-log pos) (when (get-text-property pos 'invisible) (remove-text-properties pos (cdr romacs-fl-hide) '(invisible nil))) (put-text-property pos (next-single-char-property-change pos 'invisible nil (min (point-max) (+ pos 50))) 'fontified t)))))"),
+    // Narrowed inside the hidden stretch. GNU also calls at a narrowed ZV,
+    // past the accessible text (VM2-FONTIFY1): fontified, it is not called.
+    ("narrowed", "(progn (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible t) (put-text-property (+ (car romacs-fl-hide) 60) (+ (car romacs-fl-hide) 61) 'fontified t) (narrow-to-region (point-min) (+ (car romacs-fl-hide) 60)))"),
+    ("never-fontifies", "(progn (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible t) (setq fontification-functions (list (lambda (pos) (romacs-fl-log pos)))))"),
+];
+
+/// GNU's iterator calls at the first position of a hidden stretch, its
+/// `fontified` handler running before its `invisible` one, then steps over
+/// the stretch: hidden text several chunks long is asked for once, however
+/// it is hidden.
+#[test]
+fn hidden_text_is_fontified_as_pinned_gnu_walks() {
+    let mut failures = vec![];
+    for (name, hide) in HIDDEN_CASES {
+        let case = format!("(progn {HIDE} {CHUNK} {hide})");
+        let expected = gnu(&case);
+        let mut vm = romacs_vm(&case);
+        vm.display_snapshot(400, 200).unwrap();
+        let actual = printed(&mut vm, REPORT);
+        if actual != expected {
+            failures.push(format!("{name}\n  GNU    {expected}\n  Romacs {actual}"));
+        }
+        assert_eq!(vm.take_display_diagnostics(), Vec::<String>::new(), "{name}");
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Whether lines 07 to 11 are all fontified.
+const HIDDEN_FONTIFIED: &str = "(not (text-property-any (car romacs-fl-hide) (cdr romacs-fl-hide) 'fontified nil))";
+
+/// Text an unfold reveals is fontified by the next redisplay: an overlay
+/// deleted, or `buffer-invisibility-spec` changed.
+#[test]
+fn unfolded_text_is_fontified_by_the_next_redisplay() {
+    for (name, hide, unfold) in [
+        ("overlay", "(setq romacs-fl-fold (make-overlay (car romacs-fl-hide) (cdr romacs-fl-hide))) (overlay-put romacs-fl-fold 'invisible t)", "(delete-overlay romacs-fl-fold)"),
+        ("spec", "(setq buffer-invisibility-spec '(outline)) (put-text-property (car romacs-fl-hide) (cdr romacs-fl-hide) 'invisible 'outline)", "(setq buffer-invisibility-spec nil)"),
+    ] {
+        let mut vm = romacs_vm(&format!("(progn {HIDE} {CHUNK} {hide})"));
+        vm.display_snapshot(400, 200).unwrap();
+        assert_eq!(printed(&mut vm, HIDDEN_FONTIFIED), "nil", "{name}: hidden text is left");
+        vm.eval_source(unfold).unwrap();
+        vm.display_snapshot(400, 200).unwrap();
+        assert_eq!(printed(&mut vm, HIDDEN_FONTIFIED), "t", "{name}: revealed text is fontified");
+        assert_eq!(vm.take_display_diagnostics(), Vec::<String>::new(), "{name}");
+    }
+}
+
+/// An overlay whose `window` is another window hides nothing in this one.
+#[test]
+fn an_overlay_hides_text_only_in_its_window() {
+    let mut vm = romacs_vm(&format!("(progn {HIDE} \
+        (setq romacs-fl-a (selected-window)) \
+        (let ((half (/ (window-pixel-height romacs-fl-a) 2))) \
+          (set-window-new-pixel romacs-fl-a half) \
+          (setq romacs-fl-b (split-window-internal romacs-fl-a half nil 0.5))) \
+        (set-window-buffer romacs-fl-b (current-buffer)) \
+        (put-text-property (point-min) (point-max) 'fontified t) \
+        (put-text-property (+ (car romacs-fl-hide) 80) (+ (car romacs-fl-hide) 120) 'fontified nil) \
+        (let ((o (make-overlay (car romacs-fl-hide) (cdr romacs-fl-hide)))) (overlay-put o 'invisible t) (overlay-put o 'window romacs-fl-b)))"));
+    let found = "(list (- (romacs--fontify-next romacs-fl-a romacs-fl-start romacs-fl-end) (car romacs-fl-hide)) (romacs--fontify-next romacs-fl-b romacs-fl-start romacs-fl-end))";
+    assert_eq!(printed(&mut vm, found), "(80 nil)");
 }

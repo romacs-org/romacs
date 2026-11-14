@@ -1,0 +1,19 @@
+[package]
+name = "romacs-gnu-tests"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Per-deftest runner for GNU Emacs's own test suite (test/gnu/test) on VM2"
+
+# Harness only. The VM is used through its public API; nothing here changes
+# Lisp-visible behaviour.
+[dependencies]
+romacs-vm = { path = "../../crates/romacs-vm" }
+serde_json = "1"
+
+[[bin]]
+name = "romacs-gnu-ert"
+path = "src/main.rs"
+
+[lints]
+workspace = true

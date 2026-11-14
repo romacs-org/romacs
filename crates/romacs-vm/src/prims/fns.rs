@@ -3,23 +3,23 @@
 use super::*;
 
 /// GNU `FOR_EACH_TAIL_SAFE` (lisp.h:5845-5905), reproduced exactly, because
-/// Lisp observes its counts (`safe-length` on a cycle). Returns the tail at
-/// exit: nil after a detected cycle, the non-cons terminator otherwise.
-fn for_each_tail_safe(cx: &Leaf<'_>, mut tail: Value, mut body: impl FnMut(Value)) -> Value {
-    let mut tortoise = tail;
-    let mut l: u64 = 0;
+/// Lisp observes its counts (`safe-length` on a cycle): the conses of LIST
+/// counted, each read once, and the tail that ends it, None after a cycle.
+fn walk_tails(cx: &Leaf<'_>, list: Value) -> (i64, Option<Value>) {
+    // `Leaf::pair` reads a cons of the VM's own table in place, so the walk
+    // costs a load and a compare a cons where it once read each cons twice.
+    let (mut tail, mut tortoise, mut count) = (list, list, 0i64);
     while let Some((_, cdr)) = cx.pair(tail) {
-        body(tail);
         tail = cdr;
+        count += 1;
         if tail == tortoise {
-            return Value::NIL;
+            return (count, None);
         }
-        l += 1;
-        if l & 4095 == 0 && l.is_power_of_two() {
+        if count & 4095 == 0 && count.count_ones() == 1 {
             tortoise = tail;
         }
     }
-    tail
+    (count, Some(tail))
 }
 
 defsubr! { name = "nthcdr", gnu = "fns.c:1749", effect = Pure,
@@ -68,19 +68,19 @@ fn nthcdr(cx, n: Value, list: Value) {
 
 defsubr! { name = "proper-list-p", gnu = "fns.c:244", effect = Pure,
 fn proper_list_p(cx, object: Value) {
-    let mut len = 0i64;
-    let mut last = object;
-    for_each_tail_safe(cx, object, |t| {
-        len += 1;
-        last = cx.pair(t).map_or(Value::NIL, |(_, cdr)| cdr);
-    });
-    Ok(if last == Value::NIL { Value::integer(len).unwrap() } else { Value::NIL })
+    // A cycle, or a tail that is not nil, is no proper list; its length
+    // is the conses walked.
+    let (len, end) = walk_tails(cx, object);
+    Ok(match end {
+        Some(end) if end == Value::NIL => Value::integer(len).unwrap(),
+        _ => Value::NIL,
+    })
 }}
 
 defsubr! { name = "safe-length", gnu = "fns.c:162", effect = Pure,
 fn safe_length(cx, list: Value) {
-    let mut len = 0i64;
-    for_each_tail_safe(cx, list, |_| len += 1);
+    // A circular list counts the conses walked before the cycle showed.
+    let (len, _end) = walk_tails(cx, list);
     Ok(Value::integer(len).unwrap())
 }}
 

@@ -2,32 +2,13 @@
 //! Each line is one expression, evaluated after GNU's loadup chain; both
 //! sides run in this process's environment, so collation compares under
 //! the same locale.
-use romacs_vm::Vm;
-use std::path::Path;
-
-/// The loadup chain (find_charset.rs's), for buffers and coding systems.
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 fn matches_pinned_gnu(cases: &str) {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let mut failures = Vec::new();
     for expression in cases.lines().filter(|line| !line.is_empty()) {
         // As character codes, as tests/json.rs compares.

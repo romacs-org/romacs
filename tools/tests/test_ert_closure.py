@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 ORACLE_ROOT = Path(os.environ.get("GNU_ORACLE_ROOT", Path.home() / ".cache/gnu-emacs-pin"))
-PIN = __import__("tomllib").loads((ROOT / "parity-reference.toml").read_text())["mirror_commit"]
+PIN = __import__("tomllib").loads((ROOT / "ledger/parity-reference.toml").read_text())["mirror_commit"]
 GNU = os.environ.get("ROMACS_GNU_ORACLE", str(ORACLE_ROOT / PIN / "bin/emacs"))
 SOURCE = Path(os.environ.get("ROMACS_GNU_SOURCE", ORACLE_ROOT / "src"))
 

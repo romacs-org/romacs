@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[test]
 fn minor_mode_docstring_search_can_save_dead_buffer_match_data() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu");
     let mut vm = Vm::new();
     vm.set_load_path(&[root.clone(), root.join("emacs-lisp")]).unwrap();
     vm.install_lisp_prelude().unwrap();

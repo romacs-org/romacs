@@ -1,13 +1,17 @@
 [workspace]
 members = [
     "crates/romacs-brand",
+    "crates/romacs-record",
+    "crates/romacs-keeper",
+    "crates/romacs-coordinate-contract",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
+    "crates/romacs-vm-test-build",
+    "crates/romacs-icon-font",
     "crates/romacs-layout-input",
     "crates/romacs-layout",
     "crates/romacs-vm-gui",
     "crates/romacs-grammars",
-    "tests/coordinate-contract",
     "crates/romacs-logo",
     "crates/romacs-regex",
     "crates/romacs-mcp",
@@ -28,13 +32,16 @@ members = [
     "crates/romacs-infra",
     "crates/romacs-video",
     "crates/romacs-video-model",
-    "gnu-tests/runner",
+    "crates/romacs-gnu-tests",
 ]
 default-members = [
     "crates/romacs-vm",
     "crates/romacs-vm-gui",
 ]
 resolver = "2"
+# Upstream packages carried with patches of ours (crates/vendor/*/ROMACS.md):
+# dependencies, never members, and not counted as our code.
+exclude = ["crates/vendor"]
 
 # Configuration for cross-rs (`cross`), folded in from a root-level
 # Cross.toml; cargo itself ignores metadata.* tables.
@@ -54,10 +61,10 @@ repository = "https://git.thanosapollo.org/romacs"
 # Lints every package inherits with `[lints] workspace = true`. Every unsafe
 # operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
 # carries its own SAFETY justification. tools/lib/unsafe_census.py (run by
-# tools/check-derived) fails when a package neither denies this nor is
-# listed as pending in UNSAFE-FLOORS.json. Clippy's
-# undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
-# here: existing code would fail it.
+# tools/check-derived) fails when a package does not deny this. Clippy's
+# undocumented_unsafe_blocks is enforced by the smells ratchet's count of
+# undocumented sites (tools/lib/smells.py), not here: existing code would
+# fail it.
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
@@ -334,6 +341,10 @@ debug = true
 strip = "none"
 
 [patch.crates-io]
+# tree-sitter 0.27.0 as published, plus the commits listed in
+# crates/vendor/tree-sitter/ROMACS.md; tools/treesit-fuzz checks that its trees
+# equal the published runtime's.
+tree-sitter = { path = "crates/vendor/tree-sitter" }
 # Fork branch: patch (includes inherited fixes and explicit Wayland connections
 # with failed-construction retry; deferred daemon startup never mutates display env).
 winit = { git = "https://github.com/thanosapollo/winit", rev = "6884804b87b93c228b97ba683ddcc7d0acb4d023" }

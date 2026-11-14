@@ -1,4 +1,4 @@
-//! Session images (rlisp/warm-restart.el) across processes: one batch
+//! Session images (lisp/romacs/warm-restart.el) across processes: one batch
 //! session builds a session (tests/fixtures/warm-restart-session.el) and
 //! writes its image; a fresh process restores it and must observe the same
 //! buffers (text, point, mark, mark ring, narrowing, modified flag, mode,
@@ -7,11 +7,13 @@
 //! What is not carried is named in the image; a blocked buffer refuses
 //! the image; a damaged image or a buffer that cannot come back keeps the
 //! image and never loses its text.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/warm-restart-session.el");
-const RLISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../rlisp");
+const ROMACS_LISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/romacs");
 
 fn dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("romacs-warm-restart-{name}-{}", std::process::id()));
@@ -29,11 +31,11 @@ fn lisp(path: &Path) -> String {
 fn batch(dir: &Path, source: &str) -> String {
     let script = dir.join(format!("script-{}.el", source.len()));
     std::fs::write(&script, format!("(setq load-path (cons {} load-path))\n(load {} nil t)\n{source}\n",
-                                    lisp(Path::new(RLISP)), lisp(Path::new(FIXTURE)))).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+                                    lisp(Path::new(ROMACS_LISP)), lisp(Path::new(FIXTURE)))).unwrap();
+    let output = Command::new(installed::romacs())
         .args(["-Q", "--batch", "-l"]).arg(&script).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state")).env("ROMACS_WORLD", "off")
+        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
         .output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(output.status.success(), "batch failed: {}\n{stdout}\n{}", output.status, String::from_utf8_lossy(&output.stderr));
@@ -176,7 +178,7 @@ fn a_restored_unsaved_file_is_locked_and_another_editors_lock_asks_at_the_next_e
 
 #[test]
 fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
-    // Agent sessions outlive the editor (rlisp/romacs-agent.el); a restored
+    // Agent sessions outlive the editor (lisp/romacs/romacs-agent.el); a restored
     // chat is the session's view, made from its journal, never a copy.
     let dir = dir("agent");
     let session = dir.join("state/romacs/agents/0a1b2c3d-test");

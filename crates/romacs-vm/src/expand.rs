@@ -413,7 +413,10 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             call("current-buffer", vec![]),
             progn(args),
         ),
-        "declare" => s("nil"),
+        // subr.el's `declare-function' tells the byte compiler a function
+        // exists and expands to nil; files of Romacs's own Lisp that a
+        // world without GNU's Lisp loads declare primitives with it.
+        "declare" | "declare-function" => s("nil"),
         "`" if args.len() == 1 => Walk { bare: true, ..Walk::standard() }.template(&args[0], 0)
             .map_err(|_| "malformed backquote template".to_string())?.form,
         "with-temp-buffer" => {
@@ -700,6 +703,14 @@ mod tests {
             format!("{second:?}"),
             "separate expansions must not reuse generated identities"
         );
+    }
+
+    /// Before `subr.el` defines it, `declare-function` expands to nil, as GNU's macro does.
+    #[test]
+    fn a_bare_vm_reads_declare_function_as_nil() {
+        let mut vm = crate::Vm::new();
+        let value = vm.eval_source("(declare-function romacs-command-epoch \"prims/completion.rs\" ())").unwrap();
+        assert_eq!(value.display().unwrap(), "nil");
     }
 
     /// Before backquote.el, `backquote-list*' is not there to call.

@@ -1,0 +1,17 @@
+{
+  "what": "The GNU Git paths under upstream lisp/ at gnu_commit are retained byte-for-byte under local lisp/gnu/ (R221), except the ones `excluded` drops deliberately: GNU's ChangeLogs, READMEs and build files, which no runtime, test or tool reads. An additional 81 generated GNU-support Lisp files are retained as separately declared byte snapshots, not as members of lisp_tree. Romacs Lisp and packages live in lisp/romacs/, with temporary external dependencies in lisp/romacs/deps/; variants of pristine GNU Git paths belong in lisp-overlay/.",
+  "gnu_repository": "https://git.savannah.gnu.org/git/emacs.git",
+  "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "lisp_tree": "dbf27afec19b78470b7f0b64ae724aa3f86302c9",
+  "excluded": [
+    "lisp/ChangeLog.*",
+    "lisp/*/ChangeLog.*",
+    "lisp/COPYING",
+    "lisp/Makefile.in",
+    "lisp/README",
+    "lisp/term/README"
+  ],
+  "restore_pristine_paths": "git -C GNU archive --format=tar 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea lisp | tar -x --transform='s,^lisp,lisp/gnu,'  # restores pristine paths only; then delete what `excluded` names; does not generate support",
+  "generated_support": "ledger/lisp-generated.json",
+  "drift_check": "python3 tools/lib/lisp_oracle.py check --gnu GNU  # pristine Git blobs, excluded paths absent, declared support SHA-256 bytes and no undeclared Lisp inputs; also run by tools/check-derived and crates/romacs-vm/tests/lisp_oracle.rs"
+}

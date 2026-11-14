@@ -152,7 +152,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         RemoveOverlays => (0, Some(4)),
         StringMatch | PosixStringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
-        ReSearchForward | ReSearchBackward | PosixSearchForward | PosixSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
+        ReSearchForward | ReSearchBackward | PosixSearchForward | PosixSearchBackward | SearchForward | SearchBackward | LocateLibrary => (1, Some(4)),
         WindowVscroll | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }

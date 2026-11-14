@@ -1,5 +1,5 @@
 //! `--isolate FD`: this binary as a worker isolate (`romacs_vm::isolate`,
-//! rlisp/vm/isolate.el). The worker boots as its spawner did: `--world
+//! lisp/romacs/vm/isolate.el). The worker boots as its spawner did: `--world
 //! STORE KEY` adopts that exact world and refuses any other, `--source`
 //! runs the GNU loadup chain from source, `--bare` is a VM with the Lisp
 //! prelude alone; `--compiled-store DIR` loads compiled Lisp from the

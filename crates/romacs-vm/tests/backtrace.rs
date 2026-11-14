@@ -629,7 +629,7 @@ fn backtrace_eval_buffers_and_excursions_match_gnu() {
 
 // `backtrace--frames-and-locals' is `mapbacktrace' plus `backtrace--locals'
 // for every frame but the first, from one walk; `backtrace-get-frames'
-// (rlisp/romacs-backtrace.el) is built on it.
+// (lisp/romacs/romacs-backtrace.el) is built on it.
 #[test]
 fn frames_and_locals_equal_the_per_frame_primitives() {
     let mut vm = Vm::new();

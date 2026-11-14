@@ -301,10 +301,6 @@
       "class": "VALUE",
       "row": "VM2-EMPTY1"
     },
-    "propertize/0570": {
-      "class": "SIGNAL-VS-VALUE",
-      "row": "VM2-FR5-3"
-    },
     "propertize/0572": {
       "class": "SIGNAL-VS-VALUE",
       "row": "VM2-FR5-3"

@@ -18,9 +18,9 @@ LIB_TEST = ['cargo', 'test', '-p', 'romacs-vm', '--lib', 'host_input']
 CURSOR_TEST = ['cargo', 'test', '-p', 'romacs-layout', '--test', 'cursor']
 
 MUTANTS = [
-    ('M1 gate reverted: no host means end-of-file', 'rlisp/vm/minibuf.el',
+    ('M1 gate reverted: no host means end-of-file', 'lisp/romacs/vm/minibuf.el',
      '(unless (or executing-kbd-macro (romacs--host-input-p))', '(unless executing-kbd-macro', HOST_TEST),
-    ('M2 read-event never asks the host', 'rlisp/vm/keyboard.el',
+    ('M2 read-event never asks the host', 'lisp/romacs/vm/keyboard.el',
      '      (setq c (romacs--read-host-event))', '      (setq c nil)', HOST_TEST),
     ('M3 host read is a plain primitive (no reentrant stack/GC discipline)', VM + 'threaded.rs',
      'Primitive::Eval | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent) {\n            return reentrant_load(',
@@ -40,7 +40,7 @@ MUTANTS = [
      'let selected = frame.windows[0].snapshot.id; let ends = host.redisplay(HostFrame { frame, selected })?;', HOST_TEST),
     ('M10 layout ends from the wait not committed', VM + 'host_input.rs',
      '                self.display_apply_layout(&ends)?;', '                let _ = ends;', HOST_TEST),
-    ('M11 C-g returns instead of signalling (abort exits normally)', 'rlisp/vm/minibuf.el',
+    ('M11 C-g returns instead of signalling (abort exits normally)', 'lisp/romacs/vm/minibuf.el',
      "      (throw 'exit (lambda () (signal 'minibuffer-quit nil))))))", "      (throw 'exit nil))))", HOST_TEST),
     ('M12 Closed signals error, not quit', VM + 'host_input.rs',
      'let quit = self.intern("quit");', 'let quit = self.intern("error");', HOST_TEST),

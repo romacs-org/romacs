@@ -1,4 +1,4 @@
-//! Native models (rlisp/romacs-model.el, `src/display_host/models.rs`): the primitives
+//! Native models (lisp/romacs/romacs-model.el, `src/display_host/models.rs`): the primitives
 //! check Lisp's arguments and send the display exactly the protocol values,
 //! a `(surface :id ...)` display spec lays out as a surface glyph only while
 //! its surface lives, and the renderer's events reach Lisp as the special
@@ -206,7 +206,7 @@ impl HostInput for Script {
     }
 }
 
-/// The read hands the event to Lisp as its special event; rlisp/vm/keyboard.el
+/// The read hands the event to Lisp as its special event; lisp/romacs/vm/keyboard.el
 /// runs its binding and reads on, as for focus events.
 #[test]
 fn a_read_answers_an_event_as_its_special_event() {

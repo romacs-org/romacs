@@ -8,6 +8,8 @@ script on the prompt's first line:
   say TEXT      reply TEXT
   slow N        sleep N seconds, then reply `slow done' (a long turn; a
                 steer's text ends it early, `steered: TEXT')
+  wait FILE     a turn held until FILE exists (60 s at most), then reply
+                `released' (an interrupt ends it)
   fail          end the turn failed
   Evaluate ...  Gnosis's evaluator prompt: answered as fake_harness.py does
   anything else reply `VERDICT: APPROVE' and the prompt's line count
@@ -59,6 +61,11 @@ def run_turn(thread, turn, prompt):
     if first == 'fail':
         status, error = 'failed', {'message': 'the fake model failed'}
         reply = None
+    elif first.startswith('wait '):
+        path, deadline = first.split(' ', 1)[1], time.monotonic() + 60
+        while not os.path.exists(path) and time.monotonic() < deadline and thread.turn == turn:
+            thread.stop.wait(.05)
+        status, error, reply = ('completed', None, 'released') if thread.turn == turn else ('interrupted', None, None)
     elif first.startswith('slow '):
         thread.stop.wait(float(first.split()[1]))
         if thread.turn != turn:

@@ -672,6 +672,15 @@ impl Program {
     pub(super) fn sites(&self) -> usize {
         self.entries.len()
     }
+    /// Make the entry cache of function ID's first instruction name TARGET,
+    /// which no call does when TARGET is a heap entry: whether ID has
+    /// lowered code here.
+    #[cfg(test)]
+    pub(super) fn plant_entry(&mut self, id: usize, target: Value) -> bool {
+        let Some(site) = self.code.get(id).and_then(|code| code.first()).map(|inst| inst.site) else { return false };
+        self.entries[site].target = target;
+        true
+    }
     /// What function ID's lowered code holds, each instruction read on a copy,
     /// and the functions its entry caches enter: for verify's reference
     /// marker (gc_check.rs), apart from `trace_function'.
@@ -808,6 +817,18 @@ impl Suspended {
         }
         for entry in &self.entries {
             value(entry.target);
+        }
+    }
+    /// What a minor collection reads of its lowered code: that of the
+    /// functions CHANGED since the last collection, the rest naming only
+    /// what a collection promoted. An entry cache names no heap entry: a
+    /// call fills one with a primitive, or with nothing for a closure
+    /// (`resolve_entry`), so a minor reads none. Verify's reference walk
+    /// reads them all, and reports one that names what a minor freed.
+    pub(super) fn minor_values(&self, changed: &[usize], value: &mut impl FnMut(Value)) {
+        for inst in changed.iter().filter_map(|&id| self.code.get(id)).flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
         }
     }
     /// Whether a cleanup of this engine is running: an escape's or a normal
@@ -1149,11 +1170,12 @@ fn unrouted(e: &mut Engine<'_>, original: Option<&str>) -> Escape {
         Escape::Signal(Value::reference(slot + 1, 7), data)
 }
 /// Pop the innermost control and land the pending escape there if it takes
-/// it, Some(the target in this activation's code, whether a cleanup): a protect region's cleanup keeps the exit (with ORIGINAL, the
-/// diagnostic) in its resume record; a catch or condition case takes the
-/// payload into its register.
+/// it, Some(the target in this activation's code): a protect region's
+/// cleanup keeps the exit (with ORIGINAL, the diagnostic) in its resume
+/// record; a catch or condition case takes the payload into its register,
+/// and its handler's first tick polls (lisp-speed 13.4).
 #[inline]
-fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> {
+fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<usize> {
     let control = e.controls.pop().unwrap();
     let matches = match (&control.kind, e.escape.as_ref().expect("a routed escape")) {
         (ControlKind::Protect { .. }, _) => true,
@@ -1168,7 +1190,6 @@ fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> 
     release_control(e, &control);
     if !matches { return None; }
     let escape = e.escape.take().unwrap();
-    let cleanup = matches!(control.kind, ControlKind::Protect { .. });
     match control.kind {
         ControlKind::Protect { end } => {
             // Its cleanup runs until `Op::ResumeExit' pops the record.
@@ -1208,10 +1229,17 @@ fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> 
                 Escape::Normal(_) => unreachable!(),
             };
             e.set_reg(control.dest, payload);
+            // What a poll here would take (a due collection, aftermath, a
+            // pending quit) the handler's first tick takes, a back-jump or a
+            // Lisp entry; a handler of primitives only leaves them to its
+            // engine's next tick, the next engine entry or the request's end.
+            // A cleanup's entry takes nothing: its resume record is on top
+            // (gc-smooth 4.12, invariant 5).
+            e.budget = 0;
         }
         ControlKind::Resume { .. } | ControlKind::HandlerBind { .. } => unreachable!(),
     }
-    Some((control.target, cleanup))
+    Some(control.target)
 }
 /// Leave this activation for its caller's (true), or end the engine with the
 /// escape as its error, or as the escape it propagates to an `eval' caller.
@@ -1274,11 +1302,11 @@ fn no_catch(e: &mut Engine<'_>) -> bool {
 }
 /// Regions belong to register activations. Unwinding consumes those same frames;
 /// no record copies a frame pointer, register pointer, or function identity.
-/// The registers and instruction to resume at, and whether that enters a
-/// cleanup, or None as the engine ends. The escape stays the pending one,
+/// The instruction in this activation's code that the escape lands at, or
+/// None as the engine ends. The escape stays the pending one,
 /// traced, across every restore and handler that runs Lisp on the way.
 #[inline(never)]
-fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> Option<(usize, bool)> {
+fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> Option<usize> {
     // What the native call that escaped queued came before its escape.
     drain_writes(&mut m, gc.by_ref());
     let (mut original, failed_depth, hooked) = m.leaf((), |e, ()| {
@@ -1341,12 +1369,12 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
     }
 }
 /// The driver's continuation of `route_escape`: the registers and
-/// instruction to resume at, and whether that enters a cleanup.
-fn routed(e: Eng<'_, '_>, landing: Option<(usize, bool)>) -> Option<(*mut Value, *const Inst, bool)> {
-    let (target, cleanup) = landing?;
+/// instruction to resume at.
+fn routed(e: Eng<'_, '_>, landing: Option<usize>) -> Option<(*mut Value, *const Inst)> {
+    let target = landing?;
     let code = &e.code[e.function];
     assert!(target < code.len(), "a landing inside its activation's code");
-    Some((e.regs, code[target..].as_ptr(), cleanup))
+    Some((e.regs, code[target..].as_ptr()))
 }
 // This is argument-stack storage, not Lisp heap objects. Its capacity is reused
 // across calls and every live element is forwarded at the engine's safepoints.
@@ -1790,7 +1818,22 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     engine.vm.running_engines += 1;
     let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
-        orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), stress_collect, done);
+        orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
+    }
+    // A poll allocation asked for (`Vm::poll_requested`) outlives the engine
+    // that asked: an entry collects if one is due, so forms run an engine
+    // each (a loaded file's) collect between them, as GNU's eval_sub does,
+    // and the first tick takes the rest (aftermath, a quit). With nothing
+    // due it settles here, as a poll would, so engines that never tick do
+    // not each look again; an engine that may not collect leaves the request
+    // to one that may, as `leave_native` does.
+    if engine.vm.poll_requested() && engine.vm.may_collect(1) {
+        if engine.vm.collection_due() {
+            orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
+        } else if !engine.vm.aftermath_pending() {
+            engine.vm.settle_poll();
+        }
+        engine.budget = 0;
     }
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
@@ -1819,13 +1862,12 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         // takes the hold, this gives it back).
         let routed = orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), route_escape, routed);
         engine.vm.unwinding -= 1;
-        let Some((regs, pc, cleanup)) = routed else { break };
-        // Region exits are strand wait points too: suspended payloads are
-        // activation-owned roots before any cleanup instruction can allocate.
-        // A handler landing is an ordinary poll; a cleanup's entry only collects.
+        let Some((regs, pc)) = routed else { break };
+        // A landing resumes as any instruction does: a handler's first tick
+        // polls (`land` zeroed the budget), and a cleanup runs as it is.
         let e = Eng::lend(&mut engine, gc.by_ref());
         // SAFETY: routing returned the frame its escape lands in and the instruction there.
-        value = unsafe { if cleanup { cleanup_entry(e, regs, pc) } else { poll_resume(e, regs, pc) } };
+        value = unsafe { next(e, regs, pc) };
     }
     // A normal return has already unbound through return_unbind. With a
     // variable trapped, the restores' watchers may collect: VALUE is rooted.
@@ -1868,9 +1910,10 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         None => Ok(value),
     }
 }
-/// A stress collection at an engine's entry.
+/// A collection at an engine's entry: a stress one, or one allocation asked
+/// for and found due.
 #[inline(never)]
-fn stress_collect<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) {
+fn entry_collect<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) {
     lend::collect(&mut m, gc.by_ref(), false);
 }
 /// The driver's continuation of a lend that leaves nothing to do.
@@ -2366,33 +2409,6 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // safepoint unless `inhibit-quit' is bound.
     let quit = m.leaf((), |e, ()| (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some());
     if quit { Continue::Stop } else { Continue::At(pc) }
-}
-/// Entering a cleanup, its exit kept in a resume record: a collection due
-/// runs here, Rust only, the exit traced, as at any wait point. Nothing that
-/// can raise runs (a quit, the debugger, a collection's aftermath): an escape
-/// now would meet that record on top (`route_escape') and drop the cleanup
-/// unrun. The next ordinary poll takes them.
-#[inline(never)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
-unsafe fn cleanup_entry(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-    let collect = e.vm.collection_due() && e.vm.may_collect(1);
-    debug_assert!(!collect || r == e.regs, "a cleanup runs in the current frame");
-    // SAFETY: the function's contract: PC is the cleanup's first
-    // instruction, in this engine's code, and R its frame.
-    unsafe {
-        if collect {
-            return orchestrate(e, Pc::new(pc), cleanup_collected, continue_at);
-        }
-        next(e, r, pc)
-    }
-}
-#[inline(never)]
-fn cleanup_collected<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
-    lend::collect(&mut m, gc.by_ref(), false);
-    Continue::At(pc)
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
 /// `quit` signal, else the host's C-g or `quit-flag' (`Vm::maybe_quit').

@@ -4,7 +4,7 @@
 //! printed, including `revision` = the oracle binary's own
 //! `emacs-repository-version`. Until this guard the recorder was
 //! `/usr/bin/emacs`, built at b28750b822dc, 320 GNU commits older than the pin
-//! `parity-reference.toml` declares, while the evidence's `gnu_sources` hashed
+//! `ledger/parity-reference.toml` declares, while the evidence's `gnu_sources` hashed
 //! the pin's C files: every "recorded against live GNU" number named the wrong
 //! reference.
 //!
@@ -32,13 +32,13 @@ fn primh() -> PathBuf {
     repo().join("crates/romacs-vm/tools/primh")
 }
 
-/// `mirror_commit` from parity-reference.toml: the one declared GNU pin.
+/// `mirror_commit` from ledger/parity-reference.toml: the one declared GNU pin.
 fn pin() -> String {
-    let text = std::fs::read_to_string(repo().join("parity-reference.toml")).unwrap();
+    let text = std::fs::read_to_string(repo().join("ledger/parity-reference.toml")).unwrap();
     let line = text
         .lines()
         .find(|l| l.starts_with("mirror_commit"))
-        .expect("parity-reference.toml declares mirror_commit");
+        .expect("ledger/parity-reference.toml declares mirror_commit");
     let commit = line.split('"').nth(1).unwrap().to_owned();
     assert_eq!(
         commit.len(),

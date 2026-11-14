@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 # Each grammar is the commit its GNU ts mode names in
-# `treesit-language-source-alist' (gnu-lisp/), as a crates.io release whose
+# `treesit-language-source-alist' (lisp/gnu/), as a crates.io release whose
 # sources are that commit's, or the commit itself. etc/tree-sitter/README.md
 # records each one's provenance and licence.
 [dependencies]

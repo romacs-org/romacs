@@ -1131,9 +1131,6 @@ pub struct RoundedFill {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct FrameGlyphBuffer {
     pub scroll_input_policy: crate::ScrollInputPolicy,
-    /// Shared immutable off-screen text for compositor scrolling.
-    pub scroll_surfaces: Vec<std::sync::Arc<crate::scroll_coverage::ScrollSurface>>,
-    pub input_checkpoint: Vec<crate::input_progress::InputCheckpoint>,
     /// Evaluator interaction snapshot paired with these exact pixels.
     pub presentation_id: crate::frame_chrome::PresentationId,
     /// Canonical frame ancestry/placement for this presentation.
@@ -1406,18 +1403,6 @@ impl FrameGlyphBuffer {
         Ok(())
     }
 
-    pub(crate) fn scroll_pointer_source(
-        &self,
-    ) -> Result<crate::PresentedPointerSourceMap, crate::PresentedPointerMapError> {
-        match &self.presented_pointer_source {
-            Some(source) => Ok(source.as_ref().clone()),
-            None if self.presented_pointer.is_empty() => {
-                Ok(crate::PresentedPointerSourceMap::empty())
-            }
-            None => Err(crate::PresentedPointerMapError::MissingSourceMap),
-        }
-    }
-
     fn synthesize_face(
         &self,
         face_id: FaceId,
@@ -1499,8 +1484,6 @@ impl FrameGlyphBuffer {
     pub fn new() -> Self {
         Self {
             scroll_input_policy: crate::ScrollInputPolicy::default(),
-            scroll_surfaces: Vec::new(),
-            input_checkpoint: Vec::new(),
             presentation_id: crate::frame_chrome::PresentationId::default(),
             frame_placement: crate::presented_frame::PresentedFramePlacement::default(),
             origin: crate::presentation_origin::PresentationOrigin::Ordinary,
@@ -1838,11 +1821,27 @@ impl FrameGlyphBuffer {
         ascent: f32,
         _overlay_hint: bool,
     ) {
+        let row = self.slot_row(y);
+        self.add_char_on_row(char, (x, y, row), (width, height, ascent), self.current_face_id, BoxVerticalEdges::Both);
+    }
+
+    /// The grid row of a glyph at Y (`DisplaySlotId::from_pixels`): the
+    /// same for every glyph a row adds at its top.
+    #[must_use]
+    pub fn slot_row(&self, y: f32) -> u32 {
+        Px(y).cells_rounded(Px(self.char_height)).get()
+    }
+
+    /// `add_char` in face `FACE_ID` owning box EDGES, at X, Y on grid row
+    /// ROW (`slot_row` of Y), WIDTH wide, HEIGHT tall with its baseline
+    /// ASCENT below Y: a layout that adds a row's glyphs finds the row once.
+    pub fn add_char_on_row(&mut self, char: char, (x, y, row): (f32, f32, u32), (width, height, ascent): (f32, f32, f32), face_id: FaceId, box_vertical_edges: BoxVerticalEdges) {
+        let col = u16::try_from(Px(x).cells_rounded(Px(self.char_width)).get()).unwrap_or(u16::MAX);
         self.glyphs.push(FrameGlyph::Char {
             window_id: self.current_window_id,
             row_role: self.current_row_role,
             clip_rect: self.current_clip_rect,
-            slot_id: self.current_slot_id(x, y),
+            slot_id: DisplaySlotId { window_id: self.current_window_id, row, col },
             bidi_level: 0,
             char,
             composed: None,
@@ -1852,8 +1851,8 @@ impl FrameGlyphBuffer {
             width,
             height,
             ascent,
-            face_id: self.current_face_id,
-            box_vertical_edges: BoxVerticalEdges::Both,
+            face_id,
+            box_vertical_edges,
         });
     }
 

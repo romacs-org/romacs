@@ -5,8 +5,9 @@
 //! With `--owner-emoji` the policy carries
 //! `(set-fontset-font t 'emoji "Noto Color Emoji" nil 'prepend)`, approximated by
 //! U+1F300..U+1FAFF (the test carries GNU's exact emoji ranges). `--bold` and `--italic` change the requested style.
-//! With `--bundled` the fonts Romacs ships (assets/fonts) are registered first,
-//! as the GUI registers them, so the primary line names the file that wins.
+//! With `--bundled` the fonts Romacs ships in assets/fonts are registered first,
+//! as the GUI registers them, so the primary line names the file that wins
+//! (the icon font, which the GUI writes from its binary, is not among them).
 
 use romacs_font::{
     FontDef, FontRequest, FontResolver, Fontset, FontsetMode, FontsetState, FontsetTarget,

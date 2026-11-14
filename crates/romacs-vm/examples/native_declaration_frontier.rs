@@ -4,7 +4,7 @@ fn main() {
     let target = std::env::args().nth(1).expect("target");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")])
+    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")])
         .unwrap();
     let mut files = vec![
         "emacs-lisp/backquote.el",
@@ -18,7 +18,7 @@ fn main() {
     ];
     files.push(&target);
     for file in files {
-        let path = root.join("gnu-lisp").join(file);
+        let path = root.join("lisp/gnu").join(file);
         let result = vm.load_file(&path).map(drop);
         println!(
             "{}",

@@ -1,8 +1,0 @@
-{
-  "what": "Where the bundled Lisp lives, relative to the runtime root (this checkout or an installed share/romacs, beside gnu-lisp/). Each root and its immediate subdirectories, minus excluded ones, follow GNU's load-path (crates/romacs-vm-gui/src/startup.rs runtime_load_path). tools/lib/bundled_autoloads.py scans the same directories (each root's own files are Romacs's runtime Lisp, preloaded or loaded on demand; its subdirectories are packages) with GNU's loaddefs-generate into the autoloads file, which --loadup loads before the user's init.",
-  "roots": [
-    {"path": "rlisp", "exclude": ["vm", "deps"]},
-    {"path": "rlisp/deps", "exclude": []}
-  ],
-  "autoloads": "rlisp/romacs-bundled-autoloads.el"
-}

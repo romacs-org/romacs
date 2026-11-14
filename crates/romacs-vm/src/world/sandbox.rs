@@ -52,12 +52,16 @@ pub fn confine_publishing(read: &[PathBuf], store: &Path) -> io::Result<()> {
 }
 
 fn restrict(read: &[PathBuf], write: &[PathBuf], store: Option<&Path>) -> io::Result<()> {
+    // HOST(libc::process): the Landlock syscalls of a world build: confine this thread; query and
+    // effect nothing
     let abi = unsafe { libc::syscall(libc::SYS_landlock_create_ruleset, std::ptr::null::<RulesetAttr>(), 0, CREATE_RULESET_VERSION) };
     if abi < 1 {
         return Err(io::Error::last_os_error());
     }
     let handled = handled(abi);
     let attr = RulesetAttr { handled_access_fs: handled };
+    // HOST(libc::process): the Landlock syscalls of a world build: confine this thread; query and
+    // effect nothing
     let ruleset = unsafe { libc::syscall(libc::SYS_landlock_create_ruleset, &attr, size_of::<RulesetAttr>(), 0) };
     if ruleset < 0 {
         return Err(io::Error::last_os_error());
@@ -77,6 +81,8 @@ fn restrict(read: &[PathBuf], write: &[PathBuf], store: Option<&Path>) -> io::Re
         return Err(io::Error::last_os_error());
     }
     use std::os::fd::AsRawFd;
+    // HOST(libc::process): the Landlock syscalls of a world build: confine this thread; query and
+    // effect nothing
     if unsafe { libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
@@ -89,6 +95,7 @@ fn allow(ruleset: &std::os::fd::OwnedFd, path: &Path, access: u64) -> io::Result
     use std::os::fd::AsRawFd;
     use std::os::unix::ffi::OsStrExt;
     let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return Ok(()) };
+    // HOST(libc::file): an O_PATH handle that names a Landlock root; reads nothing
     let fd = unsafe { libc::open(name.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
     if fd < 0 {
         return Ok(());
@@ -97,6 +104,8 @@ fn allow(ruleset: &std::os::fd::OwnedFd, path: &Path, access: u64) -> io::Result
     let directory = crate::host::metadata(path).is_ok_and(|m| m.file_type().is_dir());
     let access = if directory { access } else { access & !READ_DIR };
     let rule = PathBeneath { allowed_access: access, parent_fd: fd.as_raw_fd() };
+    // HOST(libc::process): the Landlock syscalls of a world build: confine this thread; query and
+    // effect nothing
     if unsafe { libc::syscall(libc::SYS_landlock_add_rule, ruleset.as_raw_fd(), RULE_PATH_BENEATH, &rule, 0) } != 0 {
         return Err(io::Error::last_os_error());
     }

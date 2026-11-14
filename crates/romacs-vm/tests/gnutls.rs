@@ -13,6 +13,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tls").join(name)
@@ -96,26 +99,6 @@ fn cases(port: u16) -> Vec<String> {
         r#"(mapcar (lambda (e) (list e (gnutls-errorp e) (gnutls-error-fatalp e) (gnutls-error-string e))) '(t gnutls-e-again gnutls-e-interrupted gnutls-e-invalid-session -8 -9 -12 -15 -24 -28 -32 -43 -50 -52 -53 -54 -59 -64 -87 -110 -326 5))"#.into(),
         r#"(mapcar #'gnutls-peer-status-warning-describe '(:invalid :revoked :self-signed :unknown-ca :not-ca :insecure :not-activated :expired :no-host-match :signature-failure :purpose-mismatch :bogus))"#.into(),
     ]
-}
-
-/// The loadup chain the daily-driver consumers run on (process.rs's).
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("gnu-lisp");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("rlisp"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
-    vm
 }
 
 /// How long one GNU oracle call may take, and how many times a call that
@@ -241,7 +224,7 @@ fn gnu_answers(cases: &[String], port: u16) -> Vec<String> {
 #[test]
 fn tls_sessions_match_pinned_gnu() {
     let port = start_server();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(progn (require 'gnutls) (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))").unwrap();
     let cases = cases(port);
     let answers = gnu_answers(&cases, port);
@@ -265,7 +248,7 @@ fn tls_sessions_match_pinned_gnu() {
 #[test]
 fn nowait_verification_refusal_fails_the_connection() {
     let port = start_server();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(require 'gnutls)").unwrap();
     let case = format!(r#"(let* ((events nil) (p (make-network-process :name "t11" :host "127.0.0.1" :service {port} :buffer (get-buffer-create "t11") :noquery t :nowait t :sentinel (lambda (p m) (setq events (cons (list (process-status p) m) events))) :tls-parameters (cons 'gnutls-x509pki (gnutls-boot-parameters :hostname "localhost" :trustfiles nil :verify-error t))))) (prog1 (equal (list (progn (while (null events) (accept-process-output nil 1)) events) (process-status p) (process-live-p p)) '(((failed "failed with code Certificate validation failed localhost, verification code 42\n")) failed nil)) (delete-process p)))"#);
     assert!(vm.eval_source(&case).unwrap().is_t());
@@ -291,7 +274,7 @@ fn bounded(limit: std::time::Duration, body: impl FnOnce(Vm) + Send + 'static) {
     const BOOTSTRAP: std::time::Duration = std::time::Duration::from_secs(600);
     let (phase, reached) = std::sync::mpsc::channel();
     let worker = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-        let mut vm = bootstrapped();
+        let mut vm = gnu_lisp(&[]);
         vm.eval_source("(require 'gnutls)").unwrap();
         let _ = phase.send("bootstrap");
         body(vm);

@@ -7,7 +7,7 @@ labwc with a private HOME/XDG/TMPDIR, both on the same init.el.  The keys
 go through each engine's own command loop, typed by wtype, in *scratch*:
 
   bindings  C-h b: describe-bindings, over describe-buffer-bindings and
-            help--describe-vector (rlisp/romacs-help.el).
+            help--describe-vector (lisp/romacs/romacs-help.el).
   mode      C-h m: describe-mode, its minor modes and the major mode's map.
   key       C-h k C-f: describe-key, then C-h k C-x C-f, a prefix key.
   function  C-h f car RET and C-h f describe-vector RET: describe-function.

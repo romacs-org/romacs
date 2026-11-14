@@ -13,7 +13,7 @@ fn main() {
             .map(std::path::PathBuf::from)
             .collect::<Vec<_>>()
     } else {
-        vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp")]
+        vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu")]
     };
     vm.set_load_path(&paths).unwrap();
     let result = vm.load_file(std::path::Path::new(file)).map(|_| ());
