@@ -50,7 +50,8 @@ mod tests {
           (defface hosted-big '((t :height 280)) "Taller.")
           (defface hosted-small '((t :height 90)) "Shorter.")
           (defface hosted-sans '((t :family "Sans")) "Proportional.")
-          (set-buffer (get-buffer-create "hosted")) (set-window-buffer nil (current-buffer)))"#).unwrap();
+          (set-buffer (get-buffer-create "hosted")) (set-window-buffer nil (current-buffer))
+          (setq romacs-display-check t))"#).unwrap();
         let mut hosted = Hosted { vm, engine, width, height };
         hosted.paint();
         hosted
@@ -70,6 +71,8 @@ mod tests {
         }
         fn paint(&mut self) -> Paint {
             let snapshot = self.vm.frame_snapshot(self.width, self.height).unwrap();
+            // `romacs-display-check': each window the snapshot reused shows what a full build would.
+            assert_eq!(self.eval("(cdr (assq 'check-mismatches (romacs--display-stats)))"), "0", "{:?}", self.vm.take_display_diagnostics());
             let window = &snapshot.windows[0];
             let (id, window_width, window_height) = (window.snapshot.id, window.snapshot.width, window.snapshot.height);
             let color = romacs_display_protocol::Color::from_pixel(0xffffff);

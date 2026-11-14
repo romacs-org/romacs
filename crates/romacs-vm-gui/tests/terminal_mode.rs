@@ -54,6 +54,8 @@ fn setup() -> (Vm,Shared) {
 fn printed(vm:&mut Vm,s:&str)->String {vm.eval_source(s).unwrap().display().unwrap()}
 fn open(vm:&mut Vm) {
     assert_eq!(printed(vm,"(fboundp 'romacs-term)"),"t","TERMINAL_COMMAND_MUST_BE_AVAILABLE");
+    // The terminal host here is a stand-in in this process: no keeper.
+    vm.eval_source("(setq romacs-keeper-enabled nil)").unwrap();
     vm.eval_source("(romacs-term \"/bin/sh\")").unwrap(); vm.poll_terminal_output().unwrap();
 }
 const META: i64 = 0x8000000;

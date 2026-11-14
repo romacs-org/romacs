@@ -64,6 +64,12 @@ Return SEQUENCE.  GNU fns.c `Fmapc'."
         (setq i (1+ i))))
     sequence))
 
+;; A compiled caller may run a mapping loop in place of a call
+;; (romacs-compile.el, `romacs-compile--mapping') while the function is
+;; still the one defined here: it compares the function cell with this.
+(put 'mapcar 'romacs--definition (symbol-function 'mapcar))
+(put 'mapc 'romacs--definition (symbol-function 'mapc))
+
 (defun mapcan (function sequence)
   "Apply FUNCTION to each element of SEQUENCE, and `nconc' the results.
 GNU fns.c `Fmapcan'."
@@ -119,313 +125,17 @@ unreadable OBJECTS a print meets, called with ESCAPE while
       (setq objects (cdr objects)))
     (nreverse answers)))
 
-;;; Reverse keymap lookup
+;;; Keymaps
 
 (defvar where-is-preferred-modifier nil)
 (defvar minor-mode-overriding-map-alist nil)
 (defvar emulation-mode-map-alists nil)
 
-(defun romacs--where-append (prefix event)
-  ;; Chartab walkers reuse the range cons between callbacks.
-  (if (consp event) (setq event (cons (car event) (cdr event))))
-  (let ((last (1- (length prefix))))
-    (if (and (>= last 0) (eq (aref prefix last) meta-prefix-char)
-             (integerp event))
-        (let ((sequence (copy-sequence prefix)))
-          (aset sequence last (logior event 134217728))
-          sequence)
-      (vconcat prefix (vector event)))))
-
-(defun keymap--get-keyelt (object autoload)
-  "Given OBJECT which was found in a slot in a keymap,
-trace indirect definitions to get the actual definition of that slot.
-Also if OBJECT has a menu string as the first element,
-remove that.  Also remove a menu help string as second element.
-If AUTOLOAD, apply a `menu-item''s `:filter' to its definition.
-keymap.c get_keyelt; a circular wrapper, which GNU follows forever,
-signals."
-  (let ((done nil) (seen nil))
-    (while (and (consp object) (not done))
-      (if (memq object seen) (error "Circular menu item"))
-      (setq seen (cons object seen))
-      (cond ((eq (car object) 'menu-item)
-             (if (not (consp (cdr object)))
-                 (setq done t)
-               (setq object (cdr (cdr object)))
-               (let ((tail object))
-                 (if (consp object) (setq object (car object)))
-                 (if autoload
-                     (while (and (consp tail) (consp (cdr tail)))
-                       (if (not (eq (car tail) :filter))
-                           (setq tail (cdr tail))
-                         ;; keyboard.c menu_item_eval_property: an error is nil.
-                         (let ((filter (car (cdr tail))) (inhibit-redisplay t))
-                           (setq object (condition-case nil (eval (list filter (list 'quote object)) nil)
-                                          (error nil))))
-                         (setq tail nil)))))))
-            ((stringp (car object)) (setq object (cdr object)))
-            (t (setq done t))))
-    object))
-
-(defun romacs--keymap-noload (object)
-  "keymap.c get_keymap without autoloading or signalling: the keymap
-OBJECT is or names, OBJECT itself when it names an autoloaded keymap,
-else nil."
-  (if (eq (car-safe object) 'keymap) object
-    (let ((function (and object (indirect-function object))))
-      (cond ((eq (car-safe function) 'keymap) function)
-            ((and (symbolp object) (eq (car-safe function) 'autoload)
-                  (eq (nth 4 function) 'keymap))
-             object)))))
-
-(defun romacs--accessible-cycle-p (map sequence maps)
-  "Whether MAP is already in MAPS under a prefix of SEQUENCE."
-  (let ((cycle nil) entry)
-    (while (and (not cycle) (setq entry (rassq map maps)))
-      (let* ((prefix (car entry)) (n (length prefix)) (i 0))
-        (if (<= n (length sequence))
-            (progn
-              (while (and (< i n) (eq (aref prefix i) (aref sequence i)))
-                (setq i (1+ i)))
-              (setq cycle (>= i n)))))
-      (setq maps (cdr (memq entry maps))))
-    cycle))
-
-(defun accessible-keymaps (keymap &optional prefix)
-  "Find all keymaps accessible via prefix characters from KEYMAP.
-Returns a list of elements of the form (KEYS . MAP), where the sequence
-KEYS starting from KEYMAP gets you to MAP.  These elements are ordered
-so that the KEYS increase in length.  The first element is ([] . KEYMAP).
-An optional argument PREFIX, if non-nil, should be a key sequence;
-then the value includes only maps for prefixes that start with PREFIX.
-keymap.c Faccessible_keymaps: a breadth-first walk that queues each
-keymap bound to a prefix not already reached by a prefix of it."
-  (let ((prefix-length (length prefix)) (maps nil))
-    (if (not prefix)
-        (let ((map (romacs--keymap-noload keymap)))
-          (if (not (consp map)) (signal 'wrong-type-argument (list 'keymapp keymap)))
-          (setq maps (list (cons [] map))))
-      (let ((map (romacs--keymap-noload (lookup-key keymap prefix t))))
-        (if map
-            (progn
-              ;; A string's 8-bit characters are meta characters.
-              (if (stringp prefix)
-                  (setq prefix (vconcat (mapcar (lambda (c)
-                                                  (if (and (< c 256) (/= 0 (logand c 128)))
-                                                      (logior (logxor c 128) 134217728)
-                                                    c))
-                                                prefix))))
-              (setq maps (list (cons prefix map)))))))
-    (let ((tail maps) (last maps))
-      (while tail
-        (let* ((sequence (car (car tail))) (map (cdr (car tail)))
-               (end (1- (length sequence)))
-               ;; Not the last event of PREFIX itself.
-               (metized (and (>= end 0) (>= end prefix-length)
-                             (eq (aref sequence end) meta-prefix-char))))
-          ;; An autoloaded keymap cannot be walked without loading it.
-          (if (consp map)
-              (map-keymap
-               (lambda (key binding)
-                 (let ((child (romacs--keymap-noload (keymap--get-keyelt binding nil))))
-                   (if (and child (not (romacs--accessible-cycle-p child sequence maps)))
-                       (if (and metized (integerp key))
-                           ;; The meta character's sequence is as long as
-                           ;; SEQUENCE, so it goes right after it.
-                           (let ((meta (copy-sequence sequence)))
-                             (aset meta end (logior key 134217728))
-                             (setcdr tail (cons (cons meta child) (cdr tail)))
-                             (if (eq last tail) (setq last (cdr tail))))
-                         ;; Chartab walkers reuse the range cons between callbacks.
-                         (if (consp key) (setq key (cons (car key) (cdr key))))
-                         (setcdr last (list (cons (vconcat sequence (vector key)) child)))
-                         (setq last (cdr last))))))
-               map)))
-        (setq tail (cdr tail))))
-    maps))
-
-(defun romacs--where-bindings (maps)
-  "Each key sequence MAPS bind, with its binding, in the order of
-`accessible-keymaps' (keymap.c where_is_internal)."
-  (let ((rows nil))
-    (while (consp maps)
-      (let ((prefixes (accessible-keymaps (car maps))))
-        (while prefixes
-          (let ((prefix (car (car prefixes))) (map (cdr (car prefixes))))
-            (if (consp map)
-                (map-keymap
-                 (lambda (event raw)
-                   (setq rows (cons (cons (romacs--where-append prefix event) raw) rows)))
-                 map)))
-          (setq prefixes (cdr prefixes))))
-      (setq maps (cdr maps)))
-    (nreverse rows)))
-
-(defun romacs--where-lookup (maps sequence)
-  (let ((value nil) (key (copy-sequence sequence)) (i 0))
-    ;; GNU treats a range event as its first character during shadow lookup.
-    (while (< i (length key))
-      (let ((event (aref key i)))
-        (if (and (consp event) (integerp (car event)) (integerp (cdr event)))
-            (aset key i (car event))))
-      (setq i (1+ i)))
-    (while (and maps (not value))
-      (setq value (lookup-key (car maps) key))
-      ;; An absent prefix falls through; a defined non-prefix shadows later maps.
-      (if (and (integerp value)
-               (not (lookup-key (car maps) (substring key 0 value))))
-          (setq value nil))
-      (setq maps (cdr maps)))
-    (if (integerp value) (setq value nil))
-    value))
-
-(defun romacs--where-remapping (definition maps)
-  (if (symbolp definition)
-      (romacs--where-lookup maps (vector 'remap definition))))
-
-(defun romacs--where-mouse-prefix-p (sequence)
-  (let ((event (if (> (length sequence) 1) (aref sequence 0))))
-    (if (symbolp event)
-        (let ((name (symbol-name event)) (continue t))
-          (while continue
-            (let ((i 0))
-              (while (and (< i (length name)) (/= (aref name i) 45))
-                (setq i (1+ i)))
-              (if (and (< i (length name)) (member (substring name 0 i)
-                          '("A" "C" "H" "M" "S" "s" "up" "down" "drag"
-                            "click" "double" "triple")))
-                  (setq name (substring name (1+ i)))
-                (setq continue nil))))
-          (member name '("menu-bar" "tab-bar" "tool-bar" "tab-line"
-                         "header-line" "mode-line" "mouse-1" "mouse-2"
-                         "mouse-3" "mouse-4" "mouse-5"))))))
-
-(defun romacs--where-candidates (definition rows noindirect nomenus)
-  (let ((found nil))
-    (while rows
-      (let* ((row (car rows)) (binding (cdr row)))
-        (if (not noindirect) (setq binding (keymap--get-keyelt binding nil)))
-        (if (and (or (eq binding definition)
-                     (and (consp definition) (equal binding definition)))
-                 (not (and nomenus (romacs--where-mouse-prefix-p (car row)))))
-            (setq found (cons (car row) found))))
-      (setq rows (cdr rows)))
-    (nreverse found)))
-
-(defun romacs--where-preferred (sequence modifier)
-  (let ((i 0) (result 1))
-    (while (and (> result 0) (< i (length sequence)))
-      (let ((event (aref sequence i)))
-        (if (not (integerp event)) (setq result 0)
-          (let ((bits (logand event 130023424)))
-            (if (= bits modifier) (setq result 2)
-              (if (/= bits 0) (setq result 0))))))
-      (setq i (1+ i)))
-    result))
-
-(defun romacs--where-modifier ()
-  (let ((entry (assq where-is-preferred-modifier
-                     '((A . 4194304) (alt . 4194304) (C . 67108864)
-                       (ctrl . 67108864) (control . 67108864) (H . 16777216)
-                       (hyper . 16777216) (M . 134217728) (meta . 134217728)
-                       (S . 33554432) (shift . 33554432) (s . 8388608)
-                       (super . 8388608) (up . 1) (down . 2) (drag . 4)
-                       (click . 8) (double . 16) (triple . 32)))))
-    (if entry (cdr entry) 0)))
-
-(defun romacs--where-advertised (definition maps)
-  (let ((advertised (if (symbolp definition) (get definition :advertised-binding)))
-        (result nil))
-    (while (and (consp advertised) (not result))
-      (if (eq (romacs--where-lookup maps (car advertised)) definition)
-          (setq result (car advertised)))
-      (setq advertised (cdr advertised)))
-    (if (and (not result) advertised
-             (eq (romacs--where-lookup maps advertised) definition))
-        (setq result advertised))
-    result))
-
-(defvar romacs--where-cache nil
-  "keymap.c where_is_cache: each definition's key sequences in the keymaps
-`romacs--where-cache-maps', ignoring menus and following indirection, while
-`romacs--keymap-generation' stays `romacs--where-cache-generation'.")
-(defvar romacs--where-cache-maps t)
-(defvar romacs--where-cache-generation nil)
-
-(defun romacs--where-cached (maps)
-  "The reverse map of MAPS, rebuilt when they or any keymap changed."
-  (if (not (and romacs--where-cache (equal maps romacs--where-cache-maps)
-                (eql romacs--where-cache-generation (romacs--keymap-generation))))
-      (let ((table (make-hash-table :test 'eql))
-            (rows (romacs--where-bindings maps)))
-        (while rows
-          (let ((row (car rows)))
-            (if (not (romacs--where-mouse-prefix-p (car row)))
-                (let ((binding (keymap--get-keyelt (cdr row) nil)))
-                  (puthash binding (cons (car row) (gethash binding table)) table))))
-          (setq rows (cdr rows)))
-        (maphash (lambda (binding sequences) (puthash binding (nreverse sequences) table)) table)
-        (setq romacs--where-cache table romacs--where-cache-maps maps
-              romacs--where-cache-generation (romacs--keymap-generation))))
-  romacs--where-cache)
-
-(defun where-is-internal (definition &optional keymap firstonly noindirect no-remap)
-  "Return keys invoking DEFINITION in KEYMAP, respecting shadows and remapping."
-  (let* ((maps (cond ((and (consp keymap) (keymapp (car keymap))) keymap)
-                     (keymap (list keymap (current-global-map)))
-                     (t (current-active-maps))))
-         (remapping (romacs--where-remapping definition maps))
-         (modifier (romacs--where-modifier)))
-    (if (and (not no-remap) remapping) (setq definition remapping))
-    (or (and firstonly (romacs--where-advertised definition maps))
-        (romacs--where-find definition maps firstonly noindirect no-remap modifier))))
-
-(defun romacs--where-find (definition maps firstonly noindirect no-remap modifier)
-  (let* ((nomenus (and firstonly (not (eq firstonly 'non-ascii))))
-         ;; keymap.c where_is_internal: the cache serves menu-less lookups
-         ;; through indirection; any other lookup enumerates the maps.
-         (cache (and nomenus (not noindirect) (romacs--where-cached maps)))
-         (rows (if (not cache) (romacs--where-bindings maps)))
-         (candidates (lambda (definition)
-                       (if cache (gethash definition cache)
-                         (romacs--where-candidates definition rows noindirect nomenus))))
-         (pending (funcall candidates definition))
-         (remapped nil) (second nil) (found nil) (answer nil))
-    (while (and (or pending (not second)) (not answer))
-      (if (not pending) (setq pending remapped second t))
-      (if pending
-          (let* ((sequence (car pending))
-                 (value (romacs--where-lookup maps sequence)))
-            (setq pending (cdr pending))
-            (if (and second (symbolp value) value)
-                (setq value (or (romacs--where-remapping value maps) value)))
-            (if (equal value definition)
-                (if (and (not no-remap) (not second) (= (length sequence) 2)
-                         (eq (aref sequence 0) 'remap) (symbolp (aref sequence 1)))
-                    (setq remapped (append (funcall candidates (aref sequence 1)) remapped))
-                  ;; The cache shares SEQUENCE: change a copy.
-                  (if (stringp (aref sequence (1- (length sequence))))
-                      (progn (setq sequence (copy-sequence sequence))
-                             (aset sequence (1- (length sequence)) "(any string)")))
-                  (if (not (or (member sequence found)
-                               (and (= (length sequence) 1)
-                                    (symbolp (aref sequence 0))
-                                    (get (aref sequence 0) 'non-key-event))))
-                      (setq found (cons sequence found)))
-                  (if (or (eq firstonly 'non-ascii)
-                          (and firstonly (= (romacs--where-preferred sequence modifier) 2)))
-                      (setq answer sequence)))))))
-    (setq found (nreverse found))
-    (or answer (if (not firstonly) found
-                 (romacs--where-first found modifier)))))
-
-(defun romacs--where-first (found modifier)
-  (let ((tail found) (answer nil))
-    (while (and (/= modifier 0) tail (not answer))
-      (if (> (romacs--where-preferred (car tail) modifier) 0)
-          (setq answer (car tail)))
-      (setq tail (cdr tail)))
-    (or answer (car found))))
+(defun romacs--menu-filter (filter definition)
+  "Apply a menu item's FILTER to its DEFINITION, as keymap lookup does.
+Errors give nil (keyboard.c menu_item_eval_property)."
+  (let ((inhibit-redisplay t))
+    (condition-case nil (eval (list filter (list 'quote definition)) nil) (error nil))))
 
 ;; textprop.c's char-property motion, composed as its C composes the
 ;; overlay and text-property primitives.
@@ -754,24 +464,25 @@ The signal is logged, after LOG, to *Messages* only, as GNU's add_to_log."
 ;; nil `fontified' char property, call `fontification-functions' with that
 ;; position, each through dsafe_call1 and with the variable itself bound to
 ;; nil.  A buffer-local `t' runs the global functions; a global `t' is
-;; ignored.  Redisplay then reads the property again: a function that left
-;; it nil is not called again in that stretch, so none can loop.
-(defun romacs--redisplay-fontify (start end)
-  "Run `fontification-functions' over the unfontified text from START to END.
-Redisplay calls this in the buffer of a window showing START to END."
-  (let ((buffer (current-buffer)) (pos start))
-    (while (and pos (< pos end) fontification-functions (not memory-full))
-      (if (get-char-property pos 'fontified)
-          (setq pos (next-single-char-property-change pos 'fontified nil end))
-        (romacs--run-fontification-functions pos)
-        (if (not (buffer-live-p buffer))
-            (setq pos nil)
-          ;; GNU's fig leaf: back to the displayed buffer, whose text the
-          ;; functions may have shortened.
-          (set-buffer buffer)
-          (setq end (min end (point-max)))
-          (unless (get-char-property pos 'fontified)
-            (setq pos (next-single-char-property-change pos 'fontified nil end))))))))
+;; ignored.  The display iterator runs its handlers at the first position
+;; of a hidden stretch too, `fontified' before `invisible', and then steps
+;; over the stretch, so nothing inside it is asked for:
+;; `romacs--fontify-next' finds each position as the iterator reaches it.
+;; Redisplay then reads the property again: a function that left it nil is
+;; not called again in that stretch, so none can loop.
+(defun romacs--redisplay-fontify (window start end)
+  "Run `fontification-functions' over the text WINDOW shows from START to END.
+Redisplay calls this in the buffer of WINDOW."
+  (let ((buffer (current-buffer))
+        (pos (romacs--fontify-next window start end)))
+    (while (and pos fontification-functions (not memory-full))
+      (romacs--run-fontification-functions pos)
+      (setq pos (when (and (buffer-live-p buffer) (window-live-p window))
+                  ;; GNU's fig leaf: back to the displayed buffer, whose text
+                  ;; the functions may have shortened.
+                  (set-buffer buffer)
+                  (setq end (min end (point-max)))
+                  (romacs--fontify-next window pos end t))))))
 
 (defun romacs--run-fontification-functions (pos)
   (let ((functions fontification-functions)
@@ -841,6 +552,43 @@ CONDITIONS or has a regexp matching ERROR's message."
 
 ;;; Finalizers
 
+(defvar romacs--undo-offering nil
+  "Non-nil while `romacs--offer-undo-lists' asks: a collection inside the
+function, which GNU's has inhibited, asks nothing more of it.")
+
+(defun romacs--offer-undo-lists ()
+  "undo.c truncate_undo_list's call of `undo-outer-limit-function', for each
+buffer whose first undo record a collection found past `undo-outer-limit'.
+A collection runs no Lisp, so this comes after it (VM2-UNDO-OUTER), with that
+buffer current.  A nil answer truncates the list as without the function; any
+other leaves it to the function, and so does an error, logged to *Messages*.
+A quit leaves this buffer and the rest to the next collection."
+  (unless romacs--undo-offering
+    (let ((offer (romacs--take-undo-offer))
+          (asked nil))
+      (when offer
+        (let ((romacs--undo-offering t)
+              (match-data (match-data)))
+          (save-current-buffer
+            (unwind-protect
+                ;; One at a time, each looked for afresh: the function, or
+                ;; whatever ran while it asked, may have changed another
+                ;; buffer's list since the collection.  A buffer is asked
+                ;; about once in a run: one the function has put past the
+                ;; limit again since is the next collection's.
+                (while offer
+                  (setq asked (cons (car offer) asked))
+                  (set-buffer (car offer))
+                  (romacs--answer-undo-offer
+                   (car offer)
+                   (condition-case err
+                       (funcall undo-outer-limit-function (cdr offer))
+                     (error (let ((inhibit-message t))
+                              (message "undo-outer-limit-function failed: %S" err))
+                            t)))
+                  (setq offer (romacs--take-undo-offer asked)))
+              (set-match-data match-data t))))))))
+
 (defvar romacs--post-gc-owned nil
   "Non-nil while a `romacs--run-finalizers' that took a collection's
 `post-gc-hook' is active: a run started by a collection inside it leaves
@@ -861,6 +609,9 @@ hook is this run's, which runs once.  The run takes its work before it
 allocates, and a run with nothing to do returns at once.  It runs at a safe
 point after the collection, inside whatever code runs there, and keeps that
 code's match data and current buffer, as for a process filter."
+  ;; As garbage_collect, the undo lists come first.  Theirs is no finalizer's
+  ;; work: quits are not held off from a function that may ask a question.
+  (romacs--offer-undo-lists)
   ;; Quits wait from before anything is taken: a finalizer taken is emptied.
   (let* ((inhibit-quit t)
          (collected (and (not romacs--post-gc-owned) (romacs--take-post-gc)))

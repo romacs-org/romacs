@@ -318,11 +318,13 @@ pub struct Text {
 romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table, ts_linecols });
 impl std::ops::Deref for Text {
     type Target = TextBody;
+    #[inline]
     fn deref(&self) -> &TextBody {
         &self.body
     }
 }
 impl std::ops::DerefMut for Text {
+    #[inline]
     fn deref_mut(&mut self) -> &mut TextBody {
         &mut self.body
     }

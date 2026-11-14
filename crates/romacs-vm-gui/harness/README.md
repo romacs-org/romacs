@@ -429,6 +429,33 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+
+## The render thread at rest (`rest_live.py`)
+
+What the render thread draws, and why, while nothing on screen changes.
+Under `ROMACS_DIAGNOSTICS=1` it writes its frame counters as `frame-stats`
+lines on stderr (`render_thread/frame_stats.rs`): frames planned and
+presented per demand reason (`redisplay` for dirty content, `platform_redraw`
+for a redraw nothing of ours asked for, an effect's own name beside
+`redisplay` while it animates), redraw requests and events, the scenes the
+evaluator sent (`scene_commits`) and loop wakeups; one line a second while
+they move, none once they rest, so the last line holds the totals. The
+harness holds one `--loadup` session in four states by real keys and takes
+each state's frames from those lines: idle with the blink off (no frame,
+the main thread under 1% of a core), GNU's blink (two frames a second), an
+agent chat whose turn runs (its clock, one frame a second) and the same
+with a timer 20 times a second that changes nothing. A frame that answers
+no scene of the evaluator's, or names another reason, fails its state, and
+so does a blink or a clock that draws too little for the time it was held.
+`ROMACS_HARNESS_WLR_ENV` (`KEY=VALUE ...`) is added to the session's
+environment to run the private compositor on a real GPU, where effects the
+software renderer suppresses can stand.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/rest_live.py --binary BIN --output DIR \
+  [--seconds 3..6] [--tools LABWC-DIR]   # about 1 minute
+```
+
 ## Typing while background work allocates (`gc_typing_live.py`)
 
 Key latency against collections: one isolated `-Q --loadup` session with
@@ -447,6 +474,31 @@ evaluates more Lisp with the setup, such as a variant's
 ```sh
 python3 -B crates/romacs-vm-gui/harness/gc_typing_live.py --binary BIN --output DIR \
   [--prompt] [--seed N] [--tools LABWC-DIR:WLR-RANDR-DIR]   # about 3 minutes
+```
+
+## What one redisplay costs (`display_stages_live.py`)
+
+Redisplay's cost by scenario, in instructions, held to bars. Each scenario
+of `display_stages.el` (synthetic buffers: plain text, text with invisible
+and `display` parts, an agent chat) runs in a fresh `-Q --loadup` session
+in a private headless labwc: a buffer shown one way, then 30 steps, each a
+timer that makes the scenario's change followed by the loop's own
+redisplay. The session reads `romacs-instructions` and
+`romacs--display-stats` at each step's start, all before it writes
+anything, so the report has, per step and as medians, the instructions and
+conses spent inside redisplay beside the whole step's instructions, the
+windows rebuilt, the bands expanded, the layouts asked of the layout host
+and the frames submitted. `display_stages_bars.json` holds each scenario's
+figures: instructions and conses under a ceiling, the counts exactly, so a
+step that no longer does its change fails too. So does a scenario more
+than a tenth of whose steps paint when they change nothing, or do not when
+they do. Work that removes cost lowers the bars in the same change:
+`--write-bars FILE` writes the ones a run would pass. `--record` adds a
+call graph of each scenario's steps (a frame-pointer build).
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \
+  [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
 ```
 
 ## Typing while jabber catches up its archives (`jabber_live.py`, `xmpp_fixture.py`)

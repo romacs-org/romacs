@@ -127,6 +127,56 @@ mod reclamation_tests {
     }
 }
 use super::*;
+
+#[cfg(test)]
+thread_local! {
+    /// The variables this thread's VMs have read through `Vm::variable_value`.
+    static VARIABLE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The variables this thread's VMs have read through `Vm::variable_value`.
+#[cfg(test)]
+pub(crate) fn variable_reads() -> usize {
+    VARIABLE_READS.with(std::cell::Cell::get)
+}
+
+/// Where one buffer's value of a variable is read from.
+#[derive(Clone, Copy)]
+enum Place {
+    /// A symbol slot's value cell: the variable's own, or the buffer's
+    /// private binding of it.
+    Slot(usize),
+    /// A built-in's native storage.
+    Native(forwarded::Fwd),
+    /// Found at each read: an alias, a per-buffer or a fenced built-in.
+    Each,
+}
+
+/// Variables a primitive reads at every call, and where their values in one
+/// buffer are (`Vm::read_places`): GNU reads a C variable, into which
+/// set-buffer swapped the buffer's binding. A place holds for its buffer
+/// until a local-binding table changes or a collection moves the buffer
+/// (`Forwarded::local_epoch`, as `Vm::eval_limit_local`), and while the
+/// variable's redirect is the one it was found under (an alias, a fence
+/// and a first localization each change it).
+#[derive(Clone, Copy)]
+pub(crate) struct Places<const N: usize> {
+    symbols: [usize; N],
+    buffer: Value,
+    epoch: u64,
+    /// Each variable's redirect when found, and where it was found.
+    found: [(Option<VariableRedirect>, Place); N],
+}
+impl<const N: usize> Places<N> {
+    /// Of the variables at symbol slots SYMBOLS, none found yet.
+    pub(crate) fn new(symbols: [usize; N]) -> Self {
+        Self { symbols, buffer: Value::UNBOUND, epoch: 0, found: [(None, Place::Each); N] }
+    }
+    /// The symbol slot of variable I.
+    pub(crate) fn symbol(&self, i: usize) -> usize {
+        self.symbols[i]
+    }
+}
+
 impl Vm {
     /// GNU eval.c:747: search oldest-first for this exact symbol, without
     /// following aliases. Local bindings are excluded; localized ordinary
@@ -321,6 +371,8 @@ impl Vm {
         Ok(self.slots[slot].value)
     }
     pub(super) fn variable_value(&mut self, slot: usize) -> Result<Value> {
+        #[cfg(test)]
+        VARIABLE_READS.with(|reads| reads.set(reads.get() + 1));
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             let local = self.variable_binding_slot(base, false)?;
@@ -328,6 +380,62 @@ impl Vm {
         }
         let local = self.variable_binding_slot(slot, false)?;
         Ok(self.slots[local].value)
+    }
+    /// The values of PLACES' variables in the current buffer, each as
+    /// `variable_value` gives it, read where they were found: None when
+    /// the places no longer hold, or one of them is found at each read,
+    /// for [`Self::find_places`].
+    #[inline]
+    pub(crate) fn read_places<const N: usize>(&self, places: &Places<N>) -> Option<[Value; N]> {
+        if places.buffer != self.slots[self.buffer_slot].value || places.epoch != self.forwarded.local_epoch {
+            return None;
+        }
+        // By index: every call of a search or a scan comes through here.
+        let mut values = [Value::NIL; N];
+        let mut i = 0;
+        while i < N {
+            let (redirect, place) = places.found[i];
+            if self.variable_redirects.get(places.symbols[i]).copied().flatten() != redirect {
+                return None;
+            }
+            values[i] = match place {
+                Place::Slot(slot) => self.slots[slot].value,
+                Place::Native(fwd) => self.forwarded.stored(fwd)?,
+                Place::Each => return None,
+            };
+            i += 1;
+        }
+        Some(values)
+    }
+    /// The values of PLACES' variables in the current buffer, each read
+    /// with `variable_value`, and PLACES made theirs there.
+    #[cold]
+    pub(crate) fn find_places<const N: usize>(&mut self, places: &mut Places<N>) -> Result<[Value; N]> {
+        let mut values = [Value::NIL; N];
+        for (i, value) in values.iter_mut().enumerate() {
+            let symbol = places.symbols[i];
+            *value = self.variable_value(symbol)?;
+            // After the read, which resolves a lazy redirect.
+            places.found[i] = (self.variable_redirects.get(symbol).copied().flatten(), self.variable_place(symbol)?);
+        }
+        places.buffer = self.slots[self.buffer_slot].value;
+        places.epoch = self.forwarded.local_epoch;
+        Ok(values)
+    }
+    /// Where `variable_value` reads SLOT's value in the current buffer.
+    fn variable_place(&mut self, slot: usize) -> Result<Place> {
+        use forwarded::Fwd;
+        if self.indirect_variable(slot) != slot {
+            return Ok(Place::Each);
+        }
+        Ok(match self.native_forwarding(slot) {
+            Some(fwd @ (Fwd::Obj(_) | Fwd::Bool(_) | Fwd::Int(_))) => {
+                let local = self.variable_binding_slot(slot, false)?;
+                if local == slot { Place::Native(fwd) } else { Place::Slot(local) }
+            }
+            Some(Fwd::Buffer(_) | Fwd::Fence(_)) => Place::Each,
+            None => Place::Slot(self.variable_binding_slot(slot, false)?),
+        })
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);

@@ -529,6 +529,7 @@ impl Vm {
 
     /// Expand a whole mode-line format for the window whose buffer is current.
     pub(super) fn mode_line_band(&mut self, format: &Form, state: &SpecState) -> Result<Band> {
+        self.display_state.stats.bands += 1;
         self.mode_line_expand(format, state, Target::Display)
     }
 

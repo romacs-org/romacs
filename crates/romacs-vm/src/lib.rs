@@ -18,10 +18,12 @@ mod char_table;
 mod graphics;
 mod width_rule;
 mod map_keymap;
+mod where_is;
 #[cfg(test)]
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod command_set;
 mod command;
 mod interpreted_closure;
 mod oclosure;
@@ -119,6 +121,7 @@ pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
 mod isolate;
+mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
@@ -140,6 +143,7 @@ mod lstring;
 mod let_forms;
 mod symkey;
 mod display;
+mod display_stats;
 mod fringe;
 mod tab_bar;
 mod overlay_order;
@@ -1339,6 +1343,8 @@ pub struct Vm {
     buffer_resolutions: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
+    /// The char tables read as flat rows (`char_table::flat`).
+    flat_tables: char_table::FlatTables,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1506,6 +1512,8 @@ pub struct Vm {
     region_collect: bool,
     /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
     isolates: isolate::Isolates,
+    /// This session's keeper, once attached (`keeper.rs`).
+    keeper: Option<keeper::Link>,
     /// GNU inotify.c inotifyfd: the file notification instance, made by
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
     inotify: Option<std::os::fd::OwnedFd>,
@@ -1647,6 +1655,8 @@ pub struct Vm {
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
     completion_walks: u64,
+    /// The symbols M-x lists (`command_set.rs`).
+    command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
@@ -1659,6 +1669,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// A collection found a list for `undo-outer-limit-function`, and the
+    /// aftermath has not looked (`Vm::take_undo_offer`).
+    undo_offers_due: bool,
     /// Escapes being unwound, in any engine: routing takes it, the driver gives
     /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
     unwinding: usize,
@@ -1811,6 +1824,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     referrers,
     local_owners,
     completion_walks,
+    command_set,
     completion_case_memo,
     caches,
     stack,
@@ -1818,6 +1832,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
+    undo_offers_due,
     unwinding,
     aftermath_runs,
     keymap_filters,
@@ -1839,6 +1854,7 @@ romacs_snapshot::snapshot_fields!(Vm {
 } at_rest {
     site_leaf,
     regexp_cache,
+    flat_tables,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1858,6 +1874,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     region_free,
     region_collect,
     isolates,
+    keeper,
     inotify,
     fence,
     pending,
@@ -1920,6 +1937,7 @@ impl Vm {
             buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            flat_tables: char_table::FlatTables::default(),
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
@@ -1990,6 +2008,7 @@ impl Vm {
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
+            keeper: None,
             inotify: None,
             buffer_slot: 0,
             resolved_buffer: None,
@@ -2053,6 +2072,7 @@ impl Vm {
             referrers: None,
             local_owners: None,
             completion_walks: 0,
+            command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
             stack: vec![],
@@ -2060,6 +2080,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
+            undo_offers_due: false,
             unwinding: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],
@@ -2232,12 +2253,17 @@ impl Vm {
             self.macros.remove(&slot);
         }
         self.world_version = world;
+        self.command_set.changed(slot);
         Ok(())
     }
     /// Record whether `names' maps SLOT's name to SLOT.
     fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
         if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
         self.initial_obarray[slot] = interned;
+        // A void symbol's interning changes no command.
+        if self.slots.get(slot).is_some_and(|s| !matches!(s.function, Value::NIL | Value::UNBOUND)) {
+            self.command_set.changed(slot);
+        }
     }
     /// Whether SLOT's symbol is interned in the initial obarray.
     fn in_initial_obarray(&self, slot: usize) -> bool {

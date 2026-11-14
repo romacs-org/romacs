@@ -287,6 +287,10 @@ impl HostInput for GuiHost {
         self.sender.pointer()
     }
 
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        Some(self.sender.take_key_repeats())
+    }
+
     fn native_window(&mut self, action: romacs_vm::NativeWindow) -> Option<bool> {
         let mut shared = self.shared.borrow_mut();
         let Some(server) = shared.server.as_mut() else {

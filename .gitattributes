@@ -127,6 +127,5 @@ lib-src/rcs2log diff=shell
 # whitespace.
 java/INSTALL -whitespace
 
-lisp/romacs/romacs-bundled-autoloads.el merge=romacs-derived
 ledger/smell-floors.json merge=romacs-floors
 ledger/unsafe-floors.json merge=romacs-unsafe-floors

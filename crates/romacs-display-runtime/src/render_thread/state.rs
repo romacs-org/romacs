@@ -895,6 +895,8 @@ pub(super) struct RenderApp {
     /// from the physical modifier keys' own key events.
     pub(super) modifier_sides: super::modifier_sides::ModifierSides,
     pub(super) key_repeats: super::key_repeat::KeyRepeats,
+    /// The frame counters' diagnostic lines (`frame_stats.rs`).
+    pub(super) stats_lines: super::frame_stats::StatsLines,
     /// The evaluator's busy indicator (busy_toast.rs).
     pub(super) busy_toast: super::busy_toast::BusyToast,
     /// How far the last scene from the evaluator got (`draw_fresh_scene').
@@ -1107,6 +1109,7 @@ impl RenderApp {
             modifier_state: winit::keyboard::ModifiersState::empty(),
             modifier_sides: super::modifier_sides::ModifierSides::default(),
             key_repeats: super::key_repeat::KeyRepeats::default(),
+            stats_lines: super::frame_stats::StatsLines::default(),
             busy_toast: super::busy_toast::BusyToast::default(),
             scene: SceneDraw::Drawn,
             pending_file_drops: Default::default(),

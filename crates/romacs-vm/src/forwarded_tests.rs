@@ -110,6 +110,19 @@ fn heap_initial_values_are_materialised_lazily_once() {
     assert_eq!(vm.display(a).unwrap(), "(keymap)");
 }
 
+/// A restored process names its own host (GNU's `init_editfns`), not the
+/// one its image was built on.
+#[test]
+fn a_restored_process_reads_its_host_name_again() {
+    let mut vm = Vm::new();
+    let f = fwd(&mut vm, "system-name");
+    let built = vm.eval_source_raw("system-name").unwrap();
+    vm.world_reinit();
+    assert_eq!(vm.forwarded.object(f), Value::UNBOUND);
+    let now = vm.eval_source_raw("system-name").unwrap();
+    assert_eq!(vm.display(now).unwrap(), vm.display(built).unwrap());
+}
+
 #[test]
 fn system_name_is_materialised_lazily_once() {
     let mut vm = Vm::new();

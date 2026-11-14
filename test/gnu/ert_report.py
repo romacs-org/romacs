@@ -155,6 +155,8 @@ def run_native(binary, rel_path: pathlib.Path, mini_harness: pathlib.Path | None
     env.pop('EMACSLOADPATH', None)
     env['LANG'] = 'C'
     env['HOME'] = str(home)
+    # A throwaway HOME spawns no world builder: Romacs boots from source.
+    env['ROMACS_WORLD'] = 'off'
     # Avoid test report side effects inherited from the caller.
     env.pop('EMACS_TEST_JUNIT_REPORT', None)
     try:

@@ -85,6 +85,13 @@ class LispLayoutTests(unittest.TestCase):
                     for notice in notices:
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU custom.el', source)
+                elif file == ROOT / 'lisp/romacs/romacs-commands.el':
+                    # Derives simple.el's read-extended-command-1.
+                    notices = re.findall(copyright_pattern, (ROOT / 'lisp/gnu/simple.el').read_text())
+                    self.assertTrue(notices, 'GNU_SIMPLE_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU simple.el', source)
                 elif file == ROOT / 'lisp/romacs/romacs-keymap.el':
                     # Derived from GNU src/keyboard.c, outside lisp/gnu/.
                     self.assertIn(';; Copyright (C) 1985-1989, 1993-1997, 1999-2026 Free Software Foundation,', source)
@@ -112,11 +119,10 @@ class LispLayoutTests(unittest.TestCase):
                     self.assertIn(';; Copyright (C) 2010-2026 Free Software Foundation, Inc.', (ROOT / 'lisp/gnu/color.el').read_text())
                     self.assertIn(';; Portions Copyright (C) 2010-2026 Free Software Foundation, Inc., from\n;; GNU Emacs lisp/color.el', source)
                 elif file == ROOT / 'lisp/romacs/romacs-theme-modus.el':
-                    # Generated from modus-themes.el (GNU ELPA, FSF copyright) by
-                    # tools/adapt-modus; retains its notice and names the version.
+                    # Adapts modus-themes.el (GNU ELPA, FSF copyright) as it
+                    # loads; retains its notice and names the version.
                     self.assertIn(';; Copyright (C) 2019-2026  Free Software Foundation, Inc.', source)
                     self.assertIn(';; Adapted from modus-themes.el 5.3.0 by Protesilaos Stavrou', source)
-                    self.assertRegex(source, r'sha256 [0-9a-f]{64}')
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)

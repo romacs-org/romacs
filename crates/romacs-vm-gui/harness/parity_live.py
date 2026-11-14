@@ -173,6 +173,9 @@ class Engine:
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
         self.probe_dir = root / 'probe'
+        # A runtime directory for the editor alone; the compositor keeps
+        # the root, where its socket's path is short enough to bind.
+        self.editor_runtime = None
 
     def start(self, tools):
         """Start the compositor and the editor; a failure leaves neither running."""
@@ -198,6 +201,8 @@ class Engine:
         time.sleep(.3)
         started = time.time()
         output = (self.root / 'engine.log').open('w')
+        if self.editor_runtime:
+            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
@@ -426,11 +431,14 @@ def prepare_world(romacs, env, cwd):
     return round(time.time() - started, 3) if done.returncode == 0 else None
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=()):
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=(), check=False):
     """`romacs-vm-gui --loadup ARGS' on INIT, as ~/.config/romacs/init.el
     unless INIT is None, from a world prepared first (`prepare_world', its
     seconds in `world_seconds'), as a user's HOME holds one; CLS as
-    `gnu_engine'."""
+    `gnu_engine'.  With CHECK, `romacs-display-check' is on: every window
+    redisplay reuses is also built in full, which a harness that measures
+    must not ask for, and one that asks reads `check-mismatches' from
+    `romacs--display-stats' before it ends."""
     (home / '.config/romacs').mkdir()
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
@@ -439,7 +447,8 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup', *args], root, lisp, env, timeout).start(tools)
+    checked = ('--eval', '(setq romacs-display-check t)') if check else ()
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *checked, *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 
