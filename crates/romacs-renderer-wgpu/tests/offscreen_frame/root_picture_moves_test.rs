@@ -63,6 +63,10 @@ struct Extras {
     underlined: bool,
     /// The window drawn as a pane: rounded corners and an edge.
     paned: bool,
+    /// The pane's right corners just beside the rows, which end short of
+    /// the frame's edge, and a fringe bitmap whose ink reaches far past
+    /// its column on the mode line, the window's rows' fringe bitmap gone.
+    cornered: bool,
 }
 
 fn line(at: usize) -> String {
@@ -148,14 +152,15 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
                 *face_id = FaceId::new(BIG);
             }
         }
-        if at == FRINGE_LINE {
+        if at == FRINGE_LINE && !extras.cornered {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 1, FaceId::new(NORMAL), FringeSide::Left);
         }
         if extras.tiled && at == TILED_LINE {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 2, FaceId::new(NORMAL), FringeSide::Left);
         }
         let end = 2.0 + text.chars().count() as f32 * CELL;
-        frame.add_stretch(end, y, width - end, h, BG, FaceId::new(NORMAL), false);
+        let right = if extras.cornered { width - 10.0 } else { width };
+        frame.add_stretch(end, y, (right - end).max(0.0), h, BG, FaceId::new(NORMAL), false);
         if at == IMAGE_LINE {
             let x = 2.0 + 14.0 * CELL;
             frame.glyphs.push(FrameGlyph::Image {
@@ -177,11 +182,13 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         }
         y += h;
     }
-    if extras.paned {
+    if extras.paned || extras.cornered {
         // Round the window and its mode line, its corners clear of the rows,
-        // its top edge on the first row.
+        // its top edge on the first row; cornered, its right corners start
+        // where the rows end.
+        let right = if extras.cornered { width - 6.0 } else { width + 6.0 };
         frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
-            bounds: Rect::new(-6.0, 0.0, width + 12.0, body + ROW),
+            bounds: Rect::new(-6.0, 0.0, right + 6.0, body + ROW),
             radius: 4.0,
             edge: Some(Color::rgb(0.9, 0.9, 0.2)),
             dim: 0.0,
@@ -192,6 +199,9 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         frame.add_border(width - 6.0, 0.0, 2.0, body, Color::rgb(0.8, 0.2, 0.2));
     }
     frame.set_draw_context(window, GlyphRowRole::ModeLine, None);
+    if extras.cornered {
+        frame.push_fringe_bitmap(0.0, body, 2.0, ROW, 1, FaceId::new(NORMAL), FringeSide::Left);
+    }
     frame.add_stretch(0.0, body, width, ROW, Color::rgb(0.35, 0.35, 0.4), FaceId::new(MODE), false);
     for (at, ch) in "-:-- scratch".chars().enumerate() {
         frame.add_char(ch, 2.0 + at as f32 * CELL, body, CELL, ROW, 6.0, false);
@@ -293,12 +303,12 @@ fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined || extras.paned)) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined || extras.paned || extras.cornered)) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
     }
-    if extras.paned && (scale - 1.5).abs() > f32::EPSILON {
+    if (extras.paned || extras.cornered) && (scale - 1.5).abs() > f32::EPSILON {
         assert!(call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED) > bands, "bands move under the pane's edge");
     }
 }
@@ -348,6 +358,13 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane() {
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane_at_a_scale_of_two() {
     scrolled_through_picture_equals_whole(2.0, Extras { paned: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_beside_a_pane_s_corner() {
+    // Ink far from the rows reaches past its cell: the rows' band, drawn
+    // by its own ink, stays clear of the corner beside it, and moves.
+    scrolled_through_picture_equals_whole(1.0, Extras { cornered: true, ..Extras::default() });
 }
 
 #[test]

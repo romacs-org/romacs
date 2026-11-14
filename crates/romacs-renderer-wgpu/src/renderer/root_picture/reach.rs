@@ -6,7 +6,9 @@
 //! and is, and draw every glyph whose ink enters the patch. The text pass
 //! notes each quad it builds against its cell (`note`); a picture keeps the
 //! largest reach its passes have seen and grows each patch by it.
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+
+use rustc_hash::FxHashMap;
 
 use romacs_display_protocol::types::Rect;
 
@@ -46,8 +48,77 @@ impl Reach {
     }
 }
 
+/// How far ink reached past its cells, by the row of cells it was drawn in
+/// (a cell's y and height, bit for bit).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Rows(FxHashMap<(u32, u32), Reach>);
+
+impl Rows {
+    /// Rows of cells (their y and height) and how far ink reached in each.
+    #[cfg(test)]
+    pub(crate) fn of_rows(rows: impl IntoIterator<Item = ((f32, f32), Reach)>) -> Self {
+        Rows(rows.into_iter().map(|((y, h), reach)| ((y.to_bits(), h.to_bits()), reach)).collect())
+    }
+
+    /// The farthest ink drawn in a row whose height overlaps BOUNDS'
+    /// reached: a group's own reach, and its neighbours' in any row it
+    /// shares. None drawn there: none.
+    pub(crate) fn of(&self, bounds: Rect) -> Reach {
+        self.0
+            .iter()
+            .filter(|((y, h), _)| {
+                let (y, h) = (f32::from_bits(*y), f32::from_bits(*h));
+                y < bounds.y + bounds.height && bounds.y < y + h
+            })
+            .fold(Reach::default(), |reach, (_, row)| reach.max(*row))
+    }
+
+    /// SELF with OTHER's rows, the farther reach where both have one.
+    pub(crate) fn merge(&mut self, other: Rows) {
+        for (row, reach) in other.0 {
+            let entry = self.0.entry(row).or_default();
+            *entry = entry.max(reach);
+        }
+    }
+
+    /// SELF after the rows within FROM's height were copied DY away: what
+    /// was drawn where they land is gone, and theirs reaches there too (and
+    /// still where they were, whose pixels the copy leaves).
+    pub(crate) fn moved(&mut self, from: Rect, dy: f32) {
+        let within = |(y, h): (u32, u32), top: f32| {
+            let (y, h) = (f32::from_bits(y), f32::from_bits(h));
+            top <= y && y + h <= top + from.height
+        };
+        let carried: Vec<((u32, u32), Reach)> = self
+            .0
+            .iter()
+            .filter(|(row, _)| within(**row, from.y))
+            .map(|(&(y, h), &reach)| (((f32::from_bits(y) + dy).to_bits(), h), reach))
+            .collect();
+        self.0.retain(|row, _| !within(*row, from.y + dy));
+        self.merge(Rows(carried.into_iter().collect()));
+    }
+}
+
+/// The picture's reach, as a plan reads it: ALL, the farthest any ink it
+/// drew went, for groups it has not drawn; and ROWS, by row, for those it
+/// has.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Inks<'a> {
+    pub(crate) all: Reach,
+    pub(crate) rows: &'a Rows,
+}
+
+impl Inks<'_> {
+    /// How far the ink of a group the picture drew at BOUNDS can reach.
+    pub(crate) fn drawn(&self, bounds: Rect) -> Reach {
+        self.rows.of(bounds)
+    }
+}
+
 thread_local! {
     static SEEN: Cell<Reach> = const { Cell::new(Reach { up: 0.0, down: 0.0, left: 0.0, right: 0.0 }) };
+    static SEEN_ROWS: RefCell<Rows> = RefCell::new(Rows::default());
 }
 
 /// Note a glyph drawn as INK in its CELL.
@@ -59,6 +130,10 @@ pub(crate) fn note(cell: Rect, ink: Rect) {
         right: (ink.x + ink.width - cell.x - cell.width).max(0.0),
     };
     SEEN.set(SEEN.get().max(reach));
+    SEEN_ROWS.with_borrow_mut(|rows| {
+        let entry = rows.0.entry((cell.y.to_bits(), cell.height.to_bits())).or_default();
+        *entry = entry.max(reach);
+    });
 }
 
 /// Note POINTS, the corners of what was drawn for CELL.
@@ -73,6 +148,11 @@ pub(crate) fn note_points(cell: Rect, points: impl Iterator<Item = [f32; 2]>) {
 /// The reach noted on this thread since the last take.
 pub(crate) fn take() -> Reach {
     SEEN.take()
+}
+
+/// The reach noted on this thread since the last take of rows, by row.
+pub(crate) fn take_rows() -> Rows {
+    SEEN_ROWS.take()
 }
 
 #[cfg(test)]
@@ -113,6 +193,7 @@ mod tests {
                 ..Reach::default()
             })
         );
+        take_rows();
         // A wave two pixels under its cell.
         note_points(
             Rect::new(0.0, 0.0, 10.0, 20.0),
@@ -125,5 +206,23 @@ mod tests {
                 ..Reach::default()
             }
         );
+    }
+
+    #[test]
+    fn rows_keep_their_reach_and_move_with_their_rows() {
+        take_rows();
+        note(Rect::new(0.0, 0.0, 7.0, 10.0), Rect::new(0.0, 0.0, 10.0, 10.0));
+        note(Rect::new(0.0, 30.0, 7.0, 10.0), Rect::new(-2.0, 30.0, 9.0, 10.0));
+        let mut rows = take_rows();
+        let right = Reach { right: 3.0, ..Reach::default() };
+        let left = Reach { left: 2.0, ..Reach::default() };
+        assert_eq!(rows.of(Rect::new(50.0, 0.0, 5.0, 10.0)), right, "a row's own");
+        assert_eq!(rows.of(Rect::new(0.0, 10.0, 5.0, 10.0)), Reach::default(), "none drawn there");
+        assert_eq!(rows.of(Rect::new(0.0, 5.0, 5.0, 30.0)), right.max(left), "every row it overlaps");
+        // The rows of 0..20 are copied down 30: the row at 30 is overwritten,
+        // and the row at 0 keeps its pixels until it is drawn again.
+        rows.moved(Rect::new(0.0, 0.0, 10.0, 20.0), 30.0);
+        assert_eq!(rows.of(Rect::new(0.0, 30.0, 5.0, 10.0)), right);
+        assert_eq!(rows.of(Rect::new(0.0, 0.0, 5.0, 10.0)), right);
     }
 }

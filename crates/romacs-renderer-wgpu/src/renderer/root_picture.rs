@@ -82,6 +82,8 @@ pub struct RootPicture {
     shown: Option<Shown>,
     /// The farthest ink the picture's passes have drawn past its cells.
     reach: Reach,
+    /// How far, by row of the cells it drew.
+    rows: reach::Rows,
 }
 
 /// The last frame painted, indexed, what it was rasterized under, and
@@ -121,6 +123,7 @@ impl RootPicture {
             bind_group,
             shown: None,
             reach: Reach::default(),
+            rows: reach::Rows::default(),
         }
     }
 
@@ -171,7 +174,10 @@ impl RootPicture {
             Some(s) if repeats => Plan::Clean {
                 rows: damage::text_rows(&s.indexed, |_| true),
             },
-            Some(s) => damage::plan(&s.indexed, frame, &runs, self.reach, renderer.scale_factor()),
+            Some(s) => {
+                let inks = reach::Inks { all: self.reach, rows: &self.rows };
+                damage::plan(&s.indexed, frame, &runs, inks, renderer.scale_factor())
+            }
         };
         let keep = |frame: &FrameGlyphBuffer, runs: Vec<Run>, pictured, effects| Shown {
             indexed: Indexed {
@@ -258,7 +264,7 @@ impl RootPicture {
     /// Copy each of MOVES' bands to its new place in the picture, through a
     /// pooled texture (a texture is not copied onto itself); false when the
     /// pool has none to lend or a band leaves the picture.
-    fn carry(&self, renderer: &mut WgpuRenderer, moves: &[Move]) -> bool {
+    fn carry(&mut self, renderer: &mut WgpuRenderer, moves: &[Move]) -> bool {
         if moves.is_empty() {
             return true;
         }
@@ -288,6 +294,9 @@ impl RootPicture {
         }
         renderer.submit_commands([encoder.finish()]);
         crate::cost::add(crate::cost::BANDS_MOVED, moves.len());
+        for m in moves {
+            self.rows.moved(m.from, m.dy);
+        }
         true
     }
 
@@ -337,7 +346,7 @@ impl RootPicture {
         let device = (surface.device_width().get(), surface.device_height().get());
         let scale = renderer.scale_factor();
         let picture = self.texture.view().clone();
-        self.reach = patched(self.reach, |reach| {
+        let (reach, rows) = patched(self.reach, |reach| {
             for (region, scissor) in pixel_regions(regions, reach, scale, device) {
                 let glyphs = region_glyphs(&shown.indexed, region, reach, &[]);
                 with_glyphs(&mut shown.indexed.frame, glyphs, false, |sub| {
@@ -357,6 +366,8 @@ impl RootPicture {
                 });
             }
         });
+        self.reach = reach;
+        self.rows.merge(rows);
     }
 
     /// Repaint the picture whole from SHOWN's frame, without its cursors;
@@ -370,6 +381,7 @@ impl RootPicture {
     ) -> Shown {
         let picture = self.texture.view().clone();
         reach::take();
+        reach::take_rows();
         let cursors = std::mem::take(&mut shown.indexed.frame.window_cursors);
         renderer.render_frame_glyphs(
             &picture,
@@ -384,6 +396,7 @@ impl RootPicture {
         );
         shown.indexed.frame.window_cursors = cursors;
         self.reach = reach::take();
+        self.rows = reach::take_rows();
         shown.pictured = true;
         shown
     }
@@ -437,7 +450,7 @@ impl RootPicture {
             .zip(&facts)
             .filter_map(|(extent, fact)| extent.map(|extent| fact.1.map_or(extent, |slot| damage::union(extent, slot))))
             .collect();
-        self.reach = patched(self.reach, |reach| {
+        let (reach, rows) = patched(self.reach, |reach| {
             for &extent in &extents {
                 let Some((region, scissor)) = pixel_region(reach.grow(extent), scale, device) else {
                     continue;
@@ -462,18 +475,22 @@ impl RootPicture {
                 });
             }
         });
+        self.reach = reach;
+        self.rows.merge(rows);
     }
 }
 
 /// Draw patches with PATCH under REACH, and again under the farther reach
-/// their glyphs showed, until it covers what they drew; the reach then.
-fn patched(mut reach: Reach, mut patch: impl FnMut(Reach)) -> Reach {
+/// their glyphs showed, until it covers what they drew; the reach then, and
+/// how far by row the last drawing reached.
+fn patched(mut reach: Reach, mut patch: impl FnMut(Reach)) -> (Reach, reach::Rows) {
     loop {
         reach::take();
+        reach::take_rows();
         patch(reach);
         let seen = reach::take();
         if reach.covers(seen) {
-            return reach;
+            return (reach, reach::take_rows());
         }
         reach = reach.max(seen);
     }

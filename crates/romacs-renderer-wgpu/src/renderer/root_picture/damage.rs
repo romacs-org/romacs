@@ -25,7 +25,7 @@ use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::types::{DisplayWindowId, Rect};
 
 use super::moves::{self, Move};
-use super::reach::Reach;
+use super::reach::Inks;
 
 /// A group's name: its window (0 for glyphs of none) and its glyphs' span.
 pub(crate) type Key = (i64, u32, u32);
@@ -115,8 +115,8 @@ pub(crate) fn text_rows(indexed: &Indexed, kept: impl Fn(&Run) -> bool) -> usize
 }
 
 /// What a picture of OLD does to show NEW, whose runs are `new_runs`: its
-/// ink reaches REACH past its cells, at SCALE device pixels per logical one.
-pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reach: Reach, scale: f32) -> Plan {
+/// ink reaches INKS past its cells, at SCALE device pixels per logical one.
+pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks: Inks<'_>, scale: f32) -> Plan {
     let rows = |runs: &[Run], kept: &dyn Fn(&Run) -> bool| {
         let mut keys: Vec<Key> = runs
             .iter()
@@ -151,7 +151,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reac
         .collect();
     changed.sort_unstable();
     let same = |key: &Key| changed.binary_search(key).is_err();
-    let moved = moves::find(&sides, &changed, reach, scale);
+    let moved = moves::find(&sides, &changed, inks, scale);
     let placed = |key: &Key| moved.placed.binary_search(key).is_ok();
     // A changed group the moves place needs no repaint; nor does one of the
     // old frame whose ink lies inside a band a move overwrites.
@@ -167,7 +167,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reac
                 indices
                     .iter()
                     .map(|&i| old.runs[i].bounds)
-                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, reach, new))),
+                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, inks.drawn(*bounds), new))),
             );
         }
     }

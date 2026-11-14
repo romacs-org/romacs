@@ -2,7 +2,7 @@ use romacs_display_protocol::frame_glyphs::{FrameGlyphBuffer, GlyphRowRole};
 use romacs_display_protocol::types::{Color, DisplayWindowId, Rect};
 
 use super::super::damage::{self, Indexed, Plan};
-use super::super::reach::Reach;
+use super::super::reach::{Inks, Reach, Rows};
 use super::{Move, moved_glyph, on_pixels, outward};
 
 const ROW: f32 = 10.0;
@@ -27,7 +27,7 @@ fn window(lines: &[&str], first: usize, rows: usize) -> FrameGlyphBuffer {
 
 fn plan(old: &FrameGlyphBuffer, new: &FrameGlyphBuffer, scale: f32) -> Plan {
     let old = Indexed::new(old.clone());
-    damage::plan(&old, new, &damage::runs(&new.glyphs), Reach::default(), scale)
+    damage::plan(&old, new, &damage::runs(&new.glyphs), Inks { all: Reach::default(), rows: &Rows::default() }, scale)
 }
 
 const LINES: [&str; 8] = ["one", "two", "three", "four", "five", "six", "seven", "eight"];
@@ -172,7 +172,10 @@ fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
     let old = Indexed::new(window(&lines, 0, 5));
     let new = window(&lines, 1, 5);
     let reach = Reach { right: 10.0, ..Reach::default() };
-    let Plan::Regions { moves, regions, .. } = damage::plan(&old, &new, &damage::runs(&new.glyphs), reach, 1.0) else {
+    // Every row of the old picture drawn with ink reaching that far.
+    let rows = Rows::of_rows((0..5u8).map(|row| ((ROW * f32::from(row), ROW), reach)));
+    let inks = Inks { all: reach, rows: &rows };
+    let Plan::Regions { moves, regions, .. } = damage::plan(&old, &new, &damage::runs(&new.glyphs), inks, 1.0) else {
         panic!("a scroll is a move and regions");
     };
     assert_eq!(moves.len(), 1);
