@@ -110,12 +110,14 @@ class Parsing(unittest.TestCase):
         # 10 M of fixed work and 2 instructions per unit of N a step, 4 steps
         # at N 100 and 400: the exponent says it grows, the slope that it is
         # within 3 a unit.
-        flat = row(10**7 + 2 * 100 * 4, 10**7 + 2 * 400 * 4, slope=3.0, steps=4, budget=0.0)
+        flat = row(10**7 + 2 * 100 * 4, 10**7 + 2 * 400 * 4, slope=3.0, steps=4, gui=True, budget=0.0)
         self.assertEqual((flat['status'], flat['slope'], flat['slope_budget']), ('PASS', 2.0, 3.0))
-        steep = row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4)
+        steep = row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4, gui=True)
         self.assertEqual(steep['status'], 'FAIL')
         self.assertIn('slope 5.0 over budget 3.0', steep['reason'])
-        self.assertEqual(row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4, known='tickets.md#y')['status'], 'KNOWN')
+        self.assertEqual(row(10**7, 10**7 + 5 * 300 * 4, slope=3.0, steps=4, gui=True, known='tickets.md#y')['status'], 'KNOWN')
+        # A batch body runs once, whatever its :steps.
+        self.assertEqual(row(10**7, 10**7 + 2 * 300, slope=3.0, steps=4)['slope'], 2.0)
         self.assertNotIn('slope', row(10**7, 4 * 10**7))
         text = s.table([flat])
         self.assertIn('| slope 3.0 | PASS', text)

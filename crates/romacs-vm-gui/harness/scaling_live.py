@@ -97,8 +97,9 @@ def exponent(work_n, work_kn, k):
 
 def slope(work_n, work_kn, probe):
     """The instructions WORK_N grows by to WORK_KN per unit of PROBE's N and
-    per step."""
-    return (work_kn - work_n) / ((probe['k'] - 1) * probe['n'] * probe.get('steps', 1))
+    per step: a batch probe's body runs once, whatever its :steps."""
+    steps = probe.get('steps', 1) if probe['gui'] else 1
+    return (work_kn - work_n) / ((probe['k'] - 1) * probe['n'] * steps)
 
 
 def stack_growth(marks):

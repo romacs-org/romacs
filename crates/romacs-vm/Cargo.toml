@@ -44,9 +44,9 @@ ropey_stable = { package = "ropey", version = "=1.6.1", default-features = false
 # FxHash for maps keyed by VM-allocated slots and ids; foldhash, seeded per
 # map, for maps keyed by names that Lisp, files and the network supply.
 rustc-hash = "2"
+foldhash = "0.2"
 # The vectorised newline search that finds where rows end (src/redisplay.rs).
 memchr.workspace = true
-foldhash = "0.2"
 # fzf scoring split across threads over many candidates (src/fzf.rs), and the
 # collector's threads (src/gc_mark.rs), which share chunks through a deque.
 rayon = "1.12"
