@@ -710,7 +710,28 @@ or a repeat."
       (romacs-agent-ui--composer-update)
       (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
 
+(defvar romacs-agent-ui--turn-starts (make-hash-table :test #'eq :weakness 'key)
+  "Each session's last turn start seen live: (TIME . DONE-SEQ), the turn
+end it came after.")
+
+(defun romacs-agent-ui--see-failed-children (session event)
+  "SESSION's live turn starts at EVENT, a message after a turn's end (one
+steering the turn under way starts none): a failure of a task it
+delegated that was there when its turn before started has been in view a
+whole turn, and is seen now, as opening the task's chat sees it."
+  (when (and (eq (plist-get event :type) 'input) (romacs-agent--live-p session))
+    (let ((before (gethash session romacs-agent-ui--turn-starts)))
+      (unless (and before (eql (cdr before) (romacs-agent-done-seq session)))
+        (when before
+          (dolist (child (romacs-agent-children session))
+            (when (and (eq (romacs-agent-ui--state-key child) 'failed)
+                       (<= (or (romacs-agent-last-time child) 0) (car before)))
+              (romacs-agent-mark-seen child))))
+        (puthash session (cons (or (plist-get event :time) (float-time)) (romacs-agent-done-seq session))
+                 romacs-agent-ui--turn-starts)))))
+
 (defun romacs-agent-ui--on-event (session event)
+  (romacs-agent-ui--see-failed-children session event)
   ;; A report comes with each request: the views follow only what it changes.
   (when (and (eq (plist-get event :type) 'rate-limit)
              (not (equal (romacs-agent-ui--pools-line) romacs-agent-ui--pools-shown)))
@@ -781,7 +802,7 @@ and the parent of one whose state that changed, in the next batch."
         (when (and (member (plist-get event :name) romacs-agent-ui--subagent-tools)
                    (not (plist-get event :parent)))
           (unless table (setq table (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
-          (puthash id (list :tool id :state "running" :time (plist-get event :time)
+          (puthash id (list :tool id :subagent t :state "running" :time (plist-get event :time)
                             :title (car (romacs-agent-ui--delegation (plist-get event :name) (plist-get event :input))))
                    table)
           (romacs-agent-ui--children-changed session))
@@ -930,7 +951,41 @@ turn of its session starts, a completion never (its session's turn tells it)."
                        (let ((x (romacs-agent-ui--row-rank a)) (y (romacs-agent-ui--row-rank b)))
                          (if (= x y) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0)) (< x y)))))
           (romacs-agent-children-summary session)
-          (romacs-agent-ui--rollup (mapcar (lambda (row) (plist-get row :key)) rows)))))
+          (romacs-agent-ui--workers-summary (romacs-agent-children-rows session)))))
+
+(defconst romacs-agent-ui--worker-kinds
+  '((approval "✋" "Needs approval" romacs-agent-approval)
+    (question "❓" "Asks you" romacs-agent-approval)
+    (failed "❗" "Failed" romacs-agent-error)
+    (subagents "🤖" "Working" romacs-agent-running)
+    (threads "🧵" "Threads live" romacs-agent-running))
+  "What a session's header counts of its workers, as (KIND GLYPH WORD
+FACE): what wants the user, then its harness's own subagents running,
+then its delegated threads still live.")
+
+(defun romacs-agent-ui--worker-kind (row)
+  "The kinds worker ROW counts as (`romacs-agent-ui--worker-kinds')."
+  (let ((key (plist-get row :key)))
+    (delq nil (list (and (memq key '(approval question failed)) key)
+                    (cond ((plist-get row :session) (and (memq key romacs-agent-ui--live-keys) 'threads))
+                          ;; A command the harness runs is no subagent.
+                          ((and (eq key 'working) (plist-get row :subagent)) 'subagents))))))
+
+(defun romacs-agent-ui--workers-summary (rows)
+  "ROWS, a session's workers ranked, as its header's counts by kind
+\(`romacs-agent-ui--worker-kinds'), or nil when none counts: hovering lists
+every worker by title and state."
+  (let* ((kinds (mapcan #'romacs-agent-ui--worker-kind rows))
+         (parts (delq nil (mapcar (lambda (kind) (let ((count (cl-count (car kind) kinds)))
+                                                   (and (> count 0) (romacs-agent-ui--count kind count))))
+                                  romacs-agent-ui--worker-kinds))))
+    (when parts
+      (let ((text (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))
+            (listing (mapconcat (lambda (row) (format "%s: %s" (or (plist-get row :title) "task")
+                                                      (downcase (nth 2 (romacs-agent-ui--state-of (plist-get row :key))))))
+                                (seq-take rows 20) "\n")))
+        (add-text-properties 0 (length text) (list 'help-echo listing) text)
+        text))))
 
 ;;; A session's state
 ;;
