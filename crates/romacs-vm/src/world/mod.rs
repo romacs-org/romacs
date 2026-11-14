@@ -796,8 +796,8 @@ fn framed(hasher: &mut sha2::Sha256, bytes: &[u8]) {
 }
 
 /// TEXT's property runs as Lisp sees them, their count and each run's
-/// bounds and keys into HASHER: the property values, for the caller to
-/// digest.
+/// bounds into HASHER: the property keys' symbols and the values, for the
+/// caller to digest.
 fn property_runs(properties: &crate::properties::Properties, len: usize, hasher: &mut sha2::Sha256) -> Vec<Value> {
     use crate::coordinates::ByteOffset;
     use sha2::Digest;
@@ -813,8 +813,7 @@ fn property_runs(properties: &crate::properties::Properties, len: usize, hasher:
     for (at, end, properties) in runs {
         hasher.update([at, end, properties.len()].map(usize::to_le_bytes).concat());
         for (key, value) in properties {
-            framed(hasher, key.as_bytes());
-            values.push(value);
+            values.extend([key.symbol(), value]);
         }
     }
     values.reverse();

@@ -211,8 +211,8 @@ impl<'a> VmSyntax<'a> {
         // properties to read (`Vm::regexp_syntax_source').
         let subject = source.subject;
         let reader = subject.and_then(|s| match vm.object_if(s.object)? {
-            Object::Buffer(t) => Some(t.properties.reader("syntax-table")),
-            Object::String(s) | Object::RawString(s) => Some(s.properties.reader("syntax-table")),
+            Object::Buffer(t) => Some(t.properties.reader(crate::properties::Key::SYNTAX_TABLE)),
+            Object::String(s) | Object::RawString(s) => Some(s.properties.reader(crate::properties::Key::SYNTAX_TABLE)),
             _ => None,
         });
         Self {
@@ -443,18 +443,18 @@ impl Vm {
     /// Whether OBJECT, a search subject, has any `syntax-table' property.
     fn has_syntax_properties(&self, object: Value) -> bool {
         match self.object_if(object) {
-            Some(Object::Buffer(t)) => t.properties.has_key("syntax-table"),
-            Some(Object::String(s) | Object::RawString(s)) => s.properties.has_key("syntax-table"),
-            Some(Object::ByteBuffer(t)) => t.properties.values().any(|p| p.contains_key("syntax-table")),
+            Some(Object::Buffer(t)) => t.properties.has_key(crate::properties::Key::SYNTAX_TABLE),
+            Some(Object::String(s) | Object::RawString(s)) => s.properties.has_key(crate::properties::Key::SYNTAX_TABLE),
+            Some(Object::ByteBuffer(t)) => t.properties.values().any(|p| p.contains_key(crate::properties::Key::SYNTAX_TABLE)),
             _ => false,
         }
     }
     /// OBJECT's `syntax-table' property at byte AT.
     fn syntax_property(&self, object: Value, at: usize) -> Option<Value> {
         match self.object_if(object)? {
-            Object::Buffer(t) => t.properties.get_property(ByteOffset(at), "syntax-table"),
-            Object::String(s) | Object::RawString(s) => s.properties.get_property(ByteOffset(at), "syntax-table"),
-            Object::ByteBuffer(t) => t.properties.get(&ByteOffset(at)).and_then(|p| p.get("syntax-table")).copied(),
+            Object::Buffer(t) => t.properties.get_property(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE),
+            Object::String(s) | Object::RawString(s) => s.properties.get_property(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE),
+            Object::ByteBuffer(t) => t.properties.get(&ByteOffset(at)).and_then(|p| p.get(crate::properties::Key::SYNTAX_TABLE)).copied(),
             _ => None,
         }
     }
@@ -462,15 +462,15 @@ impl Vm {
     /// OBJECT, or None when none follows.
     fn syntax_property_free_until(&self, object: Value, at: usize) -> Option<usize> {
         let next = |p: &crate::properties::Properties, len: usize| {
-            if p.get_property(ByteOffset(at), "syntax-table").is_some() { return Some(at); }
-            let next = p.next_single_change(ByteOffset(at), "syntax-table", ByteOffset(len)).0;
+            if p.get_property(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE).is_some() { return Some(at); }
+            let next = p.next_single_change(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE, ByteOffset(len)).0;
             (next < len).then_some(next)
         };
         match self.object_if(object)? {
             Object::Buffer(t) => next(&t.properties, t.len_bytes()),
             Object::String(s) | Object::RawString(s) => next(&s.properties, s.bytes().len()),
             Object::ByteBuffer(t) => t.properties.range(ByteOffset(at)..)
-                .find(|(_, p)| p.contains_key("syntax-table")).map(|(b, _)| b.0),
+                .find(|(_, p)| p.contains_key(crate::properties::Key::SYNTAX_TABLE)).map(|(b, _)| b.0),
             _ => None,
         }
     }

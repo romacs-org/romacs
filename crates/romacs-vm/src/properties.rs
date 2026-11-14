@@ -3,12 +3,96 @@
 //! A key has no implicit or visual baseline.
 use crate::{Value, coordinates::ByteOffset};
 use std::{collections::BTreeMap, ops::Range};
-type Values = BTreeMap<String, Value>;
 type Link = Option<Box<Tree>>;
 const LEAF: usize = 32;
+
+/// A property's key: its symbol, compared by identity as GNU's `EQ`
+/// compares plist keys, so an uninterned symbol is its own key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Key(Value);
+romacs_snapshot::snapshot_tuple!(Key(f0));
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.0.cmp(&other.0.0)
+    }
+}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Key {
+    /// SYMBOL's key, or None when it is no symbol.
+    pub(crate) fn of(symbol: Value) -> Option<Self> {
+        (symbol == Value::NIL || symbol == Value::TRUE || (symbol.tag() == 7 && symbol != Value::UNBOUND)).then_some(Self(symbol))
+    }
+    /// The symbol this key is.
+    pub(crate) fn symbol(self) -> Value {
+        self.0
+    }
+    const fn builtin(index: usize) -> Self {
+        Self(Value::reference(index + 1, 7))
+    }
+    /// A key for NAME where no `Vm` interns it: its built-in key, else the
+    /// key of NAME's place among the names tests have asked for, past the
+    /// built-ins, so that two names are always two keys.
+    #[cfg(test)]
+    pub(crate) fn test(name: &str) -> Self {
+        static NAMES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        if let Some(index) = Self::BUILTIN.iter().position(|builtin| *builtin == name) {
+            return Self::builtin(index);
+        }
+        let mut names = NAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let index = names.iter().position(|known| known == name).unwrap_or_else(|| {
+            names.push(name.to_owned());
+            names.len() - 1
+        });
+        Self::builtin(Self::BUILTIN.len() + index)
+    }
+}
+/// The keys Rust names: `Vm::new` interns their symbols first and in this
+/// order, so each is a constant, as GNU's `Qface` is.
+macro_rules! builtin_keys {
+    ($($constant:ident = $name:literal;)*) => {
+        impl Key {
+            /// The built-in keys' symbol names, each at its symbol's slot.
+            pub(crate) const BUILTIN: &'static [&'static str] = &[$($name),*];
+            builtin_keys!(@at 0; $($constant)*);
+        }
+    };
+    (@at $index:expr; $constant:ident $($rest:ident)*) => {
+        pub(crate) const $constant: Self = Self::builtin($index);
+        builtin_keys!(@at $index + 1; $($rest)*);
+    };
+    (@at $index:expr;) => {};
+}
+builtin_keys! {
+    FACE = "face";
+    CATEGORY = "category";
+    SYNTAX_TABLE = "syntax-table";
+    READ_ONLY = "read-only";
+    INHIBIT_READ_ONLY = "inhibit-read-only";
+    MODIFICATION_HOOKS = "modification-hooks";
+    INSERT_BEHIND_HOOKS = "insert-behind-hooks";
+    INSERT_IN_FRONT_HOOKS = "insert-in-front-hooks";
+    FRONT_STICKY = "front-sticky";
+    REAR_NONSTICKY = "rear-nonsticky";
+    MODE_LINE_ELT_NO = "mode-line-elt-no";
+}
 #[cfg(test)]
 #[path = "properties_tests.rs"]
 mod tests;
+mod body;
+mod values;
+pub(crate) use body::{BodyProperties, Reading, Store};
+pub(crate) use values::Values;
+
+/// PAIRS of a character, each with its write's stamp, as a plist reads
+/// them: the newest first.
+fn newest_first(mut pairs: Vec<(u32, Key, Value)>) -> Vec<(Key, Value)> {
+    pairs.sort_unstable_by_key(|(stamp, _, _)| std::cmp::Reverse(*stamp));
+    pairs.into_iter().map(|(_, k, v)| (k, v)).collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Run {
@@ -24,6 +108,23 @@ impl Run {
     /// What a reader sees: its value when present, whatever its stamp.
     fn observed(self) -> Option<Value> {
         (self.stamp != 0).then_some(self.value)
+    }
+    /// LEN bytes without the key.
+    const fn absent(len: u32) -> Self {
+        Self { len, stamp: 0, value: Value::NIL }
+    }
+    /// Add RUN to RUNS, lengthening the last run when RUN continues it.
+    fn append(runs: &mut [Self], count: &mut usize, run: Self) {
+        if run.len == 0 {
+            return;
+        }
+        match count.checked_sub(1).map(|last| &mut runs[last]) {
+            Some(last) if last.same(run) && last.len.checked_add(run.len).is_some() => last.len += run.len,
+            _ => {
+                runs[*count] = run;
+                *count += 1;
+            }
+        }
     }
 }
 /// A leaf's runs, length and present length, and whether every run reads
@@ -87,15 +188,179 @@ impl Tree {
             Self::Branch { height, .. } => *height,
         }
     }
-    fn branch(left: Box<Self>, right: Box<Self>) -> Box<Self> {
-        Box::new(Self::Branch {
+    fn node(left: Box<Self>, right: Box<Self>) -> Self {
+        Self::Branch {
             len: left.len() + right.len(),
             present: left.present() + right.present(),
             height: 1 + left.height().max(right.height()),
             uniform: Self::joined_uniform(&left, &right),
             left,
             right,
-        })
+        }
+    }
+    fn branch(left: Box<Self>, right: Box<Self>) -> Box<Self> {
+        Box::new(Self::node(left, right))
+    }
+    /// An overfull leaf's RUNS as two leaves, the first of AT runs, each
+    /// holding no more than its runs.
+    fn halves(runs: &[Run], at: usize) -> Self {
+        let (left, right) = runs.split_at(at);
+        Self::node(Box::new(Self::leaf(left.to_vec())), Box::new(Self::leaf(right.to_vec())))
+    }
+    /// A branch after an edit below it: whether its runs read the same
+    /// throughout, and, where a child GREW taller, its height and balance.
+    /// The edit's own descent has kept its length and present length.
+    /// Whether the branch grew taller itself.
+    fn settle(&mut self, grew: bool) -> bool {
+        let Self::Branch { left, right, height, uniform, .. } = self else { return false };
+        *uniform = Self::joined_uniform(left, right);
+        if !grew {
+            return false;
+        }
+        let before = *height;
+        if left.height().abs_diff(right.height()) > 1 {
+            let Self::Branch { left, right, .. } = std::mem::replace(self, Self::Leaf(Vec::new(), 0, 0, true)) else { unreachable!() };
+            *self = *Self::balance(left, right);
+        } else {
+            *height = 1 + left.height().max(right.height());
+        }
+        self.height() != before
+    }
+    /// The runs of START..END through TO, where one leaf holds them all:
+    /// the runs the range touches are rewritten in place, the leaf split in
+    /// two when it overflows, and only its path is visited.  None when the
+    /// range spans leaves; else how much more of the text has the key, and
+    /// whether the tree grew taller here.
+    fn rewrite_local(&mut self, start: usize, end: usize, to: &impl Fn(Run) -> Run) -> Option<(isize, bool)> {
+        match self {
+            Self::Leaf(runs, len, present, uniform) => {
+                // The window: the runs the range touches and the one on
+                // either side, which what is written may continue.
+                let (mut first, mut at) = (0, 0);
+                while at + runs[first].len as usize <= start {
+                    at += runs[first].len as usize;
+                    first += 1;
+                }
+                if first > 0 {
+                    first -= 1;
+                    at -= runs[first].len as usize;
+                }
+                let mut output = [Run::absent(0); LEAF + 2];
+                let (mut count, mut last, mut was) = (0, first, 0);
+                while last < runs.len() {
+                    let r = runs[last];
+                    let limit = at + r.len as usize;
+                    if r.stamp != 0 {
+                        was += r.len as isize;
+                    }
+                    // The run after the range ends the window.
+                    let after = at >= end;
+                    if limit <= start || after {
+                        Run::append(&mut output, &mut count, r);
+                    } else {
+                        let (a, b) = (at.max(start), limit.min(end));
+                        // Each piece is part of R, whose length is a u32.
+                        let piece = |len: usize| u32::try_from(len).expect("part of a run");
+                        Run::append(&mut output, &mut count, Run { len: piece(a - at), ..r });
+                        Run::append(&mut output, &mut count, to(Run { len: piece(b - a), ..r }));
+                        Run::append(&mut output, &mut count, Run { len: piece(limit - b), ..r });
+                    }
+                    (at, last) = (limit, last + 1);
+                    if after {
+                        break;
+                    }
+                }
+                let now: isize = output[..count].iter().filter(|r| r.stamp != 0).map(|r| r.len as isize).sum();
+                runs.splice(first..last, output[..count].iter().copied());
+                *present = present.wrapping_add_signed(now - was);
+                *uniform = Self::runs_uniform(runs);
+                let grew = runs.len() > LEAF;
+                if grew {
+                    // A leaf written at its end is being filled in order:
+                    // leave it full.
+                    *self = Self::halves(runs, if end == *len { LEAF } else { runs.len() / 2 });
+                }
+                Some((now - was, grew))
+            }
+            Self::Branch { left, right, present, .. } => {
+                let boundary = left.len();
+                let (more, grew) = if end <= boundary {
+                    left.rewrite_local(start, end, to)?
+                } else if start >= boundary {
+                    right.rewrite_local(start - boundary, end - boundary, to)?
+                } else {
+                    return None;
+                };
+                *present = present.wrapping_add_signed(more);
+                Some((more, self.settle(grew)))
+            }
+        }
+    }
+    /// START..END's runs through TO, in one descent when a leaf holds the
+    /// range, else by one split and join around it.
+    fn rewrite(root: &mut Box<Self>, start: usize, end: usize, to: &impl Fn(Run) -> Run) {
+        if root.rewrite_local(start, end, to).is_some() {
+            return;
+        }
+        let mut work = 0;
+        let whole = std::mem::replace(root, Box::new(Self::Leaf(Vec::new(), 0, 0, true)));
+        let (a, b) = Self::split(Some(whole), start, &mut work);
+        let (b, c) = Self::split(b, end - start, &mut work);
+        let mut runs: Vec<Run> = Vec::new();
+        b.expect("a range inside the tree").walk(0, &mut |_, r| {
+            let r = to(r);
+            match runs.last_mut() {
+                Some(last) if last.same(r) && last.len.checked_add(r.len).is_some() => last.len += r.len,
+                _ => runs.push(r),
+            }
+        });
+        let middle = runs.chunks(LEAF).fold(None, |tree, chunk| Self::join(tree, Some(Box::new(Self::leaf(chunk.to_vec()))), &mut work));
+        *root = Self::concat(Self::concat(a, middle, &mut work), c, &mut work).expect("a range inside the tree");
+    }
+    /// GAP without the key and then RUN at the tree's end, in its last leaf.
+    /// Whether the tree grew taller.
+    fn append_local(&mut self, gap: u32, run: Run) -> bool {
+        let (longer, more) = (gap as usize + run.len as usize, if run.stamp == 0 { 0 } else { run.len as usize });
+        match self {
+            Self::Leaf(runs, len, present, uniform) => {
+                for run in [Run::absent(gap), run] {
+                    if run.len == 0 {
+                        continue;
+                    }
+                    let longer = runs.last().filter(|last| last.same(run)).and_then(|last| last.len.checked_add(run.len));
+                    match longer {
+                        Some(len) => runs.last_mut().expect("a last run").len = len,
+                        None => runs.push(run),
+                    }
+                }
+                *len += longer;
+                *present += more;
+                *uniform = Self::runs_uniform(runs);
+                let grew = runs.len() > LEAF;
+                if grew {
+                    *self = Self::halves(runs, LEAF);
+                }
+                grew
+            }
+            Self::Branch { right, len, present, .. } => {
+                let grew = right.append_local(gap, run);
+                *len += longer;
+                *present += more;
+                self.settle(grew)
+            }
+        }
+    }
+    /// GAP without the key and then LEN at STAMP and VALUE at the tree's
+    /// end: one descent, unless a stretch is too long for one run.
+    fn append(root: &mut Box<Self>, gap: usize, len: usize, stamp: u32, value: Value) {
+        if let (Ok(gap), Ok(len)) = (u32::try_from(gap), u32::try_from(len)) {
+            root.append_local(gap, Run { len, stamp, value });
+            return;
+        }
+        let mut work = 0;
+        let whole = std::mem::replace(root, Box::new(Self::Leaf(Vec::new(), 0, 0, true)));
+        let grown = Self::concat(Some(whole), Self::uniform(gap, 0, Value::NIL, &mut work), &mut work);
+        *root = Self::concat(grown, Self::uniform(len, stamp, value, &mut work), &mut work).expect("a tree");
     }
     fn balance(left: Box<Self>, right: Box<Self>) -> Box<Self> {
         if left.height() > right.height() + 1 {
@@ -602,6 +867,29 @@ impl Tree {
     }
 }
 
+/// One character's properties, read by key.
+pub(crate) trait Plist {
+    fn property(&self, key: Key) -> Option<Value>;
+}
+impl Plist for [(Key, Value)] {
+    fn property(&self, key: Key) -> Option<Value> {
+        self.iter().find(|(k, _)| *k == key).map(|(_, value)| *value)
+    }
+}
+impl Plist for Vec<(Key, Value)> {
+    fn property(&self, key: Key) -> Option<Value> {
+        self.as_slice().property(key)
+    }
+}
+/// The properties of the character at a byte of a text's store, each read
+/// from its own key's runs: no list of them is made.
+pub(crate) struct At<'a>(pub &'a Properties, pub ByteOffset);
+impl Plist for At<'_> {
+    fn property(&self, key: Key) -> Option<Value> {
+        self.0.get_property(self.1, key)
+    }
+}
+
 /// One key's values for many reads: [`Properties::get_property`] without
 /// the key's lookup, remembering the run it read last.
 pub(crate) struct KeyReader<'a> {
@@ -635,26 +923,44 @@ impl KeyReader<'_> {
 /// The runs of a range seen through a few keys ([`Properties::key_runs`]):
 /// each run's bytes and the values of those keys its characters have.
 pub(crate) struct KeyRuns<'a> {
-    layers: Vec<(&'a str, &'a Tree)>,
+    layers: Vec<(Key, &'a Tree)>,
     at: ByteOffset,
     end: ByteOffset,
 }
-impl<'a> Iterator for KeyRuns<'a> {
-    type Item = (Range<ByteOffset>, Vec<(&'a str, Value)>);
+impl Iterator for KeyRuns<'_> {
+    type Item = (Range<ByteOffset>, Vec<(Key, Value)>);
     fn next(&mut self) -> Option<Self::Item> {
         let at = self.at;
         if at >= self.end {
             return None;
         }
-        let values = self.layers.iter().filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| (*key, r.value))).collect();
+        let values = self.layers.iter().filter_map(|(key, root)| root.at(at.0).and_then(Run::observed).map(|value| (*key, value))).collect();
         self.at = self.layers.iter().fold(self.end, |next, (_, root)| next.min(root.change_after(at, next)));
         Some((at..self.at, values))
     }
 }
 
+/// Every key of MAP, a symbol, through VISIT: a key keeps its symbol
+/// alive.  The map is rebuilt in the rare case a key comes back another.
+pub(crate) fn visit_keys<V>(map: &mut BTreeMap<Key, V>, visit: &mut impl FnMut(&mut Value)) {
+    let mut moved = Vec::new();
+    for &key in map.keys() {
+        let mut symbol = key.0;
+        visit(&mut symbol);
+        if symbol != key.0 {
+            moved.push((key, Key(symbol)));
+        }
+    }
+    for (old, new) in moved {
+        let value = map.remove(&old).expect("a key just read");
+        map.insert(new, value);
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Properties {
-    layers: BTreeMap<String, Link>,
+    /// Each key's runs.  A key no text has has no layer.
+    layers: BTreeMap<Key, Box<Tree>>,
     stamp: u32,
     /// Where `syntax-table' changed since the text's parse-state summaries
     /// last took the changes (`crate::syntax_index`). Boxed, and made by the
@@ -694,6 +1000,21 @@ impl SyntaxChanges {
             *hull = true;
         }
     }
+    /// Note in SLOT the runs of ROOT's RANGE whose value CHANGED picks, a
+    /// run past ROOT's end, or of no ROOT, having none.
+    fn note_runs(slot: &mut Option<Box<Self>>, root: Option<&Tree>, range: Range<usize>, changed: impl Fn(Option<Value>) -> bool) {
+        let mut at = range.start;
+        while at < range.end {
+            let (end, had) = match root.and_then(|root| root.run_at(at)) {
+                Some((base, run)) => ((base + run.len as usize).min(range.end), run.observed()),
+                None => (range.end, None),
+            };
+            if changed(had) {
+                Self::note(slot, at..end);
+            }
+            at = end;
+        }
+    }
 }
 
 impl Properties {
@@ -707,24 +1028,31 @@ impl Properties {
     }
     /// No properties at all, as a new store, the change noted.
     pub(crate) fn reset(&mut self) {
-        let changes = if self.layers.contains_key("syntax-table") {
+        let changes = if self.has_key(Key::SYNTAX_TABLE) {
             Some(Box::new(SyntaxChanges { all: true, ..SyntaxChanges::default() }))
         } else {
             self.syntax_changes.take()
         };
         *self = Self { syntax_changes: changes, ..Self::new() };
     }
-    pub fn properties_keys(&self) -> Vec<String> {
-        self.layers.keys().cloned().collect()
+    fn tree(&self, key: Key) -> Option<&Tree> {
+        self.layers.get(&key).map(|root| &**root)
+    }
+    fn trees(&self) -> impl Iterator<Item = &Tree> {
+        self.layers.values().map(|root| &**root)
+    }
+    /// The keys some text has.
+    pub fn keys(&self) -> impl Iterator<Item = Key> + '_ {
+        self.layers.keys().copied()
     }
     /// The runs of equal properties inside RANGE, in order, each with its
     /// properties: a snapshot that costs RANGE's runs, not the whole text.
-    pub fn runs(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, Vec<(String, Value)>)> {
+    pub fn runs(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, Vec<(Key, Value)>)> {
         let mut runs = Vec::new();
         let mut at = range.start;
         while at < range.end {
             let next = self.next_change(at, range.end);
-            runs.push((at..next, self.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect()));
+            runs.push((at..next, self.properties_at(at)));
             at = next;
         }
         runs
@@ -732,24 +1060,18 @@ impl Properties {
     /// The runs inside RANGE seen through KEYS alone, each with its start:
     /// a run ends only where one of KEYS changes, and holds those of KEYS
     /// its characters have.  Costs the runs of KEYS, not of every property.
-    pub fn runs_of(&self, range: Range<ByteOffset>, keys: &[String]) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
-        self.key_runs(range, keys.iter().map(String::as_str))
-            .map(|(run, values)| (run.start, values.into_iter().map(|(key, value)| (key.to_owned(), value)).collect()))
-            .collect()
+    pub fn runs_of(&self, range: Range<ByteOffset>, keys: &[Key]) -> Vec<(ByteOffset, Vec<(Key, Value)>)> {
+        self.key_runs(range, keys.iter().copied()).map(|(run, values)| (run.start, values)).collect()
     }
     /// [`Self::runs_of`], one run at a time: a caller that stops early pays
     /// for the runs it read.
-    pub fn key_runs<'a, 'k>(&'a self, range: Range<ByteOffset>, keys: impl IntoIterator<Item = &'k str>) -> KeyRuns<'a> {
-        let layers = keys
-            .into_iter()
-            .filter_map(|key| self.layers.get_key_value(key))
-            .filter_map(|(key, root)| Some((key.as_str(), root.as_deref()?)))
-            .collect();
+    pub fn key_runs(&self, range: Range<ByteOffset>, keys: impl IntoIterator<Item = Key>) -> KeyRuns<'_> {
+        let layers = keys.into_iter().filter_map(|key| Some((key, self.tree(key)?))).collect();
         KeyRuns { layers, at: range.start, end: range.end }
     }
     /// Whether any text has the property KEY.
-    pub fn has_key(&self, key: &str) -> bool {
-        self.layers.contains_key(key)
+    pub fn has_key(&self, key: Key) -> bool {
+        self.layers.contains_key(&key)
     }
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
@@ -767,7 +1089,7 @@ impl Properties {
         Self::default()
     }
     pub fn same_run_state(&self, a: ByteOffset, b: ByteOffset) -> bool {
-        self.layers.values().flatten().all(|root| {
+        self.trees().all(|root| {
             let state = |at| {
                 root.at(at)
                     .filter(|r| r.stamp != 0)
@@ -777,29 +1099,33 @@ impl Properties {
         })
     }
     /// A reader of KEY's values.
-    pub fn reader(&self, key: &str) -> KeyReader<'_> {
-        KeyReader { root: self.layers.get(key).and_then(|root| root.as_deref()), run: std::cell::Cell::new((0, 0, None)) }
+    pub fn reader(&self, key: Key) -> KeyReader<'_> {
+        KeyReader { root: self.tree(key), run: std::cell::Cell::new((0, 0, None)) }
     }
-    pub fn get_property(&self, at: ByteOffset, key: &str) -> Option<Value> {
-        self.layers
-            .get(key)?
-            .as_ref()?
-            .at(at.0)
-            .filter(|r| r.stamp != 0)
-            .map(|r| r.value)
+    pub fn get_property(&self, at: ByteOffset, key: Key) -> Option<Value> {
+        self.tree(key)?.run_at(at.0).and_then(|(_, run)| run.observed())
     }
-    /// Replacement preserves the insertion stamp at already-present positions.
-    /// A `syntax-table' put is a change where a run had another value (as
-    /// `eq') or none.
-    pub fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
+    /// The first position in RANGE where KEY does not read VALUE (None:
+    /// where the text has KEY at all), found without visiting the stretches
+    /// that read VALUE throughout.
+    pub fn first_unlike(&self, range: Range<ByteOffset>, key: Key, value: Option<Value>) -> Option<ByteOffset> {
         if range.start >= range.end {
-            return;
+            return None;
         }
+        let Some(root) = self.tree(key).filter(|root| range.start.0 < root.len()) else { return value.is_some().then_some(range.start) };
+        root.next_different(0, range.start.0, value, range.end.0)
+            .filter(|at| *at < range.end.0)
+            // Past the layer's end no text has the key.
+            .or_else(|| (value.is_some() && root.len() < range.end.0).then(|| root.len().max(range.start.0)))
+            .map(ByteOffset)
+    }
+    /// The stamp of a new write.
+    fn next_stamp(&mut self) -> u32 {
         if self.stamp == u32::MAX {
             // Dense rank compression preserves all ordering and merge decisions;
             // dead stamps must not impose a lifetime limit on an editor buffer.
             let mut stamps = BTreeMap::new();
-            for tree in self.layers.values().flatten() {
+            for tree in self.trees() {
                 tree.walk(0, &mut |_, r| {
                     if r.stamp != 0 {
                         stamps.insert(r.stamp, 0);
@@ -810,125 +1136,103 @@ impl Properties {
             for (index, rank) in stamps.values_mut().enumerate() {
                 *rank = index as u32 + 1;
             }
-            for tree in self.layers.values_mut().flatten() {
-                tree.renumber(&stamps);
+            for root in self.layers.values_mut() {
+                root.renumber(&stamps);
             }
         }
         self.stamp = self
             .stamp
             .checked_add(1)
             .expect("too many live annotation stamps");
-        let stamp = self.stamp;
-        let root = self.layers.entry(key.into()).or_default();
-        let mut work = 0;
-        let len = root.as_ref().map_or(0, |n| n.len());
-        if len < range.end.0 {
-            *root = Tree::concat(
-                root.take(),
-                Tree::uniform(range.end.0 - len, 0, Value::NIL, &mut work),
-                &mut work,
-            );
-        }
-        let (a, b) = Tree::split(root.take(), range.start.0, &mut work);
-        let (b, c) = Tree::split(b, range.end.0 - range.start.0, &mut work);
-        let mut replacement = None;
-        let logged = key == "syntax-table";
-        b.unwrap().walk(range.start.0, &mut |at, r| {
-            if logged && r.observed() != Some(value) {
-                SyntaxChanges::note(&mut self.syntax_changes, at..at + r.len as usize);
-            }
-            replacement = Tree::concat(
-                replacement.take(),
-                Tree::uniform(
-                    r.len as usize,
-                    if r.stamp == 0 { stamp } else { r.stamp },
-                    value,
-                    &mut work,
-                ),
-                &mut work,
-            );
-        });
-        *root = Tree::concat(Tree::concat(a, replacement, &mut work), c, &mut work);
+        self.stamp
     }
-    /// A `syntax-table` remove is a change where a run held a value.
-    pub fn remove(&mut self, range: Range<ByteOffset>, key: &str) {
-        let Some(root) = self.layers.get_mut(key) else {
+    /// Replacement preserves the insertion stamp at already-present positions.
+    /// A `syntax-table' put is a change where a run had another value (as
+    /// `eq') or none.
+    pub fn put(&mut self, range: Range<ByteOffset>, key: Key, value: Value) {
+        if range.start >= range.end {
+            return;
+        }
+        if key == Key::SYNTAX_TABLE {
+            let root = self.layers.get(&key).map(|root| &**root);
+            SyntaxChanges::note_runs(&mut self.syntax_changes, root, range.start.0..range.end.0, |had| had != Some(value));
+        }
+        let stamp = self.next_stamp();
+        let (start, end) = (range.start.0, range.end.0);
+        if let Some(root) = self.layers.get_mut(&key) {
+            let len = root.len();
+            if len <= start {
+                return Tree::append(root, start - len, end - start, stamp, value);
+            }
+            if len < end {
+                Tree::append(root, end - len, 0, 0, Value::NIL);
+            }
+            Tree::rewrite(root, start, end, &|r| Run { stamp: if r.stamp == 0 { stamp } else { r.stamp }, value, ..r });
+        } else {
+            let mut work = 0;
+            let before = Tree::uniform(start, 0, Value::NIL, &mut work);
+            let root = Tree::concat(before, Tree::uniform(end - start, stamp, value, &mut work), &mut work);
+            self.layers.insert(key, root.expect("a range that is not empty"));
+        }
+    }
+    /// A `syntax-table' remove is a change where a run held a value.
+    pub fn remove(&mut self, range: Range<ByteOffset>, key: Key) {
+        let Some(root) = self.layers.get_mut(&key) else {
             return;
         };
-        let mut work = 0;
-        let len = root.as_ref().map_or(0, |n| n.len());
+        let len = root.len();
         let start = range.start.0.min(len);
         let end = range.end.0.min(len);
         if start >= end {
             return;
         }
-        let (a, b) = Tree::split(root.take(), start, &mut work);
-        let (b, c) = Tree::split(b, end - start, &mut work);
-        if key == "syntax-table" && let Some(b) = &b {
-            b.walk(start, &mut |at, r| {
-                if r.stamp != 0 {
-                    SyntaxChanges::note(&mut self.syntax_changes, at..at + r.len as usize);
-                }
-            });
+        if key == Key::SYNTAX_TABLE {
+            SyntaxChanges::note_runs(&mut self.syntax_changes, Some(root), start..end, |had| had.is_some());
         }
-        *root = Tree::concat(
-            Tree::concat(
-                a,
-                Tree::uniform(end - start, 0, Value::NIL, &mut work),
-                &mut work,
-            ),
-            c,
-            &mut work,
-        );
-        if root.as_ref().is_none_or(|n| n.present() == 0) {
-            self.layers.remove(key);
+        Tree::rewrite(root, start, end, &|r| Run::absent(r.len));
+        if root.present() == 0 {
+            self.layers.remove(&key);
         }
     }
-    pub fn properties_at(&self, at: ByteOffset) -> Vec<(&str, Value)> {
-        let mut values: Vec<_> = self
-            .layers
-            .iter()
-            .filter_map(|(key, root)| {
-                let r = root.as_ref()?.at(at.0)?;
-                (r.stamp != 0).then_some((r.stamp, key.as_str(), r.value))
-            })
-            .collect();
-        values.sort_unstable_by_key(|(stamp, _, _)| std::cmp::Reverse(*stamp));
-        values.into_iter().map(|(_, k, v)| (k, v)).collect()
+    /// Every key removed from RANGE.
+    pub fn clear(&mut self, range: Range<ByteOffset>) {
+        for key in self.keys().collect::<Vec<_>>() {
+            self.remove(range.clone(), key);
+        }
+    }
+    pub fn properties_at(&self, at: ByteOffset) -> Vec<(Key, Value)> {
+        newest_first(self.layers.iter().filter_map(|(key, root)| {
+            let r = root.at(at.0)?;
+            (r.stamp != 0).then_some((r.stamp, *key, r.value))
+        }).collect())
     }
     /// Observable boundaries compare presence and eq-values, never stamps.
     /// Each key's search stops at the nearest change found so far.
     pub fn next_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, next)))
+        self.trees().fold(limit, |next, root| next.min(root.change_after(at, next)))
     }
     /// The last boundary before `at` where any property changes, or
     /// `limit` when that is nearer: [`Self::next_change`] backwards.
     pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        self.layers.values().flatten().fold(limit, |previous, root| previous.max(root.change_before(at, previous)))
+        self.trees().fold(limit, |previous, root| previous.max(root.change_before(at, previous)))
     }
     /// [`Self::next_change`] of `key` alone.
-    pub fn next_single_change(&self, at: ByteOffset, key: &str, limit: ByteOffset) -> ByteOffset {
-        self.layers.get(key).and_then(Option::as_ref).map_or(limit, |root| root.change_after(at, limit))
+    pub fn next_single_change(&self, at: ByteOffset, key: Key, limit: ByteOffset) -> ByteOffset {
+        self.tree(key).map_or(limit, |root| root.change_after(at, limit))
     }
     /// Plain insertion inherits nothing. Suffix boundaries move by sums.
     pub fn replace(&mut self, range: Range<ByteOffset>, inserted: usize) -> usize {
         let mut work = 0;
         self.layers.retain(|_, root| {
-            let len = root.as_ref().map_or(0, |n| n.len());
+            let len = root.len();
             if range.start.0 < len {
-                if range.end.0 <= len
-                    && root.as_mut().unwrap().edit_local(
-                        range.start.0,
-                        range.end.0,
-                        inserted,
-                        &mut work,
-                    )
-                {
-                    return root.as_ref().unwrap().present() != 0;
+                if range.end.0 <= len && root.edit_local(range.start.0, range.end.0, inserted, &mut work) {
+                    return root.present() != 0;
                 }
-                let (a, b) = Tree::split(root.take(), range.start.0, &mut work);
+                let whole = std::mem::replace(root, Box::new(Tree::Leaf(Vec::new(), 0, 0, true)));
+                let (a, b) = Tree::split(Some(whole), range.start.0, &mut work);
                 let (_, c) = Tree::split(b, range.end.0.min(len) - range.start.0, &mut work);
-                *root = Tree::concat(
+                let edited = Tree::concat(
                     Tree::concat(
                         a,
                         Tree::uniform(inserted, 0, Value::NIL, &mut work),
@@ -937,43 +1241,40 @@ impl Properties {
                     c,
                     &mut work,
                 );
+                match edited {
+                    Some(edited) => *root = edited,
+                    None => return false,
+                }
             }
-            root.as_ref().is_some_and(|n| n.present() != 0)
+            root.present() != 0
         });
         work
     }
-    /// Legacy adapter, outside hot paths: expands runs into a byte map.
+    /// Legacy adapter, outside hot paths: expands runs into a byte map,
+    /// each byte's properties in their plist order.
     pub fn to_map(&self) -> BTreeMap<ByteOffset, Values> {
-        let mut out: BTreeMap<ByteOffset, Values> = BTreeMap::new();
+        let mut stamped: BTreeMap<ByteOffset, Vec<(u32, Key, Value)>> = BTreeMap::new();
         for (key, root) in &self.layers {
-            if let Some(root) = root {
-                root.walk(0, &mut |at, r| {
-                    if r.stamp != 0 {
-                        for p in at..at + r.len as usize {
-                            out.entry(ByteOffset(p))
-                                .or_default()
-                                .insert(key.clone(), r.value);
-                        }
+            root.walk(0, &mut |at, r| {
+                if r.stamp != 0 {
+                    for p in at..at + r.len as usize {
+                        stamped.entry(ByteOffset(p)).or_default().push((r.stamp, *key, r.value));
                     }
-                });
-            }
+                }
+            });
         }
-        out
+        stamped.into_iter().map(|(at, pairs)| (at, newest_first(pairs).into_iter().collect())).collect()
     }
     /// Legacy one-byte fixture adapter. Production writes use whole ranges.
+    /// The byte's properties become VALUES, in their order.
     pub fn insert(&mut self, at: ByteOffset, values: Values) -> Option<Values> {
-        let old: Values = self
-            .properties_at(at)
-            .into_iter()
-            .map(|(k, v)| (k.into(), v))
-            .collect();
+        let old: Values = self.properties_at(at).into_iter().collect();
         for key in old.keys() {
-            if !values.contains_key(key) {
-                self.remove(at..ByteOffset(at.0 + 1), key);
-            }
+            self.remove(at..ByteOffset(at.0 + 1), *key);
         }
-        for (k, v) in values {
-            self.put(at..ByteOffset(at.0 + 1), &k, v);
+        // The newest is written last.
+        for (k, v) in values.into_iter().rev() {
+            self.put(at..ByteOffset(at.0 + 1), k, v);
         }
         (!old.is_empty()).then_some(old)
     }
@@ -988,12 +1289,13 @@ impl Properties {
     pub fn resize_character(&mut self, range: Range<ByteOffset>, inserted: usize) {
         let mut work = 0;
         for root in self.layers.values_mut() {
-            let len = root.as_ref().map_or(0, |n| n.len());
+            let len = root.len();
             if range.start.0 >= len {
                 continue;
             }
-            let run = root.as_ref().unwrap().at(range.start.0).unwrap();
-            let (a, b) = Tree::split(root.take(), range.start.0, &mut work);
+            let run = root.at(range.start.0).unwrap();
+            let whole = std::mem::replace(root, Box::new(Tree::Leaf(Vec::new(), 0, 0, true)));
+            let (a, b) = Tree::split(Some(whole), range.start.0, &mut work);
             let (_, c) = Tree::split(b, range.end.0.min(len) - range.start.0, &mut work);
             *root = Tree::concat(
                 Tree::concat(
@@ -1003,32 +1305,30 @@ impl Properties {
                 ),
                 c,
                 &mut work,
-            );
+            )
+            .expect("a character keeps a width");
         }
     }
     /// GNU insert-and-inherit keeps inherited keys (including nil) and prepends
     /// missing string keys in plist traversal order.
-    pub fn inherit_inserted(&mut self, range: Range<ByteOffset>, inherited: &[(String, Value)]) {
+    pub fn inherit_inserted(&mut self, range: Range<ByteOffset>, inherited: &[(Key, Value)]) {
         if range.is_empty() || inherited.is_empty() {
             return;
         }
         let mut source = self.slice(range.clone());
         for (key, _) in inherited {
-            source.remove(ByteOffset(0)..ByteOffset(range.end.0 - range.start.0), key);
+            source.remove(ByteOffset(0)..ByteOffset(range.end.0 - range.start.0), *key);
         }
         let mut merged = Self::new();
         for (key, value) in inherited.iter().rev() {
             merged.put(
                 ByteOffset(0)..ByteOffset(range.end.0 - range.start.0),
-                key,
+                *key,
                 *value,
             );
         }
         merged.copy_in_order(ByteOffset(0), &source, true);
-        let keys: Vec<_> = self.layers.keys().cloned().collect();
-        for key in keys {
-            self.remove(range.clone(), &key);
-        }
+        self.clear(range.clone());
         self.copy_into(range.start, &merged);
     }
     /// Copy a relative subtree range without expanding runs into characters.
@@ -1036,14 +1336,10 @@ impl Properties {
         let mut out = Self::new();
         out.stamp = self.stamp;
         for (key, root) in &self.layers {
-            let len = root.as_ref().map_or(0, |n| n.len());
-            if range.start.0 >= len {
-                continue;
-            }
             let mut work = 0;
-            let part = root.as_ref().and_then(|n| n.copy_range(range.start.0, range.end.0, &mut work));
-            if part.as_ref().is_some_and(|n| n.present() != 0) {
-                out.layers.insert(key.clone(), part);
+            let part = root.copy_range(range.start.0, range.end.0, &mut work);
+            if let Some(part) = part.filter(|n| n.present() != 0) {
+                out.layers.insert(*key, part);
             }
         }
         out
@@ -1056,13 +1352,11 @@ impl Properties {
     fn copy_in_order(&mut self, at: ByteOffset, source: &Self, reverse: bool) {
         let mut runs = vec![];
         for (key, root) in &source.layers {
-            if let Some(root) = root {
-                root.walk(0, &mut |start, r| {
-                    if r.stamp != 0 {
-                        runs.push((r.stamp, key.as_str(), start, r.len as usize, r.value));
-                    }
-                });
-            }
+            root.walk(0, &mut |start, r| {
+                if r.stamp != 0 {
+                    runs.push((r.stamp, *key, start, r.len as usize, r.value));
+                }
+            });
         }
         runs.sort_unstable_by_key(|(stamp, _, start, _, _)| (*stamp, *start));
         if reverse {
@@ -1076,160 +1370,19 @@ impl Properties {
             );
         }
     }
+    /// Every value, and every key's symbol: a key keeps its symbol alive.
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        for tree in self.layers.values_mut().flatten() {
-            tree.visit(visit);
+        visit_keys(&mut self.layers, visit);
+        for root in self.layers.values_mut() {
+            root.visit(visit);
         }
     }
     pub fn storage_bytes(&self) -> usize {
         // Conservative BTree node reservation: up to one 11-slot node per key.
-        self.layers
-            .iter()
-            .map(|(k, root)| {
-                k.capacity()
-                    + 11 * (size_of::<String>() + size_of::<Link>())
-                    + 12 * size_of::<usize>()
-                    + root.as_ref().map_or(0, |n| n.storage())
-            })
-            .sum::<usize>()
+        self.layers.len() * 11 * (size_of::<Key>() + size_of::<Box<Tree>>())
+            + self.trees().map(Tree::storage).sum::<usize>()
             + self.syntax_changes.as_ref().map_or(0, |changes| {
                 size_of::<SyntaxChanges>() + changes.ranges.capacity() * size_of::<Range<usize>>()
             })
-    }
-}
-
-/// What a property primitive's plan asks of the properties it changes: a
-/// string's, or a text body's, which records what is stored.
-pub(crate) trait Store {
-    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value);
-    fn remove(&mut self, range: Range<ByteOffset>, key: &str);
-    fn reset(&mut self);
-    fn keys(&self) -> Vec<String>;
-}
-impl Store for Properties {
-    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { Properties::put(self, range, key, value); }
-    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { Properties::remove(self, range, key); }
-    fn reset(&mut self) { Properties::reset(self); }
-    fn keys(&self) -> Vec<String> { self.properties_keys() }
-}
-impl Store for BodyProperties {
-    fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) { BodyProperties::put(self, range, key, value); }
-    fn remove(&mut self, range: Range<ByteOffset>, key: &str) { BodyProperties::remove(self, range, key); }
-    fn reset(&mut self) { self.store.reset(); }
-    fn keys(&self) -> Vec<String> { self.store.properties_keys() }
-}
-
-/// How a collection reads a text body's properties (`BodyProperties`).
-#[derive(Clone, Copy, Default)]
-pub(crate) struct Reading {
-    /// The epoch the VM's last collection ended at (`crate::epoch`).
-    pub(crate) since: u64,
-    /// Every property is read, as a full collection, a compaction's rewrite
-    /// and verify's reference walk do; else only what was stored since.
-    pub(crate) whole: bool,
-}
-
-/// Values kept before a record gives up and the body is read whole.
-const WRITTEN_LIMIT: usize = 64 << 10;
-
-/// A text body's properties, with a record of what was stored into them.
-/// A body is shared by a buffer and its indirect buffers and belongs to no
-/// table entry alone, so no entry's colour says it was stored into: the
-/// record is here, in the storage, and a minor collection reads it in place
-/// of every property of every buffer. It hands out the properties to read
-/// only (`Deref`), and each method that can store a Value records it, so a
-/// store that records nothing does not compile. A string's properties need
-/// none of this: its entry is dirtied.
-///
-/// The record is kept by epoch (`crate::epoch`), which any VM's collection
-/// in the process advances: a store cannot tell whether its own VM has
-/// collected since the last one, so it never drops what is recorded. The
-/// collector, which knows the epoch its VM's last collection ended at,
-/// reads what was recorded since and drops what was recorded before.
-#[derive(Clone)]
-pub(crate) struct BodyProperties {
-    store: Properties,
-    /// The Values stored that can name a heap entry, oldest first.
-    written: Vec<Value>,
-    /// The epochs `written` was recorded in, ascending, and where each one's
-    /// Values begin.
-    epochs: Vec<u64>,
-    starts: Vec<usize>,
-    /// The epoch at which everything last counted as stored: when the body
-    /// was made, its properties replaced whole, or its record given up.
-    all_at: u64,
-}
-romacs_snapshot::snapshot_struct!(BodyProperties { store, written, epochs, starts, all_at });
-
-impl std::ops::Deref for BodyProperties {
-    type Target = Properties;
-    #[inline]
-    fn deref(&self) -> &Properties {
-        &self.store
-    }
-}
-
-impl BodyProperties {
-    /// STORE as a body's properties: all of it counts as just stored.
-    pub(crate) fn new(store: Properties) -> Self {
-        Self { store, written: Vec::new(), epochs: Vec::new(), starts: Vec::new(), all_at: crate::epoch::born() }
-    }
-    /// VALUES are about to be stored.
-    fn record(&mut self, values: impl IntoIterator<Item = Value>) {
-        let now = crate::epoch::born();
-        // Everything counts as stored in this epoch already.
-        if self.all_at == now { return; }
-        if self.epochs.last() != Some(&now) {
-            self.epochs.push(now);
-            self.starts.push(self.written.len());
-        }
-        self.written.extend(values.into_iter().filter(|v| matches!(v.tag(), 0 | 3..=5) && *v != Value::NIL));
-        if self.written.len() > WRITTEN_LIMIT {
-            (self.written, self.epochs, self.starts, self.all_at) = (Vec::new(), Vec::new(), Vec::new(), now);
-        }
-    }
-    pub fn put(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
-        self.record([value]);
-        self.store.put(range, key, value);
-    }
-    pub fn inherit_inserted(&mut self, range: Range<ByteOffset>, inherited: &[(String, Value)]) {
-        self.record(inherited.iter().map(|&(_, value)| value));
-        self.store.inherit_inserted(range, inherited);
-    }
-    pub fn copy_into(&mut self, at: ByteOffset, source: &Properties) {
-        self.record(source.to_map().into_values().flat_map(BTreeMap::into_values));
-        self.store.copy_into(at, source);
-    }
-    pub fn remove(&mut self, range: Range<ByteOffset>, key: &str) {
-        self.store.remove(range, key);
-    }
-    pub fn replace(&mut self, range: Range<ByteOffset>, inserted: usize) -> usize {
-        self.store.replace(range, inserted)
-    }
-    pub fn resize_character(&mut self, range: Range<ByteOffset>, inserted: usize) {
-        self.store.resize_character(range, inserted);
-    }
-    pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
-        self.store.take_syntax_changes()
-    }
-    /// The collector's visit, as READING says. What was recorded before the
-    /// VM's last collection is dropped: that collection kept it. What was
-    /// recorded since is visited, by a whole reading too: a compaction
-    /// rewrites those Values, and one removed since it was stored is kept
-    /// until the next collection. Nothing recorded since is dropped here:
-    /// a mark a key press abandons has consumed nothing.
-    pub(crate) fn visit_values(&mut self, reading: Reading, visit: &mut impl FnMut(&mut Value)) {
-        let stale = self.epochs.partition_point(|&epoch| epoch < reading.since);
-        if stale > 0 {
-            let from = self.starts.get(stale).copied().unwrap_or(self.written.len());
-            self.written.drain(..from);
-            self.epochs.drain(..stale);
-            self.starts.drain(..stale);
-            self.starts.iter_mut().for_each(|start| *start -= from);
-        }
-        self.written.iter_mut().for_each(&mut *visit);
-        if reading.whole || self.all_at >= reading.since {
-            self.store.visit_values(visit);
-        }
     }
 }

@@ -335,8 +335,8 @@ impl Vm {
     }
 
     // Properties use byte coordinates; printed intervals use Lisp characters.
-    // This snapshot borrows keys and copies Values without allocating Lisp data.
-    fn print_string_properties(&self, value: Value) -> Vec<(usize, usize, Vec<(&str, Value)>)> {
+    // This snapshot copies keys and Values without allocating Lisp data.
+    fn print_string_properties(&self, value: Value) -> Vec<(usize, usize, Vec<(crate::properties::Key, Value)>)> {
         let Some(data::Object::String(s) | data::Object::RawString(s)) = self.object_if(value) else { return Vec::new(); };
         if s.properties.is_empty() { return Vec::new(); }
         let offsets: Vec<_> = (0..=s.len()).map(|i| s.byte_offset(coordinates::CharOffset(i)).unwrap()).collect();
@@ -446,8 +446,7 @@ impl Vm {
                         let mut parts = Vec::with_capacity(limit);
                         for (key, v) in plist {
                             if parts.len() >= limit { break; }
-                            let slot = self.names.get(key).ok_or("unknown text-property symbol")?;
-                            parts.push(self.print_object(Value::reference(slot + 1, 7), true, options, depth + 2)?);
+                            parts.push(self.print_object(key.symbol(), true, options, depth + 2)?);
                             if parts.len() >= limit { break; }
                             parts.push(self.print_object(v, true, options, depth + 2)?);
                         }

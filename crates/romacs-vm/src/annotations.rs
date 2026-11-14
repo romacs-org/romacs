@@ -1,6 +1,33 @@
 //! Lisp annotation resolution. Raw per-key presence remains a storage concern.
-use crate::{coordinates::*, data::Object, *};
+use crate::{coordinates::*, data::Object, properties::{Key, Plist}, *};
 use crate::indirect::Shared;
+
+/// Where one character's properties are: nowhere (text that keeps none), in
+/// a store's runs, or in a unibyte buffer's map for its byte.
+pub(super) enum Place<'a> {
+    Plain,
+    Runs(properties::At<'a>),
+    Byte(Option<&'a properties::Values>),
+}
+impl Place<'_> {
+    /// The character's properties, newest first.
+    fn pairs(&self) -> Vec<(Key, Value)> {
+        match self {
+            Self::Plain | Self::Byte(None) => vec![],
+            Self::Runs(properties::At(properties, at)) => properties.properties_at(*at),
+            Self::Byte(Some(values)) => values.iter().map(|(k, v)| (*k, *v)).collect(),
+        }
+    }
+}
+impl Plist for Place<'_> {
+    fn property(&self, key: Key) -> Option<Value> {
+        match self {
+            Self::Plain | Self::Byte(None) => None,
+            Self::Runs(at) => at.property(key),
+            Self::Byte(Some(values)) => values.get(key).copied(),
+        }
+    }
+}
 
 const YANK_EXCLUDED: &[&str] = &[
     "category",
@@ -371,7 +398,7 @@ impl Vm {
                     }
                     plist
                         .chunks_exact(2)
-                        .map(|pair| Ok((self.annotation_symbol_name(pair[0])?.to_owned(), pair[1])))
+                        .map(|pair| Ok((Key::of(pair[0]).ok_or("symbol required")?, pair[1])))
                         .collect::<Result<Vec<_>>>()?
                 } else {
                     vec![]
@@ -395,31 +422,23 @@ impl Vm {
                     return Err("index out of range".into());
                 }
                 if p == YankFontLockFace {
-                    t.put_property(range, "face", value);
+                    t.put_property(range, Key::FACE, value);
                 } else {
                     let mut at = range.start;
                     while at < range.end {
                         let end = t.properties.next_change(at, range.end);
-                        let raw: Vec<_> = t
-                            .properties
-                            .properties_at(at)
-                            .into_iter()
-                            .map(|(k, v)| (k.to_owned(), v))
-                            .collect();
+                        let raw = t.properties.properties_at(at);
                         let mut merged = properties::Properties::new();
                         let span = ByteOffset(0)..ByteOffset(end.0 - at.0);
                         for (key, value) in category.iter().rev() {
-                            merged.put(span.clone(), key, *value);
+                            merged.put(span.clone(), *key, *value);
                         }
                         for (key, value) in &raw {
-                            merged.put(span.clone(), key, *value);
+                            merged.put(span.clone(), *key, *value);
                         }
-                        let old: Vec<_> = t.properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                        for key in t.properties.properties_keys() {
-                            t.properties.remove(at..end, &key);
-                        }
+                        t.properties.clear(at..end);
                         t.properties.copy_into(at, &merged);
-                        if old != t.properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect::<Vec<_>>() { t.state.record_change(false); }
+                        if raw != t.properties.properties_at(at) { t.state.record_change(false); }
                         at = end;
                     }
                 }
@@ -441,12 +460,12 @@ impl Vm {
                         Some(
                             self.list_values(value)?
                                 .into_iter()
-                                .map(|v| self.annotation_symbol_name(v).map(str::to_owned))
+                                .map(|v| Key::of(v).ok_or_else(|| "symbol required".to_owned()))
                                 .collect::<Result<Vec<_>>>()?,
                         )
                     }
                 } else {
-                    Some(YANK_EXCLUDED.iter().map(|v| (*v).to_owned()).collect())
+                    Some(YANK_EXCLUDED.iter().filter_map(|name| self.property_key(name)).collect())
                 };
                 let index = self.buffer_index()?;
                 let Object::Buffer(t) = self.objects.entry_mut(index) else {
@@ -466,19 +485,19 @@ impl Vm {
                 if !noexclude {
                     if let Some(keys) = excluded {
                         for key in keys {
-                            t.remove_property(range.clone(), &key);
+                            t.remove_property(range.clone(), key);
                         }
                     } else {
-                        let keys: Vec<_> = t.properties.slice(range.clone()).properties_keys();
+                        let keys: Vec<_> = t.properties.slice(range.clone()).keys().collect();
                         for key in keys {
-                            t.remove_property(range.clone(), &key);
+                            t.remove_property(range.clone(), key);
                         }
                     }
                 }
                 if b > a {
                     let last = t.byte_of_char(CharOffset(t.char_of_byte(b)?.0 - 1))?;
                     if !t.properties.properties_at(last).is_empty() {
-                        t.put_property(last..b, "rear-nonsticky", Value::TRUE);
+                        t.put_property(last..b, Key::REAR_NONSTICKY, Value::TRUE);
                     }
                 }
                 if self.annotation_variable("yank-undo-function") == Value::TRUE {
@@ -495,29 +514,25 @@ impl Vm {
             _ => unreachable!(),
         }
     }
-    fn annotation_member(&self, key: &str, value: Value) -> Result<bool> {
+    fn annotation_member(&self, key: Key, value: Value) -> Result<bool> {
         if value == Value::NIL {
             return Ok(false);
         }
         if value.tag() != 3 {
             return Ok(true);
         }
-        for v in self.list_values(value)? {
-            if self.annotation_symbol_name(v)? == key {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(self.list_values(value)?.contains(&key.symbol()))
     }
-    fn annotation_nonsticky(&self, key: &str) -> Result<Option<bool>> {
+    fn annotation_nonsticky(&self, key: Key) -> Result<Option<bool>> {
         let Some(slot) = self.names.get("text-property-default-nonsticky") else {
             return Ok(["composition", "syntax-table", "display"]
-                .contains(&key)
+                .iter()
+                .any(|name| self.property_key(name) == Some(key))
                 .then_some(true));
         };
         for entry in self.list_values(self.slots[*slot].value)? {
             let (symbol, flag) = self.cons_pair(entry)?;
-            if self.annotation_symbol_name(symbol)? == key {
+            if symbol == key.symbol() {
                 return Ok(Some(flag != Value::NIL));
             }
         }
@@ -525,12 +540,12 @@ impl Vm {
     }
     pub(super) fn annotation_inherited(
         &mut self,
-        left: Vec<(String, Value)>,
-        right: Vec<(String, Value)>,
+        left: Vec<(Key, Value)>,
+        right: Vec<(Key, Value)>,
         same_run: bool,
-    ) -> Result<Vec<(String, Value)>> {
-        let front_key = Value::reference(self.slot("front-sticky") + 1, 7);
-        let rear_key = Value::reference(self.slot("rear-nonsticky") + 1, 7);
+    ) -> Result<Vec<(Key, Value)>> {
+        let front_key = Key::FRONT_STICKY.symbol();
+        let rear_key = Key::REAR_NONSTICKY.symbol();
         let lf = self.annotation_resolve(&left, front_key)?;
         let lr = self.annotation_resolve(&left, rear_key)?;
         let rf = self.annotation_resolve(&right, front_key)?;
@@ -539,7 +554,7 @@ impl Vm {
         if same_run && left == right && !(lr != Value::NIL && lr.tag() != 3) {
             let mut all = true;
             if lf == Value::NIL || lf.tag() == 3 {
-                for (key, _) in &left {
+                for &(key, _) in &left {
                     if !self.annotation_member(key, lf)?
                         && (self.annotation_member(key, lr)?
                             || self.annotation_nonsticky(key)?.is_some())
@@ -562,18 +577,18 @@ impl Vm {
                 left.iter()
                     .filter(|(k, _)| !right.iter().any(|(r, _)| r == k)),
             )
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| *k)
             .collect();
         for key in keys {
-            if key == "front-sticky" || key == "rear-nonsticky" {
+            if key == Key::FRONT_STICKY || key == Key::REAR_NONSTICKY {
                 continue;
             }
-            let l = left.iter().find(|(k, _)| k == &key).map(|(_, v)| *v);
-            let r = right.iter().find(|(k, _)| k == &key).map(|(_, v)| *v);
-            let default = self.annotation_nonsticky(&key)?;
+            let l = left.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+            let r = right.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+            let default = self.annotation_nonsticky(key)?;
             let mut use_left =
-                l.is_some() && !self.annotation_member(&key, lr)? && default != Some(true);
-            let mut use_right = self.annotation_member(&key, rf)? || default == Some(false);
+                l.is_some() && !self.annotation_member(key, lr)? && default != Some(true);
+            let mut use_right = self.annotation_member(key, rf)? || default == Some(false);
             // Stickiness can name an absent right key; only a present value
             // competes with the left, whose explicit nil must otherwise survive.
             if use_left && use_right && r.is_some() {
@@ -589,26 +604,26 @@ impl Vm {
                 (r.unwrap(), rf, rr)
             } else {
                 if use_right {
-                    front.push(Value::reference(self.slot(&key) + 1, 7));
-                    if self.annotation_member(&key, rr)? {
-                        rear.push(Value::reference(self.slot(&key) + 1, 7));
+                    front.push(key.symbol());
+                    if self.annotation_member(key, rr)? {
+                        rear.push(key.symbol());
                     }
                 }
                 continue;
             };
-            if self.annotation_member(&key, f)? {
-                front.push(Value::reference(self.slot(&key) + 1, 7));
+            if self.annotation_member(key, f)? {
+                front.push(key.symbol());
             }
-            if self.annotation_member(&key, rn)? {
-                rear.push(Value::reference(self.slot(&key) + 1, 7));
+            if self.annotation_member(key, rn)? {
+                rear.push(key.symbol());
             }
             out.push((key, value));
         }
         if !rear.is_empty() {
             let value = self.list_value(&rear);
-            out.insert(0, ("rear-nonsticky".into(), value));
+            out.insert(0, (Key::REAR_NONSTICKY, value));
         }
-        let category_front = if let Some((_, cat)) = out.iter().find(|(k, _)| k == "category") {
+        let category_front = if let Some((_, cat)) = out.iter().find(|(k, _)| *k == Key::CATEGORY) {
             self.annotation_plist(self.annotation_symbol_plist(*cat)?, front_key)?
                 == Some(Value::TRUE)
         } else {
@@ -616,7 +631,7 @@ impl Vm {
         };
         if !front.is_empty() && !category_front {
             let value = self.list_value(&front);
-            out.insert(0, ("front-sticky".into(), value));
+            out.insert(0, (Key::FRONT_STICKY, value));
         }
         Ok(out)
     }
@@ -635,14 +650,13 @@ impl Vm {
         let at = t.point;
         let end = ByteOffset(t.len_bytes());
         let same_run = at.0 > 0 && at < end && t.properties.same_run_state(ByteOffset(at.0 - 1), at);
-        let owned = |pairs: Vec<(&str, Value)>| pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect::<Vec<_>>();
         let left = if at.0 > 0 {
             let before = t.byte_of_char(CharOffset(t.char_of_byte(at)?.0 - 1))?;
-            owned(t.properties.properties_at(before))
+            t.properties.properties_at(before)
         } else {
             vec![]
         };
-        let right = if at < end { owned(t.properties.properties_at(at)) } else { vec![] };
+        let right = if at < end { t.properties.properties_at(at) } else { vec![] };
         let inherited = self.annotation_inherited(left, right, same_run)?;
         self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
         let Object::Buffer(t) = self.objects.entry_mut(index) else {
@@ -660,38 +674,27 @@ impl Vm {
         // The neighbours are the whole text's, a narrowing's edges included.
         let (at, end) = (b.point, b.bytes.len());
         let same_run = at.0 > 0 && at.0 < end && b.properties.get(&ByteOffset(at.0 - 1)) == b.properties.get(&at);
-        let pairs = |p: usize| b.properties.get(&ByteOffset(p)).map(|m| m.iter().map(|(k, &v)| (k.clone(), v)).collect()).unwrap_or_default();
-        let left: Vec<(String, Value)> = if at.0 > 0 { pairs(at.0 - 1) } else { vec![] };
-        let right: Vec<(String, Value)> = if at.0 < end { pairs(at.0) } else { vec![] };
+        let pairs = |p: usize| b.properties.get(&ByteOffset(p)).map(|m| m.iter().map(|(&k, &v)| (k, v)).collect()).unwrap_or_default();
+        let left: Vec<(Key, Value)> = if at.0 > 0 { pairs(at.0 - 1) } else { vec![] };
+        let right: Vec<(Key, Value)> = if at.0 < end { pairs(at.0) } else { vec![] };
         let inherited = self.annotation_inherited(left, right, same_run)?;
         self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
         let Object::ByteBuffer(b) = self.objects.entry_mut(index) else { unreachable!("unibyte buffer") };
         if !inherited.is_empty() {
             for p in at.0..b.point.0 {
                 let values = b.properties.entry(ByteOffset(p)).or_default();
-                values.extend(inherited.iter().cloned());
+                *values = properties::Values::inheriting(&inherited, values);
             }
         }
         Ok(Value::NIL)
     }
-    fn annotation_symbol_name(&self, value: Value) -> Result<&str> {
-        if value == Value::NIL {
-            return Ok("nil");
-        }
-        if value == Value::TRUE {
-            return Ok("t");
-        }
-        let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
-        #[cfg(test)]
-        self.variable_read_probes.set(self.variable_read_probes.get() + 1);
-        // Only an interned symbol names a property: its name maps back to it.
-        let name = self.symbol_names.get(slot).ok_or("symbol required")?;
-        if self.names.get(name) == Some(&slot) { Ok(name.as_str()) } else { Err("symbol required".into()) }
-    }
     /// The value of the plain variable NAME in the current buffer: its
     /// buffer-local binding there, else its default; nil when void.
     pub(super) fn annotation_variable(&self, name: &str) -> Value {
-        let Some(&slot) = self.names.get(name) else { return Value::NIL };
+        self.names.get(name).map_or(Value::NIL, |&slot| self.annotation_slot_value(slot))
+    }
+    /// `annotation_variable` of the variable at SLOT.
+    fn annotation_slot_value(&self, slot: usize) -> Value {
         let table = self.slots[slot].local;
         let local = (table != Value::NIL)
             .then(|| self.eq_hash_get(table, self.slots[self.buffer_slot].value))
@@ -876,9 +879,9 @@ impl Vm {
     /// the printer shows them, each with its properties, most recently set
     /// first; None without an interval tree (text that never had
     /// properties).
-    pub(crate) fn object_intervals(&self, object: Value) -> Result<Option<Vec<(usize, usize, Vec<(String, Value)>)>>> {
+    pub(crate) fn object_intervals(&self, object: Value) -> Result<Option<Vec<(usize, usize, Vec<(Key, Value)>)>>> {
         fn runs(properties: &crate::properties::Properties, len: usize, char_of: impl Fn(usize) -> Result<usize>)
-            -> Result<Option<Vec<(usize, usize, Vec<(String, Value)>)>>> {
+            -> Result<Option<Vec<(usize, usize, Vec<(Key, Value)>)>>> {
             if !properties.has_intervals() || len == 0 { return Ok(None); }
             properties.runs(ByteOffset(0)..ByteOffset(len)).into_iter()
                 .map(|(run, values)| Ok((char_of(run.start.0)?, char_of(run.end.0)?, values)))
@@ -909,23 +912,29 @@ impl Vm {
             _ => Value::reference(self.slot(key) + 1, 7),
         }
     }
-    pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(String, Value)>> {
+    /// The properties of OBJECT's character AT (a buffer position, or a
+    /// string index), validated as `Fget_text_property` validates it.
+    pub(super) fn annotation_place(&self, object: Value, at: usize) -> Result<Place<'_>> {
         if Self::image_string(object) {
             if at > self.string_value(object)?.chars().count() {
                 return Err("index out of range".into());
             }
-            return Ok(vec![]);
+            return Ok(Place::Plain);
         }
-        let pairs = match self.object(object)? {
+        Self::annotation_place_in(self.object(object)?, at)
+    }
+    /// `annotation_place` in TEXT, the object itself.
+    fn annotation_place_in(text: &Object, at: usize) -> Result<Place<'_>> {
+        Ok(match text {
             Object::String(s) | Object::RawString(s) => {
                 let b = s.byte_offset(CharOffset(at)).ok_or("index out of range")?;
-                s.properties.properties_at(ByteOffset(b))
+                Place::Runs(properties::At(&s.properties, ByteOffset(b)))
             }
             Object::Bytes(bytes) => {
                 if at > bytes.len() {
                     return Err("index out of range".into());
                 }
-                return Ok(vec![]);
+                Place::Plain
             }
             Object::Buffer(t) => {
                 let c = at.checked_sub(1).ok_or("index out of range")?;
@@ -934,30 +943,31 @@ impl Vm {
                 if b < r.start || b > r.end {
                     return Err("index out of range".into());
                 }
-                t.properties.properties_at(b)
+                Place::Runs(properties::At(&t.properties, b))
             }
             Object::ByteBuffer(t) => {
                 let b = ByteOffset(at.checked_sub(1).ok_or("index out of range")?);
                 if b < t.restriction.start || b > t.restriction.end {
                     return Err("index out of range".into());
                 }
-                return Ok(t
-                    .properties
-                    .get(&b)
-                    .map(|m| m.iter().map(|(k, v)| (k.clone(), *v)).collect())
-                    .unwrap_or_default());
+                Place::Byte(t.properties.get(&b))
             }
             _ => return Err("buffer or string required".into()),
-        };
-        Ok(pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+        })
     }
-    fn annotation_base(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Option<Value>> {
-        let name = self.annotation_symbol_name(key)?;
-        if let Some((_, v)) = raw.iter().find(|(k, _)| k.as_ref() == name) {
-            return Ok(Some(*v));
+    pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(Key, Value)>> {
+        Ok(self.annotation_place(object, at)?.pairs())
+    }
+    /// KEY among RAW, one character's own properties, else from its
+    /// `category`.  An object that is no symbol is the key of no property.
+    fn annotation_base(&self, raw: &(impl Plist + ?Sized), key: Value) -> Result<Option<Value>> {
+        #[cfg(test)]
+        self.variable_read_probes.set(self.variable_read_probes.get() + 1);
+        if let Some(v) = Key::of(key).and_then(|key| raw.property(key)) {
+            return Ok(Some(v));
         }
-        if let Some((_, category)) = raw.iter().find(|(k, _)| k.as_ref() == "category") {
-            let plist = self.annotation_symbol_plist(*category)?;
+        if let Some(category) = raw.property(Key::CATEGORY) {
+            let plist = self.annotation_symbol_plist(category)?;
             // GNU category nil, unlike directly stored nil, does not mask aliases/defaults.
             return Ok(self
                 .annotation_plist(plist, key)?
@@ -965,45 +975,67 @@ impl Vm {
         }
         Ok(None)
     }
-    /// KEY's aliases in `char-property-alias-alist`: `assq`, stopping at
-    /// KEY's entry and copying nothing of the others.
-    fn annotation_aliases(&self, key: Value) -> Result<Vec<Value>> {
-        let mut tail = self.annotation_variable("char-property-alias-alist");
+    /// KEY's aliases in ALIST, `char-property-alias-alist`: the rest of its
+    /// `assq` entry, found without copying anything of the others.
+    fn annotation_alias_tail(&self, alist: Value, key: Value) -> Result<Value> {
+        let mut tail = alist;
         for _ in 0..=self.list_limit() {
             if tail == Value::NIL {
-                return Ok(Vec::new());
+                return Ok(Value::NIL);
             }
             let (entry, rest) = self.cons_pair(tail)?;
             let (alias_key, aliases) = self.cons_pair(entry)?;
             if alias_key == key {
-                return self.list_values(aliases);
+                return Ok(aliases);
             }
             tail = rest;
         }
         Err("circular list".into())
     }
-    /// The names of KEY's aliases, which decide
+    fn annotation_aliases(&self, key: Value) -> Result<Vec<Value>> {
+        self.list_values(self.annotation_alias_tail(self.textget_variables().0, key)?)
+    }
+    /// LIST's length, refused as `list_values` refuses a list that is
+    /// improper or circular.
+    fn annotation_list_length(&self, list: Value) -> Result<usize> {
+        let (mut tail, mut length, limit) = (list, 0, self.list_limit());
+        while tail != Value::NIL {
+            tail = self.cons_pair(tail)?.1;
+            length += 1;
+            if length > limit {
+                return Err("circular list".into());
+            }
+        }
+        Ok(length)
+    }
+    /// The keys of KEY's aliases, which decide
     /// [`Self::annotation_resolve`] of KEY where neither KEY nor `category`
     /// gives it.
-    pub(super) fn annotation_alias_names(&self, key: Value) -> Result<Vec<&str>> {
-        self.annotation_aliases(key)?.into_iter().map(|alias| self.annotation_symbol_name(alias)).collect()
+    pub(super) fn annotation_alias_keys(&self, key: Value) -> Result<Vec<Key>> {
+        Ok(self.annotation_aliases(key)?.into_iter().filter_map(Key::of).collect())
     }
-    /// The name KEY's own property layer has.
-    pub(super) fn annotation_key_name(&self, key: Value) -> Result<&str> {
-        self.annotation_symbol_name(key)
-    }
-    pub(super) fn annotation_resolve(&self, raw: &[(impl AsRef<str>, Value)], key: Value) -> Result<Value> {
+    pub(super) fn annotation_resolve(&self, raw: &(impl Plist + ?Sized), key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }
-        for alias in self.annotation_aliases(key)? {
+        let (alist, defaults) = self.textget_variables();
+        let mut aliases = self.annotation_alias_tail(alist, key)?;
+        // The aliases are read from their list, checked whole first: a
+        // read copies none of them.
+        for _ in 0..self.annotation_list_length(aliases)? {
+            let (alias, rest) = self.cons_pair(aliases)?;
             if let Some(v) = self.annotation_base(raw, alias)?.filter(|v| *v != Value::NIL) {
                 return Ok(v);
             }
+            aliases = rest;
         }
-        Ok(self
-            .annotation_plist(self.annotation_variable("default-text-properties"), key)?
-            .unwrap_or(Value::NIL))
+        Ok(self.annotation_plist(defaults, key)?.unwrap_or(Value::NIL))
+    }
+    /// `char-property-alias-alist' and `default-text-properties' in the
+    /// current buffer, read by their slots: no name is looked up.
+    pub(crate) fn textget_variables(&self) -> (Value, Value) {
+        let [aliases, defaults] = self.textget_slots;
+        (self.annotation_slot_value(aliases), self.annotation_slot_value(defaults))
     }
     pub(super) fn text_annotation_primitive(
         &mut self,
@@ -1090,24 +1122,23 @@ impl Vm {
         } else {
             Value::NIL
         };
-        let object = if object == Value::NIL {
-            self.buffer_index()?;
-            self.slots[self.buffer_slot].value
-        } else {
-            object
-        };
+        // The current buffer is looked up once, by `buffer_index`.
+        let current = if object == Value::NIL { Some(self.buffer_index()?) } else { None };
         // validate_interval_range: CHECK_FIXNUM_COERCE_MARKER.
         let at =
             usize::try_from(self.scalar_position(self.stack[start])?).map_err(|_| "index out of range")?;
-        let raw = self.annotation_raw(object, at)?;
+        let place = match current {
+            Some(index) => Self::annotation_place_in(&self.objects[index], at)?,
+            None => self.annotation_place(object, at)?,
+        };
         if raw_query {
             let mut values = vec![];
-            for (key, value) in raw {
-                values.extend([self.property_key_symbol(&key), value]);
+            for (key, value) in place.pairs() {
+                values.extend([key.symbol(), value]);
             }
             Ok(self.list_value(&values))
         } else {
-            self.annotation_resolve(&raw, self.stack[start + 1])
+            self.annotation_resolve(&place, self.stack[start + 1])
         }
     }
 }
@@ -1254,23 +1285,13 @@ impl AnnotatedBuffer {
             ..Self::from(self.text.share())
         }
     }
-    pub(crate) fn put_property(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
-        let mut at = range.start;
-        let mut changed = false;
-        while at < range.end {
-            changed |= self.properties.get_property(at, key) != Some(value);
-            at = self.properties.next_change(at, range.end);
-        }
+    pub(crate) fn put_property(&mut self, range: Range<ByteOffset>, key: Key, value: Value) {
+        let changed = self.properties.first_unlike(range.clone(), key, Some(value)).is_some();
         self.properties.put(range, key, value);
         if changed { self.state.record_change(false); }
     }
-    pub(crate) fn remove_property(&mut self, range: Range<ByteOffset>, key: &str) {
-        let mut at = range.start;
-        let mut changed = false;
-        while at < range.end {
-            changed |= self.properties.get_property(at, key).is_some();
-            at = self.properties.next_change(at, range.end);
-        }
+    pub(crate) fn remove_property(&mut self, range: Range<ByteOffset>, key: Key) {
+        let changed = self.properties.first_unlike(range.clone(), key, None).is_some();
         self.properties.remove(range, key);
         if changed { self.state.record_change(false); }
     }

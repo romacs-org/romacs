@@ -81,7 +81,7 @@ impl Leaf<'_> {
                 let pieces = [b2..f2, f1..b2, b1..f1].map(|r| (r.end.0 - r.start.0, b.properties.slice(r)));
                 let point = b.char_of_byte(b.point).map_err(Fault::Error)?.0 as i64 + 1;
                 b.overwrite(b1..f2, &text).map_err(Fault::Error)?;
-                for key in b.properties.properties_keys() { b.properties.remove(b1..f2, &key); }
+                b.properties.clear(b1..f2);
                 let mut at = b1.0;
                 for (len, properties) in &pieces {
                     b.properties.copy_into(ByteOffset(at), properties);
@@ -112,7 +112,7 @@ impl Leaf<'_> {
     /// (nil PROP VALUE BEG . END) for each property of each run, in order.
     fn record_properties_cleared(&mut self, index: usize, from: i64, to: i64) -> std::result::Result<(), Fault> {
         if from == to || self.vm.undo_list_of(index) == Value::TRUE { return Ok(()); }
-        let runs: Vec<(i64, i64, Vec<(String, Value)>)> = match &self.vm.objects[index] {
+        let runs: Vec<(i64, i64, Vec<(crate::properties::Key, Value)>)> = match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
                 let range = b.byte_of_char(CharOffset((from - 1) as usize)).map_err(Fault::Error)?..b.byte_of_char(CharOffset((to - 1) as usize)).map_err(Fault::Error)?;
                 let char_at = |p: ByteOffset| b.char_of_byte(p).map(|c| c.0 as i64 + 1);
@@ -120,9 +120,9 @@ impl Leaf<'_> {
                     .map(|(r, ps)| Ok((char_at(r.start)?, char_at(r.end)?, ps))).collect::<crate::Result<_>>().map_err(Fault::Error)?
             }
             data::Object::ByteBuffer(b) => {
-                let mut runs: Vec<(i64, i64, Vec<(String, Value)>)> = Vec::new();
+                let mut runs: Vec<(i64, i64, Vec<(crate::properties::Key, Value)>)> = Vec::new();
                 for at in (from - 1) as usize..(to - 1) as usize {
-                    let ps: Vec<(String, Value)> = b.properties.get(&ByteOffset(at)).map(|m| m.iter().map(|(k, &v)| (k.clone(), v)).collect()).unwrap_or_default();
+                    let ps: Vec<(crate::properties::Key, Value)> = b.properties.get(&ByteOffset(at)).map(|m| m.iter().map(|(&k, &v)| (k, v)).collect()).unwrap_or_default();
                     match runs.last_mut() {
                         Some(run) if run.1 == at as i64 + 1 && run.2 == ps => run.1 += 1,
                         _ => runs.push((at as i64 + 1, at as i64 + 2, ps)),
@@ -135,8 +135,7 @@ impl Leaf<'_> {
         };
         for (beg, end, properties) in runs {
             for (key, value) in properties {
-                let prop = self.vm.property_key_symbol(&key);
-                self.vm.record_property_change(beg, end, prop, value).map_err(Fault::Error)?;
+                self.vm.record_property_change(beg, end, key.symbol(), value).map_err(Fault::Error)?;
             }
         }
         Ok(())
