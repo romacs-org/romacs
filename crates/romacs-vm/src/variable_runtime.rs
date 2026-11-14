@@ -271,7 +271,7 @@ impl Vm {
     pub(super) fn initialize_variable_redirect(&mut self, name: &str, slot: usize) {
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
         if self.variable_redirects[slot].is_none() && self.names.get(name) == Some(&slot)
-            && let Some(fwd) = self.forwarded.lookup(name) {
+            && let Some(fwd) = crate::forwarded::Forwarded::lookup(name) {
             self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(fwd));
         }
         if self.variable_redirects[slot].is_none() {

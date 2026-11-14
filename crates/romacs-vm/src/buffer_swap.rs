@@ -120,7 +120,7 @@ impl Vm {
             put_identity(self.objects.entry_mut(ia), b);
             put_identity(self.objects.entry_mut(ib), a);
             // The identities came back; the text's variables go with it.
-            let slots: Vec<u16> = TEXT_VARIABLES.iter().filter_map(|name| match self.forwarded.lookup(name) {
+            let slots: Vec<u16> = TEXT_VARIABLES.iter().filter_map(|name| match crate::forwarded::Forwarded::lookup(name) {
                 Some(crate::forwarded::Fwd::Buffer(i)) => Some(i),
                 _ => None,
             }).collect();

@@ -637,7 +637,7 @@ impl Vm {
             Object::ByteBuffer(b) => &b.per_buffer,
             _ => unreachable!(),
         };
-        let kept: Vec<u16> = ["buffer-file-name", "buffer-file-truename"].into_iter().filter_map(|name| match self.forwarded.lookup(name) {
+        let kept: Vec<u16> = ["buffer-file-name", "buffer-file-truename"].into_iter().filter_map(|name| match crate::forwarded::Forwarded::lookup(name) {
             Some(crate::forwarded::Fwd::Buffer(i)) => Some(i),
             _ => None,
         }).collect();

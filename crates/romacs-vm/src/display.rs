@@ -373,7 +373,7 @@ impl DisplayState {
                 Attribute::Background => FaceValue::Str("#000000".into()),
                 Attribute::Height => FaceValue::Height(romacs_face::Height::Absolute(150)),
                 Attribute::Width | Attribute::Weight | Attribute::Slant => {
-                    FaceValue::Symbol("normal")
+                    FaceValue::Symbol("normal".into())
                 }
                 _ => FaceValue::Bool(false),
             };
