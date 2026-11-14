@@ -3,6 +3,8 @@ mod own_test;
 
 use romacs_vm_gui::{command, presentation, startup};
 use romacs_vm::{CommandEvent, Vm};
+#[path = "support/home.rs"]
+mod home;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).unwrap().display().unwrap()
@@ -43,6 +45,7 @@ fn install_command_after_gnu_loadup() {
     std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        home::private_home(&mut vm, "install-command");
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();
         assert_eq!(printed(&mut vm, "(lookup-key (current-global-map) [24 6])"), "find-file");

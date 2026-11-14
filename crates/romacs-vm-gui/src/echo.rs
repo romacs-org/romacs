@@ -208,7 +208,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(gnu_subr_keymap_body).unwrap().join().unwrap();
     }
     fn gnu_subr_keymap_body() {
-        let (mut vm, started) = crate::test_world::started(crate::test_world::Boot { floor: Some(1), ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { floor: Some(1), ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "echo-keymap");
+        let started = crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let loadup = started.loadup.as_ref().unwrap();
         assert!(loadup.rows.iter().any(|r| r.site.name == "emacs-lisp/backquote"
             && matches!(r.outcome, crate::loadup::Outcome::Complete { .. })), "{}", loadup.table());

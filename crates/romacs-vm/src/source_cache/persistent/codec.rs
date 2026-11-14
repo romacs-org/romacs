@@ -75,7 +75,8 @@ fn function_json(f: &Function) -> J {
         f.sites,
         f.code.iter().map(|op| op_json(*op)).collect::<Vec<_>>(),
         f.dynamic,
-        params_json(f.params.as_deref())
+        params_json(f.params.as_deref()),
+        f.key.map(|key| format!("{key:032x}"))
     ])
 }
 /// A lambda list holding a generated symbol is not portable: null.
@@ -89,9 +90,9 @@ fn params_json(params: Option<&[Form]>) -> J {
 }
 fn function(v: &J) -> Option<Function> {
     let a = v.as_array()?;
-    // The eighth and ninth elements, the dialect and the lambda list, are
-    // absent from older entries.
-    if !(7..=9).contains(&a.len()) {
+    // The eighth to tenth elements, the dialect, the lambda list and the
+    // structural key, are absent from older entries.
+    if !(7..=10).contains(&a.len()) {
         return None;
     }
     let sites = a[5]
@@ -112,6 +113,7 @@ fn function(v: &J) -> Option<Function> {
         pending: None,
         dynamic: a.get(7).and_then(J::as_bool),
         params: a.get(8).and_then(J::as_array).and_then(|p| p.iter().map(|v| form(v, 0)).collect::<Option<Vec<_>>>()),
+        key: a.get(9).and_then(J::as_str).and_then(|k| u128::from_str_radix(k, 16).ok()),
         code: a[6]
             .as_array()?
             .iter()

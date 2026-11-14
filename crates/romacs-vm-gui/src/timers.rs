@@ -106,7 +106,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(timers_body).unwrap().join().unwrap();
     }
     fn timers_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-timers");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The idle collection has its own test below.
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil romacs-gc-idle-delay nil) (message nil)");
@@ -258,7 +260,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(first_wait_body).unwrap().join().unwrap();
     }
     fn first_wait_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-first-wait");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         // As the session does once its Lisp is ready (main.rs).
         crate::echo::install(&mut vm).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
@@ -320,7 +324,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(command_end_body).unwrap().join().unwrap();
     }
     fn command_end_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-command-end");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         vm.eval_source("(read-event nil nil 0)").unwrap();
         vm.eval_source("(defun collected-command () (interactive)) (global-set-key \"q\" 'collected-command)").unwrap();
@@ -338,7 +344,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(idle_collect_body).unwrap().join().unwrap();
     }
     fn idle_collect_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-idle-collect");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
@@ -395,7 +403,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(prompt_collect_body).unwrap().join().unwrap();
     }
     fn prompt_collect_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-prompt-collect");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
         vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
@@ -426,7 +436,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(scheduled_body).unwrap().join().unwrap();
     }
     fn scheduled_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-scheduled");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let schedule = "(run-with-timer 0.2 nil (lambda () (setq log (cons (list 'timer (- (float-time) start)) log))))";
@@ -465,7 +477,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(rescheduling_body).unwrap().join().unwrap();
     }
     fn rescheduling_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot::GNU_ONLY);
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-rescheduling");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
             (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 10) (run-with-timer 0 nil #'rescheduling)))
@@ -514,7 +528,9 @@ mod tests {
             .stdin(std::process::Stdio::piped()).output().unwrap();
         let expected = String::from_utf8(gnu.stdout).unwrap();
         assert_eq!(expected, "(nil (\"open\") (\"hi\") t)", "pinned GNU");
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot::GNU_ONLY);
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-process");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         vm.set_host_input(Some(Box::new(Waiting(vec![]))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil)");
@@ -550,7 +566,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(streaming_body).unwrap().join().unwrap();
     }
     fn streaming_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot::GNU_ONLY);
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-streaming");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil bytes 0)");
         // Output for 5 s, faster than its filter, which works on each
@@ -649,7 +667,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(quit_left_body).unwrap().join().unwrap();
     }
     fn quit_left_body() {
-        let (mut vm, _) = crate::test_world::started(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-quit-left");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.eval_source("(setq timer-list nil timer-idle-list nil romacs-gc-idle-delay nil)
                         (run-with-idle-timer 0 nil (lambda () (with-local-quit (signal 'quit nil))))").unwrap();
         vm.enter_busy();

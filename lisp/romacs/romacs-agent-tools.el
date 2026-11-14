@@ -464,11 +464,34 @@ read once from its `answered' file.")
             (puthash (string-to-number line) t table)))
         (puthash (romacs-agent-id session) table romacs-agent-tools--answered))))
 
-(defun romacs-agent-tools--answer (session seq)
-  "A `wait' answered with SESSION's turn end SEQ: its parent has it, and
-earlier ends still on their way stay so."
+(defun romacs-agent-tools--mark-answered (session seq)
+  "SESSION's turn end SEQ is answered: its parent has it, and earlier
+ends still on their way stay so."
   (puthash seq t (romacs-agent-tools--answered-table session))
   (write-region (format "%d\n" seq) nil (expand-file-name "answered" (romacs-agent-dir session)) t 'silent))
+
+(defun romacs-agent-tools--answer (session seq)
+  "A `wait' answered with SESSION's turn end SEQ: marked so
+\(`romacs-agent-tools--mark-answered'), it goes from SESSION's ends now, no
+delivery may follow.  The ends are walked only down to it: a wait answers
+its newest end."
+  (romacs-agent-tools--mark-answered session seq)
+  ;; Newest first: past an older seq it is not there (gone already).
+  (let ((ends (romacs-agent-ends session)))
+    (if (eql (car (car ends)) seq)
+        (setf (romacs-agent-ends session) (cdr ends))
+      (let ((cell ends))
+        (while (and (cdr cell) (> (car (cadr cell)) seq)) (setq cell (cdr cell)))
+        (when (and (cdr cell) (eql (car (cadr cell)) seq)) (setcdr cell (cddr cell)))))))
+
+(defun romacs-agent-tools--drop-answered (child handed answered)
+  "Let go of CHILD's ends whose seqs ANSWERED (a table) holds, all newer
+than HANDED: only its ends newer than that are walked."
+  (let ((kept nil) (rest (romacs-agent-ends child)))
+    (while (and rest (> (car (car rest)) handed))
+      (unless (gethash (car (car rest)) answered) (push (car rest) kept))
+      (setq rest (cdr rest)))
+    (setf (romacs-agent-ends child) (nconc (nreverse kept) rest))))
 
 (defun romacs-agent-tools--wanted-p (session seq)
   "Whether SESSION's turn end SEQ is still to be given to its parent."
@@ -522,17 +545,34 @@ this process.  Its ends stay in it until delivered
 \(`romacs-agent-tools--wanted-p'): a restart before then, its state kept,
 hands them on again.")
 
+(defvar romacs-agent-tools--pruned (make-hash-table :test #'eq :weakness 'key)
+  "A child to the delivered seq its ends were last pruned at: they are
+pruned again only once more of them are delivered.  An end answered goes
+as it is (`romacs-agent-tools--answer').")
+
 (defun romacs-agent-tools--unhanded (child)
-  "CHILD's turn ends not yet handed on by this process, oldest first."
-  (let ((handed (gethash child romacs-agent-tools--handed 0)))
-    (cl-remove-if-not (lambda (end) (> (car end) handed)) (reverse (romacs-agent-ends child)))))
+  "CHILD's turn ends not yet handed on by this process, oldest first: the
+newest of its ends, newest first, down to the last handed on."
+  (let ((handed (gethash child romacs-agent-tools--handed 0)) (new nil))
+    (cl-loop for end in (romacs-agent-ends child) while (> (car end) handed) do (push end new))
+    new))
+
+(defun romacs-agent-tools--prune-ends (child)
+  "Let go of CHILD's ends its parent has, once more of them are delivered
+since they were last pruned (and the first time, what a restart kept): a
+parent at work while ends pile up costs nothing per end."
+  (let ((woken (romacs-agent-tools--woken child)))
+    (unless (eql woken (gethash child romacs-agent-tools--pruned))
+      (puthash child woken romacs-agent-tools--pruned)
+      (setf (romacs-agent-ends child)
+            (cl-remove-if-not (lambda (end) (romacs-agent-tools--wanted-p child (car end))) (romacs-agent-ends child))))))
 
 (defun romacs-agent-tools--hand-on (child)
   (let ((parent (romacs-agent-get (plist-get (romacs-agent-options child) :parent)))
-        (ends (romacs-agent-tools--unhanded child)))
-    ;; Those delivered or done with are let go.
-    (setf (romacs-agent-ends child)
-          (cl-remove-if-not (lambda (end) (romacs-agent-tools--wanted-p child (car end))) (romacs-agent-ends child)))
+        (handed (gethash child romacs-agent-tools--handed 0))
+        (ends (romacs-agent-tools--unhanded child))
+        (answered nil))
+    (romacs-agent-tools--prune-ends child)
     (when parent
       (dolist (end ends)
         (puthash child (car end) romacs-agent-tools--handed)
@@ -541,7 +581,10 @@ hands them on again.")
               ;; Newest first: an end is added in constant time.
               (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
             ;; Done with on its own: an earlier end still waiting stays wanted.
-            (romacs-agent-tools--answer child (car end)))))
+            (romacs-agent-tools--mark-answered child (car end))
+            (puthash (car end) t (or answered (setq answered (make-hash-table)))))))
+      ;; They go at once, in one walk of the new ends alone.
+      (when answered (romacs-agent-tools--drop-answered child handed answered))
       (romacs-agent-tools--wake-soon parent))))
 
 (defvar romacs-agent-tools--waking (make-hash-table :test #'equal)
@@ -612,6 +655,7 @@ its parent again."
   (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
   (remhash (romacs-agent-id child) romacs-agent-tools--answered)
   (remhash child romacs-agent-tools--handed)
+  (remhash child romacs-agent-tools--pruned)
   (when-let* ((parent (plist-get (romacs-agent-options child) :parent)))
     (puthash parent (cl-remove child (gethash parent romacs-agent-tools--pending) :key #'car)
              romacs-agent-tools--pending)))
