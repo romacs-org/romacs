@@ -1,6 +1,8 @@
 //! GNU DEFUNs whose Romacs definitions need the whole runtime (Lisp ones
 //! among them) or read what it loads, in `romacs-vm-gui -Q --batch' against
 //! pinned GNU's `emacs -Q --batch': one form a line, each printed.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 const FORMS: &str = r###"
@@ -67,7 +69,7 @@ fn runtime_builtins_match_pinned_gnu() {
         assert!(output.status.success(), "{binary}: {}", String::from_utf8_lossy(&output.stderr));
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
-    let (expected, actual) = (run(&gnu), run(env!("CARGO_BIN_EXE_romacs-vm-gui")));
+    let (expected, actual) = (run(&gnu), run(installed::romacs()));
     let failures: Vec<String> = forms.iter().zip(expected.lines().zip(actual.lines())).filter(|(_, (e, a))| e != a)
         .map(|(form, (e, a))| format!("{form}\n  GNU    {e}\n  Romacs {a}")).collect();
     assert_eq!(expected.lines().count(), actual.lines().count(), "{actual}");
@@ -87,7 +89,6 @@ fn suspend_emacs_stops_between_its_hooks() {
                        (prin1 (suspend-emacs)))";
     let run = |binary: &str| {
         let child = Command::new(binary).args(["-Q", "--batch", "--eval", form]).current_dir(&dir).env("HOME", &dir)
-            .env("ROMACS_WORLD", "off")
             .stdout(std::process::Stdio::piped()).process_group(0).spawn().unwrap();
         let stat = format!("/proc/{}/stat", child.id());
         let stopped = || std::fs::read_to_string(&stat).is_ok_and(|text| text.rsplit(") ").next().unwrap_or("").starts_with('T'));
@@ -101,5 +102,5 @@ fn suspend_emacs_stops_between_its_hooks() {
         assert!(output.status.success());
         String::from_utf8(output.stdout).unwrap()
     };
-    assert_eq!(run(env!("CARGO_BIN_EXE_romacs-vm-gui")), "before\nafter\nnil");
+    assert_eq!(run(installed::romacs()), "before\nafter\nnil");
 }

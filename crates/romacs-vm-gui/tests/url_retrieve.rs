@@ -3,6 +3,8 @@
 //! keep-alive server, so the second goes through url-http's pool of free
 //! connections, which url-http.el keys by `main-thread'.  Both print each
 //! response's status line and body.
+#[path = "support/installed.rs"]
+mod installed;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Command;
@@ -31,7 +33,7 @@ fn serve(listener: TcpListener) {
 #[test]
 fn url_retrieve_through_the_connection_pool_matches_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || serve(listener));
@@ -48,8 +50,6 @@ fn url_retrieve_through_the_connection_pool_matches_pinned_gnu() {
     let run = |binary: &str| {
         let output = Command::new(binary).args(["-Q", "--batch", "--eval", &form]).current_dir(&dir)
             .env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-            // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
-            .env("ROMACS_WORLD", "off")
             .output().unwrap();
         (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),
          String::from_utf8_lossy(&output.stderr).lines().last().unwrap_or_default().to_owned())
@@ -84,7 +84,7 @@ fn serve_encoded(listener: TcpListener) {
 #[test]
 fn url_retrieve_decompresses_a_gzip_body_as_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-url-gzip-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let run = |binary: &str| {
@@ -100,7 +100,6 @@ fn url_retrieve_decompresses_a_gzip_body_as_pinned_gnu() {
                  (princ (format \"%S|%s\" url-mime-encoding-string (buffer-substring (point) (point-max)))))))");
         let output = Command::new(binary).args(["-Q", "--batch", "--eval", &form]).current_dir(&dir)
             .env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-            .env("ROMACS_WORLD", "off")
             .output().unwrap();
         server.join().unwrap();
         (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),
