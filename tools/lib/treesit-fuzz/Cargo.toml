@@ -1,0 +1,21 @@
+# tools/treesit-fuzz builds this twice, against the published tree-sitter
+# runtime and against crates/vendor/tree-sitter, and compares the two.
+# Its own workspace, so the repository's [patch.crates-io] does not apply.
+[package]
+name = "treesit-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tree-sitter = "=0.27.0"
+tree-sitter-language = "0.1.7"
+romacs-grammars = { path = "../../../crates/romacs-grammars" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[workspace]
+
+[profile.release]
+debug = 1
