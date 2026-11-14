@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """perkey_live's validation, without a compositor or binary."""
+import argparse
 import unittest
 
 import perkey_live as pk
@@ -29,6 +30,20 @@ class Counters(unittest.TestCase):
         self.assertNotIn('--no-inherit', pk.perf_stat(42, 'out.txt', inherit=True))
         self.assertEqual(alone[alone.index('-t') + 1], '42')
         self.assertEqual(alone[alone.index('-o') + 1], 'out.txt')
+
+
+class Options(unittest.TestCase):
+    BASE = ['--binary', 'romacs-vm-gui', '--output', 'out']
+
+    def test_a_session_counts_the_evaluator_alone_unless_inherit_is_asked(self):
+        self.assertFalse(pk.arguments(self.BASE).inherit)
+        self.assertFalse(pk.Session(pk.arguments(self.BASE), None, False).inherit)
+        self.assertTrue(pk.Session(pk.arguments(self.BASE + ['--inherit']), None, False).inherit)
+
+    def test_a_harness_with_options_of_its_own_counts_the_evaluator_alone(self):
+        # images_typing_live, theme_live and the others build perkey's
+        # Session over options that name no `inherit'.
+        self.assertFalse(pk.Session(argparse.Namespace(keys=40), None, False).inherit)
 
 
 class Expectations(unittest.TestCase):
