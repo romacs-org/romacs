@@ -227,6 +227,8 @@ pub struct FontResolver {
     orders: HashMap<(GroupKey, RequestKey), Arc<Vec<romacs_layout_input::Alternative>>>,
     opened: HashMap<(String, u32, u32), Option<OpenedFace>>,
     files: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
+    /// How often its answers were retired (`retired`).
+    retired: u64,
 }
 
 impl std::fmt::Debug for FontResolver {
@@ -256,6 +258,7 @@ impl FontResolver {
             orders: HashMap::default(),
             opened: HashMap::default(),
             files: HashMap::default(),
+            retired: 0,
         })
     }
 
@@ -291,7 +294,13 @@ impl FontResolver {
         self.sole.clear();
         self.realized.clear();
         self.orders.clear();
+        self.retired += 1;
     }
+
+    /// How often this resolver retired its answers: what was derived from
+    /// them (a face realised, a line laid out) holds while this stands.
+    #[must_use]
+    pub fn retired(&self) -> u64 { self.retired }
 
     /// Adopt the producer's fontsets: a new revision retires every answer.
     pub fn set_fontsets(&mut self, state: Arc<FontsetState>) {

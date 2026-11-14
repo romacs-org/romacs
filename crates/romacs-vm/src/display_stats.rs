@@ -2,7 +2,9 @@
 //! evaluator ran, the instructions and conses spent inside them, the
 //! windows a snapshot reused or rebuilt, the bands it expanded, what this
 //! evaluator asked of the layout host besides a paint's own layout, and
-//! the frames it submitted. Plain counters, always on: a cycle pays two
+//! the frames it submitted, and what the layout engine on its thread did
+//! (display lines laid out and served from its cache, rows wrapped, rows
+//! of an earlier version of a line kept). Plain counters, always on: a cycle pays two
 //! reads of the thread's instruction counter for them, which the first
 //! cycle opens (a pinned event: the thread has one hardware counter fewer
 //! for a profiler); the reads are no host calls of the session's
@@ -24,11 +26,13 @@ use crate::{Result, Value, Vm};
 /// The counts `romacs--display-stats` reports, in order: the VM's own,
 /// then from HOST on the host calls its thread keeps.
 const NAMES: [&str; COUNTS] = ["cycles", "instructions", "conses", "windows-visited", "windows-reused", "windows-rebuilt",
-    "band-expansions", "band-evals", "check-mismatches", "layouts", "measures", "frames-submitted"];
-const COUNTS: usize = 12;
+    "band-expansions", "band-evals", "check-mismatches", "layouts", "measures", "frames-submitted",
+    "lines-laid", "lines-served", "rows-wrapped", "rows-reused"];
+const COUNTS: usize = 16;
 const INSTRUCTIONS: usize = 1;
 const HOST: usize = 9;
-const HOST_CALLS: [&str; COUNTS - HOST] = ["layout.lay_out", "layout.measure", "sender.submit_scene"];
+const HOST_CALLS: [&str; COUNTS - HOST] = ["layout.lay_out", "layout.measure", "sender.submit_scene",
+    "layout.lines-laid", "layout.lines-served", "layout.rows-wrapped", "layout.rows-reused"];
 
 thread_local! {
     /// The thread's HOST_CALLS at the last reset. It is kept with the
