@@ -37,7 +37,8 @@ and what the merge queue holds it to.
 
 ## Traps
 - Nextest refuses a whole filter over one `binary_id` no package has. Only a
-  package with an `all` test target is asked for it.
+  package with folded test targets (`all`, `gnu`) is asked for them
+  (`impact.test_file`).
 - Git quotes a path that has a quote, a backslash or a byte past ASCII. Read
   its NUL-delimited output (`-z`) wherever a path is used again.
 

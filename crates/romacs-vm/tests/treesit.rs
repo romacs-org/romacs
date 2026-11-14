@@ -300,8 +300,7 @@ fn a_frame_waits_for_no_first_parse() {
 /// language with no grammar or mode leaves the text alone.
 #[test]
 fn code_blocks_take_their_languages_faces() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = bootstrapped(&root);
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source("(load \"romacs-treesit-code\" nil t)").unwrap();
     let setup = format!("(progn {SYSTEM_SETUP} \
         (set-buffer (get-buffer-create \"md\")) \
