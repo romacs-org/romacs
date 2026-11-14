@@ -1,6 +1,9 @@
-//! Lists romacs-vm's test files for `modules!` (src/lib.rs): each
-//! `tests/FILE.rs` but those `tests/all/standalone.txt` names, as the
-//! `#[path]` module declarations the `all` target holds.
+//! Lists romacs-vm's test files for `modules!` and `gnu_modules!`
+//! (src/lib.rs): each `tests/FILE.rs` but those `tests/all/standalone.txt`
+//! names, as the `#[path]` module declarations of the target that holds
+//! it. A file that boots GNU's Lisp (it includes one of `GNU_LISP`'s
+//! support files) is a module of `gnu`, whose executable restores that
+//! boot from a world; every other file is a module of `all`.
 //!
 //! This is romacs-vm's test list, built here rather than by romacs-vm's own
 //! build script: Cargo rebuilds a package's library whenever its build
@@ -28,12 +31,26 @@ fn main() {
     if let Some(gone) = alone.iter().find(|name| !files.contains(name)) {
         panic!("tests/all/standalone.txt: {gone} names no test file");
     }
-    let mut text = String::new();
+    let (mut all, mut gnu) = (String::new(), String::new());
     for name in files.iter().filter(|name| !alone.contains(name)) {
-        writeln!(text, "#[path = \"../{name}.rs\"]\nmod {name};").expect("writing to a String");
+        let path = tests.join(format!("{name}.rs"));
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let target = if boots_gnu_lisp(&source) { &mut gnu } else { &mut all };
+        writeln!(target, "#[path = \"../{name}.rs\"]\nmod {name};").expect("writing to a String");
     }
-    let out = Path::new(&std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("modules.rs");
-    std::fs::write(&out, text).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+    for (file, text) in [("modules.rs", all), ("gnu_modules.rs", gnu)] {
+        std::fs::write(out.join(file), text).unwrap_or_else(|e| panic!("{}: {e}", out.join(file).display()));
+    }
+}
+
+/// The support files whose includers boot GNU's Lisp (`support/gnu_lisp.rs`,
+/// and the two built on it). `tools/lib/test_modules.py` holds the same list.
+const GNU_LISP: [&str; 3] = ["support/gnu_lisp.rs", "support/gnu_ert_vm.rs", "support/gui_probe.rs"];
+
+/// Whether a test file's SOURCE includes one of `GNU_LISP`.
+fn boots_gnu_lisp(source: &str) -> bool {
+    GNU_LISP.iter().any(|support| source.contains(&format!("#[path = \"{support}\"]")))
 }
 
 /// The files of a standalone list's TEXT: one `FILE: reason` a line, each

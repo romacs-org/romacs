@@ -5,8 +5,9 @@
 //! text, comments and bogus markup, implied and repeated html/head/body,
 //! end-tag priorities and attributes. Both engines read one case file and
 //! answer each case's tree's printed md5; a mismatch shows Romacs's tree.
-use romacs_vm::Vm;
-use std::path::Path;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 const TAGS: &str = "a abbr acronym address b bdo big blockquote button caption center cite code col colgroup dd del dfn dir div dl dt em
 fieldset font form h1 h2 h3 h4 h5 h6 hr i ins kbd label legend li listing map menu object ol optgroup option p pre q s samp select small
@@ -60,25 +61,6 @@ const PROGRAM: &str = r#"(let ((print-escape-newlines t) (print-length nil) (pri
         (setq out (cons (if romacs-show tree (md5 tree)) out)))))
   (encode-coding-string (mapconcat #'identity (nreverse out) "\n") 'utf-8))"#;
 
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 #[test]
 fn html_trees_match_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
@@ -90,7 +72,7 @@ fn html_trees_match_pinned_gnu() {
         .args(["-Q", "--batch", "--eval", &setup(false), "--eval", &format!("(princ {PROGRAM})")]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(&setup(false)).unwrap();
     let actual = String::from_utf8(vm.eval_source(PROGRAM).unwrap().bytes().unwrap().to_vec()).unwrap();
     let differing: Vec<usize> = expected.lines().zip(actual.lines()).enumerate().filter(|(_, (g, r))| g != r).map(|(i, _)| i).collect();
@@ -126,7 +108,7 @@ fn deep_nesting_stops_as_gnu() {
   (nreverse out))"#;
     let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {program}))")]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let actual = vm.eval_source(&format!("(encode-coding-string (prin1-to-string {program}) (quote utf-8))")).unwrap().bytes().unwrap().to_vec();
     assert_eq!(String::from_utf8(actual).unwrap(), String::from_utf8(output.stdout).unwrap());
 }
