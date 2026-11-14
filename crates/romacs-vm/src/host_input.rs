@@ -121,8 +121,9 @@ pub trait HostInput {
     }
 
     /// Whether the host shows top-level frames beyond the first, each in
-    /// a window of its own: what lets `make-frame' make one. A host
-    /// without, every batch run's, keeps the one.
+    /// a window of its own that it shows, hides and iconifies as the frame
+    /// is: what lets `make-frame' make one, and a top-level frame hide. A
+    /// host without, every batch run's, keeps one frame, always visible.
     fn top_level_frames(&mut self) -> bool { false }
     /// The id of the top-level frame whose window the event `next_event'
     /// last returned came from (keyboard.c's event `frame_or_window'),

@@ -670,9 +670,10 @@ impl crate::window::Windows<'_> {
         self.vm.set_top_frame_geometry(frame, native.0, native.1, line, column).map_err(internal)
     }
     /// Show top-level FRAME, or hide it, ICONIFIED or not. A frame
-    /// without a window system stays visible, as a terminal frame does.
+    /// without a window system stays visible, as a terminal frame does, and
+    /// so does one whose host does not manage its frames' windows.
     pub(crate) fn set_top_frame_visibility(&mut self, frame: Value, visible: bool, iconified: bool) -> std::result::Result<(), Fault> {
-        if !self.vm.window_system_open() { return Ok(()); }
+        if !self.vm.window_system_open() || !self.vm.host_top_level_frames() { return Ok(()); }
         let f = self.vm.frame_mut(frame).map_err(internal)?;
         let iconified = iconified && !visible;
         if (f.visible, f.iconified) != (visible, iconified) {
