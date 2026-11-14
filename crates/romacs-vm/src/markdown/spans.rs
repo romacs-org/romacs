@@ -14,14 +14,15 @@ pub(crate) struct Span {
 }
 
 /// A document's spans; the line starts of its top-level blocks (ascending),
-/// from which [`super::restart`] picks; its code blocks; and the labels its
-/// link reference definitions define ([`label_key`]).
+/// from which [`super::restart`] picks; its code blocks; and its link
+/// reference definitions, each where it starts and the label it defines
+/// ([`label_key`]).
 #[derive(Debug, Default)]
 pub(crate) struct Parsed {
     pub spans: Vec<Span>,
     pub tops: Vec<usize>,
     pub codes: Vec<Code>,
-    pub labels: Vec<String>,
+    pub labels: Vec<(usize, String)>,
     /// Each link's range and destination (empty when its definition is
     /// outside the text).
     pub links: Vec<(Range<usize>, String)>,
@@ -135,9 +136,10 @@ pub(crate) fn spans_with(text: &str, known: &dyn Fn(&str) -> bool) -> Parsed {
     for (label, definition) in parser.reference_definitions().iter() {
         let span = definition.span.clone();
         out.spans.push(Span { start: span.start, end: span.end, kind: Kind::Url, depth: 0 });
-        out.labels.push(label_key(label));
+        out.labels.push((span.start, label_key(label)));
     }
     out.tops.dedup();
+    out.labels.sort();
     out
 }
 

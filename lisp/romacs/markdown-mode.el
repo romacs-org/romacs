@@ -13,6 +13,11 @@
 
 ;;; Code:
 
+;; Before the mode's file defines its hook: a `markdown-mode-hook' a user's
+;; init filled stays its value.
+;;;###autoload
+(defvaralias 'markdown-mode-hook 'romacs-markdown-mode-hook)
+
 (require 'romacs-markdown-mode)
 
 ;;;###autoload
@@ -24,7 +29,6 @@
 ;;;###autoload
 (defalias 'gfm-view-mode #'romacs-markdown-view-mode)
 
-(defvaralias 'markdown-mode-hook 'romacs-markdown-mode-hook)
 (defvaralias 'markdown-mode-map 'romacs-markdown-mode-map)
 
 (defvar markdown-fontify-code-blocks-natively t

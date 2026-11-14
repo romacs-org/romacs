@@ -3,7 +3,7 @@
 //! touched. Positions are character offsets into the document. The text is
 //! read through a READ function: the index holds none of it.
 use super::spans::spans;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::ops::Range;
 
 /// The text of a range of characters.
@@ -15,13 +15,16 @@ pub(crate) struct Index {
     starts: Vec<usize>,
     /// The hull of what changed since the starts were last right.
     dirty: Option<Range<usize>>,
-    /// The labels the document's link reference definitions define.
-    labels: HashSet<String>,
+    /// The document's link reference definitions: where each starts and the
+    /// label it defines, ascending, as `starts` are kept.
+    defs: Vec<(usize, String)>,
+    /// How many definitions define each label.
+    labels: HashMap<String, usize>,
     /// The document's length, in characters, as its edits leave it.
     len: usize,
     built: bool,
 }
-romacs_snapshot::snapshot_struct!(Index { starts, dirty, labels, len, built });
+romacs_snapshot::snapshot_struct!(Index { starts, dirty, defs, labels, len, built });
 
 impl Index {
     /// START..END of the document was replaced by INSERTED characters.
@@ -34,6 +37,9 @@ impl Index {
         self.starts.retain(|&s| s <= start || s > end);
         for s in &mut self.starts {
             *s = shift(*s);
+        }
+        for (at, _) in &mut self.defs {
+            *at = shift(*at);
         }
         let changed = match self.dirty.take() {
             Some(d) => shift(d.start).min(start)..shift(d.end).max(new_end),
@@ -50,7 +56,7 @@ impl Index {
 
     /// Whether a reference to LABEL (a `label_key`) resolves in the document.
     pub(crate) fn defines(&self, label: &str) -> bool {
-        self.labels.contains(label)
+        self.labels.get(label).is_some_and(|&n| n > 0)
     }
 
     /// Make the starts right for a document of LEN characters, reading it
@@ -62,7 +68,8 @@ impl Index {
             let text = read(0..len);
             let parsed = spans(&text);
             self.starts = char_starts(&text, &parsed.tops, 0);
-            self.labels = parsed.labels.into_iter().collect();
+            self.defs = defs(&text, parsed.labels, 0);
+            self.labels = counts(&self.defs);
             (self.len, self.built, self.dirty) = (len, true, None);
             return Some(0..len);
         }
@@ -87,8 +94,17 @@ impl Index {
                 starts.extend(found.into_iter().filter(|&s| s < cut_at));
                 starts.extend_from_slice(&self.starts[k.min(self.starts.len())..]);
                 self.starts = starts;
-                self.labels.extend(parsed.labels);
-                return Some(from..cut_at);
+                // The definitions read again replace those in the span: a
+                // label defined or no longer defined changes what every
+                // reference to it is, so the whole document is again to face.
+                self.defs.retain(|(at, _)| *at < from || cut.is_some_and(|c| *at >= c));
+                self.defs.extend(defs(&text, parsed.labels, from));
+                self.defs.sort();
+                let labels = counts(&self.defs);
+                let defined = |m: &HashMap<String, usize>| m.iter().filter(|e| *e.1 > 0).map(|e| e.0.clone()).collect::<std::collections::BTreeSet<_>>();
+                let reshaped = defined(&labels) != defined(&self.labels);
+                self.labels = labels;
+                return Some(if reshaped { 0..len } else { from..cut_at });
             }
             // Not found again: look twice as far.
             k = (k + (k - after).max(1)).min(self.starts.len());
@@ -109,6 +125,22 @@ impl Index {
     pub(crate) fn starts(&self) -> &[usize] {
         &self.starts
     }
+}
+
+/// LABELS, (byte offset into TEXT, label) ascending, with their offsets as
+/// characters from BASE.
+fn defs(text: &str, labels: Vec<(usize, String)>, base: usize) -> Vec<(usize, String)> {
+    let offsets: Vec<usize> = labels.iter().map(|(at, _)| *at).collect();
+    char_starts(text, &offsets, base).into_iter().zip(labels).map(|(at, (_, label))| (at, label)).collect()
+}
+
+/// How many of DEFS define each label.
+fn counts(defs: &[(usize, String)]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for (_, label) in defs {
+        *counts.entry(label.clone()).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// TOPS, byte offsets into TEXT, as character offsets from BASE.

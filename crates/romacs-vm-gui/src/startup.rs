@@ -1990,13 +1990,16 @@ mod tests {
         let path = runtime_load_path(&dir).unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&path).unwrap();
-        for name in ["websocket", "fsm", "markdown-mode"] {
+        for name in ["websocket", "fsm"] {
             let directory = owned.join("deps").join(name);
             assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: {name}");
             let expected = directory.join(format!("{name}.el"));
             assert_eq!(printed(&mut vm, &format!("(locate-file-internal {} load-path '(\".el\"))", lisp_string(name))),
                 lisp_string(&expected.to_string_lossy()));
         }
+        // markdown-mode is Romacs's compatibility library (ledger/divergences/MD1.md).
+        assert_eq!(printed(&mut vm, "(locate-file-internal \"markdown-mode\" load-path '(\".el\"))"),
+            lisp_string(&owned.join("markdown-mode.el").to_string_lossy()));
         assert!(!path.contains(&owned.join("vm")), "VM helpers are compile-time inputs, not public libraries");
     }
 

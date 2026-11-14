@@ -102,6 +102,32 @@ unfontified, so redisplay asks for them again."
         (romacs-markdown-follow-link)
         (should (equal browsed "https://example.org"))))))
 
+(ert-deftest romacs-markdown-mode-follows-references-defined-elsewhere ()
+  (romacs-markdown-mode-tests--with "[go][r]\n\nOther.\n\n[r]: https://example.org/r\n"
+    (let (browsed)
+      (cl-letf (((symbol-function 'browse-url) (lambda (url) (setq browsed url))))
+        (search-forward "go")
+        (romacs-markdown-follow-link)
+        (should (equal browsed "https://example.org/r"))))))
+
+(ert-deftest romacs-markdown-mode-colours-each-block-afresh ()
+  "A block coloured by its mode's Font Lock in the reused hidden buffer is
+coloured as in a fresh one: no syntax state of the block before."
+  (skip-unless (fboundp 'scheme-mode))
+  (romacs-markdown-mode-tests--with
+      "```scheme\n(define (long-function-name argument) \"a string\" (list 1 2 3))\n```\n\n```scheme\n#;\n(define ignored 1)\n```\n"
+    (font-lock-ensure)
+    (should (memq 'font-lock-comment-face (romacs-markdown-mode-tests--faces-at "ignored")))))
+
+(ert-deftest romacs-markdown-mode-runs-markdown-mode-hook ()
+  (require 'markdown-mode)
+  (let* ((ran nil) (hook (lambda () (setq ran t))))
+    (add-hook 'markdown-mode-hook hook)
+    (unwind-protect
+        (romacs-markdown-mode-tests--with "# x\n" (should ran))
+      (remove-hook 'markdown-mode-hook hook))
+    (should (eq (indirect-function 'markdown-mode) (indirect-function 'romacs-markdown-mode)))))
+
 (ert-deftest romacs-markdown-mode-colours-code-by-language ()
   (romacs-markdown-mode-tests--with "```elisp\n(defun f () nil)\n```\n"
     (font-lock-ensure)

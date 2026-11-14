@@ -122,13 +122,19 @@ impl Leaf<'_> {
         Ok(self.cons(a, b))
     }
 
-    /// The links of BEG..END of the current buffer, one Markdown document:
-    /// each (START END . DESTINATION), DESTINATION empty for a reference
-    /// whose definition is outside the region.
+    /// The links of BEG..END of the current buffer, a Markdown document,
+    /// references to labels it defines anywhere included: each (START END .
+    /// DESTINATION), DESTINATION empty for a reference defined outside
+    /// BEG..END.
     pub(crate) fn markdown_links(&mut self, beg: Value, end: Value) -> R<Value> {
         let (beg, end) = self.validate_region(beg, end)?;
-        let text = self.markdown_text(beg, end)?;
-        let parsed = markdown::spans(&text);
+        let buffer = self.current_buffer()?;
+        let range = usize::try_from(beg - 1).unwrap_or(0)..usize::try_from(end - 1).unwrap_or(0);
+        let ((text, parsed), _) = self.markdown_synced(buffer, |index, read| {
+            let text = read(range);
+            let parsed = markdown::spans_with(&text, &|label| index.defines(label));
+            (text, parsed)
+        })?;
         let positions = Positions::new(&text, parsed.links.iter().flat_map(|(r, _)| [r.start, r.end]).collect(), beg);
         let mut list = Value::NIL;
         for (range, dest) in parsed.links.iter().rev() {
@@ -174,7 +180,13 @@ impl Leaf<'_> {
             .filter(|r| r.end > write.start && r.start < write.end)
             .map(|r| (r.start.max(write.start), r.end.min(write.end), r.kinds.as_slice()))
             .collect();
-        let codes: Vec<&markdown::Code> = parsed.codes.iter().filter(|c| c.body.end > write.start && c.body.start < write.end).collect();
+        // A code block's text as far as it is written (narrowing may cut it).
+        let codes: Vec<markdown::Code> = parsed
+            .codes
+            .iter()
+            .filter(|c| c.body.end > write.start && c.body.start < write.end)
+            .map(|c| markdown::Code { language: c.language.clone(), body: c.body.start.max(write.start)..c.body.end.min(write.end) })
+            .collect();
         let mut offsets: Vec<usize> = vec![write.start, write.end];
         offsets.extend(runs.iter().flat_map(|r| [r.0, r.1]));
         offsets.extend(codes.iter().flat_map(|c| [c.body.start, c.body.end]));

@@ -152,7 +152,8 @@ A code block in one of these is coloured by its mode's Font Lock."
       (with-current-buffer buffer (delay-mode-hooks (funcall mode)))
       (setf (alist-get mode romacs-markdown--mode-buffers) buffer))
     (with-current-buffer buffer
-      (let ((inhibit-read-only t))
+      ;; Its change hooks run, so its syntax caches forget the last block.
+      (let ((inhibit-read-only t) (inhibit-modification-hooks nil))
         (erase-buffer)
         (insert text)
         (font-lock-ensure)

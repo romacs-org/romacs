@@ -278,3 +278,41 @@ fn index_blocks_hold_a_region() {
     assert_eq!(index.blocks(0, 4), 0..6);
     assert_eq!(index.blocks(6, 8), 6..8);
 }
+
+/// A definition deleted takes its label with it, and a change of what is
+/// defined asks for the whole document to be faced again.
+#[test]
+fn index_follows_definitions() {
+    let mut text = String::from("[go][r]\n\nOther.\n\n[r]: /u\n");
+    let mut index = Index::default();
+    let read = |t: &String| { let t = t.clone(); move |r: std::ops::Range<usize>| t[r].to_owned() };
+    index.sync(text.len(), &mut read(&text));
+    assert!(index.defines("r"));
+    let start = text.find("[r]:").unwrap();
+    let end = text.len();
+    text.truncate(start);
+    index.edit(start, end, 0);
+    assert_eq!(index.sync(text.len(), &mut read(&text)), Some(0..text.len()));
+    assert!(!index.defines("r"));
+    // An edit elsewhere keeps what is defined, and its span local.
+    let mut text = String::from("[r]: /u\n\nOne.\n\nTwo.\n\nThree.\n");
+    let mut index = Index::default();
+    index.sync(text.len(), &mut read(&text));
+    let at = text.find("Three").unwrap();
+    text.insert(at, 'x');
+    index.edit(at, at, 1);
+    let span = index.sync(text.len(), &mut read(&text)).unwrap();
+    assert!(span.start > 0 && index.defines("r"), "{span:?}");
+}
+
+/// A reference in a slice resolves against labels defined elsewhere.
+#[test]
+fn references_resolve_outside_the_slice() {
+    let text = "[go][r]\n\nOther.\n\n[R]:  https://example.org/r\n";
+    let mut index = Index::default();
+    index.sync(text.len(), &mut |r| text[r].to_owned());
+    assert!(index.defines("r"));
+    let parsed = spans_with("[go][r]\n", &|label| index.defines(label));
+    assert_eq!(parsed.links.len(), 1, "{:?}", parsed.links);
+    assert!(spans("[go][r]\n").links.is_empty());
+}
