@@ -6,7 +6,7 @@
   "glyphs_walked": 99,
   "font_identities": 185,
   "bytes_uploaded": 61300,
-  "own_instructions": 4640000,
+  "own_instructions": 4650000,
   "extra_frames": 0
  },
  "chat-cursor": {
@@ -26,7 +26,7 @@
   "glyphs_walked": 97,
   "font_identities": 179,
   "bytes_uploaded": 51300,
-  "own_instructions": 3750000,
+  "own_instructions": 3740000,
   "extra_frames": 0
  },
  "typed": {
@@ -46,7 +46,7 @@
   "glyphs_walked": 190,
   "font_identities": 357,
   "bytes_uploaded": 93400,
-  "own_instructions": 5020000,
+  "own_instructions": 5010000,
   "extra_frames": 0
  },
  "chat-stream-1k": {
@@ -56,7 +56,7 @@
   "glyphs_walked": 128,
   "font_identities": 231,
   "bytes_uploaded": 84800,
-  "own_instructions": 5340000,
+  "own_instructions": 5330000,
   "extra_frames": 0
  },
  "chat-stream-10k": {
@@ -66,7 +66,7 @@
   "glyphs_walked": 128,
   "font_identities": 231,
   "bytes_uploaded": 84800,
-  "own_instructions": 5400000,
+  "own_instructions": 5410000,
   "extra_frames": 0
  },
  "fontify-open-org-folded": {
@@ -94,9 +94,9 @@
   "rows_reused": 41,
   "cursor_rows": 1,
   "glyphs_walked": 385,
-  "font_identities": 733,
+  "font_identities": 737,
   "bytes_uploaded": 166000,
-  "own_instructions": 6520000,
+  "own_instructions": 6830000,
   "extra_frames": 0
  },
  "fontify-typed-elisp": {
@@ -106,7 +106,7 @@
   "glyphs_walked": 193,
   "font_identities": 363,
   "bytes_uploaded": 92600,
-  "own_instructions": 7540000,
+  "own_instructions": 7550000,
   "extra_frames": 0
  },
  "typed-three-windows": {
@@ -120,13 +120,13 @@
   "extra_frames": 0
  },
  "scroll-line": {
-  "rows_tessellated": 3,
-  "rows_reused": 35,
-  "cursor_rows": 1,
-  "glyphs_walked": 223,
-  "font_identities": 425,
-  "bytes_uploaded": 99300,
-  "own_instructions": 5500000,
+  "rows_tessellated": 38,
+  "rows_reused": 0,
+  "cursor_rows": 0,
+  "glyphs_walked": 2240,
+  "font_identities": 4470,
+  "bytes_uploaded": 869000,
+  "own_instructions": 23700000,
   "extra_frames": 0
  }
 }

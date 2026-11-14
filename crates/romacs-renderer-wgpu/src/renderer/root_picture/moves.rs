@@ -1,30 +1,44 @@
 //! Rows that only moved. A scroll, or a line inserted or deleted above
 //! others, moves a band of a window's rows by one distance: the new frame's
-//! groups there are the old frame's, glyph for glyph, but for their y. The
-//! picture holds their pixels already, elsewhere, so the band is copied to
-//! its new place and only what entered it, or lies around it, is repainted.
+//! rows there are the old frame's, glyph for glyph, but for their y. The
+//! picture holds their pixels already, a distance away, so the band is
+//! copied there, and the plan repaints what changed around it.
 //!
-//! A window's distance is the one most of its changed text groups moved by,
-//! found from a signature of each group's glyphs that leaves y out, and
-//! checked glyph by glyph. A move is taken only where it is exact on the
-//! surface: a whole number of device pixels, and every glyph clear of its
-//! clip's top and bottom in both places and of any gradient that reads its
-//! y. A glyph's slot id is not compared: slots are derived from pixels and
-//! only place cursors, which the picture does not hold.
+//! A band moves only when it passes one predicate, which makes the copy
+//! byte-equal to drawing the band whole (display-renderer-damage.md, §5
+//! step 4, gives each clause's reason):
 //!
-//! The band copied is the moved groups' box, widened by how far ink reaches
-//! sideways and out to whole device pixels (ink a row casts sideways moves
-//! with it), and narrowed to whole device pixels top and bottom, the
-//! slivers left repainted. What the copy brings into the band besides the
-//! moved groups, and what the new frame draws there besides them, is
-//! repainted: a group of either frame that touches the band, other than a
-//! solid rectangle that spans it (a window's background); and so are the
-//! strips above and below it that the moved groups' ink, and the ink of
-//! what they replace, reaches.
+//! 1. Exact on the device: the scale is a whole number, and the distance
+//!    and every y, height and baseline the band's glyphs carry are whole
+//!    device pixels (`on_grid`). Every edge the glyph pass derives from
+//!    them then lies on a half pixel and moves by exactly the distance.
+//! 2. The same rows: each of the band's visual rows is entire, and is the
+//!    old frame's row the distance away, glyph for glyph but y and slot
+//!    (`moved`, `whole_rows`). A row draws with its whole visual row and
+//!    nothing else: underline runs and box runs end at a window's edge.
+//! 3. Nothing drawn from y: no face with a background gradient, no tiled
+//!    fringe bitmap, no strike-through or wave underline (placed off the
+//!    half-pixel grid), no clip cutting the band's ink in either place
+//!    (`reads_y`, `moved`).
+//! 4. Nothing else in the band: the band is the rows' ink box (their cells
+//!    grown by the picture's reach, out to device pixels), and whatever else
+//!    the new frame draws there, or the old frame at its source, is a
+//!    uniform rectangle spanning both places (a window's background, an
+//!    unclipped border, a pane's dim), or, in the band's place only, a pane
+//!    edge that is opaque and the same in both frames, which every pass
+//!    draws last and the picture draws over each band it moves (`cover` in
+//!    root_picture.rs), so it covers whatever the copy put under it. No
+//!    other glyph's ink, no pane corner, no pane edge in the source
+//!    (`alone`).
+//!
+//! A frame's glyphs that pass are copied; the plan repaints its changed
+//! groups as for any frame but the moved rows, whose ink the band holds,
+//! and old rows whose ink lies in the band, which the copy overwrites.
 use std::hash::{Hash, Hasher};
 
 use rustc_hash::{FxHashMap, FxHasher};
 
+use romacs_display_protocol::face::{FaceAttributes, UnderlineStyle};
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::types::Rect;
 
@@ -39,7 +53,7 @@ pub(crate) struct Move {
     pub(crate) dy: f32,
 }
 
-/// A frame's moves, and what they leave to repaint.
+/// A frame's moves.
 #[derive(Debug, Default)]
 pub(crate) struct Found {
     pub(crate) moves: Vec<Move>,
@@ -47,49 +61,37 @@ pub(crate) struct Found {
     pub(crate) placed: Vec<Key>,
     /// Where each move lands.
     pub(crate) bands: Vec<Rect>,
-    /// What must be repainted once they are made.
-    pub(crate) damage: Vec<Rect>,
 }
 
 /// Fewest groups a move carries: one alone is as cheap repainted.
 const MIN_GROUPS: usize = 2;
+/// Most distances checked per window, best voted first: signatures agree on
+/// rows alike in text, so the best voted can prove wrong. A wrong one costs
+/// a few glyphs a row: a row that did not move differs early.
+const MAX_TRIES: usize = 8;
 
 /// The moves that bring a picture of SIDES' old frame toward its new one,
 /// whose groups at CHANGED (sorted) differ in place; REACH is how far ink
 /// leaves its cells, SCALE the device pixels per logical one.
 pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32) -> Found {
     let mut found = Found::default();
-    for (window, dy) in distances(sides, changed, scale) {
-        let mut placed: Vec<Key> = sides
-            .after
-            .keys()
-            .filter(|key| key.0 == window && moved(sides, **key, dy, reach))
-            .copied()
-            .collect();
-        if placed.len() < MIN_GROUPS {
-            continue;
-        }
-        placed.sort_unstable();
-        let Some(band) = placed
+    if !on_pixels(1.0, scale) {
+        return found;
+    }
+    let candidates = distances(sides, changed, scale);
+    let mut windows: Vec<i64> = candidates.iter().map(|c| c.0).collect();
+    windows.dedup();
+    for window in windows {
+        // The first distance, best voted first, whose band passes.
+        let Some((step, area, placed)) = candidates
             .iter()
-            .flat_map(|key| sides.after[key].iter().map(|&at| sides.runs[at].bounds))
-            .reduce(damage::union)
+            .filter(|c| c.0 == window)
+            .take(MAX_TRIES)
+            .find_map(|&(_, dy)| band(sides, window, dy, reach, scale))
         else {
             continue;
         };
-        let left = (band.x - reach.left).max(0.0);
-        let right = (band.x + band.width + reach.right).min(sides.new.width);
-        let Some(area) = snapped(Rect::new(left, band.y, right - left, band.height), scale) else {
-            continue;
-        };
-        let from = Rect::new(area.x, area.y - dy, area.width, area.height);
-        if from.y < 0.0 || from.y + from.height > sides.new.height {
-            continue;
-        }
-        found.damage.extend(slivers(band, area));
-        found.damage.extend(spoiled(sides, &placed, area, from, dy, reach));
-        found.damage.extend(ring(band, area, reach));
-        found.moves.push(Move { from, dy });
+        found.moves.push(step);
         found.bands.push(area);
         found.placed.extend(placed);
     }
@@ -97,8 +99,70 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
     found
 }
 
-/// Per window, the distance most of its changed text groups moved by: at
-/// least `MIN_GROUPS` of them, by whole device pixels at SCALE.
+/// The band of WINDOW's rows that moved DY, if one passes the predicate:
+/// its move, where it lands, and the groups it places.
+fn band(sides: &Sides<'_>, window: i64, dy: f32, reach: Reach, scale: f32) -> Option<(Move, Rect, Vec<Key>)> {
+    let mut placed: Vec<Key> = sides
+        .after
+        .keys()
+        .filter(|key| key.0 == window && moved(sides, **key, dy, reach, scale))
+        .copied()
+        .collect();
+    placed.sort_unstable();
+    let placed = whole_rows(sides, &placed, dy);
+    if placed.len() < MIN_GROUPS {
+        return None;
+    }
+    let rows = placed
+        .iter()
+        .flat_map(|key| sides.after[key].iter().map(|&at| sides.runs[at].bounds))
+        .reduce(damage::union)?;
+    let frame = Rect::new(0.0, 0.0, sides.new.width, sides.new.height);
+    let area = outward(intersection(reach.grow(rows), frame)?, scale);
+    let from = Rect::new(area.x, area.y - dy, area.width, area.height);
+    let inside = from.y >= 0.0 && from.y + from.height <= sides.new.height;
+    (inside && alone(sides, &placed, area, from, dy, reach, scale)).then_some((Move { from, dy }, area, placed))
+}
+
+/// Of PLACED (sorted), the groups whose whole visual row moved DY from a
+/// whole visual row: a row's groups draw together (an underline run keeps
+/// its first glyph's line, a box spans them), so a group moves only with
+/// every group of its row, from a row of exactly their sources.
+fn whole_rows(sides: &Sides<'_>, placed: &[Key], dy: f32) -> Vec<Key> {
+    let source = |key: &Key| (key.0, (f32::from_bits(key.1) - dy).to_bits(), key.2);
+    // Each frame's visual rows, as the sorted keys of their groups.
+    let rows = |runs: &[Run]| {
+        let mut rows: FxHashMap<usize, Vec<Key>> = FxHashMap::default();
+        for run in runs {
+            rows.entry(run.row).or_default().push(run.key);
+        }
+        for keys in rows.values_mut() {
+            keys.sort_unstable();
+            keys.dedup();
+        }
+        rows
+    };
+    let (new_rows, old_rows) = (rows(sides.runs), rows(&sides.old.runs));
+    let old_row_of: FxHashMap<Key, usize> = sides.old.runs.iter().map(|run| (run.key, run.row)).collect();
+    let whole = |keys: &Vec<Key>| {
+        let mut sources: Vec<Key> = keys.iter().map(source).collect();
+        sources.sort_unstable();
+        keys.iter().all(|key| placed.binary_search(key).is_ok())
+            && old_row_of.get(&sources[0]).is_some_and(|row| old_rows[row] == sources)
+    };
+    let mut kept: Vec<Key> = new_rows
+        .values()
+        .filter(|keys| keys.iter().any(|key| placed.binary_search(key).is_ok()) && whole(keys))
+        .flatten()
+        .copied()
+        .collect();
+    kept.sort_unstable();
+    kept
+}
+
+/// The distances changed text groups moved by, by window and best voted
+/// first: those at least `MIN_GROUPS` of a window's groups' signatures
+/// vote for, by whole device pixels at SCALE.
 fn distances(sides: &Sides<'_>, changed: &[Key], scale: f32) -> Vec<(i64, f32)> {
     let text = |groups: &damage::Groups, runs: &[Run], key: &Key| {
         key.0 != 0 && groups.get(key).is_some_and(|at| at.iter().any(|&i| runs[i].text))
@@ -124,62 +188,49 @@ fn distances(sides: &Sides<'_>, changed: &[Key], scale: f32) -> Vec<(i64, f32)> 
         let signed = signature(sides.new, sides.runs, &sides.after[key]);
         for &y in stood.get(&(key.0, signed, key.2)).into_iter().flatten() {
             let dy = f32::from_bits(key.1) - y;
-            if dy != 0.0 && whole(dy, scale) {
+            if dy != 0.0 && on_pixels(dy, scale) {
                 *votes.entry((key.0, dy.to_bits())).or_default() += 1;
             }
         }
     }
-    let mut best: Vec<(i64, usize, f32)> = Vec::new();
-    for ((window, dy), n) in votes {
-        let dy = f32::from_bits(dy);
-        if n < MIN_GROUPS {
-            continue;
-        }
-        let rank = |(n, dy): (usize, f32)| (n, std::cmp::Reverse(dy.abs().to_bits()), dy.to_bits());
-        match best.iter_mut().find(|b| b.0 == window) {
-            Some(b) if rank((n, dy)) > rank((b.1, b.2)) => *b = (window, n, dy),
-            Some(_) => {}
-            None => best.push((window, n, dy)),
-        }
-    }
-    best.sort_unstable_by_key(|b| b.0);
-    best.into_iter().map(|(window, _, dy)| (window, dy)).collect()
-}
-
-/// Whether DY logical pixels are a whole number of device pixels at SCALE.
-fn whole(dy: f32, scale: f32) -> bool {
-    let device = dy * scale;
-    (device - device.round()).abs() < 1e-3
+    let mut ranked: Vec<(i64, usize, f32)> = votes
+        .into_iter()
+        .filter(|vote| vote.1 >= MIN_GROUPS)
+        .map(|((window, dy), n)| (window, n, f32::from_bits(dy)))
+        .collect();
+    // By window; then most votes, the shorter distance, and its bits, so the
+    // order is the same whatever the map's.
+    ranked.sort_unstable_by_key(|&(window, n, dy)| {
+        (window, std::cmp::Reverse(n), dy.abs().to_bits(), dy.to_bits())
+    });
+    ranked.into_iter().map(|(window, _, dy)| (window, dy)).collect()
 }
 
 /// A hash of the glyphs at AT of FRAME's RUNS that leaves their y out: of
-/// how many there are and of the first and the last.
+/// where they start and of each one's kind, character and face.
 fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
     let mut hasher = FxHasher::default();
     let mut glyphs = at.iter().flat_map(|&i| frame.glyphs[runs[i].glyphs.clone()].iter());
-    let count: usize = at.iter().map(|&i| runs[i].glyphs.len()).sum();
-    count.hash(&mut hasher);
-    // Its count and its ends: what tells most rows apart, and costs the
-    // same however long the row; `moved` checks every glyph.
-    for glyph in [glyphs.next(), glyphs.last()].into_iter().flatten() {
-        std::mem::discriminant(glyph).hash(&mut hasher);
-        if let FrameGlyph::Char { char, face_id, .. } = glyph {
-            char.hash(&mut hasher);
-            face_id.get().hash(&mut hasher);
-        }
-        if let Some(bounds) = glyph.geometry() {
-            bounds.x.to_bits().hash(&mut hasher);
-            bounds.width.to_bits().hash(&mut hasher);
+    // Where it starts, then every glyph's kind and character: rows that
+    // sign alike are alike in text, and `moved` checks every field.
+    if let Some(bounds) = glyphs.clone().next().and_then(FrameGlyph::geometry) {
+        bounds.x.to_bits().hash(&mut hasher);
+    }
+    for glyph in &mut glyphs {
+        match glyph {
+            FrameGlyph::Char { char, face_id, .. } => (u32::from(*char), face_id.get()).hash(&mut hasher),
+            _ => std::mem::discriminant(glyph).hash(&mut hasher),
         }
     }
     hasher.finish()
 }
 
 /// Whether the new frame's group KEY is the old frame's group DY above it,
-/// moved: glyph for glyph equal but for y, each clear of its clip's top and
-/// bottom in both places (its sides cut it alike in either) and of any
-/// gradient.
-fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
+/// moved, by clauses 1 to 3: glyph for glyph equal but for y, on whole
+/// device pixels in both places, drawing nothing from y, its ink clear of
+/// its clips' tops and bottoms in both places (their sides cut it alike in
+/// either).
+fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach, scale: f32) -> bool {
     let source = (key.0, (f32::from_bits(key.1) - dy).to_bits(), key.2);
     let (Some(was), Some(is)) = (sides.before.get(&source), sides.after.get(&key)) else {
         return false;
@@ -191,17 +242,15 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
     let before = Rect::new(inked.x, inked.y - dy, inked.width, inked.height);
     let inside = |clip: Rect, rect: Rect| clip.y <= rect.y && rect.y + rect.height <= clip.y + clip.height;
     let clear = |glyph: &FrameGlyph| {
-        clip(glyph).is_none_or(|clip| inside(clip, inked) && inside(clip, before))
-            && face(glyph).is_none_or(|face| {
-                sides.new.faces.get(&face).is_none_or(|face| face.background_gradient.is_none())
-            })
+        !reads_y(sides.new, glyph) && clip(glyph).is_none_or(|clip| inside(clip, inked) && inside(clip, before))
     };
     let mut olds = was.iter().flat_map(|&at| sides.old.frame.glyphs[sides.old.runs[at].glyphs.clone()].iter());
     let mut news = is.iter().flat_map(|&at| sides.new.glyphs[sides.runs[at].glyphs.clone()].iter());
     loop {
         match (olds.next(), news.next()) {
             (None, None) => return true,
-            (Some(old), Some(new)) if clear(new) && moved_glyph(old, new, dy) => {}
+            (Some(old), Some(new))
+                if clear(new) && on_grid(old, scale) && on_grid(new, scale) && moved_glyph(old, new, dy) => {}
             _ => return false,
         }
     }
@@ -332,6 +381,45 @@ fn moved_text(old: &FrameGlyph, new: &FrameGlyph, dy: f32) -> Option<bool> {
     }
 }
 
+/// Whether V logical pixels are a whole number of device pixels at SCALE,
+/// exactly.
+fn on_pixels(v: f32, scale: f32) -> bool {
+    let device = v * scale;
+    device.to_bits() == device.round().to_bits()
+}
+
+/// Clause 1: whether every y, height and baseline GLYPH carries is a whole
+/// number of device pixels at SCALE; false for a kind a band does not carry.
+fn on_grid(glyph: &FrameGlyph, scale: f32) -> bool {
+    let all = |values: &[f32]| values.iter().all(|&v| on_pixels(v, scale));
+    match glyph {
+        FrameGlyph::Char { y, height, baseline, .. } => all(&[*y, *height, *baseline]),
+        FrameGlyph::Stretch { y, height, .. }
+        | FrameGlyph::FringeBitmap { y, height, .. }
+        | FrameGlyph::Border { y, height, .. } => all(&[*y, *height]),
+        FrameGlyph::Image { y, height, slot_rect, box_rect, .. } => {
+            all(&[*y, *height, slot_rect.y, slot_rect.height, box_rect.y, box_rect.height])
+        }
+        FrameGlyph::Background { bounds, .. } => all(&[bounds.y, bounds.height]),
+        _ => false,
+    }
+}
+
+/// Clause 3: whether GLYPH, in FRAME, draws something from its y beyond
+/// moving with it: a background gradient sampled at y, a fringe bitmap
+/// tiled by y, or a strike-through or wave underline, placed off the
+/// half-pixel grid.
+fn reads_y(frame: &FrameGlyphBuffer, glyph: &FrameGlyph) -> bool {
+    if let FrameGlyph::FringeBitmap { bitmap_index, .. } = glyph {
+        return frame.fringe_bitmaps.get(bitmap_index).is_some_and(|bitmap| bitmap.period > 0);
+    }
+    face(glyph).and_then(|id| frame.faces.get(&id)).is_some_and(|face| {
+        face.background_gradient.is_some()
+            || face.attributes.contains(FaceAttributes::STRIKE_THROUGH)
+            || (face.attributes.contains(FaceAttributes::UNDERLINE) && face.underline_style == UnderlineStyle::Wave)
+    })
+}
+
 /// The clip GLYPH is drawn under, if any.
 fn clip(glyph: &FrameGlyph) -> Option<Rect> {
     match glyph {
@@ -352,6 +440,20 @@ fn face(glyph: &FrameGlyph) -> Option<romacs_display_protocol::types::FaceId> {
     }
 }
 
+/// Where A and B overlap, if they do.
+pub(crate) fn intersection(a: Rect, b: Rect) -> Option<Rect> {
+    let (x0, y0) = (a.x.max(b.x), a.y.max(b.y));
+    let (x1, y1) = ((a.x + a.width).min(b.x + b.width), (a.y + a.height).min(b.y + b.height));
+    (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+}
+
+/// Whether BAND holds the ink of a group with BOUNDS, ink reaching REACH
+/// past it, on FRAME: ink past the frame's edges is never drawn.
+pub(crate) fn holds_ink(band: Rect, bounds: Rect, reach: Reach, frame: &FrameGlyphBuffer) -> bool {
+    intersection(reach.grow(bounds), Rect::new(0.0, 0.0, frame.width, frame.height))
+        .is_none_or(|ink| contains(band, ink))
+}
+
 /// Whether OUTER holds INNER.
 pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
     outer.x <= inner.x
@@ -360,83 +462,65 @@ pub(crate) fn contains(outer: Rect, inner: Rect) -> bool {
         && inner.y + inner.height <= outer.y + outer.height
 }
 
-/// RECT on whole device pixels at SCALE: out to them at its sides, in to
-/// them at its top and bottom; None if nothing is left.
-fn snapped(rect: Rect, scale: f32) -> Option<Rect> {
-    let snap = |v: f32, up: bool| {
-        let device = v * scale;
-        let near = device.round();
-        let device = if (device - near).abs() < 1e-3 {
-            near
-        } else if up {
-            device.ceil()
+/// RECT grown out to whole device pixels at SCALE.
+fn outward(rect: Rect, scale: f32) -> Rect {
+    let [x0, y0] = [rect.x, rect.y].map(|v| (v * scale).floor() / scale);
+    let [x1, y1] = [rect.x + rect.width, rect.y + rect.height].map(|v| (v * scale).ceil() / scale);
+    Rect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// Clause 4: whether the band at AREA, moving DY from FROM, holds nothing
+/// but the groups it PLACES (sorted): whatever else either frame draws in
+/// its place there (the new frame at AREA, the old at FROM), its ink grown
+/// by REACH, is a uniform rectangle spanning both places, which looks alike
+/// moved within itself. Of the panes' chrome, drawn over the rows and fixed
+/// where they move: a dim spans both places or touches neither, no corner
+/// touches either, no edge touches FROM, and an edge in AREA is opaque and
+/// the same in both frames, drawn over the band after the copy.
+fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, reach: Reach, scale: f32) -> bool {
+    let span = (from.y.min(area.y), (from.y + from.height).max(area.y + area.height));
+    let spans = |r: Rect| r.y <= span.0 && r.y + r.height >= span.1;
+    // A window's background, or a border as its clip cuts it.
+    let uniform = |glyph: &FrameGlyph| match glyph {
+        FrameGlyph::Background { bounds, .. } => Some(Some(*bounds)),
+        FrameGlyph::Border { x, y, width, height, clip_rect, .. } => {
+            let bounds = Rect::new(*x, *y, *width, *height);
+            Some(clip_rect.map_or(Some(bounds), |clip| intersection(bounds, clip)))
+        }
+        _ => None,
+    };
+    let fits = |frame: &FrameGlyphBuffer, run: &Run, place: Rect| {
+        let glyphs = &frame.glyphs[run.glyphs.clone()];
+        if glyphs.iter().all(|g| uniform(g).is_some()) {
+            glyphs
+                .iter()
+                .filter_map(|g| uniform(g).flatten())
+                .all(|r| spans(r) || !damage::overlaps(r, place))
         } else {
-            device.floor()
-        };
-        device / scale
+            !damage::overlaps(reach.grow(run.bounds), place)
+        }
     };
-    let (x0, x1) = (snap(rect.x, false), snap(rect.x + rect.width, true));
-    let (y0, y1) = (snap(rect.y, true), snap(rect.y + rect.height, false));
-    (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
-}
-
-/// What of BAND's height AREA, snapped from it, leaves: under a device
-/// pixel above and below.
-fn slivers(band: Rect, area: Rect) -> [Rect; 2] {
-    [
-        Rect::new(area.x, band.y, area.width, area.y - band.y),
-        Rect::new(area.x, area.y + area.height, area.width, band.y + band.height - area.y - area.height),
-    ]
-}
-
-/// The strips above and below BAND, as wide as AREA, that ink drawn in it
-/// reaches.
-fn ring(band: Rect, area: Rect, reach: Reach) -> [Rect; 2] {
-    [
-        Rect::new(area.x, band.y - reach.up, area.width, reach.up),
-        Rect::new(area.x, band.y + band.height, area.width, reach.down),
-    ]
-}
-
-/// What the move of FROM by DY to BAND leaves wrong in BAND: each group of
-/// the new frame there it did not place (PLACED), and each group of the old
-/// frame in FROM it did not carry, where that lands; but a solid rectangle
-/// spanning both places, which looks alike moved within itself.
-fn spoiled(sides: &Sides<'_>, placed: &[Key], band: Rect, from: Rect, dy: f32, reach: Reach) -> Vec<Rect> {
-    let span = (from.y.min(band.y), (from.y + from.height).max(band.y + band.height));
-    let carried: Vec<Key> = {
-        let mut keys: Vec<Key> = placed.iter().map(|k| (k.0, (f32::from_bits(k.1) - dy).to_bits(), k.2)).collect();
-        keys.sort_unstable();
-        keys
-    };
-    let spoils = |frame: &FrameGlyphBuffer, run: &Run, area: Rect| {
-        let solid = frame.glyphs[run.glyphs.clone()]
+    let mut carried: Vec<Key> = placed.iter().map(|k| (k.0, (f32::from_bits(k.1) - dy).to_bits(), k.2)).collect();
+    carried.sort_unstable();
+    let others = |frame: &FrameGlyphBuffer, runs: &[Run], groups: &damage::Groups, moving: &[Key], place: Rect| {
+        groups
             .iter()
-            .all(|g| matches!(g, FrameGlyph::Background { .. } | FrameGlyph::Border { .. }));
-        if solid {
-            damage::overlaps(run.bounds, area)
-                && !(run.bounds.y <= span.0 && run.bounds.y + run.bounds.height >= span.1)
-        } else {
-            damage::overlaps(reach.grow(run.bounds), area)
-        }
+            .filter(|(key, _)| moving.binary_search(key).is_err())
+            .all(|(_, at)| at.iter().all(|&i| fits(frame, &runs[i], place)))
     };
-    let mut out = Vec::new();
-    for (key, at) in &sides.after {
-        if placed.binary_search(key).is_err() {
-            out.extend(at.iter().map(|&i| &sides.runs[i]).filter(|run| spoils(sides.new, run, band)).map(|run| run.bounds));
-        }
-    }
-    for (key, at) in &sides.before {
-        if carried.binary_search(key).is_err() {
-            out.extend(
-                at.iter()
-                    .map(|&i| &sides.old.runs[i])
-                    .filter(|run| spoils(&sides.old.frame, run, from))
-                    .map(|run| Rect::new(run.bounds.x, run.bounds.y + dy, run.bounds.width, run.bounds.height)),
-            );
-        }
-    }
-    out
+    let chrome = |frame: &FrameGlyphBuffer| super::super::panes::pane_geometry(&frame.panes, frame.background, scale);
+    let (now, was) = (chrome(sides.new), chrome(&sides.old.frame));
+    let touches = |r: Rect| damage::overlaps(r, area) || damage::overlaps(r, from);
+    let covering = |(rect, color): &(Rect, romacs_display_protocol::types::Color)| {
+        color.a >= 1.0 && was.edges.iter().any(|(r, c)| r == rect && c == color)
+    };
+    let chrome_clear = now.dims.iter().chain(&was.dims).all(|(r, _)| spans(*r) || !touches(*r))
+        && now.corners.iter().chain(&was.corners).all(|corner| !touches(corner.square))
+        && was.edges.iter().all(|(r, _)| !damage::overlaps(*r, from))
+        && now.edges.iter().all(|edge| !damage::overlaps(edge.0, from) && (!damage::overlaps(edge.0, area) || covering(edge)));
+    others(sides.new, sides.runs, &sides.after, placed, area)
+        && others(&sides.old.frame, &sides.old.runs, &sides.before, &carried, from)
+        && chrome_clear
 }
 
 #[cfg(test)]

@@ -933,6 +933,7 @@ impl WgpuRenderer {
             let mut underline_run = super::content::UnderlineRun::default();
             for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
                 if let FrameGlyph::Char {
+                    window_id,
                     x,
                     y,
                     baseline,
@@ -994,7 +995,7 @@ impl WgpuRenderer {
                         if *underline == UnderlineStyle::None { underline_run.end(); }
                         if *underline != UnderlineStyle::None {
                             let ul_color = underline_color.as_ref().unwrap_or(fg);
-                            let geometry = underline_run.geometry(*x, ya, *width, ul_position, *underline == UnderlineStyle::Wave,
+                            let geometry = underline_run.geometry((window_id.get(), *x, ya, *width), ul_position, *underline == UnderlineStyle::Wave,
                                                                   || ul_position.resolve(ya, *height, baseline_y, ul_thick));
                             let ul_y = geometry.top_y;
                             let line_thickness = geometry.thickness;

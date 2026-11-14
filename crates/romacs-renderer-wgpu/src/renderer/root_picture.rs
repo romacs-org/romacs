@@ -231,6 +231,7 @@ impl RootPicture {
                     let shown = self.repaint(renderer, atlas, shown, mapping);
                     return self.composed(renderer, atlas, shown, target, Painted::Whole);
                 }
+                self.cover(renderer, atlas, &mut shown, &moves, mapping);
                 self.patch_regions(renderer, atlas, &mut shown, &regions, mapping);
                 crate::cost::add(crate::cost::ROWS_REUSED, rows_kept);
                 (shown, Painted::Regions(regions.len()))
@@ -286,7 +287,42 @@ impl RootPicture {
             encoder.copy_texture_to_texture(at(scratch, origin), at(picture, wgpu::Origin3d { y: to, ..origin }), extent);
         }
         renderer.submit_commands([encoder.finish()]);
+        crate::cost::add(crate::cost::BANDS_MOVED, moves.len());
         true
+    }
+
+    /// Draw over each of MOVES' bands the pane edges of SHOWN's frame that
+    /// lie in it, as every pass draws them, last: opaque, they cover whatever
+    /// the copy put under them (`moves`, clause 4).
+    fn cover(
+        &mut self,
+        renderer: &mut WgpuRenderer,
+        atlas: &mut WgpuGlyphAtlas,
+        shown: &mut Shown,
+        moves: &[Move],
+        mapping: romacs_display_protocol::PresentMapping,
+    ) {
+        let frame = &shown.indexed.frame;
+        if moves.is_empty() || frame.panes.is_empty() {
+            return;
+        }
+        let surface = mapping.surface();
+        let device = (surface.device_width().get(), surface.device_height().get());
+        let scale = renderer.scale_factor();
+        let edges = super::panes::pane_geometry(&frame.panes, frame.background, scale).edges;
+        // Both lie on whole device pixels: their overlap is taken there, not
+        // grown out from logical coordinates that f32 can leave a hair short.
+        let scissors: Vec<(u32, u32, u32, u32)> = moves
+            .iter()
+            .map(|m| Rect::new(m.from.x, m.from.y + m.dy, m.from.width, m.from.height))
+            .flat_map(|band| edges.iter().filter_map(move |(edge, _)| device_overlap(*edge, band, scale, device)))
+            .collect();
+        let picture = self.texture.view().clone();
+        for scissor in scissors {
+            with_glyphs(&mut shown.indexed.frame, Vec::new(), false, |sub| {
+                renderer.render_frame_glyphs_impl(&picture, sub, atlas, mapping, false, None, None, None, None, true, Some(scissor));
+            });
+        }
     }
 
     /// Repaint REGIONS of the picture from SHOWN's frame, without its cursors.
@@ -487,6 +523,22 @@ fn slot_facts(frame: &FrameGlyphBuffer, slot: DisplaySlotId) -> (Option<usize>, 
         .filter_map(FrameGlyph::geometry)
         .reduce(damage::union);
     (frame.cursor_anchor(slot), in_slot)
+}
+
+/// Where A and B, both on whole device pixels at SCALE, overlap on a
+/// surface of DEVICE pixels, as a scissor; None if they do not.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "device pixels: whole numbers clamped to the surface, far below f32's exact range"
+)]
+fn device_overlap(a: Rect, b: Rect, scale: f32, (width, height): (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    let edges = |r: Rect| [r.x, r.y, r.x + r.width, r.y + r.height].map(|v| (v * scale).round());
+    let ([ax0, ay0, ax1, ay1], [bx0, by0, bx1, by1]) = (edges(a), edges(b));
+    let (x0, y0) = (ax0.max(bx0).max(0.0), ay0.max(by0).max(0.0));
+    let (x1, y1) = (ax1.min(bx1).min(width as f32), ay1.min(by1).min(height as f32));
+    (x1 > x0 && y1 > y0).then_some((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32))
 }
 
 /// MOVE's band in device pixels at SCALE: where it is, the row it goes to,
