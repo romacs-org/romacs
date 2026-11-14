@@ -5,19 +5,20 @@
 //! reporting with pidfds and retirement, the kill reaching a reported
 //! child's group, and the project consumer's results being those of the
 //! synchronous definitions.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn batch(script: &str, cwd: &Path) -> (bool, String, String) {
     let scratch = std::env::temp_dir().join(format!("romacs-isolates-gnu-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let output = Command::new(installed::romacs())
         .args(["--batch", "-Q", "--eval", script])
         .current_dir(cwd)
         .env("HOME", &scratch)
         .env("XDG_CACHE_HOME", scratch.join("cache"))
         .env("XDG_CONFIG_HOME", scratch.join("config"))
-        .env("ROMACS_WORLD", "off")
         .output()
         .expect("batch session");
     (output.status.success(), String::from_utf8_lossy(&output.stdout).into_owned(), String::from_utf8_lossy(&output.stderr).into_owned())

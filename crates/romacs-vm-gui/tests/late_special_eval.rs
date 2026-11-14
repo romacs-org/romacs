@@ -5,6 +5,8 @@
 //! `eval-buffer' or an `eval' of a `defvar' (VM2-LATE-SPECIAL1).  Each case
 //! runs in pinned GNU and in Romacs's batch session; the printed values
 //! must be GNU's.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 /// (NAME, FORM): FORM's printed value, or its signal.
@@ -29,11 +31,10 @@ const CASES: &[(&str, &str)] = &[
     ("initializer-eval-defvar", "(list (let ((late-v 1) (late-k (eval '(defvar late-v 5) t))) (list late-v (symbol-value 'late-v) late-k)) late-v)"),
 ];
 
-fn run(binary: &str, dir: &std::path::Path, form: &str, romacs: bool) -> String {
+fn run(binary: &str, dir: &std::path::Path, form: &str) -> String {
     let wrapped = format!("(progn (add-to-list 'load-path {:?}) (prin1 (condition-case e {form} (error (list 'signal e)))))", dir.display().to_string());
     let mut command = Command::new(binary);
     command.args(["-Q", "--batch", "--eval", &wrapped]).current_dir(dir).env("HOME", dir).env("TMPDIR", dir);
-    if romacs { command.env("ROMACS_WORLD", "off"); }
     let output = command.output().unwrap();
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -46,7 +47,7 @@ fn late_specials_in_evaluated_forms_bind_as_gnu() {
     std::fs::write(dir.join("late-special-lib.el"), ";;; late-special-lib.el -*- lexical-binding: t -*-\n(defvar late-lib-var 1)\n(provide 'late-special-lib)\n").unwrap();
     let mut failures = vec![];
     for (name, form) in CASES {
-        let (expected, actual) = (run(&gnu, &dir, form, false), run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir, form, true));
+        let (expected, actual) = (run(&gnu, &dir, form), run(installed::romacs(), &dir, form));
         if expected.is_empty() || actual != expected { failures.push(format!("{name}\n  GNU    {expected}\n  Romacs {actual}")); }
     }
     let _ = std::fs::remove_dir_all(&dir);

@@ -11,6 +11,8 @@
 //! Romacs session boots from its batch world in that HOME's cache
 //! (src/batch.rs), which a first session prepares in the store
 //! `--world-build` made.
+#[path = "support/installed.rs"]
+mod installed;
 use std::path::Path;
 use std::process::Command;
 
@@ -74,8 +76,8 @@ fn cases(lib: &Path) -> Vec<Case> {
     ]
 }
 
-/// BINARY with ARGS in DIR, its HOME; a Romacs session from its world in
-/// DIR's cache, or from source without WORLD.
+/// BINARY with ARGS in DIR, its HOME; a Romacs session from a world (DIR's
+/// cache's, else its installation's), or from source without WORLD.
 fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, String, String) {
     let mut command = Command::new(binary);
     command.args(args).current_dir(dir)
@@ -115,7 +117,7 @@ fn a_missing_explicit_init_file_is_an_error() {
 /// ~/.emacs, and with an init named, both writers save beside it.
 #[test]
 fn batch_writers_leave_the_init_alone() {
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-batch-init-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let init = dir.join("init.el");
@@ -125,7 +127,7 @@ fn batch_writers_leave_the_init_alone() {
         (customize-save-variable 'kill-ring-max 123)
         (disable-command 'backward-word))", init.display().to_string(), format!("{}/", dir.display()));
     let args = ["-Q", "--batch", "--eval", &program].map(str::to_owned);
-    let (status, stdout, stderr) = run(romacs, &dir, &args, false);
+    let (status, stdout, stderr) = run(romacs, &dir, &args, true);
     assert_eq!(status, Some(0), "{stdout}{stderr}");
     assert!(!dir.join(".emacs").exists(), "a batch program made ~/.emacs");
     assert_eq!(std::fs::read_to_string(&init).unwrap(), INIT);
@@ -201,7 +203,7 @@ fn stored(dir: &Path, suffix: &str) -> Vec<std::path::PathBuf> {
 #[test]
 fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-batch-huge-{}", std::process::id()));
     let home = dir.join("home");
     std::fs::create_dir_all(&home).unwrap();
@@ -211,8 +213,8 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     let args: Vec<String> = ["-Q", "--batch", "--eval",
         "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
         .iter().map(ToString::to_string).collect();
-    let expected = run(&gnu, &home, &args, false);
-    let actual = run(romacs, &home, &args, false);
+    let expected = run(&gnu, &home, &args, true);
+    let actual = run(romacs, &home, &args, true);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!((expected.0, expected.1.as_str()), (Some(0), "(nil \"~/\" nil)\n"), "GNU {expected:?}");
     assert_eq!((actual.0, actual.1.as_str()), (expected.0, expected.1.as_str()), "Romacs stderr {}", actual.2);

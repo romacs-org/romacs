@@ -4,6 +4,8 @@
 //! language environment and the keyboard, terminal, locale and process
 //! coding systems that `char-displayable-p' (hence
 //! `truncate-string-ellipsis') and process decoding read.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 const FORM: &str = "(princ (list (terminal-coding-system) (keyboard-coding-system) locale-coding-system
@@ -15,7 +17,7 @@ const FORM: &str = "(princ (list (terminal-coding-system) (keyboard-coding-syste
 #[test]
 fn locale_startup_matches_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let romacs = installed::romacs();
     let dir = std::env::temp_dir().join(format!("romacs-locale-startup-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // None: no LANG at all, where `set-locale-environment' asks
@@ -24,9 +26,7 @@ fn locale_startup_matches_pinned_gnu() {
         let run = |binary: &str| {
             let mut command = Command::new(binary);
             command.args(["-Q", "--batch", "--eval", FORM]).current_dir(&dir)
-                .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG")
-                // A throwaway HOME spawns no world builder (src/batch.rs): this boots from source.
-                .env("ROMACS_WORLD", "off");
+                .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG");
             if let Some(lang) = lang { command.env("LANG", lang); }
             let output = command.output().unwrap();
             (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),

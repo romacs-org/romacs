@@ -3,6 +3,8 @@
 //! `treesit-language-source-alist', and the loader finds it after the
 //! user's grammar directories and before the system's, never for a
 //! language `treesit-load-name-override-list' names.
+#[path = "support/installed.rs"]
+mod installed;
 use romacs_vm_gui::grammars;
 use romacs_vm::Vm;
 use std::path::{Path, PathBuf};
@@ -104,8 +106,8 @@ fn a_library_in_the_users_grammar_directory_comes_first() {
     let form = format!("(progn (setq user-emacs-directory {:?})
         (princ (list (car (cdr (treesit-language-available-p 'json t))) (treesit-language-available-p 'python))))",
         format!("{}/", user.display()));
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
-        .args(["-Q", "--batch", "--eval", &form]).env("HOME", &user).env("ROMACS_WORLD", "off").output().unwrap();
+    let output = std::process::Command::new(installed::romacs())
+        .args(["-Q", "--batch", "--eval", &form]).env("HOME", &user).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8_lossy(&output.stdout), "(symbol-error t)");
 }

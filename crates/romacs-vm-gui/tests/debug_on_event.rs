@@ -5,6 +5,8 @@
 //! with nothing to read); it is not left as an event for an input read that
 //! never comes. Unlike C-g it quits under `inhibit-quit' too, which the
 //! handler clears.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -25,9 +27,9 @@ fn debugger_line_after(name: &str, setup: &str, body: &str) -> String {
 (princ "ENDED\n")
 "#);
     std::fs::write(dir.join("busy.el"), source).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let mut child = Command::new(installed::romacs())
         .args(["-Q", "--batch", "-l"]).arg(dir.join("busy.el")).current_dir(&dir)
-        .env("HOME", &dir).env("MARK", &dir).env("ROMACS_WORLD", "off")
+        .env("HOME", &dir).env("MARK", &dir)
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let start = Instant::now();
     while !dir.join("busy").exists() {
