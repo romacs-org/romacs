@@ -341,6 +341,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "recenter-redisplay", gnu: "window.c:9484", kind: Kind::Lisp(Init::Symbol("tty")) },
     CVariable { name: "record-all-keys", gnu: "keyboard.c:14462", kind: Kind::Bool(false) },
     CVariable { name: "redisplay-adhoc-scroll-in-resize-mini-windows", gnu: "xdisp.c:39491", kind: Kind::Bool(true) },
+    CVariable { name: "region-extract-function", gnu: "casefiddle.c:723", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "report-emacs-bug-address", gnu: "emacs.c:3613", kind: Kind::Lisp(Init::Str("bug-gnu-emacs@gnu.org")) },
     CVariable { name: "resize-mini-frames", gnu: "frame.c:7566", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "resize-mini-windows", gnu: "xdisp.c:39045", kind: Kind::Lisp(Init::Nil) },

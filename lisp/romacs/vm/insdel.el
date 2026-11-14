@@ -110,7 +110,7 @@ moved it, as GNU's preserve_ptr, and the overlays' hooks found, as
               (if (local-variable-p 'warm-restart-lock-pending base)
                   (with-current-buffer base (kill-local-variable 'warm-restart-lock-pending))))))
       (if (and mark-active (boundp 'saved-region-selection)
-               (not saved-region-selection) (boundp 'region-extract-function)
+               (not saved-region-selection) region-extract-function
                (marker-buffer (mark-marker))
                (if (eq select-active-regions 'only)
                    (eq (car-safe transient-mark-mode) 'only)
