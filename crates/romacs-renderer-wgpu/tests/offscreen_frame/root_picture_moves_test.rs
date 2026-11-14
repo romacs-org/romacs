@@ -58,7 +58,6 @@ fn text_face(frame: &mut FrameGlyphBuffer, id: u32, bg: Color) {
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::too_many_lines,
     reason = "one view's whole frame, built in one place from a test's few rows and columns"
 )]
 fn view_frame(view: View, scale: f32, inky: bool) -> FrameGlyphBuffer {
@@ -224,7 +223,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| scale == 1.0 && !inky) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !inky) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
