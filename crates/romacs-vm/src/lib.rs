@@ -168,6 +168,7 @@ mod threaded;
 
 mod expand;
 mod save_excursion;
+mod closure_key;
 mod numbers;
 mod metadata;
 mod variable_definitions;
@@ -1061,8 +1062,13 @@ struct Function {
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
+    /// Its structural key (`closure_key`): closures of two lambdas with the
+    /// same key and `equal` captures are `equal`, as GNU's are. None where
+    /// the source has no canonical spelling; such closures compare by
+    /// identity.
+    key: Option<u128>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params, key });
 /// A function body a compiled load left in its artifact's bytes
 /// (`Vm::decode_pending`), with what the body names: a collection keeps
 /// its VALUES (moving them with the heap) and CHILDREN alive, and its
@@ -1505,6 +1511,10 @@ pub struct Vm {
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
+    /// Consumed by the next lambda compiled: the closure slots `closure`
+    /// takes out of its body (an interactive spec and its modes), which its
+    /// structural key covers as GNU's `equal` compares them (`closure_key`).
+    closure_key_extra: Vec<Form>,
     /// Eager `lambda' bodies being compiled around the current form.
     lambda_depth: usize,
     /// The windows the last window change functions run saw
@@ -1771,6 +1781,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     reached_generated,
     loader_order_request,
     keep_captures,
+    closure_key_extra,
     lambda_depth,
     window_change_seen,
     expanded_macros,
@@ -2008,6 +2019,7 @@ impl Vm {
             reached_generated: None,
             loader_order_request: false,
             keep_captures: false,
+            closure_key_extra: Vec::new(),
             lambda_depth: 0,
             window_change_seen: Vec::new(),
             expanded_macros: vec![],
@@ -2386,6 +2398,7 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
@@ -2557,6 +2570,7 @@ impl Vm {
             pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
         Ok((id, names))
     }
@@ -2615,6 +2629,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2651,6 +2666,7 @@ impl Vm {
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();
@@ -2717,6 +2733,8 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
+        // The closure stays the one its key named before its first call.
+        function.key = self.functions[id].key;
         self.functions.set(id, Arc::new(function));
         Ok(())
     }
