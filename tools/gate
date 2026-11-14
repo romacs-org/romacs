@@ -669,12 +669,20 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
               'romacs-gui-tests::harness_contract')
 
 
+# The packages whose test files are also modules of one `all` target
+# (tools/lib/test_modules.py's PACKAGES).
+ALL_TARGETS = ('romacs-vm',)
+
+
 def test_file(binary):
     """Nextest filter for the tests of the test file BINARY, `PACKAGE::FILE`:
-    its own target, and its module of the package's `all` target
-    (tools/lib/test_modules.py). A run builds one of the two."""
+    its own target and, in a package that has an `all` target, its module
+    there (tools/lib/test_modules.py). A run builds one of the two. Nextest
+    refuses a filter naming a binary no package has, so a package without
+    `all` is not asked for one."""
     package, file = binary.split('::')
-    return f'binary_id({binary}) | (binary_id({package}::all) & test(/^{file}::/))'
+    alone = f'binary_id({binary})'
+    return f'{alone} | (binary_id({package}::all) & test(/^{file}::/))' if package in ALL_TARGETS else alone
 
 
 def changed_filter(wt, base='beta'):
