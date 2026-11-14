@@ -169,7 +169,21 @@ impl ApplicationHandler for StartingApp {
         }
     }
 
+    // Both startup replies and render commands are drained at about_to_wait,
+    // after native dispatch, using the same wake-only contract as RenderApp.
+    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {}
+
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.prepare_or_run(event_loop);
+        // Readiness decided in this pass goes out with it.
+        if let Phase::Preparing { app, .. } | Phase::Running(app) = &mut self.phase {
+            app.send_answers();
+        }
+    }
+}
+
+impl StartingApp {
+    fn prepare_or_run(&mut self, event_loop: &dyn ActiveEventLoop) {
         if let Phase::Preparing { initial, app } = &mut self.phase {
             // Consume CPU-owned configuration and frame identity even while no
             // initial geometry exists. The bounded producer cannot deadlock the
@@ -310,10 +324,6 @@ impl ApplicationHandler for StartingApp {
             }
         }
     }
-
-    // Both startup replies and render commands are drained at about_to_wait,
-    // after native dispatch, using the same wake-only contract as RenderApp.
-    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {}
 }
 
 pub(super) fn run(

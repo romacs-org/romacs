@@ -3,8 +3,8 @@
 #[test]
 fn legacy_readiness_replay_source_authority_is_exact_and_non_resizing() {
     let dispatch = include_str!("../window_commands.rs");
-    assert!(dispatch.contains("if let Some(reply) = reply"));
-    assert!(dispatch.contains("self.frame_windows.await_ready(id, reply)"));
+    assert!(dispatch.contains("if let Some(request) = request"));
+    assert!(dispatch.contains("self.frame_windows.await_ready(id, request)"));
     assert!(dispatch.contains("primary.replay_pending_native_state(pending.window())"));
     let manager = include_str!("../frame_windows.rs");
     let replay = manager
@@ -19,8 +19,10 @@ fn legacy_readiness_replay_source_authority_is_exact_and_non_resizing() {
     assert!(!replay.contains("request_surface_size"));
     assert!(!replay.contains("request_inner_size"));
     assert!(manager.contains("window_state.replay_pending_native_state(native.window.as_ref())"));
-    assert!(manager.contains("if reply.send(result).is_err() && ready"));
-    assert!(manager.contains("if reply.send(Ok(())).is_err()"));
+    assert!(manager.contains("self.answers.push((request, result))"));
+    // A window made after its waiter gave up is destroyed by the waiter's side.
+    let sender = include_str!("../../paint_host.rs");
+    assert!(sender.contains("if reply.send(made.clone()).is_err() && made.is_ok()"));
     let creation = include_str!("../lifecycle.rs");
     assert!(creation.contains(".replay_pending_native_state(window.as_ref())"));
     let hints = include_str!("../geometry_hints.rs");

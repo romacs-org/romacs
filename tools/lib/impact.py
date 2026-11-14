@@ -64,6 +64,11 @@ STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'roma
 # is built. A check a lane runs before it submits leaves them to the queue.
 SLOW_RULES = ('romacs-vm::compile_boundaries', 'romacs-vm::primitive_gc_boundary')
 
+# The tests that refuse to pass without the gate's run-local evidence
+# (ROMACS_GATE_EVIDENCE, prepared by tools/gate for its own run): the parity
+# ratchets. Only the gate runs them; a check of its own leaves them out.
+GATE_ONLY = 'test(/(^|::)parity_ratchet_/)'
+
 # A rule that scans one crate's sources, kept as a unit test of that crate:
 # its package, and the nextest filter of the rule. It runs when the crate
 # changes, so a small gate does not build every such crate's tests.
@@ -252,22 +257,28 @@ def select(paths, root, metadata):
             'lisp': lisp, 'filter': ' | '.join(terms), 'packages_to_build': sorted(build)}
 
 
-def runs(answer, root):
+def runs(answer, root, leave=()):
     """ANSWER (select's) as one run a package: [(package, cargo target flags,
     nextest filter)], for a caller that runs each package alone; None when
-    everything runs. A package's filter keeps the terms that name it."""
+    everything runs. A package's filter keeps the terms that name it. LEAVE
+    are test files, `PACKAGE::FILE` (as SLOW_RULES), that no run takes, though
+    the answer reaches them: a package's filter then ends `& not (...)`."""
     if answer['everything']:
         return None
     terms = {}
     for name in answer['packages']:
         terms.setdefault(name, []).append(f'package({name})')
-    for name in sorted(set(answer['files']) | set(STRUCTURAL)):
+    for name in sorted((set(answer['files']) | set(STRUCTURAL)) - set(leave)):
         package = name.split('::')[0]
         if package not in answer['packages']:
             terms.setdefault(package, []).append(test_file(name))
     for crate, rule in CRATE_RULES.items():
         if crate in answer['packages']:
             terms[crate].append(rule)
+    for package in terms:
+        left = [test_file(name) for name in sorted(leave) if name.split('::')[0] == package]
+        if left and package in answer['packages']:
+            terms[package] = [f'({" | ".join(terms[package])}) & not ({" | ".join(left)})']
     def flags(package):
         if package in test_modules.PACKAGES:
             return test_modules.targets(root, package)

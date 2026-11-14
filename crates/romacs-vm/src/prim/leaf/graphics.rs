@@ -588,8 +588,10 @@ impl Leaf<'_> {
     fn image_find_file(&mut self, name: &str) -> std::result::Result<Option<String>, Fault> {
         let expand = |dir: &str| std::path::Path::new(dir).join(name);
         if std::path::Path::new(name).is_absolute() || name.starts_with('~') {
+            // `~/' is the session's home, as expand-file-name finds it (GNU get_homedir).
             let path = if let Some(rest) = name.strip_prefix("~/") {
-                crate::host::getenv("HOME").map(|h| std::path::Path::new(&h).join(rest)).unwrap_or_else(|| name.into())
+                let home = crate::prim::prims::expand_file_name::home_directory(self)?;
+                std::path::PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(home)).join(rest)
             } else { name.into() };
             return Ok(crate::host::probe(crate::host::Probe::IsFile, &path).then(|| path.to_string_lossy().into_owned()));
         }

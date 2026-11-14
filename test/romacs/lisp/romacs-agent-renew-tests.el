@@ -269,7 +269,7 @@ state root that has said two things, its writes to its harness in
       (should (= relaunched 1)))))
 
 (ert-deftest romacs-agent-renew-keys-and-tool ()
-  (should (eq (lookup-key romacs-agent-chat-actions-map "N") 'romacs-agent-chat-renew))
+  (should (eq (lookup-key romacs-agent-chat-actions-map "F") 'romacs-agent-chat-renew))
   (should (equal (command-modes 'romacs-agent-chat-renew) '(romacs-agent-chat-mode)))
   (should (functionp (plist-get (cdr (assoc "romacs_task_renew" (let ((romacs-mcp-tools nil)) (load "romacs-agent-tools" nil t) romacs-mcp-tools))) :handler))))
 

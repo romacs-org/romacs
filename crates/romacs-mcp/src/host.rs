@@ -13,7 +13,7 @@
 //! kept as JSON, any other as a string. A record that ends a turn (a
 //! `result`) is synced to disk. DIR/host.json names the host's and the
 //! harness's pids. One server is attached at a time: another is refused
-//! unless it steals the attachment.
+//! unless it steals the attachment, which closes the first's connection.
 //!
 //! The socket speaks lines: the server's first is `{"attach":{"from":N,
 //! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness and
@@ -169,7 +169,12 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
     if writeln!(stream, "{}", json!({"attached": id})).is_err() { return None; }
     let clone = stream.try_clone().ok()?;
     shared.next_attachment = id;
-    shared.attached = Some((id, clone));
+    // A stolen attachment is closed: its server hears it ended, lets its
+    // relays go to the route that now leads to the thief, and does not go on
+    // taking the session's calls.
+    if let Some((_, stolen)) = shared.attached.replace((id, clone)) {
+        let _ = stolen.shutdown(std::net::Shutdown::Both);
+    }
     Some(id)
 }
 
@@ -372,6 +377,34 @@ mod tests {
         assert_eq!(attach(&shared, other, &request), None);
         let refused: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
         assert_eq!(refused["refused"], "attached");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_stolen_attachment_is_closed() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-steal-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let journal = OpenOptions::new().append(true).open(&path).unwrap();
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, journal, path: path.clone(), attached: None, next_attachment: 0,
+                                                  stdin: Arc::new(Mutex::new(None)) }));
+        let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
+        let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
+        let (first, ours) = UnixStream::pair().unwrap();
+        assert_eq!(attach(&shared, first, &attach_request), Some(1));
+        let (second, theirs) = UnixStream::pair().unwrap();
+        assert_eq!(attach(&shared, second, &steal_request), Some(2));
+        // The first server reads its acknowledgement, then the end (not a
+        // connection left open: the read would time out).
+        ours.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut lines = BufReader::new(ours).lines();
+        let kept: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(kept["attached"], 1);
+        assert!(lines.next().is_none());
+        let kept: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
+        assert_eq!(kept["attached"], 2);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }
