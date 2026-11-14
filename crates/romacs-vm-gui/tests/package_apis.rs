@@ -81,3 +81,21 @@ fn maphash_through_apply() {
                  (condition-case e (apply #'maphash #'ignore '(1)) (error e))))",
     ]);
 }
+
+/// editfns.c's labeled restrictions (`with-restriction` and
+/// `without-restriction` with a label): narrowing and widening within the
+/// label, nesting, lifting by label, an error inside, insertion at the
+/// bounds, `erase-buffer`, `save-restriction`, an indirect buffer.
+#[test]
+fn labeled_restrictions() {
+    same_as_gnu("labeled-restrictions", &[
+        "(with-temp-buffer (insert \"abcdef\") (list (with-restriction 2 4 :label 'foo (list (buffer-string) (progn (narrow-to-region 1 7) (list (point-min) (point-max))) (progn (narrow-to-region 3 3) (list (point-min) (point-max))) (progn (widen) (list (point-min) (point-max))))) (list (point-min) (point-max))))",
+        "(with-temp-buffer (insert \"abcdef\") (narrow-to-region 2 6) (with-restriction 3 5 :label 'foo (list (without-restriction :label 'foo (list (point-min) (point-max))) (without-restriction :label 'bar (list (point-min) (point-max))) (without-restriction (list (point-min) (point-max))) (list (point-min) (point-max)))))",
+        "(with-temp-buffer (insert \"abcdefgh\") (with-restriction 2 8 :label 'outer (with-restriction 3 7 :label 'inner (list (progn (widen) (list (point-min) (point-max))) (without-restriction :label 'inner (list (point-min) (point-max) (progn (widen) (list (point-min) (point-max))))) (without-restriction :label 'outer (list (point-min) (point-max)))))))",
+        "(with-temp-buffer (insert \"abcdef\") (list (condition-case e (with-restriction 2 4 :label 'foo (error \"boom\")) (error (cadr e))) (list (point-min) (point-max)) (progn (widen) (list (point-min) (point-max)))))",
+        "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 4 :label 'foo (list (condition-case e (narrow-to-region 1 20) (error (car e))) (progn (goto-char (point-max)) (insert \"XY\") (list (point-min) (point-max) (buffer-string))) (progn (widen) (list (point-min) (point-max))))))",
+        "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 4 :label 'foo (erase-buffer) (insert \"xyz\") (list (point-min) (point-max) (progn (widen) (list (point-min) (point-max))))))",
+        "(with-temp-buffer (insert \"abcdef\") (save-restriction (internal--labeled-narrow-to-region 2 4 'foo) (narrow-to-region 1 7)) (list (point-min) (point-max) (progn (narrow-to-region 1 7) (list (point-min) (point-max)))))",
+        "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 5 :label 'foo (let ((base (current-buffer))) (with-current-buffer (make-indirect-buffer base \"ind\") (prog1 (list (point-min) (point-max) (progn (narrow-to-region 1 7) (list (point-min) (point-max)))) (kill-buffer))))))",
+    ]);
+}
