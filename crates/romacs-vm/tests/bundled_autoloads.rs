@@ -32,19 +32,21 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
     assert!(query(&mut vm, &format!("(length (romacs-bundled-autoloads-directories {root_name}))")).parse::<usize>().unwrap() > 3);
     vm.eval_source(&format!("(setq load-path (append load-path (romacs-bundled-autoloads-directories {root_name})) user-emacs-directory {:?})",
         home.to_string_lossy())).unwrap();
-    let state = |vm: &mut Vm, name: &str, file: &str| query(vm, &format!(
+    let state = |vm: &mut Vm, name: &str, feature: &str, file: &str| query(vm, &format!(
         "(list (if (autoloadp (symbol-function '{name})) (nth 1 (symbol-function '{name})) (functionp '{name}))
-               (commandp '{name}) (featurep '{name}) (and (assoc {:?} load-history) t))",
+               (commandp '{name}) (featurep '{feature}) (and (assoc {:?} load-history) t))",
         root.join(file).to_string_lossy()));
-    let commands = [("gnosis-dashboard", "lisp/romacs/gnosis/gnosis-dashboard.el"), ("hermes", "lisp/romacs/hermes/hermes.el")];
-    let before: Vec<String> = commands.iter().map(|(name, file)| state(&mut vm, name, file)).collect();
-    assert_eq!(before, [r#"("gnosis-dashboard" t nil nil)"#, r#"("hermes" t nil nil)"#], "autoloaded, not loaded");
+    // A command, its package's feature (also its library) and file.
+    let commands = [("gnosis-dashboard", "gnosis-dashboard", "lisp/romacs/gnosis/gnosis-dashboard.el"),
+                    ("jabber-info", "jabber", "lisp/romacs/jabber/jabber.el")];
+    let before: Vec<String> = commands.iter().map(|(name, feature, file)| state(&mut vm, name, feature, file)).collect();
+    assert_eq!(before, [r#"("gnosis-dashboard" t nil nil)"#, r#"("jabber" t nil nil)"#], "autoloaded, not loaded");
     // A call first does what `autoload-do-load` does; this loads the file
     // without running the command (no network or database).
-    for (name, _) in commands {
+    for (name, _, _) in commands {
         assert_eq!(query(&mut vm, &format!("(functionp (autoload-do-load (symbol-function '{name}) '{name}))")), "t", "{name}");
     }
-    let after: Vec<String> = commands.iter().map(|(name, file)| state(&mut vm, name, file)).collect();
+    let after: Vec<String> = commands.iter().map(|(name, feature, file)| state(&mut vm, name, feature, file)).collect();
     let _ = std::fs::remove_dir_all(&home);
     assert_eq!(after, ["(t t t t)", "(t t t t)"], "each call loads its package's own file");
 }
@@ -62,10 +64,10 @@ fn a_world_build_records_what_the_bundled_scan_reads() {
     loaded.unwrap();
     let records = trace["records"].as_array().unwrap();
     let recorded = |kind: &str, path: &Path| records.iter().any(|r| r["kind"] == kind && r["path"] == json!(path.to_string_lossy()));
-    for dir in ["lisp/romacs", "lisp/romacs/gnosis", "lisp/romacs/hermes", "lisp/romacs/deps"] {
+    for dir in ["lisp/romacs", "lisp/romacs/gnosis", "lisp/romacs/jabber", "lisp/romacs/deps"] {
         assert!(recorded("dir-list", &root.join(dir)), "{dir} is listed");
     }
-    for file in ["lisp/bundled.json", "lisp/romacs/hermes/hermes.el", "lisp/romacs/gnosis/gnosis-dashboard.el"] {
+    for file in ["lisp/bundled.json", "lisp/romacs/jabber/jabber.el", "lisp/romacs/gnosis/gnosis-dashboard.el"] {
         assert!(recorded("file-read", &root.join(file)), "{file} is read");
     }
     assert_eq!(trace["refusals"], json!([]));

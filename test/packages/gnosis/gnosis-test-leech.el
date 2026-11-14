@@ -227,10 +227,10 @@ revision is never rewritten to the current one."
       (let ((inbox (gnosis-inbox--read (gnosis-inbox-file)))
             (rows (gnosis-test-content--evidence)))
         (should-error (gnosis-leech-propose 101 replace :kind "rework-replace"
-                                            :agent "hermes/tutor" :reason "stale")
+                                            :agent "claude/tutor" :reason "stale")
                       :type 'user-error)
         (should-error (gnosis-leech-propose 101 split :kind "rework-split"
-                                            :agent "hermes/tutor" :reason "stale")
+                                            :agent "claude/tutor" :reason "stale")
                       :type 'user-error)
         (should-error (gnosis-inbox-propose-rework 101 replace :agent "a" :reason "r")
                       :type 'user-error)
@@ -252,7 +252,7 @@ revision is never rewritten to the current one."
                               101 (list (list :type "basic" :keimenon "Which nerve supplies deltoid?"
                                               :answer '("axillary") :tags '("anatomy")
                                               :target-revision current))
-                              :kind "rework-replace" :agent "hermes/tutor" :reason "fresh"))))
+                              :kind "rework-replace" :agent "claude/tutor" :reason "fresh"))))
       (let ((entry (seq-find (lambda (e) (eq (plist-get e :state) 'pending))
                              (gnosis-test-leech--entries))))
         (should (equal current (plist-get entry :target-revision)))
@@ -266,7 +266,7 @@ Queue the annotation adding \"More.\" to #101."
   (gnosis-test--add-basic-thema "Question?" "answer" '("test") "Original." 101)
   (gnosis-test--add-basic-thema "Question?" "answer" '("test") "Original.\n\nMore." 102)
   (gnosis-leech-propose 101 (list (gnosis-leech-annotation-draft 101 "More."))
-                        :kind "rework-annotate" :agent "hermes/tutor" :reason "more"))
+                        :kind "rework-annotate" :agent "claude/tutor" :reason "more"))
 
 (defun gnosis-test-leech--schedules ()
   "Return scheduler rows and review events, for unchanged-evidence checks."
@@ -324,7 +324,7 @@ Queue the annotation adding \"More.\" to #101."
            (b (gnosis-leech-annotation-draft 101 "Prerequisite B."))
            (propose (lambda (draft)
                       (car (gnosis-leech-propose 101 (list draft) :kind "rework-annotate"
-                                                 :agent "hermes/tutor" :reason "x"))))
+                                                 :agent "claude/tutor" :reason "x"))))
            (first (funcall propose a))
            (second (funcall propose b)))
       (should (eq 'added (plist-get first :status)))
@@ -353,7 +353,7 @@ Queue the annotation adding \"More.\" to #101."
     (gnosis-test-leech--card 101 "Deltoid nerve?" "axillary" 4)
     (gnosis-leech-request 101)
     (let ((results (gnosis-leech-propose 101 (gnosis-test-leech--split-drafts)
-                                         :kind "rework-split" :agent "hermes/tutor"
+                                         :kind "rework-split" :agent "claude/tutor"
                                          :reason "two facts in one card")))
       (should (equal '(added added) (mapcar (lambda (r) (plist-get r :status)) results))))
     (should-not (gnosis-leech-requests))
@@ -374,7 +374,7 @@ Queue the annotation adding \"More.\" to #101."
   (gnosis-test-leech
     (gnosis-test-leech--card 101 "Deltoid nerve?" "axillary" 4)
     (gnosis-leech-propose 101 (list (car (gnosis-test-leech--split-drafts)))
-                          :kind "rework-split" :agent "hermes/tutor" :reason "split")
+                          :kind "rework-split" :agent "claude/tutor" :reason "split")
     (save-window-excursion
       (gnosis-inbox)
       (unwind-protect (gnosis-inbox-reject "trivial")
@@ -397,7 +397,7 @@ Queue the annotation adding \"More.\" to #101."
                              (gnosis-leech-propose
                               101 (list (gnosis-leech-annotation-draft
                                          101 "Mnemonic: the axillary nerve wraps the surgical neck."))
-                              :kind "rework-annotate" :agent "hermes/tutor" :reason "mnemonic"))))
+                              :kind "rework-annotate" :agent "claude/tutor" :reason "mnemonic"))))
       (let ((entry (car (gnosis-test-leech--entries))))
         (should (equal '(101) (gnosis-inbox-apply entry))))
       (should (equal "C5-C6.\n\nMnemonic: the axillary nerve wraps the surgical neck."
@@ -415,7 +415,7 @@ Queue the annotation adding \"More.\" to #101."
           (bad (plist-put (gnosis-leech-annotation-draft 101 "More.") :keimenon "Changed?"))
           (shrunk (plist-put (gnosis-leech-annotation-draft 101 "More.") :parathema "Gone.")))
       (gnosis-leech-propose 101 (list bad shrunk) :kind "rework-annotate"
-                            :agent "hermes/tutor" :reason "x")
+                            :agent "claude/tutor" :reason "x")
       (dolist (entry (gnosis-test-leech--entries))
         (should-error (gnosis-inbox-apply entry) :type 'user-error))
       (should (equal rows (gnosis-test-content--evidence)))
@@ -427,7 +427,7 @@ Queue the annotation adding \"More.\" to #101."
     (gnosis-test-leech--card 101 "Deltoid nerve?" "axillary" 4 "C5-C6.")
     (gnosis-test-leech--practice 101 "radial" 1)
     (gnosis-leech-propose 101 (list (gnosis-leech-annotation-draft 101 "Mnemonic: wraps the neck."))
-                          :kind "rework-annotate" :agent "hermes/tutor" :reason "mnemonic")
+                          :kind "rework-annotate" :agent "claude/tutor" :reason "mnemonic")
     (save-window-excursion
       (gnosis-inbox)
       (unwind-protect
@@ -558,7 +558,7 @@ Queue the annotation adding \"More.\" to #101."
             (goto-char (point-min))
             (re-search-forward "^:END:")
             (beginning-of-line)
-            (insert ":GNOSIS_AGENT: hermes/tutor\n:GNOSIS_REASON: mnemonic\n"))
+            (insert ":GNOSIS_AGENT: claude/tutor\n:GNOSIS_REASON: mnemonic\n"))
           (let ((propose (gnosis-test-leech--batch "gnosis-leech-batch-propose" gnosis-dir drafts)))
             (should (= 0 (car propose)))
             (should (equal '("added") (mapcar (lambda (r) (plist-get r :status))
@@ -593,7 +593,7 @@ Queue the annotation adding \"More.\" to #101."
         (goto-char (point-min))
         (re-search-forward "^:END:")
         (beginning-of-line)
-        (insert ":GNOSIS_AGENT: hermes/tutor\n:GNOSIS_REASON: x\n"))
+        (insert ":GNOSIS_AGENT: claude/tutor\n:GNOSIS_REASON: x\n"))
       ;; The card changes after the report.
       (gnosis-update 'extras '(= parathema "Edited.") '(= id 101))
       (let ((propose (gnosis-test-leech--batch "gnosis-leech-batch-propose" gnosis-dir drafts)))

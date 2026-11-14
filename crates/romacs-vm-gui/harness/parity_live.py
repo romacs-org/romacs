@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The machinery the side-by-side parity harnesses share.
 
-A harness (gnosis_parity_live.py, hermes_parity_live.py) names its
+A harness (gnosis_parity_live.py, for one) names its
 workflows and how each engine's private tree and init are made; this module
 starts each engine in its own private headless labwc, drives the same keys
 into both through wtype, asks parity_probe.el for the same observable state

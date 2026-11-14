@@ -9,7 +9,7 @@
 ;; keymap layers load where GNU's C would already be in place.  Each Romacs
 ;; adaptation is commented where it happens.
 ;;
-;; This is the regime for package suites (Gnosis, emacs-hermes) and for
+;; This is the regime for package suites (Gnosis, jabber) and for
 ;; GNU's own test suite (test/gnu/run.py, the gnu-ert regime), which
 ;; assume a dumped GNU Emacs.
 

@@ -397,7 +397,7 @@ fn save_excursion_unibyte_matches_gnu() {
     assert_eq!(actual, expected);
 }
 
-// The runtime pieces Gnosis and emacs-hermes reach, on the full loadup chain.
+// The runtime pieces Gnosis reaches, on the full loadup chain.
 #[test]
 fn daily_driver_load_slice_matches_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

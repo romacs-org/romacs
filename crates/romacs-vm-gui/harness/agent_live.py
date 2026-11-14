@@ -1853,7 +1853,7 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
-        # emacs-hermes's chat keys and its actions menu, with real keys.
+        # The chat's keys and its actions menu, with real keys.
         ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
         good.append(cleared('composer cleared for keys'))
@@ -1980,8 +1980,8 @@ def composer(args, base, real=False):
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
         # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer (SPC there scrolls, as in hermes's
-        # chat); M-> from there reaches it too.
+        # there goes to the composer (SPC there scrolls); M-> from there
+        # reaches it too.
         a.keys('-M', 'alt', '<', '-m', 'alt')
         good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
         a.keys('-M', 'alt', '<', '-m', 'alt')
