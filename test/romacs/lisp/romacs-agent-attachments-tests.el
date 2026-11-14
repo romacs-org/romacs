@@ -109,4 +109,54 @@ its journal's records raise."
           (romacs-agent--raise session (list :type 'attachments :id (gethash "id" sent) :attachments nil))
           (should (gethash "attached" (car (funcall (nth 1 deferred))))))))))
 
+(ert-deftest romacs-agent-attachments-a-call-lets-go-of-what-it-owns ()
+  ;; Cancelled while hashing: its process, timers and waiter go, and
+  ;; nothing is journaled after.  A file rewritten while hashed is
+  ;; refused.  No sha256sum: attached with no hash.  Its harness ending
+  ;; before the note is read back: an error, its waiter gone.
+  (romacs-agent-attachments-tests--with
+    (let* ((request (list :peer nil :cancelled nil))
+           (romacs-mcp--active request)
+           (noted nil))
+      (cl-letf* ((make (symbol-function 'make-process))
+                 ((symbol-function 'romacs-mcp--live-p) (lambda (&rest _) t))
+                 ((symbol-function 'romacs-agent--note) (lambda (&rest _) (setq noted t)))
+                 ;; A hash that takes its time.
+                 ((symbol-function 'make-process)
+                  (lambda (&rest args)
+                    (apply make (plist-put (copy-sequence args) :command '("sleep" "30"))))))
+        (let ((deferred (romacs-agent-attachments--tool (romacs-mcp--object "paths" (vector notes)))))
+          (plist-put request :cancelled t)
+          (let ((end (+ (float-time) 5)) (answer nil))
+            (while (and (not answer) (< (float-time) end))
+              (accept-process-output nil 0.1)
+              (setq answer (condition-case err (funcall (nth 1 deferred)) (user-error (list :refused (cadr err))))))
+            (should (equal (car answer) :refused)))
+          (should-not noted)
+          (should-not (cl-some (lambda (p) (and (process-live-p p) (string-prefix-p "romacs-attach-sha" (process-name p))))
+                               (process-list))))))
+    ;; Rewritten between its check and its hash.
+    (cl-letf* ((hash (symbol-function 'romacs-agent-attachments--hash))
+               ((symbol-function 'romacs-agent-attachments--hash)
+                (lambda (job file size then)
+                  (write-region (make-string 37 ?y) nil file nil 'silent)
+                  (set-file-times file (time-add (current-time) 5))
+                  (funcall hash job file size then))))
+      (should (string-match-p "changed while it was attached"
+                              (cadr (should-error (romacs-agent-attachments-tests--attach "paths" (vector notes))
+                                                  :type 'user-error)))))
+    ;; No hasher to run.
+    (write-region "findings\n" nil notes nil 'silent)
+    (let ((exec-path nil) (process-environment (cons "PATH=/nonexistent" process-environment)))
+      (should (eq (gethash "sha" (aref (gethash "attached" (romacs-agent-attachments-tests--attach "paths" (vector notes))) 0))
+                  :null)))
+    ;; Its harness ends before its note is read back.
+    (cl-letf (((symbol-function 'romacs-agent--note)
+               (lambda (s _note) (romacs-agent--raise s (list :type 'exit :status 1 :seq 90)))))
+      (should (string-match-p "harness ended"
+                              (cadr (should-error (romacs-agent-attachments-tests--attach "paths" (vector notes))
+                                                  :type 'user-error)))))
+    ;; Only the fixture's own collector is left: no waiter.
+    (should (= (length romacs-agent-event-functions) 1))))
+
 ;;; romacs-agent-attachments-tests.el ends here

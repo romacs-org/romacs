@@ -28,11 +28,35 @@
 (defconst romacs-agent-attachments--hash-seconds 20
   "How long hashing an attachment may take before it is given up.")
 
-(defun romacs-agent-attachments--hash (file size then)
+(defconst romacs-agent-attachments--seconds 60
+  "How long one call may take, its files hashed and its note journaled,
+before it is given up.")
+
+(defun romacs-agent-attachments--job (request)
+  "A call's job: what it owns until it is over, for MCP REQUEST (the
+active request, to know a cancellation by)."
+  (list :request request :processes nil :timers nil :waiter nil :over nil))
+
+(defun romacs-agent-attachments--retire (job)
+  "Let go of all JOB owns: its hashing processes, its timers, its waiter.
+What comes late of them does nothing."
+  (unless (plist-get job :over)
+    (plist-put job :over t)
+    (dolist (process (plist-get job :processes)) (when (process-live-p process) (delete-process process)))
+    (mapc #'cancel-timer (plist-get job :timers))
+    (when-let* ((waiter (plist-get job :waiter))) (remove-hook 'romacs-agent-event-functions waiter))))
+
+(defun romacs-agent-attachments--gone-p (job)
+  "Whether JOB's request was cancelled, or its caller's connection closed."
+  (let ((request (plist-get job :request)))
+    (and request (or (plist-get request :cancelled)
+                     (not (romacs-mcp--live-p (plist-get request :peer) (plist-get request :generation)))))))
+
+(defun romacs-agent-attachments--hash (job file size then)
   "Call THEN with FILE's sha256, or nil when it is larger than
-`romacs-agent-attachments--hash-limit' (SIZE its size) or hashing fails
-or takes too long.  Off the command loop: `sha256sum', its output
-unescaped whatever the file's name."
+`romacs-agent-attachments--hash-limit' (SIZE its size), `sha256sum'
+cannot run, or hashing fails or takes too long; never once JOB is over.
+Off the command loop, its output unescaped whatever the file's name."
   (if (> size romacs-agent-attachments--hash-limit) (funcall then nil)
     (let* ((output (generate-new-buffer " *romacs-attach-sha*" t))
            (done nil)
@@ -40,19 +64,24 @@ unescaped whatever the file's name."
                      (unless done
                        (setq done t)
                        (when (buffer-live-p output) (kill-buffer output))
-                       (funcall then sha))))
-           (process (make-process
-                     :name "romacs-attach-sha" :buffer output :noquery t :connection-type 'pipe
-                     :command (list "sha256sum" "--zero" "--" file)
-                     :sentinel (lambda (process _event)
-                                 (unless (process-live-p process)
-                                   (funcall settle
-                                            (and (eql (process-exit-status process) 0) (buffer-live-p output)
-                                                 (with-current-buffer output
-                                                   (goto-char (point-min))
-                                                   (and (looking-at "[0-9a-f]\\{64\\}") (match-string 0))))))))))
-      (run-at-time romacs-agent-attachments--hash-seconds nil
-                   (lambda () (unless done (delete-process process) (funcall settle nil)))))))
+                       (unless (plist-get job :over) (funcall then sha)))))
+           (process (condition-case nil
+                        (make-process
+                         :name "romacs-attach-sha" :buffer output :noquery t :connection-type 'pipe
+                         :command (list "sha256sum" "--zero" "--" file)
+                         :sentinel (lambda (process _event)
+                                     (unless (process-live-p process)
+                                       (funcall settle
+                                                (and (eql (process-exit-status process) 0) (buffer-live-p output)
+                                                     (with-current-buffer output
+                                                       (goto-char (point-min))
+                                                       (and (looking-at "[0-9a-f]\\{64\\}") (match-string 0))))))))
+                      (error nil))))
+      (if (not process) (funcall settle nil)
+        (plist-put job :processes (cons process (plist-get job :processes)))
+        (plist-put job :timers (cons (run-at-time romacs-agent-attachments--hash-seconds nil
+                                                  (lambda () (unless done (delete-process process) (funcall settle nil))))
+                                     (plist-get job :timers)))))))
 
 (defun romacs-agent-attachments--check (path)
   "PATH, an attachment's, when it names an absolute local regular file not
@@ -75,13 +104,20 @@ target's when it is a symbolic link."
          (mapcar (lambda (a) (and (stringp a) a)) (append alt nil)))
         (t (user-error "alt is a string, or an array of one per file"))))
 
-(defun romacs-agent-attachments--await (session id then)
-  "Call THEN once SESSION's attachments note ID is read back from its journal."
+(defun romacs-agent-attachments--await (job session id then)
+  "Call THEN with t once SESSION's attachments note ID is read back from
+its journal, or with nil should its harness end first; JOB owns the
+wait."
   (letrec ((waiter (lambda (seen event)
-                     (when (and (eq seen session) (eq (plist-get event :type) 'attachments)
-                                (equal (plist-get event :id) id))
-                       (remove-hook 'romacs-agent-event-functions waiter)
-                       (funcall then)))))
+                     (when (eq seen session)
+                       (pcase (plist-get event :type)
+                         ('attachments (when (equal (plist-get event :id) id)
+                                         (remove-hook 'romacs-agent-event-functions waiter)
+                                         (funcall then t)))
+                         ((or 'exit 'unstarted)
+                          (remove-hook 'romacs-agent-event-functions waiter)
+                          (funcall then nil)))))))
+    (plist-put job :waiter waiter)
     (add-hook 'romacs-agent-event-functions waiter)))
 
 (defun romacs-agent-attachments--tool (arguments)
@@ -107,19 +143,39 @@ turn known."
                              paths files (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths))))
            (waiting (length items))
            (id (romacs-agent--uuid))
-           (cell (list nil)))
+           (cell (list nil))
+           (job (romacs-agent-attachments--job romacs-mcp--active))
+           (finish (lambda (outcome)
+                     (unless (car cell) (setcar cell outcome))
+                     (romacs-agent-attachments--retire job))))
+      ;; Its lifetime: given up when its request is, or after a while.
+      (plist-put job :timers
+                 (list (run-at-time romacs-agent-attachments--seconds nil
+                                    (lambda () (funcall finish (list :error "Attaching took too long; try again"))))
+                       (run-at-time 1 1 (lambda () (when (romacs-agent-attachments--gone-p job)
+                                                     (funcall finish (list :error "cancelled")))))))
       (cl-mapc (lambda (item file)
                  (romacs-agent-attachments--hash
-                  (plist-get file :path) (plist-get file :bytes)
+                  job (plist-get file :path) (plist-get file :bytes)
                   (lambda (sha)
-                    (when sha (puthash "sha" sha item))
-                    (when (zerop (cl-decf waiting))
-                      (condition-case err
-                          (progn (romacs-agent-attachments--await caller id (lambda () (setcar cell (list :done))))
-                                 (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "id" id
-                                                                                "items" (vconcat items)
-                                                                                "compare" (if compare (vconcat compare) :null))))
-                        (error (setcar cell (list :error (error-message-string err)))))))))
+                    (cond
+                     ;; Hashed as it was when checked, or not at all.
+                     ((not (equal (romacs-attach--identity (plist-get file :path)) (plist-get file :identity)))
+                      (funcall finish (list :error (format "%s changed while it was attached: attach it again"
+                                                           (gethash "path" item)))))
+                     (t
+                      (when sha (puthash "sha" sha item))
+                      (when (zerop (cl-decf waiting))
+                        (condition-case err
+                            (progn (romacs-agent-attachments--await
+                                    job caller id
+                                    (lambda (journaled)
+                                      (funcall finish (if journaled (list :done)
+                                                        (list :error "Its harness ended before the attachments were journaled")))))
+                                   (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "id" id
+                                                                                  "items" (vconcat items)
+                                                                                  "compare" (if compare (vconcat compare) :null))))
+                          (error (funcall finish (list :error (error-message-string err)))))))))))
                items files)
       (romacs-mcp-defer
        (lambda ()
