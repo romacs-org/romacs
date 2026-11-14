@@ -115,6 +115,7 @@ struct Peer {
 /// One process's TLS session over its channel's descriptors.
 pub(crate) struct Session {
     conn: rustls::ClientConnection,
+    // CELL(Plain)
     peer: Arc<Mutex<Peer>>,
     pub stage: u8,
     /// p->gnutls_p: records go through the session. A blocking client's
@@ -402,6 +403,7 @@ fn status_bits(error: &webpki::Error) -> u32 {
 struct Verifier {
     roots: Arc<rustls::RootCertStore>,
     provider: Arc<rustls::crypto::CryptoProvider>,
+    // CELL(Plain)
     peer: Arc<Mutex<Peer>>,
 }
 

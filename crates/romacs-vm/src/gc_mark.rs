@@ -282,7 +282,9 @@ pub(super) struct Marking {
     verify: bool,
     n: usize,
     /// Each sweeping thread's graves, for the dropper as one batch.
+    // CELL(Dead)
     batch: Mutex<Vec<Vec<Grave>>>,
+    // CELL(Collector)
     queue: Injector<Work>,
     /// The VM's planted faults (`gc::Faults'), for its own threads only, the
     /// worker panic taken by the first worker to come to it.
@@ -298,13 +300,17 @@ pub(super) struct Marking {
     stop: AtomicBool,
     /// Where a thread with nothing to do waits for a chunk.
     parked: AtomicUsize,
+    // CELL(Plain)
     park: Mutex<()>,
     wake: Condvar,
     /// Claimed entries for the coordinator. The queue itself is the truth: a
     /// separate count of it can be overwritten between take and clear.
+    // CELL(Collector)
     serial: Mutex<Vec<Value>>,
+    // CELL(Plain)
     census: Mutex<Census>,
     /// Run just after the coordinator takes a hand-over: a worker's moment.
+    // CELL(Plain)
     #[cfg(test)]
     after_take: Mutex<Option<Box<dyn FnOnce(&Marking) + Send>>>,
 }

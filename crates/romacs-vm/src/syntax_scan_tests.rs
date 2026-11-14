@@ -115,9 +115,13 @@ pub(crate) fn nested_text(rng: &mut Rng, len: usize) -> Vec<u8> {
 struct Mutable<'a> {
     text: Vec<u8>,
     table: &'a [i32; 128],
+    // CELL(Plain): The scanner's test text: syntax codes and positions, no Value.
     overrides: std::cell::RefCell<BTreeMap<usize, i32>>,
+    // CELL(Plain)
     record: std::cell::Cell<bool>,
+    // CELL(Plain)
     replay: std::cell::RefCell<Vec<i32>>,
+    // CELL(Plain)
     read: std::cell::RefCell<Vec<i32>>,
 }
 impl Text for Mutable<'_> {
