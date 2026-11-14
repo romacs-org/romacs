@@ -34,7 +34,9 @@
 //! reset cannot stale it. It is valid for one device scale and raster
 //! policy, is recreated with its surface's size and format, and is dropped
 //! with its device.
-use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
+use std::collections::HashMap;
+
+use romacs_display_protocol::frame_glyphs::{DisplaySlotId, FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::types::{AnimatedCursor, Rect};
 
 use super::super::glyph_atlas::WgpuGlyphAtlas;
@@ -86,7 +88,13 @@ struct Shown {
     indexed: Indexed,
     scale_bits: u32,
     subpixel: bool,
+    /// The renderer's effect settings it was drawn under: a pass reads some
+    /// even with every effect off (a scroll bar's track opacity).
+    effects: crate::effect_config::EffectsConfig,
     pictured: bool,
+    /// Per cursor slot: the glyph that places a cursor there and the box of
+    /// the glyphs in it (`slot_facts`), found once per shown frame.
+    slots: HashMap<DisplaySlotId, (Option<usize>, Option<Rect>)>,
 }
 
 impl RootPicture {
@@ -139,14 +147,11 @@ impl RootPicture {
             cursor_visible,
             animated_cursor,
         } = target;
-        let scale = renderer.scale_factor();
-        let (scale_bits, subpixel) = (scale.to_bits(), atlas.subpixel_enabled());
-        let surface = mapping.surface();
-        let device = (surface.device_width().get(), surface.device_height().get());
+        let (scale_bits, subpixel) = (renderer.scale_factor().to_bits(), atlas.subpixel_enabled());
         let shown = self
             .shown
             .take()
-            .filter(|s| s.scale_bits == scale_bits && s.subpixel == subpixel);
+            .filter(|s| s.scale_bits == scale_bits && s.subpixel == subpixel && s.effects == renderer.effects);
         let repeats = shown
             .as_ref()
             .is_some_and(|s| damage::repeats(&s.indexed.frame, frame));
@@ -162,14 +167,16 @@ impl RootPicture {
             },
             Some(s) => damage::plan(&s.indexed, frame, &runs),
         };
-        let keep = |frame: &FrameGlyphBuffer, runs: Vec<Run>, pictured| Shown {
+        let keep = |frame: &FrameGlyphBuffer, runs: Vec<Run>, pictured, effects| Shown {
             indexed: Indexed {
                 frame: frame.glyph_pass_copy(),
                 runs,
             },
             scale_bits,
             subpixel,
+            effects,
             pictured,
+            slots: HashMap::new(),
         };
         let (mut shown, painted) = match (plan, shown) {
             // A frame that needs a whole repaint is drawn as it comes: the
@@ -187,7 +194,7 @@ impl RootPicture {
                     None,
                     None,
                 );
-                self.shown = Some(keep(frame, runs, false));
+                self.shown = Some(keep(frame, runs, false, renderer.effects.clone()));
                 return Painted::Direct;
             }
             // Repeating, wholly or in part, a frame the picture does not
@@ -197,7 +204,7 @@ impl RootPicture {
                 (self.repaint(renderer, atlas, shown, mapping), Painted::Whole)
             }
             (Plan::Regions { .. }, Some(shown)) if !shown.pictured => (
-                self.repaint(renderer, atlas, keep(frame, runs, true), mapping),
+                self.repaint(renderer, atlas, keep(frame, runs, true, renderer.effects.clone()), mapping),
                 Painted::Whole,
             ),
             (Plan::Clean { rows }, Some(mut shown)) => {
@@ -206,29 +213,8 @@ impl RootPicture {
                 (shown, Painted::Clean)
             }
             (Plan::Regions { regions, rows_kept }, Some(_)) => {
-                let mut shown = keep(frame, runs, true);
-                let picture = self.texture.view().clone();
-                self.reach = patched(self.reach, |reach| {
-                    for (region, scissor) in pixel_regions(&regions, reach, scale, device) {
-                        let glyphs = region_glyphs(&shown.indexed, region, reach, &[]);
-                        with_glyphs(&mut shown.indexed.frame, glyphs, false, |sub| {
-                            renderer.render_frame_glyphs_impl(
-                                &picture,
-                                sub,
-                                atlas,
-                                mapping,
-                                false,
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                                true,
-                                Some(scissor),
-                            );
-                        });
-                    }
-                });
+                let mut shown = keep(frame, runs, true, renderer.effects.clone());
+                self.patch_regions(renderer, atlas, &mut shown, &regions, mapping);
                 crate::cost::add(crate::cost::ROWS_REUSED, rows_kept);
                 (shown, Painted::Regions(regions.len()))
             }
@@ -237,6 +223,42 @@ impl RootPicture {
         self.compose(renderer, atlas, &mut shown, target);
         self.shown = Some(shown);
         painted
+    }
+
+    /// Repaint REGIONS of the picture from SHOWN's frame, without its cursors.
+    fn patch_regions(
+        &mut self,
+        renderer: &mut WgpuRenderer,
+        atlas: &mut WgpuGlyphAtlas,
+        shown: &mut Shown,
+        regions: &[Rect],
+        mapping: romacs_display_protocol::PresentMapping,
+    ) {
+        let surface = mapping.surface();
+        let device = (surface.device_width().get(), surface.device_height().get());
+        let scale = renderer.scale_factor();
+        let picture = self.texture.view().clone();
+        self.reach = patched(self.reach, |reach| {
+            for (region, scissor) in pixel_regions(regions, reach, scale, device) {
+                let glyphs = region_glyphs(&shown.indexed, region, reach, &[]);
+                with_glyphs(&mut shown.indexed.frame, glyphs, false, |sub| {
+                    renderer.render_frame_glyphs_impl(
+                        &picture,
+                        sub,
+                        atlas,
+                        mapping,
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        true,
+                        Some(scissor),
+                    );
+                });
+            }
+        });
     }
 
     /// Repaint the picture whole from SHOWN's frame, without its cursors;
@@ -289,18 +311,26 @@ impl RootPicture {
         renderer
             .begin_draw(RenderTarget::new(target, surface))
             .blit_retained(&self.bind_group);
-        let frame = &shown.indexed.frame;
-        // The glyphs that place each cursor (`FrameGlyphBuffer::cursor_anchor`)
-        // go into every cursor's patch, so it places the cursors as the frame does.
-        let anchors: Vec<usize> = frame
-            .window_cursors
+        // Per cursor, the glyph that places it (`FrameGlyphBuffer::cursor_anchor`),
+        // which goes into every cursor's patch so it places the cursors as the
+        // frame does, and the glyphs in its slot, which its patch covers.
+        let cursors = shown.indexed.frame.window_cursors.clone();
+        let facts: Vec<(Option<usize>, Option<Rect>)> = cursors
             .iter()
-            .filter_map(|c| frame.cursor_anchor(c.slot_id))
+            .map(|cursor| {
+                *shown
+                    .slots
+                    .entry(cursor.slot_id)
+                    .or_insert_with(|| slot_facts(&shown.indexed.frame, cursor.slot_id))
+            })
             .collect();
-        let extents = cursor_regions(
-            frame,
-            renderer.cursor_extents(frame, cursor_visible, animated_cursor.as_ref()),
-        );
+        let anchors: Vec<usize> = facts.iter().filter_map(|fact| fact.0).collect();
+        let extents: Vec<Rect> = renderer
+            .cursor_extents(&shown.indexed.frame, cursor_visible, animated_cursor.as_ref())
+            .into_iter()
+            .zip(&facts)
+            .filter_map(|(extent, fact)| extent.map(|extent| fact.1.map_or(extent, |slot| damage::union(extent, slot))))
+            .collect();
         self.reach = patched(self.reach, |reach| {
             for &extent in &extents {
                 let Some((region, scissor)) = pixel_region(reach.grow(extent), scale, device) else {
@@ -375,53 +405,64 @@ fn adopt_presentation(shown: &mut FrameGlyphBuffer, frame: &FrameGlyphBuffer) {
     shown.frame_placement = frame.frame_placement;
 }
 
-/// What each cursor of FRAME, drawing in EXTENTS, changes of the cursorless
-/// picture: its extent, and every glyph in its slot, which the pass draws in
-/// the cursor's inverse colours wherever it is (a row set shorter than the
-/// frame's cell can give two glyphs one slot).
-fn cursor_regions(frame: &FrameGlyphBuffer, extents: Vec<Option<Rect>>) -> Vec<Rect> {
-    frame
-        .window_cursors
+/// For a cursor on SLOT of FRAME: the glyph that places it, and the box of
+/// every glyph in the slot, which the pass draws in the cursor's inverse
+/// colours wherever it is (a row set shorter than the frame's cell can give
+/// two glyphs one slot).
+fn slot_facts(frame: &FrameGlyphBuffer, slot: DisplaySlotId) -> (Option<usize>, Option<Rect>) {
+    let in_slot = frame
+        .glyphs
         .iter()
-        .zip(extents)
-        .filter_map(|(cursor, extent)| {
-            let in_slot = frame
-                .glyphs
-                .iter()
-                .filter(|g| g.slot_id() == Some(cursor.slot_id))
-                .filter_map(FrameGlyph::geometry);
-            extent.map(|extent| in_slot.fold(extent, damage::union))
-        })
-        .collect()
+        .filter(|g| g.slot_id() == Some(slot))
+        .filter_map(FrameGlyph::geometry)
+        .reduce(damage::union);
+    (frame.cursor_anchor(slot), in_slot)
 }
 
-/// What a patch of REGION draws: the frame's background over it, then every
-/// glyph of each group of SHOWN whose bounds grown by REACH touch it, and
-/// ANCHORS, in frame order.
+/// What a patch of REGION draws: the frame's background over it, then the
+/// glyphs of every run of SHOWN whose group touches it (bounds grown by
+/// REACH), with the whole visual rows they lie on (the text runs of their
+/// window that overlap them, so underline and box runs that span runs of
+/// different heights lay out as in the whole frame), and ANCHORS, in frame
+/// order.
 fn region_glyphs(shown: &Indexed, region: Rect, reach: Reach, anchors: &[usize]) -> Vec<FrameGlyph> {
-    let frame = &shown.frame;
-    let mut keys: Vec<_> = shown
-        .runs
+    let (frame, runs) = (&shown.frame, &shown.runs);
+    let mut keys: Vec<_> = runs
         .iter()
         .filter(|run| damage::overlaps(reach.grow(run.bounds), region))
         .map(|run| run.key)
         .collect();
     keys.sort_unstable();
     keys.dedup();
+    let mut picked: Vec<bool> = runs.iter().map(|run| keys.binary_search(&run.key).is_ok()).collect();
+    // Close over rows: a text run of a picked text run's window that
+    // overlaps it vertically is picked too, until nothing more is.
+    let rows = |a: &damage::Run, b: &damage::Run| {
+        a.text && b.text && a.key.0 == b.key.0 && a.bounds.y < b.bounds.y + b.bounds.height && b.bounds.y < a.bounds.y + a.bounds.height
+    };
+    loop {
+        let more: Vec<usize> = (0..runs.len())
+            .filter(|&j| !picked[j] && (0..runs.len()).any(|i| picked[i] && rows(&runs[i], &runs[j])))
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        for j in more {
+            picked[j] = true;
+        }
+    }
     let mut glyphs = vec![FrameGlyph::Background {
         bounds: region,
         color: frame.background,
     }];
-    for run in &shown.runs {
-        if keys.binary_search(&run.key).is_ok() {
+    for (run, picked) in runs.iter().zip(picked) {
+        if picked {
             glyphs.extend_from_slice(&frame.glyphs[run.glyphs.clone()]);
         } else {
-            glyphs.extend(
-                run.glyphs
-                    .clone()
-                    .filter(|at| anchors.contains(at))
-                    .map(|at| frame.glyphs[at].clone()),
-            );
+            let mut held: Vec<usize> = anchors.iter().copied().filter(|at| run.glyphs.contains(at)).collect();
+            held.sort_unstable();
+            held.dedup();
+            glyphs.extend(held.into_iter().map(|at| frame.glyphs[at].clone()));
         }
     }
     glyphs

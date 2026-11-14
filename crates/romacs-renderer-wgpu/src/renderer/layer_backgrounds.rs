@@ -360,6 +360,7 @@ impl WgpuRenderer {
                     continue;
                 };
                 let face = frame_glyphs.resolved_face(*face_id);
+                let start = foreground_rect_vertices.len();
                 self.render_fringe_bitmap(
                     &mut foreground_rect_vertices,
                     *x,
@@ -368,6 +369,11 @@ impl WgpuRenderer {
                     *height,
                     &face.fg,
                     bitmap,
+                );
+                // A bitmap wider than its column spills past it.
+                super::root_picture::reach::note_points(
+                    romacs_display_protocol::types::Rect::new(*x, *y, *width, *height),
+                    foreground_rect_vertices[start..].iter().map(|v| v.position),
                 );
             }
         }

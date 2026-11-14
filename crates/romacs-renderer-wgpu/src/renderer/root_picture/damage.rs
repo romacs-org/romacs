@@ -33,6 +33,9 @@ pub(crate) struct Run {
     pub(crate) key: Key,
     pub(crate) glyphs: Range<usize>,
     pub(crate) bounds: Rect,
+    /// It holds characters or stretches: a row's text, which underline and
+    /// box runs span.
+    pub(crate) text: bool,
 }
 
 /// A frame and its runs.
@@ -63,6 +66,8 @@ pub(crate) enum Plan {
 
 /// Past this share of the frame's area in regions, a whole repaint.
 const WHOLE_SHARE: f32 = 0.5;
+/// Past this many changed runs, a whole repaint, before they are joined.
+const MAX_DAMAGED_RUNS: usize = 256;
 /// Past this many regions, a whole repaint: each is a pass of its own, with
 /// a setup that does not shrink with its size.
 const MAX_REGIONS: usize = 6;
@@ -123,6 +128,11 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> P
             }
         }
     }
+    // Past this many changed runs the frame changed nearly everywhere, and
+    // joining them pairwise would cost more than the whole repaint saves.
+    if damaged.len() > MAX_DAMAGED_RUNS {
+        return Plan::Whole;
+    }
     let regions = merge(damaged);
     if regions.is_empty() {
         return Plan::Clean {
@@ -151,6 +161,7 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
     for (at, glyph) in glyphs.iter().enumerate() {
         let bounds = glyph.geometry().unwrap_or_default();
+        let text = matches!(glyph, FrameGlyph::Char { .. } | FrameGlyph::Stretch { .. });
         let key = (
             glyph.window_id().map_or(0, DisplayWindowId::get),
             bounds.y.to_bits(),
@@ -160,11 +171,13 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
                 run.bounds = union(run.bounds, bounds);
+                run.text |= text;
             }
             _ => out.push(Run {
                 key,
                 glyphs: at..at + 1,
                 bounds,
+                text,
             }),
         }
     }

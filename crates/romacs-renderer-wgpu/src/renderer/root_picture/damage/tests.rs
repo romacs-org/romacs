@@ -203,3 +203,20 @@ fn tables_agree_on_the_entries_both_hold() {
     ));
     assert!(!nested_agree(&nested(a), &nested(HashMap::from([(1, 'z')]))));
 }
+
+#[test]
+fn changes_on_too_many_runs_are_a_whole_repaint_before_they_are_joined() {
+    // Every other row of a tall frame changed: hundreds of runs, none
+    // meeting, which joining would compare pairwise.
+    let tall = |pick: bool| {
+        let mut f = FrameGlyphBuffer::with_size(400.0, 20_000.0);
+        f.set_face(FaceId::new(0), Color::WHITE, None, 400, false, 0, None, 0, None, 0, None);
+        f.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        for row in 0..1000u16 {
+            let ch = if pick && row % 2 == 0 { 'b' } else { 'a' };
+            f.add_char(ch, 0.0, f32::from(row) * ROW, 10.0, ROW, 15.0, false);
+        }
+        f
+    };
+    assert_eq!(planned(&tall(false), &tall(true)), Plan::Whole);
+}

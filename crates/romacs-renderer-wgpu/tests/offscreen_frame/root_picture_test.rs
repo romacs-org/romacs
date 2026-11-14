@@ -6,7 +6,7 @@
 //! and with rows that share slot ids.
 use super::*;
 use romacs_display_protocol::face::UnderlineStyle;
-use romacs_display_protocol::frame_glyphs::WindowCursor;
+use romacs_display_protocol::frame_glyphs::{FringeBitmapData, FringeSide, WindowCursor};
 use romacs_renderer_wgpu::{PaintTarget, Painted, RootPicture, SnapshotSize};
 
 #[derive(Clone)]
@@ -19,6 +19,10 @@ struct Scene {
     bg: Color,
     cursor: (usize, usize, CursorStyle),
     glide: Option<(f32, bool)>,
+    /// A fringe bitmap wider than its column on the other window's last row.
+    fringe: bool,
+    /// The renderer's scroll bar track opacity.
+    track_opacity: f32,
 }
 
 const ROW: f32 = 12.0;
@@ -29,6 +33,7 @@ const SELECTED: u32 = 1;
 const MODE: u32 = 2;
 const BOXED: u32 = 3;
 const WAVY: u32 = 4;
+const UNDERLINED: u32 = 5;
 
 fn face(frame: &mut FrameGlyphBuffer, id: u32, fg: Color, bg: Color) {
     frame.set_face(
@@ -63,6 +68,7 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
     face(&mut frame, MODE, scene.fg, Color::rgb(0.35, 0.35, 0.4));
     face(&mut frame, BOXED, scene.fg, scene.bg);
     face(&mut frame, WAVY, scene.fg, scene.bg);
+    face(&mut frame, UNDERLINED, scene.fg, scene.bg);
     face(&mut frame, NORMAL, scene.fg, scene.bg);
     {
         let boxed = frame.faces.get_mut(&FaceId::new(BOXED)).unwrap();
@@ -74,6 +80,10 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
         wavy.attributes |= FaceAttributes::UNDERLINE;
         wavy.underline_style = UnderlineStyle::Wave;
         wavy.underline_color = Some(Color::RED);
+        let underlined = frame.faces.get_mut(&FaceId::new(UNDERLINED)).unwrap();
+        underlined.attributes |= FaceAttributes::UNDERLINE;
+        underlined.underline_style = UnderlineStyle::Line;
+        underlined.underline_color = Some(Color::rgb(0.3, 0.9, 0.3));
     }
     let text = |frame: &mut FrameGlyphBuffer,
                 window: i64,
@@ -86,6 +96,9 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
             for (col, ch) in line.chars().enumerate() {
                 let (x, y) = (x0 + 2.0 + col as f32 * CELL, 1.0 + row as f32 * ROW);
                 let id = styled(row + first, col);
+                // The first line's tail is set two pixels taller: one
+                // underline run over glyphs of two heights.
+                let height = if window == 1 && row + first == 0 && col >= 3 { ROW + 2.0 } else { ROW };
                 if id == SELECTED {
                     frame.add_stretch(
                         x,
@@ -97,7 +110,7 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
                         false,
                     );
                 }
-                frame.add_char(ch, x, y, CELL, ROW, 9.0, false);
+                frame.add_char(ch, x, y, CELL, height, 9.0, false);
                 if let Some(FrameGlyph::Char { face_id, .. }) = frame.glyphs.last_mut() {
                     *face_id = FaceId::new(id);
                 }
@@ -115,6 +128,7 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
         scene.first,
         &|row, col| match &selected {
             Some((r, cols)) if *r == row && cols.contains(&col) => SELECTED,
+            _ if row == 0 => UNDERLINED,
             _ if row == 1 && col < 4 => BOXED,
             _ => NORMAL,
         },
@@ -129,6 +143,14 @@ fn scene_frame(scene: &Scene, scale: f32, shared_slots: bool) -> FrameGlyphBuffe
             NORMAL
         }
     });
+    if scene.fringe {
+        // Sixteen columns of ink in a two-pixel fringe, on a row with no text.
+        frame.register_fringe_bitmap(
+            1,
+            FringeBitmapData { bits: vec![0xFFFF; 8], width: 16, height: 8, period: 0, align: 0 },
+        );
+        frame.push_fringe_bitmap(SPLIT + 2.0, 1.0 + 3.0 * ROW, 2.0, ROW, 1, FaceId::new(NORMAL), FringeSide::Left);
+    }
     frame.add_scroll_bar(
         false,
         W as f32 - 4.0,
@@ -230,6 +252,8 @@ fn sequence() -> Vec<(&'static str, Scene, bool)> {
         bg: Color::rgb(0.10, 0.12, 0.16),
         cursor: (0, 0, CursorStyle::FilledBox),
         glide: None,
+        fringe: false,
+        track_opacity: 0.6,
     };
     let mut steps = vec![("start", start.clone(), true)];
     let mut next = |name, change: &dyn Fn(&mut Scene), visible| {
@@ -300,6 +324,11 @@ fn sequence() -> Vec<(&'static str, Scene, bool)> {
         true,
     );
     next("nothing changed", &|_| {}, true);
+    // The cursor inside the taller tail of an underlined line.
+    next("a cursor in a line of two heights", &|s| { s.first = 0; s.cursor = (0, 4, CursorStyle::FilledBox); }, true);
+    next("a fringe indicator on a line with no text", &|s| { s.right[3] = ""; s.fringe = true; }, true);
+    next("the fringe indicator goes", &|s| s.fringe = false, true);
+    next("the scroll bar's track opacity changes", &|s| s.track_opacity = 0.2, true);
     steps
 }
 
@@ -314,6 +343,7 @@ fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
     let mut order = Vec::new();
     for (name, scene, visible) in sequence() {
         let frame = scene_frame(&scene, scale, shared_slots);
+        h.renderer.effects.scroll_bar.track_opacity = scene.track_opacity;
         let mapping = mapping_for_scale(&frame, W, H, scale);
         h.atlas.set_current_frame_fonts(frame.font_bindings());
         let (whole_texture, whole_view) = make_tex(&h.renderer, "whole");
@@ -401,6 +431,7 @@ fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
     );
     assert_eq!(painted["a theme change"], Painted::Direct);
     assert_eq!(painted["nothing changed"], Painted::Whole);
+    assert_eq!(painted["the scroll bar's track opacity changes"], Painted::Direct, "a setting the picture was drawn under changed");
 }
 
 #[test]
