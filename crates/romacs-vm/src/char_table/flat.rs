@@ -19,6 +19,7 @@ use std::cell::{Cell, OnceCell};
 const PAGE: usize = 256;
 type Page = [Value; PAGE];
 /// The pages of 65,536 characters, each read on first use.
+// CELL(Passing)
 type Plane = [OnceCell<Box<Page>>; 256];
 /// The views a VM keeps, the one least recently made current replaced first.
 const VIEWS: usize = 8;
@@ -31,6 +32,9 @@ pub(crate) struct FlatTable {
     /// The table read; the VM's views do not outlive a collection.
     table: Value,
     ascii: [Value; 128],
+    // CELL(Passing): A char table's view, filled under a shared borrow with copies of the table's
+    // entries; the VM drops its views as every collection starts (`clear_collection_caches`), so
+    // no mark ever finds one.
     planes: [OnceCell<Box<Plane>>; CharTable::LEN >> 16],
     /// The pages read so far.
     pages: Cell<usize>,

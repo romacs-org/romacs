@@ -35,9 +35,11 @@ struct View<'a> {
     /// until then: an entry is a cons a program may alter without writing
     /// the table, so its code is read from it once a scan, during which no
     /// program runs.
+    // CELL(Plain)
     ascii: [std::cell::Cell<i32>; 128],
     /// The last character read, as (byte, code): a scan reads a
     /// character, its syntax and its width at one position in turn.
+    // CELL(Plain)
     last: std::cell::Cell<(usize, u32)>,
 }
 
