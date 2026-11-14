@@ -240,23 +240,25 @@ mod tests {
     fn an_image_in_memory_has_no_holes_and_one_elsewhere_keeps_them() {
         use std::os::unix::fs::MetadataExt;
         let len = 16 << 20;
-        let in_memory = |dir: &std::path::Path| rustix::fs::statfs(dir).is_ok_and(|fs| u32::try_from(fs.f_type).ok() == Some(super::TMPFS_MAGIC));
-        let allocated_after = |dir: &std::path::Path| {
+        // (whether it is in memory, the bytes allocated once filled) of a
+        // sparse file made in DIR, or None where none can be made.
+        let tried = |dir: &std::path::Path| {
             let path = dir.join(format!("romacs-image-holes-{}", std::process::id()));
-            let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
-            file.set_len(len as u64).unwrap();
-            super::whole_in_memory(&file, len).unwrap();
-            let allocated = std::fs::metadata(&path).unwrap().blocks() * 512;
-            std::fs::remove_file(&path).unwrap();
-            allocated
+            let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).ok()?;
+            let in_memory = rustix::fs::fstatfs(&file).is_ok_and(|fs| u32::try_from(fs.f_type).ok() == Some(super::TMPFS_MAGIC));
+            let filled = file.set_len(len as u64).map_err(|e| e.to_string()).and_then(|()| super::whole_in_memory(&file, len));
+            let allocated = std::fs::metadata(&path).map(|m| m.blocks() * 512);
+            let _ = std::fs::remove_file(&path);
+            filled.unwrap();
+            Some((in_memory, allocated.unwrap()))
         };
-        let candidates = [std::path::PathBuf::from("/dev/shm"), std::env::temp_dir(), std::path::PathBuf::from("/var/tmp")];
-        let usable: Vec<_> = candidates.iter().filter(|d| d.is_dir() && std::fs::metadata(d).is_ok_and(|m| !m.permissions().readonly())).collect();
-        if let Some(memory) = usable.iter().find(|d| in_memory(d)) {
-            assert!(allocated_after(memory) >= len as u64, "an image on tmpfs ({}) kept holes", memory.display());
+        let found: Vec<(bool, u64)> = [std::path::PathBuf::from("/dev/shm"), std::env::temp_dir(), std::path::PathBuf::from("/var/tmp")]
+            .iter().filter_map(|dir| tried(dir)).collect();
+        if let Some((_, allocated)) = found.iter().find(|(in_memory, _)| *in_memory) {
+            assert!(*allocated >= len as u64, "an image on tmpfs kept holes: {allocated} of {len} bytes");
         }
-        if let Some(disk) = usable.iter().find(|d| !in_memory(d)) {
-            assert!(allocated_after(disk) < len as u64, "an image on {} lost its holes", disk.display());
+        if let Some((_, allocated)) = found.iter().find(|(in_memory, _)| !*in_memory) {
+            assert!(*allocated < len as u64, "an image elsewhere lost its holes: {allocated} of {len} bytes");
         }
     }
 
