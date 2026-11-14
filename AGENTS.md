@@ -30,10 +30,14 @@ possible; say so where you do.
   `substitute-command-keys` or `help-key-binding`, mode-line and status text in
   named faces that inherit theme faces. A command that only makes sense in a mode
   declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
-- Romacs's own Lisp byte-compiles on the pinned GNU Emacs with no new warning: the
-  check's Lisp tier holds each touched file of `lisp/romacs/` to its base. GNU does
-  not know what only Romacs has, so declare it where it is used: `declare-function`
-  for a primitive, naming its Rust file, and `defvar` for a variable.
+- Romacs's own Lisp passes `tools/romacs-lint` with no new finding: Romacs loads
+  each touched file and holds what it names to what the machine defines (functions
+  and their argument counts, free and unused variables), and the check's Lisp tier
+  holds a file to its base. A `declare-function` is for a function the file does
+  not load, and must be true: it names the library that defines the function, or
+  a primitive's Rust file. What a caller should know of a function is put on the
+  function, beside the better path's definition, and the lint tells each caller:
+  `(put 'FUNCTION 'romacs-lint-hint "...")`.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
@@ -196,6 +200,9 @@ The other commands:
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
   It preserves `CARGO_TARGET_DIR` and defaults to `dev-fast`. Use `--profile gate`
   for compute-heavy GNU loading and oracle tests, with the same focused selectors.
+- Lisp lint on a prebuilt or installed host: `python3 tools/romacs-lint FILE ...`,
+  what the change adds since its merge-base with beta. `--all` shows older findings
+  too, `--binary` names the host; an installed host answers in about a second.
 - Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
