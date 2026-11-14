@@ -647,6 +647,32 @@ message's record for TEXT, `interrupted' each interrupted."
       (delete-directory root t)
       (delete-directory run t))))
 
+(ert-deftest romacs-agent-delegate-detached-with-a-socket-left ()
+  ;; A selection's restart, its unit stopped and its socket left behind:
+  ;; ended, the switch noted and the session resumed on it.  A plan
+  ;; toggled while detached is refused before anything changes.
+  (let* ((root (make-temp-file "romacs-left-" t))
+         (run (romacs-test-socket-directory "left-"))
+         (socket (expand-file-name "host.sock" run))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "l" :harness 'claude :state 'detached :dir root :host-socket socket
+                                      :options '(:model "old")))
+         (resumed nil))
+    (puthash "l" session romacs-agent--sessions)
+    (unwind-protect
+        (progn
+          (write-region "" nil socket nil 'silent)
+          (should-error (romacs-agent-set-plan session t) :type 'user-error)
+          (should-not (plist-get (romacs-agent-options session) :plan))
+          (cl-letf (((symbol-function 'romacs-agent-resume) (lambda (s) (push (plist-get (romacs-agent-options s) :model) resumed)))
+                    ((symbol-function 'romacs-agent--manifest-put) #'ignore))
+            (setf (romacs-agent-pending-selection session) (list :state 'restarting :model "new" :stopped t))
+            (romacs-agent--restarted session))
+          (should (equal resumed '("new")))
+          (should (eq (romacs-agent-state session) 'ended)))
+      (delete-directory root t)
+      (delete-directory run t))))
+
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none
   ;; delegated: said to be external.

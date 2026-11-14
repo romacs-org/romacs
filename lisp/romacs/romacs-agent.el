@@ -418,6 +418,8 @@ now (its driver's :plan), else at its next launch."
          ;; harness says (`mode' events fill it in).
          (from (or (plist-get options :plan-from) (and now (not (equal now "plan")) now))))
     (unless (eq (and (plist-get options :plan) t) (and on t))
+      ;; Its note able to go first: never the option changed and its note lost.
+      (romacs-agent--check-note session)
       (romacs-agent--set-options
        session (append (and on (list :plan t)) (and on from (list :plan-from from))
                        (romacs-agent--without options '(:plan :plan-from))))
@@ -2422,6 +2424,9 @@ next run takes the unit's name; at once when it ran detached."
   "Resume SESSION on its selection, once its harness and its unit are gone."
   (when (and (plist-get (romacs-agent-pending-selection session) :stopped)
              (not (process-live-p (romacs-agent-connection session))))
+    ;; Its unit stopped, confirmed: ended, whatever socket it left, so its
+    ;; journal is this server's to note the switch in.
+    (when (eq (romacs-agent-state session) 'detached) (setf (romacs-agent-state session) 'ended))
     (romacs-agent--commit-switch session)
     ;; Messages go on waiting until the new supervisor is there to take them.
     (setf (romacs-agent-pending-selection session) (list :state 'resuming))
