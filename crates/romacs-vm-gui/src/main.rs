@@ -40,6 +40,9 @@ mod exit;
 mod preparing;
 mod quit;
 mod client;
+#[cfg(test)]
+#[path = "../tests/support/home.rs"]
+mod test_home;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).

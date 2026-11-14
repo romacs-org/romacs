@@ -211,6 +211,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_collection_floor(1);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "echo-keymap");
         let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let loadup = started.loadup.as_ref().unwrap();
         assert!(loadup.rows.iter().any(|r| r.site.name == "emacs-lisp/backquote"

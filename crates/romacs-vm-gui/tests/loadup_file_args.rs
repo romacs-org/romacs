@@ -5,6 +5,8 @@
 //! b/notes.org'.
 use romacs_vm_gui::startup;
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 #[test]
 fn loadup_file_arguments_visit_through_gnus_find_file() {
@@ -30,6 +32,7 @@ fn loadup_file_arguments_visit_through_gnus_find_file() {
     let mine = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        home::private_home(&mut vm, "file-args");
         let mut started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         started.files = files;
         startup::finish_loadup(&mut vm, &started).unwrap();
