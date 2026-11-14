@@ -122,9 +122,13 @@ impl Leaf<'_> {
             }
             "attached" => Ok(self.vm.keeper.as_ref().map_or(Value::NIL, |link| integer(link.client.keeper.pid))),
             "socket" => {
-                let runtime = crate::host::getenv("XDG_RUNTIME_DIR").ok_or_else(|| failed("XDG_RUNTIME_DIR is not set: no place for a keeper's socket".into()))?;
+                // The session's own environment, `process-environment', as every
+                // primitive that resolves a variable reads it (GNU egetenv).
+                let runtime = crate::prim::prims::environment::egetenv(self, "XDG_RUNTIME_DIR")?
+                    .map(|bytes| std::path::PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(bytes)))
+                    .ok_or_else(|| failed("XDG_RUNTIME_DIR is not set: no place for a keeper's socket".into()))?;
                 let session = String::from_utf8_lossy(&self.string_bytes(arg(0))?).into_owned();
-                let socket = romacs_keeper::run::socket_path(std::path::Path::new(&runtime), &session);
+                let socket = romacs_keeper::run::socket_path(&runtime, &session);
                 Ok(self.string(&socket.to_string_lossy()))
             }
             "detach" => {
