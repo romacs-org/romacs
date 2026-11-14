@@ -19,6 +19,9 @@ anything, so a step's figures are differences of two readings:
   layouts               layouts asked of the layout host besides a paint's
                         own: redisplay's, and any the step's own Lisp asked
   frames_submitted      frames sent to the renderer
+  lines_laid            display lines the layout engine laid out, some
+                        row of them wrapped (the rest it had kept)
+  rows_wrapped          rows the layout engine wrapped
   chars_fontified       characters `jit-lock' asked its functions for, in
                         a scenario that counts them (fontification's)
 
@@ -72,7 +75,7 @@ BARS = HERE / 'display_stages_bars.json'
 # A figure and the count of a reading it is the difference of.
 COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'instructions', 'display_conses': 'conses',
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
-          'frames_submitted': 'frames-submitted'}
+          'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
 OPTIONAL = {'chars_fontified': 'fontified-chars'}
 # The figures whose 90th percentile is held too (a whole step's varies
@@ -186,14 +189,15 @@ def overall(rows):
 
 def table(rows):
     """The report as a Markdown table, instructions in millions."""
-    lines = ['| scenario | step | display | display p90 | conses | rebuilt | bands | layouts | frames | status |',
-             '|---|---|---|---|---|---|---|---|---|---|']
+    lines = ['| scenario | step | display | display p90 | conses | rebuilt | bands | layouts | frames | lines laid | rows wrapped | status |',
+             '|---|---|---|---|---|---|---|---|---|---|---|---|']
     for row in rows:
         f = row.get('figures')
         millions = lambda name: f'{f[name] / 1e6:.2f}M'  # noqa: E731
         cells = ([millions('step_instructions'), millions('display_instructions'), millions('display_instructions_p90'),
-                  f['display_conses'], f['windows_rebuilt'], f['band_expansions'], f['layouts'], f['frames_submitted']]
-                 if f else ['-'] * 8)
+                  f['display_conses'], f['windows_rebuilt'], f['band_expansions'], f['layouts'], f['frames_submitted'],
+                  f['lines_laid'], f['rows_wrapped']]
+                 if f else ['-'] * 10)
         note = f" — {row['reason']}" if row.get('reason') else (f" — odd steps {row['odd']}" if row.get('odd') else '')
         lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
     return '\n'.join(lines) + '\n'

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""perfbench's elisp-benchmarks rows and README tables, without an engine.
+"""perfbench's row selection, figures and README tables, without an engine.
 
 Run: python3 -B -m unittest discover -s crates/romacs-vm-gui/harness/perfbench -p 'test_perfbench*.py'
 """
@@ -161,6 +161,12 @@ class GnuEngine(unittest.TestCase):
         for part in ('32.0.50', '`cccccccc`', 'emacs-x 1-1', 'natively compiled', 'inputs are pinned at `bbbbbbbb`'):
             self.assertIn(part, text)
 
+    def test_the_pinned_oracle_is_named_pinned(self):
+        meta = {'gnu_build': {'version': '32.0.50', 'commit': 'b' * 40, 'package': None, 'native': True},
+                'fixtures': {'commit': 'b' * 40}}
+        self.assertEqual(readme.gnu_engine(meta), 'GNU Emacs 32.0.50 pinned at commit `bbbbbbbb`, natively compiled,'
+                                                  ' the inputs pinned there too')
+
     def test_a_run_from_before_keeps_its_pinned_wording(self):
         self.assertEqual(readme.gnu_engine({'fixtures': {'commit': 'b' * 40}}), 'pinned GNU Emacs `bbbbbbbb`')
 
@@ -181,28 +187,28 @@ class Session(unittest.TestCase):
 
         def fail():
             raise TimeoutError('no result')
-        got = pb.session_row(session, 'session x', fail)
+        got = pb.session_row(session, 'x', fail, pb.RECOVER)
         self.assertEqual((got['wall'], got['block']), (None, None))
         self.assertIn('no result', got['failed'])
         self.assertEqual(len(sent), 3)
         self.assertIsNone(session.stopped)
 
-    def test_a_failed_row_runs_its_cleanup(self):
+    def test_a_failed_row_runs_its_recovery(self):
         asked = []
         session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'gnu'}),
                                  'stopped': None, 'ask': staticmethod(lambda form, *_: asked.append(form))})
 
         def fail():
             raise TimeoutError('no result')
-        pb.session_row(session, 'session M-x shell', fail, 'shell')
-        self.assertEqual(asked, ['(perfbench-session-abort (quote shell))'])
+        pb.session_row(session, 'theme switch cycled', fail, '(perfbench-session-abort (quote theme-cycle))')
+        self.assertEqual(asked, ['(perfbench-session-abort (quote theme-cycle))'])
 
     def test_a_dead_engine_stops_the_session_without_losing_the_group(self):
         def dead(*_):
             raise RuntimeError('editor exited')
         session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'romacs'}),
                                  'stopped': None, 'ask': staticmethod(dead)})
-        got = pb.session_row(session, 'session x', dead)
+        got = pb.session_row(session, 'x', dead, pb.RECOVER)
         self.assertIn('editor exited', got['failed'])
         self.assertIn('stopped answering in x', session.stopped)
 
@@ -212,7 +218,7 @@ class Session(unittest.TestCase):
         for error in (pb.Refused('rounds differ'), pb.parity_live.LispError('gnu', 'form', 'void')):
             def fail():
                 raise error
-            self.assertIn('not run', pb.session_row(session, 'session x', fail)['failed'])
+            self.assertIn('not run', pb.session_row(session, 'x', fail, pb.RECOVER)['failed'])
 
     def test_rounds_that_made_different_things_are_no_sample(self):
         samples = [{'wall': 1.0, 'block': 1.0, 'instructions': 1}] * 3
@@ -258,10 +264,10 @@ class Session(unittest.TestCase):
             raise TimeoutError('no answer')
         session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'romacs'}),
                                  'stopped': None, 'ask': staticmethod(silent)})
-        pb.session_row(session, 'session x', silent)
+        pb.session_row(session, 'x', silent, pb.RECOVER)
         self.assertIn('stopped answering in x', session.stopped)
         ran = []
-        got = pb.session_row(session, 'session y', lambda: ran.append(1))
+        got = pb.session_row(session, 'y', lambda: ran.append(1), pb.RECOVER)
         self.assertEqual(ran, [])
         self.assertIn('stopped answering in x', got['failed'])
 
@@ -296,12 +302,109 @@ class Session(unittest.TestCase):
         text = readme.session_section(made)
         self.assertIn('| vc-dir | run |', text)
         self.assertNotIn('startup', text)
-        self.assertEqual(readme.selector(made['rows'][0]), 'session')
 
-    def test_every_key_row_and_command_has_a_distinct_name(self):
-        names = [c[0] for c in pb.SESSION_COMMANDS] + [k[0] for k in pb.SESSION_KEYS]
-        self.assertEqual(len(names), len(set(names)))
-        self.assertTrue(all(n.startswith('session ') for n in names))
+class Catalogue(unittest.TestCase):
+    NAMES = [name for name, _ in pb.catalogue()]
+
+    def test_every_row_has_its_own_name_and_no_comma_to_split_it(self):
+        self.assertEqual(len(self.NAMES), len(set(self.NAMES)))
+        self.assertEqual([n for n in self.NAMES if ',' in n], [])
+
+    def test_no_selection_is_every_row_but_the_whole_elb_suite(self):
+        self.assertEqual(pb.selection(None, pb.catalogue()), (self.NAMES, False))
+
+    def test_areas_pick_their_rows_and_no_others(self):
+        chosen, every = pb.selection(['syntax,typing'], pb.catalogue())
+        for name in ('key self-insert text', 'syntax-ppss subr.el emacs-lisp-mode', 'key in the middle xdisp.c c-ts-mode'):
+            self.assertIn(name, chosen)
+        self.assertNotIn('prim gethash', chosen)
+        self.assertFalse(every)
+        self.assertEqual(chosen, [n for n in self.NAMES if n in chosen])
+
+    def test_a_name_or_a_glob_picks_rows(self):
+        self.assertEqual(pb.selection(['key C-f text'], pb.catalogue())[0], ['key C-f text'])
+        chosen = pb.selection(['*c-ts-mode'], pb.catalogue())[0]
+        self.assertTrue(chosen and all(n.endswith('c-ts-mode') for n in chosen))
+        self.assertIn('scroll C-v xdisp.c c-ts-mode', chosen)
+
+    def test_a_word_that_names_nothing_stops_the_run(self):
+        with self.assertRaises(SystemExit) as stopped:
+            pb.selection(['syntax', 'no-such-row'], pb.catalogue())
+        self.assertIn('no-such-row', str(stopped.exception))
+
+    def test_elb_asks_for_every_member_and_a_member_by_name_is_kept(self):
+        chosen, every = pb.selection(['elb'], pb.catalogue())
+        self.assertTrue(every)
+        self.assertIn('elb smie', chosen)
+        self.assertIn('elb fibn', pb.selection(['elb fibn'], pb.catalogue())[0])
+
+    def test_each_file_and_mode_has_the_rigs_operations_but_one_left_out(self):
+        rows = {(op, name, mode) for _, name, _, mode, op, _, _ in pb.syntax_rows()}
+        self.assertEqual(len(rows), len(pb.SYNTAX_FILES) * len(pb.SYNTAX_OPS) - 1)
+        self.assertNotIn(('font-lock-ensure', 'xdisp.c', 'c-mode'), rows)
+        self.assertIn(('font-lock-ensure', 'xdisp.c', 'c-ts-mode'), rows)
+
+    def test_a_glob_of_elb_members_adds_no_member(self):
+        chosen, _ = pb.selection(['elb *'], pb.catalogue())
+        self.assertNotIn('elb *', chosen)
+
+    def test_only_runners_with_a_row_wanted_run(self):
+        steps = pb.plan(None, {'prim gethash', 'key C-f text'}, False)
+        self.assertEqual(len(steps), 2)
+        self.assertTrue(all(any(n in ('prim gethash', 'key C-f text') for n in names) for names, _ in steps))
+        self.assertEqual(len(pb.plan(None, set(self.NAMES), False)),
+                         len(pb.BATCH) + len(pb.syntax_rows()) + 6)
+
+
+class Change(unittest.TestCase):
+    def test_each_row_changes_against_the_newest_run_that_has_it(self):
+        newest = {'rows': [pb.row('a', 'batch', 'run', {}, {'instructions': 200}, 3)]}
+        older = {'rows': [pb.row('a', 'batch', 'run', {}, {'instructions': 50}, 3),
+                          pb.row('b', 'batch', 'run', {}, {'instructions': 100}, 3)]}
+        rows = pb.with_ratios([pb.row('a', 'batch', 'run', {}, {'instructions': 100}, 3),
+                               pb.row('b', 'batch', 'run', {}, {'instructions': 50}, 3)], [newest, older])
+        self.assertEqual([r['instructions_change'] for r in rows], [-.5, -.5])
+
+    def test_a_figure_refused_before_takes_the_run_before_that(self):
+        newest = {'rows': [pb.row('a', 'batch', 'run', {}, {'instructions': 200, 'wall': None}, 3)]}
+        older = {'rows': [pb.row('a', 'batch', 'run', {}, {'instructions': 50, 'wall': 2.0}, 3)]}
+        made = pb.with_ratios([pb.row('a', 'batch', 'run', {}, {'instructions': 100, 'wall': 1.0}, 3)], [newest, older])[0]
+        self.assertEqual((made['instructions_change'], made['wall_change']), (-.5, -.5))
+
+    def test_only_runs_whose_lisp_ran_the_same_way_are_compared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, started, lisp in (('a/1', '1', 'compiled store'), ('a/2', '2', 'source'), ('a/3', '3', 'compiled store')):
+                (root / name).mkdir(parents=True)
+                (root / name / 'results.json').write_text(json.dumps({'meta': {'started': started, 'romacs_lisp': lisp},
+                                                                      'rows': []}))
+            found = pb.previous_results(root, None, root / 'a/3', 'compiled store')
+        self.assertEqual([r['meta']['started'] for r in found], ['1'])
+
+    def test_uncompiled_rows_are_less_the_load_alone(self):
+        class Ctx(pb.Context):
+            def __init__(self, directory):
+                self.runs, self.cache, self.store = 1, Path(directory), None
+                self.compared = ('gnu', 'romacs')
+                self.log = lambda *_: None
+
+        class Batch:
+            once = staticmethod(lambda engine, workload, skip=False, extra=None: {
+                'instructions': 10 ** 6 if skip else 10 ** 6 + 300 * pb.MICRO_N, 'seconds': 1.0, 'loaded': [],
+                'compiled': set(), 'published': 0})
+        with tempfile.TemporaryDirectory() as directory:
+            rows = pb.uncompiled_rows(Ctx(directory), Batch, {'uncompiled named call'})
+        self.assertEqual(rows[0]['gnu']['instructions'], 300)
+
+    def test_the_tables_refuse_a_run_of_some_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'results.json'
+            made = results([])
+            made['meta']['only'] = ['syntax']
+            data.write_text(json.dumps(made))
+            with self.assertRaises(SystemExit) as stopped:
+                readme.main([str(data), str(Path(directory) / 'README.md')])
+        self.assertIn('whole run', str(stopped.exception))
 
 
 class Source(unittest.TestCase):
@@ -315,11 +418,9 @@ def lead_results(**overrides):
     def made(name, gnu, romacs):
         return pb.row(name, 'session', 'run', gnu, romacs, 3)
     rows = [made(readme.VC_HISTORY, {'wall': 19.0, 'check': '183574 abc'}, {'wall': 3.0, 'key': .005, 'check': '183574 abc'}),
-            made(readme.OPEN_XDISP, {'wall': .65}, {'wall': .77}),
-            made(readme.OPEN_XDISP_TS, {'wall': .4}, {'wall': .4}),
+            made(readme.OPEN_XDISP_TS, {'wall': .4}, {'wall': .77}),
             made(readme.OPEN_HEADER_TS, {'wall': 2.0}, {'wall': 2.0}),
             *[made(row, {'wall': 1e-7}, {'wall': 2e-8}) for row in readme.UNCOMPILED.values()],
-            made(readme.OPEN_HEADER, {'wall': 2.0}, {'wall': 1.0}),
             made(readme.THEME, {'wall': .05}, {'wall': .06})]
     made_results = results(rows)
     made_results['meta'].update(header_bytes=15_600_000, history_commits=183574)
@@ -374,12 +475,7 @@ class Lead(unittest.TestCase):
             made['meta']['history_commits'] = 194171
         self.assertIn('vc-history-commits', readme.lead_missing(lead_results(x=short)))
 
-    def test_a_run_with_session_selected_checks_the_lead_and_quick_does_not(self):
-        args = lambda **k: type('Args', (), {'only': None, 'quick': False, **k})  # noqa: E731
-        self.assertTrue(pb.selected(args(), 'session', 'session', False))
-        self.assertTrue(pb.selected(args(only=['session']), 'session', 'session', False))
-        self.assertFalse(pb.selected(args(quick=True), 'session', 'session', False))
-        self.assertFalse(pb.selected(args(only=['elb']), 'session', 'session', False))
+    def test_a_run_with_no_lead_rows_lacks_every_lead_value(self):
         self.assertEqual(len(readme.lead_missing(results([]))), len(readme.lead_values(results([]))))
 
     def test_a_failed_lead_leaves_the_readme_alone(self):
@@ -513,7 +609,7 @@ class Neomacs(unittest.TestCase):
     def test_its_failed_compile_keeps_the_other_engines_micro_rows(self):
         class Ctx(pb.Context):
             def __init__(self, directory):
-                self.quick, self.runs, self.cache, self.store = False, 1, Path(directory), None
+                self.runs, self.cache, self.store = 1, Path(directory), None
                 self.gnu_build = {'sha256': 'f' * 64}
                 self.engines = {'gnu': 'g', 'romacs': 'r', 'neomacs': 'n'}
                 self.compared = tuple(self.engines)
@@ -531,8 +627,8 @@ class Neomacs(unittest.TestCase):
             raise pb.Refused('compile timed out')
         pb.neomacs_compiled = refused
         with tempfile.TemporaryDirectory() as directory:
-            rows = pb.micro_rows(Ctx(directory), Batch)
-        self.assertEqual(len(rows), len(pb.MICRO) - 1 + len(pb.UNCOMPILED))
+            rows = pb.micro_rows(Ctx(directory), Batch, {name for name, _ in pb.MICRO})
+        self.assertEqual(len(rows), len(pb.MICRO))
         self.assertIsNotNone(rows[0]['gnu']['instructions'])
         self.assertIn('not run: compile timed out', rows[0]['neomacs']['failed'])
 
@@ -595,7 +691,7 @@ class Batch(unittest.TestCase):
         ctx = type('Ctx', (), {'runs': 3, 'compared': ('gnu', 'romacs'), 'attempt': staticmethod(lambda _, f: f()),
                                'romacs_note': staticmethod(lambda _: 'Romacs: source')})
         batch.ctx = ctx
-        batch.figures = lambda engine, _: {'gnu': gnu, 'romacs': romacs}[engine]
+        batch.figures = lambda engine, *_: {'gnu': gnu, 'romacs': romacs}[engine]
         return batch.workload('r', 'w')
 
     def test_a_count_of_zero_or_less_has_no_figure_and_says_so(self):
@@ -610,6 +706,7 @@ class FirstUse(unittest.TestCase):
     def test_what_a_first_use_compiled_is_said_and_is_outside_the_figures(self):
         batch = pb.Batch.__new__(pb.Batch)
         batch.ctx = type('Ctx', (), {'runs': 1, 'store': Path('/s')})
+        batch.setups, batch.warmed = {}, set()
         made = []
 
         def once(engine, workload, skip=False, extra=None):
@@ -625,30 +722,24 @@ class FirstUse(unittest.TestCase):
         self.assertEqual(len(made), 2)
 
 
-class Ert(unittest.TestCase):
-    def test_a_refused_file_costs_its_result_once_not_the_row(self):
-        calls = []
+class Setup(unittest.TestCase):
+    def test_rows_with_one_setup_share_its_runs_and_a_first_use_per_mode(self):
+        batch = pb.Batch.__new__(pb.Batch)
+        batch.ctx = type('Ctx', (), {'runs': 3, 'store': Path('/s')})
+        batch.setups, batch.warmed = {}, set()
+        made = []
 
-        def refused(argv, *rest):
-            calls.append(argv)
-            raise pb.Refused('timed out')
-        self.addCleanup(setattr, pb, 'run', pb.run)
-        pb.run = refused
-
-        class Ctx:
-            fixtures, engines, env, memory = Path('/nonexistent'), {'neomacs': 'n'}, {}, {}
-            scratch = staticmethod(lambda suffix: Path('/nonexistent/x'))
-            store_marks = staticmethod(dict)
-            log = staticmethod(lambda *_: None)
-
-        class Batch:
-            env = {'neomacs': {}}
-        hung = set()
-        first = pb.ert_pass(Ctx, Batch, 'neomacs', hung)
-        second = pb.ert_pass(Ctx, Batch, 'neomacs', hung)
-        self.assertEqual(first['failed'], pb.ERT_FILES)
-        self.assertEqual(second['failed'], pb.ERT_FILES)
-        self.assertEqual(len(calls), len(pb.ERT_FILES))
+        def once(engine, workload, skip=False, extra=None):
+            made.append((engine, skip))
+            return {'instructions': 40 if skip else 100, 'seconds': 1.0, 'check': 1, 'published': 0}
+        batch.once = once
+        mode = {'PERFBENCH_MODE': 'c-mode'}
+        for op in ('key', 'scan-lists'):
+            figures = batch.figures('romacs', 'syntax', dict(mode, PERFBENCH_OP=op), 'syntax c warm')
+            self.assertEqual(figures['instructions'], 60)
+        batch.figures('romacs', 'syntax', dict(mode, PERFBENCH_OP='font-lock-ensure'), 'syntax c plain')
+        self.assertEqual(made.count(('romacs', True)), 6)  # three per setup, not per row
+        self.assertEqual(made.count(('romacs', False)), 1 + 3 * 3)  # one first use for the mode
 
 
 class Table(unittest.TestCase):
@@ -684,11 +775,6 @@ class Store(unittest.TestCase):
     def test_a_long_list_of_source_reads_is_cut_with_its_count(self):
         note = pb.store_note([{'loaded': [f'/r/{n}.el' for n in range(9)], 'compiled': set(), 'published': 0}])
         self.assertIn('and 3 more', note)
-
-    def test_the_loaded_line_is_read_from_ert_output(self):
-        self.assertEqual(pb.loaded_line('Ran 3 tests\nPERFBENCH-LOADED ("/r/a.el")\n'), ['/r/a.el'])
-        self.assertEqual(pb.loaded_line('PERFBENCH-LOADED nil\n'), [])
-        self.assertIsNone(pb.loaded_line('Ran 3 tests\n'))
 
     def test_the_harness_own_lisp_is_no_load(self):
         loaded = [str(pb.HARNESS / 'parity-probe.el'), '/h/.config/romacs/init.el', '/r/a.el']
@@ -792,7 +878,7 @@ class Readme(unittest.TestCase):
         text = readme.headlines(results(rows))
         self.assertIn("--only 'how-many xdisp.c'", text)
         self.assertIn('`aaaaaaaa`', text)
-        self.assertIn("--neomacs NEOMACS --only 'keys'", text)
+        self.assertIn("--neomacs NEOMACS --only 'key C-f'", text)
         self.assertEqual(readme.kept_wins(f'<!-- perfbench-headlines-begin -->\n{text}\n<!-- perfbench-headlines-end -->\n'),
                          {('how-many xdisp.c', 'GNU'), ('key C-f', 'neomacs')})
 
@@ -814,7 +900,7 @@ class Readme(unittest.TestCase):
         made = results(rows)
         made['meta']['neomacs'] = {'version': 'Neomacs 1.2', 'commit': 'c' * 40}
         text = readme.section(made)
-        self.assertIn('| neomacs | Romacs/GNU', text)
+        self.assertIn('| neomacs time | Romacs/neomacs (instructions) |', text)
         self.assertIn('`cccccccc`', text)
         self.assertIn('| 0.50x |', text)
 

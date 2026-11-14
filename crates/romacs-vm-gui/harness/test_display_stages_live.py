@@ -4,7 +4,7 @@ import unittest
 import display_stages_live as d
 
 NAMES = ('step-instructions', 'collections', 'cycles', 'instructions', 'conses', 'windows-rebuilt', 'band-expansions', 'layouts',
-         'frames-submitted')
+         'frames-submitted', 'lines-laid', 'rows-wrapped')
 IDLE = {'name': 'idle', 'paints': False}
 PAINTS = {'name': 'typed', 'paints': True}
 
@@ -13,14 +13,16 @@ def readings(*rows):
     """Readings whose consecutive differences are ROWS, each NAMES' counts."""
     out, total = [dict.fromkeys(NAMES, 0)], dict.fromkeys(NAMES, 0)
     for row in rows:
+        row = (*row, *[0] * (len(NAMES) - len(row)))
         total = {name: total[name] + count for name, count in zip(NAMES, row)}
         out.append(total)
     return out
 
 
 # A step of 900 instructions, 500 of them in one redisplay that built one
-# window, expanded two bands and submitted a frame.
-STEP = (900, 0, 1, 500, 7, 1, 2, 0, 1)
+# window, expanded two bands, submitted a frame and laid one line out, one
+# row of it wrapped.
+STEP = (900, 0, 1, 500, 7, 1, 2, 0, 1, 1, 1)
 QUIET = (300, 0, 1, 100, 0, 0, 2, 0, 0)
 
 
@@ -120,8 +122,8 @@ class Bars(unittest.TestCase):
 
     def test_the_table_shows_figures_or_the_reason(self):
         text = d.table([d.verdict(PAINTS, self.result, 2, {'typed': self.bars}), d.verdict(IDLE, {'readings': []}, 2, {})])
-        self.assertIn('| typed | 0.00M | 0.00M | 0.00M | 7 | 1 | 2 | 0 | 1 | PASS |', text)
-        self.assertIn('| idle | - | - | - | - | - | - | - | - | FAIL — 0 readings for 2 steps |', text)
+        self.assertIn('| typed | 0.00M | 0.00M | 0.00M | 7 | 1 | 2 | 0 | 1 | 1 | 1 | PASS |', text)
+        self.assertIn('| idle | - | - | - | - | - | - | - | - | - | - | FAIL — 0 readings for 2 steps |', text)
 
 
 if __name__ == '__main__':
