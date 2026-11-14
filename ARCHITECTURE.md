@@ -60,10 +60,12 @@ frozen snapshots.
 
 Each top-level entry, and what it holds:
 
-- `crates/`: the Rust packages; `lisp/`: Romacs's and GNU's Lisp; `etc/`:
-  runtime data; `assets/`: fonts, icons, branding; `test/`: the test
-  suites; `tools/`: commands and their modules; `ledger/`: decisions checks
-  enforce; `doc/`: documentation; `nix/`: packaging.
+- `crates/`: the Rust packages, with upstream ones we carry patched under
+  `crates/vendor/` (outside the workspace and our censuses); `lisp/`:
+  Romacs's and GNU's Lisp; `etc/`: runtime data; `assets/`: fonts, icons,
+  branding; `test/`: the test suites; `tools/`: commands and their modules;
+  `ledger/`: decisions checks enforce; `doc/`: documentation; `nix/`:
+  packaging.
 - `Cargo.toml` and `Cargo.lock`: the workspace; `.cargo/`: Cargo and
   cargo-deny configuration; `.config/`: nextest; `rust-toolchain.toml`.
 - `flake.nix` and `flake.lock`: the toolchain and packages.

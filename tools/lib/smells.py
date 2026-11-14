@@ -24,11 +24,12 @@ What counts, summed over the workspace (`report` shows each crate's share):
               second route beside `defsubr!` (tools/lib/primitive_index.py)
   primitives_outside_prims  `defsubr! { name = ... }` declarations outside
               PRIMS (the harness's own tests and probes)
-  generated   tracked files outside GNU's own trees whose first lines say a
-              tool wrote them: GNU's recordings and imports from outside
-              sources, kept with their recorder (tools/lib/generated_files.py
-              keeps what our tools make from the sources out of git); Cargo's
-              lockfiles aside. A list: a new entry is a rise.
+  generated   tracked files outside GNU's own trees and crates/vendor/ whose
+              first lines say a tool wrote them: GNU's recordings and imports
+              from outside sources, kept with their recorder
+              (tools/lib/generated_files.py keeps what our tools make from the
+              sources out of git); Cargo's lockfiles aside. A list: a new entry
+              is a rise.
 
 A deliberate new instance is declared where it occurs, and a declared one is
 not counted:
@@ -171,6 +172,7 @@ def lint_census(root, lines):
     a shared macro counts once per call. LINES must end in a successful build."""
     root = os.path.realpath(root)
     dirs = {Path(root, d).resolve(): n for d, n in unsafe_census.packages(root).items()}
+    vendor = Path(root, unsafe_census.VENDOR).resolve()
     seen, counts, finished = set(), {}, False
     for line in lines:
         if not line.startswith('{'):
@@ -179,7 +181,7 @@ def lint_census(root, lines):
         diagnostic = message.get('message') or {}
         finished = message.get('reason') == 'build-finished' and message.get('success') is True
         if message.get('reason') != 'compiler-message' or diagnostic.get('level') != 'warning' \
-                or not diagnostic.get('code'):
+                or not diagnostic.get('code') or Path(message['manifest_path']).resolve().is_relative_to(vendor):
             continue
         spans = tuple(sorted((place(root, s), place(root, call_site(s)))
                              for s in diagnostic['spans'] if s['is_primary']))
@@ -315,9 +317,11 @@ def head(root, name):
 
 
 def says_generated(root, name):
-    """Whether NAME, outside GNU's own trees and no lockfile, says in its first
-    lines that a tool writes it, and does not declare it."""
-    if name.startswith(GNU_TREES) or Path(name).name == LOCKFILE or (Path(root) / name).is_symlink():
+    """Whether NAME, outside GNU's own trees and upstream's under crates/vendor/
+    and no lockfile, says in its first lines that a tool writes it, and does
+    not declare it."""
+    if name.startswith((*GNU_TREES, unsafe_census.VENDOR)) or Path(name).name == LOCKFILE \
+            or (Path(root) / name).is_symlink():
         return False
     lines = head(root, name)
     return any(GENERATED.search(line) for line in lines) and not smell_marks('\n'.join(lines), 'generated')
