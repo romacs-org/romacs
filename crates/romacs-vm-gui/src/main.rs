@@ -1715,9 +1715,10 @@ fn evaluate(
                     for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
                 }
             }
-            // Pixels landed, a parse a window waits on did, or a publication
-            // left images to send: paint again.
-            if vm.land_images()? || vm.land_treesit() || images.borrow().behind() { live_presentation.changed(); }
+            // Pixels landed, a parse a window waits on did, a publication
+            // left images to send, or the renderer lost its images (a
+            // device reset woke this wait): paint again.
+            if vm.land_images()? || vm.land_treesit() || images.borrow().must_repaint(sender.as_ref()) { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }

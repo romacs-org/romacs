@@ -90,11 +90,6 @@ impl Images {
         self.landed = true;
     }
 
-    /// Whether pixels wait to go to the renderer: the loop paints again.
-    pub fn behind(&self) -> bool {
-        self.landed
-    }
-
     /// Whether the frame on screen must be submitted again though it is
     /// unchanged: pixels it lacked landed, or a GPU rebuild lost images it
     /// had.  (An image the renderer evicts is one no presented frame draws,
@@ -266,7 +261,7 @@ mod tests {
         loop {
             images.publish(&renderer, [&drawing(&ids)]).unwrap();
             publications += 1;
-            if !images.behind() { break }
+            if !images.must_repaint(&renderer) { break }
         }
         assert_eq!((publications, renderer.sent.borrow().len()), (3, 40));
         images.release(1);
@@ -275,14 +270,14 @@ mod tests {
         // Full: nothing goes, and the frame goes again.
         renderer.room.set(Some(0));
         images.publish(&renderer, [&drawing(&[41])]).unwrap();
-        assert!(images.behind());
+        assert!(images.must_repaint(&renderer));
         // Room for one: the image; the retirements wait, and go next.
         renderer.room.set(Some(1));
         images.publish(&renderer, [&drawing(&[41])]).unwrap();
-        assert!(images.behind());
+        assert!(images.must_repaint(&renderer));
         renderer.room.set(None);
         images.publish(&renderer, [&drawing(&[41])]).unwrap();
-        assert!(!images.behind());
+        assert!(!images.must_repaint(&renderer));
         assert_eq!(renderer.sent.borrow()[40..], ["load 41/1", "retire 1", "retire 2"]);
         // Forty retirements go sixteen at a time too.
         for id in 3..=41 { images.release(id); }
@@ -290,7 +285,7 @@ mod tests {
         loop {
             images.publish(&renderer, [&drawing(&[])]).unwrap();
             publications += 1;
-            if !images.behind() { break }
+            if !images.must_repaint(&renderer) { break }
         }
         assert_eq!((publications, renderer.sent.borrow().len()), (3, 43 + 39));
     }
@@ -303,11 +298,11 @@ mod tests {
         let renderer = Renderer::default();
         let mut images = Images::default();
         images.free_surface(5);
-        assert!(images.behind());
+        assert!(images.must_repaint(&renderer));
         renderer.room.set(Some(0));
         images.publish(&renderer, std::iter::empty()).unwrap();
         images.retire_surfaces(&renderer).unwrap();
-        assert!(images.behind(), "refused: it goes again");
+        assert!(images.must_repaint(&renderer), "refused: it goes again");
         assert!(renderer.sent.borrow().is_empty());
         renderer.room.set(None);
         for _ in 0..2 {
@@ -315,7 +310,7 @@ mod tests {
             images.retire_surfaces(&renderer).unwrap();
         }
         assert_eq!(*renderer.sent.borrow(), ["free 5"]);
-        assert!(!images.behind());
+        assert!(!images.must_repaint(&renderer));
     }
 
     /// Many freed surfaces go in order, at most one batch after each frame,
@@ -326,7 +321,7 @@ mod tests {
         let mut images = Images::default();
         for id in 0..40 { images.free_surface(id); }
         let mut frames = 0;
-        while images.behind() {
+        while images.must_repaint(&renderer) {
             images.publish(&renderer, std::iter::empty()).unwrap();
             images.retire_surfaces(&renderer).unwrap();
             frames += 1;
