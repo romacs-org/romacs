@@ -555,4 +555,33 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
     (romacs-agent-renew--finish session nil)
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words")))))
 
+(ert-deftest romacs-agent-renew-takes-the-debt-it-starts-with ()
+  ;; Owed before the renewal begins, its harness exiting during the note:
+  ;; the turn goes to the new conversation.  A rollback's hold takes no
+  ;; debt along, and a renewal given up leaves none behind.
+  (require 'romacs-agent-codex)
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-driver-state session)
+          (list :thread "th" :ready t :owed (list (list :turn "turn/steer:4" "late words" nil))))
+    (cl-letf (((symbol-function 'romacs-agent-events-async) #'ignore))
+      (romacs-agent-renew session))
+    (romacs-agent--raise session (list :type 'exit :status 0 :seq 60))
+    (romacs-agent-renew--release session (romacs-agent-renew--holder session))
+    ;; Given up before its note: no debt kept for a later one.
+    (should-not (gethash session romacs-agent-renew--owed))
+    (setf (romacs-agent-driver-state session)
+          (list :thread "th" :ready t :owed (list (list :turn "turn/steer:4" "late words" nil))))
+    (cl-letf (((symbol-function 'romacs-agent-events-async) #'ignore))
+      (romacs-agent-renew session))
+    (romacs-agent--raise session (list :type 'exit :status 0 :seq 61))
+    (romacs-agent-renew--hold session nil)
+    (romacs-agent-renew--finish session nil)
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words")))
+    (should-not (gethash session romacs-agent-renew--owed)))
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-driver-state session) (list :thread "th" :ready t :rolling-back (list 'r)))
+    (romacs-agent--raise session (list :type 'handshake
+                                       :state (list :owed (list (list :turn "turn/steer:4" "late" nil)))))
+    (should-not (gethash session romacs-agent-renew--owed))))
+
 ;;; romacs-agent-renew-tests.el ends here
