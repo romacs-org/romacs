@@ -937,10 +937,14 @@ impl World {
             return Err("world image: the tables did not compact".into());
         }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
-        let len = image::capture(vm, carry, &file, self.key)?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        read_only(&temporary).map_err(|e| e.to_string())?;
-        host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
+        let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
+            file.sync_all().map_err(|e| e.to_string())?;
+            read_only(&temporary).map_err(|e| e.to_string())?;
+            host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string()).map(|()| len)
+        });
+        // An image not placed goes now: what it holds of a full store (in
+        // memory, a tmpfs) is not to wait for the next build's sweep.
+        let len = placed.inspect_err(|_| { let _ = host::remove_file(&temporary); })?;
         // Hashed from the file as published, which also caches it.
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| e.to_string())?;
         let digest = file_digest(&self.store, &image, true).map_err(|e| e.to_string())?;
@@ -1415,6 +1419,23 @@ mod tests {
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A build whose image cannot be written or placed leaves no image
+    /// behind in the store: here the capture refuses, as this test process's
+    /// heap is not a builder's arena.
+    #[test]
+    fn an_image_not_placed_is_removed() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-unplaced", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        private_store(&store).unwrap();
+        let world = World { store: store.clone(), key: [7; 32], recipe: vec![] };
+        let error = world.publish_world(Vm::new(), (), &json!({"refusals": []}), json!({})).unwrap_err();
+        assert!(error.contains("arena"), "{error}");
+        let left: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".rwi")).collect();
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]

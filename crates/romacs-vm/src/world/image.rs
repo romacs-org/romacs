@@ -233,32 +233,31 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
 mod tests {
     use crate::{Value, Vm};
 
-    /// A sparse image in memory (tmpfs, /dev/shm) comes out whole, every
-    /// page its own, so no later touch of it needs the filesystem's room;
-    /// on a disk its holes stay.
+    /// A sparse image in memory (tmpfs) comes out whole, every page its
+    /// own, so no later touch of it needs the filesystem's room; on another
+    /// filesystem its holes stay. Each is tried where one is at hand.
     #[test]
-    fn an_image_in_memory_has_no_holes_and_one_on_a_disk_keeps_them() {
+    fn an_image_in_memory_has_no_holes_and_one_elsewhere_keeps_them() {
         use std::os::unix::fs::MetadataExt;
         let len = 16 << 20;
-        let sparse = |dir: &std::path::Path| {
+        let in_memory = |dir: &std::path::Path| rustix::fs::statfs(dir).is_ok_and(|fs| u32::try_from(fs.f_type).ok() == Some(super::TMPFS_MAGIC));
+        let allocated_after = |dir: &std::path::Path| {
             let path = dir.join(format!("romacs-image-holes-{}", std::process::id()));
             let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
             file.set_len(len as u64).unwrap();
-            (path, file)
-        };
-        let shm = std::path::Path::new("/dev/shm");
-        if u32::try_from(rustix::fs::statfs(shm).unwrap().f_type).ok() == Some(super::TMPFS_MAGIC) {
-            let (path, file) = sparse(shm);
             super::whole_in_memory(&file, len).unwrap();
             let allocated = std::fs::metadata(&path).unwrap().blocks() * 512;
             std::fs::remove_file(&path).unwrap();
-            assert!(allocated >= len as u64, "{allocated} of {len} bytes allocated on tmpfs");
+            allocated
+        };
+        let candidates = [std::path::PathBuf::from("/dev/shm"), std::env::temp_dir(), std::path::PathBuf::from("/var/tmp")];
+        let usable: Vec<_> = candidates.iter().filter(|d| d.is_dir() && std::fs::metadata(d).is_ok_and(|m| !m.permissions().readonly())).collect();
+        if let Some(memory) = usable.iter().find(|d| in_memory(d)) {
+            assert!(allocated_after(memory) >= len as u64, "an image on tmpfs ({}) kept holes", memory.display());
         }
-        let (path, file) = sparse(std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
-        super::whole_in_memory(&file, len).unwrap();
-        let allocated = std::fs::metadata(&path).unwrap().blocks() * 512;
-        std::fs::remove_file(&path).unwrap();
-        assert!(allocated < len as u64, "a disk image kept {allocated} of {len} bytes allocated");
+        if let Some(disk) = usable.iter().find(|d| !in_memory(d)) {
+            assert!(allocated_after(disk) < len as u64, "an image on {} lost its holes", disk.display());
+        }
     }
 
     /// What a capture writes is one old generation: an entry made and a
