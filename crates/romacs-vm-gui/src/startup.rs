@@ -596,6 +596,7 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
 /// directory, the runtime's own Lisp and bundled layout beside it, and the
 /// bundled packages' directories. What a world's builder may read of Lisp
 /// (`world::build_roots`, `test_world`).
+#[must_use]
 pub fn lisp_roots(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = vec![dir.to_owned()];
     roots.extend(runtime_of(dir).map(|root| root.join("lisp/romacs")));

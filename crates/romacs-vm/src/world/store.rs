@@ -596,7 +596,8 @@ impl World {
     ///
     /// When the restored VM's `romacs-world-restart` fails: the world is
     /// the test's to answer for.
-    pub fn for_test<T: super::safe::SnapshotSafe + 'static>(store: PathBuf, recipe: Vec<String>, roots: Vec<PathBuf>,
+    #[must_use]
+    pub fn for_test<T: super::safe::SnapshotSafe + 'static>(store: PathBuf, recipe: &[String], roots: Vec<PathBuf>,
                                                             build: impl FnOnce() -> Result<(Vm, T), String>) -> Option<(Vm, T)> {
         // Before the key, which reads this executable.
         if !host::one_test_process() || !arena::serves_heap() || arena::mapped_image().is_some() {
@@ -622,12 +623,12 @@ impl World {
                 if let Err(error) = world.prune_family_to_current() {
                     eprintln!("test world: prune failed: {error}");
                 }
-                let built = world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())
+                let outcome = world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())
                     .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
-                if let Err(error) = &built {
+                if let Err(error) = &outcome {
                     eprintln!("test world: {error}");
                 }
-                host::exit_at_once(i32::from(built.is_err()))
+                host::exit_at_once(i32::from(outcome.is_err()))
             }
             Launch::Chain { .. } => None,
         }
@@ -1159,6 +1160,10 @@ impl World {
     /// `prune_family` keeping no world beside this one and those in use: a
     /// test executable's (`for_test`), whose others are of the executables
     /// it was before it was rebuilt, which no process can restore.
+    ///
+    /// # Errors
+    ///
+    /// When the store cannot be read or a world's files removed.
     pub fn prune_family_to_current(&self) -> std::io::Result<Vec<String>> {
         self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true, 0)
     }

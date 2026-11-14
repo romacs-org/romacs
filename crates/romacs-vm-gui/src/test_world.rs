@@ -56,7 +56,7 @@ pub fn chain(boot: Boot) -> (Vm, Loadup) {
     // In this executable's profile directory (it is in PROFILE/deps).
     let exe = std::env::current_exe().unwrap();
     let store = exe.parent().and_then(std::path::Path::parent).unwrap().join("romacs-vm-gui-test-worlds");
-    World::for_test(store, boot.recipe(&dir), startup::lisp_roots(&dir), || booted(boot, &dir, true))
+    World::for_test(store, &boot.recipe(&dir), startup::lisp_roots(&dir), || booted(boot, &dir, true))
         .unwrap_or_else(|| booted(boot, &dir, false).unwrap())
 }
 
@@ -67,7 +67,7 @@ fn booted(boot: Boot, dir: &std::path::Path, world: bool) -> Result<(Vm, Loadup)
         vm.world_begin();
     }
     let (width, height, line, column) = boot.frame;
-    vm.set_frame_geometry(width, height, line, column).map_err(|e| e.to_string())?;
+    vm.set_frame_geometry(width, height, line, column)?;
     if let Some(floor) = boot.floor {
         vm.set_collection_floor(floor);
     }

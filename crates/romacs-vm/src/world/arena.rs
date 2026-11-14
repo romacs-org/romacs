@@ -995,6 +995,7 @@ pub fn active() -> bool {
 /// Whether this process's global allocator is the arena: a new block lies
 /// in its range. The arena exists in any process that asks for it, whatever
 /// allocator serves the heap, so `active` alone does not tell.
+#[must_use]
 pub fn serves_heap() -> bool {
     let block = Box::new(0_u8);
     let at = std::ptr::from_ref(&*block) as usize;
