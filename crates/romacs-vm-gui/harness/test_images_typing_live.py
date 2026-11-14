@@ -31,6 +31,17 @@ class Landing(unittest.TestCase):
         self.assertFalse(itl.waiting([('D', 10)], [('D', 10)]), 'it was reading its file')
         self.assertFalse(itl.waiting([], [('S', 0)]), 'a worker started between')
 
+    def test_a_frame_in_flight_holds_the_span_open(self):
+        submitted = lambda n: {'diagnostic': 'paint-submitted', 'presentation': n}
+        painted = lambda n: {'diagnostic': 'paint', 'presentation': n}
+        # A decode landed while frame 7 was in flight: the evaluator
+        # submitted 8 and waits for it to paint.
+        self.assertFalse(itl.presented([submitted(7), painted(6), submitted(8)]))
+        self.assertFalse(itl.presented([submitted(7), submitted(8), painted(7)]))
+        self.assertTrue(itl.presented([submitted(7), submitted(8), painted(8)]))
+        self.assertTrue(itl.presented([submitted(7), submitted(8), painted(9)]), 'a later paint retires it')
+        self.assertTrue(itl.presented([]))
+
 
 if __name__ == '__main__':
     unittest.main()

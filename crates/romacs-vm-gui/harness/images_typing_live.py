@@ -104,6 +104,15 @@ def waiting(before, after):
     return len(before) == len(after) and all(b[0] == a[0] == 'S' and b[1] == a[1] for b, a in zip(before, after))
 
 
+def presented(records):
+    """Whether, among the session's diagnostic RECORDS, the last frame
+    submitted has painted: a paint retires its own presentation or a later
+    one, and the evaluator defers a frame its loop marked changed until the
+    one in flight has painted."""
+    last = lambda kind: max((r['presentation'] for r in records if r.get('diagnostic') == kind), default=0)
+    return last('paint') >= last('paint-submitted')
+
+
 def control_form(files):
     lines = ' '.join('(insert "\\n")' for _ in files)
     return f'(with-current-buffer "*images*" {lines} t)'
@@ -194,19 +203,26 @@ class Session(perkey.Session):
         return found
 
     def landed(self):
-        """Wait until the decodes are done and landed: the decode worker
-        (none before the first image) and then the evaluator wait, asleep
-        with no CPU time over --landed seconds.  The worker wakes the
-        evaluator with each result, which lands it at once."""
+        """Wait until the decodes are done and their display work with them:
+        the decode worker (none before the first image) waits, asleep with no
+        CPU time over --landed seconds; then the evaluator does, writing no
+        diagnostic meanwhile, with the last frame it submitted painted
+        (`presented').  The worker wakes the evaluator with each result,
+        which lands it, and a frame that changed goes once the one in flight
+        has painted.  Refused when that never comes."""
         end = time.monotonic() + self.args.timeout
         evaluator = lambda: [thread_state(Path(f'/proc/{self.process.pid}/task/{self.tid}/stat').read_text())]
-        for readings in (lambda: self.threads('image-decode'), evaluator):
+        quiet = lambda: (evaluator(), len(perkey.records(self.stderr)))
+
+        def settled(before, after):
+            return waiting(before[0], after[0]) and before[1] == after[1] and presented(perkey.records(self.stderr))
+        for readings, done in ((lambda: self.threads('image-decode'), waiting), (quiet, settled)):
             while True:
                 if time.monotonic() > end:
-                    raise perkey.Invalid('the decodes never finished')
+                    raise perkey.Invalid('the decodes and their paints never finished')
                 before = readings()
                 time.sleep(self.args.landed)
-                if waiting(before, readings()):
+                if done(before, readings()):
                     break
 
     def idle(self):
