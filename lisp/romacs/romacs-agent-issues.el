@@ -70,10 +70,18 @@ stands in the way of what it logs."
 
 ;;; What sessions' events say
 
-(defvar romacs-agent-issues--asked (make-hash-table :test #'eq :weakness 'key)
-  "Delegated sessions whose running turn began with a message: the turn
-an end answers.  A resumed harness's own turn, taking up a cut one, has
-none.")
+(defvar romacs-agent-issues--judged (make-hash-table :test #'eq :weakness 'key)
+  "Delegated sessions to the seq of the prompt their last turn end
+answered: an end answers a prompt only when one came since.  Nothing
+judged yet in this process means its last prompt is unanswered: a
+session restored mid-turn has that prompt in its kept state.")
+
+(defun romacs-agent-issues--asked (session)
+  "Whether SESSION's turn ending now answers a prompt none answered yet;
+it is answered from now on."
+  (let ((prompt (romacs-agent-input-seq session)))
+    (prog1 (and prompt (not (eql prompt (gethash session romacs-agent-issues--judged))))
+      (puthash session prompt romacs-agent-issues--judged))))
 
 (defvar romacs-agent-issues--told (make-hash-table :test #'eq :weakness 'key)
   "Delegated sessions to how many messages their parent sent while their
@@ -94,9 +102,8 @@ text is kept: only its size."
          (role (plist-get (romacs-agent-options session) :role))
          (seq (plist-get event :seq))
          (told (gethash session romacs-agent-issues--told))
-         (asked (gethash session romacs-agent-issues--asked)))
+         (asked (romacs-agent-issues--asked session)))
     (remhash session romacs-agent-issues--told)
-    (remhash session romacs-agent-issues--asked)
     (when told (romacs-agent-issues-record 'crossed session :seq seq :waiting told :chars (length result)))
     (cond ((plist-get event :limit)
            (romacs-agent-issues-record 'limit session :seq seq :provider (romacs-agent-provider session)
@@ -113,7 +120,7 @@ text is kept: only its size."
 
 (defun romacs-agent-issues--on-event (session event)
   "Log what EVENT, a live one of SESSION's, says went wrong."
-  (when (memq (plist-get event :type) '(input done exit unstarted selection))
+  (when (memq (plist-get event :type) '(done exit unstarted selection))
     (let ((delegated (plist-get (romacs-agent-options session) :parent))
           (type (plist-get event :type)))
       (cond
@@ -121,12 +128,10 @@ text is kept: only its size."
        ((eq type 'unstarted)
         (when (eq (romacs-agent-get (romacs-agent-id session)) session)
           (romacs-agent-issues-record 'resume-failed session :text (plist-get event :text))))
-       ;; What a turn answers is state, replayed too (its answer may be
-       ;; live); only logging waits for live events.
-       ((eq type 'input) (when delegated (puthash session t romacs-agent-issues--asked)))
+       ;; A turn end replayed answered its prompt: never judged again.
        ((not (romacs-agent--live-p session))
-        (when (memq type '(done exit))
-          (remhash session romacs-agent-issues--asked)
+        (when (and delegated (memq type '(done exit)))
+          (romacs-agent-issues--asked session)
           (remhash session romacs-agent-issues--told)))
        ((eq type 'done)
         (if delegated (romacs-agent-issues--end session event)
@@ -137,7 +142,7 @@ text is kept: only its size."
        ((eq type 'exit)
         (when (and delegated (romacs-agent-failed session)
                    (eql (romacs-agent-done-seq session) (plist-get event :seq)))
-          (remhash session romacs-agent-issues--asked)
+          (romacs-agent-issues--asked session)
           (remhash session romacs-agent-issues--told)
           (romacs-agent-issues-record 'no-result session :seq (plist-get event :seq) :how "exit"
                                       :status (plist-get event :status))))

@@ -57,7 +57,7 @@ delegated review task of a registered parent."
 
 (defun romacs-agent-issues-tests--turn (session seq text &rest done)
   "SESSION's turn, begun by a message, ending at SEQ with TEXT."
-  (romacs-agent-issues-tests--event session :type 'input :text "do it" :seq (1- seq))
+  (setf (romacs-agent-input-seq session) (1- seq))
   (apply #'romacs-agent-issues-tests--event session :type 'done :seq seq :text text done))
 
 (ert-deftest romacs-agent-issues-from-a-tasks-turn-ends ()
@@ -89,16 +89,19 @@ delegated review task of a registered parent."
     (romacs-agent-issues-tests--turn task 7 "VERDICT: CHANGES\nS1.")
     (should-not (romacs-agent-issues-read))))
 
-(ert-deftest romacs-agent-issues-a-replayed-question-judges-its-live-answer ()
-  ;; Restored mid-turn: the question is replayed, its answer comes live.
+(ert-deftest romacs-agent-issues-a-restored-question-judges-its-live-answer ()
+  ;; Restored mid-turn (its kept state, or a replay): the question came
+  ;; before this process, its answer comes live.
   (romacs-agent-issues-tests--with
-    (setf (romacs-agent-caught-up task) nil)
-    (romacs-agent-issues-tests--event task :type 'input :text "review it" :seq 2)
-    ;; An earlier turn replayed whole logs nothing, and ends its question.
-    (romacs-agent-issues-tests--event task :type 'done :seq 1 :text "")
-    (romacs-agent-issues-tests--event task :type 'input :text "review it again" :seq 4)
+    (setf (romacs-agent-input-seq task) 5)
+    (romacs-agent-issues-tests--event task :type 'done :seq 9 :text "Looks fine.")
+    (should (equal (romacs-agent-issues-tests--kinds) '("result-shape")))
+    ;; A replayed end answered its question: the live one after it, with
+    ;; no new question, is not judged.
+    (setf (romacs-agent-caught-up task) nil (romacs-agent-input-seq task) 11)
+    (romacs-agent-issues-tests--event task :type 'done :seq 12 :text "VERDICT: APPROVE")
     (setf (romacs-agent-caught-up task) t)
-    (romacs-agent-issues-tests--event task :type 'done :seq 5 :text "Looks fine.")
+    (romacs-agent-issues-tests--event task :type 'done :seq 13 :text "")
     (should (equal (romacs-agent-issues-tests--kinds) '("result-shape")))))
 
 (ert-deftest romacs-agent-issues-a-harness-exit-mid-turn ()
