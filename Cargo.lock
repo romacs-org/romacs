@@ -3884,6 +3884,7 @@ dependencies = [
  "libloading",
  "libsqlite3-sys",
  "md-5",
+ "memchr",
  "num-bigint",
  "num-integer",
  "rayon",
