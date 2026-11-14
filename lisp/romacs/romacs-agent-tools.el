@@ -557,6 +557,7 @@ ended without its end handed on yet."
 turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
   (unless (memq (romacs-agent-state parent) '(starting running waiting-approval))
     (let* ((hold (romacs-agent-tools--all-pending-p parent))
+           (copies (gethash (romacs-agent-id parent) romacs-agent-tools--copies))
            (held nil) (ready nil))
       ;; One pass, oldest first: the ends still wanted, held or ready.
       (dolist (item (reverse (gethash (romacs-agent-id parent) romacs-agent-tools--pending)))
@@ -572,12 +573,15 @@ turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
          (mapconcat #'identity
                     (append (mapcar (lambda (item) (romacs-agent-tools--wake-text (car item) (cdr item))) ready)
                             ;; Its tasks' messages to each other since the last: copies, never a wake.
-                            (mapcar (lambda (copy) (romacs-agent-tools--copy-text (car copy) (cdr copy)))
-                                    (prog1 (gethash (romacs-agent-id parent) romacs-agent-tools--copies)
-                                      (remhash (romacs-agent-id parent) romacs-agent-tools--copies))))
+                            (mapcar (lambda (copy) (romacs-agent-tools--copy-text (car copy) (cdr copy))) copies))
                     "\n\n")
-         ;; Delivered only once the parent's harness has it.
-         (lambda () (dolist (item ready) (romacs-agent-tools--mark-woken (car item) (cadr item))))
+         ;; Delivered only once the parent's harness has it; the copies kept till then.
+         (lambda ()
+           (dolist (item ready) (romacs-agent-tools--mark-woken (car item) (cadr item)))
+           (puthash (romacs-agent-id parent)
+                    (cl-remove-if (lambda (copy) (memq copy copies))
+                                  (gethash (romacs-agent-id parent) romacs-agent-tools--copies))
+                    romacs-agent-tools--copies))
          (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready)))))))
 
 (defun romacs-agent-tools--deliver (session text delivered &optional valid)
@@ -798,8 +802,10 @@ sends nothing."
       (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
              (romacs-agent-send child text nil valid))
             ((and busy (eq mode 'interrupt))
-             (romacs-agent-interrupt child)
-             (romacs-agent-send-later child text t nil valid))
+             ;; First in line before the cut: a turn not yet under way
+             ;; (Codex's before it names it) cannot be cut, and it goes after.
+             (romacs-agent-send-later child text t nil valid)
+             (ignore-error user-error (romacs-agent-interrupt child)))
             (t
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.

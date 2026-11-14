@@ -266,6 +266,27 @@ reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
     (romacs-agent-tools--flush parent)
     (should (= (length (romacs-agent-tools--wakes-parse (car delivered))) 1))))
 
+(ert-deftest romacs-agent-delegate-a-copy-waits-for-its-wake-delivered ()
+  ;; The wake carrying a copy never reached the parent: the next carries it.
+  (romacs-agent-delegate-tests--sending a
+    (send b "X")
+    (cl-letf (((symbol-function 'romacs-agent-tools--deliver) (lambda (&rest _) nil)))
+      (romacs-agent-delegate-tests--end b 7 "B done")
+      (romacs-agent-tools--flush parent))
+    (romacs-agent-delegate-tests--end b 9 "B again")
+    (romacs-agent-tools--flush parent)
+    (should (member "sent" (mapcar (lambda (w) (plist-get w :state))
+                                   (romacs-agent-tools--wakes-parse (car delivered)))))))
+
+(ert-deftest romacs-agent-delegate-interrupting-a-turn-not-yet-started ()
+  ;; Its turn not yet named, it cannot be cut: the message still goes first.
+  (romacs-agent-delegate-tests--sending parent
+    (send a "waiting")
+    (cl-letf (((symbol-function 'romacs-agent-interrupt) (lambda (_) (user-error "No turn to interrupt yet"))))
+      (send a "urgent" "interrupt"))
+    (drain a)
+    (should (equal (car written) '("a" . "urgent")))))
+
 (ert-deftest romacs-agent-delegate-send-outside-the-tree-is-refused ()
   (romacs-agent-delegate-tests--family ((a nil))
     (let ((stranger (romacs-agent--make :id "eeeeeeee-0000-4000-8000-000000000000" :harness 'claude
