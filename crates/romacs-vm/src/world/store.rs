@@ -273,10 +273,21 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     // empty, and one must make and write the marker before any other reads
     // it, or the others' exclusive creation of it fails (EEXIST).
     rustix::fs::flock(&dir, rustix::fs::FlockOperation::LockExclusive)?;
-    if host::store_dir_is_empty(dir.as_fd())? {
-        return write_marker(&dir);
+    // Read through the directory opened again under the lock: btrfs lists
+    // to a directory's reader only the entries it had when the reader
+    // opened it, so a marker made since would not be seen through DIR.
+    let now = host::open_store_dir(store, false)?;
+    let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
+    };
+    if identity(&now)? != identity(&dir)? {
+        return Err(std::io::Error::other(format!("world store {}: replaced while it was opened", store.display())));
     }
-    match marker_error(&dir) {
+    if host::store_dir_is_empty(now.as_fd())? {
+        return write_marker(&now);
+    }
+    match marker_error(&now) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
     }
@@ -1423,7 +1434,9 @@ mod tests {
     }
 
     /// Launches that start at once on a new store each find it a store:
-    /// one marks it, the others read its marker once written.
+    /// one marks it, the others read its marker once written. Its failure
+    /// on btrfs, whose reader of a directory sees only the entries it had
+    /// when opened, was a temporary directory there (the train's).
     #[test]
     fn a_new_store_opened_at_once_by_many_is_marked_once() {
         let store = std::env::temp_dir().join(format!("romacs-store-{}-at-once", std::process::id()));
@@ -1433,9 +1446,10 @@ mod tests {
             let threads: Vec<_> = (0..16).map(|_| scope.spawn(|| { start.wait(); private_store(&store) })).collect();
             threads.into_iter().map(|thread| thread.join().unwrap()).collect()
         });
-        assert!(opened.iter().all(Result::is_ok), "{opened:?}");
-        assert_eq!(std::fs::read_to_string(store.join(MARKER)).unwrap(), MARKER_TEXT);
-        let _ = std::fs::remove_dir_all(store);
+        let marker = std::fs::read_to_string(store.join(MARKER));
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(opened.iter().all(Result::is_ok), "{}: {opened:?}", store.display());
+        assert_eq!(marker.unwrap(), MARKER_TEXT);
     }
 
     #[test]
