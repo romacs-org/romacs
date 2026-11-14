@@ -206,10 +206,10 @@ the pinned oracle.
 
 The gates, small and whole for each side:
 
-- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
-  in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
-  everything, so give a branch of a branch its real base.
+- Rust, small: `make gate-small`. The tests the change since beta, or since
+  `BASE=REV`, can reach, and the structural rules whatever changed: one map from
+  paths to tests and harnesses, `tools/lib/impact.py` (tools/AGENTS.md). A change it
+  cannot map runs everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
 - Lisp, one module: `make check-MODULE`.
 - Lisp, whole: `make check`.
@@ -315,8 +315,8 @@ standalone Cargo execution without it.
   `beta` in as it moves.
 - Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
   in a Romacs session): the merge forecast with `beta`, tracked generated files,
-  the lint of the Lisp the branch touches, and the structural rules, each finding
-  with its fix.
+  the lint of the Lisp the branch touches, and the Rust tests the change can reach
+  (`tools/lib/impact.py`), each finding with its fix.
 - A branch lands through the merge queue: signed commits, the full check, then
   a submitted request. The queue merges requests onto `beta` in order and
   reruns what each merge changes.

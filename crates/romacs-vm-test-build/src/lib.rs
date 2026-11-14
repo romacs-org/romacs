@@ -10,8 +10,9 @@
 
 use std::path::PathBuf;
 
-/// Each `tests/FILE.rs` of romacs-vm, but the standalone ones, as the
-/// module `FILE` (`#[path = "../FILE.rs"] mod FILE;`).
+/// Each `tests/FILE.rs` of romacs-vm that is a module of `all` (build.rs:
+/// neither standalone nor booting GNU's Lisp), as the module `FILE`
+/// (`#[path = "../FILE.rs"] mod FILE;`).
 ///
 /// # Panics
 ///
@@ -20,6 +21,18 @@ use std::path::PathBuf;
 pub fn modules(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     assert!(input.is_empty(), "modules!() takes no arguments");
     include_str!(concat!(env!("OUT_DIR"), "/modules.rs")).parse().expect("build.rs writes Rust")
+}
+
+/// Each `tests/FILE.rs` of romacs-vm that boots GNU's Lisp (build.rs), as
+/// the module `FILE`: the `gnu` target's.
+///
+/// # Panics
+///
+/// When given arguments: it takes none.
+#[proc_macro]
+pub fn gnu_modules(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    assert!(input.is_empty(), "gnu_modules!() takes no arguments");
+    include_str!(concat!(env!("OUT_DIR"), "/gnu_modules.rs")).parse().expect("build.rs writes Rust")
 }
 
 /// The primh replay harness (tools/primh/replay.rs.in) for this crate: its

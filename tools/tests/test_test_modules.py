@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tools/lib/test_modules.py: the modules are the directory's files less the
-standalone ones, and `equal` passes only when `all` holds exactly the tests of
-its files."""
+standalone ones, those that boot GNU's Lisp in `gnu` and the rest in `all`,
+and `equal` passes only when each holds exactly the tests of its files."""
 import shutil
 import sys
 import tempfile
@@ -30,11 +30,14 @@ class TestModulesTest(unittest.TestCase):
         (self.tests / 'support').mkdir()
         for name in ('b', 'a', 'alone', 'support/helper'):
             (self.tests / f'{name}.rs').write_text('')
+        (self.tests / 'g.rs').write_text('#[path = "support/gnu_lisp.rs"]\nmod gnu_lisp;\n')
         (self.tests / 'all/standalone.txt').write_text('# why\nalone: it has an allocator of its own\n')
 
     def test_modules_are_the_files_less_the_standalone_ones(self):
-        self.assertEqual(test_modules.package(self.root, 'romacs-vm'), (['a', 'b'], {'alone': 'it has an allocator of its own'}))
-        self.assertEqual(test_modules.targets(self.root, 'romacs-vm'), ['--lib', '--bins', '--test', 'all', '--test', 'alone'])
+        self.assertEqual(test_modules.package(self.root, 'romacs-vm'),
+                         ({'a': 'all', 'b': 'all', 'g': 'gnu'}, {'alone': 'it has an allocator of its own'}))
+        self.assertEqual(test_modules.targets(self.root, 'romacs-vm'),
+                         ['--lib', '--bins', '--test', 'all', '--test', 'gnu', '--test', 'alone'])
 
     def test_a_standalone_entry_needs_a_file_and_a_reason(self):
         (self.tests / 'all/standalone.txt').write_text('gone: it was here\n')
@@ -45,31 +48,33 @@ class TestModulesTest(unittest.TestCase):
                 test_modules.standalone(text)
 
     def equal(self, *suites):
-        return test_modules.equal(inventory(*suites), 'romacs-vm', ['a', 'b'], {'alone': 'why'})
+        return test_modules.equal(inventory(*suites), 'romacs-vm', {'a': 'all', 'b': 'all', 'g': 'gnu'}, {'alone': 'why'})
 
     def test_equal_passes_when_all_holds_each_files_tests(self):
-        apart = (suite('a', ['one', 'deep::two_ignored']), suite('b', ['one']), suite('alone', ['one']),
+        apart = (suite('a', ['one', 'deep::two_ignored']), suite('b', ['one']), suite('g', ['one']), suite('alone', ['one']),
                  suite('romacs_vm', ['unit'], kind='lib'), suite('a', ['other'], package='romacs-vm-gui'))
         whole = suite('all', ['a::one', 'a::deep::two_ignored', 'b::one', 'its_own_test'])
-        self.assertEqual(self.equal(*apart, whole), (3, []))
+        self.assertEqual(self.equal(*apart, whole, suite('gnu', ['g::one'])), (4, []))
 
     def test_equal_names_a_test_on_one_side_only(self):
-        apart = (suite('a', ['one']), suite('b', ['one', 'two']), suite('alone', ['one']))
-        count, found = self.equal(*apart, suite('all', ['a::one', 'b::one', 'b::three']))
-        self.assertEqual(count, 3)
+        apart = (suite('a', ['one']), suite('b', ['one', 'two']), suite('g', ['one']), suite('alone', ['one']))
+        count, found = self.equal(*apart, suite('all', ['a::one', 'b::one', 'b::three', 'g::one']), suite('gnu', []))
+        self.assertEqual(count, 4)
         self.assertEqual(found, ['romacs-vm: b::two is in its own target, not so in `all`',
-                                 'romacs-vm: b::three is in `all`, not so in its own target'])
+                                 'romacs-vm: b::three is in `all`, not so in its own target',
+                                 'romacs-vm: g::one is in `all`, not so in its own target',
+                                 'romacs-vm: g::one is in its own target, not so in `gnu`'])
 
     def test_equal_holds_ignored_tests_to_the_same_state(self):
-        apart = (suite('a', ['one_ignored']), suite('b', []), suite('alone', []))
+        apart = (suite('a', ['one_ignored']), suite('b', []), suite('g', ['one']), suite('alone', []))
         whole = suite('all', ['a::one_ignored'])
         whole['testcases']['a::one_ignored']['ignored'] = False
-        self.assertEqual(len(self.equal(*apart, whole)[1]), 2)
+        self.assertEqual(len(self.equal(*apart, whole, suite('gnu', ['g::one']))[1]), 2)
 
     def test_equal_refuses_an_inventory_that_lacks_a_target_or_any_test(self):
-        self.assertIn('no test target listed for all, alone', self.equal(suite('a', ['one']), suite('b', []))[1][0])
-        empty = (suite('a', []), suite('b', []), suite('alone', ['one']), suite('all', []))
-        self.assertIn('list no test', self.equal(*empty)[1][0])
+        self.assertIn('no test target listed for all, alone, g, gnu', self.equal(suite('a', ['one']), suite('b', []))[1][0])
+        empty = (suite('a', []), suite('b', []), suite('g', ['one']), suite('alone', ['one']), suite('all', []), suite('gnu', ['g::one']))
+        self.assertIn('modules of `all` list no test', self.equal(*empty)[1][0])
 
 
 if __name__ == '__main__':

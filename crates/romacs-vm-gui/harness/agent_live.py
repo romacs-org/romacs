@@ -86,6 +86,7 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 usage: agent_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -326,12 +327,16 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The board names each session's instance.
-        home = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
-                                            '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
-                                            'nil (romacs-agent-board--view)) 120) '
-                                            '(buffer-substring-no-properties (point-min) (point-max))))'))
-        shown = sorted({p for p in ('claude2', 'claude') if any(line.split('  ')[-1].startswith(p) or f' {p} ·' in line or line.rstrip().endswith(p) for line in home.splitlines())})
+        # The board names each session's harness, its account on hover.
+        hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
+                                              '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
+                                              'nil (romacs-agent-board--view)) 120) '
+                                              '(let ((pos (point-min)) (found nil)) '
+                                              '(while (setq pos (next-single-property-change pos (quote help-echo))) '
+                                              '(let ((h (get-text-property pos (quote help-echo)))) '
+                                              '(when (and (stringp h) (string-prefix-p "account " h)) (push (substring h 8) found)))) '
+                                              'found)))'))
+        shown = sorted(set(hovers))
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
@@ -1139,17 +1144,17 @@ def launcher(args, base):
         two = start()
         until(lambda: reached(pinned, two) and reached(fresh, two), 60, 'both sessions reached editor 2')
         # Editor 3 starts while editor 2 is attached: the supervisors refuse
-        # it and no route moves.  Editor 2 then lets the fresh session go
-        # (its supervisor connection closed) and editor 3 attaches it: only
-        # that session's calls reach editor 3, the pinned one's editor 2.
+        # it and no route moves.  Editor 3 then takes the fresh session over
+        # (an attach that steals it: a connection editor 2 merely lost, its
+        # relay's next hello attaches it there again): only that session's
+        # calls reach editor 3, the pinned one's editor 2.
         three = start()
         until(lambda: own(three).is_socket(), 60, "editor 3's endpoint")
         # Longer than any supervisor takes to refuse (an earlier one, with no
         # acknowledgement, is taken as kept only after 3 s connected).
         time.sleep(4)
         kept = (os.readlink(fresh_route), os.readlink(old_socket))
-        ask(own(two), f'(progn (delete-process (romacs-agent-connection (romacs-agent-get {lisp_text(fresh)}))) t)')
-        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10) t)')
+        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10 t) t)')
         until(lambda: os.readlink(fresh_route) == str(own(three)), 15, "the fresh route led to editor 3")
         mark = time.time()
         ask(own(three), f'(romacs-agent-send (romacs-agent-get {lisp_text(fresh)}) {later})')
@@ -1162,7 +1167,9 @@ def launcher(args, base):
         late_id = '22222222-3333-4444-8555-666666666666'
         late_dir = a.home / '.local/state/romacs/agents' / late_id
         late_dir.mkdir(mode=0o700)
-        late_socket = runtime / 'agents/late.sock'
+        # Where Romacs looks for its supervisor: named by the session id alone.
+        late_socket = runtime / 'agents' / f'{late_id[:8]}-{hashlib.sha256(late_id.encode()).hexdigest()[:8]}' / 'host.sock'
+        late_socket.parent.mkdir(mode=0o700, parents=True)
         late = sockets.socket(sockets.AF_UNIX)
         late.bind(str(late_socket))
         late.listen()
@@ -1442,7 +1449,7 @@ def mcp_tour(args, base):
                     errors[name] = text[:200]
                 return text
 
-            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_cancel')
+            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
             for name in [n for n in names if n not in on_task + ('romacs_restart_request',)]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
@@ -1473,9 +1480,10 @@ def mcp_tour(args, base):
                         and '*tour*' in listed['buffers'] and friend not in listed['buffers']
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
-                        # without a running unit or a calling task.
+                        # without a running unit or a calling task; romacs_dev_check where no Romacs
+                        # tree is (the tour's project).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch')
+                                                                  'romacs_task_watch', 'romacs_dev_check')
                                 for n in errors)
                         and task is not None)
         return result

@@ -8,8 +8,9 @@
 //! Known difference: make_dom interns a non-ASCII name undecoded, so GNU's
 //! symbol has a unibyte name, and Romacs's is the name; those cases only
 //! compare whether the document parses.
-use romacs_vm::Vm;
-use std::path::Path;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 const CASES: &[&str] = &[
     "<a/>",
@@ -363,25 +364,6 @@ fn lisp_string(text: &str) -> String {
     out
 }
 
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 const RUN: &str = r#"(with-temp-buffer
   (let ((coding-system-for-read 'utf-8)) (insert-file-contents FILE))
   (let ((cases (read (current-buffer))) (out nil))
@@ -409,7 +391,7 @@ fn xml_regions_match_pinned_gnu() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let bytes = |codes: &str| String::from_utf8_lossy(&codes.trim_matches(['(', ')']).split_whitespace().map(|n| n.parse::<u8>().unwrap()).collect::<Vec<_>>()).into_owned();
     let expected = bytes(&String::from_utf8(output.stdout).unwrap());
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let actual = bytes(&vm.eval_source(&form).and_then(|v| v.display()).unwrap());
     let (expected, actual): (Vec<_>, Vec<_>) = (expected.split('\u{1e}').collect(), actual.split('\u{1e}').collect());
     assert_eq!(expected.len(), CASES.len());
@@ -452,7 +434,7 @@ const FORMS: &str = r#"
 #[test]
 fn xml_region_forms_match_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     let mut failures = Vec::new();
     for form in FORMS.lines().filter(|line| !line.is_empty()) {
         let source = format!("(append (encode-coding-string (prin1-to-string {form}) 'utf-8) nil)");
