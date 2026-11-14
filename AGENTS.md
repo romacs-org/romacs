@@ -175,10 +175,10 @@ the pinned oracle.
 
 The gates, small and whole for each side:
 
-- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
-  beta, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
-  in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
-  everything, so give a branch of a branch its real base.
+- Rust, small: `make gate-small`. The tests the change since beta, or since
+  `BASE=REV`, can reach, and the structural rules whatever changed: one map from
+  paths to tests and harnesses, `tools/lib/impact.py` (tools/AGENTS.md). A change it
+  cannot map runs everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
 - Lisp, one module: `make check-MODULE`.
 - Lisp, whole: `make check`.
