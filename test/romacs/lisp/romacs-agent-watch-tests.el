@@ -62,7 +62,7 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
                                   (mapconcat (lambda (unit) (format "Id=%s\nActiveState=%s\n" unit state))
                                              (cdr (member "--" args)) "\n")))
                   nil))
-               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text) (push (cons task text) told) task))
+               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
                ((symbol-function 'run-at-time) (lambda (&rest _) (timer-create))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 

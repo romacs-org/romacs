@@ -1091,7 +1091,11 @@ its parent and wake rule)."
         (let ((wanted (romacs-agent--wanted task))
               (verb (if (equal provider (romacs-agent-provider task)) "change" "move")))
           (romacs-agent-select task (or model (plist-get wanted :model)) (or effort (plist-get wanted :effort)) provider)
-          (when (and next (not (string-empty-p (string-trim next)))) (romacs-agent-tools--tell task next))
+          (when (and next (not (string-empty-p (string-trim next))))
+            (if (equal id caller)
+                ;; Its own next step: its own words.
+                (romacs-agent-tools--tell task next)
+              (romacs-agent-tools--message-to (romacs-agent-get caller) task next "queue")))
           (let ((record (romacs-agent-tools--task task)))
             (puthash "next" (if (equal id caller)
                                 (format "You %s once this turn ends, the same conversation: end your turn now." verb)

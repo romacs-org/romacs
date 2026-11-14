@@ -368,10 +368,11 @@ message's record for TEXT, `interrupted' each interrupted."
       (let ((wake (romacs-agent-tools--wake-parse (car delivered))))
         (should (equal (plist-get wake :reply-to) (gethash "id" asked)))
         (should (equal (plist-get wake :result) "main"))))
-    ;; The user's own prompt answers no message.
+    ;; A prompt into the turn under way changes nothing; the user's own
+    ;; prompt beginning the next answers no message.
     (romacs-agent-delegate-tests--receive a nil "go on")
     (should (romacs-agent-answering a))
-    (setf (romacs-agent-state a) 'idle)
+    (setf (romacs-agent-completed-seq a) 41)
     (romacs-agent-delegate-tests--receive a nil "go on")
     (should-not (romacs-agent-answering a))))
 
@@ -446,6 +447,72 @@ message's record for TEXT, `interrupted' each interrupted."
     (let ((romacs-agent-event-functions (list (lambda (_s event) (push event seen)))))
       (romacs-agent--record session (romacs-mcp--object "seq" 2 "t" 2.0 "out" line)))
     (should-not (cl-find 'input seen :key (lambda (e) (plist-get e :type))))))
+
+(ert-deftest romacs-agent-delegate-a-missed-steer-keeps-its-message ()
+  ;; A Codex steer that misses its turn goes as a turn of its own: still
+  ;; the other session's message, in its envelope, read back as its own.
+  (require 'romacs-agent-codex)
+  (let* ((session (romacs-agent--make :id "x" :harness 'codex :harness-session "th" :state 'running))
+         (message (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead")))
+         (steer (romacs-mcp--object "id" "turn/steer:4" "method" "turn/steer" "romacsMessage" message
+                                    "params" (romacs-mcp--object "input" (vector (romacs-agent--codex-text "late"))))))
+    (dolist (event (romacs-agent--codex-message session steer))
+      (when (eq (plist-get event :type) 'handshake) (romacs-agent--raise session event)))
+    (dolist (event (romacs-agent--codex-steered session "turn/steer:4" "no active turn"))
+      (when (eq (plist-get event :type) 'handshake) (romacs-agent--raise session event)))
+    (let* ((owed (car (plist-get (romacs-agent-driver-state session) :owed)))
+           (line (romacs-agent--codex-owed-line session owed))
+           (sent (romacs-agent--text-of (gethash "input" (gethash "params" line)))))
+      (should (string-prefix-p "<romacs-message " sent))
+      ;; Its echo: the message, as written, from the other session.
+      (let ((input (car (romacs-agent--codex-message session line))))
+        (should (equal (plist-get input :text) "late"))
+        (should (eq (plist-get input :message) message))))))
+
+(ert-deftest romacs-agent-delegate-a-per-turn-prompt-keeps-its-message ()
+  ;; A per-turn harness's prompt is journaled by its supervisor: the
+  ;; message's record goes before it, and the prompt reads back as it.
+  (let* ((root (make-temp-file "romacs-per-turn-" t))
+         (session (romacs-agent--make :id "x" :harness 'claude :state 'idle :dir root))
+         (message (romacs-agent-tools--message "sibling" (romacs-agent--make :id "s" :title "sib"))))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'romacs-agent--per-turn-p) (lambda (_) t))
+                    ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+                    ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("h")))
+                    ((symbol-function 'romacs-agent--launch) #'ignore)
+                    ((symbol-function 'romacs-agent--attach) #'ignore))
+            (romacs-agent--turn session "the interface?" nil message))
+          (let ((prompt (with-temp-buffer (insert-file-contents (expand-file-name "input" root)) (buffer-string)))
+                (seen nil))
+            (should (string-prefix-p "<romacs-message " prompt))
+            (let ((romacs-agent-event-functions (list (lambda (_s event) (push event seen)))))
+              (romacs-agent--record session (romacs-mcp--object "seq" 5 "t" 5.0
+                                                                "in" (romacs-mcp--object "prompt" prompt "images" []))))
+            (let ((input (cl-find 'input seen :key (lambda (e) (plist-get e :type)))))
+              (should (equal (plist-get input :text) "the interface?"))
+              (should (equal (gethash "id" (plist-get input :message)) (gethash "id" message))))
+            (should (romacs-agent-received-message session (gethash "id" message)))
+            (should-not (romacs-agent-incoming session))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-agent-delegate-a-resumed-run-answers-the-next-message ()
+  ;; Resumed: running as its harness starts, no turn under way; the
+  ;; message it is sent then begins its turn, and is what it answers.
+  (let ((session (romacs-agent--make :id "x" :harness 'codex :state 'running :input-seq 5 :completed-seq 6))
+        (message (romacs-agent-tools--message "parent" (romacs-agent--make :id "p" :title "Lead"))))
+    (romacs-agent--raise session (list :type 'input :text "go" :message message :seq 8))
+    (should (equal (romacs-agent-answering session) (gethash "id" message)))))
+
+(ert-deftest romacs-agent-delegate-switch-next-says-who-sent-it ()
+  (romacs-agent-delegate-tests--sending parent
+    (cl-letf (((symbol-function 'romacs-agent-select) #'ignore)
+              ((symbol-function 'romacs-agent--configured) (lambda (_) (list :harness 'claude))))
+      (romacs-agent-tools--switch (romacs-mcp--object "taskId" (romacs-agent-id a) "model" "m" "next" "go on in plan mode"))
+      (setf (romacs-agent-state a) 'idle)
+      (romacs-agent--send-next a t)
+      (should (equal (cdar written) "go on in plan mode"))
+      (should (equal (gethash "kind" (cdar messages)) "parent")))))
 
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none

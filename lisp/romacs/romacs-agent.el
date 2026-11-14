@@ -370,9 +370,10 @@ loading it would undo that one's changes; merge it first")
   ;; a plist of :provider :text :window :resets.
   limited
   ;; The messages from other sessions it received last, newest first, each
-  ;; its `romacsMessage' record (`romacs-agent--message-envelope'), and the
-  ;; id of the one its running or last turn began with: what it answers.
-  received answering)
+  ;; its `romacsMessage' record (`romacs-agent--message-envelope'), the
+  ;; id of the one its running or last turn began with (what it answers),
+  ;; and the record of the message a per-turn harness's next prompt is.
+  received answering incoming)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1300,6 +1301,16 @@ The body cannot close the envelope early."
             ">\n" (replace-regexp-in-string "</romacs-message" "<\\/romacs-message" text t t)
             "\n</romacs-message>\n" (romacs-agent--message-reply-line message))))
 
+(defun romacs-agent--message-body (envelope)
+  "The text ENVELOPE (`romacs-agent--message-envelope') wraps."
+  (let ((start (1+ (or (string-search "\n" envelope) -1)))
+        (end (let ((at nil) (from 0))
+               (while (setq from (string-search "\n</romacs-message>" envelope from))
+                 (setq at from from (1+ from)))
+               at)))
+    (replace-regexp-in-string "<\\\\/romacs-message" "</romacs-message"
+                              (substring envelope start (or end (length envelope))) t t)))
+
 (defun romacs-agent--input (session text &optional images message)
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES; MESSAGE, when given, is its `romacsMessage' record:
@@ -1362,7 +1373,11 @@ a digest of its identity, UUID-shaped."
 attached IMAGES; MESSAGE as `romacs-agent--input' says, TEXT then in its
 envelope.  The supervisor journals TEXT and gives it to the harness
 itself, so the turn goes on whatever becomes of this server."
-  (when message (setq text (romacs-agent--message-envelope message text)))
+  (when message
+    ;; Its prompt's record is the supervisor's: the message's record goes
+    ;; before it, read with it (`romacs-agent--record').
+    (romacs-agent--note session (romacs-mcp--object "type" "message" "message" message))
+    (setq text (romacs-agent--message-envelope message text)))
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (let ((input (expand-file-name "input" (romacs-agent-dir session)))
         (images (romacs-agent--sendable-images images)))
@@ -1394,6 +1409,8 @@ itself, so the turn goes on whatever becomes of this server."
               (when (plist-get event :permission-mode)
                 (romacs-agent--mode-seen session (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
+    ;; The message a per-turn harness's next prompt is.
+    ('incoming (setf (romacs-agent-incoming session) (plist-get event :message)))
     ;; A request: when the prompt cache it wrote expires, or unknown.
     ('cache (setf (romacs-agent-driver-state session)
                   (plist-put (romacs-agent-driver-state session) :cache-expires
@@ -1439,7 +1456,9 @@ itself, so the turn goes on whatever becomes of this server."
             ;; answers it (a steer into a running turn does not).
             (let ((message (plist-get event :message)))
               (when message (romacs-agent--received session message))
-              (unless (memq (romacs-agent-state session) '(running waiting-approval))
+              (when (eq message (romacs-agent-incoming session)) (setf (romacs-agent-incoming session) nil))
+              ;; A turn begun by an earlier prompt and not ended yet: a steer.
+              (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
                 (setf (romacs-agent-answering session) (and message (gethash "id" message)))))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
@@ -1663,8 +1682,12 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
                             ((stringp out) (list (list :type 'unknown :raw out)))
                             ;; A per-turn prompt: the supervisor's own record.
                             ((and (hash-table-p in) (stringp (gethash "prompt" in)))
-                             (list (list :type 'input :text (gethash "prompt" in)
-                                         :images (append (gethash "images" in) nil))))
+                             (let ((message (romacs-agent-incoming session)))
+                               (list (append (list :type 'input
+                                                   :text (if message (romacs-agent--message-body (gethash "prompt" in))
+                                                           (gethash "prompt" in))
+                                                   :images (append (gethash "images" in) nil))
+                                             (and message (list :message message))))))
                             ((hash-table-p in)
                              (let ((request (gethash "romacsRequest" in))
                                    (message (gethash "romacsMessage" in)))
@@ -1686,6 +1709,7 @@ FAILED ANSWERS), ANSWERS the id of the message the turn began with."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ("message" (list (list :type 'incoming :message (gethash "message" note))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
                                ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
