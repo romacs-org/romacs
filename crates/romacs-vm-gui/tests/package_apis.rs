@@ -85,7 +85,9 @@ fn maphash_through_apply() {
 /// editfns.c's labeled restrictions (`with-restriction` and
 /// `without-restriction` with a label): narrowing and widening within the
 /// label, nesting, lifting by label, an error inside, insertion at the
-/// bounds, `erase-buffer`, `save-restriction`, an indirect buffer.
+/// bounds, `erase-buffer`, `save-restriction` (across `buffer-swap-text`
+/// too), an indirect buffer. Point after a labeled widening is
+/// VM2-LABELED-WIDEN-POINT's.
 #[test]
 fn labeled_restrictions() {
     same_as_gnu("labeled-restrictions", &[
@@ -97,5 +99,8 @@ fn labeled_restrictions() {
         "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 4 :label 'foo (erase-buffer) (insert \"xyz\") (list (point-min) (point-max) (progn (widen) (list (point-min) (point-max))))))",
         "(with-temp-buffer (insert \"abcdef\") (save-restriction (internal--labeled-narrow-to-region 2 4 'foo) (narrow-to-region 1 7)) (list (point-min) (point-max) (progn (narrow-to-region 1 7) (list (point-min) (point-max)))))",
         "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 5 :label 'foo (let ((base (current-buffer))) (with-current-buffer (make-indirect-buffer base \"ind\") (prog1 (list (point-min) (point-max) (progn (narrow-to-region 1 7) (list (point-min) (point-max)))) (kill-buffer))))))",
+        "(let ((a (generate-new-buffer \"a\")) (b (generate-new-buffer \"b\"))) (with-current-buffer b (insert \"123456789\")) (with-current-buffer a (insert \"abcdef\") (with-restriction 2 4 :label 'foo (save-restriction (buffer-swap-text b)))) (prog1 (list (with-current-buffer a (widen) (list (point-min) (point-max))) (with-current-buffer b (widen) (list (point-min) (point-max)))) (kill-buffer a) (kill-buffer b)))",
+        "(let ((a (generate-new-buffer \"a\")) (b (generate-new-buffer \"b\"))) (with-current-buffer b (insert \"123456789\")) (with-current-buffer a (insert \"abcdef\") (narrow-to-region 2 6) (save-restriction (internal--labeled-narrow-to-region 3 4 'foo) (buffer-swap-text b))) (prog1 (list (with-current-buffer a (widen) (list (point-min) (point-max))) (with-current-buffer b (widen) (list (point-min) (point-max)))) (kill-buffer a) (kill-buffer b)))",
+        "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 5 :label 'outermost-restriction (list (progn (widen) (list (point-min) (point-max))) (progn (widen) (list (point-min) (point-max))))))",
     ]);
 }
