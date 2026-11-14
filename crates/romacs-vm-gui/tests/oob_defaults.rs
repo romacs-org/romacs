@@ -10,6 +10,8 @@
 use romacs_vm_gui::{command, fonts, grammars, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::collections::VecDeque;
+#[path = "support/home.rs"]
+mod home;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))
@@ -42,17 +44,13 @@ impl HostInput for Keys {
 /// the user's init, started
 /// with -Q when QUICK; and its HOME.
 fn session(name: &str, quick: bool) -> (Vm, std::path::PathBuf) {
-    let home = std::env::temp_dir().join(format!("romacs-oob-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(home.join("config/romacs")).unwrap();
-    std::fs::write(home.join("config/romacs/history"), "(setq extended-command-history '(\"oob-history-command\"))\n").unwrap();
-    std::fs::write(home.join("config/romacs/recentf.eld"), "(setq recentf-list '(\"/oob/kept.txt\"))\n").unwrap();
     let mut vm = Vm::new();
     vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
     vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
-    vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
-        quoted(&format!("HOME={}", home.display())),
-        quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();
+    let home = home::private_home(&mut vm, &format!("oob-{name}"));
+    std::fs::create_dir_all(home.join("config/romacs")).unwrap();
+    std::fs::write(home.join("config/romacs/history"), "(setq extended-command-history '(\"oob-history-command\"))\n").unwrap();
+    std::fs::write(home.join("config/romacs/recentf.eld"), "(setq recentf-list '(\"/oob/kept.txt\"))\n").unwrap();
     startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
     startup::before_init(&mut vm, startup::Launch::Loadup, quick).unwrap();
     (vm, home)

@@ -9,8 +9,8 @@ fn substring(cx, string: Value; optional from: Value, to: Value) {
     // CHECK_VECTOR_OR_STRING, then validate_subarray (fns.c:1545-1577).
     let size = if let Ok(n) = cx.vector_len(string) {
         n as i64
-    } else if let Ok(view) = cx.string_view(string) {
-        view.chars as i64
+    } else if let Ok((chars, _)) = cx.string_shape(string) {
+        chars as i64
     } else {
         return Err(Fault::Wrong("arrayp", string));
     };

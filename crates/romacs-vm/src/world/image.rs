@@ -146,9 +146,28 @@ pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
-    let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
+    let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
-    written
+    whole_in_memory(file, written).map(|()| written)
+}
+
+/// tmpfs's `f_type` (linux/magic.h).
+const TMPFS_MAGIC: u32 = 0x0102_1994;
+
+/// The image FILE of LEN bytes, its holes filled where it lies in memory
+/// (tmpfs). There a hole is a page the filesystem makes on first touch,
+/// and a process that maps the image and touches one while the
+/// filesystem is full dies of SIGBUS; filled here, a full filesystem fails
+/// this build with ENOSPC instead, as any failed write does. On a disk
+/// the holes stay holes.
+fn whole_in_memory(file: &std::fs::File, len: usize) -> Result<(), String> {
+    // HOST(rustix::file): the type of filesystem of the image file the builder opened through host
+    let in_memory = rustix::fs::fstatfs(file).map_err(|e| format!("world image: {e}"))?.f_type;
+    if u32::try_from(in_memory).ok() != Some(TMPFS_MAGIC) {
+        return Ok(());
+    }
+    rustix::fs::fallocate(file, rustix::fs::FallocateFlags::empty(), 0, len as u64)
+        .map_err(|e| format!("world image in memory (tmpfs): {e}"))
 }
 
 /// The census of VM and CARRY as an image holds them
@@ -213,6 +232,35 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
 #[cfg(test)]
 mod tests {
     use crate::{Value, Vm};
+
+    /// A sparse image in memory (tmpfs) comes out whole, every page its
+    /// own, so no later touch of it needs the filesystem's room; on another
+    /// filesystem its holes stay. Each is tried where one is at hand.
+    #[test]
+    fn an_image_in_memory_has_no_holes_and_one_elsewhere_keeps_them() {
+        use std::os::unix::fs::MetadataExt;
+        let len = 16 << 20;
+        // (whether it is in memory, the bytes allocated once filled) of a
+        // sparse file made in DIR, or None where none can be made.
+        let tried = |dir: &std::path::Path| {
+            let path = dir.join(format!("romacs-image-holes-{}", std::process::id()));
+            let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).ok()?;
+            let in_memory = rustix::fs::fstatfs(&file).is_ok_and(|fs| u32::try_from(fs.f_type).ok() == Some(super::TMPFS_MAGIC));
+            let filled = file.set_len(len as u64).map_err(|e| e.to_string()).and_then(|()| super::whole_in_memory(&file, len));
+            let allocated = std::fs::metadata(&path).map(|m| m.blocks() * 512);
+            let _ = std::fs::remove_file(&path);
+            filled.unwrap();
+            Some((in_memory, allocated.unwrap()))
+        };
+        let found: Vec<(bool, u64)> = [std::path::PathBuf::from("/dev/shm"), std::env::temp_dir(), std::path::PathBuf::from("/var/tmp")]
+            .iter().filter_map(|dir| tried(dir)).collect();
+        if let Some((_, allocated)) = found.iter().find(|(in_memory, _)| *in_memory) {
+            assert!(*allocated >= len as u64, "an image on tmpfs kept holes: {allocated} of {len} bytes");
+        }
+        if let Some((_, allocated)) = found.iter().find(|(in_memory, _)| !*in_memory) {
+            assert!(*allocated < len as u64, "an image elsewhere lost its holes: {allocated} of {len} bytes");
+        }
+    }
 
     /// What a capture writes is one old generation: an entry made and a
     /// store since the last collection are settled before the write. The

@@ -1,0 +1,15 @@
+;;; expand-region.el --- Journey: grow a region through Lisp structure  -*- lexical-binding: t -*-
+(pp-step "require" (require 'expand-region) (featurep 'expand-region))
+(pp-step "expand"
+  (with-current-buffer (get-buffer-create "er")
+    (switch-to-buffer (current-buffer))
+    (emacs-lisp-mode)
+    (insert "(defun f (x)\n  (let ((y (+ x 1)))\n    (* y 2)))\n")
+    (goto-char (point-min))
+    (search-forward "+ x")
+    (let (regions)
+      (keymap-global-set "C-=" #'er/expand-region)
+      (dotimes (_ 5)
+        (pp-keys "C-=")
+        (push (list (region-beginning) (region-end)) regions))
+      (nreverse regions))))

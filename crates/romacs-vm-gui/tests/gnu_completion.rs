@@ -10,6 +10,8 @@
 use romacs_vm_gui::{command, fonts, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+#[path = "support/home.rs"]
+mod home;
 
 const LINE: u32 = 20;
 
@@ -91,7 +93,6 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     let root = std::env::temp_dir().join(format!("romacs-gnu-completion-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("work/sub")).unwrap();
-    std::fs::create_dir_all(root.join("home/config")).unwrap();
     std::fs::write(root.join("work/sub/notes.txt"), "notes\n").unwrap();
     for dir in ["a", "b"] {
         std::fs::create_dir_all(root.join("work/uq").join(dir)).unwrap();
@@ -102,14 +103,10 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         std::fs::write(root.join("work").join(name), "zq\n").unwrap();
     }
     let work = format!("{}/", root.join("work").display());
-    let home = root.join("home");
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
-        // The session's user directory is a private one, never the user's own.
-        vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
-            quoted(&format!("HOME={}", home.display())),
-            quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();
+        home::private_home(&mut vm, "gnu-completion");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let mut report = vec![];
         // Romacs's defaults are standard values, set through their :set.
@@ -205,6 +202,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "complete-default");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let mut report = vec![printed(&mut vm, "(list window-system romacs-complete-mode
             (eval (car (get 'romacs-complete-mode 'standard-value)) t) fido-vertical-mode icomplete-mode
@@ -435,6 +433,7 @@ fn chrome_colours_follow_the_theme() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "chrome-colours");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         // The default background; the panel's selected row and matches; then
         // as painted, the root frame's focus edge and hairline, and a toast's
@@ -537,6 +536,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "background-mode");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(defun bm-probe ()
             (romacs-layer-toast \"toast\")
@@ -646,6 +646,7 @@ fn theme_lisp_tests_pass(file: &'static str) {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, std::path::Path::new(file).file_stem().unwrap().to_str().unwrap());
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for file in ["lisp/romacs/romacs-test.el", file] {
@@ -666,6 +667,7 @@ fn faces_paint_their_weight_and_slant() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "faces-weight");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(progn (require 'org-faces) (delete-other-windows)
             (switch-to-buffer (get-buffer-create \"fw\")) (fundamental-mode)

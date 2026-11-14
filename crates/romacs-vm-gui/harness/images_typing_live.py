@@ -119,11 +119,6 @@ def control_form(files):
 
 
 class Session(perkey.Session):
-    # The evaluator thread alone: the decode worker starts at the first
-    # image, inside the images' span, and its decoding is not the
-    # evaluator's work.
-    inherit = False
-
     def env(self):
         env = super().env()
         if self.args.hold:
