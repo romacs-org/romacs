@@ -1440,7 +1440,7 @@ pub struct Vm {
     /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
-    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
+    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<prim::prims::doc::DocFile>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: NameSet<String>,
