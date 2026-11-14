@@ -492,7 +492,7 @@ pub(super) fn detect_frame_transitions(
     renderer: &mut WgpuRenderer,
     transitions: &mut TransitionState,
     effects: &romacs_display_protocol::EffectsConfig,
-    transition_hints: Vec<romacs_display_protocol::ContentTransitionHint>,
+    transition_hints: &[romacs_display_protocol::ContentTransitionHint],
     pending: crate::render_thread::frame_compositor::PendingContinuity,
     frame_dirty: &mut bool,
 ) {
@@ -501,7 +501,7 @@ pub(super) fn detect_frame_transitions(
     // two clock reads happened to be.
     let now = renderer.frame_sample().presentation_time();
 
-    for hint in &transition_hints {
+    for hint in transition_hints {
         apply_transition_hint(transitions, hint, now);
     }
     // Scroll transitions come from a measurement the compositor made when the

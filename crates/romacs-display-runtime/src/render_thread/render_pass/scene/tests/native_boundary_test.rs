@@ -267,7 +267,7 @@ fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls
             &mut renderer,
             &mut render.compositor.transitions,
             &Default::default(),
-            new_frame.take_transition_hints(),
+            &new_frame.take_transition_hints(),
             Default::default(),
             &mut render.compositor.dirty,
         );

@@ -36,7 +36,7 @@ pub(super) fn through_composition_ring(
     composition: &SnapshotLease,
     composition_view: &wgpu::TextureView,
     frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-    hints: Vec<romacs_display_protocol::ContentTransitionHint>,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     inputs: &FrameDrawInputs<'_>,
     accept_derived_effects: bool,
     pane_blits: &[PaneBlit],
@@ -159,7 +159,7 @@ pub(super) fn onto_target(
     render: &mut GuiFrameRenderState,
     composition_view: &wgpu::TextureView,
     frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-    hints: Vec<romacs_display_protocol::ContentTransitionHint>,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     inputs: &FrameDrawInputs<'_>,
     accept_derived_effects: bool,
 ) -> Result<(), super::surface::FrameRenderFailure> {
@@ -202,7 +202,7 @@ fn detect_transitions(
     acquired: &super::surface::SurfaceAcquired,
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
-    hints: Vec<romacs_display_protocol::ContentTransitionHint>,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     accept_derived_effects: bool,
 ) {
     let pending_continuity = render.take_pending_continuity(acquired, accept_derived_effects);

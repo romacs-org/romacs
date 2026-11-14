@@ -305,7 +305,7 @@ fn snapshot(fractional: bool) {
         &mut renderer,
         &mut render.compositor.transitions,
         &Default::default(),
-        root.take_transition_hints(),
+        &root.take_transition_hints(),
         Default::default(),
         &mut render.compositor.dirty,
     );
