@@ -244,6 +244,24 @@ else none.  The turn failing, or its harness ending, gives none."
 (defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
   "Sessions whose journaled renewal is being finished: once each.")
 
+(defvar romacs-agent-renew--owed (make-hash-table :test #'eq :weakness 'key)
+  "Sessions a renewal holds to the turns their harness was last owed
+\(`romacs-agent-renew--owed-now'): what an exit, clearing its run's
+state, would otherwise lose before the renewal is finished.")
+
+(defun romacs-agent-renew--owed-now (session)
+  "The turns SESSION's harness is owed now, by its driver's :owed-turns."
+  (funcall (or (romacs-agent--harness-get session :owed-turns) #'ignore) session))
+
+(defun romacs-agent-renew--keep-owed (session event)
+  "While a renewal holds SESSION, keep what its harness is owed as turns,
+as each startup or debt EVENT (a handshake) changes it."
+  (when (and (eq (plist-get event :type) 'handshake) (romacs-agent--held-p session))
+    (when-let* ((owed (romacs-agent-renew--owed-now session)))
+      (puthash session owed romacs-agent-renew--owed))))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-renew--keep-owed)
+
 (defun romacs-agent-renew--finish (session native)
   "Finish SESSION's journaled renewal to conversation NATIVE: its manifest
 says so, and its harness runs anew on it.  Once: its new run's note ends it."
@@ -254,9 +272,10 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
         (progn (romacs-agent-renew--commit session native)
                ;; What its harness was owed as turns of their own goes to
                ;; the new conversation first: its next run would lose it.
-               (when-let* ((owed (funcall (or (romacs-agent--harness-get session :owed-turns) #'ignore) session)))
+               (when-let* ((owed (or (romacs-agent-renew--owed-now session) (gethash session romacs-agent-renew--owed))))
                  (dolist (turn (reverse owed))
                    (romacs-agent--enqueue-first session (list (car turn) nil nil (cadr turn)))))
+               (remhash session romacs-agent-renew--owed)
                (romacs-agent--relaunch session))
       (error (remhash session romacs-agent-renew--finishing)
              (signal (car err) (cdr err))))))

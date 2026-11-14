@@ -540,4 +540,19 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
     (romacs-agent-renew--finish session nil)
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words" "waiting")))))
 
+(ert-deftest romacs-agent-renew-keeps-a-missed-steer-through-an-exit ()
+  ;; Owed while held, then its harness exits (its run's state cleared)
+  ;; before the renewal finishes: the turn still goes to the new one.
+  (require 'romacs-agent-codex)
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-driver-state session) (list :thread "th" :ready t))
+    (romacs-agent-renew--hold session (list 'test))
+    (romacs-agent--raise session (list :type 'handshake
+                                       :state (list :owed (list (list :turn "turn/steer:4" "late words" nil)))))
+    (romacs-agent--raise session (list :type 'exit :status 0 :seq 60))
+    (should-not (plist-get (romacs-agent-driver-state session) :owed))
+    (romacs-agent-renew--hold session nil)
+    (romacs-agent-renew--finish session nil)
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words")))))
+
 ;;; romacs-agent-renew-tests.el ends here
