@@ -6,7 +6,7 @@ use super::input::{MenuBarHit, frame_chrome_hit, frame_chrome_owns_pointer};
 use super::state::PointerCursorIntent;
 use super::state::PresentedInteractionKey;
 use crate::thread_comm::{
-    InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput, ScrollDelta,
+    InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput,
 };
 use romacs_display_protocol::PresentationFramePoint;
 use romacs_display_protocol::TransportModifierBit;
@@ -1569,42 +1569,7 @@ impl RenderApp {
                     target,
                     action,
                 });
-                let receipt = self.comms.send_input_with_receipt(input);
-                if let (
-                    ScrollDelta::Pixels {
-                        x: horizontal,
-                        y: vertical,
-                    },
-                    Some(receipt),
-                ) = (delta, receipt)
-                    && self.modifiers == 0
-                    && horizontal.abs() <= vertical.abs()
-                    && let Some(state) = self.frame_windows.get_by_winit_mut(window_id)
-                    && state.render.emacs_frame_id == target_fid
-                    && matches!(
-                        state.render.compositor.layout,
-                        super::frame_compositor::layout_driver::LayoutDriver::Settled
-                    )
-                    && !state.render.compositor.transitions.has_active()
-                    && !state
-                        .render
-                        .compositor
-                        .renderer_effects
-                        .scroll_effects_active()
-                    && let Some(frame) = state.render.compositor.current_frame.as_ref()
-                    && state.render.compositor.input_scroll.push(
-                        frame,
-                        ev_x,
-                        ev_y,
-                        -vertical.round(),
-                        receipt,
-                    )
-                {
-                    state.render.compositor.current_scene_generation =
-                        super::frame_state::next_scene_generation();
-                    state.render.compositor.current_row_damage = None;
-                    state.render.mark_dirty();
-                }
+                self.comms.send_input(input);
             }
             self.record_idle_dim_activity(window_id);
         }

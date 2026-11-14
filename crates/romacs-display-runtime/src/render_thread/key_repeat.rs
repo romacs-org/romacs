@@ -24,7 +24,7 @@ impl KeyRepeats {
             || self
                 .pending
                 .get(&(window, key))
-                .is_some_and(InputReceipt::consumed_or_cancelled)
+                .is_some_and(InputReceipt::taken)
     }
 
     pub fn queued(&mut self, window: WindowId, key: PhysicalKey, receipt: Option<InputReceipt>) {

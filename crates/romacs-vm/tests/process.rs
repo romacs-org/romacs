@@ -10,6 +10,8 @@
 //! synchronize. A child that must split its output across reads waits for a
 //! line the test sends once the filter has seen the first part; a part has
 //! a newline only at its end, since sh's printf may write before one.
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::Path;
@@ -117,24 +119,20 @@ fn bootstrapped() -> Vm {
 /// Run each of EXPRESSIONS in Romacs's VM and in pinned GNU, each in a
 /// private `default-directory' under BASE; the mismatches.
 fn mismatches(vm: &mut Vm, expressions: &[&str], base: &Path) -> Vec<String> {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = |index: usize, side: &str| {
+        let directory = base.join(format!("{index}-{side}"));
+        std::fs::create_dir_all(&directory).unwrap();
+        format!("{}/", directory.display())
+    };
+    // As character codes, as tests/json.rs compares.
+    let source = |index: usize, expression: &str, side: &str| format!(
+        "(progn (setq default-directory {:?}) (append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil))",
+        directory(index, side));
+    let answers = gnu_batch::outputs(&expressions.iter().enumerate()
+        .map(|(index, expression)| format!("(progn {PROLOGUE} (prin1 {}))", source(index, expression, "gnu"))).collect::<Vec<_>>());
     let mut failures = Vec::new();
-    for (index, expression) in expressions.iter().enumerate() {
-        let directory = |side: &str| {
-            let directory = base.join(format!("{index}-{side}"));
-            std::fs::create_dir_all(&directory).unwrap();
-            format!("{}/", directory.display())
-        };
-        // As character codes, as tests/json.rs compares.
-        let source = |side: &str| format!(
-            "(progn (setq default-directory {:?}) (append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil))",
-            directory(side));
-        let output = std::process::Command::new(&binary)
-            .args(["-Q", "--batch", "--eval", PROLOGUE, "--eval", &format!("(prin1 {})", source("gnu"))])
-            .output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
-        let actual = vm.eval_source(&source("romacs")).and_then(|v| v.display());
+    for ((index, expression), expected) in expressions.iter().enumerate().zip(answers) {
+        let actual = vm.eval_source(&source(index, expression, "romacs")).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
                 .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();

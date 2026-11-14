@@ -1,9 +1,5 @@
 //! Native event-loop startup before font-owned window geometry is available.
 
-#[cfg(test)]
-#[path = "startup/tests/first_frame.rs"]
-mod first_frame_tests;
-
 use super::RenderApp;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use std::{cell::RefCell, rc::Rc};
@@ -233,7 +229,7 @@ impl ApplicationHandler for StartingApp {
                 || (app.comms.keep_alive_without_frames
                     && app.frame_windows.primary_window().is_none())
             {
-                // Geometry can precede consumption (or outlive revocation) of
+                // Geometry can precede consumption of
                 // RealizeFrame. Keep the healthy root idle until a live frame
                 // transaction has supplied the primary, including at staging pressure.
                 event_loop.set_control_flow(app.startup_control_flow());

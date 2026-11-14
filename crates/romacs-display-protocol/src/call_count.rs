@@ -13,6 +13,11 @@ pub fn count(name: &'static str) {
     COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += 1);
 }
 
+/// Count N more of NAME on this thread.
+pub fn add(name: &'static str, n: u64) {
+    if n > 0 { COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += n); }
+}
+
 /// This thread's calls of NAME so far.
 #[must_use]
 pub fn of(name: &str) -> u64 {

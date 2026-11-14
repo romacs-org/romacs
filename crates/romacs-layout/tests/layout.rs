@@ -581,3 +581,24 @@ fn a_fallback_character_at_a_wrap_shares_its_rows_baseline() {
     }).nth(skip).unwrap();
     assert_eq!(baseline('\u{6f22}', 0), baseline('x', 4));
 }
+
+/// A raw byte shows as an escape, ASCII glyphs of its face: they are as
+/// tall as the face, whether or not the character the byte's placeholder
+/// is also shows as itself in that face somewhere in the window.
+#[test]
+fn an_escape_rises_as_its_face_whatever_else_the_window_shows() {
+    use romacs_layout_input::{BoxLine, Decor};
+    let mut snapshot = scene();
+    snapshot.faces[0].decor = Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 2, color: None, style: 1 }), ..Default::default() };
+    let escape_heights = |text: &str, raw: u32| {
+        let mut s = snapshot.clone();
+        s.text = TextSlice { utf8: text.into(), raw: vec![raw], extends: vec![], face_runs: vec![] };
+        romacs_layout::layout(&s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Char { char: '\\' | '3' | '5' | '1', height, ascent, .. } => Some((*height, *ascent)),
+            _ => None,
+        }).collect::<Vec<_>>()
+    };
+    let alone = escape_heights("\u{e9}", 0);
+    assert_eq!(alone.len(), 4, "the escape is four glyphs");
+    assert_eq!(escape_heights("\u{e9}\n\u{e9}", 3), alone, "with the character itself on the line above");
+}

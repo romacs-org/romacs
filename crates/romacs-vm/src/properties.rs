@@ -899,6 +899,8 @@ impl Plist for At<'_> {
 pub(crate) struct KeyReader<'a> {
     root: Option<&'a Tree>,
     /// The last run read: its start, end and value.
+    // CELL(Passing): A reader borrowing its tree, so no collection runs while it holds the run it
+    // read.
     run: std::cell::Cell<(usize, usize, Option<Value>)>,
 }
 impl KeyReader<'_> {

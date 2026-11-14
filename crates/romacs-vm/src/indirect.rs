@@ -28,6 +28,7 @@ use std::rc::Rc;
 /// the one split borrow of the arena (`threaded::quiet_insert`) pairs a
 /// string with a buffer. So a mutable reference to a cell's value never
 /// coexists with another reference to it.
+// CELL(Generic)
 pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>);
 // SAFETY: the cell's value is SnapshotSafe, and a world image maps the Rc
 // and its value back where they were.

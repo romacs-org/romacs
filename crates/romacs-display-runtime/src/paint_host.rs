@@ -288,14 +288,14 @@ pub(crate) fn trace_key_enqueue(event: &crate::thread_comm::InputEvent, delivery
         && matches!(event, crate::thread_comm::InputEvent::Key { pressed: true, .. })
         && let Some(delivery) = delivery {
         let mut times = KEY_TIMES.lock().unwrap();
-        times.retain(|(receipt, _)| !receipt.cancelled());
+        times.retain(|(receipt, _)| !receipt.taken());
         times.push((delivery.receipt(), std::time::Instant::now()));
     }
 }
 pub fn take_key_enqueue_time(event: &crate::thread_comm::InputEvent) -> Option<std::time::Instant> {
     match event {
-        crate::thread_comm::InputEvent::Tracked { receipt, .. } => {
-            let actual = receipt.receipt();
+        crate::thread_comm::InputEvent::Tracked { delivery, .. } => {
+            let actual = delivery.receipt();
             let mut times = KEY_TIMES.lock().unwrap();
             let index = times.iter().position(|(queued, _)| queued.same_input(&actual))?;
             Some(times.remove(index).1)
@@ -309,19 +309,19 @@ pub fn take_key_enqueue_time(event: &crate::thread_comm::InputEvent) -> Option<s
 fn latency_receipt_does_not_pair_a_discarded_native_event() {
     use crate::thread_comm::InputEvent;
     use romacs_display_protocol::input_progress::InputDelivery;
-    let discarded = InputDelivery::for_read();
-    let delivered = InputDelivery::for_read();
+    let discarded = InputDelivery::new();
+    let delivered = InputDelivery::new();
     let first = std::time::Instant::now();
     let second = first + std::time::Duration::from_millis(1);
     KEY_TIMES.lock().unwrap().extend([(discarded.receipt(), first), (delivered.receipt(), second)]);
     drop(discarded);
-    let event = InputEvent::Tracked { receipt: delivered, event: Box::new(InputEvent::Key {
+    let event = InputEvent::Tracked { delivery: delivered, event: Box::new(InputEvent::Key {
         key: crate::host_types::FrontendKey::Character('k'), modifiers: 0,
         pressed: true, emacs_frame_id: 1,
     }) };
     assert_eq!(take_key_enqueue_time(&event), Some(second));
     assert_eq!(take_key_enqueue_time(&event), None, "one event has one timestamp");
-    KEY_TIMES.lock().unwrap().retain(|(receipt, _)| !receipt.cancelled());
+    KEY_TIMES.lock().unwrap().retain(|(receipt, _)| !receipt.taken());
 }
 
 impl PaintSender {
@@ -594,8 +594,6 @@ impl PaintSender {
                 visual: None,
                 adopt_primary: true,
                 reply: Some(reply),
-                live: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
             }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();

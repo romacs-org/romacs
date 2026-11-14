@@ -15,8 +15,10 @@
 ;; Until the tree lands, redisplay shows the text plain and keys run: its
 ;; landing brings the faces (`treesit_parse_pending' in display.rs).  What
 ;; runs by itself must not ask for the tree meanwhile, or it waits for the
-;; parse with the keys behind it: `show-paren-mode's idle timer is the one
-;; such asker, and highlights no paren until the tree is there.
+;; parse with the keys behind it.  Two things do: tree-sitter's own
+;; `pre-redisplay-functions' entry, which the frame the landing wakes runs
+;; with every change since, and `show-paren-mode's idle timer, which
+;; highlights no paren until the tree is there.
 
 ;; A typed character does not wait for its parse either.  A frame shows an
 ;; edit of `romacs-treesit-show-before-parse' bytes or fewer as the text
@@ -79,6 +81,7 @@ A parse no parser came for is abandoned, its thread left to end."
 (when (fboundp 'advice-add)
   (advice-add 'after-find-file :around #'romacs-treesit--visit)
   (with-eval-after-load 'treesit
+    (advice-add 'treesit--pre-redisplay :before-while #'romacs-treesit--no-parse-p)
     (advice-add 'treesit-show-paren-data :before-while #'romacs-treesit--no-parse-p)))
 
 (provide 'romacs-treesit)

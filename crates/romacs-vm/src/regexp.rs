@@ -66,6 +66,7 @@ struct Input<'a> {
     /// end and the last conversion. A conversion counts characters only
     /// from the nearest, so a match near the last costs the distance from
     /// it, not the length of the text.
+    // CELL(Plain)
     anchors: std::cell::Cell<[(usize, usize); 3]>,
 }
 /// Internal multibyte text starts each character with one byte that is not
@@ -276,8 +277,10 @@ struct CachedPattern {
     translation: Translation,
     /// The syntax table the compiled fastmap read (GNU `used_syntax').
     syntax: Option<Value>,
+    // CELL(Plain)
     compiled: std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>,
     /// The cache's clock at the last use: a hit moves it without the cache.
+    // CELL(Plain)
     used: std::cell::Cell<u64>,
 }
 
@@ -289,6 +292,7 @@ const PATTERN_CACHE_SIZE: usize = 1024;
 /// syntax table and the case translation hold throughout.
 pub(crate) struct StringMatcher {
     sources: Vec<Value>,
+    // CELL(Plain)
     patterns: Vec<Option<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>>>,
     key: Translation,
     translation: Option<regex::CaseTranslation>,

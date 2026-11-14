@@ -23,6 +23,7 @@
 (require 'romacs-mcp)
 (require 'romacs-mcp-editor)
 (require 'romacs-mcp-session)
+(require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
 
@@ -1439,6 +1440,7 @@ A later saved value replaces this one; the entry itself stays."
 ;; Gnosis's agent API, when gnosis is installed (it loads at a tool's first call).
 (when (locate-library "gnosis-agent") (require 'romacs-agent-gnosis))
 (romacs-mcp-enable-session-tools)
+(romacs-mcp-enable-dev-tools)
 
 (provide 'romacs-agent-tools)
 ;;; romacs-agent-tools.el ends here

@@ -9,6 +9,7 @@ pub(crate) struct BufferState {
     pub(crate) inhibit_buffer_hooks: bool,
     /// Shared with the buffer's indirect buffers, as GNU's MODIFF and
     /// SAVE_MODIFF are in their shared text.
+    // CELL(Plain)
     pub(crate) modification: crate::indirect::Shared<crate::modification::Modification>,
     /// syntax.c's find_start_* cache, tagged with `Vm::defun_start_epoch`
     /// when this buffer wrote it: GNU keeps one cache for the last buffer.
