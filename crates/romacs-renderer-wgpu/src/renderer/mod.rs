@@ -33,7 +33,7 @@ mod frame_submission;
 mod paint;
 mod panes;
 mod target;
-pub use target::{NativeContentPlacement, RenderTarget, SnapshotRegion};
+pub use target::{NativeContentPlacement, RenderTarget};
 mod effect_common;
 mod effects_state;
 mod frame_pass;

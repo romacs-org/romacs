@@ -840,11 +840,6 @@ impl GuiFrameRenderState {
                 requested: presentation,
             });
         }
-        if target_frame_id == self.emacs_frame_id
-            && let Some(hit) = self.compositor.input_scroll.hit(point)
-        {
-            return hit;
-        }
         frame
             .resolve_presented_hit(PresentedHitQuery::new(point))
             .map(|hit| hit.and_then(|hit| hit.semantic()))
@@ -1063,24 +1058,6 @@ impl GuiFrameRenderState {
         &self,
         frame: &FrameGlyphBuffer,
     ) -> Option<romacs_display_protocol::PointerAppearanceSelection> {
-        // The projected frame owns a newly resolved pointer map. Appearance
-        // IDs from the authoritative frame cannot address it; resolve hover
-        // against the exact temporary paint geometry instead.
-        if self.compositor.input_scroll.active() {
-            if !self.pointer_inside || self.presented_press.is_some() {
-                return None;
-            }
-            let (x, y) = self.root_frame_point_from_surface(self.mouse_pos.0, self.mouse_pos.1)?;
-            let point = self.inverse_map(frame, x, y)?;
-            let appearance = frame
-                .resolve_presented_hit(PresentedHitQuery::new(point))
-                .ok()??
-                .appearance()?;
-            return Some(romacs_display_protocol::PointerAppearanceSelection::new(
-                appearance,
-                romacs_display_protocol::PointerAppearancePhase::Hover,
-            ));
-        }
         self.pointer_appearance.selection_for(frame)
     }
 
@@ -1255,13 +1232,6 @@ impl GuiFrameRenderState {
             installed_at,
         )
         .apply(self);
-        if let Some(window) = self.compositor.input_scroll.reconcile(frame.as_ref()) {
-            // Projected motion has already been drawn; do not animate it twice.
-            self.compositor
-                .pending
-                .scrolls
-                .retain(|scroll| scroll.window != window);
-        }
         // Staged, not installed: these describe the incoming presentation, and
         // they become the baseline only if a frame is actually drawn from it.
         self.compositor.incoming_reflow_imprints = reflow_imprints;
@@ -1323,7 +1293,6 @@ impl GuiFrameRenderState {
     ) -> Option<FrameGlyphBuffer> {
         let current_frame = self.compositor.current_frame.as_mut()?;
         let mut frame = Self::take_frame_for_render(current_frame);
-        self.compositor.input_scroll.paint(&mut frame);
         self.compositor.text_animations.paint(&mut frame);
         Some(frame)
     }
@@ -2055,7 +2024,7 @@ impl GuiFrameWindowManager {
             );
             let attrs = crate::window_identity::apply_platform_window_identity(attrs, event_loop);
 
-            match comms.create_window(event_loop, attrs, req.emacs_frame_id) {
+            match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     window_icon.apply(window.as_ref());
@@ -2565,7 +2534,6 @@ impl GuiFrameWindowManager {
             render.compositor.glyph_atlas = None;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
-            render.compositor.retained_scroll = None;
             render.compositor.retained_root = None;
             render.compositor.last_root_key = None;
             // Composition ring plus every running transition's leased

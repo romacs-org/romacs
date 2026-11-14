@@ -46,10 +46,8 @@ mod composition_targets;
 mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
-mod retained_scroll;
 pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
-pub(super) use retained_scroll::RetainedScroll;
 mod scene;
 pub(in crate::render_thread) mod surface;
 
@@ -100,7 +98,6 @@ struct FrameDrawInputs<'a> {
     bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
     child_frame_style: &'a ChildFrameStyle,
     scroll_indicators_enabled: bool,
-    retain_scroll_body: bool,
     toolbar: &'a ToolbarResources,
     /// What every native model's texture shows for this frame.
     models: &'a super::models::ModelPicture,
@@ -126,7 +123,6 @@ fn render_frame_window_contents(
         cursor_visible,
         inputs.root_animated_cursor,
         inputs.bg_gradient,
-        inputs.retain_scroll_body,
     );
     let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
         romacs_display_protocol::present_trace::Stage::NonRootStart,
@@ -210,7 +206,6 @@ fn render_frame_window_contents_to_surface(
         surface,
         &feature_plan,
         compositor_only_hint,
-        bg_gradient.is_some() || extra_line_spacing != 0.0 || extra_letter_spacing != 0.0,
     )?;
     window_state.render.child_opacity_src = targets.picture;
     let result = render_frame_window_contents_reserved(
@@ -269,7 +264,6 @@ fn render_frame_window_contents_reserved(
     let animated_cursor = render.cursor.animated_cursor().filter(|_| !RenderApp::cursor_blinked_off(render));
     let root_animated_cursor = animated_cursor.filter(|cursor| {
         cursor.frame_id == DisplayFrameId::new(render.emacs_frame_id)
-            && !render.compositor.input_scroll.active()
     });
     // The slide animation is composed at draw time: emit_cursor_visual reads
     // the interpolated rect from animated_cursor for the active window's
@@ -431,7 +425,6 @@ fn render_frame_window_contents_reserved(
         bg_gradient,
         child_frame_style,
         scroll_indicators_enabled,
-        retain_scroll_body: extra_line_spacing == 0.0 && extra_letter_spacing == 0.0,
         toolbar,
         models,
     };

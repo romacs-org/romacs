@@ -3,62 +3,6 @@ use romacs_display_protocol::{
     ImageId, ImageStateEvent,
 };
 
-#[test]
-fn native_repeat_tracking_does_not_fill_command_completion_ledger() {
-    let (emacs, render) = ThreadComms::new().split();
-    let mut progress = romacs_display_protocol::input_progress::InputProgress::default();
-    let _command = progress.begin_command();
-    // A single interactive command may read held-key input indefinitely.
-    for _ in 0..1300 {
-        let observer = render.send_key_input_with_receipt(InputEvent::Key {
-            key: crate::host_types::FrontendKey::Character('p'),
-            modifiers: 0,
-            pressed: true,
-            emacs_frame_id: 1,
-        });
-        let observer = observer.expect("every native key needs a read receipt");
-        assert!(!observer.consumed_or_cancelled());
-        let InputEvent::Tracked { receipt, .. } = emacs.input_rx.try_recv().unwrap() else {
-            panic!("native key must retain read ownership through the bridge");
-        };
-        progress.consumed(receipt);
-        assert!(observer.consumed_or_cancelled());
-    }
-    assert!(progress.current_command_receipts().is_empty());
-}
-
-#[test]
-fn native_page_keys_keep_read_and_scroll_completion_receipts_separate() {
-    let (emacs, render) = ThreadComms::new().split();
-    let read = render
-        .send_key_input_with_receipt(InputEvent::Key {
-            key: crate::host_types::FrontendKey::Keysym(0xff55),
-            modifiers: 0,
-            pressed: true,
-            emacs_frame_id: 1,
-        })
-        .unwrap();
-    let mut progress = romacs_display_protocol::input_progress::InputProgress::default();
-    let command = progress.begin_command();
-    let InputEvent::Tracked { receipt, event } = emacs.input_rx.try_recv().unwrap() else {
-        panic!("missing native read receipt");
-    };
-    progress.consumed(receipt);
-    let InputEvent::Tracked { receipt, .. } = *event else {
-        panic!("missing scroll completion receipt");
-    };
-    let completion = receipt.receipt();
-    assert!(!read.same_input(&completion));
-    progress.consumed(receipt);
-    assert!(read.consumed_or_cancelled());
-    assert!(!completion.acknowledged_by(&progress.checkpoint()));
-    assert_eq!(progress.current_command_receipts().len(), 1);
-    assert!(progress.current_command_receipts()[0].same_input(&completion));
-    drop(command);
-    assert!(completion.acknowledged_by(&progress.checkpoint()));
-    assert!(!read.acknowledged_by(&progress.checkpoint()));
-}
-
 fn unpresented_pointer(x: f32, y: f32, target_frame_id: u64, action: PointerAction) -> InputEvent {
     InputEvent::PositionedPointer(PositionedPointerInput {
         position: PointerPosition {
@@ -71,9 +15,25 @@ fn unpresented_pointer(x: f32, y: f32, target_frame_id: u64, action: PointerActi
     })
 }
 
-// ===================================================================
-// Constants
-// ===================================================================
+#[test]
+fn a_native_key_receipt_is_taken_once_the_evaluator_drops_the_event() {
+    let (emacs, render) = ThreadComms::new().split();
+    // A single interactive command may read held-key input indefinitely.
+    for _ in 0..1300 {
+        let observer = render.send_key_input_with_receipt(InputEvent::Key {
+            key: crate::host_types::FrontendKey::Character('p'),
+            modifiers: 0,
+            pressed: true,
+            emacs_frame_id: 1,
+        });
+        let observer = observer.expect("every native key needs a read receipt");
+        assert!(!observer.taken());
+        let event = emacs.input_rx.try_recv().unwrap();
+        assert!(matches!(event, InputEvent::Tracked { .. }), "native key must keep its delivery through the bridge");
+        drop(event);
+        assert!(observer.taken());
+    }
+}
 
 #[test]
 fn channel_capacity_constants() {
