@@ -326,12 +326,16 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The board names each session's instance.
-        home = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
-                                            '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
-                                            'nil (romacs-agent-board--view)) 120) '
-                                            '(buffer-substring-no-properties (point-min) (point-max))))'))
-        shown = sorted({p for p in ('claude2', 'claude') if any(line.split('  ')[-1].startswith(p) or f' {p} ·' in line or line.rstrip().endswith(p) for line in home.splitlines())})
+        # The board names each session's harness, its account on hover.
+        hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
+                                              '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
+                                              'nil (romacs-agent-board--view)) 120) '
+                                              '(let ((pos (point-min)) (found nil)) '
+                                              '(while (setq pos (next-single-property-change pos (quote help-echo))) '
+                                              '(let ((h (get-text-property pos (quote help-echo)))) '
+                                              '(when (and (stringp h) (string-prefix-p "account " h)) (push (substring h 8) found)))) '
+                                              'found)))'))
+        shown = sorted(set(hovers))
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
