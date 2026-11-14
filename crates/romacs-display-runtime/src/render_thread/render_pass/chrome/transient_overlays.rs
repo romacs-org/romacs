@@ -180,6 +180,8 @@ pub(super) fn draw_fps(
     let transition_count = render.compositor.transitions.active_count();
 
     let fps = &mut render.overlays.fps;
+    // CLOCK: closes the CPU render-work span `begin_fps_cpu_span` began; the
+    // frame sample is the same at both ends of it, so it cannot measure it.
     let frame_time = fps.cpu_span_start.elapsed().as_secs_f32() * 1000.0;
     fps.frame_time_ms = fps.frame_time_ms * 0.9 + frame_time * 0.1;
     let stats_lines = vec![
