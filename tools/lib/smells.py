@@ -1,49 +1,56 @@
 #!/usr/bin/env python3
-"""Smells census, and a ratchet on it: no change adds a smell.
+"""Smells census, and a ratchet on it: no change adds an undeclared smell.
 
 One report of the smells the cleanup removes, and a ratchet on each, so a
 removed smell cannot come back. The scope is the unsafe census's: every .rs
 file in a Cargo package, credited to its nearest package
-(tools/lib/unsafe_census.py, which also keeps the unsafe floors in
-ledger/unsafe-floors.json; `report` shows its kinds and SAFETY coverage here too).
+(tools/lib/unsafe_census.py, whose sites the ratchet holds too).
 
-Per crate:
-  allows      lint names in `allow(...)` or `expect(...)` attributes that are
-              dead_code, the unused group, or an unused_* lint (one per name)
+What counts, summed over the workspace (`report` shows each crate's share):
+  allows      lint names in `allow(...)` attributes that are dead_code, the
+              unused group, or an unused_* lint (one per name), and in
+              `expect(...)` attributes that give no `reason`
   todos       TODO, FIXME, XXX and HACK in comments
-  long_files  files over `long_file_lines` lines
-
-Per lint, across the workspace (`lints`): every rustc and Clippy warning of
-`cargo clippy --workspace --all-targets -- -W clippy::pedantic`, each
-distinct diagnostic once, however many targets compile its code. Lints are
-capped at warn, so a deny-by-default lint is counted rather than stopping the
-count.
-
-Layout (`layout`):
-  root                    the tree's top-level entries
-  members_outside_crates  workspace members not under crates/
-  legacy_primitives       primitives lib.rs registers through its own enum,
-                          the second route beside `defsubr!`
-                          (tools/lib/primitive_index.py reads both from source)
+  long_files  files over LONG_FILE_LINES lines
+  unsafe_sites, unsafe_undocumented
+              unsafe sites, and those without a SAFETY: comment
+              (tools/lib/unsafe_census.py says what annotates a site)
+  lint L      every rustc and Clippy warning of `cargo clippy --workspace
+              --all-targets -- -W clippy::pedantic`, each distinct diagnostic
+              once, however many targets compile its code. Lints are capped
+              at warn, so a deny-by-default lint is counted rather than
+              stopping the count.
+  legacy_primitives  primitives lib.rs registers through its own enum, the
+              second route beside `defsubr!` (tools/lib/primitive_index.py)
   primitives_outside_prims  `defsubr! { name = ... }` declarations outside
-                          PRIMS (the harness's own tests and probes)
-  generated               tracked files outside GNU's own trees whose first
-                          lines say a tool wrote them: GNU's recordings and
-                          imports from outside sources, kept with their
-                          recorder (tools/lib/generated_files.py keeps what
-                          our tools make from the sources out of git). The
-                          list only shrinks; a new generated file fails
-                          until listed deliberately.
+              PRIMS (the harness's own tests and probes)
+  generated   tracked files outside GNU's own trees whose first lines say a
+              tool wrote them: GNU's recordings and imports from outside
+              sources, kept with their recorder (tools/lib/generated_files.py
+              keeps what our tools make from the sources out of git); Cargo's
+              lockfiles aside. A list: a new entry is a rise.
+
+A deliberate new instance is declared where it occurs, and a declared one is
+not counted:
+  a lint      `#[expect(LINT, reason = "...")]` on the item; rustc warns once
+              the lint no longer fires, so a declaration cannot go stale
+  an allow    the same `expect`, with its reason
+  a TODO      names its tracker issue: `TODO(#N)` or `TODO(repo#N)`
+  an unsafe site  `UNSAFE(reason)` beside its SAFETY: comment
+  a long file, a primitive outside PRIMS, a generated file
+              `SMELL(long-file): reason` in a comment of the file,
+              `SMELL(primitive): reason` in the comment lines directly above
+              the `defsubr!`, `SMELL(generated): reason` in the file's first
+              lines
+An undocumented unsafe site and a legacy primitive have no declaration.
 
 check holds a tree to its merge-base with BASE (--base, else $ROMACS_BASE,
 else beta): a count fails when it is above what the same count measures on
-the merge-base's tree. A change answers for what it adds and for nothing else:
-not for floors lowered since it forked, and not for a rise the floors' slack
-would have hidden. A drop needs no record. The one way to add a smell is to
-raise its floor in ledger/smell-floors.json by as much, a hand edit made deliberately
-in its own commit with its reason; a new layout entry, a generated file among
-them, is added to its list the same way. A branch does not lower a floor or drop a listed entry either: the
-merge may not have its drop, so `lower` records drops on the trunk.
+the merge-base's tree, both counted by this code. A change answers for what it
+adds and for nothing else; a drop needs no record, and nothing is stored in
+the tree. Two rules hold whatever the merge-base had: every top-level entry
+is named in the Top level section of ARCHITECTURE.md, and every workspace
+member lives under crates/.
 
 The merge-base is measured once and kept (`base_counts`), under
 $ROMACS_SMELLS_CACHE, else $XDG_CACHE_HOME/romacs/smells: one file per tree,
@@ -51,27 +58,13 @@ counting code and Clippy version, and one kept checkout to measure in. A clean
 tree's own counts are kept too, so the merge-base of a later branch is usually
 there already.
 
-check --absolute holds the tree to the floors file itself, for a checkpoint on
-the trunk: a count above its floor fails, a listed entry that is missing or
-extra fails, and a slack crate-smell or layout floor fails until `lower`
-records it. A lint's floor is a ceiling there: a drop passes. `lower` only
-lowers floors and drops listed entries that are gone.
-
-The floors file merges by its meaning, not its text (`merged`): each side's
-raise is added, a lowered floor stays lowered, and a list has what both keep
-and what either added. `tools/git-setup` installs that as git's merge
-driver for the file, so a merge needs no hand; where the driver is not
-installed and git reports a conflict, `resolve` writes the same merge.
-
 With ROMACS_CLIPPY_TARGET_DIR set, clippy builds each checkout in its own
 tree there and writes the checkout's path into the tree's `checkout` file;
 `prune` removes the trees whose checkout no longer exists.
 
-usage: smells.py check [--base REV | --absolute] [--root ROOT] [--clippy-json FILE]
-       smells.py report|lower|resolve [--root ROOT] [--clippy-json FILE]
-       smells.py merge BASE OURS THEIRS   (the merge driver: the result replaces OURS)
+usage: smells.py check [--base REV] [--root ROOT] [--clippy-json FILE]
+       smells.py report [--root ROOT] [--clippy-json FILE]
        smells.py prune   (removes the clippy trees under $ROMACS_CLIPPY_TARGET_DIR whose checkout is gone)
-       smells.py report --floors   (counts in the floors file's format)
 """
 import argparse
 import fcntl
@@ -90,37 +83,60 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import primitive_index  # noqa: E402
 import unsafe_census  # noqa: E402
 
-FLOORS = Path('ledger/smell-floors.json')
-# Where a merge-base from before the records moved into ledger/ keeps its
-# floors; it goes once no open branch's merge-base predates the move.
-FLOORS_BEFORE = 'SMELL-FLOORS.json'
+LONG_FILE_LINES = 1500
 CRATE_SMELLS = ('allows', 'todos', 'long_files')
-COUNTED = ('legacy_primitives', 'primitives_outside_prims')
-LISTED = ('root', 'members_outside_crates', 'generated')
 GNU_TREES = ('lisp/gnu/', 'test/gnu/test/', 'etc/')
+LOCKFILE = 'Cargo.lock'
+ARCHITECTURE = 'ARCHITECTURE.md'
 GENERATED = re.compile(r'(?i)\b(?:generated by|do not edit|auto-?generated)\b|@generated\b')
 COUNTING = ('smells.py', 'unsafe_census.py', 'primitive_index.py')
 PRIMS = 'crates/romacs-vm/src/prims/'
-ALLOW = re.compile(r'\b(?:allow|expect)\s*\(([^)]*)\)')
+ALLOW = re.compile(r'\b(allow|expect)\s*\(([^)]*)\)')
 ALLOWED_LINT = re.compile(r'(?<![:\w])(?:dead_code|unused(?:_\w+)?)\b')
-TODO = re.compile(r'\b(?:TODO|FIXME|XXX|HACK)\b')
+REASON = re.compile(r'\breason\s*=')
+TODO = re.compile(r'\b(?:TODO|FIXME|XXX|HACK)\b(?!\([\w.-]*#\d+\))')
 DEFSUBR = re.compile(r'\bdefsubr\s*!\s*\{\s*name\s*=')
 CLIPPY = ('cargo', 'clippy', '--locked', '--offline', '--workspace', '--all-targets',
           '--message-format=json', '--', '-W', 'clippy::pedantic', '--cap-lints', 'warn')
+# How each count's new instance is declared where it occurs, for the failure.
+DECLARE = {
+    'allows': 'declare it as `#[expect(LINT, reason = "...")]`',
+    'todos': 'name its tracker issue: `TODO(#N)`',
+    'long_files': 'declare it with `SMELL(long-file): reason` in a comment of the file',
+    'unsafe_sites': 'declare it with `UNSAFE(reason)` beside its SAFETY: comment',
+    'unsafe_undocumented': 'put a `// SAFETY:` comment on the line above its `unsafe`',
+    'legacy_primitives': f'declare it with `defsubr!` in {PRIMS}',
+    'primitives_outside_prims': 'declare it with `SMELL(primitive): reason` in the comment lines above it',
+    'lint': 'declare it as `#[expect({}, reason = "...")]` on the item',
+}
 
 
-def file_smells(src, long_file_lines):
-    """SRC's smells, and how many primitives it declares."""
+def smell_marks(text, kind):
+    """Whether TEXT declares a smell of KIND: `SMELL(KIND): reason`."""
+    return re.search(rf'\bSMELL\({re.escape(kind)}\):[ \t]*\S', text) is not None
+
+
+def allowed_names(code):
+    """The dead or unused lint names CODE allows, or expects without a reason."""
+    return sum(len(ALLOWED_LINT.findall(m[2])) for m in ALLOW.finditer(code)
+               if m[1] == 'allow' or not REASON.search(m[2]))
+
+
+def file_smells(src, long_file_lines=LONG_FILE_LINES):
+    """SRC's undeclared smells, and how many primitives it declares undeclared."""
     code, comments, _ = unsafe_census.lex(src)
-    smells = Counter(allows=sum(len(ALLOWED_LINT.findall(m[1])) for m in ALLOW.finditer(code)),
-                     todos=sum(len(TODO.findall(text)) for _, _, text in comments),
-                     long_files=int(len(src.splitlines()) > long_file_lines))
-    return smells, len(DEFSUBR.findall(code))
+    notes = '\n'.join(text for _, _, text in comments)
+    long = len(src.splitlines()) > long_file_lines and not smell_marks(notes, 'long-file')
+    _, note = unsafe_census.annotator(src, code, comments)
+    primitives = sum(not smell_marks(note(m.start()), 'primitive') for m in DEFSUBR.finditer(code))
+    smells = Counter(allows=allowed_names(code), todos=sum(len(TODO.findall(text)) for _, _, text in comments),
+                     long_files=int(long))
+    return smells, primitives
 
 
-def crate_census(root, long_file_lines):
-    """({crate: Counter of CRATE_SMELLS}, [(lines, path)] of long files,
-    {path outside PRIMS: primitives it declares})."""
+def crate_census(root, long_file_lines=LONG_FILE_LINES):
+    """({crate: Counter of CRATE_SMELLS}, [(lines, path)] of undeclared long files,
+    {path outside PRIMS: undeclared primitives it declares})."""
     counts, long, strays = {}, [], {}
     for crate, name, src in unsafe_census.rust_sources(root):
         smells, declares = file_smells(src, long_file_lines)
@@ -272,113 +288,91 @@ def run_clippy(root):
     return done.stdout.splitlines()
 
 
-def layout(root, strays):
-    """{'root': [top-level entries], 'members_outside_crates': [...],
-    'generated': [...], 'legacy_primitives': N, 'primitives_outside_prims': N}."""
+def tracked(root):
+    """The paths git has, or would have, in ROOT that exist."""
     listed = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
                             cwd=root, check=True, stdout=subprocess.PIPE).stdout.decode()
-    names = [name for name in listed.split('\0') if name and (Path(root) / name).exists()]
-    top = sorted({name.split('/', 1)[0] for name in names})
+    return [name for name in listed.split('\0') if name and (Path(root) / name).exists()]
+
+
+def layout(root, strays):
+    """{'root': [top-level entries], 'members_outside_crates': [...],
+    'generated': [undeclared ...], 'legacy_primitives': N, 'primitives_outside_prims': N}."""
+    names = tracked(root)
     members = tomllib.loads((Path(root) / 'Cargo.toml').read_text())['workspace']['members']
     primitives = primitive_index.vm2_primitives(Path(root).resolve() / 'crates/romacs-vm/src').values()
-    return {'root': top,
+    return {'root': sorted({name.split('/', 1)[0] for name in names}),
             'members_outside_crates': sorted(m for m in members if not m.startswith('crates/')),
             'legacy_primitives': sum('variant' in p for p in primitives),
             'primitives_outside_prims': sum(strays.values()),
             'generated': sorted(n for n in names if says_generated(root, n))}
 
 
-def says_generated(root, name):
-    """Whether NAME, outside GNU's own trees, says in its first lines that a
-    tool writes it."""
-    if name.startswith(GNU_TREES) or (Path(root) / name).is_symlink():
-        return False
+def head(root, name):
+    """NAME's first five lines."""
     with open(Path(root) / name, 'rb') as f:
-        head = f.read(2048).decode('utf-8', 'replace').split('\n')[:5]
-    return any(GENERATED.search(line) for line in head)
+        return f.read(2048).decode('utf-8', 'replace').split('\n')[:5]
 
 
-def measure(root, floors, clippy_json=None):
-    """Everything check compares against FLOORS."""
-    crates, long, strays = crate_census(root, floors['long_file_lines'])
+def says_generated(root, name):
+    """Whether NAME, outside GNU's own trees and no lockfile, says in its first
+    lines that a tool writes it, and does not declare it."""
+    if name.startswith(GNU_TREES) or Path(name).name == LOCKFILE or (Path(root) / name).is_symlink():
+        return False
+    lines = head(root, name)
+    return any(GENERATED.search(line) for line in lines) and not smell_marks('\n'.join(lines), 'generated')
+
+
+def measure(root, clippy_json=None):
+    """Everything check and report read of the tree at ROOT."""
+    crates, long, strays = crate_census(root)
     lines = Path(clippy_json).read_text().splitlines() if clippy_json else run_clippy(root)
     by_crate = lint_census(root, lines)
-    return {'crates': crates, 'long': long, 'strays': strays, 'lints_by_crate': by_crate,
-            'lints': sum(by_crate.values(), Counter()), 'layout': layout(root, strays)}
+    return {'crates': crates, 'unsafe': unsafe_census.census(root), 'long': long, 'strays': strays,
+            'lints_by_crate': by_crate, 'lints': sum(by_crate.values(), Counter()), 'layout': layout(root, strays)}
 
 
-def bound(what, have, limit):
-    """Why HAVE breaks the floor LIMIT for WHAT, or None."""
-    if have > limit:
-        return f'{what}: {have}, above its floor {limit}'
-    if have < limit:
-        return f'{what}: {have}, below its floor {limit}; record the drop with tools/lib/smells.py lower'
-    return None
+def summary(now):
+    """What the ratchet compares of NOW, a measure: {'totals': {what: n}, 'generated': [...]}."""
+    crates = sum(now['crates'].values(), Counter())
+    unsafe = sum(now['unsafe'].values(), Counter())
+    totals = {smell: crates[smell] for smell in CRATE_SMELLS}
+    totals.update(unsafe_sites=unsafe['sites'] - unsafe['declared'], unsafe_undocumented=unsafe['undocumented'])
+    totals.update({key: now['layout'][key] for key in ('legacy_primitives', 'primitives_outside_prims')})
+    totals.update({f'lint {lint}': n for lint, n in now['lints'].items()})
+    return {'totals': totals, 'generated': list(now['layout']['generated'])}
 
 
-def listed(what, have, floor):
-    found = [f'{what}: {entry} is new; adding one is a deliberate edit of {FLOORS}'
-             for entry in sorted(set(have) - set(floor))]
-    return found + [f'{what}: {entry} is gone; record it with tools/lib/smells.py lower'
-                    for entry in sorted(set(floor) - set(have))]
+def declare(what):
+    """How a new instance of WHAT is declared, or what to do instead."""
+    kind, _, lint = what.partition(' ')
+    return DECLARE[kind].format(lint) if lint else DECLARE[what]
 
 
-def problems(floors, now):
-    """Why NOW breaks FLOORS, one line each."""
-    found = []
-    for crate in sorted(set(floors['crates']) | set(now['crates'])):
-        floor, have = floors['crates'].get(crate, {}), now['crates'].get(crate, Counter())
-        found += [bound(f'{crate} {smell}', have[smell], floor.get(smell, 0)) for smell in CRATE_SMELLS]
-    for lint in sorted(now['lints']):
-        if now['lints'][lint] > floors['lints'].get(lint, 0):
-            found.append(f'lint {lint}: {now["lints"][lint]}, above its ceiling {floors["lints"].get(lint, 0)}')
-    for key in LISTED:
-        found += listed(f'layout {key}', now['layout'][key], floors['layout'][key])
-    found += [bound(f'layout {key}', now['layout'][key], floors['layout'][key]) for key in COUNTED]
-    return [p for p in found if p]
+def rises(base, tree):
+    """Why TREE adds a smell to BASE, one line each: both are summaries."""
+    had, have = base['totals'], tree['totals']
+    found = [f'{what}: {have[what]}, above the {had.get(what, 0)} of its merge-base; '
+             f'remove {have[what] - had.get(what, 0)}, or {declare(what)}'
+             for what in sorted(have) if have[what] > had.get(what, 0)]
+    return found + [f'generated: {name} is new; declare it with `SMELL(generated): reason` in its first lines'
+                    for name in sorted(set(tree['generated']) - set(base['generated']))]
 
 
-def tally(counts):
-    """COUNTS, in the floors file's shape, as one {what: count} of what a tree holds."""
-    flat = {f'{crate} {smell}': n for crate, smells in counts['crates'].items() for smell, n in smells.items()}
-    flat.update({f'lint {lint}': n for lint, n in counts['lints'].items()})
-    flat.update({f'layout {key}': counts['layout'].get(key, 0) for key in COUNTED})
-    return flat
+def named(text):
+    """The names the Top level section of ARCHITECTURE.md's TEXT gives in
+    backquotes, a directory's trailing slash dropped."""
+    section = re.search(r'^## Top level\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    return {name.rstrip('/') for name in re.findall(r'`([^`\n]+)`', section[1] if section else '')}
 
 
-def rises(floors, base_floors, base, now, ahead=True):
-    """Why NOW adds a smell to BASE, one line each. BASE and NOW are the counts of
-    the merge-base and of the tree, and BASE_FLOORS and FLOORS their floors
-    files: a floor raised between them allows a rise of as much.
-
-    A tree AHEAD of its merge-base, a branch, may not lower a floor or drop a
-    listed entry. Its drop was measured on its own tree, and the merge with the
-    trunk may not have it (a file one side shortened and the other lengthened);
-    a floor lowered there would leave the trunk above its floor with no change
-    to blame. Lowering is recorded on the trunk, at a checkpoint."""
-    have, had, raised, was = tally(now), tally(base), tally(floors), tally(base_floors)
-    found = []
-    if ahead:
-        found += [f'{what}: its floor is lowered from {was[what]} to {raised.get(what, 0)}; a drop needs no record on '
-                  f'a branch, and `lower` records it on the trunk at a checkpoint: restore the floor'
-                  for what in sorted(was) if raised.get(what, 0) < was[what]]
-    for what in sorted(have):
-        allowed = max(0, raised.get(what, 0) - was.get(what, 0))
-        if have[what] > had.get(what, 0) + allowed:
-            over = have[what] - had.get(what, 0) - allowed
-            found.append(f'{what}: {have[what]}, above the {had.get(what, 0)} of its merge-base'
-                         + (f' and the {allowed} its floor was raised by' if allowed else '')
-                         + f"; remove {over}, or set its floor in {FLOORS} {allowed + over} above the merge-base's")
-    def entries(counts, key):                   # a floors file from before a list was one has a count there
-        value = counts['layout'].get(key)
-        return set(value) if isinstance(value, list) else set()
-    for key in LISTED:
-        new = entries(now, key) - entries(base, key) - (entries(floors, key) - entries(base_floors, key))
-        found += [f'layout {key}: {entry} is new; adding one is a deliberate edit of {FLOORS}' for entry in sorted(new)]
-        if ahead:
-            found += [f'layout {key}: {entry} is dropped from the list; `lower` drops it on the trunk at a '
-                      f'checkpoint: restore it' for entry in sorted(entries(base_floors, key) - entries(floors, key))]
-    return found
+def rules(root, now):
+    """Why the tree at ROOT, measured as NOW, breaks a layout rule, one line each."""
+    names = named((Path(root) / ARCHITECTURE).read_text())
+    found = [f'top level: {entry} is not named in the Top level section of {ARCHITECTURE}; name it there'
+             for entry in now['layout']['root'] if entry not in names]
+    return found + [f'workspace member {member} is outside crates/; move it there'
+                    for member in now['layout']['members_outside_crates']]
 
 
 def git(root, *args):
@@ -404,12 +398,12 @@ def cargo_settings():
     return env, [(name, (home / name).read_text()) for name in ('config', 'config.toml') if (home / name).is_file()]
 
 
-def counting(long_file_lines):
-    """What a tree's counts depend on beside the tree: this code, Clippy, the
-    limit, and Cargo's settings from outside the tree."""
+def counting():
+    """What a tree's counts depend on beside the tree: this code, Clippy, and
+    Cargo's settings from outside the tree."""
     code = b''.join((Path(__file__).resolve().parent / name).read_bytes() for name in COUNTING)
     clippy = subprocess.run(['cargo', 'clippy', '-V'], stdout=subprocess.PIPE, check=True).stdout
-    return hashlib.sha256(code + clippy + repr((long_file_lines, cargo_settings())).encode()).hexdigest()
+    return hashlib.sha256(code + clippy + repr(cargo_settings()).encode()).hexdigest()
 
 
 def kept(tree, how):
@@ -432,9 +426,8 @@ def clean_tree(root):
     return git(root, 'write-tree')
 
 
-def base_counts(root, commit, floors, how):
-    """COMMIT's counts in the floors file's shape, measured once: in the one
-    kept checkout, one measurer at a time."""
+def base_counts(root, commit, how):
+    """COMMIT's summary, measured once: in the one kept checkout, one measurer at a time."""
     path = kept(git(root, 'rev-parse', f'{commit}^{{tree}}'), how)
     if path.exists():
         return json.loads(path.read_text())
@@ -449,7 +442,7 @@ def base_counts(root, commit, floors, how):
                 else git(root, 'worktree', 'add', '--detach', '--force', str(checkout), commit)
             if moved is None or git(checkout, 'clean', '-fdq') is None:
                 raise ValueError(f'cannot check the merge-base {commit[:12]} out into {checkout}')
-            keep(path, as_floors(None, floors['long_file_lines'], measure(checkout, floors)))
+            keep(path, summary(measure(checkout)))
     return json.loads(path.read_text())
 
 
@@ -477,120 +470,21 @@ def merge_base(root, rev):
     return bases[0]
 
 
-def base_side(root, rev, floors, now=None):
-    """(the merge-base's floors, its counts) for `rises`. NOW, the tree's own
-    counts as this code measured them, is kept first when git has the whole
-    tree, so a tree that is its own merge-base, or a later branch's, is not
-    measured twice."""
+def held_to_base(root, rev, tree, keep_own=True):
+    """`rises` for the tree at ROOT, whose summary is TREE, against its merge-base
+    with REV. TREE is kept first when git has the whole tree (and KEEP_OWN: it
+    was measured here, not from supplied diagnostics), so a tree that is its own
+    merge-base, or a later branch's, is not measured twice."""
     commit = merge_base(root, rev)
-    how = counting(floors['long_file_lines'])
-    tree = now and clean_tree(root)
-    if tree:
-        keep(kept(tree, how), now)
-    was = git(root, 'show', f'{commit}:{FLOORS}') or git(root, 'show', f'{commit}:{FLOORS_BEFORE}')
-    empty = {'crates': {}, 'lints': {}, 'layout': {}}
-    return json.loads(was) if was else empty, base_counts(root, commit, floors, how), commit
+    how = counting()
+    own = keep_own and clean_tree(root)
+    if own:
+        keep(kept(own, how), tree)
+    return rises(base_counts(root, commit, how), tree)
 
 
-def held_to_base(root, rev, floors, tree, keep_own=True):
-    """`rises` for the tree at ROOT, whose counts are TREE, against its merge-base with REV."""
-    base_floors, base, commit = base_side(root, rev, floors, tree if keep_own else None)
-    return rises(floors, base_floors, base, tree, ahead=git(root, 'rev-parse', 'HEAD') != commit)
-
-
-def lowered(floors, now):
-    """FLOORS lowered to NOW, never raised; zeros and gone entries dropped."""
-    crates = {}
-    for crate, floor in floors['crates'].items():
-        new = {s: min(floor.get(s, 0), now['crates'].get(crate, Counter())[s]) for s in CRATE_SMELLS}
-        if any(new.values()):
-            crates[crate] = new
-    lints = {lint: min(n, now['lints'][lint]) for lint, n in floors['lints'].items() if now['lints'][lint]}
-    old = floors['layout']
-    return {**floors, 'crates': dict(sorted(crates.items())), 'lints': dict(sorted(lints.items())),
-            'layout': {**{key: [e for e in old[key] if e in now['layout'][key]] for key in LISTED},
-                       **{key: min(old[key], now['layout'][key]) for key in COUNTED}}}
-
-
-def merged(base, ours, theirs):
-    """The floors file a merge of OURS and THEIRS has, both grown from BASE.
-
-    A count is each side's raise added to the lowest of the three: a raise is
-    an allowance its side asked for, so two raises both count, and a floor one
-    side lowered stays lowered. Only the trunk lowers (`rises` holds a branch
-    to that), so the lowered floor is one the trunk's own tree met, and the
-    merge can exceed it only by what the branch's raise allows. A list has
-    what both keep and what either added. Where the file's form changed on one
-    side (a count that became a list), the list is the newer form. The limit
-    and the rule's text changed differently on the two sides is a conflict."""
-    def count(b, o, t):
-        return min(b, o, t) + max(0, o - b) + max(0, t - b)
-
-    def entries(b, o, t):
-        return sorted((o & t) | (o - b) | (t - b))
-
-    def one(b, o, t):
-        sides = (b, o, t)
-        if any(isinstance(x, dict) for x in sides):
-            b, o, t = (x if isinstance(x, dict) else {} for x in sides)
-            both = {k: one(b.get(k), o.get(k), t.get(k)) for k in sorted(set(o) | set(t))}
-            return {k: v for k, v in both.items() if v != 0}
-        if any(isinstance(x, list) for x in sides):
-            return entries(*(set(x) if isinstance(x, list) else set() for x in sides))
-        return count(*(x or 0 for x in sides))
-    kept = {}
-    for key in ('rule', 'long_file_lines'):
-        if len({json.dumps(side[key]) for side in (base, ours, theirs)}) == 3:
-            raise ValueError(f'{key} changed differently on the two sides')
-        kept[key] = ours[key] if ours[key] != base[key] else theirs[key]
-    crates = one(base['crates'], ours['crates'], theirs['crates'])
-    return {**ours, **kept, 'lints': one(base['lints'], ours['lints'], theirs['lints']),
-            'crates': {c: {s: v.get(s, 0) for s in CRATE_SMELLS} for c, v in crates.items() if v},
-            'layout': {**{k: [] for k in LISTED}, **{k: 0 for k in COUNTED},
-                       **one(base['layout'], ours['layout'], theirs['layout'])}}
-
-
-def merge_files(base, ours, theirs):
-    """Git's merge driver for the floors file (tools/git-setup installs
-    it): write the three-way merge over OURS. 1, leaving OURS, when a side
-    is not a floors file (no common ancestor has one, or it does not parse):
-    git then reports the conflict as it would without a driver. Git asks no
-    driver when the two sides are the same file, so the same raise made on
-    both sides, with nothing else differing, still merges to one raise."""
-    try:
-        text = dump(merged(*(json.loads(Path(p).read_text()) for p in (base, ours, theirs))))
-    except (OSError, ValueError, KeyError, TypeError):
-        return 1
-    Path(ours).write_text(text)
-    return 0
-
-
-def as_floors(rule, long_file_lines, now):
-    """NOW in the floors file's shape: what `report --floors` prints."""
-    crates = {c: {s: t[s] for s in CRATE_SMELLS} for c, t in sorted(now['crates'].items())
-              if any(t[s] for s in CRATE_SMELLS)}
-    return {'rule': rule, 'long_file_lines': long_file_lines, 'crates': crates,
-            'lints': dict(sorted(now['lints'].items())), 'layout': now['layout']}
-
-
-def dump(floors):
-    """FLOORS as ledger/smell-floors.json text, one line per crate, lint and entry,
-    so lanes that lower different ones merge cleanly."""
-    def lines(items):
-        return ',\n'.join(f'    {item}' for item in items)
-    lay = floors['layout']
-    return (f'{{\n  "rule": {json.dumps(floors["rule"])},\n'
-            f'  "long_file_lines": {floors["long_file_lines"]},\n'
-            f'  "crates": {{\n{lines(f"{json.dumps(c)}: {json.dumps(v)}" for c, v in floors["crates"].items())}\n  }},\n'
-            f'  "lints": {{\n{lines(f"{json.dumps(k)}: {v}" for k, v in floors["lints"].items())}\n  }},\n'
-            f'  "layout": {{\n    "root": [\n{lines("  " + json.dumps(e) for e in lay["root"])}\n    ],\n'
-            f'    "members_outside_crates": {json.dumps(lay["members_outside_crates"])},\n'
-            f'    "generated": [\n{lines("  " + json.dumps(e) for e in lay["generated"])}\n    ],\n'
-            + ''.join(f'    "{key}": {lay[key]},\n' for key in COUNTED).rstrip(',\n') + '\n  }\n}\n')
-
-
-def report(root, floors, now, top=12):
-    unsafe = unsafe_census.report(unsafe_census.census(root))
+def report(now, top=12):
+    unsafe = unsafe_census.report(now['unsafe'])
     crates = [f'{"crate":32} {"allows":>7} {"todos":>6} {"long":>5}']
     total = Counter()
     for crate, tally in sorted(now['crates'].items(), key=lambda item: -sum(item[1].values())):
@@ -599,76 +493,40 @@ def report(root, floors, now, top=12):
             crates.append(f'{crate:32} {tally["allows"]:>7} {tally["todos"]:>6} {tally["long_files"]:>5}')
     crates.append(f'{"total":32} {total["allows"]:>7} {total["todos"]:>6} {total["long_files"]:>5}')
     long = [f'{lines:>7} {path}' for lines, path in now['long'][:top]]
-    lints = [f'{now["lints"][lint]:>7} {floors["lints"].get(lint, 0):>7} {lint}'
-             for lint in sorted(set(floors['lints']) | set(now['lints']),
-                                key=lambda lint: (-now['lints'][lint], lint))]
-    slack = sum(n - now['lints'][lint] for lint, n in floors['lints'].items() if n > now['lints'][lint])
+    lints = [f'{n:>7} {lint}' for lint, n in sorted(now['lints'].items(), key=lambda item: (-item[1], item[0]))]
     per_crate = [f'{sum(c.values()):>7} {crate}' for crate, c in
                  sorted(now['lints_by_crate'].items(), key=lambda item: -sum(item[1].values()))]
     lay = now['layout']
-    return '\n'.join(['unsafe (tools/lib/unsafe_census.py):', unsafe, '', 'smells:', *crates, '',
-                      f'longest files ({len(now["long"])} over the limit):', *long, '',
-                      f'warnings by lint ({sum(now["lints"].values())}; count, ceiling; '
-                      f'{slack} below the ceilings, for `lower`):', *lints, '',
+    return '\n'.join(['unsafe (tools/lib/unsafe_census.py):', unsafe, '', 'smells (undeclared):', *crates, '',
+                      f'longest undeclared files ({len(now["long"])} over {LONG_FILE_LINES} lines):', *long, '',
+                      f'warnings by lint ({sum(now["lints"].values())}):', *lints, '',
                       'warnings by crate:', *per_crate, '',
-                      f'layout: {len(lay["root"])} top-level entries, {len(lay["members_outside_crates"])} '
-                      f'members outside crates/, {lay["legacy_primitives"]} primitives registered in lib.rs, '
-                      f'{lay["primitives_outside_prims"]} declared outside {PRIMS}, '
-                      f'{len(lay["generated"])} generated files tracked',
+                      f'layout: {len(lay["root"])} top-level entries, {lay["legacy_primitives"]} primitives '
+                      f'registered in lib.rs, {lay["primitives_outside_prims"]} undeclared outside {PRIMS}, '
+                      f'{len(lay["generated"])} undeclared generated files tracked',
                       *(f'{n:>7} {path}' for path, n in sorted(now['strays'].items()))])
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve', 'merge', 'prune'])
-    parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS')
+    parser.add_argument('command', choices=['check', 'report', 'prune'])
     parser.add_argument('--root', default='.')
     parser.add_argument('--clippy-json', help="cargo clippy's JSON messages, instead of running it")
-    parser.add_argument('--floors', action='store_true', help='report: print the counts as a floors file')
     parser.add_argument('--base', default=os.environ.get('ROMACS_BASE') or 'beta',
                         help='check: the trunk whose merge-base the tree is held to')
-    parser.add_argument('--absolute', action='store_true', help='check: hold the tree to the floors file instead')
     args = parser.parse_args()
-    path = Path(args.root) / FLOORS
     if args.command == 'prune':
         base = os.environ.get('ROMACS_CLIPPY_TARGET_DIR')
         for tree in prune(base) if base and Path(base).is_dir() else []:
             print(f'smells: removed {tree}, whose checkout is gone')
         return 0
-    if args.command == 'merge':
-        if len(args.files) != 3:
-            parser.error('merge takes BASE OURS THEIRS')
-        return merge_files(*args.files)
-    if args.command == 'resolve':
-        sides = [subprocess.run(['git', '-C', args.root, 'show', f':{stage}:{FLOORS}'], capture_output=True,
-                                text=True) for stage in (1, 2, 3)]
-        if any(side.returncode for side in sides):
-            print(f'smells: {FLOORS} is not in a three-way conflict', file=sys.stderr)
-            return 2
-        try:
-            path.write_text(dump(merged(*(json.loads(side.stdout) for side in sides))))
-        except ValueError as exc:
-            print(f'smells: {exc}; settle it by hand', file=sys.stderr)
-            return 1
-        print(f'smells: {FLOORS} is the merge of both sides; git add it')
-        return 0
-    floors = json.loads(path.read_text())
     try:
-        now = measure(args.root, floors, args.clippy_json)
-    except ValueError as exc:
-        print(f'smells: {exc}', file=sys.stderr)
-        return 1
-    if args.command == 'report':
-        sys.stdout.write(dump(as_floors(floors['rule'], floors['long_file_lines'], now)) if args.floors
-                         else report(args.root, floors, now) + '\n')
-        return 0
-    if args.command == 'lower':
-        path.write_text(dump(lowered(floors, now)))
-        return 0
-    try:
-        tree = as_floors(None, floors['long_file_lines'], now)
-        found = problems(floors, now) if args.absolute else \
-            held_to_base(args.root, args.base, floors, tree, keep_own=not args.clippy_json)
+        now = measure(args.root, args.clippy_json)
+        if args.command == 'report':
+            print(report(now))
+            return 0
+        found = rules(args.root, now) + held_to_base(args.root, args.base, summary(now),
+                                                     keep_own=not args.clippy_json)
     except (ValueError, subprocess.CalledProcessError) as exc:
         print(f'smells: {exc}', file=sys.stderr)
         return 1

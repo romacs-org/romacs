@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unsafe Rust census, with per-crate ratchets (ledger/unsafe-floors.json).
+"""Unsafe Rust census: what counts as a site, as documented, and as declared.
 
 Scope: every .rs file Git tracks or would track (untracked files that are not
 ignored count too) inside a Cargo package directory, credited to the nearest
@@ -20,37 +20,30 @@ left in code is one site, of one kind:
   attr    `#[unsafe(no_mangle)]` and the other unsafe attributes
   other   any other use (macro patterns), counted so nothing hides
 
-What counts as documented. A site is documented when a comment containing
-`SAFETY:` (any case, as Clippy's undocumented_unsafe_blocks reads it) is
-either earlier on the site's own line, or in the run of comment lines directly
-above it. The run is the comment-only lines walking up from the site's line;
-attribute lines (`#[...]`, one line each) are stepped over, and a blank line or
-any other code ends it. For fn, impl and trait a `# Safety` heading in the
-doc comment counts too. A trailing comment after code, or a SAFETY comment
-above the start of a multi-line statement whose `unsafe` begins a later
-line, does not count: put the comment on the line above the keyword.
+What annotates a site: the comments earlier on its own line, and the run of
+comment lines directly above it. The run is the comment-only lines walking up
+from the site's line; attribute lines (`#[...]`, one line each) are stepped
+over, and a blank line or any other code ends it. A trailing comment after
+code, or a comment above the start of a multi-line statement whose `unsafe`
+begins a later line, does not annotate it: put the comment on the line above
+the keyword.
 
-The ratchet. ledger/unsafe-floors.json records, per crate, `sites` and
-`undocumented`. `check` fails when a crate's count rises above its floor, and
-also when a floor is slack (the crate now has fewer), so a deletion is
-recorded in the same change: run `lower`, which only ever lowers floors and
-drops crates that reach zero. A crate absent from the file has floors of
-zero. Raising a floor is a hand edit, made deliberately in its own commit.
-Undocumented sites carry the coverage rule: a new unsafe site without a
-SAFETY comment raises `undocumented` and fails, and deleting a documented
-site never does.
+A site is documented when its annotation holds `SAFETY:` (any case, as
+Clippy's undocumented_unsafe_blocks reads it); for fn, impl and trait a
+`# Safety` heading in the doc comment counts too. A site is declared when its
+annotation also holds `UNSAFE(reason)`: why no crate in Cargo.lock covers the
+call safely (AGENTS.md). tools/lib/smells.py holds the workspace's undeclared
+and undocumented sites to the merge-base's: a new site is declared where it
+occurs, and an undocumented one never comes back.
 
-The file also lists the crates where `unsafe_op_in_unsafe_fn` is not yet
-denied (`unsafe_op_in_unsafe_fn_pending`, crate: reason). `check` fails when a
-crate neither denies the lint (through `[lints] workspace = true`, its own
-`unsafe_op_in_unsafe_fn = "deny"`, or `unsafe_code = "forbid"`) nor is
-listed, and when a listed crate already denies it.
+`check` holds every package to denying `unsafe_op_in_unsafe_fn` (through
+`[lints] workspace = true`, its own `unsafe_op_in_unsafe_fn = "deny"`, or
+`unsafe_code = "forbid"`), with no source attribute relaxing it again.
 
-usage: unsafe_census.py check|report|lower [--root ROOT]
+usage: unsafe_census.py check|report [--root ROOT]
 """
 import argparse
 import bisect
-import json
 import re
 import subprocess
 import sys
@@ -58,9 +51,7 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-FLOORS = Path('ledger/unsafe-floors.json')
 KINDS = ('block', 'fn', 'impl', 'trait', 'extern', 'attr', 'other')
-PENDING = 'unsafe_op_in_unsafe_fn_pending'
 
 # The next lexically interesting thing: a comment, a literal, or `unsafe`.
 TOKEN = re.compile(r'''
@@ -83,6 +74,7 @@ KIND = (
 )
 SAFETY = re.compile(r'SAFETY:', re.IGNORECASE)
 SAFETY_HEADING = re.compile(r'#\s*Safety\b')
+DECLARED = re.compile(r'\bUNSAFE\(\s*[^)\s][^)]*\)')
 # The lint, or the one group that contains it.
 LINT_ALLOW = re.compile(r'\b(?:allow|expect|warn)\s*\([^)]*\b(?:unsafe_op_in_unsafe_fn|rust_2024_compatibility)\b')
 
@@ -145,10 +137,9 @@ def is_site(code, offset, kind):
     return kind != 'other' or not re.match(r'unsafe\s+(?:extern\s+)?fn\s*[(<]', code[offset:offset + 200])
 
 
-def documented(kind, line, column, lines, comments_by_line):
-    """Whether the site at LINE, COLUMN (0-based) carries a SAFETY comment
-    under the module's counting rule."""
-    heading = kind in ('fn', 'impl', 'trait')
+def annotation(line, column, lines, comments_by_line):
+    """The comment text annotating the code at LINE, COLUMN (0-based): the
+    comments earlier on its line and the run of comment lines directly above."""
     text = [t for start_col, t in comments_by_line.get(line, ()) if start_col < column]
     row = line - 1
     while row >= 0:
@@ -160,14 +151,16 @@ def documented(kind, line, column, lines, comments_by_line):
         else:
             break
         row -= 1
-    joined = '\n'.join(text)
-    return bool(SAFETY.search(joined) or (heading and SAFETY_HEADING.search(joined)))
+    return '\n'.join(text)
 
 
-def file_census(src):
-    """([(kind, documented, line)] for each unsafe site in SRC, the number
-    of attributes in SRC that allow unsafe_op_in_unsafe_fn)."""
-    code, comments, keywords = lex(src)
+def documented(kind, note):
+    """Whether NOTE, a site's annotation, documents a site of KIND."""
+    return bool(SAFETY.search(note) or (kind in ('fn', 'impl', 'trait') and SAFETY_HEADING.search(note)))
+
+
+def annotator(src, code, comments):
+    """(line of an offset, the annotation of an offset) for SRC lexed into CODE and COMMENTS."""
     newlines = [i for i, c in enumerate(src) if c == '\n']
     line_of = lambda offset: bisect.bisect_left(newlines, offset)  # noqa: E731
     line_start = lambda line: newlines[line - 1] + 1 if line else 0  # noqa: E731
@@ -177,13 +170,24 @@ def file_census(src):
         for row in range(first, last + 1):
             comments_by_line.setdefault(row, []).append((start - line_start(first) if row == first else 0, text))
     lines = code.split('\n')
+
+    def note(offset):
+        line = line_of(offset)
+        return annotation(line, offset - line_start(line), lines, comments_by_line)
+    return line_of, note
+
+
+def file_census(src):
+    """([(kind, documented, declared, line)] for each unsafe site in SRC, the
+    number of attributes in SRC that allow unsafe_op_in_unsafe_fn)."""
+    code, comments, keywords = lex(src)
+    line_of, note = annotator(src, code, comments)
     sites = []
     for offset in keywords:
         kind = kind_of(code, offset)
-        if not is_site(code, offset, kind):
-            continue
-        line = line_of(offset)
-        sites.append((kind, documented(kind, line, offset - line_start(line), lines, comments_by_line), line + 1))
+        if is_site(code, offset, kind):
+            text = note(offset)
+            sites.append((kind, documented(kind, text), bool(DECLARED.search(text)), line_of(offset) + 1))
     return sites, len(LINT_ALLOW.findall(code))
 
 
@@ -226,17 +230,18 @@ def rust_sources(root):
 
 
 def census(root):
-    """{crate: Counter of kinds plus 'sites', 'undocumented', and 'allows'
-    (source attributes that relax unsafe_op_in_unsafe_fn)}."""
+    """{crate: Counter of kinds plus 'sites', 'undocumented', 'declared', and
+    'allows' (source attributes that relax unsafe_op_in_unsafe_fn)}."""
     counts = {}
     for crate, _, src in rust_sources(root):
         tally = counts.setdefault(crate, Counter())
         sites, allows = file_census(src)
         tally['allows'] += allows
-        for kind, ok, _ in sites:
+        for kind, ok, declared, _ in sites:
             tally[kind] += 1
             tally['sites'] += 1
             tally['undocumented'] += not ok
+            tally['declared'] += declared
     return counts
 
 
@@ -253,113 +258,20 @@ def lint_denied(manifest, workspace):
     return level(rust, 'unsafe_op_in_unsafe_fn') in ('deny', 'forbid') or level(rust, 'unsafe_code') == 'forbid'
 
 
-def lint_problems(root, pending, counts):
-    """Packages whose unsafe_op_in_unsafe_fn state disagrees with PENDING. A
-    package denies the lint when its manifest does and no source attribute
-    (or its group rust_2024_compatibility) relaxes it again."""
+def lint_problems(root, counts):
+    """Packages that do not deny unsafe_op_in_unsafe_fn. A package denies the
+    lint when its manifest does and no source attribute (or its group
+    rust_2024_compatibility) relaxes it again."""
     workspace = tomllib.loads((Path(root) / 'Cargo.toml').read_text()).get('workspace', {}).get('lints', {})
-    found = []
-    names = set()
-    for directory, name in sorted(packages(root).items()):
-        names.add(name)
-        denied = (lint_denied(tomllib.loads((Path(root) / directory / 'Cargo.toml').read_text()), workspace)
-                  and not counts.get(name, Counter())['allows'])
-        if denied and name in pending:
-            found.append(f'{name} denies unsafe_op_in_unsafe_fn; drop it from {PENDING} in {FLOORS}')
-        elif not denied and name not in pending:
-            found.append(f'{name} does not deny unsafe_op_in_unsafe_fn; deny it, or list it in {PENDING} with a reason')
-        elif name in pending and not str(pending[name]).strip():
-            found.append(f'{name} is listed in {PENDING} without a reason')
-    found += [f'{PENDING} names {name}, which is no package' for name in sorted(set(pending) - names)]
-    return found
-
-
-def problems(root, floors=None, counts=None):
-    """Why ROOT's unsafe census breaks ledger/unsafe-floors.json, one line each."""
-    floors = floors if floors is not None else json.loads((Path(root) / FLOORS).read_text())
-    counts = counts if counts is not None else census(root)
-    recorded = floors.get('crates', {})
-    found = []
-    for crate in sorted(set(recorded) | set(counts)):
-        floor = recorded.get(crate, {})
-        now = counts.get(crate, Counter())
-        for key, what in (('sites', 'unsafe sites'), ('undocumented', 'unsafe sites without a SAFETY: comment')):
-            have, limit = now[key], floor.get(key, 0)
-            if have > limit:
-                found.append(f'{crate}: {have} {what}, above its floor {limit}')
-            elif have < limit:
-                found.append(f'{crate}: {have} {what}, below its floor {limit}; '
-                             'record the drop with tools/lib/unsafe_census.py lower')
-    return found + lint_problems(root, floors.get(PENDING, {}), counts)
-
-
-def lowered(floors, counts):
-    """FLOORS with every crate's floors lowered to COUNTS, never raised."""
-    crates = {}
-    for crate, floor in floors.get('crates', {}).items():
-        now = counts.get(crate, Counter())
-        new = {key: min(floor.get(key, 0), now[key]) for key in ('sites', 'undocumented')}
-        if new['sites']:
-            crates[crate] = new
-    return {**floors, 'crates': dict(sorted(crates.items()))}
-
-
-def dump(floors):
-    """FLOORS as ledger/unsafe-floors.json text: one line per crate, so lanes that
-    lower different crates merge cleanly."""
-    crates = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(floor)}' for crate, floor in floors['crates'].items())
-    pending = ',\n'.join(f'    {json.dumps(crate)}: {json.dumps(reason)}'
-                          for crate, reason in sorted(floors.get(PENDING, {}).items()))
-    return (f'{{\n  "rule": {json.dumps(floors["rule"])},\n  "crates": {{\n{crates}\n  }},\n'
-            f'  "{PENDING}": {{\n{pending}\n  }}\n}}\n')
-
-
-def merged(base, ours, theirs):
-    """The floors a merge of OURS and THEIRS has, both grown from BASE. The
-    floors are exact (check fails below one as well as above), so each count
-    is BASE plus both sides' changes: two lanes that each removed sites in a
-    crate both count. Where both sides removed the same site the result is
-    low by one and check says so. Pending entries merge three ways."""
-    keys = ('sites', 'undocumented')
-    names = set(base['crates']) | set(ours['crates']) | set(theirs['crates'])
-
-    def count(crate, key):
-        b, o, t = (side['crates'].get(crate, {}).get(key, 0) for side in (base, ours, theirs))
-        return o + t - b
-    crates = {crate: {key: count(crate, key) for key in keys} for crate in sorted(names)}
-    return {**ours, 'crates': {c: f for c, f in crates.items() if f['sites'] > 0},
-            PENDING: merged_entries(*(side.get(PENDING, {}) for side in (base, ours, theirs)))}
-
-
-def merged_entries(base, ours, theirs):
-    """A three-way merge of two maps grown from BASE: an entry one side
-    changed or removed takes that side's change; both sides changing one
-    entry differently is a conflict (ValueError)."""
-    result = {}
-    for key in sorted(set(base) | set(ours) | set(theirs)):
-        b, o, t = base.get(key), ours.get(key), theirs.get(key)
-        if o != b and t != b and o != t:
-            raise ValueError(f'{key} changed differently on the two sides')
-        value = t if o == b else o
-        if value is not None:
-            result[key] = value
-    return result
-
-
-def merge_files(base, ours, theirs):
-    """Git's merge driver for ledger/unsafe-floors.json (tools/git-setup installs
-    it): write the merge over OURS. 1, leaving OURS, when a side does not
-    parse: git then reports the conflict as it would without a driver."""
-    try:
-        text = dump(merged(*(json.loads(Path(p).read_text()) for p in (base, ours, theirs))))
-    except (OSError, ValueError, KeyError, TypeError):
-        return 1
-    Path(ours).write_text(text)
-    return 0
+    return [f'{name} does not deny unsafe_op_in_unsafe_fn; deny it'
+            for directory, name in sorted(packages(root).items())
+            if not lint_denied(tomllib.loads((Path(root) / directory / 'Cargo.toml').read_text()), workspace)
+            or counts.get(name, Counter())['allows']]
 
 
 def report(counts):
-    header = f'{"crate":32} ' + ' '.join(f'{k:>6}' for k in KINDS) + f' {"sites":>6} {"undoc":>6} {"cover":>6}'
+    header = (f'{"crate":32} ' + ' '.join(f'{k:>6}' for k in KINDS)
+              + f' {"sites":>6} {"undoc":>6} {"decl":>6} {"cover":>6}')
     rows = [header]
     total = Counter()
     for crate, tally in sorted(((c, t) for c, t in counts.items() if t['sites']), key=lambda item: -item[1]['sites']):
@@ -372,26 +284,19 @@ def report(counts):
 def row(name, tally):
     cover = 100 * (tally['sites'] - tally['undocumented']) / tally['sites'] if tally['sites'] else 100
     return (f'{name:32} ' + ' '.join(f'{tally[k]:>6}' for k in KINDS)
-            + f' {tally["sites"]:>6} {tally["undocumented"]:>6} {cover:>5.1f}%')
+            + f' {tally["sites"]:>6} {tally["undocumented"]:>6} {tally["declared"]:>6} {cover:>5.1f}%')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower', 'merge'])
-    parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS, as git passes them')
+    parser.add_argument('command', choices=['check', 'report'])
     parser.add_argument('--root', default='.')
     args = parser.parse_args()
-    if args.command == 'merge':
-        return merge_files(*args.files)
+    counts = census(args.root)
     if args.command == 'report':
-        print(report(census(args.root)))
+        print(report(counts))
         return 0
-    path = Path(args.root) / FLOORS
-    floors = json.loads(path.read_text())
-    if args.command == 'lower':
-        path.write_text(dump(lowered(floors, census(args.root))))
-        return 0
-    found = problems(args.root, floors)
+    found = lint_problems(args.root, counts)
     for problem in found:
         print(f'unsafe-census: {problem}', file=sys.stderr)
     return 1 if found else 0
