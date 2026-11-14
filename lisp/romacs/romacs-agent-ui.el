@@ -4,7 +4,12 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Romacs's own interface to agent sessions (romacs-agent.el).
+;; Romacs's own interface to agent sessions (romacs-agent.el), in the look of
+;; emacs-hermes's chat (lisp/romacs/hermes, by the same author): its pure
+;; formatting helpers (hermes-chat-format.el: the clock, token counts,
+;; Markdown) are used as they are; the prompt face, the full-width rule, the
+;; turn footer, the composer hint and the header's shape are adapted from
+;; hermes-chat.el and hermes-chat-buffer.el to romacs-agent's sessions.
 ;;
 ;; - One state for a session (`romacs-agent-ui--state'), every view's:
 ;;   the header, the workers' rows, the cards of delegated tasks, the status
@@ -42,18 +47,20 @@
 ;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
+(declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
 
-;;; Faces
+;;; Faces (hermes-chat's, for the same look)
 
 (defface romacs-agent-prompt '((t :inherit highlight))
-  "A user's prompt in a chat.")
+  "A user's prompt in a chat (hermes-chat-user-input).")
 (defface romacs-agent-rule
   '((((background light)) :foreground "gray70")
     (t :foreground "gray30"))
-  "The rule closing a turn and above the composer.")
+  "The rule closing a turn and above the composer (hermes-chat-separator's colours).")
 (defface romacs-agent-running '((t :inherit font-lock-keyword-face))
-  "What is running: a tool's mark, the live rule.")
+  "What is running: a tool's mark, the live rule (hermes-chat-turn-running).")
 (defface romacs-agent-dim '((t :inherit shadow))
   "Settled rows, thinking, folded output and metadata.")
 (defface romacs-agent-done '((t :inherit success))
@@ -65,7 +72,7 @@
 (defface romacs-agent-error '((t :inherit error))
   "A failed tool call or turn.")
 (defface romacs-agent-model '((t :inherit font-lock-type-face))
-  "The model in a chat's header.")
+  "The model in a chat's header (hermes-chat-header-model).")
 (defface romacs-agent-effort '((t :weight bold))
   "A reasoning effort; each level's face inherits it.")
 (defface romacs-agent-effort-default '((t :inherit shadow))
@@ -79,7 +86,7 @@
 (defface romacs-agent-project '((t :inherit font-lock-function-name-face))
   "A session's project, where a row names it.")
 (defface romacs-agent-context '((t :inherit font-lock-number-face))
-  "Context tokens in a chat's header.")
+  "Context tokens in a chat's header (hermes-chat-header-context).")
 (defface romacs-agent-mode '((t :inherit font-lock-builtin-face))
   "The harness's permission mode in a chat's header.")
 (defface romacs-agent-section '((t :inherit font-lock-function-name-face :weight bold))
@@ -131,13 +138,6 @@ much of it its deltas wrote.")
   (require 'hermes-chat-format))
 
 ;;; The transcript
-
-(defun romacs-agent-ui--clock (seconds)
-  "SECONDS as a clock: 12s, 4:26 or 1:02:03."
-  (let ((s (max 0 (floor seconds))))
-    (cond ((< s 60) (format "%ds" s))
-          ((< s 3600) (format "%d:%02d" (/ s 60) (% s 60)))
-          (t (format "%d:%02d:%02d" (/ s 3600) (/ (% s 3600) 60) (% s 60))))))
 
 (defun romacs-agent-ui--depth (session parent)
   "How deep a block under tool call PARENT nests."
@@ -448,7 +448,7 @@ delegation's row is a card (`romacs-agent-ui--tool-text')."
            (let ((inhibit-read-only t))
              (if (not mark)
                  (goto-char romacs-agent-ui--end)
-               ;; The mark settles; the row recedes.
+               ;; The mark settles; the row recedes (hermes-chat--entry-head-face).
                (goto-char mark)
                (delete-char 1)
                (insert (romacs-agent-ui--sealed
@@ -465,8 +465,9 @@ delegation's row is a card (`romacs-agent-ui--tool-text')."
                                     'invisible 'romacs-agent-output))))))))))
 
 (defun romacs-agent-ui--table-width ()
-  "Columns a table may take: the window's pixels in the fixed-pitch font's
-width, less two for the line's end.  Hidden, the rule's width."
+  "Columns a table may take, as hermes-chat--table-window-width counts them:
+the window's pixels in the fixed-pitch font's width, less two for the line's
+end.  Hidden, the rule's width."
   (let ((window (get-buffer-window (current-buffer) t)))
     (max 20 (- (if window
                    (/ (window-body-width window t) (max 1 (window-font-width window 'fixed-pitch)))
@@ -527,7 +528,7 @@ range its deltas wrote."
                        (and (numberp (plist-get event :time)) (numberp (romacs-agent-turn-start session))
                             (- (plist-get event :time) (romacs-agent-turn-start session)))))
          (text (concat (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-dim))
-                       (if duration (propertize (concat " " (romacs-agent-ui--clock duration)) 'face 'romacs-agent-dim) ""))))
+                       (if duration (propertize (concat " " (hermes-chat--clock duration)) 'face 'romacs-agent-dim) ""))))
     (romacs-agent-ui--line session event (romacs-agent-ui--rule text))))
 
 (defun romacs-agent-ui--rule-width ()
@@ -536,9 +537,10 @@ range its deltas wrote."
     (max 20 (1- (if window (window-body-width window) (frame-width))))))
 
 (defun romacs-agent-ui--rule (&optional text)
-  "A rule across the chat, carrying TEXT after a short lead.  Drawn with
-box-drawing characters to the window's width: Romacs's display does not
-yet paint a face's strike-through on stretch glyphs."
+  "A rule across the chat, carrying TEXT after a short lead
+\(hermes-chat--status-rule-line's shape).  Drawn with box-drawing
+characters to the window's width: Romacs's display does not yet paint
+a face's strike-through on hermes's stretch glyphs."
   (let* ((lead (propertize "──" 'face 'romacs-agent-rule))
          (head (if text (concat lead " " text " ") lead)))
     (concat head (propertize (make-string (max 1 (- (romacs-agent-ui--rule-width) (string-width head))) ?─)
@@ -1078,7 +1080,7 @@ order, or nil when none is news."
         (setq-default romacs-mode-line-agent rollup)
         (force-mode-line-update t)))))
 
-;;; The header
+;;; The header (hermes-chat--header-line's shape)
 ;;
 ;; A value, never a form: the buffer's `header-line-format' is the string
 ;; `romacs-agent-ui--header-show' last made, so showing it runs no Lisp.
@@ -1190,13 +1192,13 @@ made again."
 ;;; The composer
 
 (defun romacs-agent-ui--key (command)
-  "COMMAND's key in a chat, for a hint."
+  "COMMAND's key in a chat, as hermes-chat--command-key-hint shows it."
   (substitute-command-keys (format "\\<romacs-agent-chat-mode-map>\\[%s]" command)))
 
 (defvar romacs-agent-ui--hint nil "The composer's hint, made once: looking up keys is slow.")
 
 (defun romacs-agent-ui--hint ()
-  "The empty composer's hint."
+  "The empty composer's hint (hermes-chat--placeholder-string)."
   (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint "Message…"))))
 
 (defun romacs-agent-ui--make-hint (text &optional key)
@@ -1222,9 +1224,10 @@ takes it: the other keys are the actions menu's (?)."
   "The rule above the composer while a turn runs: ● Running, its clock, the tool."
   (let ((session romacs-agent-ui--session))
     (when (memq (romacs-agent-state session) '(starting running waiting-approval))
+      (romacs-agent-ui--helpers)
       (let* ((approval (eq (romacs-agent-state session) 'waiting-approval))
              (start (romacs-agent-turn-start session))
-             (clock (and (numberp start) (romacs-agent-ui--clock (- (float-time) start)))))
+             (clock (and (numberp start) (hermes-chat--clock (- (float-time) start)))))
         (concat (romacs-agent-ui--rule
                  (concat (propertize (if approval "◆ Waiting for you" "● Running")
                                      'face (if approval 'romacs-agent-approval 'romacs-agent-running))
@@ -1300,7 +1303,8 @@ there."
     ;; Completion (the predicted prompt, `romacs-agent-ui--suggestion-capf'),
     ;; as M-TAB and C-M-i complete anywhere.
     (define-key map (kbd "TAB") #'completion-at-point)
-    ;; A session's actions; stopping and resuming are in the actions menu.
+    ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
+    ;; has the same action; stopping and resuming are in the actions menu.
     (define-key map (kbd "C-j") #'newline)
     (define-key map (kbd "S-<return>") #'newline)
     (define-key map (kbd "C-c C-c") #'romacs-agent-chat-interrupt)
@@ -1677,7 +1681,7 @@ of the session; a question is answered instead."
     (unless id (user-error "No approval here"))
     (romacs-agent-respond romacs-agent-ui--session id nil)))
 
-;;; A chat's actions
+;;; emacs-hermes's chat actions
 
 (defun romacs-agent-ui--running-p ()
   (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
