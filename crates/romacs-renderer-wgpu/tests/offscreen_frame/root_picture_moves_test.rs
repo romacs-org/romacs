@@ -51,7 +51,7 @@ struct View {
 
 /// What a session's frames hold besides plain text.
 #[derive(Clone, Copy, Default)]
-#[expect(clippy::struct_excessive_bools, reason = "four independent things a test frame may hold")]
+#[expect(clippy::struct_excessive_bools, reason = "independent things a test frame may hold")]
 struct Extras {
     /// A line whose glyphs leave its row.
     inky: bool,
@@ -61,6 +61,8 @@ struct Extras {
     bordered: bool,
     /// An underlined line, its tail shorter.
     underlined: bool,
+    /// The window drawn as a pane: rounded corners and an edge.
+    paned: bool,
 }
 
 fn line(at: usize) -> String {
@@ -175,6 +177,14 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         }
         y += h;
     }
+    if extras.paned {
+        frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
+            bounds: Rect::new(0.0, 0.0, width, body),
+            radius: 4.0,
+            edge: Some(Color::rgb(0.9, 0.9, 0.2)),
+            dim: 0.0,
+        });
+    }
     if extras.bordered {
         frame.set_draw_context(window, GlyphRowRole::Text, Some(Rect::new(0.0, 2.0 * ROW, width, 2.0 * ROW)));
         frame.add_border(width - 6.0, 0.0, 2.0, body, Color::rgb(0.8, 0.2, 0.2));
@@ -280,7 +290,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined)) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined || extras.paned)) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
@@ -313,6 +323,17 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_a_borde
     // The border runs the window's height, its clip two rows of it: moved
     // with the rows, its visible stretch would move too.
     scrolled_through_picture_equals_whole(1.0, Extras { bordered: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane() {
+    // The pane's corners and edge stay where the rows move under them.
+    scrolled_through_picture_equals_whole(1.0, Extras { paned: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane_at_a_fractional_scale() {
+    scrolled_through_picture_equals_whole(1.5, Extras { paned: true, ..Extras::default() });
 }
 
 #[test]

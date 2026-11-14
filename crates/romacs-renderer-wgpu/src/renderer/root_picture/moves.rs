@@ -63,11 +63,6 @@ const MAX_TRIES: usize = 8;
 /// leaves its cells, SCALE the device pixels per logical one.
 pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32) -> Found {
     let mut found = Found::default();
-    // Panes draw their edges and corners over the rows, fixed where the
-    // rows move: a frame with panes is repainted.
-    if !sides.new.panes.is_empty() || !sides.old.frame.panes.is_empty() {
-        return found;
-    }
     let candidates = distances(sides, changed, scale);
     let mut windows: Vec<i64> = candidates.iter().map(|c| c.0).collect();
     windows.dedup();
@@ -109,6 +104,7 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
         }
         found.damage.extend(slivers(band, area));
         found.damage.extend(spoiled(sides, &placed, area, from, dy, reach));
+        found.damage.extend(pane_chrome(sides.new, area, from, dy, scale));
         found.damage.extend(ring(band, area, reach));
         found.moves.push(Move { from, dy });
         found.bands.push(area);
@@ -479,6 +475,30 @@ fn ring(band: Rect, area: Rect, reach: Reach) -> [Rect; 2] {
         Rect::new(area.x, band.y - reach.up, area.width, reach.up),
         Rect::new(area.x, band.y + band.height, area.width, reach.down),
     ]
+}
+
+/// What the move of FROM by DY to BAND leaves wrong of FRAME's panes, drawn
+/// over the rows and fixed where they move: a corner or edge the band
+/// covers, or one the copy brings from FROM; but a uniform piece (a dim, a
+/// side edge) that spans both places, which looks alike moved within itself.
+fn pane_chrome(frame: &FrameGlyphBuffer, band: Rect, from: Rect, dy: f32, scale: f32) -> Vec<Rect> {
+    if frame.panes.is_empty() {
+        return Vec::new();
+    }
+    let span = (from.y.min(band.y), (from.y + from.height).max(band.y + band.height));
+    let spans = |r: &Rect| r.y <= span.0 && r.y + r.height >= span.1;
+    let geometry = super::super::panes::pane_geometry(&frame.panes, frame.background, scale);
+    let uniform = geometry.dims.iter().chain(&geometry.edges).map(|(rect, _)| *rect).filter(|r| !spans(r));
+    let mut out = Vec::new();
+    for rect in uniform.chain(geometry.corners.iter().map(|corner| corner.square)) {
+        if damage::overlaps(rect, band) {
+            out.push(rect);
+        }
+        if damage::overlaps(rect, from) {
+            out.push(Rect::new(rect.x, rect.y + dy, rect.width, rect.height));
+        }
+    }
+    out
 }
 
 /// What the move of FROM by DY to BAND leaves wrong in BAND: each group of

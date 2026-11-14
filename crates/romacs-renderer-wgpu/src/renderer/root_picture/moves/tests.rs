@@ -177,7 +177,9 @@ fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
 }
 
 #[test]
-fn a_frame_with_panes_moves_nothing() {
+fn a_pane_s_corners_and_edges_are_repainted_where_rows_move_under_them() {
+    // The window's pane: rounded corners and an edge, drawn over the rows
+    // and fixed where they move.
     let mut old = window(&LINES, 0, 5);
     let mut new = window(&LINES, 1, 5);
     for frame in [&mut old, &mut new] {
@@ -188,17 +190,22 @@ fn a_frame_with_panes_moves_nothing() {
             dim: 0.0,
         });
     }
-    let plan = plan(&old, &new, 1.0);
-    assert!(!matches!(&plan, Plan::Regions { moves, .. } if !moves.is_empty()), "{plan:?}");
+    let Plan::Regions { moves, regions, .. } = plan(&old, &new, 1.0) else {
+        panic!("a scroll is a move and regions");
+    };
+    assert_eq!(moves.len(), 1);
+    let covered = |x: f32, y: f32| regions.iter().any(|r| r.x <= x && x < r.x + r.width && r.y <= y && y < r.y + r.height);
+    assert!(covered(1.0, 1.0) && covered(1.0, 45.0), "the top and bottom left corners: {regions:?}");
+    assert!(covered(50.0, 0.5), "the top edge: {regions:?}");
 }
 
 #[test]
 fn a_distance_moves_only_where_it_is_exact_on_the_device() {
     use romacs_display_protocol::frame_glyphs::FrameGlyph;
-    // Rows 9.6000996 tall at 1.25: a hair from twelve device pixels is not
-    // twelve, and a baseline at device 58.500122 snaps to 59 while the
-    // same baseline a row up, at 46.499996, snaps to 46: thirteen apart.
-    let dy = -9.600_099_6;
+    // Rows 9.6001 tall at 1.25: a hair from twelve device pixels is not
+    // twelve, and a baseline at device 58.5001 snaps to 59 while the same
+    // baseline a row up, at 46.49997, snaps to 46: thirteen apart.
+    let dy = -9.6001;
     assert!(!whole(dy, 1.25) && whole(-8.0, 1.5));
     let frame = window(&LINES, 0, 1);
     let old = frame.glyphs.iter().find(|g| matches!(g, FrameGlyph::Char { .. })).unwrap().clone();
@@ -209,7 +216,7 @@ fn a_distance_moves_only_where_it_is_exact_on_the_device() {
         }
         glyph
     };
-    let was = 58.500_122 / 1.25;
+    let was = 58.5001 / 1.25;
     assert!(!snaps(&at(was), &at(was + dy), dy, 1.25));
     assert!(snaps(&at(10.0), &at(2.0), -8.0, 1.5));
 }
