@@ -1733,26 +1733,39 @@ copy (`romacs-agent--scratch'): SESSION is left as it is."
     (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
     (nreverse events)))
 
-(defun romacs-agent-events-async (session then &optional batch)
+(defun romacs-agent-events-async (session then &optional batch fail)
   "Call THEN with SESSION's journal as the events it raised (as
 `romacs-agent-events' gives them), replayed BATCH records (200 by default)
-at a time between the editor's other work: a long journal never holds it."
-  (let* ((scratch (romacs-agent--scratch session)) (events nil)
+at a time between the editor's other work: a long journal never holds it.
+FAIL, when given, is called with the error's message instead should
+reading it fail, its file or any batch; else the error is signalled."
+  (let* ((scratch (romacs-agent--scratch session)) (events (list nil))
          (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-         (lines (and (file-readable-p journal)
-                     (with-temp-buffer
-                       (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
-                       (split-string (buffer-string) "\n" t))))
-         (step nil))
+         (lines nil) (step nil)
+         (guarded (lambda (function)
+                    (if (not fail) (progn (funcall function) t)
+                      (condition-case err (progn (funcall function) t)
+                        (error (funcall fail (error-message-string err)) nil))))))
     (setq step (lambda ()
-                 (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-                   (dotimes (_ (or batch 200))
-                     (when lines
-                       (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
-                                                                       :null-object :null :false-object :false))))
-                         (when (hash-table-p record) (romacs-agent--record scratch record))))))
-                 (if lines (run-at-time 0 nil step) (funcall then (nreverse events)))))
-    (funcall step)))
+                 (when (funcall guarded (lambda () (romacs-agent--events-step scratch lines events batch)))
+                   (setq lines (nthcdr (or batch 200) lines))
+                   (if lines (run-at-time 0 nil step) (funcall then (nreverse (car events)))))))
+    (when (funcall guarded
+                   (lambda ()
+                     (setq lines (and (file-readable-p journal)
+                                      (with-temp-buffer
+                                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
+                                        (split-string (buffer-string) "\n" t))))))
+      (funcall step))))
+
+(defun romacs-agent--events-step (scratch lines events batch)
+  "Replay the first BATCH (200) of LINES, journal records, into SCRATCH,
+pushing the events it raises onto EVENTS's car."
+  (let ((romacs-agent-event-functions (list (lambda (_ event) (push event (car events))))))
+    (cl-loop for line in lines repeat (or batch 200)
+             do (let ((record (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                                :null-object :null :false-object :false))))
+                  (when (hash-table-p record) (romacs-agent--record scratch record))))))
 
 (defun romacs-agent--record-request (record)
   "The request id of RECORD, a user's message written, or nil."

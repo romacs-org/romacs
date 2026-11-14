@@ -449,4 +449,42 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
         (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
         (should (= (length relaunched) 1))))))
 
+(ert-deftest romacs-agent-renew-a-journal-that-cannot-be-read-lets-go ()
+  ;; Its journal unreadable, in its first read or a later batch: the
+  ;; renewal fails, said so, and holds nothing.
+  (romacs-agent-renew-tests--with 'claude
+    (let ((outcome nil) (end (+ (float-time) 30)))
+      (cl-letf (((symbol-function 'insert-file-contents) (lambda (&rest _) (signal 'file-error '("Opening input file" "gone")))))
+        (romacs-agent-renew session nil (lambda (result) (setq outcome result)))
+        (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (eq (car outcome) :error))
+      (should-not (romacs-agent--held-p session)))
+    (let ((outcome nil) (end (+ (float-time) 30)) (steps 0))
+      (cl-letf* ((step (symbol-function 'romacs-agent--events-step))
+                 ((symbol-function 'romacs-agent--events-step)
+                  (lambda (&rest args) (when (> (cl-incf steps) 1) (error "Bad batch")) (apply step args))))
+        (romacs-agent-renew-tests--journal
+         session (romacs-agent-renew-tests--prompt 5 "a") (romacs-agent-renew-tests--reply "u1" "b")
+         (romacs-agent-renew-tests--prompt 9 "c") (romacs-agent-renew-tests--reply "u2" "d"))
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_time _repeat function &rest args)
+                     ;; Batches of one record: a later batch fails.
+                     (if (eq function #'romacs-agent-events-async)
+                         (apply function (append (seq-take args 2) (list 1 (nth 3 args))))
+                       (apply function args)))))
+          (romacs-agent-renew session nil (lambda (result) (setq outcome result))))
+        (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (equal outcome '(:error "Bad batch")))
+      (should-not (romacs-agent--held-p session)))))
+
+(ert-deftest romacs-agent-renew-a-failed-finish-may-be-tried-again ()
+  (romacs-agent-renew-tests--with 'codex
+    (romacs-agent--record session (romacs-mcp--object "seq" 50 "t" 50.0 "note"
+                                                      (romacs-mcp--object "type" "renew" "from" "old" "to" :null "brief" "B")))
+    (cl-letf (((symbol-function 'romacs-agent--manifest-put) (lambda (&rest _) (error "Disk full"))))
+      (romacs-agent-renew--restored))
+    (should (= relaunched 0))
+    (romacs-agent-renew--restored)
+    (should (= relaunched 1))))
+
 ;;; romacs-agent-renew-tests.el ends here

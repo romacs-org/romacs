@@ -165,7 +165,8 @@ cannot renew."
                (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
                                                                "why" (or why :null) "brief" brief "summary" source
                                                                "context" (or (romacs-agent-context-used session) :null))))
-           (error (funcall fail (error-message-string err)))))))))))
+           (error (funcall fail (error-message-string err))))))))
+     nil fail)))
 
 (defun romacs-agent-renew--compaction (events)
   "The summary of the compaction its harness made since its last turn
@@ -216,8 +217,12 @@ else none.  The turn failing, or its harness ending, gives none."
 says so, and its harness runs anew on it.  Once: its new run's note ends it."
   (unless (gethash session romacs-agent-renew--finishing)
     (puthash session t romacs-agent-renew--finishing)
-    (romacs-agent-renew--commit session native)
-    (romacs-agent--relaunch session)))
+    ;; Failing before a run is under way: none is, and it may be tried again.
+    (condition-case err
+        (progn (romacs-agent-renew--commit session native)
+               (romacs-agent--relaunch session))
+      (error (remhash session romacs-agent-renew--finishing)
+             (signal (car err) (cdr err))))))
 
 (defun romacs-agent-renew--unfinished (session)
   "Finish SESSION's renewal if one is journaled that no run followed."
