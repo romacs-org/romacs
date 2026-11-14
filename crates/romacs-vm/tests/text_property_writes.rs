@@ -195,6 +195,20 @@ fn unibyte_buffers_take_the_same_writes() {
                  (buffer-modified-p) (tpw-plists)))");
 }
 
+/// A unibyte buffer's character reads its properties in GNU's plist
+/// order, newest first, whatever order their symbols were made in: after
+/// writes, an inheriting insertion, a copy to a string and a change to
+/// multibyte.
+#[test]
+fn unibyte_buffers_keep_each_plist_in_order() {
+    agree("(with-temp-buffer (set-buffer-multibyte nil) (insert \"abcd\") \
+           (put-text-property 1 3 'zz 1) (put-text-property 1 3 'aa 2) (put-text-property 1 2 'zz 5) \
+           (set-text-properties 3 4 '(m 1 b 2 z 3)) \
+           (goto-char 3) (insert-and-inherit (propertize \"x\" 'n 1 'zz 7)) \
+           (list (tpw-plists) (tpw-plists (buffer-substring 1 5)) \
+                 (progn (set-buffer-multibyte t) (tpw-plists))))");
+}
+
 /// A `syntax-table` property written, removed or replaced by any of the
 /// writers reaches the scanner's next reading.
 #[test]

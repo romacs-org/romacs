@@ -7,7 +7,7 @@ use crate::indirect::Shared;
 pub(super) enum Place<'a> {
     Plain,
     Runs(properties::At<'a>),
-    Byte(Option<&'a std::collections::BTreeMap<Key, Value>>),
+    Byte(Option<&'a properties::Values>),
 }
 impl Place<'_> {
     /// The character's properties, newest first.
@@ -24,7 +24,7 @@ impl Plist for Place<'_> {
         match self {
             Self::Plain | Self::Byte(None) => None,
             Self::Runs(at) => at.property(key),
-            Self::Byte(Some(values)) => values.get(&key).copied(),
+            Self::Byte(Some(values)) => values.get(key).copied(),
         }
     }
 }
@@ -683,7 +683,7 @@ impl Vm {
         if !inherited.is_empty() {
             for p in at.0..b.point.0 {
                 let values = b.properties.entry(ByteOffset(p)).or_default();
-                values.extend(inherited.iter().copied());
+                *values = properties::Values::inheriting(&inherited, values);
             }
         }
         Ok(Value::NIL)

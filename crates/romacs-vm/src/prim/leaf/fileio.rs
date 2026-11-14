@@ -301,7 +301,7 @@ impl Leaf<'_> {
         let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { return Ok(()) };
         let at = t.point.0;
         // to_map gives each byte's properties; put them back as runs.
-        let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<Key, Value>)> = vec![];
+        let mut runs: Vec<(usize, usize, &crate::properties::Values)> = vec![];
         for (offset, values) in &map {
             match runs.last_mut() {
                 Some((_, end, run)) if *end == offset.0 && *run == values => *end += 1,
@@ -309,7 +309,8 @@ impl Leaf<'_> {
             }
         }
         for (start, end, values) in runs {
-            for (key, value) in values {
+            // The newest is written last, to stay first.
+            for (key, value) in values.iter().rev() {
                 t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), *key, *value);
             }
         }

@@ -94,7 +94,7 @@ impl<'a> View<'a> {
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
             Body::Multibyte(_, ref reader) => reader.as_ref()?.get(ByteOffset(byte)),
-            Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get(&crate::properties::Key::SYNTAX_TABLE)).copied(),
+            Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get(crate::properties::Key::SYNTAX_TABLE)).copied(),
         }
     }
 }

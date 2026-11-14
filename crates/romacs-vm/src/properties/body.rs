@@ -2,7 +2,7 @@
 //! since the last collection, and the store a property plan writes through.
 use super::{Key, Properties, SyntaxChanges};
 use crate::{Value, coordinates::ByteOffset};
-use std::{collections::BTreeMap, ops::Range};
+use std::ops::Range;
 
 /// What a property primitive's plan asks of the properties it changes: a
 /// string's, or a text body's, which records what is stored.
@@ -104,7 +104,7 @@ impl BodyProperties {
         self.store.inherit_inserted(range, inherited);
     }
     pub fn copy_into(&mut self, at: ByteOffset, source: &Properties) {
-        self.record(source.to_map().into_values().flat_map(BTreeMap::into_values));
+        self.record(source.to_map().into_values().flat_map(|values| values.into_iter().map(|(_, value)| value)));
         self.store.copy_into(at, source);
     }
     pub fn remove(&mut self, range: Range<ByteOffset>, key: Key) {

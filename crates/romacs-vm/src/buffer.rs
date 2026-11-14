@@ -1376,7 +1376,7 @@ impl Vm {
                 }
                 Ok(b.properties
                     .get(&p)
-                    .and_then(|v| v.get(&key.unwrap()))
+                    .and_then(|v| v.get(key.unwrap()))
                     .copied()
                     .unwrap_or(Value::NIL))
             }
@@ -1506,7 +1506,7 @@ mod tests {
         };
         assert_eq!(b.bytes, [0xce, 0xbb]);
         assert_eq!(b.point, ByteOffset(1));
-        let leaf = b.properties[&ByteOffset(1)][&vm.property_key("x").unwrap()];
+        let leaf = *b.properties[&ByteOffset(1)].get(vm.property_key("x").unwrap()).unwrap();
         assert_eq!(vm.display(leaf).unwrap(), "\"retained\"");
         let Object::ByteBuffer(b) = vm.objects.entry_mut(roots[0].index(0).unwrap() - 1) else {
             panic!()

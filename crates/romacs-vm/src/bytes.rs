@@ -97,7 +97,7 @@ impl Mirror {
     }
 }
 /// A unibyte buffer's or insertion's text properties, by byte.
-pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<crate::properties::Key, Value>>;
+pub(crate) type ByteProperties = BTreeMap<ByteOffset, crate::properties::Values>;
 
 impl ByteBuffer {
     /// Bring the mirror to the bytes, narrowing and point now.
@@ -282,10 +282,7 @@ impl ByteBuffer {
         if let Some(held) = &mut self.held { held.visit_values(reading, visit); }
         if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(reading, visit); }
         for props in self.properties.values_mut() {
-            crate::properties::visit_keys(props, visit);
-            for v in props.values_mut() {
-                visit(v);
-            }
+            props.visit_values(visit);
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
@@ -298,7 +295,7 @@ impl ByteBuffer {
             .values()
             .map(|p| {
                 size_of::<ByteOffset>()
-                    + size_of::<BTreeMap<crate::properties::Key, Value>>()
+                    + size_of::<crate::properties::Values>()
                     + p.len() * (size_of::<crate::properties::Key>() + size_of::<Value>())
             })
             .sum::<usize>()

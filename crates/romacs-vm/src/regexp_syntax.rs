@@ -445,7 +445,7 @@ impl Vm {
         match self.object_if(object) {
             Some(Object::Buffer(t)) => t.properties.has_key(crate::properties::Key::SYNTAX_TABLE),
             Some(Object::String(s) | Object::RawString(s)) => s.properties.has_key(crate::properties::Key::SYNTAX_TABLE),
-            Some(Object::ByteBuffer(t)) => t.properties.values().any(|p| p.contains_key(&crate::properties::Key::SYNTAX_TABLE)),
+            Some(Object::ByteBuffer(t)) => t.properties.values().any(|p| p.contains_key(crate::properties::Key::SYNTAX_TABLE)),
             _ => false,
         }
     }
@@ -454,7 +454,7 @@ impl Vm {
         match self.object_if(object)? {
             Object::Buffer(t) => t.properties.get_property(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE),
             Object::String(s) | Object::RawString(s) => s.properties.get_property(ByteOffset(at), crate::properties::Key::SYNTAX_TABLE),
-            Object::ByteBuffer(t) => t.properties.get(&ByteOffset(at)).and_then(|p| p.get(&crate::properties::Key::SYNTAX_TABLE)).copied(),
+            Object::ByteBuffer(t) => t.properties.get(&ByteOffset(at)).and_then(|p| p.get(crate::properties::Key::SYNTAX_TABLE)).copied(),
             _ => None,
         }
     }
@@ -470,7 +470,7 @@ impl Vm {
             Object::Buffer(t) => next(&t.properties, t.len_bytes()),
             Object::String(s) | Object::RawString(s) => next(&s.properties, s.bytes().len()),
             Object::ByteBuffer(t) => t.properties.range(ByteOffset(at)..)
-                .find(|(_, p)| p.contains_key(&crate::properties::Key::SYNTAX_TABLE)).map(|(b, _)| b.0),
+                .find(|(_, p)| p.contains_key(crate::properties::Key::SYNTAX_TABLE)).map(|(b, _)| b.0),
             _ => None,
         }
     }

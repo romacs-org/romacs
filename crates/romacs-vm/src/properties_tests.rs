@@ -85,7 +85,7 @@ fn relative_layers_match_the_old_map_after_every_operation() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         if i % 3 == 0 {
             let p = ByteOffset(seed as usize % (len + 1));
-            let v = BTreeMap::from([(named("x"), Value::integer(i).unwrap())]);
+            let v: Values = [(named("x"), Value::integer(i).unwrap())].into_iter().collect();
             assert_eq!(new.insert(p, v.clone()), old.insert(p, v));
         } else {
             let start = seed as usize % (len + 1);

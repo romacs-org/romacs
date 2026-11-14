@@ -3,7 +3,6 @@
 //! A key has no implicit or visual baseline.
 use crate::{Value, coordinates::ByteOffset};
 use std::{collections::BTreeMap, ops::Range};
-type Values = BTreeMap<Key, Value>;
 type Link = Option<Box<Tree>>;
 const LEAF: usize = 32;
 
@@ -84,7 +83,16 @@ builtin_keys! {
 #[path = "properties_tests.rs"]
 mod tests;
 mod body;
+mod values;
 pub(crate) use body::{BodyProperties, Reading, Store};
+pub(crate) use values::Values;
+
+/// PAIRS of a character, each with its write's stamp, as a plist reads
+/// them: the newest first.
+fn newest_first(mut pairs: Vec<(u32, Key, Value)>) -> Vec<(Key, Value)> {
+    pairs.sort_unstable_by_key(|(stamp, _, _)| std::cmp::Reverse(*stamp));
+    pairs.into_iter().map(|(_, k, v)| (k, v)).collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Run {
@@ -1193,16 +1201,10 @@ impl Properties {
         }
     }
     pub fn properties_at(&self, at: ByteOffset) -> Vec<(Key, Value)> {
-        let mut values: Vec<_> = self
-            .layers
-            .iter()
-            .filter_map(|(key, root)| {
-                let r = root.at(at.0)?;
-                (r.stamp != 0).then_some((r.stamp, *key, r.value))
-            })
-            .collect();
-        values.sort_unstable_by_key(|(stamp, _, _)| std::cmp::Reverse(*stamp));
-        values.into_iter().map(|(_, k, v)| (k, v)).collect()
+        newest_first(self.layers.iter().filter_map(|(key, root)| {
+            let r = root.at(at.0)?;
+            (r.stamp != 0).then_some((r.stamp, *key, r.value))
+        }).collect())
     }
     /// Observable boundaries compare presence and eq-values, never stamps.
     /// Each key's search stops at the nearest change found so far.
@@ -1248,31 +1250,30 @@ impl Properties {
         });
         work
     }
-    /// Legacy adapter, outside hot paths: expands runs into a byte map.
+    /// Legacy adapter, outside hot paths: expands runs into a byte map,
+    /// each byte's properties in their plist order.
     pub fn to_map(&self) -> BTreeMap<ByteOffset, Values> {
-        let mut out: BTreeMap<ByteOffset, Values> = BTreeMap::new();
+        let mut stamped: BTreeMap<ByteOffset, Vec<(u32, Key, Value)>> = BTreeMap::new();
         for (key, root) in &self.layers {
             root.walk(0, &mut |at, r| {
                 if r.stamp != 0 {
                     for p in at..at + r.len as usize {
-                        out.entry(ByteOffset(p))
-                            .or_default()
-                            .insert(*key, r.value);
+                        stamped.entry(ByteOffset(p)).or_default().push((r.stamp, *key, r.value));
                     }
                 }
             });
         }
-        out
+        stamped.into_iter().map(|(at, pairs)| (at, newest_first(pairs).into_iter().collect())).collect()
     }
     /// Legacy one-byte fixture adapter. Production writes use whole ranges.
+    /// The byte's properties become VALUES, in their order.
     pub fn insert(&mut self, at: ByteOffset, values: Values) -> Option<Values> {
         let old: Values = self.properties_at(at).into_iter().collect();
         for key in old.keys() {
-            if !values.contains_key(key) {
-                self.remove(at..ByteOffset(at.0 + 1), *key);
-            }
+            self.remove(at..ByteOffset(at.0 + 1), *key);
         }
-        for (k, v) in values {
+        // The newest is written last.
+        for (k, v) in values.into_iter().rev() {
             self.put(at..ByteOffset(at.0 + 1), k, v);
         }
         (!old.is_empty()).then_some(old)
