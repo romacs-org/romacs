@@ -61,7 +61,7 @@ class ChangedFilter(unittest.TestCase):
     def test_a_test_file_is_selected_as_a_module_of_all_too(self):
         # A run builds a file's own target or its package's `all`, not both.
         self.assertEqual(test_file('romacs-vm::quit_async'),
-                         'binary_id(romacs-vm::quit_async) | (binary_id(romacs-vm::all) & test(/^quit_async::/))')
+                         'binary_id(romacs-vm::quit_async) | ((binary_id(romacs-vm::all) | binary_id(romacs-vm::gnu)) & test(/^quit_async::/))')
 
     def test_a_crate_rule_is_selected_when_its_crate_changes(self):
         # A clock read added to any file of the render thread breaks the time

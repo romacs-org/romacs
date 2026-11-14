@@ -115,7 +115,7 @@ class Structural(unittest.TestCase):
         self.assertNotIn('compile_boundaries', runs['romacs-vm'][1])
         self.assertNotIn('primitive_gc_boundary', runs['romacs-vm'][1])
         self.assertEqual(runs['romacs-vm'][0][:4], ['--lib', '--bins', '--test', 'all'])
-        self.assertIn('binary_id(romacs-vm::all) & test(/^no_remote_references::/)', runs['romacs-vm'][1])
+        self.assertIn('(binary_id(romacs-vm::all) | binary_id(romacs-vm::gnu)) & test(/^no_remote_references::/)', runs['romacs-vm'][1])
         self.assertEqual(runs['romacs-gui-tests'][0], ['--test', 'harness_contract'])
 
     def test_a_change_with_no_rust_runs_no_rule(self):

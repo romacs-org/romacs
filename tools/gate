@@ -680,20 +680,22 @@ SLOW_RULES = ('romacs-vm::compile_boundaries', 'romacs-vm::primitive_gc_boundary
 CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test(/(^|::)time_discipline_test::/)'}
 
 
-# The packages whose test files are also modules of one `all` target
-# (tools/lib/test_modules.py's PACKAGES).
+# The packages whose test files are also modules of a folded target, `all`
+# or, for a file that boots GNU's Lisp, `gnu` (tools/lib/test_modules.py's
+# PACKAGES).
 ALL_TARGETS = ('romacs-vm',)
 
 
 def test_file(binary):
     """Nextest filter for the tests of the test file BINARY, `PACKAGE::FILE`:
-    its own target and, in a package that has an `all` target, its module
-    there (tools/lib/test_modules.py). A run builds one of the two. Nextest
-    refuses a filter naming a binary no package has, so a package without
-    `all` is not asked for one."""
+    its own target and, in a package that has folded targets, its module in
+    the one that holds it (tools/lib/test_modules.py). A run builds one of
+    the two. Nextest refuses a filter naming a binary no package has, so a
+    package without them is not asked for one."""
     package, file = binary.split('::')
     alone = f'binary_id({binary})'
-    return f'{alone} | (binary_id({package}::all) & test(/^{file}::/))' if package in ALL_TARGETS else alone
+    folded = f'(binary_id({package}::all) | binary_id({package}::gnu)) & test(/^{file}::/)'
+    return f'{alone} | ({folded})' if package in ALL_TARGETS else alone
 
 
 def trunk(wt, base='beta'):
