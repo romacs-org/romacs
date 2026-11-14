@@ -29,7 +29,7 @@ fn environment_string(cx: &mut Leaf<'_>, bytes: Vec<u8>) -> Value {
 }
 
 /// GNU egetenv: VARIABLE's value in `process-environment', None when unset.
-pub(super) fn egetenv(cx: &mut Leaf<'_>, variable: &str) -> std::result::Result<Option<Vec<u8>>, Fault> {
+pub(crate) fn egetenv(cx: &mut Leaf<'_>, variable: &str) -> std::result::Result<Option<Vec<u8>>, Fault> {
     let environment = environment_value(cx, "process-environment")?;
     crate::host::lisp_env(crate::host::EnvList::Process, variable.as_bytes());
     Ok(lookup(cx, variable.as_bytes(), environment)?.flatten())
