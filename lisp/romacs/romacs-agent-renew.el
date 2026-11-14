@@ -359,6 +359,15 @@ no subagent of its harness running."
                  (cl-some (lambda (row) (equal (plist-get row :state) "running"))
                           (hash-table-values (romacs-agent-subagents session)))))))
 
+(defun romacs-agent-renew-threshold (session)
+  "The share of its model's context window at which SESSION renews by
+itself at a turn's end (`romacs-agent-renew-at'), for a view to show; nil
+when it will not: renewing off, its harness unable to renew, or renewed
+by itself from this conversation already."
+  (and romacs-agent-renew-at (romacs-agent--harness-get session :renew)
+       (not (equal (gethash session romacs-agent-renew--automatic) (romacs-agent--native-id session)))
+       romacs-agent-renew-at))
+
 (defun romacs-agent-renew--why-now (session)
   "Why SESSION renews at its turn's end now: asked to, or its context
 full (`romacs-agent-renew--full'), once a conversation; else nil."

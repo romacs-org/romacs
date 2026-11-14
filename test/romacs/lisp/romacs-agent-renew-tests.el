@@ -584,4 +584,15 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
                                        :state (list :owed (list (list :turn "turn/steer:4" "late" nil)))))
     (should-not (gethash session romacs-agent-renew--owed))))
 
+(ert-deftest romacs-agent-renew-threshold-for-views ()
+  (romacs-agent-renew-tests--with 'claude
+    (should (= (romacs-agent-renew-threshold session) 0.8))
+    (let ((romacs-agent-renew-at nil)) (should-not (romacs-agent-renew-threshold session)))
+    ;; Renewed by itself from this conversation: no more.
+    (puthash session (romacs-agent--native-id session) romacs-agent-renew--automatic)
+    (should-not (romacs-agent-renew-threshold session)))
+  (let ((session (romacs-agent--make :id "x" :harness 'claude)))
+    (cl-letf (((symbol-function 'romacs-agent--harness-get) (lambda (_ _key) nil)))
+      (should-not (romacs-agent-renew-threshold session)))))
+
 ;;; romacs-agent-renew-tests.el ends here
