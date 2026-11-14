@@ -155,6 +155,24 @@ root, their reports in a fresh table; `kept' counts writes to disk."
         (romacs-agent--note-room (romacs-agent--make :id "s-codex" :provider "codex" :caught-up t) (plist-put event :time 3.0))
         (should-not (romacs-agent-room "codex"))))))
 
+(ert-deftest romacs-agent-limits-what-a-report-leaves-out ()
+  ;; A weekly row with no status after its window reset: the old
+  ;; rejection is not inherited.  A row with no reset within its period:
+  ;; its reset kept, so a resume can still be scheduled.
+  (romacs-agent-limits-tests--with
+    (let ((now (float-time)))
+      (romacs-agent-limits-tests--report "claude" (- now 200) `("seven_day" rejected 1.0 ,(- now 100)))
+      (romacs-agent--note-room (romacs-agent--make :provider "claude" :caught-up t)
+                               (list :type 'rate-limit :time now
+                                     :windows (list (list :name "seven_day" :used 0.1 :resets (+ now 600)))))
+      (should (romacs-agent-room "claude"))
+      (romacs-agent-limits-tests--report "claude2" (- now 10) `("seven_day" rejected 1.0 ,(+ now 900)))
+      (romacs-agent--note-room (romacs-agent--make :provider "claude2" :caught-up t)
+                               (list :type 'rate-limit :time now
+                                     :windows (list (list :name "seven_day" :status 'rejected :used 1.0))))
+      (should-not (romacs-agent-room "claude2"))
+      (should (= (plist-get (romacs-agent-room-of "claude2") :resets) (+ now 900))))))
+
 (ert-deftest romacs-agent-limits-a-legacy-report-and-another-servers ()
   (romacs-agent-limits-tests--with
     (let ((later (+ (float-time) 86400)))

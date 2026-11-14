@@ -2323,15 +2323,23 @@ were, its one report as its window's."
 (defun romacs-agent--room-windows (known reported time)
   "KNOWN windows (an instance's :windows) with REPORTED ones (a rate-limit
 event's :windows, plists of :name :status :used :resets) as of TIME:
-each window's latest report; a status not said is the one known."
+each window's latest report; what it does not say (status, use, reset)
+is its last report's while that is still the window's period."
   ;; Its own cells: the known report stays as it was.
   (let ((windows (copy-alist known)))
     (dolist (window reported windows)
       (when-let* ((name (plist-get window :name)))
-        (let ((before (cdr (assoc name windows))))
+        (let* ((before (cdr (assoc name windows)))
+               (resets (plist-get window :resets))
+               ;; Its last report still the window's period: not reset by
+               ;; TIME, and naming the same reset when this one names any.
+               (same (and before (not (and (numberp (plist-get before :resets)) (<= (plist-get before :resets) time)))
+                          (or (null resets) (equal resets (plist-get before :resets))))))
           (setf (alist-get name windows nil nil #'equal)
-                (list :status (or (plist-get window :status) (plist-get before :status))
-                      :used (plist-get window :used) :resets (plist-get window :resets) :time time)))))))
+                (list :status (or (plist-get window :status) (and same (plist-get before :status)))
+                      :used (or (plist-get window :used) (and same (plist-get before :used)))
+                      :resets (or resets (and same (plist-get before :resets)))
+                      :time time)))))))
 
 (defun romacs-agent--room-binding (windows now)
   "The limit WINDOWS (an instance's :windows) bind it by as of NOW: spent,
