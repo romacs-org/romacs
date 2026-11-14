@@ -8,7 +8,7 @@
 //! `commandp` accepts and each `OClosure`, whose interactive form only Lisp
 //! computes: a superset its callers still filter with `commandp`.
 
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(crate) struct CommandSet {
     /// By slot: whether its symbol is in the set. Empty until first asked.
     member: Vec<bool>,
@@ -20,7 +20,6 @@ pub(crate) struct CommandSet {
     /// reads of a member: a definition, an interning, a member's plist.
     epoch: u64,
 }
-romacs_snapshot::snapshot_struct!(CommandSet { member, built, dirty, epoch });
 
 /// What to judge to bring the set up to date.
 pub(crate) enum Stale {

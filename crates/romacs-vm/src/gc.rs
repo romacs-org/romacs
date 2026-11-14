@@ -1,7 +1,7 @@
 //! Strand-local stop-at-wait-point compacting collector. No process-global state.
 use super::*;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub struct HeapStats {
     pub collections: u64,
     pub allocations: u64,
@@ -13,7 +13,6 @@ pub struct HeapStats {
     /// `gc-elapsed' reports it).
     pub elapsed_ns: u64,
 }
-romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaimed, live_objects, live_bytes, capacity_bytes, elapsed_ns });
 
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
@@ -35,7 +34,7 @@ unsafe impl crate::brand::Plain for RootFrame {}
 /// moves every live object, so a heap Value a native frame kept in a Rust
 /// local across the call becomes a wrong object. Enabled by
 /// `ROMACS_GC_STRESS=N` or [`Vm::set_gc_stress`]; off (0) by default.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Stress {
     every: u32,
     entries: u32,
@@ -72,11 +71,10 @@ pub(crate) struct Stress {
     #[cfg(test)]
     pub(crate) last_mark: (usize, usize),
 }
-romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving, threads, inplace, minor, #[cfg(test)] faults, #[cfg(test)] buried, #[cfg(test)] last_mark });
 
 /// What a test breaks in a collection, to see a check catch it.
 #[cfg(test)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Faults {
     /// No string's properties handed over, in what both marks share.
     pub(crate) skip_properties: bool,
@@ -88,8 +86,6 @@ pub(crate) struct Faults {
     /// A minor panics once it has begun, before its mark.
     pub(crate) minor_panics: bool,
 }
-#[cfg(test)]
-romacs_snapshot::snapshot_struct!(Faults { skip_properties, worker_panics, allocate_before_scan, allocate_before_sweep, minor_panics });
 
 /// Records a session keeps between its usage log's writes: at one a minute
 /// or so, this holds a burst; past it collections are only counted.
@@ -97,7 +93,7 @@ pub(crate) const COLLECTION_RECORDS: usize = 256;
 
 /// A finished collection, for a real pause to name itself in the usage log
 /// (lisp/romacs/romacs-usage-log.el). MS bounds what a key or command waited.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct CollectionRecord {
     /// The idle pass's or a prompt's: it gave way to no key while marking.
     pub(crate) idle: bool,
@@ -131,10 +127,9 @@ pub(crate) struct CollectionRecord {
     /// float, as the trigger is.
     pub(crate) late: f64,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, minor, us, command, key, redisplay, at, objects, bytes, late });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct CollectionLog {
     records: Vec<CollectionRecord>,
     /// Collections past the limit.
@@ -142,7 +137,6 @@ pub(crate) struct CollectionLog {
     /// The running collection was asked for.
     pub(crate) explicit: bool,
 }
-romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
 
 /// What a collection does, in order.
 #[derive(Clone, Copy)]
@@ -151,7 +145,7 @@ pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep
 const PHASES: [&str; 11] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite"];
 /// Where the last completed collection's time went, in nanoseconds by
 /// `Phase': zero in a world build, whose heap never depends on a clock.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct GcTimes {
     pub(crate) ns: [u64; PHASES.len()],
     /// Entries marked, per table: conses, closures, cells, objects.
@@ -159,7 +153,6 @@ pub(crate) struct GcTimes {
     /// Entries the collection found in each table.
     pub(crate) entries: [usize; 4],
 }
-romacs_snapshot::snapshot_struct!(GcTimes { ns, marked, entries });
 
 /// What a completed mark holds, for the rest of the collection.
 struct Marked {
@@ -253,7 +246,7 @@ impl Lap {
 
 /// What the funnels count as they hand entries out (`Vm::alloc_cons' and its
 /// siblings, data.rs).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Allocation {
     /// Bytes the funnels have handed out, ever. Two meters read it: the
     /// memory profiler's (profiler.rs), which table growth no longer
@@ -275,11 +268,10 @@ pub(crate) struct Allocation {
     /// promoted.
     pub(crate) since: u64,
 }
-romacs_snapshot::snapshot_struct!(Allocation { allocated, poll_at, consed, compact, collected_at, since });
 
 /// What the last mark found in the objects table: `garbage-collect's
 /// statistics and the pacing's traced slots, counted once per entry.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Census {
     pub(crate) strings: usize,
     pub(crate) string_bytes: usize,
@@ -290,7 +282,6 @@ pub(crate) struct Census {
     pub(crate) floats: usize,
     pub(crate) buffers: usize,
 }
-romacs_snapshot::snapshot_struct!(Census { strings, string_bytes, vectors, vector_slots, vector_free, floats, buffers });
 impl Census {
     pub(crate) fn add(&mut self, other: &Self) {
         self.strings += other.strings;
@@ -306,7 +297,7 @@ impl Census {
 /// What `memory-use-counts' reports, in its units; symbols are counted from
 /// the symbol table, less its private binding slots, and VM2 has no intervals
 /// to count (VM2-MEMCOUNT1).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Consed {
     pub(crate) conses: u64,
     pub(crate) floats: u64,
@@ -315,7 +306,6 @@ pub(crate) struct Consed {
     pub(crate) string_chars: u64,
     pub(crate) strings: u64,
 }
-romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_symbols, string_chars, strings });
 
 /// What a freed cons or cell holds under `ROMACS_GC_VERIFY': a primitive
 /// index no table has, which no operation accepts.

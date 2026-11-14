@@ -43,7 +43,7 @@ thread_local! {
 
 /// Redisplay's own counts since the VM started, the cycle under way, and
 /// the VM's counts as the last reset read them.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct DisplayStats {
     cycles: u64,
     instructions: u64,
@@ -64,7 +64,6 @@ pub(crate) struct DisplayStats {
     open: Option<(Option<u64>, u64)>,
     base: [u64; HOST],
 }
-romacs_snapshot::snapshot_struct!(DisplayStats { cycles, instructions, conses, reused, rebuilt, bands, mismatches, open, base });
 
 impl DisplayStats {
     fn begin(&mut self, conses: u64) {

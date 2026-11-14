@@ -54,7 +54,7 @@ impl super::gc::Consed {
 }
 
 // CELL(Held)
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex::SyntaxClass>),
     Float(f64),
@@ -63,7 +63,13 @@ pub(super) enum Object {
     Frame(Box<frame::Frame>),
     Terminal(Box<frame::Terminal>),
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
+    /// At rest in an image: `foreign_resource` refuses a live connection or
+    /// statement, whose handles are SQLite's, in its own heap.
+    #[snapshot(at_rest)]
     Sqlite(Box<crate::sqlite::Handle>),
+    /// At rest in an image: `foreign_resource` refuses every live treesit
+    /// object.
+    #[snapshot(at_rest)]
     Treesit(Box<crate::treesit::Object>),
     Process(Box<crate::subprocess::Process>),
     Finalizer(Value), // alloc.c's: its function, nil once called (gc.rs dooms it)
@@ -86,43 +92,10 @@ pub(super) enum Object {
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
     /// A free table entry (table.rs `sweep`): no Value names it but a
-    /// stale one, which finds no object here.
+    /// stale one, which finds no object here. Never in an image, whose
+    /// tables are dense (gc.rs `collect_compacting`).
     Free,
 }
-romacs_snapshot::snapshot_enum!(Object {
-    Object::SyntaxTable(f0) => (f0),
-    Object::Float(f0) => (f0),
-    Object::Bignum(f0) => (f0),
-    Object::Window(f0) => (f0),
-    Object::Frame(f0) => (f0),
-    Object::Terminal(f0) => (f0),
-    Object::WindowConfiguration(f0) => (f0),
-    // At rest: `foreign_resource` refuses a live connection or statement,
-    // whose handles are SQLite's, in its own heap.
-    Object::Sqlite(f0) => (),
-    // At rest: `foreign_resource` refuses every live treesit object.
-    Object::Treesit(f0) => (),
-    Object::Process(f0) => (f0),
-    Object::Finalizer(f0) => (f0),
-    Object::Thread => (),
-    Object::String(f0) => (f0),
-    Object::RawString(f0) => (f0),
-    Object::Vector(f0) => (f0),
-    Object::BoolVector(f0) => (f0),
-    Object::Record(f0) => (f0),
-    Object::CharTable(f0) => (f0),
-    Object::SubCharTable(f0) => (f0),
-    Object::MapKeymapCursor(f0) => (f0),
-    Object::Buffer(f0) => (f0),
-    Object::Marker(f0) => (f0),
-    Object::Overlay(f0) => (f0),
-    Object::Bytes(f0) => (f0),
-    Object::ByteBuffer(f0) => (f0),
-    Object::HashTable(f0) => (f0),
-    Object::Obarray(f0) => (f0),
-    // Never captured: an image's tables are dense (gc.rs `collect_compacting`).
-    Object::Free => (),
-});
 const _: [(); 32] = [(); size_of::<Object>()];
 impl Object {
     /// The resource of this process an object holds, which no other
@@ -147,7 +120,7 @@ impl Object {
     }
 }
 /// String slots contain valid UTF-8; RawString slots contain all other bytes.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct LispString {
     bytes: Vec<u8>,
     chars: usize,
@@ -162,7 +135,6 @@ pub(super) struct LispString {
     #[cfg(test)]
     pub(super) flag_scanned: std::cell::Cell<usize>,
 }
-romacs_snapshot::snapshot_struct!(LispString { bytes, chars, flags, properties, cursors, #[cfg(test)] scanned, #[cfg(test)] flag_scanned });
 const MULTIBYTE: u8 = 1;
 const ASCII: u8 = 2;
 const UTF8: u8 = 4;

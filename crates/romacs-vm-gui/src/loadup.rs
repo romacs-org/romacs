@@ -49,7 +49,7 @@ use romacs_vm::Vm;
 use std::path::{Path, PathBuf};
 
 /// One `(load ...)` call written in loadup.el, in source order.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Site {
     /// 1-based, source order: the Nth `(load ...)` call in loadup.el's source order.
     pub index: usize,
@@ -62,10 +62,9 @@ pub struct Site {
     /// Byte offset of the `(` in loadup.el.
     pub byte: usize,
 }
-romacs_snapshot::snapshot_struct!(Site { index, name, line, form, byte });
 
 /// What became of one load site.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Outcome {
     /// `load` returned normally: all `forms` top-level forms evaluated.
     Complete { forms: usize },
@@ -81,28 +80,16 @@ pub enum Outcome {
     /// The site was never called. `why` names the loadup form's outcome.
     NotReached { why: String },
 }
-romacs_snapshot::snapshot_enum!(Outcome {
-    Outcome::Complete { forms } => (forms),
-    Outcome::Partial { forms, failed, line, source, error, total } => (forms, failed, line, source, error, total),
-    Outcome::Absent => (),
-    Outcome::Native => (),
-    Outcome::Missing { error } => (error),
-    Outcome::NotReached { why } => (why),
-});
 
 /// How many top-level forms the file has, by VM2's own reader.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Total {
     Forms(usize),
     /// The reader stopped at this 1-based form; the file has at least that many.
     ReaderStopped { at: usize, error: String },
 }
-romacs_snapshot::snapshot_enum!(Total {
-    Total::Forms(f0) => (f0),
-    Total::ReaderStopped { at, error } => (at, error),
-});
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct Row {
     pub site: Site,
     pub outcome: Outcome,
@@ -111,20 +98,18 @@ pub struct Row {
     /// form's `line N form K: error` if one failed.
     pub nested: Vec<(String, usize, Option<String>)>,
 }
-romacs_snapshot::snapshot_struct!(Row { site, outcome, nested });
 
 /// A top-level loadup.el form that signalled (it is not a load site's own
 /// failure: those are caught in the wrapper).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct FormFailure {
     pub form: usize,
     pub line: usize,
     pub source: String,
     pub error: String,
 }
-romacs_snapshot::snapshot_struct!(FormFailure { form, line, source, error });
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct Loadup {
     pub loadup: PathBuf,
     /// Top-level forms in loadup.el.
@@ -147,7 +132,6 @@ pub struct Loadup {
     /// `load-path` when loadup.el reached `(eval top-level t)`, for [`drive`]'s subdirs step.
     before_startup: Option<Vec<String>>,
 }
-romacs_snapshot::snapshot_struct!(Loadup { loadup, forms, rows, form_failures, seconds, subdirs, subdirs_skipped, load_path_len, command_definitions, before_startup });
 
 impl Loadup {
     pub fn count(&self, pick: fn(&Outcome) -> bool) -> usize {

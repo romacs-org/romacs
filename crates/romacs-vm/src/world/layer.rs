@@ -60,7 +60,7 @@ const SECRET_READERS: [&str; 17] = [
 ];
 
 /// How the init asked for a load, or declared a library it loads later.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub enum Kind {
     /// `(require NAME FILE NOERROR)`.
     Require,
@@ -73,10 +73,9 @@ pub enum Kind {
     /// `with-eval-after-load` do. Always declared.
     After,
 }
-romacs_snapshot::snapshot_enum!(Kind { Kind::Require => (), Kind::Autoload => (), Kind::After => () });
 
 /// One load the init issued at its own depth, or one library it declared.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct Entry {
     pub kind: Kind,
     /// The feature's name, or the autoload's file as given.
@@ -93,7 +92,6 @@ pub struct Entry {
     /// `After`'s forms, each as printed, in the order the init gave them.
     pub forms: Vec<String>,
 }
-romacs_snapshot::snapshot_struct!(Entry { kind, name, file, noerror, load_path, declared, forms });
 
 impl Entry {
     fn json(&self) -> Json {
@@ -157,7 +155,7 @@ fn lisp_string(text: &str) -> String {
 }
 
 /// What the init loaded, recorded while it ran (`Vm::record_init_loads`).
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Recording {
     /// The load depth of the init's own forms.
     depth: usize,
@@ -172,7 +170,6 @@ pub(crate) struct Recording {
     /// a form the init gives may hold what it returned.
     secrets: bool,
 }
-romacs_snapshot::snapshot_struct!(Recording { depth, entries, load_paths, hold, index, secrets });
 
 impl Recording {
     /// The index key of a declaration of NAME (FILE) of KIND.

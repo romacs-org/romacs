@@ -1210,7 +1210,7 @@ use crate::{
 };
 use std::ops::{Deref, DerefMut, Range};
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct AnnotatedBuffer {
     text: Text,
     /// The markers and overlay ends of the text, shared with the buffer's
@@ -1242,7 +1242,6 @@ pub(crate) struct AnnotatedBuffer {
     /// in the store `set-buffer-multibyte` makes.
     pub overlay_revision: u64,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions, overlay_revision });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1423,7 +1422,7 @@ impl AnnotatedBuffer {
                 * 2
     }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct Marker {
     pub buffer: Value,
     pub anchor: Option<Anchor>,
@@ -1432,8 +1431,7 @@ pub(crate) struct Marker {
     /// `marker-last-position' answers; 0 for one never placed.
     pub last_position: i64,
 }
-romacs_snapshot::snapshot_struct!(Marker { buffer, anchor, bias, last_position });
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct Overlay {
     pub buffer: Value,
     pub start: Option<Anchor>,
@@ -1445,7 +1443,6 @@ pub(crate) struct Overlay {
     /// count: GNU's itree puts a node before those with an equal start.
     pub inserted: u64,
 }
-romacs_snapshot::snapshot_struct!(Overlay { buffer, start, end, front, rear, properties, inserted });
 const _: () = assert!(std::mem::offset_of!(AnnotatedBuffer, text) == 0);
 impl Marker {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {

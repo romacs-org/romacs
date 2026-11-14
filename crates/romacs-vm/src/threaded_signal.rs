@@ -1,7 +1,7 @@
 //! Pre-unwind signal search shared by ordinary and reentrant engines.
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) enum SignalHandler {
     Condition(Value),
     Catch(Value),
@@ -17,14 +17,6 @@ pub(crate) enum SignalHandler {
     /// (`Vm::isolate_claim').
     Job(u64),
 }
-romacs_snapshot::snapshot_enum!(SignalHandler {
-    SignalHandler::Condition(f0) => (f0),
-    SignalHandler::Catch(f0) => (f0),
-    SignalHandler::Bind { conditions, function, group } => (conditions, function, group),
-    SignalHandler::Mask(f0) => (f0),
-    SignalHandler::Boundary => (),
-    SignalHandler::Job(f0) => (f0),
-});
 
 impl SignalHandler {
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {

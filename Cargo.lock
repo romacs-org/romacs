@@ -3833,9 +3833,19 @@ version = "0.0.20"
 dependencies = [
  "foldhash",
  "num-bigint",
+ "romacs-snapshot-derive",
  "ropey",
  "rustc-hash 2.1.3",
  "serde_json",
+]
+
+[[package]]
+name = "romacs-snapshot-derive"
+version = "0.0.20"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

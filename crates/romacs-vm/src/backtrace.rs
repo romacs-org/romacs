@@ -5,6 +5,7 @@ use super::*;
 
 /// Where a call's arguments are read from, as GNU's `record_in_backtrace`
 /// keeps a pointer to the caller's pushed values (bytecode.c `Bcall`).
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) enum Arguments {
     /// The caller's argument registers: OFFSET..OFFSET+COUNT of the register
     /// stack at suspension depth STACK (`Vm::suspended_stacks` index; the live
@@ -16,10 +17,7 @@ pub(super) enum Arguments {
     /// spread window a nested `apply` reuses while the callee runs.
     Copied(std::ops::Range<usize>),
 }
-romacs_snapshot::snapshot_enum!(Arguments {
-    Arguments::Registers { stack, offset, count } => (stack, offset, count),
-    Arguments::Copied(f0) => (f0),
-});
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Activation {
     pub token: usize,
     pub function: Value,
@@ -27,21 +25,20 @@ pub(super) struct Activation {
     args: Arguments,
     pub dynamic: usize,
 }
-romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
 /// A `save-excursion` in progress, for `backtrace-eval`'s unrewind (GNU
 /// SPECPDL_UNWIND_EXCURSION): its marker, the selected window when it
 /// showed the marker's buffer (else nil), and where it was made, as the
 /// activation count and the binding depth then. The pair orders it against
 /// both: one made in a caller just before a call is outside the callee's
 /// entry even at the same binding depth.
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Excursion {
     pub marker: Value,
     pub window: Value,
     pub frames: usize,
     pub dynamic: usize,
 }
-romacs_snapshot::snapshot_struct!(Excursion { marker, window, frames, dynamic });
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Backtrace {
     pub frames: Vec<Activation>,
     arguments: Vec<Value>,
@@ -65,7 +62,6 @@ pub(super) struct Backtrace {
     /// empty records every one.
     only: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, exit_flags, exit_pruned, excursions, observed, only });
 impl Backtrace {
     pub fn enter(
         &mut self,

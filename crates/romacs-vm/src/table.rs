@@ -220,14 +220,13 @@ impl<T> RawTable<T> {
 /// The keys and values put into a table's old strong hash tables since the
 /// last collection. Apart from the entries, so a `Stores` can hold it beside
 /// a `&mut HashTable`.
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 struct Barrier {
     values: Vec<Value>,
     /// The log overflowed and was dropped: it records nothing until the next
     /// collection, which must not trust the generations.
     lost: bool,
 }
-romacs_snapshot::snapshot_struct!(Barrier { values, lost });
 
 /// Whether V can name an entry of a table: an object, a cons, a closure or a
 /// cell, by its physical tag, and neither nil nor t, which share two of them.
@@ -288,6 +287,7 @@ impl Stores<'_> {
     }
 }
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Table<T> {
     entries: Vec<T>,
     colors: Vec<u8>,
@@ -322,37 +322,6 @@ impl<T> Default for Table<T> {
             #[cfg(test)]
             reused: 0,
         }
-    }
-}
-
-// SAFETY: as its fields, each SnapshotSafe; none addresses anything outside
-// the table's own storage.
-unsafe impl<T: romacs_snapshot::SnapshotSafe> romacs_snapshot::SnapshotSafe for Table<T> {}
-impl<T: romacs_snapshot::SnapshotSafe + romacs_snapshot::Schema> romacs_snapshot::Schema for Table<T> {
-    fn walk(&self, w: &mut romacs_snapshot::Walk<'_>) {
-        let Self { entries, colors, cursor, free, quarantined, reserved, high, marking, sticky, generation, barrier,
-                   #[cfg(test)] reused } = self;
-        w.field("entries", entries);
-        w.field("colors", colors);
-        w.field("cursor", cursor);
-        w.field("free", free);
-        w.field("quarantined", quarantined);
-        w.field("reserved", reserved);
-        w.field("high", high);
-        w.field("marking", marking);
-        w.field("sticky", sticky);
-        w.field("generation", generation);
-        w.field("barrier", barrier);
-        #[cfg(test)]
-        w.field("reused", reused);
-    }
-    fn any(&self) -> Option<&dyn std::any::Any> {
-        Some(self)
-    }
-    fn settle(&mut self, s: &mut romacs_snapshot::Settle) {
-        // The rest are numbers and flags.
-        self.entries.settle(s);
-        self.barrier.settle(s);
     }
 }
 

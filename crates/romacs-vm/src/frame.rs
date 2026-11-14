@@ -12,7 +12,7 @@ const HOST_FRAME: &str = "#:vm2-host-frame";
 pub(crate) const DEFAULT_FRINGE: u32 = 8;
 /// Live frames, newest first: GNU's `Vframe_list' (frame.c:1438).
 const FRAME_LIST: &str = "#:vm2-frame-list";
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Frame {
     pub root: Value,
     pub selected: Value,
@@ -66,7 +66,6 @@ pub(super) struct Frame {
     /// mini-window (VM2-STATUS-BAR).
     pub status_bar_top: bool,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers, status_bar_lines, status_bar_top });
 
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
@@ -88,7 +87,7 @@ pub(crate) struct ChildGeometry {
     pub height: u32,
     pub border: u32,
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Terminal {
     pub frame: Value,
     pub live: bool,
@@ -99,7 +98,6 @@ pub(super) struct Terminal {
     /// The parameter alist (terminal.c `param_alist').
     pub params: Value,
 }
-romacs_snapshot::snapshot_struct!(Terminal { frame, live, terminal_coding, keyboard_coding, params });
 impl Terminal {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding); f(&mut self.params);

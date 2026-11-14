@@ -9,7 +9,7 @@ pub(crate) use config::WindowConfiguration;
 pub(crate) const ROOT: &str = "#:vm2-root-window";
 const MINI: &str = "#:vm2-minibuffer-window";
 const SELECTED: &str = "#:vm2-selected-window";
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Window {
     pub id: u64,
     pub frame: Value,
@@ -88,7 +88,6 @@ pub(super) struct Window {
     pub(crate) shows: u64,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { shows, id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, min_hscroll, suspend_auto_hscroll, old_point, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     /// BUFFER is what the window shows now.
     pub(crate) fn show(&mut self, buffer: Value) {
@@ -178,6 +177,7 @@ impl Window {
         !self.dead && self.children.is_empty() && self.buffer != Value::NIL
     }
 }
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct WindowState {
     next: u64,
     /// GNU `window_select_count` (window.c:136).
@@ -204,7 +204,6 @@ pub(super) struct WindowState {
     /// scale): images are decoded at it and laid out in logical pixels.
     pub device_scale: f32,
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area, status_height, status_reserved, device_scale });
 impl Default for WindowState {
     fn default() -> Self {
         Self {

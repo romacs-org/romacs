@@ -4,7 +4,7 @@ use super::*;
 /// The symbols the face primitives compare against, interned once: a
 /// recalculation runs through thousands of these per theme switch, and
 /// interning by name hashes a string each time. Symbols never move.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 pub(crate) struct FaceKeys {
     pub unspecified: Value,
     pub ignore_defface: Value,
@@ -47,7 +47,6 @@ pub(crate) struct FaceKeys {
     /// What a memo holds for a slot the replay did not write.
     pub unwritten: Value,
 }
-romacs_snapshot::snapshot_struct!(FaceKeys { unspecified, ignore_defface, reset, normal, bold, italic, default, scroll_bar, border, cursor, mouse, face_alias, face_no_inherit, theme_face, defface_spec, override_spec, customized_face, saved_face, bold_key, italic_key, background_mode, display_type, reverse, face_x_resources, type_condition, min_colors, class, background, supports, graphic, keywords, frame_tables, defaults, display_record, memos, unwritten });
 
 pub(crate) const LFACE_VECTOR_SLOTS: usize = romacs_face::registry::LFACE_VECTOR_SIZE - 1;
 

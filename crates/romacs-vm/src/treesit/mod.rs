@@ -42,13 +42,12 @@ pub(crate) fn bundled_grammars() -> &'static [BundledGrammar] {
 }
 
 /// GNU's `struct ts_linecol`; `bytepos` 0 is the empty linecol.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Linecol {
     pub line: i64,
     pub col: i64,
     pub bytepos: i64,
 }
-romacs_snapshot::snapshot_struct!(Linecol { line, col, bytepos });
 pub(crate) const BOB_LINECOL: Linecol = Linecol { line: 1, col: 0, bytepos: 1 };
 pub(crate) const EMPTY_LINECOL: Linecol = Linecol { line: 0, col: 0, bytepos: 0 };
 

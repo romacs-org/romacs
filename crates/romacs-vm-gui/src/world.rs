@@ -37,10 +37,10 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 
 /// What a GUI world carries beside its VM: the chain's report.
+#[derive(romacs_snapshot::Snapshot)]
 pub struct Carry {
     pub loadup: crate::loadup::Loadup,
 }
-romacs_snapshot::snapshot_struct!(Carry { loadup });
 
 /// The source of the launch font's face, and its size in points, from
 /// ROMACS_GUI_FONT and ROMACS_GUI_FONT_SIZE.

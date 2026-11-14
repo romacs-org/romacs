@@ -23,14 +23,13 @@ fn note(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>, n: usiz
     counter.with(|c| c.set(c.get() + n));
 }
 
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct MatchState {
     // Character positions, string-relative or one-based buffer positions.
     // No heap indices: collection may move every VM object between calls.
     pub(crate) groups: Vec<Option<(usize, usize)>>,
     pub(crate) succeeded: bool,
 }
-romacs_snapshot::snapshot_struct!(MatchState { groups, succeeded });
 
 pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
     matches!(
@@ -198,13 +197,8 @@ type SearchResult<T> = std::result::Result<T, Fault>;
 
 /// What a cached pattern folds case with: nothing, the standard table,
 /// or the completion translation over a buffer's case-canon table.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) enum Translation { None, Standard, Completion(Value) }
-romacs_snapshot::snapshot_enum!(Translation {
-    Translation::None => (),
-    Translation::Standard => (),
-    Translation::Completion(f0) => (f0),
-});
 
 /// search.c's searchbufs: compiled patterns by source, so a pattern
 /// searched again is not compiled again (compile_pattern). A pattern whose

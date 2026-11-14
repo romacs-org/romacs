@@ -26,7 +26,7 @@ const END: u32 = u32::MAX;
 /// GNU's index cannot exceed 2^31 - 1 buckets: `:size` 2^30 and above fail.
 const MAXIMUM_SIZE: i64 = 1 << 30;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Test {
     Eq,
     Eql,
@@ -36,7 +36,7 @@ pub(super) enum Test {
     User(Value, Native),
 }
 /// The predicates a user-defined test may name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Native {
     /// profiler.el's `profiler-function-equal': closures by their code.
     FunctionEqual,
@@ -44,10 +44,6 @@ pub(super) enum Native {
     /// hashes, which agrees with it.
     EqualIncludingProperties,
 }
-romacs_snapshot::snapshot_enum!(Native {
-    Native::FunctionEqual => (),
-    Native::EqualIncludingProperties => (),
-});
 impl Test {
     /// The test as one byte, for content hashes.
     pub(super) fn code(self) -> u8 {
@@ -60,13 +56,7 @@ impl Test {
         }
     }
 }
-romacs_snapshot::snapshot_enum!(Test {
-    Test::Eq => (),
-    Test::Eql => (),
-    Test::Equal => (),
-    Test::User(name, native) => (name, native),
-});
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Weakness {
     None,
     Key,
@@ -74,13 +64,6 @@ pub(super) enum Weakness {
     KeyOrValue,
     KeyAndValue,
 }
-romacs_snapshot::snapshot_enum!(Weakness {
-    Weakness::None => (),
-    Weakness::Key => (),
-    Weakness::Value => (),
-    Weakness::KeyOrValue => (),
-    Weakness::KeyAndValue => (),
-});
 impl Weakness {
     /// GNU `keep_entry_p`.
     pub(super) fn keep(self, key: bool, value: bool) -> bool {
@@ -103,7 +86,7 @@ impl Weakness {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct HashTable {
     pub(super) test: Test,
     pub(super) weakness: Weakness,
@@ -123,7 +106,6 @@ pub(super) struct HashTable {
     count: usize,
     stale: bool,
 }
-romacs_snapshot::snapshot_struct!(HashTable { test, weakness, local_bindings, size, keys, values, hashes, moving, next, buckets, free, count, stale });
 impl HashTable {
     pub(super) fn new(test: Test, weakness: Weakness, size: usize) -> Self {
         Self {

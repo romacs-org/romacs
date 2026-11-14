@@ -1,7 +1,7 @@
 //! Request-owned code uses stable slots. Explicit compile handles remain pinned.
 use super::*;
 
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct RequestCode {
     pub(super) permanent: Vec<bool>,
     pub(super) image_caches: usize,
@@ -25,7 +25,6 @@ pub(super) struct RequestCode {
     /// discarded build.
     unclaimed_caches: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(RequestCode { permanent, image_caches, live, free, free_caches, compiling, compiled, since_collection, counted, unclaimed_caches });
 
 impl RequestCode {
     /// Whether every cache slot a builder took is owned: no build is open

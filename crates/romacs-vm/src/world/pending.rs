@@ -26,12 +26,11 @@ use crate::{Value, VariableRedirect, Vm};
 
 /// A pending variable: the redirect it had, and its entry in
 /// `romacs--world-pending`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Pending {
     redirect: Option<VariableRedirect>,
     entry: u32,
 }
-romacs_snapshot::snapshot_struct!(Pending { redirect, entry });
 
 impl Vm {
     /// Make the variable at SLOT wait for ENTRY's evaluation until its

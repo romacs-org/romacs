@@ -43,9 +43,8 @@ pub const MAX_BYTES: usize = 16 << 20;
 
 /// Checked boundary value. Its private field cannot be replaced or mutated.
 /// Raw `Datum` is an untrusted construction language, never a face API input.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct BoundedDatum(Datum);
-romacs_snapshot::snapshot_tuple!(BoundedDatum(f0));
 
 impl BoundedDatum {
     pub fn new(raw: &Datum) -> Result<Self, DatumError> {
@@ -118,7 +117,7 @@ impl PartialEq<BoundedDatum> for Datum {
 }
 
 /// Untrusted owned Lisp data. Use `BoundedDatum` at every face boundary.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Datum {
     Nil,
     T,
@@ -132,16 +131,6 @@ pub enum Datum {
     /// A non-empty improper list `(a b . tail)`; `tail` is never a list.
     Dotted(Vec<Datum>, Box<Datum>),
 }
-romacs_snapshot::snapshot_enum!(Datum {
-    Datum::Nil => (),
-    Datum::T => (),
-    Datum::Int(f0) => (f0),
-    Datum::Float(f0) => (f0),
-    Datum::Str(f0) => (f0),
-    Datum::Symbol(f0) => (f0),
-    Datum::List(f0) => (f0),
-    Datum::Dotted(f0, f1) => (f0, f1),
-});
 
 /// What a Lisp heap node looks like to the converter.
 ///

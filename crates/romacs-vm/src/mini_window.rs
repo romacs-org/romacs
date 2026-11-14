@@ -12,14 +12,13 @@ use std::ops::Range;
 
 /// A run of display text: `len` bytes of buffer text from buffer byte
 /// `buffer`, or, when `string`, an overlay string shown at buffer byte `buffer`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) struct Segment {
     pub display: usize,
     pub buffer: usize,
     pub len: usize,
     pub string: bool,
 }
-romacs_snapshot::snapshot_struct!(Segment { display, buffer, len, string });
 
 /// A buffer's text with its overlay strings spliced in.
 #[derive(Default)]

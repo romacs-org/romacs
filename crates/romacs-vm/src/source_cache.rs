@@ -10,7 +10,7 @@ mod tier;
 pub use prepared::PreparedHandle;
 pub use tier::DIRECT_NODE_LIMIT;
 const COMPILER: &str = concat!("vm2-source-ir-2:", env!("VM2_COMPILER_ID"));
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, romacs_snapshot::Snapshot)]
 pub struct SourceCacheStats {
     pub hits: u64,
     pub compilations: u64,
@@ -20,15 +20,13 @@ pub struct SourceCacheStats {
     /// `(lambda ...)' lists called as functions compiled (`lambda_list_closure').
     pub lambda_compiles: u64,
 }
-romacs_snapshot::snapshot_struct!(SourceCacheStats { hits, compilations, invalidations, disk_hits, direct, lambda_compiles });
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 struct Entry {
     function: usize,
     macros: Vec<(usize, u64, String)>,
     specials: Vec<(String, SpecialKind)>,
     calls: Vec<(usize, bool)>,
 }
-romacs_snapshot::snapshot_struct!(Entry { function, macros, specials, calls });
 /// A `(lambda ...)' list's compiled closure (`Vm::lambda_list_closure'):
 /// the list as it was compiled (`lambda_snapshot'), and the world epoch it
 /// was compiled in.
@@ -77,7 +75,7 @@ impl LambdaList {
 /// Conses, strings and vectors a lambda list's snapshot holds at most; a
 /// larger (or circular) list is compiled at each call.
 const LAMBDA_WALK_LIMIT: usize = 4096;
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct SourceCache {
     entries: NameMap<String, Entry>,
     stats: SourceCacheStats,
@@ -85,7 +83,6 @@ pub(super) struct SourceCache {
     prepared: Vec<prepared::Prepared>,
     last_guard: Option<Entry>,
 }
-romacs_snapshot::snapshot_struct!(SourceCache { entries, stats, store, prepared, last_guard });
 fn key(source: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(COMPILER.as_bytes());

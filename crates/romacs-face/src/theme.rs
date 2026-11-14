@@ -23,9 +23,8 @@ use crate::spec::{Background, Collapsed, FaceDef, FaceError};
 
 /// Identity of one immutable face table. Minted only when a [`Theme`] (or a
 /// [`crate::Remap`]) is constructed; never reused, never bumped by hand.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub struct Generation(NonZeroU64);
-romacs_snapshot::snapshot_tuple!(Generation(f0));
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -41,13 +40,12 @@ impl Generation {
 }
 
 /// The `defface` registry: which faces exist and their collapsed specs.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub struct Deffaces {
     aliases: FxHashMap<Arc<str>, Arc<str>>,
     order: Vec<Arc<str>>,
     specs: FxHashMap<Arc<str>, Collapsed>,
 }
-romacs_snapshot::snapshot_struct!(Deffaces { aliases, order, specs });
 
 impl Deffaces {
     /// Register a face-alias at the boundary, before the immutable theme is built.
@@ -103,12 +101,11 @@ impl Deffaces {
 }
 
 /// One authored theme's face specs, collapsed. No Custom priority machinery.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct ThemeSpec {
     name: Arc<str>,
     faces: FxHashMap<Arc<str>, Collapsed>,
 }
-romacs_snapshot::snapshot_struct!(ThemeSpec { name, faces });
 
 impl ThemeSpec {
     pub fn new(name: &str) -> ThemeSpec {
@@ -130,11 +127,10 @@ impl ThemeSpec {
 }
 
 /// One explicit user preference value, not an enabled-theme priority stack.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub struct UserOverrides {
     faces: FxHashMap<Arc<str>, FaceDef>,
 }
-romacs_snapshot::snapshot_struct!(UserOverrides { faces });
 
 impl UserOverrides {
     /// Read explicit `((FACE . PLIST) ...)` preferences; no Custom forms.
@@ -179,9 +175,8 @@ impl UserOverrides {
 /// absolute, so every realised face is too. The one exception is
 /// `:distant-foreground`, which GNU's default face also leaves unspecified
 /// (it is absent from `face-attribute-name-alist`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Base(Attrs);
-romacs_snapshot::snapshot_tuple!(Base(f0));
 
 impl Base {
     pub fn attrs(&self) -> &Attrs {
@@ -219,15 +214,14 @@ pub enum Inherit {
     Default,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub(crate) struct Face {
     pub(crate) def: Arc<FaceDef>,
     /// The face's own attributes merged along its inheritance, resolved once.
     pub(crate) inherited: Attrs,
 }
-romacs_snapshot::snapshot_struct!(Face { def, inherited });
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 struct Inputs {
     deffaces: Arc<Deffaces>,
     spec: Option<Arc<ThemeSpec>>,
@@ -237,9 +231,8 @@ struct Inputs {
     background: Background,
     base: Arc<Base>,
 }
-romacs_snapshot::snapshot_struct!(Inputs { deffaces, spec, overrides, override_order, user, background, base });
 
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 struct ThemeInner {
     generation: Generation,
     inputs: Inputs,
@@ -247,12 +240,10 @@ struct ThemeInner {
     faces: FxHashMap<Arc<str>, Face>,
     default_realized: Attrs,
 }
-romacs_snapshot::snapshot_struct!(ThemeInner { generation, inputs, order, faces, default_realized });
 
 /// An immutable face table and C merge context. Cheap to clone and switch.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct Theme(Arc<ThemeInner>);
-romacs_snapshot::snapshot_tuple!(Theme(f0));
 
 impl Theme {
     /// Build a theme. Fails, before anything is published, if any spec is
