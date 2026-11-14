@@ -1819,6 +1819,7 @@ byte FROM (a record's start) when given."
                    (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
+                 (run-hook-with-args 'romacs-agent-caught-up-functions session)
                  (romacs-agent--keep-soon session)
                  (romacs-agent--seen-caught-up session)
                  (romacs-agent--allow-tool-calls session)
@@ -2011,7 +2012,10 @@ PROVIDER when given (one of its harness: the same conversation goes on
 there, `romacs-agent--move-conversation'); nil for model or effort leaves
 it to the harness.  A running turn ends as it began, and messages wait
 until the change is in effect.  The last selection asked for wins.
-Return whether anything changes."
+Return whether anything changes.  Refused while a rollback or a renewal
+holds SESSION: its harness is run anew by those."
+  (when (romacs-agent--held-p session)
+    (user-error "Session %s is rolling back or renewing: change it after" (romacs-agent-title session)))
   (let* ((provider (or provider (plist-get (romacs-agent--wanted session) :provider)))
          (target (progn (romacs-agent--check-move session provider)
                         (list :model model :effort effort :provider provider)))
@@ -2289,12 +2293,20 @@ looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
     (romacs-agent--changed session)
     (romacs-agent-resume session)))
 
+(defvar romacs-agent-caught-up-functions nil
+  "Functions of a session whose journal's replay is over: what its records
+say is all there, what comes now is live.")
+
+(defvar romacs-agent-hold-functions nil
+  "Functions of a session saying whether something holds its messages:
+any true holds them (`romacs-agent--held-p').")
+
 (defun romacs-agent--held-p (session)
   "Whether SESSION's messages wait whatever its harness does: a rollback
 or a renewal (romacs-agent-renew.el) holds them for the conversation it
 leaves them to, a renewal until its new conversation's run starts."
-  (let ((state (romacs-agent-driver-state session)))
-    (or (plist-get state :rolling-back) (plist-get state :renewing) (romacs-agent-renewing session))))
+  (or (plist-get (romacs-agent-driver-state session) :rolling-back) (romacs-agent-renewing session)
+      (run-hook-with-args-until-success 'romacs-agent-hold-functions session)))
 
 (defun romacs-agent--send-next (session &optional force)
   "Send the first message waiting for SESSION's turn to end, unless a
@@ -2954,10 +2966,10 @@ given, is its state as its records left it."
                                                      ;; As its records left it, not as this
                                                      ;; process's view of its connection has it.
                                                      ('state (or state (romacs-agent-state session)))
-                                                     ;; A rollback's or a renewal's hold is this process's own.
+                                                     ;; A rollback's hold is this process's own.
                                                      ('driver-state (romacs-agent--without
                                                                      (romacs-agent-driver-state session)
-                                                                     '(:rolling-back :renewing)))
+                                                                     '(:rolling-back)))
                                                      (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
 
 (defun romacs-agent--keep (session &optional state)

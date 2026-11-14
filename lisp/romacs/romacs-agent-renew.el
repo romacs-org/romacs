@@ -32,13 +32,18 @@ or higher-priority instructions. Files may have changed since: read them again b
 relying on them. The message after the line is the request now."
   "A renewal's brief's head; %s names the conversation it leaves.")
 
+(defvar romacs-agent-renew--holds (make-hash-table :test #'eq :weakness 'key)
+  "Sessions a renewal holds before its note is journaled, to its token:
+this process's own, outliving a restart of the harness.")
+
 (defun romacs-agent-renew--holder (session)
   "The token of the renewal holding SESSION, or nil."
-  (plist-get (romacs-agent-driver-state session) :renewing))
+  (gethash session romacs-agent-renew--holds))
 
 (defun romacs-agent-renew--hold (session token)
-  (setf (romacs-agent-driver-state session)
-        (plist-put (romacs-agent-driver-state session) :renewing token)))
+  (if token (puthash session token romacs-agent-renew--holds) (remhash session romacs-agent-renew--holds)))
+
+(add-hook 'romacs-agent-hold-functions #'romacs-agent-renew--holder)
 
 (defun romacs-agent-renew--release (session token)
   "End TOKEN's hold on SESSION, if it still holds it: what waited goes."
@@ -121,21 +126,39 @@ cannot renew."
                                                                "context" (or (romacs-agent-context-used session) :null))))
            (error (funcall fail (error-message-string err)))))))))
 
+(defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
+  "Sessions whose journaled renewal is being finished: once each.")
+
 (defun romacs-agent-renew--finish (session native)
   "Finish SESSION's journaled renewal to conversation NATIVE: its manifest
-says so, and its harness runs anew on it."
-  (romacs-agent-renew--commit session native)
-  (romacs-agent--relaunch session))
+says so, and its harness runs anew on it.  Once: its new run's note ends it."
+  (unless (gethash session romacs-agent-renew--finishing)
+    (puthash session t romacs-agent-renew--finishing)
+    (romacs-agent-renew--commit session native)
+    (romacs-agent--relaunch session)))
+
+(defun romacs-agent-renew--unfinished (session)
+  "Finish SESSION's renewal if one is journaled that no run followed."
+  (when (and (romacs-agent-renewing session) (eq (romacs-agent-get (romacs-agent-id session)) session))
+    (condition-case err (romacs-agent-renew--finish session (romacs-agent-harness-session session))
+      (error (romacs-agent--raise session (list :type 'error :text (format "Renewal not finished: %s"
+                                                                           (error-message-string err))))))))
 
 (defun romacs-agent-renew--restored ()
-  "Finish every renewal journaled that no run of its harness followed."
+  "Finish every renewal journaled that no run of its harness followed, of
+the sessions no supervisor runs for: one that runs replays first, and is
+finished once its replay is over (`romacs-agent-caught-up-functions')."
   (dolist (session (romacs-agent-sessions))
-    (when (romacs-agent-renewing session)
-      (condition-case err (romacs-agent-renew--finish session (romacs-agent-harness-session session))
-        (error (romacs-agent--raise session (list :type 'error :text (format "Renewal not finished: %s"
-                                                                             (error-message-string err)))))))))
+    (unless (process-live-p (romacs-agent-connection session))
+      (romacs-agent-renew--unfinished session))))
+
+(defun romacs-agent-renew--ran (session event)
+  "A run started for SESSION (EVENT its note): a renewal finishing is done."
+  (when (eq (plist-get event :type) 'run) (remhash session romacs-agent-renew--finishing)))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
+(add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)
+(add-hook 'romacs-agent-event-functions #'romacs-agent-renew--ran)
 
 (defun romacs-agent-renew--commit (session native)
   "SESSION's manifest names its new conversation NATIVE (nil: its harness

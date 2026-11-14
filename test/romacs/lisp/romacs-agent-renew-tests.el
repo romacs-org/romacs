@@ -322,4 +322,39 @@ state root that has said two things, its writes to its harness in
       (should (string-match-p "renewing already"
                               (cadr (should-error (romacs-agent-rollback session 9 #'ignore) :type 'user-error)))))))
 
+(ert-deftest romacs-agent-renew-unfinished-is-finished-once-replayed ()
+  ;; Its supervisor still runs: the renewal is found by its replay, and
+  ;; finished once that is over, once.
+  (romacs-agent-renew-tests--with 'claude
+    (let ((connection (make-process :name "romacs-renew-old" :command '("cat") :noquery t)))
+      (unwind-protect
+          (progn
+            (setf (romacs-agent-connection session) connection)
+            (romacs-agent-renew--restored)
+            (should (= relaunched 0))
+            (romacs-agent--record session (romacs-mcp--object "seq" 50 "t" 50.0 "note"
+                                                              (romacs-mcp--object "type" "renew" "from" "a"
+                                                                                  "to" (romacs-agent--uuid) "brief" "B")))
+            (run-hook-with-args 'romacs-agent-caught-up-functions session)
+            (run-hook-with-args 'romacs-agent-caught-up-functions session)
+            (should (= relaunched 1))
+            ;; Its new run: done with, a later renewal finishes again.
+            (romacs-agent--raise session (list :type 'run :seq 51))
+            (should-not (gethash session romacs-agent-renew--finishing)))
+        (delete-process connection)))))
+
+(ert-deftest romacs-agent-renew-survives-a-restart-before-its-note ()
+  ;; Its harness run anew (a selection's restart) before the journal is
+  ;; read: the renewal still holds it, and goes on.  A selection is
+  ;; refused while it holds.
+  (romacs-agent-renew-tests--with 'claude
+    (let ((outcome nil) (end (+ (float-time) 30)))
+      (romacs-agent-renew session nil (lambda (result) (setq outcome result)))
+      (should (string-match-p "renewing" (cadr (should-error (romacs-agent-select session "m" nil) :type 'user-error))))
+      ;; What a resume does to its driver's state.
+      (setf (romacs-agent-driver-state session) nil)
+      (should (romacs-agent--held-p session))
+      (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
+      (should (eq (car outcome) :done)))))
+
 ;;; romacs-agent-renew-tests.el ends here
