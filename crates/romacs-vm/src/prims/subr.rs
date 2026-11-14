@@ -44,6 +44,22 @@ fn subr_native_lambda_list(cx, subr: Value) {
     Ok(Value::TRUE)
 }}
 
+// The effect class SUBR's defsubr declares (`Effect'): `pure', `reads',
+// `mutates-args' or `global'.  nil for a legacy primitive, which declares
+// none.  What a tool may assume of a call without running it: a `pure'
+// primitive reaches no state of the machine.
+defsubr! { name = "romacs--subr-effect", gnu = "romacs:lint", effect = Pure,
+fn romacs_subr_effect(cx, subr: Value) {
+    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    Ok(match crate::prim::generated(subr).map(|d| &d.effect) {
+        Some(Effect::Pure) => cx.intern("pure"),
+        Some(Effect::Reads) => cx.intern("reads"),
+        Some(Effect::MutatesArgs) => cx.intern("mutates-args"),
+        Some(Effect::Global) => cx.intern("global"),
+        None => Value::NIL,
+    })
+}}
+
 // Where Rust defines OBJECT, as help-fns.el's `help-C-file-name' finds a
 // DEFUN or DEFVAR in GNU's DOC file: for KIND `defvar', OBJECT a symbol
 // Rust forwards (its C_VARIABLES entry); else OBJECT a primitive (its
