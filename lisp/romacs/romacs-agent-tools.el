@@ -444,39 +444,36 @@ named, then `romacs-agent-tools--child-note'; an empty TASK stays empty."
 another task of its parent), when it says, its result's length, and the
 message the turn answered.")
 
-(defun romacs-agent-tools--at-p (text pos prefix)
-  "Whether TEXT has PREFIX at POS."
-  (eq t (compare-strings prefix nil nil text pos (min (length text) (+ pos (length prefix))))))
-
 (defun romacs-agent-tools--wakes-parse (text)
   "TEXT read back as the wakes it carries, in order, each a plist of :id
 :title :state :reply-to (the message the turn answered) and :result, or
 nil; after the last, the lines saying how to answer each.  A head's
 length takes its result whatever it holds; one with none (a wake of
 before) takes the rest of TEXT.  The harness takes wakes as a plain
-message, so its journal keeps only this text.  Each place is looked at
-where it is: nothing is searched for further on, nor copied."
-  (let ((pos 0) (wakes nil) (ok t))
-    (while (and ok (< pos (length text)))
-      (cond
-       ((and (romacs-agent-tools--at-p text pos "Delegated task ")
-             (eq (string-match romacs-agent-tools--wake-head text pos) pos))
-        (let* ((from (match-end 0))
-               (size (match-string 4 text))
-               (to (if size (+ from (string-to-number size)) (length text))))
-          (if (> to (length text)) (setq ok nil)
-            (push (list :id (match-string 1 text) :title (match-string 2 text) :state (match-string 3 text)
-                        :reply-to (match-string 5 text) :result (substring text from to))
-                  wakes)
-            (setq pos to)
-            (when (< pos (length text))
-              (if (romacs-agent-tools--at-p text pos "\n\n") (cl-incf pos 2) (setq ok nil))))))
-       ;; The lines saying how to answer each, after the last: read once.
-       ((and wakes (romacs-agent-tools--at-p text pos "Reply to ")
-             (string-match-p "\\`\\(?:Reply to [^\n]*\\(?:\n\\|\\'\\)\\)+\\'" (substring text pos)))
-        (setq pos (length text)))
-       (t (setq ok nil))))
-    (and ok (nreverse wakes))))
+message, so its journal keeps only this text.  It is read in a buffer,
+each place where it is: nothing is searched for further on, nor reached
+by counting characters from the start."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (let ((wakes nil) (ok t))
+      (while (and ok (not (eobp)))
+        (cond
+         ((looking-at romacs-agent-tools--wake-head)
+          (let* ((from (match-end 0))
+                 (size (match-string 4))
+                 (to (if size (+ from (string-to-number size)) (point-max))))
+            (if (> to (point-max)) (setq ok nil)
+              (push (list :id (match-string 1) :title (match-string 2) :state (match-string 3)
+                          :reply-to (match-string 5) :result (buffer-substring-no-properties from to))
+                    wakes)
+              (goto-char to)
+              (unless (eobp) (if (looking-at "\n\n") (forward-char 2) (setq ok nil))))))
+         ;; The lines saying how to answer each, after the last.
+         ((and wakes (looking-at "\\(?:Reply to [^\n]*\\(?:\n\\|\\'\\)\\)+\\'"))
+          (goto-char (point-max)))
+         (t (setq ok nil))))
+      (and ok (nreverse wakes)))))
 
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as one wake (`romacs-agent-tools--wakes-parse'), or nil."
