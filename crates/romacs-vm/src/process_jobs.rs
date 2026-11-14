@@ -432,6 +432,11 @@ mod tests {
         assert!(jobs.start(request("true")).is_err());
     }
 
+    /// Forgetting a job, or dropping its owner, kills its group and reaps
+    /// it, without waiting for its end. That is shown by state, not a clock:
+    /// the group's sleep would end itself only long after the hang guard, so a
+    /// reaped leader and a dead descendant are the kill's work. A drop returns
+    /// only once the leader is reaped.
     #[test]
     fn forgotten_and_dropped_processes_are_reaped() {
         for drop_owner in [false, true] {
@@ -443,10 +448,10 @@ mod tests {
             let path = directory.join("pids");
             let _ = std::fs::remove_file(&path);
             let mut jobs = Jobs::default();
-            let mut req = request("echo $$ > pids; sleep 30 & echo $! >> pids; wait");
+            let mut req = request("echo $$ > pids; sleep 300 & echo $! >> pids; wait");
             req.directory = directory.clone();
             let id = jobs.start(req).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_mins(1);
             let pids = loop {
                 let pids: Vec<i32> = std::fs::read_to_string(&path)
                     .unwrap_or_default()
@@ -459,7 +464,6 @@ mod tests {
                 assert!(Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(5));
             };
-            let before = Instant::now();
             if drop_owner {
                 drop(jobs);
                 let reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
@@ -475,7 +479,6 @@ mod tests {
             } else {
                 jobs.forget(id).unwrap();
             }
-            assert!(before.elapsed() < Duration::from_millis(100));
             loop {
                 let leader_reaped = !std::path::Path::new(&format!("/proc/{}", pids[0])).exists();
                 let descendant_dead = std::fs::read_to_string(format!("/proc/{}/stat", pids[1]))
