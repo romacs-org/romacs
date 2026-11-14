@@ -207,37 +207,64 @@ fn has_text(frame: &FrameGlyphBuffer, run: &Run) -> bool {
 /// GLYPHS as runs, in frame order.
 pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
+    // The open run's extent, as its edges.
+    let mut edges = [0.0f32; 4];
     for (at, glyph) in glyphs.iter().enumerate() {
-        let bounds = glyph.geometry().unwrap_or_default();
-        // An image fills its face's background over its box and slot, which
-        // can be larger than itself.
-        let painted = match glyph {
-            FrameGlyph::Image { slot_rect, box_rect, .. } => union(union(bounds, *slot_rect), *box_rect),
-            _ => bounds,
-        };
-        let text = matches!(glyph, FrameGlyph::Char { .. } | FrameGlyph::Stretch { .. });
-        let key = (
-            glyph.window_id().map_or(0, DisplayWindowId::get),
-            bounds.y.to_bits(),
-            bounds.height.to_bits(),
-        );
+        let (key, painted, text) = place(glyph);
+        let [x0, y0, x1, y1] = [painted.x, painted.y, painted.x + painted.width, painted.y + painted.height];
         match out.last_mut() {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
-                run.bounds = union(run.bounds, painted);
                 run.text |= text;
+                edges = [edges[0].min(x0), edges[1].min(y0), edges[2].max(x1), edges[3].max(y1)];
             }
-            _ => out.push(Run {
-                key,
-                glyphs: at..at + 1,
-                bounds: painted,
-                text,
-                row: 0,
-            }),
+            _ => {
+                if let Some(run) = out.last_mut() {
+                    run.bounds = Rect::new(edges[0], edges[1], edges[2] - edges[0], edges[3] - edges[1]);
+                }
+                edges = [x0, y0, x1, y1];
+                out.push(Run {
+                    key,
+                    glyphs: at..at + 1,
+                    bounds: painted,
+                    text,
+                    row: 0,
+                });
+            }
         }
+    }
+    if let Some(run) = out.last_mut() {
+        run.bounds = Rect::new(edges[0], edges[1], edges[2] - edges[0], edges[3] - edges[1]);
     }
     assign_rows(&mut out);
     out
+}
+
+/// GLYPH's group, the rectangle it paints, and whether it is text. A row's
+/// characters and stretches take one match; an image fills its face's
+/// background over its box and slot, which can be larger than itself.
+fn place(glyph: &FrameGlyph) -> (Key, Rect, bool) {
+    match glyph {
+        FrameGlyph::Char { window_id, x, y, width, height, .. }
+        | FrameGlyph::Stretch { window_id, x, y, width, height, .. } => (
+            (window_id.get(), y.to_bits(), height.to_bits()),
+            Rect::new(*x, *y, *width, *height),
+            true,
+        ),
+        _ => {
+            let bounds = glyph.geometry().unwrap_or_default();
+            let key = (
+                glyph.window_id().map_or(0, DisplayWindowId::get),
+                bounds.y.to_bits(),
+                bounds.height.to_bits(),
+            );
+            let painted = match glyph {
+                FrameGlyph::Image { slot_rect, box_rect, .. } => union(union(bounds, *slot_rect), *box_rect),
+                _ => bounds,
+            };
+            (key, painted, false)
+        }
+    }
 }
 
 /// Give RUNS their visual rows: a sweep over each window's text runs by y
