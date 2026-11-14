@@ -5,10 +5,6 @@ use crate::vertex::GlyphVertex;
 pub(in crate::renderer) enum BlitPlacement {
     Retained,
     NativeContent(romacs_display_protocol::Color),
-    Region {
-        uv: romacs_display_protocol::Rect,
-        destination: romacs_display_protocol::Rect,
-    },
 }
 
 impl WgpuRenderer {
@@ -21,27 +17,12 @@ impl WgpuRenderer {
     ) {
         let dst_view = target.view;
         let size = target.surface.logical_size();
-        let (uv, load) = match &placement {
-            BlitPlacement::Region { uv, .. } => (*uv, true),
-            _ => (
-                romacs_display_protocol::Rect::new(0.0, 0.0, 1.0, 1.0),
-                false,
-            ),
-        };
         let (x, y, w, h, clear, pipeline) = match placement {
             BlitPlacement::Retained => (
                 0.0,
                 0.0,
                 size.width(),
                 size.height(),
-                wgpu::Color::TRANSPARENT,
-                &self.pipelines.surface_copy,
-            ),
-            BlitPlacement::Region { destination, .. } => (
-                destination.x,
-                destination.y,
-                destination.width,
-                destination.height,
                 wgpu::Color::TRANSPARENT,
                 &self.pipelines.surface_copy,
             ),
@@ -121,8 +102,6 @@ impl WgpuRenderer {
         for vertex in &mut vertices {
             vertex.position[0] += x;
             vertex.position[1] += y;
-            vertex.tex_coords[0] = uv.x + vertex.tex_coords[0] * uv.width;
-            vertex.tex_coords[1] = uv.y + vertex.tex_coords[1] * uv.height;
         }
 
         let upload = self
@@ -143,11 +122,7 @@ impl WgpuRenderer {
                     view: dst_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: if load {
-                            wgpu::LoadOp::Load
-                        } else {
-                            wgpu::LoadOp::Clear(clear)
-                        },
+                        load: wgpu::LoadOp::Clear(clear),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,

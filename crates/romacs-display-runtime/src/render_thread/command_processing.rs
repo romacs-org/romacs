@@ -12,7 +12,6 @@ impl RenderApp {
                 .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
             return true;
         }
-        self.retire_cancelled_frames();
         for _ in 0..64 {
             let Ok(command) = self.comms.cmd_rx.try_recv_startup_for(
                 self.startup_commands.len() == 64,
@@ -50,7 +49,6 @@ impl RenderApp {
                 other => self.startup_commands.push_back(other),
             }
         }
-        self.retire_cancelled_frames();
         false
     }
 
@@ -82,7 +80,6 @@ impl RenderApp {
                 .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
             return true;
         }
-        self.retire_cancelled_frames();
         let mut should_exit = false;
 
         while let Some(cmd) = self
@@ -106,7 +103,6 @@ impl RenderApp {
             }
         }
 
-        self.retire_cancelled_frames();
         should_exit
     }
 

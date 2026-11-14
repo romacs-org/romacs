@@ -847,7 +847,6 @@ pub(super) struct RenderApp {
     pub(super) gpu_startup_cancelled: Arc<std::sync::atomic::AtomicBool>,
     pub(super) startup_error: Option<String>,
     pub(super) startup_commands: std::collections::VecDeque<crate::thread_comm::RenderCommand>,
-    pub(super) frame_leases: HashMap<u64, Arc<std::sync::atomic::AtomicBool>>,
     pub(super) renderer: Option<WgpuRenderer>,
     /// Native decoder workers signal this callback after replacing a latest
     /// frame or publishing control state. Production installs a winit proxy;
@@ -1048,7 +1047,7 @@ impl RenderApp {
     ) -> Self {
         let mut frame_windows = GuiFrameWindowManager::new();
         // A deferred connection is not a frame transaction. Only a consumed
-        // RealizeFrame may publish its primary identity and cancellation lease.
+        // RealizeFrame may publish its primary identity.
         if !comms.keep_alive_without_frames {
             frame_windows.set_primary_pending(GuiFrameWindowState {
                 pending_scale_factor: None,
@@ -1090,7 +1089,6 @@ impl RenderApp {
             gpu_startup_cancelled: Default::default(),
             startup_error: None,
             startup_commands: Default::default(),
-            frame_leases: Default::default(),
             menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
             #[cfg(feature = "video")]

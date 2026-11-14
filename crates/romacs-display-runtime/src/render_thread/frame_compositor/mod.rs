@@ -23,7 +23,6 @@ use romacs_renderer_wgpu::{FullFrameTexture, RendererFrameEffects, WgpuGlyphAtla
 mod child_frames;
 pub(in crate::render_thread) mod continuity;
 mod cursor;
-mod input_scroll;
 pub(in crate::render_thread) mod layout_continuity;
 pub(in crate::render_thread) mod layout_driver;
 mod media;
@@ -33,7 +32,6 @@ mod overlays;
 /// Glyph composition and rendering state for a frame window.
 pub(crate) struct FrameCompositor {
     pub current_frame: Option<FrameGlyphBuffer>,
-    pub(in crate::render_thread) input_scroll: input_scroll::InputScroll,
     /// Text animations drawn over the current frame at every draw.
     pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
     /// Video identities present in the root or any accepted child
@@ -73,7 +71,6 @@ pub(crate) struct FrameCompositor {
     pub(in crate::render_thread) retained_root: Option<RetainedRoot>,
     /// The key of the last root the root glyph pass painted.
     pub(in crate::render_thread) last_root_key: Option<crate::render_thread::render_pass::retained_root::RootKey>,
-    pub(super) retained_scroll: Option<super::render_pass::RetainedScroll>,
     /// Anchors and imprints of the presentation most recently *installed*,
     /// waiting to become the baseline if and when it is composed. Separate from
     /// the baseline pair below for the same reason `baseline` is separate from
@@ -196,7 +193,6 @@ impl FrameCompositor {
     pub(super) fn new(glyph_atlas: Option<WgpuGlyphAtlas>) -> Self {
         Self {
             current_frame: None,
-            input_scroll: input_scroll::InputScroll::default(),
             text_animations: Default::default(),
             #[cfg(feature = "video")]
             visible_videos: HashSet::new(),
@@ -214,7 +210,6 @@ impl FrameCompositor {
             retained_static: None,
             retained_root: None,
             last_root_key: None,
-            retained_scroll: None,
             incoming_scroll_anchors: ScrollAnchorsByWindow::default(),
             incoming_reflow_imprints: ReflowImprintsByWindow::default(),
             scroll_anchors: ScrollAnchorsByWindow::default(),
