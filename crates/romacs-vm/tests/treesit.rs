@@ -244,6 +244,80 @@ impl romacs_vm::LayoutHost for Cells {
     }
 }
 
+/// Parsers of one buffer that see the same text with the same grammar parse
+/// an edit once: one due a reparse takes the tree of another that has parsed
+/// the text since (VM2-TREESIT-TWIN), in whichever order they are asked,
+/// edits between them included. Each still runs its own notifiers, with what
+/// changed since its own last tree, and a parser of other ranges parses for
+/// itself.
+#[test]
+fn twin_parsers_parse_an_edit_once() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (set-buffer (get-buffer-create \"twin\")) (insert \"int a;\\nint b = ;\\nint c;\\n\") \
+        (setq twin-a (treesit-parser-create 'c) twin-b (treesit-parser-create 'c nil nil 'twin) seen-a nil seen-b nil) \
+        (defalias 'twin-seen-a (lambda (ranges _) (push ranges seen-a))) \
+        (defalias 'twin-seen-b (lambda (ranges _) (push ranges seen-b))) \
+        (treesit-parser-add-notifier twin-a 'twin-seen-a) (treesit-parser-add-notifier twin-b 'twin-seen-b) \
+        (defalias 'twin-string (lambda (p) (treesit-node-string (treesit-parser-root-node p)))) \
+        (defalias 'twin-fresh (lambda (&optional ranges) \
+          (let ((p (treesit-parser-create 'c nil t 'fresh))) \
+            (when ranges (treesit-parser-set-included-ranges p ranges)) \
+            (prog1 (twin-string p) (treesit-parser-delete p))))) \
+        (twin-string twin-a) (twin-string twin-b) (setq seen-a nil seen-b nil))");
+    vm.eval_source(&setup).unwrap();
+    let check = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(|v| v.display()).unwrap();
+    // One edit, the parsers asked in turn: both trees are the text's parse,
+    // and each parser is told the same change once.
+    assert_eq!(check(&mut vm, "(progn (goto-char 1) (insert \"long \") (twin-string twin-a) \
+        (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh)) \
+              (length seen-a) (length seen-b) (equal seen-a seen-b)))"), "(t t 1 1 t)");
+    // An edit between them: the first asked parses for itself, the other then
+    // takes its tree, and is told what changed since its own last one.
+    assert_eq!(check(&mut vm, "(progn (setq seen-a nil seen-b nil) (goto-char 14) (insert \"1\") (twin-string twin-a) \
+        (goto-char (point-max)) (insert \"int d;\\n\") (twin-string twin-b) \
+        (list (equal (twin-string twin-a) (twin-string twin-b)) (equal (twin-string twin-a) (twin-fresh)) \
+              (length seen-a) (length seen-b) \
+              (and (<= (caar (car seen-b)) 14) (>= (cdar (last (car seen-b))) (- (point-max) 7)) t)))"), "(t t 2 1 t)");
+    // A parser of other ranges is no twin.
+    assert_eq!(check(&mut vm, "(progn (treesit-parser-set-included-ranges twin-b '((1 . 12))) (twin-string twin-b) \
+        (goto-char (point-max)) (insert \"int e;\") (twin-string twin-a) \
+        (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh '((1 . 12))))))"), "(nil t)");
+}
+
+/// While a visit's first parse runs on its thread (lisp/romacs/romacs-treesit.el),
+/// a frame leaves the tree alone: `treesit--pre-redisplay' would wait for the
+/// parse, and the window shows its text plain meanwhile. The first frame after
+/// the parse lands runs it, and marks the whole text for its faces. The parse
+/// in flight is the primitive's answer here, so no thread's timing decides it.
+#[test]
+fn a_frame_waits_for_no_first_parse() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.set_gc_stress(0);
+    vm.eval_source("(progn (require 'treesit) (load \"romacs-treesit\" nil t))").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (setq parsed 0 treesit-test-parsing t) \
+        (advice-add 'romacs--treesit-parsing-p :override (lambda () treesit-test-parsing)) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") (insert \"int a;\\n\") \
+        (setq-local treesit-primary-parser (treesit-parser-create 'c)) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (treesit-parser-add-notifier treesit-primary-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions #'treesit--pre-redisplay 0 t) \
+        (setq fontification-functions nil))");
+    vm.eval_source(&setup).unwrap();
+    let state = |vm: &mut Vm| vm.eval_source("(list parsed (with-current-buffer \"ts\" (get-text-property 1 'fontified)))")
+        .and_then(|v| v.display()).unwrap();
+    vm.eval_source("(put-text-property 1 (point-max) 'fontified t)").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(state(&mut vm), "(0 t)", "no frame asks for the tree while the first parse runs");
+    vm.eval_source("(setq treesit-test-parsing nil)").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
+}
+
 /// `redisplay' between a deferred frame and the next tells the hooks what
 /// changed: the next frame does not tell them again.
 #[test]

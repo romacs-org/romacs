@@ -1,5 +1,7 @@
 //! `decode-coding-region' and `encode-coding-region' (coding.c
 //! `code_convert_region`) against the pinned GNU, and how much Lisp one runs.
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 
 const SETUP: &str = r#"
@@ -73,17 +75,15 @@ fn expressions() -> Vec<String> {
 
 #[test]
 fn region_coding_matches_pinned_gnu() {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in expressions() {
-        let output = std::process::Command::new(&binary)
-            .args(["-Q", "--batch", "--eval", &format!("(progn (setq lexical-binding t) {SETUP} (prin1 (eval '{expression} t)))")]).output().unwrap();
-        assert!(output.status.success(), "native coding probe failed: {}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
+    let expressions = expressions();
+    let answers = gnu_batch::outputs(&expressions.iter()
+        .map(|expression| format!("(progn (setq lexical-binding t) {SETUP} (prin1 (eval '{expression} t)))")).collect::<Vec<_>>());
+    for (expression, expected) in expressions.iter().zip(answers) {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         vm.eval_source(SETUP).unwrap();
-        let actual = match vm.eval_source(&expression) { Ok(value) => value.display(), Err(error) => Err(error) };
+        let actual = match vm.eval_source(expression) { Ok(value) => value.display(), Err(error) => Err(error) };
         if actual.as_deref() != Ok(expected.as_str()) { failures.push(format!("{expression}\nGNU {expected}\nVM {actual:?}")); }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
