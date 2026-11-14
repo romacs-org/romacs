@@ -180,18 +180,18 @@ fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
 }
 
 #[test]
-fn a_band_moves_under_a_pane_only_clear_of_its_edges_and_corners() {
-    // The pane's chrome is drawn over the rows and stays where they move:
-    // with its top edge and corners on the rows, nothing moves; with the
-    // pane round the rows, clear of them, the rows move.
-    let moves = |pane: Rect| {
-        let mut old = window(&LINES, 0, 5);
-        let mut new = window(&LINES, 1, 5);
-        for frame in [&mut old, &mut new] {
+fn a_band_moves_under_a_pane_s_edge_only_when_the_edge_covers_it() {
+    // A pane round the window and its mode line, its corners clear of the
+    // rows, its top edge on the first row: drawn over the band after the
+    // copy, opaque and the same in both frames, the edge covers it.
+    let moves = |first: (usize, usize), edges: (Color, Color)| {
+        let mut old = window(&LINES, first.0, 5);
+        let mut new = window(&LINES, first.1, 5);
+        for (frame, edge) in [(&mut old, edges.0), (&mut new, edges.1)] {
             frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
-                bounds: pane,
-                radius: 6.0,
-                edge: Some(Color::WHITE),
+                bounds: Rect::new(-6.0, 0.0, 112.0, 60.0),
+                radius: 4.0,
+                edge: Some(edge),
                 dim: 0.0,
             });
         }
@@ -200,8 +200,12 @@ fn a_band_moves_under_a_pane_only_clear_of_its_edges_and_corners() {
             _ => 0,
         }
     };
-    assert_eq!(moves(Rect::new(0.0, 0.0, 100.0, 50.0)), 0);
-    assert_eq!(moves(Rect::new(-20.0, -20.0, 140.0, 100.0)), 1);
+    let white = (Color::WHITE, Color::WHITE);
+    assert_eq!(moves((0, 1), white), 1, "rows move up under the edge");
+    assert_eq!(moves((1, 0), white), 0, "the source holds the edge: the copy would carry it down");
+    assert_eq!(moves((0, 1), (Color::WHITE, Color::RED)), 0, "the edge changes colour");
+    let faint = Color::new(1.0, 1.0, 1.0, 0.5);
+    assert_eq!(moves((0, 1), (faint, faint)), 0, "a translucent edge does not cover");
 }
 
 #[test]

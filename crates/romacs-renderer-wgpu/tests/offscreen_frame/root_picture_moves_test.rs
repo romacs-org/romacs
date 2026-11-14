@@ -178,8 +178,10 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         y += h;
     }
     if extras.paned {
+        // Round the window and its mode line, its corners clear of the rows,
+        // its top edge on the first row.
         frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
-            bounds: Rect::new(0.0, 0.0, width, body),
+            bounds: Rect::new(-6.0, 0.0, width + 12.0, body + ROW),
             radius: 4.0,
             edge: Some(Color::rgb(0.9, 0.9, 0.2)),
             dim: 0.0,
@@ -266,6 +268,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
     h.renderer.set_scale_factor(scale);
     load_image(&mut h);
     let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
+    let bands = call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED);
     for (name, view, entered) in scrolls() {
         let frame = view_frame(view, scale, extras);
         let mapping = mapping_for_scale(&frame, W, H, scale);
@@ -294,6 +297,9 @@ fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
+    }
+    if extras.paned && (scale - 1.5).abs() > f32::EPSILON {
+        assert!(call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED) > bands, "bands move under the pane's edge");
     }
 }
 
@@ -334,13 +340,14 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_a_borde
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane() {
-    // The pane's corners and edge stay where the rows move under them.
+    // The pane's corners and edges stay where the rows move under them; its
+    // top edge lies on the first row and is drawn over each band moved.
     scrolled_through_picture_equals_whole(1.0, Extras { paned: true, ..Extras::default() });
 }
 
 #[test]
-fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane_at_a_fractional_scale() {
-    scrolled_through_picture_equals_whole(1.5, Extras { paned: true, ..Extras::default() });
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane_at_a_scale_of_two() {
+    scrolled_through_picture_equals_whole(2.0, Extras { paned: true, ..Extras::default() });
 }
 
 #[test]

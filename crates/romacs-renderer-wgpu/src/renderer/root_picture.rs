@@ -231,6 +231,7 @@ impl RootPicture {
                     let shown = self.repaint(renderer, atlas, shown, mapping);
                     return self.composed(renderer, atlas, shown, target, Painted::Whole);
                 }
+                self.cover(renderer, atlas, &mut shown, &moves, mapping);
                 self.patch_regions(renderer, atlas, &mut shown, &regions, mapping);
                 crate::cost::add(crate::cost::ROWS_REUSED, rows_kept);
                 (shown, Painted::Regions(regions.len()))
@@ -288,6 +289,39 @@ impl RootPicture {
         renderer.submit_commands([encoder.finish()]);
         crate::cost::add(crate::cost::BANDS_MOVED, moves.len());
         true
+    }
+
+    /// Draw over each of MOVES' bands the pane edges of SHOWN's frame that
+    /// lie in it, as every pass draws them, last: opaque, they cover whatever
+    /// the copy put under them (`moves`, clause 4).
+    fn cover(
+        &mut self,
+        renderer: &mut WgpuRenderer,
+        atlas: &mut WgpuGlyphAtlas,
+        shown: &mut Shown,
+        moves: &[Move],
+        mapping: romacs_display_protocol::PresentMapping,
+    ) {
+        let frame = &shown.indexed.frame;
+        if moves.is_empty() || frame.panes.is_empty() {
+            return;
+        }
+        let surface = mapping.surface();
+        let device = (surface.device_width().get(), surface.device_height().get());
+        let scale = renderer.scale_factor();
+        let edges = super::panes::pane_geometry(&frame.panes, frame.background, scale).edges;
+        let scissors: Vec<(u32, u32, u32, u32)> = moves
+            .iter()
+            .map(|m| Rect::new(m.from.x, m.from.y + m.dy, m.from.width, m.from.height))
+            .flat_map(|band| edges.iter().filter_map(move |(edge, _)| moves::intersection(*edge, band)))
+            .filter_map(|r| pixel_region(r, scale, device).map(|(_, scissor)| scissor))
+            .collect();
+        let picture = self.texture.view().clone();
+        for scissor in scissors {
+            with_glyphs(&mut shown.indexed.frame, Vec::new(), false, |sub| {
+                renderer.render_frame_glyphs_impl(&picture, sub, atlas, mapping, false, None, None, None, None, true, Some(scissor));
+            });
+        }
     }
 
     /// Repaint REGIONS of the picture from SHOWN's frame, without its cursors.

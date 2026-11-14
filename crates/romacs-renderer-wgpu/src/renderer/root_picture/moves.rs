@@ -23,8 +23,12 @@
 //!    grown by the picture's reach, out to device pixels), and whatever else
 //!    the new frame draws there, or the old frame at its source, is a
 //!    uniform rectangle spanning both places (a window's background, an
-//!    unclipped border, a pane's dim): no other glyph's ink, no pane edge or
-//!    corner (`alone`).
+//!    unclipped border, a pane's dim), or, in the band's place only, a pane
+//!    edge that is opaque and the same in both frames, which every pass
+//!    draws last and the picture draws over each band it moves (`cover` in
+//!    root_picture.rs), so it covers whatever the copy put under it. No
+//!    other glyph's ink, no pane corner, no pane edge in the source
+//!    (`alone`).
 //!
 //! A frame's glyphs that pass are copied; the plan repaints its changed
 //! groups as for any frame but the moved rows, whose ink the band holds,
@@ -436,7 +440,7 @@ fn face(glyph: &FrameGlyph) -> Option<romacs_display_protocol::types::FaceId> {
 }
 
 /// Where A and B overlap, if they do.
-fn intersection(a: Rect, b: Rect) -> Option<Rect> {
+pub(crate) fn intersection(a: Rect, b: Rect) -> Option<Rect> {
     let (x0, y0) = (a.x.max(b.x), a.y.max(b.y));
     let (x1, y1) = ((a.x + a.width).min(b.x + b.width), (a.y + a.height).min(b.y + b.height));
     (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
@@ -468,8 +472,10 @@ fn outward(rect: Rect, scale: f32) -> Rect {
 /// but the groups it PLACES (sorted): whatever else either frame draws in
 /// its place there (the new frame at AREA, the old at FROM), its ink grown
 /// by REACH, is a uniform rectangle spanning both places, which looks alike
-/// moved within itself; and no pane edge or corner, drawn over the rows
-/// and fixed where they move, lies in either place.
+/// moved within itself. Of the panes' chrome, drawn over the rows and fixed
+/// where they move: a dim spans both places or touches neither, no corner
+/// touches either, no edge touches FROM, and an edge in AREA is opaque and
+/// the same in both frames, drawn over the band after the copy.
 fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, reach: Reach, scale: f32) -> bool {
     let span = (from.y.min(area.y), (from.y + from.height).max(area.y + area.height));
     let spans = |r: Rect| r.y <= span.0 && r.y + r.height >= span.1;
@@ -501,20 +507,19 @@ fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, rea
             .filter(|(key, _)| moving.binary_search(key).is_err())
             .all(|(_, at)| at.iter().all(|&i| fits(frame, &runs[i], place)))
     };
-    let chrome_clear = |frame: &FrameGlyphBuffer| {
-        let chrome = super::super::panes::pane_geometry(&frame.panes, frame.background, scale);
-        chrome.dims.iter().all(|(r, _)| spans(*r) || !(damage::overlaps(*r, area) || damage::overlaps(*r, from)))
-            && chrome
-                .edges
-                .iter()
-                .map(|(r, _)| *r)
-                .chain(chrome.corners.iter().map(|corner| corner.square))
-                .all(|r| !damage::overlaps(r, area) && !damage::overlaps(r, from))
+    let chrome = |frame: &FrameGlyphBuffer| super::super::panes::pane_geometry(&frame.panes, frame.background, scale);
+    let (now, was) = (chrome(sides.new), chrome(&sides.old.frame));
+    let touches = |r: Rect| damage::overlaps(r, area) || damage::overlaps(r, from);
+    let covering = |(rect, color): &(Rect, romacs_display_protocol::types::Color)| {
+        color.a >= 1.0 && was.edges.iter().any(|(r, c)| r == rect && c == color)
     };
+    let chrome_clear = now.dims.iter().chain(&was.dims).all(|(r, _)| spans(*r) || !touches(*r))
+        && now.corners.iter().chain(&was.corners).all(|corner| !touches(corner.square))
+        && was.edges.iter().all(|(r, _)| !damage::overlaps(*r, from))
+        && now.edges.iter().all(|edge| !damage::overlaps(edge.0, from) && (!damage::overlaps(edge.0, area) || covering(edge)));
     others(sides.new, sides.runs, &sides.after, placed, area)
         && others(&sides.old.frame, &sides.old.runs, &sides.before, &carried, from)
-        && chrome_clear(sides.new)
-        && chrome_clear(&sides.old.frame)
+        && chrome_clear
 }
 
 #[cfg(test)]
