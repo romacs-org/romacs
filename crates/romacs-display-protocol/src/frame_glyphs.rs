@@ -1821,11 +1821,27 @@ impl FrameGlyphBuffer {
         ascent: f32,
         _overlay_hint: bool,
     ) {
+        let row = self.slot_row(y);
+        self.add_char_on_row(char, (x, y, row), (width, height, ascent), self.current_face_id, BoxVerticalEdges::Both);
+    }
+
+    /// The grid row of a glyph at Y (`DisplaySlotId::from_pixels`): the
+    /// same for every glyph a row adds at its top.
+    #[must_use]
+    pub fn slot_row(&self, y: f32) -> u32 {
+        Px(y).cells_rounded(Px(self.char_height)).get()
+    }
+
+    /// `add_char` in face `FACE_ID` owning box EDGES, at X, Y on grid row
+    /// ROW (`slot_row` of Y), WIDTH wide, HEIGHT tall with its baseline
+    /// ASCENT below Y: a layout that adds a row's glyphs finds the row once.
+    pub fn add_char_on_row(&mut self, char: char, (x, y, row): (f32, f32, u32), (width, height, ascent): (f32, f32, f32), face_id: FaceId, box_vertical_edges: BoxVerticalEdges) {
+        let col = u16::try_from(Px(x).cells_rounded(Px(self.char_width)).get()).unwrap_or(u16::MAX);
         self.glyphs.push(FrameGlyph::Char {
             window_id: self.current_window_id,
             row_role: self.current_row_role,
             clip_rect: self.current_clip_rect,
-            slot_id: self.current_slot_id(x, y),
+            slot_id: DisplaySlotId { window_id: self.current_window_id, row, col },
             bidi_level: 0,
             char,
             composed: None,
@@ -1835,8 +1851,8 @@ impl FrameGlyphBuffer {
             width,
             height,
             ascent,
-            face_id: self.current_face_id,
-            box_vertical_edges: BoxVerticalEdges::Both,
+            face_id,
+            box_vertical_edges,
         });
     }
 

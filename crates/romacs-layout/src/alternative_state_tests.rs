@@ -55,7 +55,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
     );
     engine.layout_frame(&snapshot, 2, None).unwrap();
     assert_eq!(
-        engine.resolver.alternative_state(),
+        engine.store.resolver.alternative_state(),
         &snapshot.font_alternatives,
         "LAYOUT_ADOPTS_ALTERNATIVE_REVISION_ON_SKIPPED_ROUND_TRIP"
     );

@@ -1,6 +1,8 @@
 //! A busy session stays inspectable (debugger.md §11.1): its evaluator spins
 //! in Lisp under `inhibit-quit', and a client of `inspect.sock', on no thread
 //! of the evaluator, still gets the call stack; the spin goes on unchanged.
+#[path = "support/installed.rs"]
+mod installed;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -33,9 +35,9 @@ fn session(name: &str, body: &str) -> Session {
 {body}
 "#);
     std::fs::write(dir.join("busy.el"), source).unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let child = Command::new(installed::romacs())
         .args(["-Q", "--batch", "-l"]).arg(dir.join("busy.el")).current_dir(&dir)
-        .env("HOME", &dir).env("MARK", &dir).env("ROMACS_WORLD", "off")
+        .env("HOME", &dir).env("MARK", &dir)
         .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     let start = Instant::now();
     while !dir.join("ready").exists() {

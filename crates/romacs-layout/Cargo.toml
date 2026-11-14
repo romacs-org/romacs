@@ -8,6 +8,7 @@ license.workspace = true
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol.workspace = true
 romacs-font.workspace = true
+rustc-hash.workspace = true
 
 [dev-dependencies]
 romacs-vm = { path = "../romacs-vm" }

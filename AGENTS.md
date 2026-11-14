@@ -270,6 +270,9 @@ standalone Cargo execution without it.
   `tools/git-setup`).
 - Work on your own branch in its own worktree, started from `beta`, and merge
   `beta` in as it moves.
+- Before submitting, run `python3 tools/dev-check` (the MCP tool `romacs_dev_check`
+  in a Romacs session): the merge forecast with `beta`, tracked generated files,
+  and the structural rules, each finding with its fix.
 - A branch lands through the merge queue: signed commits, the full check, then
   a submitted request. The queue merges requests onto `beta` in order and
   reruns what each merge changes.
