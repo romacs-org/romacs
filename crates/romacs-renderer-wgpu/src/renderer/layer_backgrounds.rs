@@ -410,9 +410,8 @@ impl WgpuRenderer {
             let char_w = frame_glyphs.char_width.max(1.0);
             let tab_w = 4; // default tab width; we infer from the glyph spacing
 
-            // Collect row info: group chars by window and Y coordinate to
-            // find rows (a row is one window's: two windows' rows at one Y
-            // are two rows), then detect indent (leading space/tab) per row.
+            // Collect row info: group chars by Y coordinate to find rows,
+            // then detect indent (leading space/tab) per row.
             struct RowInfo {
                 y: f32,
                 height: f32,
@@ -421,7 +420,6 @@ impl WgpuRenderer {
             }
             let mut rows: Vec<RowInfo> = Vec::new();
             let mut current_row_y: f32 = -1.0;
-            let mut current_window: Option<romacs_display_protocol::types::DisplayWindowId> = None;
             let mut current_row_h: f32 = 0.0;
             let mut first_non_space_x: f32 = f32::MAX;
             let mut text_start_x: f32 = f32::MAX;
@@ -429,7 +427,6 @@ impl WgpuRenderer {
 
             for glyph in &frame_glyphs.glyphs {
                 if let FrameGlyph::Char {
-                    window_id,
                     x,
                     y,
                     width: _,
@@ -443,9 +440,9 @@ impl WgpuRenderer {
                         continue;
                     }
                     let gy = *y;
-                    if (gy - current_row_y).abs() > 0.5 || current_window != Some(*window_id) {
+                    if (gy - current_row_y).abs() > 0.5 {
                         // New row — save previous
-                        if has_chars && first_non_space_x < f32::MAX && first_non_space_x > text_start_x + char_w {
+                        if has_chars && first_non_space_x > text_start_x + char_w {
                             rows.push(RowInfo {
                                 y: current_row_y,
                                 height: current_row_h,
@@ -454,7 +451,6 @@ impl WgpuRenderer {
                             });
                         }
                         current_row_y = gy;
-                        current_window = Some(*window_id);
                         current_row_h = *height;
                         first_non_space_x = f32::MAX;
                         text_start_x = f32::MAX;
@@ -469,7 +465,7 @@ impl WgpuRenderer {
                 }
             }
             // Save last row
-            if has_chars && first_non_space_x < f32::MAX && first_non_space_x > text_start_x + char_w {
+            if has_chars && first_non_space_x > text_start_x + char_w {
                 rows.push(RowInfo {
                     y: current_row_y,
                     height: current_row_h,
@@ -483,20 +479,9 @@ impl WgpuRenderer {
             let use_rainbow = self.effects.indent_guides.rainbow_enabled
                 && !self.effects.indent_guides.rainbow_colors.is_empty();
             for row in &rows {
-                // Guides stop at the indent, and at the frame's edge, and
-                // start at the first tab stop on the frame: only visible
-                // stops are walked, however far a row's coordinates lie.
-                let end = (row.first_non_space_x - 1.0).min(frame_glyphs.width);
-                let first = row.text_start_x + tab_px;
-                let skipped = (-first / tab_px).ceil().max(0.0);
-                let mut col_x = first + skipped * tab_px;
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    clippy::cast_sign_loss,
-                    reason = "a count of tab stops, whole and not negative; only its remainder picks a colour"
-                )]
-                let mut depth = skipped as usize;
-                while col_x < end {
+                let mut col_x = row.text_start_x + tab_px;
+                let mut depth: usize = 0;
+                while col_x < row.first_non_space_x - 1.0 {
                     let color = if use_rainbow {
                         let (r, g, b, a) = self.effects.indent_guides.rainbow_colors
                             [depth % self.effects.indent_guides.rainbow_colors.len()];

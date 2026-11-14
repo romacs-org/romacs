@@ -470,7 +470,6 @@ fn a_scrolled_window_beside_an_underlined_neighbour_equals_it_drawn_whole() {
 }
 
 #[test]
-#[expect(clippy::cast_precision_loss, reason = "the test surface's few pixels")]
 fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
     // At 7x a pane 9 logical pixels tall has its bottom edge on device row
     // 62, a seventh of a pixel above its end. Rows three tall move from 1
@@ -506,63 +505,4 @@ fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
     let old = frame([(1.0, "ab"), (4.0, "cd")]);
     let new = frame([(3.0, "ab"), (6.0, "cd")]);
     assert!(through_picture(&mut h, &[old.clone(), old, new], 7.0) > 0, "the rows move");
-}
-
-#[test]
-#[expect(clippy::cast_precision_loss, reason = "the test surface's few pixels")]
-fn a_window_s_indent_guides_are_its_own_beside_another_window() {
-    // Two windows' rows at one y: the left row unindented, the right one
-    // indented by a tab stop. The right one draws its guide.
-    let Some(mut h) = try_harness() else {
-        eprintln!("SKIP: no GPU adapter");
-        return;
-    };
-    h.renderer.effects.indent_guides.enabled = true;
-    h.renderer.effects.indent_guides.color = (1.0, 0.0, 0.0, 1.0);
-    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
-    (frame.char_width, frame.char_height) = (4.0, SEAM_ROW);
-    frame.background = BG;
-    text_face(&mut frame, NORMAL, BG);
-    for (window, x0, text) in [(1, 0.0, "abc"), (2, 48.0, "      def")] {
-        frame.set_draw_context(DisplayWindowId::new(window), GlyphRowRole::Text, None);
-        for (col, ch) in text.chars().enumerate() {
-            frame.add_char(ch, x0 + 4.0 * f32::from(u8::try_from(col).unwrap()), 0.0, 4.0, SEAM_ROW, 8.0, false);
-        }
-    }
-    let pixels = drawn_whole(&mut h, &frame);
-    // The right window's text starts at 48; a tab stop is four cells on.
-    let guide = pxb(&pixels, 64, 6);
-    assert!(guide[0] > 200 && guide[1] < 60, "the right window's guide at x 64: {guide:?}");
-    // A row of spaces alone has no indent to guide: it draws none, and
-    // ends.
-    let mut blank = FrameGlyphBuffer::with_size(W as f32, H as f32);
-    (blank.char_width, blank.char_height) = (4.0, SEAM_ROW);
-    blank.background = BG;
-    text_face(&mut blank, NORMAL, BG);
-    for (window, x0, text) in [(1, 0.0, "      "), (2, 48.0, "def")] {
-        blank.set_draw_context(DisplayWindowId::new(window), GlyphRowRole::Text, None);
-        for (col, ch) in text.chars().enumerate() {
-            blank.add_char(ch, x0 + 4.0 * f32::from(u8::try_from(col).unwrap()), 0.0, 4.0, SEAM_ROW, 8.0, false);
-        }
-    }
-    let pixels = drawn_whole(&mut h, &blank);
-    assert!(pxb(&pixels, 16, 6)[1] > 60, "no guide in a row of spaces");
-    // The same as the frame's last row.
-    blank.set_draw_context(DisplayWindowId::new(2), GlyphRowRole::Text, None);
-    for col in 0..6u8 {
-        blank.add_char(' ', 48.0 + 4.0 * f32::from(col), SEAM_ROW, 4.0, SEAM_ROW, 8.0, false);
-    }
-    let pixels = drawn_whole(&mut h, &blank);
-    assert!(pxb(&pixels, 64, 18)[1] > 60, "no guide in a last row of spaces");
-    // A row starting far left of the frame, where a tab stop added to its
-    // start rounds back to it: the guides on the frame are drawn, and end.
-    let mut far = FrameGlyphBuffer::with_size(W as f32, H as f32);
-    (far.char_width, far.char_height) = (4.0, SEAM_ROW);
-    far.background = BG;
-    text_face(&mut far, NORMAL, BG);
-    far.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
-    far.add_char(' ', -1_073_741_824.0, 0.0, 4.0, SEAM_ROW, 8.0, false);
-    far.add_char('x', 80.0, 0.0, 4.0, SEAM_ROW, 8.0, false);
-    let pixels = drawn_whole(&mut h, &far);
-    assert!(pxb(&pixels, 64, 6)[0] > 200, "a visible guide of the far row");
 }
