@@ -1635,6 +1635,12 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                                                                       (if (numberp resets)
                                                                           (format-time-string " (resets %a %H:%M)" resets)
                                                                         ""))))))
+                               ("resume" (list (list :type 'status
+                                                     :text (pcase (gethash "state" note)
+                                                             ("scheduled" (format-time-string "resumes by itself at %a %H:%M, once its limit resets"
+                                                                                              (gethash "at" note)))
+                                                             ("fired" (format "resumed on %s: its limit reset" (gethash "on" note)))
+                                                             (_ (format "will not resume by itself: %s" (gethash "why" note)))))))
                                ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                                                    :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
                                ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
@@ -2204,9 +2210,29 @@ a restarted server knows which accounts are spent.")
         (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room)))))
   romacs-agent--room)
 
+(defun romacs-agent--with-lock (file function)
+  "Call FUNCTION holding FILE's lock, a directory FILE.lock made atomically:
+one process at a time reads, merges and replaces FILE.  A lock older than
+10 s is a crashed writer's, taken over; after 2 s of waiting, FUNCTION
+runs anyway rather than lose what it keeps."
+  (let ((lock (concat file ".lock")) (tries 40) (held nil))
+    (make-directory (file-name-directory file) t)
+    (while (and (not held) (> tries 0))
+      (condition-case nil (progn (make-directory lock) (setq held t))
+        (file-already-exists
+         (let ((made (file-attribute-modification-time (file-attributes lock))))
+           (if (and made (> (float-time (time-since made)) 10))
+               (ignore-errors (delete-directory lock))
+             (sleep-for 0.05) (cl-decf tries))))))
+    (unwind-protect (funcall function)
+      (when held (ignore-errors (delete-directory lock))))))
+
 (defun romacs-agent--keep-room ()
   "Write `romacs-agent--room' to its file, merged with what another server
-wrote there meanwhile: each account's newer report wins."
+wrote there meanwhile, under its lock: each account's newer report wins."
+  (romacs-agent--with-lock (romacs-agent--room-file) #'romacs-agent--merge-room))
+
+(defun romacs-agent--merge-room ()
   (let ((file (romacs-agent--room-file)) (rows nil))
     (pcase-dolist (`(,name . ,room) (ignore-errors (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))
       (let ((mine (gethash name romacs-agent--room)))
@@ -2330,13 +2356,14 @@ account; with none, a `user-error' saying when the first resets."
          (from (romacs-agent-provider session))
          (room (romacs-agent-room-of from))
          (wanted (romacs-agent--wanted session)))
-    (romacs-agent--note session (romacs-mcp--object "type" "handoff" "from" from "to" target "why" (or why "asked")
-                                                    "window" (or (plist-get room :window) :null)
-                                                    "resets" (or (plist-get room :resets) :null)))
-    (puthash session (list from (and (romacs-agent-limited session) t)) romacs-agent--moving-on)
-    (unless (condition-case err (romacs-agent-select session (plist-get wanted :model) (plist-get wanted :effort) target)
-              (error (remhash session romacs-agent--moving-on) (signal (car err) (cdr err))))
-      (remhash session romacs-agent--moving-on))
+    (unless (and (gethash session romacs-agent--moving-on) (equal (plist-get wanted :provider) target))
+      (romacs-agent--note session (romacs-mcp--object "type" "handoff" "from" from "to" target "why" (or why "asked")
+                                                      "window" (or (plist-get room :window) :null)
+                                                      "resets" (or (plist-get room :resets) :null)))
+      (puthash session (list from (and (romacs-agent-limited session) t)) romacs-agent--moving-on)
+      (unless (condition-case err (romacs-agent-select session (plist-get wanted :model) (plist-get wanted :effort) target)
+                (error (remhash session romacs-agent--moving-on) (signal (car err) (cdr err))))
+        (remhash session romacs-agent--moving-on)))
     target))
 
 (defun romacs-agent--moved (session event)

@@ -45,6 +45,13 @@ where they are.
   requests of one turn always go to one account.
 - Every move is recorded in the session's chat and journal, with the
   account it left, the limit it reached and when that limit resets.
+- When every account is at its limit, the session can resume by itself
+  once the first of them resets: ~romacs-agent-resume-at-reset~ (on by
+  default) waits for the reset the provider reported, plus
+  ~romacs-agent-resume-margin~ seconds (60), then goes on under the first
+  account with room.  The chat's header shows the time (⏰); *z* in its
+  actions menu cancels it, as does sending the session a message.  A
+  restarted Romacs keeps the time.
 
 With automatic moves off, the chat's actions menu (~C-c C-o~) moves a session
 by hand: *N* goes on under the next account with room.

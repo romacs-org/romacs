@@ -909,6 +909,14 @@ split across accounts."
 \(`romacs-agent-switch-on-limit')."
   :type 'number :group 'romacs-agent)
 
+(defun romacs-agent-tools--spent (session)
+  "Journal that SESSION stays at its limit, every account of its pool
+spent, and when the first resets."
+  (romacs-agent--note session (romacs-mcp--object
+                               "type" "handoff" "from" (romacs-agent-provider session) "to" :null
+                               "why" (format "every %s account is at its limit" (romacs-agent-harness session))
+                               "resets" (or (romacs-agent--earliest-reset (romacs-agent-harness session)) :null))))
+
 (defun romacs-agent-tools--switch-on-limit (session event)
   "SESSION's turn ended at its account's usage limit (EVENT): it moves on
 after `romacs-agent-switch-delay', as `romacs-agent-switch-on-limit' says,
@@ -922,24 +930,119 @@ says so, and its parent is woken with the end."
               ((not (gethash (romacs-agent-id session) romacs-agent-tools--moving))))
     (if (not (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)))
         ;; Said, in its journal; its end goes to its parent as it would.
-        (romacs-agent--note session (romacs-mcp--object
-                                     "type" "handoff" "from" (romacs-agent-provider session) "to" :null
-                                     "why" (format "every %s account is at its limit" (romacs-agent-harness session))
-                                     "resets" (or (romacs-agent--earliest-reset (romacs-agent-harness session)) :null)))
-      (puthash (romacs-agent-id session) (cons (romacs-agent-done-seq session) (romacs-agent-provider session))
-               romacs-agent-tools--moving)
-      (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session (romacs-agent-done-seq session)))))
+        (progn (romacs-agent-tools--spent session)
+               (romacs-agent-tools--schedule-resume session))
+      (let ((token (cons (romacs-agent-done-seq session) (romacs-agent-provider session))))
+        (puthash (romacs-agent-id session) token romacs-agent-tools--moving)
+        (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session token)))))
 
-(defun romacs-agent-tools--hand-over (session seq)
-  "Move SESSION on, its turn end SEQ at its account's limit still its
-last and nothing moved it meanwhile; else, or with no account left, that
-end goes to its parent as it would have."
-  (if (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
-           (eql (romacs-agent-done-seq session) seq) (romacs-agent-limited session)
-           (not (romacs-agent-pending-selection session)))
-      (condition-case err (romacs-agent-move-on session "usage limit")
-        (error (romacs-agent-tools--not-moved session (error-message-string err))))
-    (romacs-agent-tools--not-moved session nil)))
+(defun romacs-agent-tools--hand-over (session token)
+  "Move SESSION on, its wait TOKEN still its own (no message since, nothing
+moved it); with no account left, say so; its end then goes to its parent
+as it would have."
+  (when (eq (gethash (romacs-agent-id session) romacs-agent-tools--moving) token)
+    (cond ((not (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+                     (eql (romacs-agent-done-seq session) (car token)) (romacs-agent-limited session)
+                     (not (romacs-agent-pending-selection session))))
+           (romacs-agent-tools--not-moved session nil))
+          ((not (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)))
+           (romacs-agent-tools--spent session)
+           (romacs-agent-tools--schedule-resume session)
+           (romacs-agent-tools--not-moved session nil))
+          (t (condition-case err (romacs-agent-move-on session "usage limit")
+               (error (romacs-agent-tools--not-moved session (error-message-string err))))))))
+
+;;; Resuming at a limit's reset
+
+(defcustom romacs-agent-resume-at-reset t
+  "Whether a session stopped at its limit, with no account of its pool
+left with room, goes on by itself once the first of their limits resets
+\(plus `romacs-agent-resume-margin'), on the first account with room."
+  :type 'boolean :group 'romacs-agent)
+
+(defcustom romacs-agent-resume-margin 60
+  "Seconds after a limit's reported reset a session resumes at."
+  :type 'number :group 'romacs-agent)
+
+(defconst romacs-agent-tools--resumed
+  "Your usage limit has reset; go on from where you were."
+  "What a session resumed at its limit's reset is told.")
+
+(defvar romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key)
+  "Each session waiting to resume to (TIME . TIMER).")
+
+(defun romacs-agent-resume-time (session)
+  "When SESSION resumes by itself at its limit's reset, or nil."
+  (car (gethash session romacs-agent-tools--resumes)))
+
+(defun romacs-agent-tools--resumes-file ()
+  (expand-file-name "resumes.eld" (romacs-agent--state-root)))
+
+(defun romacs-agent-tools--keep-resume (id time)
+  "Record that session ID resumes at TIME (nil: no longer), in the file a
+restarted server re-arms them from, under its lock."
+  (let ((file (romacs-agent-tools--resumes-file)))
+    (romacs-agent--with-lock
+     file (lambda ()
+            (let ((rows (assoc-delete-all id (ignore-errors (with-temp-buffer (insert-file-contents file)
+                                                                              (read (current-buffer))))))
+                  (temporary (make-temp-file (expand-file-name "resumes-" (file-name-directory file)) nil ".tmp")))
+              (when time (push (cons id time) rows))
+              (with-temp-file temporary (prin1 rows (current-buffer)))
+              (rename-file temporary file t))))))
+
+(defun romacs-agent-tools--arm-resume (session time)
+  (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
+           romacs-agent-tools--resumes)
+  (romacs-agent--changed session))
+
+(defun romacs-agent-tools--schedule-resume (session)
+  "SESSION waits at its limit, every account spent: it resumes by itself
+at the earliest reset plus the margin, journaled, unless that is unknown
+or `romacs-agent-resume-at-reset' is off."
+  (when-let* (((and romacs-agent-resume-at-reset (not (romacs-agent-resume-time session))))
+              (resets (romacs-agent--earliest-reset (romacs-agent-harness session))))
+    (let ((time (max (+ resets romacs-agent-resume-margin) (+ (float-time) romacs-agent-switch-delay))))
+      (romacs-agent-tools--arm-resume session time)
+      (romacs-agent-tools--keep-resume (romacs-agent-id session) time)
+      (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "scheduled" "at" time)))))
+
+(defun romacs-agent-tools--cancel-resume (session &optional why)
+  "SESSION no longer resumes by itself; WHY, when given, is journaled."
+  (when-let* ((pending (gethash session romacs-agent-tools--resumes)))
+    (cancel-timer (cdr pending))
+    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--keep-resume (romacs-agent-id session) nil)
+    (when why (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "cancelled" "why" why)))
+    (romacs-agent--changed session)))
+
+(defun romacs-agent-tools--resume (session time)
+  "SESSION's resume at TIME is due: still stopped at its limit, it goes on
+under the first account of its pool with room, told to; else nothing.
+An account still spent (its report not yet renewed) waits for the next
+reset, once."
+  (when (equal (romacs-agent-resume-time session) time)
+    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--keep-resume (romacs-agent-id session) nil)
+    (when (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+               (not (romacs-agent-stopped session)) (romacs-agent-limited session)
+               (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
+      (let ((target (romacs-agent-pool-pick (romacs-agent-harness session))))
+        (if (not (and target (romacs-agent-room (plist-get target :name))))
+            (romacs-agent-tools--schedule-resume session)
+          (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "fired" "on" (plist-get target :name)))
+          (if (equal (plist-get target :name) (romacs-agent-provider session))
+              (romacs-agent-tools--tell session romacs-agent-tools--resumed)
+            (romacs-agent-move-on session "limit reset")))))))
+
+(defun romacs-agent-tools--rearm-resumes ()
+  "After a restart: arm again the resumes the last server left waiting."
+  (pcase-dolist (`(,id . ,time) (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--resumes-file))
+                                                                 (read (current-buffer)))))
+    (when-let* ((session (romacs-agent-get id)) ((not (romacs-agent-resume-time session))))
+      (romacs-agent-tools--arm-resume session time))))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--rearm-resumes)
 
 (defun romacs-agent-tools--not-moved (session why)
   "SESSION stays where its limit stopped it, WHY when said: its end goes
@@ -960,7 +1063,13 @@ woken with it."
 (add-hook 'romacs-agent-moved-functions #'romacs-agent-tools--moved)
 
 (defun romacs-agent-tools--limit-on-event (session event)
-  (when (eq (plist-get event :type) 'done) (romacs-agent-tools--switch-on-limit session event)))
+  (pcase (plist-get event :type)
+    ('done (romacs-agent-tools--switch-on-limit session event))
+    ;; A message after the limit: neither a wait for a move nor a resume is its.
+    ('input (when (and (romacs-agent-caught-up session) (not (romacs-agent-pending-selection session)))
+              (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+              (romacs-agent-tools--cancel-resume session "a message came")))
+    ('settled (romacs-agent-tools--cancel-resume session "settled"))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--limit-on-event)
 
@@ -991,7 +1100,8 @@ its parent and wake rule)."
                                       verb))
                      record)
             record))
-      (romacs-agent-tools--handed-off task provider model effort next))))
+      ;; Another harness, named: its pool, as for a new task.
+      (romacs-agent-tools--handed-off task (romacs-agent-pool-name provider) model effort next))))
 
 (defun romacs-agent-tools--handed-off (task provider model effort next)
   "A deferred answer: the new task going on with TASK's thread under

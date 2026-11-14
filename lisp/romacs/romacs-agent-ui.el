@@ -47,6 +47,8 @@
 ;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
+(declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
@@ -1149,6 +1151,7 @@ made again when it differs."
           :switch (and switch (romacs-agent-ui--selection-label switch))
           :workers (romacs-agent-children-summary session)
           :share (romacs-agent-ui--context-share session)
+          :resume (romacs-agent-resume-time session)
           :state (romacs-agent-ui--state-key session)
           :glyphs romacs-agent-glyphs)))
 
@@ -1159,7 +1162,7 @@ effort, the instance when not the harness's own, a permission mode other
 than bypassing them, a selection waiting, its workers, and how full its
 context is.  The whole line: a window too narrow for it shows its start,
 display clipping the band where the window ends."
-  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state &allow-other-keys)
+  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state resume &allow-other-keys)
       inputs
     (mapconcat
      #'identity
@@ -1172,6 +1175,8 @@ display clipping the band where the window ends."
                  (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
                        ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
+                 (and resume (propertize (format-time-string "⏰%H:%M" resume) 'face 'warning
+                                         'help-echo "Resumes by itself when its limit resets; z in the actions menu cancels"))
                  workers
                  (and share (propertize share 'face 'romacs-agent-context))))
      "  ")))
@@ -2112,6 +2117,11 @@ conversation as is (`romacs-agent-move-on')."
     (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) to
              (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" ""))))
 
+(defun romacs-agent-chat-cancel-resume ()
+  "This session no longer resumes by itself when its limit resets."
+  (interactive nil romacs-agent-chat-mode)
+  (romacs-agent-tools--cancel-resume romacs-agent-ui--session "cancelled by hand"))
+
 (defun romacs-agent-ui--moves-p (session provider)
   "Whether SESSION goes on under PROVIDER as it is: its harness's pool, or
 an instance of its harness."
@@ -2299,6 +2309,8 @@ view."
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "H" ("Go on under another instance…" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
+  "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
+       :if (lambda () (and romacs-agent-ui--session (romacs-agent-resume-time romacs-agent-ui--session))))
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "I" ("Implement the plan" romacs-agent-chat-implement
        :if (lambda () (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))))

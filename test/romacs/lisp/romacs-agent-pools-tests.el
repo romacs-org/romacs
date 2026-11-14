@@ -143,4 +143,115 @@ a time, `allow' marks it allowed."
                              (gethash "accounts" claude))
                      '(("claude" :false) ("claude2" t) ("claude3" t)))))))
 
+(ert-deftest romacs-agent-pools-resume-at-the-reset ()
+  ;; Every account spent, the first back in a few seconds: it resumes by
+  ;; itself then, journaled, kept across a restart, on the first with room.
+  (romacs-agent-pools-tests--with
+    (let* ((dir (make-temp-file "s" t))
+           (session (romacs-agent--make :id "r" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                        :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude")))
+           (soon (+ (float-time) 5)) (armed nil) (told nil) (moved nil)
+           (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent-tools--moving (make-hash-table :test #'equal))
+           (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
+      (puthash "r" session romacs-agent--sessions)
+      (spend "claude" soon) (spend "claude2" (+ soon 600)) (spend "claude3" (+ soon 900))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (delay _ function &rest args) (push (list delay function args) armed) 'timer))
+                ((symbol-function 'cancel-timer) #'ignore)
+                ((symbol-function 'romacs-agent-tools--wake) #'ignore)
+                ((symbol-function 'romacs-agent-tools--tell) (lambda (_s text) (push text told)))
+                ((symbol-function 'romacs-agent-move-on) (lambda (_s why) (push why moved))))
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        ;; Scheduled at the earliest reset plus its margin, said and kept.
+        (should (= (romacs-agent-resume-time session) (+ soon 1)))
+        (should (cl-find #'romacs-agent-tools--resume armed :key #'cadr))
+        (let ((journal (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))
+          (should (string-match-p "\"type\":\"resume\",\"state\":\"scheduled\"" journal)))
+        ;; A restarted server arms it again.
+        (clrhash romacs-agent-tools--resumes)
+        (romacs-agent-tools--rearm-resumes)
+        (should (= (romacs-agent-resume-time session) (+ soon 1)))
+        ;; Due, its own account back: told to go on there.
+        (spend "claude" (- (float-time) 1) 9.0)
+        (romacs-agent-tools--resume session (+ soon 1))
+        (should (equal told (list romacs-agent-tools--resumed)))
+        (should-not (romacs-agent-resume-time session))
+        (should (string-match-p "\"state\":\"fired\",\"on\":\"claude\""
+                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))
+        ;; Another account back first: it moves there.
+        (spend "claude" (+ (float-time) 600) 10.0)
+        (allow "claude2" 11.0)
+        (romacs-agent-tools--arm-resume session 42.0)
+        (romacs-agent-tools--resume session 42.0)
+        (should (equal moved '("limit reset")))
+        ;; A message cancels a waiting resume, journaled.
+        (romacs-agent-tools--arm-resume session 43.0)
+        (romacs-agent-tools--limit-on-event session '(:type input))
+        (should-not (romacs-agent-resume-time session))
+        ;; Turned off, nothing is scheduled.
+        (let ((romacs-agent-resume-at-reset nil))
+          (spend "claude2" (+ (float-time) 600) 12.0)
+          (romacs-agent-tools--switch-on-limit session '(:limit t))
+          (should-not (romacs-agent-resume-time session)))))))
+
+(ert-deftest romacs-agent-pools-a-wait-is-its-limits-alone ()
+  (romacs-agent-pools-tests--with
+    (let* ((dir (make-temp-file "w" t))
+           (session (romacs-agent--make :id "w" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                        :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude")))
+           (armed nil) (moves 0) (selects 0)
+           (romacs-agent-tools--moving (make-hash-table :test #'equal))
+           (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key)))
+      (puthash "w" session romacs-agent--sessions)
+      (spend "claude" (+ (float-time) 600))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (_d _r function &rest args) (push (cons function args) armed) 'timer))
+                ((symbol-function 'romacs-agent-tools--wake) #'ignore)
+                ((symbol-function 'romacs-agent-select) (lambda (&rest _) (cl-incf selects) (= selects 1))))
+        ;; A message after the limit: the wait it armed moves nothing.
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (let ((wait (cl-find #'romacs-agent-tools--hand-over armed :key #'car)))
+          (romacs-agent-tools--limit-on-event session '(:type input))
+          (cl-letf (((symbol-function 'romacs-agent-move-on) (lambda (&rest _) (cl-incf moves))))
+            (apply (car wait) (cdr wait))))
+        (should (= moves 0))
+        ;; The same move asked again while it is pending keeps its bookkeeping.
+        (romacs-agent-move-on session)
+        (setf (romacs-agent-pending-selection session) '(:state armed :provider "claude2"))
+        (cl-letf (((symbol-function 'romacs-agent--wanted) (lambda (_) '(:provider "claude2"))))
+          (romacs-agent-move-on session))
+        (should (gethash session romacs-agent--moving-on))
+        (setf (romacs-agent-pending-selection session) nil)
+        ;; The rest spent during the wait: said in the journal, with the reset.
+        (remhash session romacs-agent--moving-on)
+        (setq armed nil)
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (spend "claude2" (+ (float-time) 600) 5.0) (spend "claude3" (+ (float-time) 900) 5.0)
+        (let ((wait (cl-find #'romacs-agent-tools--hand-over armed :key #'car)))
+          (apply (car wait) (cdr wait)))
+        (should (string-match-p "\"to\":null,\"why\":\"every claude account is at its limit\",\"resets\":[0-9]"
+                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))))))
+
+(ert-deftest romacs-agent-pools-the-room-file-has-one-writer ()
+  (romacs-agent-pools-tests--with
+    (let* ((file (romacs-agent--room-file)) (lock (concat file ".lock")) (seen nil))
+      (romacs-agent--with-lock file (lambda () (setq seen (file-directory-p lock))))
+      (should seen)
+      (should-not (file-exists-p lock))
+      ;; A crashed writer's lock is taken over.
+      (make-directory lock t)
+      (set-file-times lock (time-subtract (current-time) 60))
+      (romacs-agent--with-lock file (lambda () (setq seen 'ran)))
+      (should (eq seen 'ran))
+      (should-not (file-exists-p lock)))))
+
+(ert-deftest romacs-agent-pools-switching-to-a-harness-is-its-pool ()
+  (romacs-agent-pools-tests--with
+    (let ((session (romacs-agent--make :id "x" :harness 'claude :provider "claude"))
+          (to nil))
+      (puthash "x" session romacs-agent--sessions)
+      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "x"))
+                ((symbol-function 'romacs-agent-tools--handed-off) (lambda (_task provider &rest _) (setq to provider))))
+        (romacs-agent-tools--switch (romacs-mcp--object "provider" "codex"))
+        (should (eq to 'codex))))))
+
 ;;; romacs-agent-pools-tests.el ends here
