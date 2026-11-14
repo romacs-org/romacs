@@ -802,6 +802,8 @@ rule, as its first did.  An empty TEXT sends nothing."
     ;; One starting is going on already: attaching it again would take its
     ;; supervisor from the attachment under way.
     (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+    ;; It waits for the turn running: that turn's result is made before it.
+    (when (memq (romacs-agent-state child) '(running waiting-approval)) (romacs-agent-issues-told child))
     (romacs-agent-send-later child text))
   child)
 

@@ -70,65 +70,102 @@ stands in the way of what it logs."
 
 ;;; What sessions' events say
 
-(defun romacs-agent-issues--text (value)
-  (string-trim (if (stringp value) value "")))
+(defvar romacs-agent-issues--asked (make-hash-table :test #'eq :weakness 'key)
+  "Delegated sessions whose running turn began with a message: the turn
+an end answers.  A resumed harness's own turn, taking up a cut one, has
+none.")
+
+(defvar romacs-agent-issues--told (make-hash-table :test #'eq :weakness 'key)
+  "Delegated sessions to how many messages their parent sent while their
+turn ran, waiting for its end: that turn's result was made before them.")
+
+(defun romacs-agent-issues-told (session)
+  "SESSION's parent sent it a message that waits for its running turn."
+  (puthash session (1+ (gethash session romacs-agent-issues--told 0)) romacs-agent-issues--told))
+
+(defconst romacs-agent-issues--quiet "[quiet]"
+  "What a task's reply starts with when its parent need not act on it: an
+acknowledgement, not a result to judge.")
 
 (defun romacs-agent-issues--end (session event)
-  "The issues of a delegated SESSION's turn end, EVENT a `done'."
-  (let ((result (romacs-agent-issues--text (plist-get event :text)))
-        (role (plist-get (romacs-agent-options session) :role))
-        (seq (plist-get event :seq)))
-    ;; Messages queued while it ran: its result was made before them.
-    (when (> (romacs-agent-queue-length session) 0)
-      (romacs-agent-issues-record 'crossed session :seq seq :queued (romacs-agent-queue-length session)
-                                  :result result))
+  "The issues of a delegated SESSION's turn end, EVENT a `done'.  No result
+text is kept: only its size."
+  (let* ((result (string-trim (or (and (stringp (plist-get event :text)) (plist-get event :text)) "")))
+         (role (plist-get (romacs-agent-options session) :role))
+         (seq (plist-get event :seq))
+         (told (gethash session romacs-agent-issues--told))
+         (asked (gethash session romacs-agent-issues--asked)))
+    (remhash session romacs-agent-issues--told)
+    (remhash session romacs-agent-issues--asked)
+    (when told (romacs-agent-issues-record 'crossed session :seq seq :waiting told :chars (length result)))
     (cond ((plist-get event :limit)
            (romacs-agent-issues-record 'limit session :seq seq :provider (romacs-agent-provider session)
-                                       :limit (plist-get event :limit) :text (or (plist-get event :text) (plist-get event :reason))))
+                                       :limit (plist-get event :limit)))
           ((plist-get event :error)
-           (romacs-agent-issues-record 'failed session :seq seq :reason (plist-get event :reason) :result result))
-          ((string-empty-p result)
-           (romacs-agent-issues-record 'no-result session :seq seq :how "done"))
+           (romacs-agent-issues-record 'failed session :seq seq :reason (plist-get event :reason)))
+          ;; Only a turn that answers a message is judged.
+          ((not asked))
+          ((string-empty-p result) (romacs-agent-issues-record 'no-result session :seq seq :how "done"))
+          ((string-prefix-p romacs-agent-issues--quiet result))
           ((when-let* ((shape (cdr (assoc role romacs-agent-issues-role-shapes))))
              (not (string-match-p shape result)))
-           (romacs-agent-issues-record 'result-shape session :seq seq :role role :result result)))))
+           (romacs-agent-issues-record 'result-shape session :seq seq :role role :chars (length result))))))
 
 (defun romacs-agent-issues--on-event (session event)
   "Log what EVENT, a live one of SESSION's, says went wrong."
-  (when (memq (plist-get event :type) '(done exit unstarted selection))
-    (when (romacs-agent--live-p session)
-      (let ((delegated (plist-get (romacs-agent-options session) :parent)))
-        (pcase (plist-get event :type)
-          ('done (if delegated (romacs-agent-issues--end session event)
-                   (when (plist-get event :limit)
-                     (romacs-agent-issues-record 'limit session :seq (plist-get event :seq)
-                                                 :provider (romacs-agent-provider session)
-                                                 :limit (plist-get event :limit)))))
-          ;; Its harness ended in the middle of a turn: no result.
-          ('exit (when (and delegated (not (eq (romacs-agent-state session) 'idle)))
-                   (romacs-agent-issues-record 'no-result session :seq (plist-get event :seq) :how "exit"
-                                               :status (plist-get event :status))))
-          ('unstarted (romacs-agent-issues-record 'resume-failed session :text (plist-get event :text)))
-          ('selection (let ((from (plist-get (plist-get event :from) :provider))
-                            (to (plist-get (plist-get event :to) :provider)))
-                        (unless (equal from to)
-                          (romacs-agent-issues-record 'moved session :from from :to to)))))))))
+  (when (memq (plist-get event :type) '(input done exit unstarted selection))
+    (let ((delegated (plist-get (romacs-agent-options session) :parent))
+          (type (plist-get event :type)))
+      (cond
+       ;; Raised by a launch, never journaled: never a replay's.
+       ((eq type 'unstarted)
+        (when (eq (romacs-agent-get (romacs-agent-id session)) session)
+          (romacs-agent-issues-record 'resume-failed session :text (plist-get event :text))))
+       ((not (romacs-agent--live-p session)))
+       ((eq type 'input) (when delegated (puthash session t romacs-agent-issues--asked)))
+       ((eq type 'done)
+        (if delegated (romacs-agent-issues--end session event)
+          (when (plist-get event :limit)
+            (romacs-agent-issues-record 'limit session :seq (plist-get event :seq)
+                                        :provider (romacs-agent-provider session) :limit (plist-get event :limit)))))
+       ;; Its harness ended in the middle of a turn: the exit ended it, failed.
+       ((eq type 'exit)
+        (when (and delegated (romacs-agent-failed session)
+                   (eql (romacs-agent-done-seq session) (plist-get event :seq)))
+          (remhash session romacs-agent-issues--asked)
+          (remhash session romacs-agent-issues--told)
+          (romacs-agent-issues-record 'no-result session :seq (plist-get event :seq) :how "exit"
+                                      :status (plist-get event :status))))
+       ((eq type 'selection)
+        (let ((from (plist-get (plist-get event :from) :provider))
+              (to (plist-get (plist-get event :to) :provider)))
+          (unless (equal from to) (romacs-agent-issues-record 'moved session :from from :to to))))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-issues--on-event)
 
 ;;; Tool calls
 
+(defconst romacs-agent-issues--plain-arguments
+  '("instance" "taskId" "mode" "provider" "model" "effort" "role" "kind" "wake" "isolation" "messageId" "unit")
+  "The arguments an issue keeps as they are (when short): names and
+choices, never what a caller wrote.")
+
+(defun romacs-agent-issues--summary (name value)
+  "VALUE of argument NAME as an issue keeps it: a plain argument's short
+value; anything else only its type and size."
+  (cond ((and (stringp value) (member name romacs-agent-issues--plain-arguments) (<= (length value) 80)) value)
+        ((stringp value) (format "(%d characters)" (length value)))
+        ((hash-table-p value) (format "(an object of %d)" (hash-table-count value)))
+        ((vectorp value) (format "(%d items)" (length value)))
+        ((or (numberp value) (memq value '(t :false :null))) value)
+        (t "(a value)")))
+
 (defun romacs-agent-issues--arguments (arguments)
-  "ARGUMENTS of a tool call as an issue keeps them: names, and short
-values (a message's text is not kept)."
+  "ARGUMENTS of a tool call as an issue keeps them, each summarized
+\(`romacs-agent-issues--summary')."
   (let ((kept (romacs-mcp--object)))
     (when (hash-table-p arguments)
-      (maphash (lambda (name value)
-                 (puthash name (if (and (stringp value) (> (length value) 80))
-                                   (format "(%d characters)" (length value))
-                                 (romacs-agent-issues--value value))
-                          kept))
-               arguments))
+      (maphash (lambda (name value) (puthash name (romacs-agent-issues--summary name value) kept)) arguments))
     kept))
 
 (defun romacs-agent-issues--on-failure (peer name arguments message refused)

@@ -55,27 +55,50 @@ delegated review task of a registered parent."
     (cl-letf (((symbol-function 'write-region) (lambda (&rest _) (error "Disk full"))))
       (should-not (condition-case nil (progn (romacs-agent-issues-record 'crossed task) nil) (error t))))))
 
+(defun romacs-agent-issues-tests--turn (session seq text &rest done)
+  "SESSION's turn, begun by a message, ending at SEQ with TEXT."
+  (romacs-agent-issues-tests--event session :type 'input :text "do it" :seq (1- seq))
+  (apply #'romacs-agent-issues-tests--event session :type 'done :seq seq :text text done))
+
 (ert-deftest romacs-agent-issues-from-a-tasks-turn-ends ()
   (romacs-agent-issues-tests--with
     ;; A review with its verdict: nothing.
-    (romacs-agent-issues-tests--event task :type 'done :seq 3 :text "VERDICT: APPROVE\nNo findings.")
+    (romacs-agent-issues-tests--turn task 3 "VERDICT: APPROVE\nNo findings.")
     (should-not (romacs-agent-issues-read))
     ;; One without, made while its parent's message waited, then one empty.
+    (romacs-agent-issues-told task)
+    (romacs-agent-issues-tests--turn task 5 "a memory consolidation summary")
+    (romacs-agent-issues-tests--turn task 7 "  ")
+    ;; At its limit, then failed.
+    (romacs-agent-issues-tests--turn task 9 "limit reached" :limit 'account)
+    (romacs-agent-issues-tests--turn task 11 "x" :error t :reason "API error")
+    (should (equal (romacs-agent-issues-tests--kinds) '("crossed" "result-shape" "no-result" "limit" "failed")))
+    ;; No result's text is kept, only its size.
+    (should-not (string-search "consolidation" (with-temp-buffer (insert-file-contents (romacs-agent-issues--file))
+                                                                 (buffer-string))))
+    (should (= (gethash "chars" (gethash "details" (nth 1 (romacs-agent-issues-read)))) 30))))
+
+(ert-deftest romacs-agent-issues-only-answers-are-judged ()
+  ;; A resumed harness's own turn (no message began it) and a quiet
+  ;; acknowledgement after a verdict are no task answers.
+  (romacs-agent-issues-tests--with
+    (romacs-agent-issues-tests--event task :type 'done :seq 3 :text "")
+    (romacs-agent-issues-tests--turn task 5 "[quiet] Acknowledged.")
+    ;; A message its parent sent once the turn ended waits for nothing.
     (setf (romacs-agent-queue-length task) 1)
-    (romacs-agent-issues-tests--event task :type 'done :seq 5 :text "a memory consolidation summary")
-    (setf (romacs-agent-queue-length task) 0)
-    (romacs-agent-issues-tests--event task :type 'done :seq 7 :text "  ")
-    ;; At its limit, then failed, then cut short by its harness's exit.
-    (romacs-agent-issues-tests--event task :type 'done :seq 9 :text "limit reached" :limit 'account)
-    (romacs-agent-issues-tests--event task :type 'done :seq 11 :error t :reason "API error")
-    (romacs-agent-issues-tests--event task :type 'exit :seq 13 :status 1)
-    (should (equal (romacs-agent-issues-tests--kinds)
-                   '("crossed" "result-shape" "no-result" "limit" "failed" "no-result")))
-    (should (equal (gethash "how" (gethash "details" (car (last (romacs-agent-issues-read))))) "exit"))
-    ;; Idle when its harness exits: no turn was cut.
-    (setf (romacs-agent-state task) 'idle)
-    (romacs-agent-issues-tests--event task :type 'exit :seq 15 :status 0)
-    (should (= (length (romacs-agent-issues-read)) 6))))
+    (romacs-agent-issues-tests--turn task 7 "VERDICT: CHANGES\nS1.")
+    (should-not (romacs-agent-issues-read))))
+
+(ert-deftest romacs-agent-issues-a-harness-exit-mid-turn ()
+  (romacs-agent-issues-tests--with
+    ;; Idle when it exits: no turn was cut.
+    (romacs-agent-issues-tests--event task :type 'exit :seq 13 :status 0)
+    (should-not (romacs-agent-issues-read))
+    ;; Its exit ended a turn, failed.
+    (setf (romacs-agent-failed task) t (romacs-agent-done-seq task) 15)
+    (romacs-agent-issues-tests--event task :type 'exit :seq 15 :status 1)
+    (should (equal (romacs-agent-issues-tests--kinds) '("no-result")))
+    (should (equal (gethash "how" (gethash "details" (car (romacs-agent-issues-read)))) "exit"))))
 
 (ert-deftest romacs-agent-issues-moves-and-failed-starts ()
   (romacs-agent-issues-tests--with
@@ -83,6 +106,8 @@ delegated review task of a registered parent."
                                       :to '(:provider "claude" :model "n"))
     (should-not (romacs-agent-issues-read))
     (romacs-agent-issues-tests--event task :type 'selection :from '(:provider "claude") :to '(:provider "claude2"))
+    ;; A launch that never started never caught up: still told.
+    (setf (romacs-agent-caught-up task) nil)
     (romacs-agent-issues-tests--event task :type 'unstarted :text "its supervisor never started")
     (should (equal (romacs-agent-issues-tests--kinds) '("moved" "resume-failed")))))
 
@@ -112,9 +137,23 @@ delegated review task of a registered parent."
                                       nil))
       (should-error (romacs-mcp--call (romacs-mcp--object "name" "romacs_task_gone" "arguments" (romacs-mcp--object)) nil))
       (romacs-mcp--call (romacs-mcp--object "name" "romacs_eval" "arguments" (romacs-mcp--object)) nil))
+    ;; A deferred call failing as it is polled.
+    (let ((romacs-mcp--deferred (list (list (list :peer nil :message (romacs-mcp--object
+                                                                        "params" (romacs-mcp--object
+                                                                                  "name" "romacs_delegate_task"
+                                                                                  "arguments" (romacs-mcp--object
+                                                                                               "task" "secret brief"))))
+                                            7 (lambda () (user-error "The task did not start")) nil)))
+          (romacs-mcp--deferred-timer nil))
+      (cl-letf (((symbol-function 'romacs-mcp--live-p) (lambda (&rest _) t))
+                ((symbol-function 'romacs-mcp--send) #'ignore))
+        (romacs-mcp--poll-deferred)))
     (let ((issues (romacs-agent-issues-read)))
       (should (equal (mapcar (lambda (i) (gethash "kind" i)) issues)
-                     '("tool-refused" "tool-error" "tool-refused" "tool-refused")))
+                     '("tool-refused" "tool-error" "tool-refused" "tool-refused" "tool-refused")))
+      (should (equal (gethash "error" (gethash "details" (nth 4 issues))) "The task did not start"))
+      ;; What a caller wrote is never kept: its size only.
+      (should (equal (gethash "task" (gethash "arguments" (gethash "details" (nth 4 issues)))) "(12 characters)"))
       (should (equal (gethash "error" (gethash "details" (car issues))) "No task x"))
       (should (equal (gethash "taskId" (gethash "arguments" (gethash "details" (car issues)))) "x"))
       (should (equal (gethash "tool" (gethash "details" (nth 3 issues))) "romacs_task_gone")))))
