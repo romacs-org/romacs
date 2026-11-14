@@ -619,7 +619,7 @@ fn frame_render_state_applies_visual_cursor_animation_rects() {
         ascent: 0.0,
         active: false,
     });
-    render.compositor.current_frame = Some(frame);
+    render.compositor.current_frame = Some(std::sync::Arc::new(frame));
     let mut visual = crate::render_thread::cursor::CursorState::new(
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
@@ -644,7 +644,7 @@ fn frame_render_state_applies_visual_cursor_animation_rects() {
 }
 
 #[test]
-fn frame_render_state_drains_transition_hints_once_for_render_clone() {
+fn frame_render_state_drains_transition_hints_once_and_shares_the_frame() {
     let mut frame = make_frame(0x42, 0);
     let region = PresentedWindowRegions {
         text_body: romacs_display_protocol::types::Rect::new(0.0, 0.0, 80.0, 80.0),
@@ -660,12 +660,16 @@ fn frame_render_state_drains_transition_hints_once_for_render_clone() {
         intent: romacs_display_protocol::ContentTransitionIntent::Replace,
     });
 
-    let first = GuiFrameRenderState::take_frame_for_render(&mut frame);
-    assert_eq!(first.transition_hints.len(), 1);
+    let mut stored = std::sync::Arc::new(frame);
+    let (first, hints) = GuiFrameRenderState::take_frame_for_render(&mut stored);
+    assert_eq!(hints.len(), 1);
+    assert!(first.transition_hints.is_empty() && stored.transition_hints.is_empty(), "the hints are drained");
+    assert!(std::sync::Arc::ptr_eq(&first, &stored), "the frame drawn is the frame held, not a copy");
+    drop(first);
 
-    let second = GuiFrameRenderState::take_frame_for_render(&mut frame);
-    assert!(second.transition_hints.is_empty());
-    assert!(frame.transition_hints.is_empty());
+    let (second, hints) = GuiFrameRenderState::take_frame_for_render(&mut stored);
+    assert!(hints.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&second, &stored));
 }
 
 #[test]

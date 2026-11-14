@@ -112,12 +112,16 @@ impl RenderFeaturePlan {
     /// Materialize the execution view of a frame without changing the retained
     /// committed frame. Runtime hints are one-shot inputs; a suppressed family
     /// is consumed but cannot leak into renderer implementation code.
-    pub(super) fn prepare_frame(self, frame: &mut FrameGlyphBuffer) {
+    pub(super) fn prepare_frame(
+        self,
+        frame: &mut std::sync::Arc<FrameGlyphBuffer>,
+        hints: &mut Vec<romacs_display_protocol::ContentTransitionHint>,
+    ) {
         if !self.accept_transition_hints {
-            frame.transition_hints.clear();
+            hints.clear();
         }
-        if !self.accept_cursor_effects {
-            frame.cursor_effects_by_window.clear();
+        if !self.accept_cursor_effects && !frame.cursor_effects_by_window.is_empty() {
+            std::sync::Arc::make_mut(frame).cursor_effects_by_window.clear();
         }
     }
 }

@@ -33,6 +33,7 @@ use romacs_display_protocol::{
     PresentationFramePoint, PresentationId, PresentedHit, PresentedHitError, PresentedHitQuery,
     RetainedImageSet, SurfaceState,
 };
+use romacs_display_protocol::ContentTransitionHint;
 use romacs_renderer_wgpu::WgpuGlyphAtlas;
 
 
@@ -637,7 +638,7 @@ impl GuiFrameRenderState {
     // retained frame through narrower accessors.
     #[allow(dead_code)]
     pub(super) fn current_frame_clone(&self) -> Option<FrameGlyphBuffer> {
-        self.compositor.current_frame.clone()
+        self.compositor.current_frame.as_deref().cloned()
     }
 
     /// Whether the retained frame carries a theme-transition effect hint —
@@ -719,7 +720,7 @@ impl GuiFrameRenderState {
     /// fetched from two different frames.
     pub(super) fn frame_for_target(&self, target_frame_id: u64) -> Option<&FrameGlyphBuffer> {
         if target_frame_id == self.emacs_frame_id {
-            self.compositor.current_frame.as_ref()
+            self.compositor.current_frame.as_deref()
         } else {
             self.compositor
                 .child_frames
@@ -887,7 +888,7 @@ impl GuiFrameRenderState {
         let frame_and_offset = if key.frame_id() == 0 || key.frame_id() == self.emacs_frame_id {
             self.compositor
                 .current_frame
-                .as_ref()
+                .as_deref()
                 .map(|frame| (frame, 0.0, 0.0))
         } else {
             self.compositor
@@ -1238,7 +1239,7 @@ impl GuiFrameRenderState {
                 &detail,
             );
         }
-        self.compositor.current_frame = frame;
+        self.compositor.current_frame = frame.map(Arc::new);
         #[cfg(feature = "video")]
         self.refresh_visible_videos();
         self.refresh_present_mapping();
@@ -1265,18 +1266,27 @@ impl GuiFrameRenderState {
     pub(super) fn take_current_frame_for_render(
         &mut self,
         _acquired: &super::render_pass::surface::SurfaceAcquired,
-    ) -> Option<FrameGlyphBuffer> {
+    ) -> Option<(Arc<FrameGlyphBuffer>, Vec<ContentTransitionHint>)> {
         let current_frame = self.compositor.current_frame.as_mut()?;
-        let mut frame = Self::take_frame_for_render(current_frame);
-        self.compositor.text_animations.paint(&mut frame);
-        Some(frame)
+        let (mut frame, hints) = Self::take_frame_for_render(current_frame);
+        if self.compositor.text_animations.is_running() {
+            self.compositor.text_animations.paint(Arc::make_mut(&mut frame));
+        }
+        Some((frame, hints))
     }
 
-    pub(super) fn take_frame_for_render(current_frame: &mut FrameGlyphBuffer) -> FrameGlyphBuffer {
-        let transition_hints = current_frame.take_transition_hints();
-        let mut frame = current_frame.clone();
-        frame.transition_hints = transition_hints;
-        frame
+    /// The frame CURRENT_FRAME holds to draw, shared, and the one-shot
+    /// transition hints it carried, drained: a draw that does not change
+    /// the frame copies nothing.
+    pub(super) fn take_frame_for_render(
+        current_frame: &mut Arc<FrameGlyphBuffer>,
+    ) -> (Arc<FrameGlyphBuffer>, Vec<ContentTransitionHint>) {
+        let hints = if current_frame.transition_hints.is_empty() {
+            Vec::new()
+        } else {
+            Arc::make_mut(current_frame).take_transition_hints()
+        };
+        (Arc::clone(current_frame), hints)
     }
 }
 

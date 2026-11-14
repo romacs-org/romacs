@@ -794,7 +794,7 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
     .unwrap();
     let window = app.frame_windows.primary_window_mut().unwrap();
     let owner = window.render.emacs_frame_id;
-    window.render.compositor.current_frame = Some(frame);
+    window.render.compositor.current_frame = Some(std::sync::Arc::new(frame));
     app.menu_bar.select(
         crate::menu_bar::MenuHeading {
             frame: owner,

@@ -31,7 +31,9 @@ mod overlays;
 
 /// Glyph composition and rendering state for a frame window.
 pub(crate) struct FrameCompositor {
-    pub current_frame: Option<FrameGlyphBuffer>,
+    /// The presentation drawn from, shared with the draw that reads it: a
+    /// draw copies it only to change it (`take_current_frame_for_render`).
+    pub current_frame: Option<std::sync::Arc<FrameGlyphBuffer>>,
     /// Text animations drawn over the current frame at every draw.
     pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
     /// Video identities present in the root or any accepted child

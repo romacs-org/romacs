@@ -492,11 +492,10 @@ pub(super) fn detect_frame_transitions(
     renderer: &mut WgpuRenderer,
     transitions: &mut TransitionState,
     effects: &romacs_display_protocol::EffectsConfig,
-    frame: &mut FrameGlyphBuffer,
+    transition_hints: Vec<romacs_display_protocol::ContentTransitionHint>,
     pending: crate::render_thread::frame_compositor::PendingContinuity,
     frame_dirty: &mut bool,
 ) {
-    let transition_hints = frame.take_transition_hints();
     // One sample for the whole frame: a transition detected and rendered in the
     // same frame starts at progress 0 rather than at whatever the gap between
     // two clock reads happened to be.
