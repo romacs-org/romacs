@@ -410,6 +410,43 @@ message's record for TEXT, `interrupted' each interrupted."
         (romacs-agent--record copy (romacs-mcp--object "seq" 1 "t" 1.0 "in" (cdr sent)))
         (should (eq (romacs-agent-received-message copy (gethash "id" message)) message))))))
 
+(ert-deftest romacs-agent-delegate-a-claude-peers-message-is-external ()
+  ;; Another Claude Code session's message, in its own channel's envelope:
+  ;; an input said to be external, answered by SendMessage to its from.
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "c" :harness 'claude :state 'idle :caught-up t))
+         (text (concat "<cross-session-message from=\"dotfiles [ab12]\" from-session=\"5e5a0000-1111-4222-8333-444455556666\" "
+                       "from-name=\"dotfiles\">\nWhich stow target?\n</cross-session-message>"))
+         (line (romacs-mcp--object "type" "user" "uuid" "u-1" "parent_tool_use_id" :null
+                                   "message" (romacs-mcp--object "role" "user" "content" text)))
+         (seen nil))
+    (puthash "c" session romacs-agent--sessions)
+    (let ((romacs-agent-event-functions (list (lambda (_s event) (push event seen)))))
+      (romacs-agent--record session (romacs-mcp--object "seq" 1 "t" 1.0 "out" line)))
+    (let* ((input (cl-find 'input seen :key (lambda (e) (plist-get e :type))))
+           (message (plist-get input :message)))
+      (should (equal (plist-get input :text) "Which stow target?"))
+      (should (equal (gethash "kind" message) "external"))
+      (should (equal (gethash "id" message) "m-u-1"))
+      (should (equal (gethash "address" (gethash "from" message)) "dotfiles [ab12]"))
+      (should (equal (gethash "name" (gethash "from" message)) "dotfiles"))
+      (should (eq (romacs-agent-received-message session "m-u-1") message))
+      (should (equal (romacs-agent--message-reply-line message)
+                     "Reply to this message with SendMessage(to=\"dotfiles [ab12]\", message=...)."))
+      ;; romacs_task_reply names the call to make instead.
+      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "c")))
+        (should (string-search "SendMessage(to=\"dotfiles [ab12]\""
+                               (cadr (should-error (romacs-agent-tools--reply
+                                                    (romacs-mcp--object "messageId" "m-u-1" "text" "x"))
+                                                   :type 'user-error))))))
+    ;; A tool's result, or a subagent's line, is no peer's message.
+    (should-not (romacs-agent--claude-peer line "plain text"))
+    (setq seen nil)
+    (puthash "parent_tool_use_id" "toolu_1" line)
+    (let ((romacs-agent-event-functions (list (lambda (_s event) (push event seen)))))
+      (romacs-agent--record session (romacs-mcp--object "seq" 2 "t" 2.0 "out" line)))
+    (should-not (cl-find 'input seen :key (lambda (e) (plist-get e :type))))))
+
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none
   ;; delegated: said to be external.

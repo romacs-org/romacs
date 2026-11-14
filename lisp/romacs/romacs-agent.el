@@ -1258,6 +1258,17 @@ message's text, which a child's result or a quote can fill.")
   "VALUE fit for an envelope's attribute: no quote or angle bracket."
   (replace-regexp-in-string "[\"<>\n]" "" (format "%s" value)))
 
+(defun romacs-agent-message-record (id kind from &optional in-reply-to)
+  "A `romacsMessage' record: its ID, the sender's KIND to the receiver
+\(parent, child, sibling or external), FROM a plist of :session (its id),
+:name and, for a Claude Code session outside Romacs, :address (what its
+SendMessage names it by) and :claude-session, and IN-REPLY-TO."
+  (let ((sender (romacs-mcp--object "session" (or (plist-get from :session) :null)
+                                    "name" (or (plist-get from :name) "a session outside Romacs"))))
+    (when (plist-get from :address) (puthash "address" (plist-get from :address) sender))
+    (when (plist-get from :claude-session) (puthash "claudeSession" (plist-get from :claude-session) sender))
+    (romacs-mcp--object "id" id "kind" kind "from" sender "inReplyTo" (or in-reply-to :null))))
+
 (defun romacs-agent--message-reply-line (message)
   "The line that ends MESSAGE's envelope, saying how to answer it with
 its own id or address filled in: never left for the receiver to guess."

@@ -862,11 +862,10 @@ first, each (SENDER . TEXT): they go with its next wake, never waking it.")
 (defun romacs-agent-tools--message (kind sender &optional in-reply-to)
   "A new `romacsMessage' record: from SENDER, a session (nil: one outside
 Romacs), what it is to the receiver KIND, answering message IN-REPLY-TO."
-  (romacs-mcp--object "id" (concat "m-" (romacs-agent--uuid)) "kind" kind
-                      "from" (romacs-mcp--object "session" (if sender (romacs-agent-id sender) :null)
-                                                 "name" (if sender (or (romacs-agent-title sender) (romacs-agent-id sender))
-                                                           "a session outside Romacs"))
-                      "inReplyTo" (or in-reply-to :null)))
+  (romacs-agent-message-record (concat "m-" (romacs-agent--uuid)) kind
+                               (and sender (list :session (romacs-agent-id sender)
+                                                 :name (or (romacs-agent-title sender) (romacs-agent-id sender))))
+                               in-reply-to))
 
 (defun romacs-agent-tools--kind (sender target)
   "What SENDER, a session or nil (outside Romacs), is to TARGET: parent,
@@ -927,7 +926,9 @@ another task of the caller's parent, its parent then copied."
                       (user-error "No message %s among the ones this session received" id)))
          (sender-id (romacs-agent--value (gethash "session" (gethash "from" message))))
          (sender (cond ((null sender-id)
-                        (user-error "Message %s came from outside Romacs: answer it in your reply" id))
+                        ;; Its own channel's, when it came by one: the call to copy.
+                        (user-error "Message %s came from outside Romacs. %s" id
+                                    (romacs-agent--message-reply-line message)))
                        ((romacs-agent-get sender-id))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id)))))
     (romacs-agent-tools--message-to caller sender (gethash "text" arguments)

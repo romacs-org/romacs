@@ -148,6 +148,36 @@ each after a line naming where it is saved: the model can refer to it."
            (list (list :type 'error :text (format "Compaction failed: %s" (gethash "compact_error" line)))))
           (status (list (list :type 'status :text status))))))
 
+(defconst romacs-agent--claude-peer-open
+  "\\`[ \t\n]*<cross-session-message\\(\\(?: [^>\n]*\\)?\\)>\n?"
+  "The head of a message another Claude Code session sent this one, its
+attributes in group 1.")
+
+(defun romacs-agent--claude-attribute (attributes name)
+  "The value of attribute NAME in ATTRIBUTES, an envelope's, or nil."
+  (and (string-match (format "\\(?:\\`\\| \\)%s=\"\\([^\"]*\\)\"" (regexp-quote name)) attributes)
+       (match-string 1 attributes)))
+
+(defun romacs-agent--claude-peer (line text)
+  "The `input' event of TEXT, LINE's, when another Claude Code session sent
+it (its own channel's <cross-session-message> envelope), else nil.  Its
+record is an external sender's, addressed by the envelope's from: what
+the model's SendMessage answers it by.  Its id is LINE's own, the same on
+every replay."
+  (when (string-match romacs-agent--claude-peer-open text)
+    (let* ((attributes (match-string 1 text))
+           (body (substring text (match-end 0)))
+           (address (romacs-agent--claude-attribute attributes "from"))
+           (uuid (romacs-agent--value (gethash "uuid" line))))
+      (when (string-match "\n?</cross-session-message>[ \t\n]*\\'" body)
+        (setq body (substring body 0 (match-beginning 0))))
+      (list (list :type 'input :text body
+                  :message (romacs-agent-message-record
+                            (concat "m-" (or uuid (secure-hash 'md5 text))) "external"
+                            (list :name (or (romacs-agent--claude-attribute attributes "from-name") address)
+                                  :address address
+                                  :claude-session (romacs-agent--claude-attribute attributes "from-session"))))))))
+
 (defun romacs-agent--claude-injected (text parent)
   "The events of TEXT, a local command's output nobody typed.  The compaction's
 own \"Compacted\" is already said by its row."
@@ -287,6 +317,13 @@ cache, it reports none) or does not say."
           ;; string from /compact, text blocks from an automatic compaction.
           ((and compacting (eq (gethash "isSynthetic" line) t))
            (list (list :type 'compacted :text (romacs-agent--text-of content))))
+          ;; Another Claude Code session's message, to this session's own
+          ;; conversation: an input, said to be theirs.
+          ((and (not parent)
+                ;; Text, never a tool's result: those are most of these lines.
+                (or (stringp content)
+                    (and (> (length content) 0) (equal (gethash "type" (aref content 0)) "text")))
+                (romacs-agent--claude-peer line (romacs-agent--text-of content))))
           ((stringp content) (romacs-agent--claude-injected content parent))
           (t
            (cl-loop for block across content
