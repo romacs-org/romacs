@@ -16,7 +16,20 @@ this copy can shrink back to the published crate.
 
 ## Patches
 
-None yet.
+Each is its own commit in Romacs's history, written for upstream.
+
+- `fix(parser): reuse a word token that can be no keyword` (`src/parser.c`).
+  A node whose first leaf is the keyword-capture token (Python's
+  `identifier`) was reused only when its recorded entry state, the state of
+  the stack it was reduced on, equalled the current one. That state differs
+  whenever the statements before it were grouped otherwise, as repetition
+  balancing does, so every top-level statement after an edit was lexed
+  again: 11% of a 279 KB Python file per key. Only a word the keyword lexer
+  matches can lex differently in another state; any other lexes as the word
+  token wherever the lex mode is the same, which the check already requires.
+  Such nodes are now reused whatever their entry state. A typed character's
+  reparse there re-lexes 570 bytes instead of 31 KB (6.7 to 1.4 ms); trees
+  equal the published runtime's after every edit `tools/treesit-fuzz` makes.
 
 ## Back to stock
 

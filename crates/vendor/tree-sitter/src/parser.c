@@ -467,6 +467,13 @@ static bool ts_parser__external_scanner_scan(
   }
 }
 
+// Whether TREE's first leaf is a word that the keyword lexer matched. Only
+// such a word can lex as a different symbol in another parse state.
+static bool ts_parser__first_leaf_is_keyword(Subtree tree) {
+  while (ts_subtree_child_count(tree) > 0) tree = ts_subtree_children(tree)[0];
+  return ts_subtree_is_keyword(tree);
+}
+
 static bool ts_parser__can_reuse_first_leaf(
   TSParser *self,
   TSStateId state,
@@ -490,7 +497,8 @@ static bool ts_parser__can_reuse_first_leaf(
     memcmp(&leaf_lex_mode, &current_lex_mode, sizeof(TSLexerMode)) == 0 &&
     (
       leaf_symbol != self->language->keyword_capture_token ||
-      (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state)
+      (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state) ||
+      !ts_parser__first_leaf_is_keyword(tree)
     )
   ) return true;
 
