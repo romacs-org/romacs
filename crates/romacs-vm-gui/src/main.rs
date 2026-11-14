@@ -40,6 +40,9 @@ mod exit;
 mod preparing;
 mod quit;
 mod client;
+#[cfg(test)]
+#[path = "../tests/support/home.rs"]
+mod test_home;
 // The unit tests' loadup from a world: the library's module (lib.rs), for
 // this executable's tests too.
 #[cfg(test)]

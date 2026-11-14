@@ -355,6 +355,13 @@ impl<'a> Encoder<'a> {
                 }
             }
         }
+        match f.key {
+            None => out.byte(0),
+            Some(key) => {
+                out.byte(1);
+                for byte in key.to_le_bytes() { out.byte(byte); }
+            }
+        }
         let mut body = Writer::default();
         let mut deps = Deps::default();
         body.n(f.sites.len());
@@ -645,13 +652,22 @@ impl Install<'_> {
             }
             _ => return Err("bad parameter list".into()),
         };
+        let key = match r.byte()? {
+            0 => None,
+            1 => {
+                let mut bytes = [0; 16];
+                for byte in &mut bytes { *byte = r.byte()?; }
+                Some(u128::from_le_bytes(bytes))
+            }
+            _ => return Err("bad structural key".into()),
+        };
         let values = read_refs(r)?;
         let list = |r: &mut Reader| -> Result<Vec<usize>> { let n = r.count()?; (0..n).map(|_| r.n()).collect() };
         let (children, caches) = (list(r)?, list(r)?);
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, params, pending: None };
+                                  sites: vec![], lazy: None, dynamic, params, pending: None, key };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
     }
 }
@@ -739,7 +755,7 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 params: f.params.clone(), pending: None };
+                                 params: f.params.clone(), pending: None, key: f.key };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
     }

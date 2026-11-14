@@ -15,6 +15,9 @@ pub mod terminal_helper;
 pub mod terminal_proto;
 pub mod terminal_service;
 pub mod terminal_wait;
+#[cfg(test)]
+#[path = "../tests/support/home.rs"]
+mod test_home;
 
 /// The arena as this library's unit tests' allocator, so a test's loadup
 /// can restore a world (`test_world`), as the program's does.

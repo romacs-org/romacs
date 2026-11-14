@@ -1145,6 +1145,7 @@ pub fn lisp_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_home::private_home;
     use romacs_vm::CommandEvent;
 
     fn printed(vm: &mut Vm, source: &str) -> String {
@@ -1939,17 +1940,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         for (file, text) in files { std::fs::write(dir.join(file), text).unwrap(); }
         dir
-    }
-
-    /// A private HOME and XDG_CONFIG_HOME for `vm`'s session: the interactive
-    /// session's user directory, which GNU's startup creates, is never the
-    /// user's own.
-    fn private_home(vm: &mut Vm, name: &str) -> std::path::PathBuf {
-        let home = scratch_lisp(&format!("{name}-home"), &[]);
-        let entries = [format!("HOME={}", home.display()), format!("XDG_CONFIG_HOME={}", home.join("config").display())];
-        vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
-                                lisp_string(&entries[0]), lisp_string(&entries[1]))).unwrap();
-        home
     }
 
     /// A runtime root for `--loadup`: `lisp/gnu/` holding FILES and, beside

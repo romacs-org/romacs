@@ -40,7 +40,8 @@ checks the download against its `SHA256SUMS`, installs under `~/.local`, and
 asks before using `sudo`, only to add missing system libraries.
 
 Options go after `bash -s --`.  `--nightly` installs the rolling build of
-`master`, and `--uninstall` removes Romacs and leaves your init and data:
+`beta`, the development branch, and `--uninstall` removes Romacs and leaves
+your init and data:
 
 ```sh
 curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly

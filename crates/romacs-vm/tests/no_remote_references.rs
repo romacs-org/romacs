@@ -92,7 +92,7 @@ const FIELDS: &[(&str, Class)] = &[
     // Weak: one whose error a Rust caller discarded goes at the next collection.
     ("thrown_no_catch", Cache),
     ("strict_root", Free), ("reached_head", Free), ("reached_generated", Free), ("loader_order_request", Free),
-    ("keep_captures", Free), ("lambda_depth", Free), ("window_change_seen", Free), ("expanded_macros", Free), ("expanded_symbols", Free),
+    ("keep_captures", Free), ("closure_key_extra", Free), ("lambda_depth", Free), ("window_change_seen", Free), ("expanded_macros", Free), ("expanded_symbols", Free),
     ("image", Free),
     // A frozen region's symbols, read once it is marked. Written when it is
     // placed and when its hash tables are put in, both before it is returned
