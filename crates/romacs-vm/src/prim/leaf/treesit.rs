@@ -1062,7 +1062,7 @@ impl Leaf<'_> {
         out.bytes.extend_from_slice(view.bytes());
         Ok(())
     }
-    fn ts_proper_list(&self, list: Value) -> R<Vec<Value>> {
+    pub(crate) fn ts_proper_list(&self, list: Value) -> R<Vec<Value>> {
         let mut out = Vec::new();
         let mut tail = list;
         while tail != Value::NIL {
@@ -1180,8 +1180,8 @@ enum Verdict {
 // The task values of treesit-query-capture.
 const CAPTURE_PARSER: usize = 0;
 const CAPTURE_FN: usize = 1;
-/// A fontify task's override (`romacs--treesit-fontify`).
-const CAPTURE_OVERRIDE: usize = 2;
+/// A fontify task's settings (`romacs--treesit-fontify`).
+const CAPTURE_SPANS: usize = 2;
 const CAPTURE_FLAGS: usize = 3;
 
 // treesit-query-capture.
@@ -1200,36 +1200,90 @@ impl Leaf<'_> {
     }
     /// `romacs--treesit-fontify`: NODE's captures by QUERY between BEG and
     /// END, as `treesit-query-capture` finds them, its predicates run; done
-    /// with the task itself, whose captures `ts_fontify_next` hands out in
-    /// order for faces between START and END with OVERRIDE.
-    pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), overriding: Value) -> R<Next> {
-        let fontify = ts::Fontify { start: region.0, end: region.1, next: (0, 0) };
-        self.ts_capture_with(node, query, beg, end, 0, Some((fontify, overriding)))
+    /// with the task itself, whose captures `ts_fontify_next` hands out for
+    /// faces between REGION's ends. QUERY's patterns are the settings
+    /// SPANS names, a vector of (FIRST-PATTERN . OVERRIDE).
+    pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), spans: Value) -> R<Next> {
+        let settings = self.vector_values(spans)?.into_iter()
+            .map(|span| self.pair(span).and_then(|(first, _)| first.integer_value()).and_then(|first| u32::try_from(first).ok()))
+            .collect::<Option<Vec<u32>>>().ok_or(Fault::Wrong("vectorp", spans))?;
+        let fontify = ts::Fontify { start: region.0, end: region.1, settings, batch: 0, next: (0, 0) };
+        self.ts_capture_with(node, query, beg, end, 0, Some((fontify, spans)))
     }
-    /// The next capture of a finished fontify TASK, as (name, node), and
-    /// the region its faces go in; None when all are applied.
-    pub(crate) fn ts_fontify_next(&mut self, task: Value) -> Option<(Value, Value, i64, i64)> {
-        let (pair, start, end) = {
+    /// The next capture of a finished fontify TASK, as (name, node, override),
+    /// and the region its faces go in; None when all are applied.
+    pub(crate) fn ts_fontify_next(&mut self, task: Value) -> Option<(Value, Value, Value, i64, i64)> {
+        let (pair, setting, start, end) = {
             let mut s = self.ts_capture_state(task);
             let f = s.fontify.as_ref().expect("a fontify task");
             let (start, end, (mut at, mut pair)) = (f.start, f.end, f.next);
             let found = loop {
                 let Some(&passed) = s.passed.get(at) else { break None };
-                let (_, first, count) = s.matches[passed];
+                let (pattern, first, count) = s.matches[passed];
                 if pair < count {
-                    break Some(first + 2 * pair);
+                    break Some((first + 2 * pair, f.setting(pattern)));
                 }
                 (at, pair) = (at + 1, 0);
             };
             s.fontify.as_mut().expect("a fontify task").next = (at, pair + 1);
-            (found?, start, end)
+            let (pair, setting) = found?;
+            (pair, setting, start, end)
         };
         let values = &self.ts_task(task).values;
-        Some((values[pair], values[pair + 1], start, end))
+        let (name, node, spans) = (values[pair], values[pair + 1], values[CAPTURE_SPANS]);
+        let overriding = self.vector_get(spans, fixnum(setting as i64)).ok()
+            .and_then(|span| self.pair(span)).map_or(Value::NIL, |(_, o)| o);
+        Some((name, node, overriding, start, end))
     }
-    /// The override a fontify TASK applies its faces with.
-    pub(crate) fn ts_fontify_override(&self, task: Value) -> Value {
-        self.ts_task(task).values[CAPTURE_OVERRIDE]
+    /// Whether a fontify TASK's match AT begins a setting after the one
+    /// under way, whose captures must be applied first.
+    fn ts_fontify_boundary(&self, task: Value, at: usize) -> bool {
+        let s = self.ts_capture_state(task);
+        s.fontify.as_ref().is_some_and(|f| at > f.batch && f.setting(s.matches[at].0) != f.setting(s.matches[f.batch].0))
+    }
+    /// The next setting of a fontify TASK whose captures are all applied:
+    /// its predicates run, as `ts_capture_run` does; done with nil when no
+    /// setting is left.
+    pub(crate) fn ts_fontify_more(&mut self, task: Value) -> R<Next> {
+        {
+            let mut s = self.ts_capture_state(task);
+            if s.at >= s.matches.len() {
+                return Ok(Next::Done(Value::NIL));
+            }
+            let at = s.at;
+            s.passed.clear();
+            let f = s.fontify.as_mut().expect("a fontify task");
+            (f.batch, f.next) = (at, (0, 0));
+        }
+        self.ts_capture_run(task)
+    }
+    /// `romacs--treesit-query-combine`: one query of LANGUAGE holding the
+    /// patterns of QUERIES in order, and the settings it stands for as
+    /// `ts_fontify` takes them, each query's first pattern with the
+    /// override in OVERRIDES beside it.
+    pub(crate) fn ts_query_combine(&mut self, language: Value, queries: &[Value], overrides: &[Value]) -> Out {
+        let mut text = Vec::new();
+        let mut spans = Vec::with_capacity(queries.len());
+        let mut first = 0u32;
+        for (&query, &overriding) in queries.iter().zip(overrides) {
+            let compiled = self.ts_ensure_compiled(query)?;
+            let source = self.ts_query(query)?.source;
+            let bytes = if self.pair(source).is_some() { self.ts_query_expand_bytes(source)?.bytes } else { self.string_bytes(source)? };
+            text.extend_from_slice(&bytes);
+            text.push(b'\n');
+            spans.push(self.cons(fixnum(i64::from(first)), overriding));
+            first += compiled.query.pattern_count();
+        }
+        let combined = if let [only] = queries {
+            *only
+        } else {
+            let source = self.ts_text_value(&text);
+            let query = self.ts_allocate(ts::Object::Query(ts::Query { language, source, compiled: None }));
+            self.ts_ensure_compiled(query)?;
+            query
+        };
+        let spans = self.vector_from(spans);
+        Ok(self.cons(combined, spans))
     }
     fn ts_capture_with(&mut self, node: Value, query: Value, beg: Value, end: Value, flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let n = self.ts_check_node(node)?;
@@ -1278,6 +1332,9 @@ impl Leaf<'_> {
             matches.push((m.pattern, start, m.captures.len()));
         }
         let timestamp = self.ts_parser(n.parser)?.timestamp;
+        if let Some(f) = &fontify {
+            matches.sort_by_key(|&(pattern, _, _)| f.setting(pattern));
+        }
         let state = ts::Capture { compiled, matches, at: 0, predicate: 0, passed: Vec::new(), timestamp, fontify };
         let task = self.ts_allocate(ts::Object::Task(ts::Task { values, state: Rc::new(RefCell::new(ts::TaskState::Capture(state))) }));
         self.ts_capture_run(task)
@@ -1415,7 +1472,7 @@ impl Leaf<'_> {
                 let s = self.ts_capture_state(task);
                 (s.compiled.clone(), s.at, s.predicate, s.matches.len())
             };
-            if at >= matches_len {
+            if at >= matches_len || self.ts_fontify_boundary(task, at) {
                 return self.ts_capture_finish(task);
             }
             let (pattern, start, count) = self.ts_capture_state(task).matches[at];

@@ -275,10 +275,11 @@ fn a_frame_waits_for_no_first_parse() {
     assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
 }
 
-/// Romacs's `treesit--font-lock-fontify-region-1` (`romacs-treesit-font-lock.el`)
-/// writes the faces and calls the functions GNU's, read from treesit.el,
-/// does, in the same order: every override, a function capture, a `#pred?`
-/// predicate, and nodes that reach past the region on either side.
+/// Romacs's `treesit-font-lock-fontify-region` (`romacs-treesit-font-lock.el`),
+/// one query for all of a language's settings, writes the faces and calls
+/// the functions GNU's, read from treesit.el, does, in the same order: every
+/// override, a function capture, a `#pred?` predicate, and nodes that reach
+/// past the region on either side.
 #[test]
 fn fontify_applies_captures_as_gnus_loop() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
@@ -307,13 +308,14 @@ fn fontify_applies_captures_as_gnus_loop() {
     vm.eval_source(&setup).unwrap();
     let run = |vm: &mut Vm| vm.eval_source("(tf-run)").and_then(romacs_vm::Local::display).unwrap();
     let ours = run(&mut vm);
-    assert_eq!(vm.eval_source("(and (string-match-p \"romacs-treesit-font-lock\" (symbol-file 'treesit--font-lock-fontify-region-1)) t)")
+    assert_eq!(vm.eval_source("(and (string-match-p \"romacs-treesit-font-lock\" (symbol-file 'treesit-font-lock-fontify-region)) t)")
         .and_then(romacs_vm::Local::display).unwrap(), "t", "Romacs's definition ran first");
-    vm.eval_source("(let ((form (with-temp-buffer \
-        (insert-file-contents (locate-library \"treesit.el\")) \
-        (re-search-forward \"^(defun treesit--font-lock-fontify-region-1 \") (goto-char (match-beginning 0)) \
-        (read (current-buffer))))) \
-      (defalias 'treesit--font-lock-fontify-region-1 (eval (cons 'lambda (cddr form)) t)))").unwrap();
+    vm.eval_source("(dolist (name '(treesit-font-lock-fontify-region treesit--font-lock-fontify-region-1)) \
+        (let ((form (with-temp-buffer \
+          (insert-file-contents (locate-library \"treesit.el\")) \
+          (re-search-forward (concat \"^(defun \" (regexp-quote (symbol-name name)) \" \")) (goto-char (match-beginning 0)) \
+          (read (current-buffer))))) \
+          (defalias name (eval (cons 'lambda (cddr form)) t))))").unwrap();
     let gnus = run(&mut vm);
     assert_eq!(ours, gnus);
     assert!(ours.contains("(call \"init_declarator\" nil 5 40)") && ours.contains("(bold font-lock-type-face)"), "the run exercised what it names: {ours}");

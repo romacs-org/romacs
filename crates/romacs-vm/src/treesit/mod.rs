@@ -543,9 +543,9 @@ pub(crate) struct Capture {
     /// Indices into MATCHES of the matches that passed.
     pub passed: Vec<usize>,
     pub timestamp: u64,
-    /// For `romacs--treesit-fontify`: the region the faces go in, and the
-    /// next capture to apply once the predicates have run, as (index into
-    /// PASSED, capture of that match).
+    /// For `romacs--treesit-fontify`: the region the faces go in, the
+    /// settings the query's patterns belong to, and the order and progress
+    /// of applying the captures once the predicates have run.
     pub fontify: Option<Fontify>,
 }
 
@@ -553,7 +553,23 @@ pub(crate) struct Capture {
 pub(crate) struct Fontify {
     pub start: i64,
     pub end: i64,
+    /// Each setting's first pattern in the query, ascending.
+    pub settings: Vec<u32>,
+    /// The first match of the setting whose predicates and captures are
+    /// under way: the capture task's matches are in setting order, each
+    /// setting's in the order the query found them, and a setting's
+    /// predicates run only once the one before it is applied, as GNU runs
+    /// one setting's query after another.
+    pub batch: usize,
+    /// The next capture of the setting's passed matches: (index into
+    /// PASSED, capture of that match).
     pub next: (usize, usize),
+}
+impl Fontify {
+    /// The setting PATTERN belongs to.
+    pub(crate) fn setting(&self, pattern: u32) -> usize {
+        self.settings.partition_point(|&first| first <= pattern).saturating_sub(1)
+    }
 }
 
 /// A walk of a tree (search, sparse tree, match) between predicate calls:

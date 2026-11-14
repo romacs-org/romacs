@@ -434,7 +434,8 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // for function captures, and for an override other than nil or t.
 
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
-fn romacs_treesit_fontify(cx, node: Value, query: Value, beg: Value, end: Value, region: Value, overriding: Value) -> Step {
+fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
+    let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;
     if !cx.ts_query_p(query) {
         let predicate = cx.intern("treesit-query-p");
         return Err(cx.ts_signal("wrong-type-argument", &[predicate, query]));
@@ -442,8 +443,21 @@ fn romacs_treesit_fontify(cx, node: Value, query: Value, beg: Value, end: Value,
     let (start, stop) = cx.pair(region).ok_or(Fault::Wrong("consp", region))?;
     let start = start.integer_value().ok_or(Fault::Wrong("integerp", start))?;
     let stop = stop.integer_value().ok_or(Fault::Wrong("integerp", stop))?;
-    let next = cx.ts_fontify(node, query, beg, end, (start, stop), overriding)?;
+    let next = cx.ts_fontify(node, query, beg, end, (start, stop), spans)?;
     fontify_step(cx, next)
+}}
+
+// One query for a run of font-lock settings of one language
+// (romacs-treesit-font-lock.el): their patterns in order, and where each
+// setting's begin with its override, as `romacs--treesit-fontify' takes them.
+defsubr! { name = "romacs--treesit-query-combine", gnu = "romacs:treesit", effect = Global,
+fn romacs_treesit_query_combine(cx, language: Value, queries: Value, overrides: Value) {
+    let (queries, overrides) = (cx.ts_proper_list(queries)?, cx.ts_proper_list(overrides)?);
+    if queries.is_empty() || queries.len() != overrides.len() || !queries.iter().all(|&q| matches!(cx.ts(q), Some(crate::treesit::Object::Query(_)))) {
+        let predicate = cx.intern("treesit-compiled-query-p");
+        return Err(cx.ts_signal("wrong-type-argument", &[predicate, queries.first().copied().unwrap_or(Value::NIL)]));
+    }
+    cx.ts_query_combine(language, &queries, &overrides)
 }}
 
 fn fontify_step(cx: &mut Leaf<'_>, next: TsNext) -> Next {
@@ -463,10 +477,10 @@ fn fontify_applied(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     fontify_apply(cx, saved[0])
 }
 /// The captures of TASK from where it stopped, each a face written over its
-/// node's part of the region or a function called with the node.
+/// node's part of the region or a function called with the node; then the
+/// next setting's predicates and captures.
 fn fontify_apply(cx: &mut Leaf<'_>, task: Value) -> Next {
-    let overriding = cx.ts_fontify_override(task);
-    while let Some((face, node, start, end)) = cx.ts_fontify_next(task) {
+    while let Some((face, node, overriding, start, end)) = cx.ts_fontify_next(task) {
         let n = cx.ts_check_node(node)?;
         let (node_start, node_end) = (cx.ts_offset_pos(&n, n.node.start()), cx.ts_offset_pos(&n, n.node.end()));
         let call = |f: Value, args: Vec<Value>| Ok(Step::Call { f, args, then: fontify_applied, saved: vec![task] });
@@ -490,7 +504,8 @@ fn fontify_apply(cx: &mut Leaf<'_>, task: Value) -> Next {
             return call(face, vec![node, overriding, start, end]);
         }
     }
-    Ok(Step::Done(Value::NIL))
+    let next = cx.ts_fontify_more(task)?;
+    fontify_step(cx, next)
 }
 
 // Search and things.
