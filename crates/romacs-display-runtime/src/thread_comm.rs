@@ -15,7 +15,6 @@ use crate::host_types::GuiFrameGeometryHints;
 pub(crate) use frame_opacity::FrameOpacityState;
 use romacs_display_protocol::{
     ImageId, ImageLoadToken,
-    key_repeat_log::KeyRepeatLog,
 };
 pub use romacs_display_protocol::{
     ImageStateEvent, MenuBarItem, PopupMenuItem, TabBarItem, ToolBarImageSource, ToolBarItem,
@@ -52,28 +51,6 @@ pub struct PointerPosition {
     pub x: f32,
     pub y: f32,
     pub target_frame_id: u64,
-}
-
-/// Where the pointer is over the primary window, in logical pixels: what a
-/// display answers GNU's `mouse_position_hook' with, read at the moment it
-/// is asked.  Nothing while the pointer is elsewhere.
-#[derive(Debug)]
-pub(crate) struct PointerCell(std::sync::atomic::AtomicU64);
-
-impl Default for PointerCell {
-    fn default() -> Self { Self(std::sync::atomic::AtomicU64::new(Self::OUTSIDE)) }
-}
-
-impl PointerCell {
-    const OUTSIDE: u64 = u64::MAX;
-    pub fn set(&self, at: Option<(i32, i32)>) {
-        let packed = at.map_or(Self::OUTSIDE, |(x, y)| u64::from(x as u32) << 32 | u64::from(y as u32));
-        self.0.store(packed, std::sync::atomic::Ordering::Relaxed);
-    }
-    pub fn get(&self) -> Option<(i32, i32)> {
-        let packed = self.0.load(std::sync::atomic::Ordering::Relaxed);
-        (packed != Self::OUTSIDE).then_some(((packed >> 32) as u32 as i32, packed as u32 as i32))
-    }
 }
 
 /// How a pointer position relates to the immutable presentation on screen.
@@ -168,6 +145,24 @@ pub enum InputEvent {
     /// surfaces, the frame post shader) is gone; the evaluator must
     /// re-resolve them and force a full redisplay.
     DisplayReset,
+    /// FRAME's PRESENTATION has drawn: the first time it has, with the
+    /// window atlas's cumulative count of face text it could not resolve.
+    /// The input bridge keeps it (`input_bridge`).
+    PresentationRendered {
+        frame: u64,
+        presentation: u64,
+        unresolved_face_text_total: u64,
+    },
+    /// The windows draw with this adapter: a software rasterizer or not.
+    AdapterChosen { software: bool },
+    /// Whether a GPU renderer is live, so a native model can be drawn.
+    ModelRenderer { live: bool },
+    /// Where the pointer is over the primary window, in logical pixels:
+    /// what a display answers GNU's `mouse_position_hook' with.  Nothing
+    /// while the pointer is elsewhere.
+    PointerOver { at: Option<(i32, i32)> },
+    /// How a held key repeated, for the usage log's `repeat' record.
+    KeyRepeatTiming(crate::input_bridge::RepeatTiming),
     /// Image decoding completed or renderer residency was lost.
     ImageStateChanged {
         event: ImageStateEvent,
@@ -290,6 +285,16 @@ impl From<FrameRef> for u64 {
 }
 
 
+
+/// Whether EVENT may be dropped when its queue is full: pointer motion,
+/// whose next motion replaces it.  Everything else is lossless.
+pub(crate) fn is_lossy_input_event(event: &InputEvent) -> bool {
+    matches!(
+        event,
+        InputEvent::PositionedPointer(PositionedPointerInput { action: PointerAction::Move { .. }, .. })
+            | InputEvent::PointerOver { .. }
+    )
+}
 
 /// Lifecycle commands for the render thread.
 #[derive(Debug)]
@@ -453,7 +458,7 @@ pub(crate) enum RenderCommand {
 // stops reading terminal bytes when the buffer is under pressure rather than
 // silently dropping command input.  Keep Romacs' render-to-evaluator input
 // queue at the same scale and use backpressure for durable user input below.
-const INPUT_CHANNEL_CAPACITY: usize = 4096;
+pub(crate) const INPUT_CHANNEL_CAPACITY: usize = 4096;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
 /// The commands Lisp's model requests may keep waiting.  The rest of the
 /// channel is a publication's (at most 16 asset loads and retirements, its
@@ -463,11 +468,6 @@ pub(crate) const MODEL_REQUEST_ROOM: usize = COMMAND_CHANNEL_CAPACITY / 4;
 
 /// Communication channels between threads
 pub(crate) struct ThreadComms {
-    /// The pointer over the primary window: Render → Emacs.
-    pub pointer: Arc<PointerCell>,
-    /// What the render thread saw of native key repeat: Render → Emacs.
-    pub key_repeats: Arc<KeyRepeatLog>,
-
     /// Commands: Emacs → Render
     pub cmd_tx: CommandSender,
     pub cmd_rx: CommandReceiver,
@@ -477,19 +477,6 @@ pub(crate) struct ThreadComms {
     pub input_rx: Receiver<InputEvent>,
 
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    /// Whether a GPU renderer is live, so a native model can be drawn: the
-    /// render thread sets it, the evaluator reads it.
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
-}
-
-/// Images the renderer no longer has though nothing retired them: those
-/// it evicted, by id, and whether a GPU rebuild lost every one.  The
-/// render thread records them; the evaluator's residency takes them.
-#[derive(Debug, Default)]
-pub(crate) struct LostImages {
-    pub evicted: Vec<u32>,
-    pub reset: bool,
 }
 
 impl ThreadComms {
@@ -498,39 +485,26 @@ impl ThreadComms {
         let (cmd_tx, cmd_rx) = command_channel(COMMAND_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         Self {
-            pointer: Arc::default(),
-            key_repeats: Arc::default(),
             cmd_tx,
             cmd_rx,
             input_tx,
             input_rx,
             frame_opacity: Arc::default(),
-            lost_images: Arc::default(),
-            model_renderer: Arc::default(),
         }
     }
 
     /// Split into Emacs-side and Render-side handles
     pub fn split(self) -> (EmacsComms, RenderComms) {
         let emacs = EmacsComms {
-            pointer: self.pointer.clone(),
-            key_repeats: Arc::clone(&self.key_repeats),
             frame_opacity: Arc::clone(&self.frame_opacity),
-            lost_images: Arc::clone(&self.lost_images),
-            model_renderer: Arc::clone(&self.model_renderer),
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
         };
 
         let render = RenderComms {
-            pointer: self.pointer,
-            key_repeats: self.key_repeats,
             input_interrupt: None,
             keep_alive_without_frames: false,
-            paint_diagnostics: None,
             frame_opacity: self.frame_opacity,
-            lost_images: self.lost_images,
-            model_renderer: self.model_renderer,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
         };
@@ -547,13 +521,9 @@ impl Default for ThreadComms {
 
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
-    pub pointer: Arc<PointerCell>,
-    pub key_repeats: Arc<KeyRepeatLog>,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The evaluator's out-of-band quit, as the render thread sees it. GNU
@@ -571,18 +541,13 @@ pub trait InputInterrupt: Send + Sync {
 
 /// Render thread communication handle
 pub(crate) struct RenderComms {
-    pub pointer: Arc<PointerCell>,
-    pub key_repeats: Arc<KeyRepeatLog>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
-    pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
     pub keep_alive_without_frames: bool,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
-    pub lost_images: Arc<Mutex<LostImages>>,
-    pub model_renderer: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RenderComms {
@@ -614,16 +579,6 @@ impl RenderComms {
         }
     }
 
-    fn is_lossy_input_event(event: &InputEvent) -> bool {
-        matches!(
-            event,
-            InputEvent::PositionedPointer(PositionedPointerInput {
-                action: PointerAction::Move { .. },
-                ..
-            })
-        )
-    }
-
     fn should_log_delivery(event: &InputEvent) -> bool {
         matches!(
             event,
@@ -649,6 +604,11 @@ impl RenderComms {
             InputEvent::WindowFocus { .. } => "window-focus",
             InputEvent::MonitorsChanged { .. } => "monitors-changed",
             InputEvent::DisplayReset => "display-reset",
+            InputEvent::PresentationRendered { .. } => "presentation-rendered",
+            InputEvent::AdapterChosen { .. } => "adapter-chosen",
+            InputEvent::ModelRenderer { .. } => "model-renderer",
+            InputEvent::PointerOver { .. } => "pointer-over",
+            InputEvent::KeyRepeatTiming(_) => "key-repeat-timing",
             InputEvent::ImageStateChanged { .. } => "image-state-changed",
             InputEvent::SurfaceCreateFailed { .. } => "surface-create-failed",
             InputEvent::Model { .. } => "model",
@@ -706,7 +666,7 @@ impl RenderComms {
         };
         let log_delivery = Self::should_log_delivery(&event);
         let event_name = Self::event_name(&event);
-        if Self::is_lossy_input_event(&event) {
+        if is_lossy_input_event(&event) {
             match self.input_tx.try_send(event) {
                 Ok(()) => {
                     if log_delivery {

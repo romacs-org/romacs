@@ -4,7 +4,6 @@
 //! bytecomp.el loads, so its own load-time calls see it. cc-defs.el's
 //! `(if (byte-code-function-p f) f (byte-compile f))' is the consumer.
 use romacs_vm::Vm;
-use std::path::Path;
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
 
@@ -18,8 +17,7 @@ fn query(vm: &mut Vm, form: &str) -> String {
 
 #[test]
 fn byte_compile_returns_an_already_compiled_function() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     for (form, expected) in [
         ("(list (featurep 'bytecomp) (and (advice-member-p #'romacs-bytecomp--function-value 'byte-compile) t))", "(nil t)"),
         ("(progn (defun bfv-f (x) (+ x 1)) (eq (byte-compile 'bfv-f) (symbol-function 'bfv-f)))", "t"),
@@ -39,8 +37,7 @@ fn byte_compile_returns_an_already_compiled_function() {
 /// answers outside any file.
 #[test]
 fn byte_compile_of_a_malformed_lambda_list_returns_gnus_diagnostic() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     for (form, expected) in [
         ("(let ((lexical-binding t)) (byte-compile '(lambda () (let 1))))", r#"" Error: Wrong type argument: listp, 1""#),
         ("(let ((lexical-binding t)) (byte-compile '(lambda () (cond 1))))", r#"" Error: Wrong type argument: listp, 1""#),
@@ -57,8 +54,7 @@ fn byte_compile_of_a_malformed_lambda_list_returns_gnus_diagnostic() {
 /// 32.0.50 answers.
 #[test]
 fn byte_compile_of_a_lambda_list_expands_its_macros_once() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     query(&mut vm, "(progn (defvar bfv-count 0) (defmacro bfv-count-m () (setq bfv-count (1+ bfv-count)) 1))");
     for (form, expected) in [
         ("(let ((lexical-binding t)) (setq bfv-count 0) (list (funcall (byte-compile '(lambda () (bfv-count-m)))) bfv-count))", "(1 1)"),
@@ -76,8 +72,7 @@ fn byte_compile_of_a_lambda_list_expands_its_macros_once() {
 /// Pinned GNU 32.0.50 answers.
 #[test]
 fn byte_compile_of_a_lambda_list_evaluates_eval_when_compile_once() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     for (form, expected) in [
         ("(progn (defvar bfv-n 0) (let ((lexical-binding t)) (let ((f (byte-compile '(lambda () (list (eval-when-compile (setq bfv-n (1+ bfv-n)) (list 'n bfv-n)) (inline (+ 1 2))))))) (list (funcall f) (funcall f) bfv-n (and (get-buffer \"*Compile-Log*\") t)))))", "(((n 1) 3) ((n 1) 3) 1 nil)"),
         ("(let ((lexical-binding t)) (funcall (byte-compile '(lambda () (eval-when-compile (defmacro bfv-wm () 73) (bfv-wm))))))", "73"),

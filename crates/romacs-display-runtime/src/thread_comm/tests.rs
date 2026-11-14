@@ -413,7 +413,7 @@ fn input_event_menu_selection_construction() {
         index: -1,
         token: None,
     };
-    assert!(!RenderComms::is_lossy_input_event(&cancelled));
+    assert!(!is_lossy_input_event(&cancelled));
     match cancelled {
         InputEvent::MenuSelection { index, .. } => assert_eq!(index, -1),
         _ => panic!("Wrong variant"),
@@ -839,19 +839,6 @@ fn cross_thread_command_delivery() {
 
     handle.join().unwrap();
 }
-
-#[test]
-fn pointer_cell_keeps_a_position_and_its_absence() {
-    let cell = PointerCell::default();
-    assert_eq!(cell.get(), None);
-    for at in [(0, 0), (45, 61), (-3, 7), (i32::MIN, i32::MAX)] {
-        cell.set(Some(at));
-        assert_eq!(cell.get(), Some(at));
-    }
-    cell.set(None);
-    assert_eq!(cell.get(), None);
-}
-
 
 #[test]
 fn thread_comms_cmd_channel_bounded_capacity() {

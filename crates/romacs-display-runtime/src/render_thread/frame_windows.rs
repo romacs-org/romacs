@@ -268,6 +268,8 @@ pub(crate) struct GuiFrameRenderState {
     /// The Emacs frame_id that owns this window (used for routing).
     pub emacs_frame_id: u64,
     pub(super) trace_last_drawn: Option<romacs_display_protocol::PresentationId>,
+    /// The newest presentation reported drawn (`InputEvent::PresentationRendered`).
+    pub(super) reported_presentation: u64,
     /// Chromeless glyph composition and rendering state.
     pub compositor: FrameCompositor,
     /// The one resolved relationship between the live root surface and the
@@ -481,6 +483,7 @@ impl GuiFrameRenderState {
         Self {
             emacs_frame_id,
             trace_last_drawn: None,
+            reported_presentation: 0,
             compositor: FrameCompositor::new(glyph_atlas),
             present_state: GuiFramePresentState::Suspended,
             chrome: ChromeState::default(),
@@ -2532,6 +2535,8 @@ impl GuiFrameWindowManager {
             // Glyph atlas textures (recreated against the new device by
             // populate_glyph_atlas / recreate_secondary_native_surfaces).
             render.compositor.glyph_atlas = None;
+            // The rebuilt atlas reports the presentation drawn again.
+            render.reported_presentation = 0;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
             render.compositor.retained_root = None;
