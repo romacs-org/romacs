@@ -9,9 +9,7 @@
 //! GNU's Lisp on a window-system frame 100 columns by 24 lines of its
 //! real font, laid out by romacs-layout as the GUI lays it out.
 use romacs_vm::Vm;
-use std::{cell::RefCell, path::Path, rc::Rc};
-#[path = "support/gnu_ert_vm.rs"]
-mod gnu_ert_vm;
+use std::{cell::RefCell, rc::Rc};
 #[path = "support/gui_probe.rs"]
 mod gui_probe;
 
@@ -28,8 +26,7 @@ impl romacs_vm::LayoutHost for Engine {
 struct Session { vm: Vm, engine: Rc<RefCell<romacs_layout::LayoutEngine>>, width: u32, height: u32, presentation: u64 }
 
 fn session() -> Session {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gui_probe::gnu_ert_vm::bootstrapped();
     vm.eval_source("(setq noninteractive nil)").unwrap();
     let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
     // 100 columns of text between fringes a column wide (the probe sets

@@ -23,21 +23,27 @@ use romacs_layout_input::{BandStretches, Face, FaceHandle, FaceRun, StatusBarSna
 /// (`Vm::named'). A handle means one face for the table's life, and a face
 /// change drops the table: the work follows what shows, not what exists.
 pub(super) struct FaceTable {
+    // CELL(Plain)
     faces: std::cell::RefCell<Vec<Face>>,
     /// Each name asked for: its handle, or None for no such face.
+    // CELL(Plain)
     index: std::cell::RefCell<std::collections::HashMap<String, Option<u32>>>,
     /// Each band's face asked for, then each name shown over it: its handle.
+    // CELL(Plain)
     over: std::cell::RefCell<std::collections::HashMap<String, std::collections::HashMap<String, Option<u32>>>>,
     /// The faces merged for text, by content: windows share one index
     /// space, since a band's handle outlives the window text it came with.
+    // CELL(Plain)
     merged: std::cell::RefCell<std::collections::HashMap<u64, Vec<u32>>>,
     /// The definitions and the buffer's `face-remapping-alist' its faces
     /// realize through (xfaces.c lookup_basic_face, get_lface_attributes).
+    // CELL(Plain)
     view: std::cell::RefCell<LiveView>,
     /// Which table this is: a window's text is laid out again when its
     /// buffer's remapping makes it another.
     pub(crate) id: u64,
     /// The host row height of its default face (the row floor), once asked.
+    // CELL(Plain)
     floor: std::cell::Cell<Option<(u64, u32)>>,
 }
 impl FaceTable {
@@ -279,6 +285,7 @@ pub(super) struct DisplayState {
     pub(super) width: u32,
     pub(super) height: u32,
     building_band: bool,
+    // CELL(Plain)
     diagnostics: std::cell::RefCell<Vec<String>>,
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,

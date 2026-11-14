@@ -11,6 +11,18 @@
   "rows_wrapped": 0,
   "display_instructions_p90": 352000
  },
+ "image-idle": {
+  "step_instructions": 660000,
+  "display_instructions": 349000,
+  "display_conses": 0,
+  "windows_rebuilt": 0,
+  "band_expansions": 0,
+  "layouts": 0,
+  "frames_submitted": 0,
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 352000
+ },
  "chat-idle": {
   "step_instructions": 872000,
   "display_instructions": 573000,
@@ -72,7 +84,8 @@
   "display_instructions_p90": 24300000
  },
  "cursor-move": {
-  "step_instructions": 2280000,
+  "step_instructions": 2340000,
+  "step_instructions_note": "set over a spread of runs: the step includes the timers around redisplay; the display bars hold this row's claim",
   "display_instructions": 1790000,
   "display_conses": 0,
   "windows_rebuilt": 0,

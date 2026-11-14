@@ -328,6 +328,28 @@ impl<T> Default for Table<T> {
 // SAFETY: as its fields, each SnapshotSafe; none addresses anything outside
 // the table's own storage.
 unsafe impl<T: romacs_snapshot::SnapshotSafe> romacs_snapshot::SnapshotSafe for Table<T> {}
+impl<T: romacs_snapshot::SnapshotSafe + romacs_snapshot::Schema> romacs_snapshot::Schema for Table<T> {
+    fn walk(&self, w: &mut romacs_snapshot::Walk<'_>) {
+        let Self { entries, colors, cursor, free, quarantined, reserved, high, marking, sticky, generation, barrier,
+                   #[cfg(test)] reused } = self;
+        w.field("entries", entries);
+        w.field("colors", colors);
+        w.field("cursor", cursor);
+        w.field("free", free);
+        w.field("quarantined", quarantined);
+        w.field("reserved", reserved);
+        w.field("high", high);
+        w.field("marking", marking);
+        w.field("sticky", sticky);
+        w.field("generation", generation);
+        w.field("barrier", barrier);
+        #[cfg(test)]
+        w.field("reused", reused);
+    }
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
 
 impl<T> Index<usize> for Table<T> {
     type Output = T;

@@ -11,7 +11,9 @@ let
   cargoSrc = lib.cleanSourceWith {
     src = source;
     name = "romacs-cargo-source";
-    filter = craneLib.filterCargoSources;
+    # Upstream packages under crates/vendor/ build from their C sources and
+    # data files too, which the Cargo-only filter would drop.
+    filter = path: type: lib.hasInfix "/crates/vendor/" path || craneLib.filterCargoSources path type;
   };
   # VM2 has no legacy video feature forwarding or dump pipeline.
   productionCapabilities = {

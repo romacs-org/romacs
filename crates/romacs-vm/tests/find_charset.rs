@@ -2,28 +2,9 @@
 //! GNU: ASCII, Unicode, raw bytes and their eight-bit charset, unibyte
 //! buffers and strings, regions in either order, empty regions, a
 //! translation table, and the argument errors.
-use romacs_vm::Vm;
-use std::path::Path;
-
-/// The loadup chain (process.rs's), for buffers and coding systems.
-fn bootstrapped() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 const CASES: &[&str] = &[
     r#"(find-charset-string "abc")"#,
@@ -60,7 +41,7 @@ fn source(case: &str) -> String {
 fn find_charset_matches_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    let mut vm = bootstrapped();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(PROLOGUE).unwrap();
     for case in CASES {
         let output = std::process::Command::new(&binary)

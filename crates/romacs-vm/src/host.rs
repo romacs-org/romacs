@@ -3208,6 +3208,7 @@ pub mod call_deadline {
     static EXPIRED: AtomicU64 = AtomicU64::new(0);
 
     struct Armed { generation: u64, at: Instant, signal: Arc<QuitSignal> }
+    // CELL(Plain)
     struct Waiter { armed: Mutex<Option<Armed>>, changed: Condvar }
 
     static WAITER: OnceLock<&'static Waiter> = OnceLock::new();
@@ -3291,6 +3292,7 @@ struct InspectSnapshot {
 /// listener's snapshots.
 #[derive(Default)]
 struct InspectStore {
+    // CELL(Plain)
     queue: std::sync::Mutex<InspectQueue>,
     changed: std::sync::Condvar,
 }

@@ -521,16 +521,20 @@ impl Leaf<'_> {
         }).collect()
     }
 
-    /// The tree PARSER's first parse would build, when another parser of its
-    /// buffer already has it: the same grammar parsing the same text from
-    /// nothing builds the same tree, so a copy replaces the parse. c-ts-mode's
-    /// `for-each' parser is why: until it finds a FOR_EACH tail it sees what
-    /// the primary sees, and would parse every C file a second time. Only
-    /// parsers seeing all of the accessible text qualify, so the parsers of
-    /// embedded ranges, however many, pay nothing here.
+    /// A tree for PARSER's parse that another parser of its buffer already
+    /// has: one with the same grammar that sees all of the same accessible
+    /// text and has parsed it since the last edit, so a copy replaces the
+    /// parse. c-ts-mode's `for-each' parser is why: until it finds a FOR_EACH
+    /// tail it sees what the primary sees, and would parse every C file, and
+    /// then every edit, a second time. A FIRST parse takes only a tree parsed
+    /// from nothing, as its own would be; a reparse takes the twin's, which
+    /// can differ from its own only where error recovery chose another parse
+    /// of the same text (VM2-TREESIT-TWIN). Only parsers seeing all of the
+    /// accessible text qualify, so the parsers of embedded ranges, however
+    /// many, pay nothing here.
     /// A tree whose edits carried no points (a parser that does not track
     /// line and column) is not the same to one that does.
-    fn ts_twin_tree(&self, parser: Value) -> Option<native::Tree> {
+    fn ts_twin_tree(&self, parser: Value, first: bool) -> Option<native::Tree> {
         let p = self.ts_parser(parser).ok()?;
         let (core, native) = (p.core.borrow(), p.native.borrow());
         let length = (core.visible.1 - core.visible.0) as u32;
@@ -542,7 +546,7 @@ impl Leaf<'_> {
                 return None;
             }
             let c = other_core.borrow();
-            let tree = c.tree.as_ref().filter(|_| c.fresh && !c.need_reparse && c.visible == core.visible
+            let tree = c.tree.as_ref().filter(|_| (c.fresh || !first) && !c.need_reparse && c.visible == core.visible
                 && c.linecols.is_some() == core.linecols.is_some())?;
             let o = self.ts_parser(*other).ok().filter(|o| o.buffer == p.buffer)?;
             let n = o.native.borrow();
@@ -623,7 +627,7 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
-        let twin = if old.is_none() { self.ts_twin_tree(parser) } else { None };
+        let twin = self.ts_twin_tree(parser, old.is_none());
         let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
         let (done, behind) = match early {
             Some((tree, false)) => (Some(tree), None),
