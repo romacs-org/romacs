@@ -244,6 +244,37 @@ impl romacs_vm::LayoutHost for Cells {
     }
 }
 
+/// While a visit's first parse runs on its thread (lisp/romacs/romacs-treesit.el),
+/// a frame leaves the tree alone: `treesit--pre-redisplay' would wait for the
+/// parse, and the window shows its text plain meanwhile. The first frame after
+/// the parse lands runs it, and marks the whole text for its faces. The parse
+/// in flight is the primitive's answer here, so no thread's timing decides it.
+#[test]
+fn a_frame_waits_for_no_first_parse() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.set_gc_stress(0);
+    vm.eval_source("(progn (require 'treesit) (load \"romacs-treesit\" nil t))").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (setq parsed 0 treesit-test-parsing t) \
+        (advice-add 'romacs--treesit-parsing-p :override (lambda () treesit-test-parsing)) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") (insert \"int a;\\n\") \
+        (setq-local treesit-primary-parser (treesit-parser-create 'c)) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (treesit-parser-add-notifier treesit-primary-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions #'treesit--pre-redisplay 0 t) \
+        (setq fontification-functions nil))");
+    vm.eval_source(&setup).unwrap();
+    let state = |vm: &mut Vm| vm.eval_source("(list parsed (with-current-buffer \"ts\" (get-text-property 1 'fontified)))")
+        .and_then(|v| v.display()).unwrap();
+    vm.eval_source("(put-text-property 1 (point-max) 'fontified t)").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(state(&mut vm), "(0 t)", "no frame asks for the tree while the first parse runs");
+    vm.eval_source("(setq treesit-test-parsing nil)").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
+}
+
 /// `redisplay' between a deferred frame and the next tells the hooks what
 /// changed: the next frame does not tell them again.
 #[test]
