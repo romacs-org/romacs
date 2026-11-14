@@ -78,15 +78,3 @@ fn booted(boot: Boot, dir: &std::path::Path, world: bool) -> Result<(Vm, Loadup)
     startup::install_session_definitions(&mut vm, boot.launch, dir)?;
     Ok((vm, loadup))
 }
-
-/// BOOT's session after its chain (`chain`, then `startup::resume_loadup`),
-/// for a test that takes no step of its own between the two.
-///
-/// # Panics
-///
-/// When the boot or the session's start fails.
-pub fn started(boot: Boot) -> (Vm, startup::Started) {
-    let (mut vm, loadup) = chain(boot);
-    let started = startup::resume_loadup(&mut vm, boot.launch, loadup).unwrap();
-    (vm, started)
-}
