@@ -618,30 +618,34 @@ message's record for TEXT, `interrupted' each interrupted."
         (romacs-agent-tools--reply (romacs-mcp--object "messageId" (plist-get asked :id) "text" "Y" "mode" "steer")))
       (should-not (plist-get (plist-get (cdar messages) :from) :by-user)))))
 
-(ert-deftest romacs-agent-delegate-a-note-goes-through-a-detached-supervisor ()
-  ;; Detached, its supervisor still running: a note goes through it,
-  ;; attached first (it numbers its journal), never written beside it.
+(ert-deftest romacs-agent-delegate-no-note-beside-a-detached-supervisor ()
+  ;; Detached, its supervisor perhaps running: its journal is that
+  ;; supervisor's, so a note is refused, and a user's answer, which needs
+  ;; one, is not sent.
   (let* ((root (make-temp-file "romacs-note-" t))
-         (socket (expand-file-name "host.sock" (romacs-test-socket-directory "note-")))
-         (got nil)
-         (server (make-network-process :name "romacs-note-host" :family 'local :service socket :server t :noquery t
-                                       :filter (lambda (_p chunk) (setq got (concat got chunk)))))
+         (run (romacs-test-socket-directory "note-"))
+         (socket (expand-file-name "host.sock" run))
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (session (romacs-agent--make :id "n" :harness 'claude :state 'detached :dir root :host-socket socket)))
     (puthash "n" session romacs-agent--sessions)
     (unwind-protect
         (progn
-          (romacs-agent--note session (romacs-mcp--object "type" "replied" "message" "m-1"))
-          (let ((end (+ (float-time) 10)))
-            (while (and (not (and got (string-search "replied" got))) (< (float-time) end))
-              (accept-process-output nil 0.05)))
-          (should (string-search "\"attach\"" got))
-          (should (string-search "\"replied\"" got))
-          (should-not (file-exists-p (expand-file-name "journal.jsonl" root))))
-      (when (process-live-p (romacs-agent-connection session)) (delete-process (romacs-agent-connection session)))
-      (delete-process server)
+          (write-region "" nil socket nil 'silent)
+          (should-error (romacs-agent--note session (romacs-mcp--object "type" "replied")) :type 'user-error)
+          (should-not (file-exists-p (expand-file-name "journal.jsonl" root)))
+          (let ((sent nil) (asked (romacs-agent-tools--message "sibling" (romacs-agent--make :id "s" :title "s"))))
+            (puthash "s" (romacs-agent--make :id "s" :harness 'claude) romacs-agent--sessions)
+            (romacs-agent--raise session (list :type 'input :text "q" :messages (list asked) :seq 1))
+            (setf (romacs-agent-state session) 'detached)
+            (cl-letf (((symbol-function 'romacs-agent-tools--message-to) (lambda (&rest _) (setq sent t))))
+              (should-error (romacs-agent-answer session (plist-get asked :id) "a" nil t) :type 'user-error))
+            (should-not sent))
+          ;; With no supervisor's socket: the journal is this server's.
+          (delete-file socket)
+          (romacs-agent--note session (romacs-mcp--object "type" "replied"))
+          (should (file-exists-p (expand-file-name "journal.jsonl" root))))
       (delete-directory root t)
-      (delete-directory (file-name-directory socket) t))))
+      (delete-directory run t))))
 
 (ert-deftest romacs-agent-delegate-outside-caller-is-external ()
   ;; A session outside Romacs (no agent session calls) sending to one none

@@ -977,7 +977,9 @@ Romacs (its own channel's reply line says how), or a sender gone."
                                     (romacs-agent--message-reply-line message)))
                        ((romacs-agent-get sender-id))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
-         (record (romacs-agent-tools--message-to session sender text (or mode "queue") id by-user)))
+         ;; Its note first able to go: never an answer sent and its note lost.
+         (record (progn (when by-user (romacs-agent--check-note session))
+                        (romacs-agent-tools--message-to session sender text (or mode "queue") id by-user))))
     ;; An agent's answer is its tool call, in its journal; its user's is
     ;; this note.
     (when by-user

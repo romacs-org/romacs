@@ -2368,17 +2368,24 @@ handoff), each a plist of :provider and :lossless."
             (sort all (lambda (a b) (and (eq (plist-get a :harness) (romacs-agent-harness session))
                                          (not (eq (plist-get b :harness) (romacs-agent-harness session)))))))))
 
+(defun romacs-agent--check-note (session)
+  "Refuse (`user-error') a note for SESSION its journal cannot take here:
+detached, its supervisor perhaps running, the journal is that
+supervisor's, numbered by it; this server writes it nothing until
+attached (another may be)."
+  (when (and (eq (romacs-agent-state session) 'detached)
+             (not (process-live-p (romacs-agent-connection session)))
+             (not (romacs-agent--per-turn-p session))
+             (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session)))
+    (user-error "Session %s is detached: attach to it (show its chat) first" (romacs-agent-title session))))
+
 (defun romacs-agent--note (session note)
   "Journal NOTE in SESSION's journal, in its place: through its supervisor
-when one runs, attached first when it runs detached (its journal is its
-supervisor's, numbered by it); with none, the journal is the server's to
-add to."
+when one runs and is attached here; with none, the journal is the
+server's to add to.  Refused while detached from a supervisor that may
+run (`romacs-agent--check-note')."
+  (romacs-agent--check-note session)
   (let ((connection (romacs-agent-connection session)))
-    (when (and (eq (romacs-agent-state session) 'detached) (not (process-live-p connection))
-               (not (romacs-agent--per-turn-p session))
-               (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
-               (processp (romacs-agent--attach session 0)))
-      (setq connection (romacs-agent-connection session)))
     (if (process-live-p connection)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
       (let* ((seq (1+ (romacs-agent-seq session)))
