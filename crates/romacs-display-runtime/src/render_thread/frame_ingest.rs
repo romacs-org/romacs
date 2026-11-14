@@ -33,8 +33,8 @@ impl RenderApp {
             });
             return;
         }
-        // Seam P already owns its font projection. No matrix materialization,
-        // Lisp, or speculative row-reuse metadata is needed for this full paint.
+        // Seam P already owns its font projection: no matrix materialization
+        // or Lisp is needed for this full paint.
         super::frame_stats::note_scene_commit(
             romacs_display_protocol::frame_time::observe_platform_now(),
         );
@@ -43,12 +43,7 @@ impl RenderApp {
         if let Some(window) = self.frame_windows.primary_window_mut() {
             window.render.compositor.text_animations.replace(text_animations);
         }
-        self.ingest_primary_paint(
-            frame,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-        );
+        self.ingest_primary_paint(frame, Default::default(), Default::default());
         // The scene's children replace the last scene's: one gone is removed.
         let shown: Vec<u64> = children.iter().map(|c| c.frame_placement.frame().get()).collect();
         for gone in std::mem::take(&mut self.scene_children) {
@@ -69,7 +64,6 @@ impl RenderApp {
     fn ingest_primary_paint(
         &mut self,
         frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-        row_damage: romacs_renderer_wgpu::FrameRowDamage,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
     ) {
@@ -83,7 +77,6 @@ impl RenderApp {
             let presentation = Self::ingest_top_level_render_frame(
                 primary_frame,
                 frame,
-                row_damage,
                 cursor_config,
                 scroll_anchors,
                 reflow_imprints,
@@ -173,7 +166,6 @@ impl RenderApp {
     fn ingest_top_level_render_frame(
         render: &mut GuiFrameRenderState,
         frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-        row_damage: romacs_renderer_wgpu::FrameRowDamage,
         cursor_config: CursorConfigSnapshot,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
@@ -197,7 +189,6 @@ impl RenderApp {
         }
         let presentation = render.set_current_frame(
             Some(frame),
-            Some(row_damage),
             scroll_anchors,
             reflow_imprints,
         );

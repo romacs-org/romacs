@@ -58,9 +58,6 @@ pub(super) struct FrameParams<'a> {
     /// Whether line/scroll-spacing animations are active this frame
     /// (glyph Y positions then go through `line_y_offset`).
     pub(super) has_line_anims: bool,
-    /// Layout row damage for this frame (built by display-runtime from the
-    /// same FrameDisplayState the glyph buffer was materialized from).
-    pub(super) row_damage: Option<&'a super::row_reuse::FrameRowDamage>,
 }
 
 /// The active render pass plus the per-frame params, handed to each draw

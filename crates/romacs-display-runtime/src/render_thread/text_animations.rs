@@ -227,7 +227,6 @@ impl super::state::RenderApp {
 fn redraw(window: &mut super::frame_windows::GuiFrameWindowState) {
     let compositor = &mut window.render.compositor;
     compositor.current_scene_generation = super::frame_state::next_scene_generation();
-    compositor.current_row_damage = None;
     window.render.mark_dirty();
     window.request_redraw();
 }

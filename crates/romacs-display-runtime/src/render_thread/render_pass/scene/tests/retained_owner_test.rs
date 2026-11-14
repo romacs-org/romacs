@@ -27,7 +27,6 @@ fn setup() -> (WgpuRenderer, GuiFrameRenderState, FrameGlyphBuffer) {
     let root = pane_frame();
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -387,7 +386,6 @@ fn terminal_unique_pane_retires_without_surrendering_fractional_native() {
     render.compositor.current_frame = Some(after.clone());
     render.set_current_frame(
         Some(after.clone()),
-        None,
         Default::default(),
         Default::default(),
     );

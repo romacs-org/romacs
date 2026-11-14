@@ -232,7 +232,7 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
     let frame = FrameGlyphBuffer::with_size(800.0, 600.0);
     assert!(frame.active_cursor().is_none());
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     render.set_dirty(false);
     let before = super::frame_stats::snapshot();
     for iteration in 0..2400 {
@@ -257,7 +257,7 @@ fn s1b_visible_cursor_poll_preserves_preedit_and_default_color_cycle() {
     let mut app = make_test_app();
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     app.refresh_frame_state();
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
     render.set_ime_preedit("composition".into(), Some((0, 3)));
@@ -838,7 +838,6 @@ fn adopted_primary_pointer_target_uses_real_frame_id() {
     if let Some(ws) = app.frame_windows.primary_window_mut() {
         ws.render.set_current_frame(
             Some(FrameGlyphBuffer::with_size(800.0, 600.0)),
-            None,
             Default::default(),
             Default::default(),
         );

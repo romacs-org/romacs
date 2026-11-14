@@ -97,6 +97,6 @@ fn a_reset_drops_the_root_picture_and_the_next_frame_is_drawn_whole() {
     let mut fresh = GuiFrameRenderState::new(43, c.device(), 1.0, false, origin);
     let target = target(&c);
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    c.render_frame_glyphs(&view, &frame, fresh.compositor.glyph_atlas.as_mut().unwrap(), mapping(&frame, W, H), true, None, None, None, None, None);
+    c.render_frame_glyphs(&view, &frame, fresh.compositor.glyph_atlas.as_mut().unwrap(), mapping(&frame, W, H), true, None, None, None, None);
     assert_eq!(after_reset, pixels(&c, &target), "the first frame after a reset is the whole pass's pixels");
 }

@@ -192,7 +192,6 @@ impl RootPicture {
                     None,
                     None,
                     None,
-                    None,
                 );
                 self.shown = Some(keep(frame, runs, false, renderer.effects.clone()));
                 return Painted::Direct;
@@ -252,7 +251,6 @@ impl RootPicture {
                         None,
                         None,
                         None,
-                        None,
                         true,
                         Some(scissor),
                     );
@@ -279,7 +277,6 @@ impl RootPicture {
             atlas,
             mapping,
             false,
-            None,
             None,
             None,
             None,
@@ -355,7 +352,6 @@ impl RootPicture {
                             mapping,
                             cursor_visible,
                             animated_cursor,
-                            None,
                             None,
                             None,
                             None,
