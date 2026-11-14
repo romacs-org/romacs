@@ -1235,7 +1235,7 @@ impl Leaf<'_> {
         };
         let values = &self.ts_task(task).values;
         let (name, node, spans) = (values[pair], values[pair + 1], values[CAPTURE_SPANS]);
-        let overriding = self.vector_get(spans, fixnum(setting as i64)).ok()
+        let overriding = i64::try_from(setting).ok().and_then(|i| self.vector_get(spans, fixnum(i)).ok())
             .and_then(|span| self.pair(span)).map_or(Value::NIL, |(_, o)| o);
         Some((name, node, overriding, start, end))
     }
