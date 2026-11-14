@@ -385,7 +385,18 @@ message's record for TEXT, `interrupted' each interrupted."
                                     "from=\"Lead one (pppppppp-0000-4000-8000-000000000000)\" in-reply-to=\"m-1\">\n")
                             envelope))
     (should (= 1 (cl-count-if (lambda (line) (string-prefix-p "</romacs-message>" line)) (split-string envelope "\n"))))
-    (should (string-suffix-p "\n</romacs-message>" envelope))
+    ;; It ends saying how to answer it, its own id filled in.
+    (should (string-suffix-p (format "\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"%s\", text=...)."
+                                     (gethash "id" message))
+                             envelope))
+    ;; From outside Romacs: by its Claude Code address when it has one,
+    ;; else said to have no route.
+    (let ((outside (romacs-agent-tools--message "external" nil)))
+      (should (string-suffix-p "has no reply route: it reads only your turn's reply."
+                               (romacs-agent--message-envelope outside "hi")))
+      (puthash "address" "lead [ab12]" (gethash "from" outside))
+      (should (string-suffix-p "\nReply to this message with SendMessage(to=\"lead [ab12]\", message=...)."
+                               (romacs-agent--message-envelope outside "hi"))))
     (let* ((session (romacs-agent--make :id "c" :harness 'claude :options '(:parent "p")))
            (sent nil))
       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_s line record) (setq sent (cons line record)))))
