@@ -100,6 +100,24 @@ short step, and sees a function defined since this Romacs started."
     (should (string-prefix-p "romacs-mcp-dev-tests--defined-since-boot (function): Return THING, for an aardwolf: no world was built with this function.\n"
                              (car result)))))
 
+(ert-deftest romacs-mcp-dev-tests-guide-module-notes ()
+  "Given a worktree, the guide answers with what the tree's own
+tools/lib/agents_md.py prints for the branch's paths."
+  (let ((tree (romacs-mcp-dev-tests--tree 0)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "tools/lib" tree))
+          (with-temp-file (expand-file-name "tools/lib/agents_md.py" tree)
+            (insert "import sys\nprint('== notes for', ' '.join(sys.argv[1:]))\n"))
+          (let* ((deferred (romacs-mcp-dev--guide (romacs-mcp--object "worktree" tree "trunk" "main")))
+                 (end (+ (float-time) 30)) (result nil))
+            (while (and (not (setq result (funcall (cadr deferred)))) (< (float-time) end))
+              (accept-process-output nil 0.05))
+            (should (equal (car result) (format "== notes for notes --root %s --trunk main" tree))))
+          (delete-file (expand-file-name "tools/lib/agents_md.py" tree))
+          (should-error (romacs-mcp-dev--guide (romacs-mcp--object "worktree" tree)) :type 'user-error))
+      (delete-directory tree t))))
+
 (ert-deftest romacs-mcp-dev-tests-no-tool ()
   "A tree without the check is refused, with what to do."
   (let ((tree (file-name-as-directory (make-temp-file "romacs-mcp-dev-tests-" t))))
