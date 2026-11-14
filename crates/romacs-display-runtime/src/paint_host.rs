@@ -11,156 +11,7 @@ use romacs_display_protocol::FrameGlyphBuffer;
 
 pub const PRIMARY_FRAME: u64 = 1;
 
-/// A sample from the live window atlas after queue presentation. Cumulative
-/// within that atlas lifetime, not a per-frame delta or compositor confirmation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PaintDiagnostic {
-    pub presentation: u64,
-    pub unresolved_face_text_total: u64,
-}
-
-#[derive(Default)]
-pub(crate) struct PaintDiagnostics {
-    latest: std::sync::Mutex<Option<PaintDiagnostic>>,
-    changed: std::sync::Condvar,
-    /// The adapter the window draws with: 0 not chosen yet, 1 a GPU, 2 a
-    /// software rasterizer (wgpu's `DeviceType::Cpu`).
-    adapter: std::sync::atomic::AtomicU8,
-    /// Called when a presentation newer than the latest sample is published: the
-    /// evaluator's wait wakes for it, where it would otherwise have to
-    /// poll for the sample.
-    wake: std::sync::OnceLock<std::sync::Arc<dyn Fn() + Send + Sync>>,
-}
-
-impl PaintDiagnostics {
-    pub(crate) fn publish_adapter(&self, software: bool) {
-        self.adapter.store(if software { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn software_adapter(&self) -> Option<bool> {
-        match self.adapter.load(std::sync::atomic::Ordering::Relaxed) {
-            0 => None,
-            kind => Some(kind == 2),
-        }
-    }
-
-    pub(crate) fn publish(&self, diagnostic: PaintDiagnostic) {
-        let newer = {
-            let mut latest = self.latest.lock().unwrap();
-            let newer = latest.is_none_or(|sample| sample.presentation < diagnostic.presentation);
-            *latest = Some(diagnostic);
-            newer
-        };
-        self.changed.notify_all();
-        // Once per presentation: the frames the render thread draws again
-        // on its own (effects, video) retire nothing and wake no one.
-        if newer && let Some(wake) = self.wake.get() { wake(); }
-    }
-
-    /// The latest sample once PRESENTATION or a later one has rendered: the
-    /// renderer draws only its newest frame, so a later presentation drawn
-    /// supersedes an earlier one it never drew.
-    fn wait(
-        &self,
-        presentation: u64,
-        timeout: std::time::Duration,
-    ) -> Result<PaintDiagnostic, String> {
-        let (latest, _) = self
-            .changed
-            .wait_timeout_while(
-                self.latest
-                    .lock()
-                    .map_err(|_| "paint diagnostic lock poisoned")?,
-                timeout,
-                |latest| latest.is_none_or(|sample| sample.presentation < presentation),
-            )
-            .map_err(|_| "paint diagnostic lock poisoned")?;
-        latest
-            .filter(|sample| sample.presentation >= presentation)
-            .ok_or_else(|| format!("no rendered atlas diagnostic for presentation {presentation}"))
-    }
-}
-
-#[cfg(test)]
-mod diagnostic_tests {
-    use super::*;
-    use std::time::Duration;
-
-    /// The wake a waiter registered runs once for each newer presentation,
-    /// after its sample is stored, so a waiter woken by it finds the render
-    /// without polling; a frame the render thread draws again wakes no one.
-    #[test]
-    fn a_newer_presentation_rendered_wakes_its_waiter_once_with_the_sample_readable() {
-        let state = std::sync::Arc::new(PaintDiagnostics::default());
-        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let (reader, log) = (state.clone(), seen.clone());
-        let wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
-            log.lock().unwrap().push(reader.wait(0, Duration::ZERO).map(|sample| sample.presentation));
-        });
-        assert!(state.wake.set(wake).is_ok());
-        for presentation in [1, 1, 2, 2, 2, 3] {
-            state.publish(PaintDiagnostic { presentation, unresolved_face_text_total: 0 });
-        }
-        assert_eq!(*seen.lock().unwrap(), vec![Ok(1), Ok(2), Ok(3)], "no wake for a presentation drawn again");
-    }
-
-    #[test]
-    fn diagnostic_preserves_nonzero_renderer_sample_and_identity() {
-        let state = PaintDiagnostics::default();
-        assert!(state.wait(1, Duration::ZERO).is_err());
-        state.publish(PaintDiagnostic {
-            presentation: 1,
-            unresolved_face_text_total: 19,
-        });
-        assert_eq!(
-            state
-                .wait(1, Duration::ZERO)
-                .unwrap()
-                .unresolved_face_text_total,
-            19
-        );
-        assert!(
-            state.wait(2, Duration::ZERO).is_err(),
-            "stale samples are not evidence"
-        );
-        state.publish(PaintDiagnostic {
-            presentation: 2,
-            unresolved_face_text_total: 27,
-        });
-        assert_eq!(
-            state.wait(2, Duration::ZERO).unwrap(),
-            PaintDiagnostic {
-                presentation: 2,
-                unresolved_face_text_total: 27,
-            }
-        );
-        assert_eq!(
-            state.wait(1, Duration::ZERO).unwrap().presentation,
-            2,
-            "a later presentation drawn settles an earlier one never drawn"
-        );
-    }
-
-    #[test]
-    fn diagnostic_wait_observes_native_thread_publication() {
-        let state = std::sync::Arc::new(PaintDiagnostics::default());
-        let producer = state.clone();
-        let worker = std::thread::spawn(move || {
-            producer.publish(PaintDiagnostic {
-                presentation: 7,
-                unresolved_face_text_total: 3,
-            })
-        });
-        assert_eq!(
-            state
-                .wait(7, Duration::from_secs(5))
-                .unwrap()
-                .unresolved_face_text_total,
-            3
-        );
-        worker.join().unwrap();
-    }
-}
+pub use crate::input_bridge::PaintDiagnostic;
 
 pub struct PaintHost {
     event_loop: render_thread::RenderEventLoop,
@@ -173,7 +24,8 @@ pub struct PaintHost {
 pub struct PaintSender {
     comms: EmacsComms,
     proxy: render_thread::RenderEventLoopProxy,
-    diagnostics: std::sync::Arc<PaintDiagnostics>,
+    /// What the render thread reported, as the input bridge keeps it.
+    facts: std::sync::Arc<crate::input_bridge::Facts>,
 }
 
 impl PaintHost {
@@ -218,9 +70,11 @@ impl PaintHost {
         let lifetime = reply
             .ready(InitialWindowSize { width, height })
             .ok_or("initial window receiver closed")?;
-        let (comms, mut render) = ThreadComms::new().split();
-        let diagnostics = std::sync::Arc::new(PaintDiagnostics::default());
-        render.paint_diagnostics = Some(diagnostics.clone());
+        let (EmacsComms { cmd_tx, input_rx, frame_opacity }, mut render) = ThreadComms::new().split();
+        // The evaluator reads the render thread's events through its bridge.
+        let (facts, input_rx) = crate::input_bridge::spawn(input_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
+            .map_err(|error| format!("input bridge: {error}"))?;
+        let comms = EmacsComms { cmd_tx, input_rx, frame_opacity };
         render.keep_alive_without_frames = server;
         if !server {
             comms
@@ -241,7 +95,7 @@ impl PaintHost {
             PaintSender {
                 comms,
                 proxy,
-                diagnostics,
+                facts,
             },
         ))
     }
@@ -325,8 +179,8 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
-    /// Call WAKE, from the render thread, when a presentation newer than
-    /// any before it has rendered: a paint's completion then ends a wait
+    /// Call WAKE, from the input bridge, when a presentation of the primary
+    /// frame newer than any before it has rendered: a paint's completion then ends a wait
     /// for input itself. One waiter per sender: a second registration
     /// would leave its wait unwoken, and is refused.
     ///
@@ -335,7 +189,7 @@ impl PaintSender {
     /// When a waiter is already registered on this sender.
     pub fn on_render(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
         romacs_display_protocol::call_count::count("sender.on_render");
-        let registered = self.diagnostics.wake.set(wake).is_ok();
+        let registered = self.facts.on_render(wake);
         assert!(registered, "one render waiter per paint sender");
     }
 
@@ -343,7 +197,7 @@ impl PaintSender {
     /// render thread has chosen its adapter.
     pub fn software_adapter(&self) -> Option<bool> {
         romacs_display_protocol::call_count::count("sender.software_adapter");
-        self.diagnostics.software_adapter()
+        self.facts.software_adapter()
     }
 
     /// Read CLIPBOARD text through the existing display-owned worker. Only the
@@ -400,7 +254,7 @@ impl PaintSender {
         timeout: std::time::Duration,
     ) -> Result<PaintDiagnostic, String> {
         romacs_display_protocol::call_count::count(if timeout.is_zero() { "sender.render_poll" } else { "sender.wait_for_render" });
-        self.diagnostics.wait(presentation, timeout)
+        self.facts.wait_for_render(PRIMARY_FRAME, presentation, timeout)
     }
 
     /// Queue one complete frame, including `fonts` and `char_fonts`. Returns
@@ -458,14 +312,13 @@ impl PaintSender {
     /// and whether a GPU rebuild lost them all.
     pub fn take_lost_images(&self) -> (Vec<u32>, bool) {
         romacs_display_protocol::call_count::count("sender.take_lost_images");
-        let mut lost = self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner());
-        (std::mem::take(&mut lost.evicted), std::mem::take(&mut lost.reset))
+        self.facts.take_lost_images()
     }
 
     /// Whether a GPU rebuild lost every image since the last take.
     pub fn images_reset_pending(&self) -> bool {
         romacs_display_protocol::call_count::count("sender.images_reset_pending");
-        self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset
+        self.facts.images_reset_pending()
     }
 
     /// Debug: rebuild the GPU state as after a device loss
@@ -480,7 +333,7 @@ impl PaintSender {
     #[must_use]
     pub fn model_renderer_live(&self) -> bool {
         romacs_display_protocol::call_count::count("sender.model_renderer_live");
-        self.comms.model_renderer.load(std::sync::atomic::Ordering::Acquire)
+        self.facts.model_renderer()
     }
 
     /// Create native model surface ID from MESHES at VIEW on BACKGROUND
@@ -603,14 +456,14 @@ impl PaintSender {
     /// Where the pointer is over the primary window, if it is.
     pub fn pointer(&self) -> Option<(i32, i32)> {
         romacs_display_protocol::call_count::count("sender.pointer");
-        self.comms.pointer.get()
+        self.facts.pointer()
     }
 
     /// What the render thread saw of native key repeat since the last take.
     #[must_use]
     pub fn take_key_repeats(&self) -> romacs_display_protocol::key_repeat_log::KeyRepeatCounts {
         romacs_display_protocol::call_count::count("sender.take_key_repeats");
-        self.comms.key_repeats.take()
+        self.facts.take_key_repeats()
     }
 
     /// Title the primary window (xdisp.c gui_consider_frame_title).

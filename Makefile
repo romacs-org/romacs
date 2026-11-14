@@ -1,4 +1,4 @@
-# The gates.  Rust: gate-small (what changed, and the structural rules), gate-full.
+# The gates.  Rust: gate-small (what the change reaches, tools/lib/impact.py), gate-full.
 # Lisp: check-MODULE (one package or library), check (all).
 #
 # The check targets run bundled Lisp packages' ERT suites on a prebuilt host, with
