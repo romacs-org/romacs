@@ -51,6 +51,7 @@ struct View {
 
 /// What a session's frames hold besides plain text.
 #[derive(Clone, Copy, Default)]
+#[expect(clippy::struct_excessive_bools, reason = "four independent things a test frame may hold")]
 struct Extras {
     /// A line whose glyphs leave its row.
     inky: bool,
@@ -85,6 +86,7 @@ fn text_face(frame: &mut FrameGlyphBuffer, id: u32, bg: Color) {
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
+    clippy::too_many_lines,
     reason = "one view's whole frame, built in one place from a test's few rows and columns"
 )]
 fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
