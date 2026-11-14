@@ -295,7 +295,8 @@ impl Vm {
     /// What the bar shows now, as `romacs-status-bar-string' gives it.
     fn status_bar_shown_text(&mut self) -> Result<Option<String>> {
         let top = self.selected_top_frame();
-        if self.top_geometry(top)?.status_reserved == 0 { return Ok(None); }
+        // No frame yet (before `ensure_windows'), no bar.
+        if self.top_geometry(top).map_or(0, |g| g.status_reserved) == 0 { return Ok(None); }
         let Some(bar) = self.status_bar_snapshot(self.frame(top)?.id)? else { return Ok(None) };
         let column = self.window_state.column.max(1) as f32;
         let advances: Vec<f32> = if self.display_state.hosted && self.has_layout_host() {
