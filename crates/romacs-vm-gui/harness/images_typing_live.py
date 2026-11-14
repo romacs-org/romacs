@@ -10,14 +10,23 @@ window: first a control that inserts as many newlines and no image, then
 IMAGES (a PNG and an SVG, say, each `:max-width' 600), which decode while
 the keys are typed.  perf counts the evaluator thread's instructions from
 each M-:'s RET to the paint after its last key, less the session's idle
-rate (perkey_live's idle phases).  Decoding off the evaluator, the images'
-span costs about what the control's does: one decoded on the evaluator,
-or a key that waits on a decode, adds its work there.  After typing, a
-third M-: asks `image-size' of each image (a query waits for its decode).
+rate (perkey_live's idle phases).  It counts that thread alone: the decode
+worker starts at the first image, inside the images' span, and what it
+decodes is not the evaluator's work.  Decoding off the evaluator, the
+images' span costs about what the control's does; an image decoded on the
+evaluator, or redisplay laying the images out again for every key, adds
+its work there.  After typing, a third M-: asks `image-size' of each
+image (a query waits for its decode).
 
 Work, not wall time, is the verdict: on a loaded host every key's latency
 stretches whatever the evaluator does.  The keys' paints are counted; the
 report gives each span's seconds for reference.
+
+Before each span and idle phase the evaluator must be quiet for --settle
+seconds, past GNU's undo-auto boundary timer (10 s after the first change
+since the last boundary, an M-:'s own minibuffer text among them): that
+timer's redisplay landing in one idle phase and not the other made them
+disagree.
 
 The image files are copied into the session's private directory before
 it starts: their first read is the session's (the page cache may already
@@ -70,6 +79,11 @@ def control_form(files):
 
 
 class Session(perkey.Session):
+    # The evaluator thread alone: the decode worker starts at the first
+    # image, inside the images' span, and its decoding is not the
+    # evaluator's work.
+    inherit = False
+
     def env(self):
         env = super().env()
         if self.args.hold:
@@ -117,7 +131,10 @@ class Session(perkey.Session):
 
     def span(self, form):
         """The evaluator's instructions and seconds from FORM's RET to the
-        paint after --keys typed keys, its reply, the keys' replies and paints."""
+        paint after --keys typed keys, its reply, the keys' replies and paints.
+        The heap is collected first: a collection due by the session's
+        allocation so far would land in whichever span crossed its threshold."""
+        self.eval_form('(garbage-collect)')
         finish = self.read_form(form)
         self.quiesce()
         start = len(perkey.records(self.stderr))
@@ -171,7 +188,8 @@ def main():
     parser.add_argument('--slack', type=float, default=.25,
                         help="the fraction the images' span may cost over the control's, per key")
     parser.add_argument('--hold', action='store_true', help='hold the decodes until the keys are typed')
-    parser.add_argument('--settle', type=float, default=3)
+    # GNU's undo-auto--boundary-timer fires 10s after a change.
+    parser.add_argument('--settle', type=float, default=12, help='quiet evaluator seconds before each span and idle phase')
     parser.add_argument('--timeout', type=float, default=240)
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     parser.add_argument('--mode', default='1600x1000')
