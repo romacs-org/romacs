@@ -53,22 +53,36 @@ pub(crate) struct Found {
 
 /// Fewest groups a move carries: one alone is as cheap repainted.
 const MIN_GROUPS: usize = 2;
+/// Most distances checked per window, best voted first: signatures can
+/// agree on rows that differ, so the best voted can prove wrong.
+const MAX_TRIES: usize = 3;
 
 /// The moves that bring a picture of SIDES' old frame toward its new one,
 /// whose groups at CHANGED (sorted) differ in place; REACH is how far ink
 /// leaves its cells, SCALE the device pixels per logical one.
 pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32) -> Found {
     let mut found = Found::default();
-    for (window, dy) in distances(sides, changed, scale) {
-        let mut placed: Vec<Key> = sides
-            .after
-            .keys()
-            .filter(|key| key.0 == window && moved(sides, **key, dy, reach))
-            .copied()
-            .collect();
-        if placed.len() < MIN_GROUPS {
+    let candidates = distances(sides, changed, scale);
+    let mut windows: Vec<i64> = candidates.iter().map(|c| c.0).collect();
+    windows.dedup();
+    for window in windows {
+        // The first distance, best voted first, that places enough groups.
+        let Some((dy, mut placed)) = candidates
+            .iter()
+            .filter(|c| c.0 == window)
+            .take(MAX_TRIES)
+            .find_map(|&(_, dy)| {
+                let placed: Vec<Key> = sides
+                    .after
+                    .keys()
+                    .filter(|key| key.0 == window && moved(sides, **key, dy, reach))
+                    .copied()
+                    .collect();
+                (placed.len() >= MIN_GROUPS).then_some((dy, placed))
+            })
+        else {
             continue;
-        }
+        };
         placed.sort_unstable();
         let Some(band) = placed
             .iter()
@@ -97,8 +111,9 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
     found
 }
 
-/// Per window, the distance most of its changed text groups moved by: at
-/// least `MIN_GROUPS` of them, by whole device pixels at SCALE.
+/// The distances changed text groups moved by, by window and best voted
+/// first: those at least `MIN_GROUPS` of a window's groups' signatures
+/// vote for, by whole device pixels at SCALE.
 fn distances(sides: &Sides<'_>, changed: &[Key], scale: f32) -> Vec<(i64, f32)> {
     let text = |groups: &damage::Groups, runs: &[Run], key: &Key| {
         key.0 != 0 && groups.get(key).is_some_and(|at| at.iter().any(|&i| runs[i].text))
@@ -129,21 +144,17 @@ fn distances(sides: &Sides<'_>, changed: &[Key], scale: f32) -> Vec<(i64, f32)> 
             }
         }
     }
-    let mut best: Vec<(i64, usize, f32)> = Vec::new();
-    for ((window, dy), n) in votes {
-        let dy = f32::from_bits(dy);
-        if n < MIN_GROUPS {
-            continue;
-        }
-        let rank = |(n, dy): (usize, f32)| (n, std::cmp::Reverse(dy.abs().to_bits()), dy.to_bits());
-        match best.iter_mut().find(|b| b.0 == window) {
-            Some(b) if rank((n, dy)) > rank((b.1, b.2)) => *b = (window, n, dy),
-            Some(_) => {}
-            None => best.push((window, n, dy)),
-        }
-    }
-    best.sort_unstable_by_key(|b| b.0);
-    best.into_iter().map(|(window, _, dy)| (window, dy)).collect()
+    let mut ranked: Vec<(i64, usize, f32)> = votes
+        .into_iter()
+        .filter(|vote| vote.1 >= MIN_GROUPS)
+        .map(|((window, dy), n)| (window, n, f32::from_bits(dy)))
+        .collect();
+    // By window; then most votes, the shorter distance, and its bits, so the
+    // order is the same whatever the map's.
+    ranked.sort_unstable_by_key(|&(window, n, dy)| {
+        (window, std::cmp::Reverse(n), dy.abs().to_bits(), dy.to_bits())
+    });
+    ranked.into_iter().map(|(window, _, dy)| (window, dy)).collect()
 }
 
 /// Whether DY logical pixels are a whole number of device pixels at SCALE.
@@ -191,7 +202,8 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach) -> bool {
     let before = Rect::new(inked.x, inked.y - dy, inked.width, inked.height);
     let inside = |clip: Rect, rect: Rect| clip.y <= rect.y && rect.y + rect.height <= clip.y + clip.height;
     let clear = |glyph: &FrameGlyph| {
-        clip(glyph).is_none_or(|clip| inside(clip, inked) && inside(clip, before))
+        in_phase(sides.new, glyph, dy)
+            && clip(glyph).is_none_or(|clip| inside(clip, inked) && inside(clip, before))
             && face(glyph).is_none_or(|face| {
                 sides.new.faces.get(&face).is_none_or(|face| face.background_gradient.is_none())
             })
@@ -330,6 +342,19 @@ fn moved_text(old: &FrameGlyph, new: &FrameGlyph, dy: f32) -> Option<bool> {
         ),
         _ => None,
     }
+}
+
+/// Whether GLYPH, moved DY down from where it was, draws as it did: a
+/// fringe bitmap that repeats samples its rows by its y, rounded, modulo its
+/// period, so it moves only by whole periods.
+#[expect(clippy::cast_possible_truncation, reason = "frame pixels, far inside i64")]
+fn in_phase(frame: &FrameGlyphBuffer, glyph: &FrameGlyph, dy: f32) -> bool {
+    let FrameGlyph::FringeBitmap { y, bitmap_index, .. } = glyph else {
+        return true;
+    };
+    let period = frame.fringe_bitmaps.get(bitmap_index).map_or(0, |bitmap| i64::from(bitmap.period));
+    let phase = |y: f32| (y.max(0.0).round() as i64).rem_euclid(period.max(1));
+    period == 0 || phase(*y) == phase(*y - dy)
 }
 
 /// The clip GLYPH is drawn under, if any.

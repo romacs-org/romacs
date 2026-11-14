@@ -110,3 +110,16 @@ fn a_glyph_moved_is_the_same_but_for_its_y_and_its_slot() {
         }
     }
 }
+
+#[test]
+fn rows_alike_at_their_ends_still_move_the_way_they_went() {
+    // Every row has three glyphs, an "a" first and a "z" last: their
+    // signatures agree, and votes tie between the two directions.
+    let lines = ["a0z", "a1z", "a2z", "a3z", "a4z", "a5z", "a6z"];
+    for (old, new, dy) in [(1, 0, ROW), (0, 1, -ROW)] {
+        let Plan::Regions { moves, .. } = plan(&window(&lines, old, 5), &window(&lines, new, 5), 1.0) else {
+            panic!("a scroll is a move");
+        };
+        assert_eq!(moves.iter().map(|m| m.dy).collect::<Vec<_>>(), [dy], "from line {old} to {new}");
+    }
+}

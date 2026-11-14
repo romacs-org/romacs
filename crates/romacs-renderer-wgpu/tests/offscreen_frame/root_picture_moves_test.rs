@@ -3,7 +3,8 @@
 //! than a window, over rows of mixed heights, past an image whose box is
 //! larger than it and a fringe bitmap wider than its column, with the
 //! cursor moving as it scrolls; at a whole and at a fractional device
-//! scale, and with ink that leaves its rows. A scroll by a line repaints
+//! scale, with ink that leaves its rows, and with a fringe bitmap that
+//! tiles in a period the rows' heights are no multiple of. A scroll by a line repaints
 //! the row that entered and no other.
 use super::*;
 use romacs_display_protocol::call_count;
@@ -24,6 +25,9 @@ const IMAGE_LINE: usize = 4;
 const FRINGE_LINE: usize = 5;
 /// The line set in a font too large for it, when ink leaves its rows.
 const INKY_LINE: usize = 6;
+/// The line with a fringe bitmap that tiles every three pixels, when one
+/// does.
+const TILED_LINE: usize = 1;
 /// The lines set taller than the rest, and how tall: the last a height
 /// that is no whole number of device pixels at 1.5.
 const TALL: [(usize, f32); 3] = [(9, 16.0), (10, 12.0), (11, 13.0)];
@@ -53,14 +57,15 @@ fn text_face(frame: &mut FrameGlyphBuffer, id: u32, bg: Color) {
 }
 
 /// VIEW's frame at SCALE: one window of text above a mode line; with
-/// INKY, a line whose glyphs leave its row.
+/// INKY, a line whose glyphs leave its row; with TILED, a fringe bitmap
+/// that tiles.
 #[expect(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "one view's whole frame, built in one place from a test's few rows and columns"
 )]
-fn view_frame(view: View, scale: f32, inky: bool) -> FrameGlyphBuffer {
+fn view_frame(view: View, scale: f32, inky: bool, tiled: bool) -> FrameGlyphBuffer {
     let (width, height_all) = (W as f32 / scale, H as f32 / scale);
     let body = height_all - ROW;
     let mut frame = FrameGlyphBuffer::with_size(width, height_all);
@@ -76,6 +81,10 @@ fn view_frame(view: View, scale: f32, inky: bool) -> FrameGlyphBuffer {
     frame.register_fringe_bitmap(
         1,
         FringeBitmapData { bits: vec![0xFFFF; 8], width: 16, height: 8, period: 0, align: 0 },
+    );
+    frame.register_fringe_bitmap(
+        2,
+        FringeBitmapData { bits: vec![0xC000, 0x0000, 0x0000], width: 2, height: 3, period: 3, align: 0 },
     );
     let window = DisplayWindowId::new(1);
     frame.set_draw_context(window, GlyphRowRole::Text, Some(Rect::new(0.0, 0.0, width, body)));
@@ -100,6 +109,9 @@ fn view_frame(view: View, scale: f32, inky: bool) -> FrameGlyphBuffer {
         }
         if at == FRINGE_LINE {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 1, FaceId::new(NORMAL), FringeSide::Left);
+        }
+        if tiled && at == TILED_LINE {
+            frame.push_fringe_bitmap(0.0, y, 2.0, h, 2, FaceId::new(NORMAL), FringeSide::Left);
         }
         let end = 2.0 + text.chars().count() as f32 * CELL;
         frame.add_stretch(end, y, width - end, h, BG, FaceId::new(NORMAL), false);
@@ -190,7 +202,7 @@ fn load_image(h: &mut Harness) {
     assert!(h.renderer.is_image_ready(ImageId::new(IMAGE)), "test image must decode");
 }
 
-fn scrolled_through_picture_equals_whole(scale: f32, inky: bool) {
+fn scrolled_through_picture_equals_whole(scale: f32, inky: bool, tiled: bool) {
     let Some(mut h) = try_harness() else {
         eprintln!("SKIP: no GPU adapter");
         return;
@@ -200,7 +212,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool) {
     load_image(&mut h);
     let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
     for (name, view, entered) in scrolls() {
-        let frame = view_frame(view, scale, inky);
+        let frame = view_frame(view, scale, inky, tiled);
         let mapping = mapping_for_scale(&frame, W, H, scale);
         h.atlas.set_current_frame_fonts(frame.font_bindings());
         let (whole_texture, whole_view) = make_tex(&h.renderer, "whole");
@@ -223,7 +235,7 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !inky) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !inky && !tiled) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
@@ -232,15 +244,21 @@ fn scrolled_through_picture_equals_whole(scale: f32, inky: bool) {
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole() {
-    scrolled_through_picture_equals_whole(1.0, false);
+    scrolled_through_picture_equals_whole(1.0, false, false);
 }
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_at_a_fractional_scale() {
-    scrolled_through_picture_equals_whole(1.5, false);
+    scrolled_through_picture_equals_whole(1.5, false, false);
 }
 
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_ink_leaves_its_rows() {
-    scrolled_through_picture_equals_whole(1.0, true);
+    scrolled_through_picture_equals_whole(1.0, true, false);
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_where_a_fringe_tiles() {
+    // A row moves by eight pixels, the tiles' phase by two of three.
+    scrolled_through_picture_equals_whole(1.0, false, true);
 }
