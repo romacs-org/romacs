@@ -1,6 +1,6 @@
 //! editfns.c's labeled restrictions, the `:label` of `with-restriction`. A buffer
 //! in one holds a stack of (LABEL BEGV ZV), innermost first, BEGV and ZV
-//! markers at its bounds, over (outermost-restriction BEGV ZV): the bounds
+//! markers at its bounds, over (nil BEGV ZV), the stack's last entry: the bounds
 //! it had when the first was entered. While it holds one, `narrow-to-region`
 //! narrows within the innermost and `widen` widens to it; `save-restriction`
 //! saves and restores the stack with the bounds.
@@ -11,9 +11,6 @@
 //! is never changed in place: a push conses onto it, a pop takes its tail.
 use super::{Fault, Leaf, Primitive, Result, Value, Vm};
 use crate::{anchors::Bias, annotations::Marker, data::Object, prim::Out};
-
-/// The label of the bounds under every labeled restriction.
-const OUTERMOST: &str = "outermost-restriction";
 
 impl Vm {
     /// Buffer INDEX's labeled restrictions, nil when it has none.
@@ -28,15 +25,18 @@ impl Vm {
         }
     }
 
-    /// The innermost labeled restriction of buffer INDEX: its label and its
-    /// bounds as character positions (`labeled_restrictions_peek_label` and
-    /// `labeled_restrictions_get_bound`).
-    pub(crate) fn innermost_labeled(&self, index: usize) -> Result<Option<(Value, i64, i64)>> {
+    /// The innermost labeled restriction of buffer INDEX: its label (None
+    /// for the outermost bounds, which GNU labels with an uninterned symbol
+    /// no caller can name) and its bounds as character positions
+    /// (`labeled_restrictions_peek_label` and `labeled_restrictions_get_bound`).
+    pub(crate) fn innermost_labeled(&self, index: usize) -> Result<Option<(Option<Value>, i64, i64)>> {
         let list = self.labeled_restrictions(index);
         if list == Value::NIL { return Ok(None); }
-        let (label, bounds) = self.cons_pair(self.cons_pair(list)?.0)?;
+        let (entry, under) = self.cons_pair(list)?;
+        let (label, bounds) = self.cons_pair(entry)?;
         let (begv, rest) = self.cons_pair(bounds)?;
         let zv = self.cons_pair(rest)?.0;
+        let label = (under != Value::NIL).then_some(label);
         Ok(Some((label, self.marker_position_value(begv)?.as_integer()?, self.marker_position_value(zv)?.as_integer()?)))
     }
 
@@ -44,8 +44,8 @@ impl Vm {
     /// only the outermost bounds are left.
     pub(crate) fn pop_labeled(&mut self, index: usize) -> Result<()> {
         let list = self.labeled_restrictions(index);
-        let Some((label, ..)) = self.innermost_labeled(index)? else { return Ok(()) };
-        let rest = if label == self.intern(OUTERMOST) { Value::NIL } else { self.cons_pair(list)?.1 };
+        if list == Value::NIL { return Ok(()); }
+        let rest = self.cons_pair(list)?.1;
         self.set_labeled_restrictions(index, rest);
         Ok(())
     }
@@ -58,7 +58,7 @@ impl Vm {
     pub(crate) fn labeled_bounds_call(&mut self, index: usize, p: Primitive, args: Vec<Value>) -> Result<(Primitive, Vec<Value>)> {
         let Some((label, begv, zv)) = self.innermost_labeled(index)? else { return Ok((p, args)) };
         if p == Primitive::Widen {
-            if label == self.intern(OUTERMOST) { self.pop_labeled(index)?; }
+            if label.is_none() { self.pop_labeled(index)?; }
             return Ok((Primitive::Narrow, vec![Value::integer(begv)?, Value::integer(zv)?]));
         }
         let (Ok(s), Ok(e)) = (args[0].as_integer(), args[1].as_integer()) else { return Ok((p, args)) };
@@ -97,8 +97,7 @@ impl Leaf<'_> {
     pub(crate) fn labeled_outermost(&mut self) -> Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         if self.vm.labeled_restrictions(index) != Value::NIL { return Ok(Value::NIL); }
-        let label = self.vm.intern(OUTERMOST);
-        self.vm.labeled_entry(index, label).map_err(Fault::Error)
+        self.vm.labeled_entry(index, Value::NIL).map_err(Fault::Error)
     }
 
     /// `labeled_restrictions_push`: LABEL over the current buffer's bounds,
@@ -118,7 +117,7 @@ impl Leaf<'_> {
     pub(crate) fn pop_labeled_if(&mut self, label: Value) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         match self.vm.innermost_labeled(index).map_err(Fault::Error)? {
-            Some((innermost, ..)) if innermost == label => self.vm.pop_labeled(index).map_err(Fault::Error),
+            Some((Some(innermost), ..)) if innermost == label => self.vm.pop_labeled(index).map_err(Fault::Error),
             _ => Ok(()),
         }
     }
