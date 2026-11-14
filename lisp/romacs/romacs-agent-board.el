@@ -493,8 +493,7 @@ window; with none, or no room, hide the card."
   (let* ((session (plist-get (romacs-agent-board--row) :session))
          (reply (and romacs-agent-board-preview session (romacs-agent-reply session)))
          (place (and reply (romacs-agent-board--preview-place)))
-         ;; Its plain text, no more than the card holds: a reply may be
-         ;; long, and formatting Markdown costs tens of milliseconds a key.
+         ;; Its plain text, no more than the card holds: a reply may be long.
          (text (and place (substring reply 0 (min (length reply) (* (nth 2 place) (nth 3 place)))))))
     (if (not (and text (string-match-p "[^[:space:]]" text)))
         (romacs-agent-board--preview-hide)
