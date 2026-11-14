@@ -136,9 +136,8 @@ fn char_equal(cx, first: Value, second: Value) {
 
 defsubr! { name = "substring-no-properties", gnu = "fns.c:1619", effect = Pure,
 fn substring_no_properties(cx, string: Value; optional from: Value, to: Value) {
-    let view = cx.string_view(string)?;
-    let chars: Vec<_> = view.chars().collect();
-    let size = chars.len() as i64;
+    let (len, multibyte) = cx.string_shape(string)?;
+    let size = len as i64;
     let index = |value: Value, default| -> Result<i64, Fault> {
         if value == Value::NIL { return Ok(default); }
         let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
@@ -151,10 +150,12 @@ fn substring_no_properties(cx, string: Value; optional from: Value, to: Value) {
     }
     // GNU's zero-length string allocator canonicalizes empty strings.
     // Preserve that identity when the input is already empty.
-    if chars.is_empty() { return Ok(string); }
-    let part = &chars[start as usize..end as usize];
-    let bytes = encode_chars(part.iter().copied(), view.is_multibyte());
-    Ok(cx.make_string(bytes, view.is_multibyte()))
+    if len == 0 { return Ok(string); }
+    // The characters START..END, found through the string's own cursor.
+    let tail = cx.string_view_from(string, end as usize)?.bytes.len();
+    let rest = cx.string_view_from(string, start as usize)?.bytes;
+    let bytes = rest[..rest.len() - tail].to_vec();
+    Ok(cx.make_string(bytes, multibyte))
 }}
 
 defsubr! { name = "string-equal", gnu = "fns.c:339", effect = Pure,
@@ -401,15 +402,15 @@ fn args_out_of_range(cx: &mut Leaf<'_>, items: &[Value]) -> Fault {
 defsubr! { name = "get-byte", gnu = "character.c:898", effect = Reads,
 fn get_byte(cx; optional position: Value, string: Value) -> Step {
     if string != Value::NIL {
-        let view = cx.string_view(string)?;
+        let (len, multibyte) = cx.string_shape(string)?;
         let index = if position == Value::NIL { 0 } else {
             let n = position.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", position))?;
-            if n as usize >= view.len() { return Err(args_out_of_range(cx, &[string, position])); }
+            if n as usize >= len { return Err(args_out_of_range(cx, &[string, position])); }
             n as usize
         };
         // GNU reads the terminating NUL of an empty string.
-        let Some(c) = view.chars().nth(index) else { return Ok(Step::Done(Value::integer(0).unwrap())) };
-        if !view.is_multibyte() { return Ok(Step::Done(Value::integer(i64::from(view.bytes()[index])).unwrap())); }
+        let Some(c) = cx.string_char(string, index)? else { return Ok(Step::Done(Value::integer(0).unwrap())) };
+        if !multibyte { return Ok(Step::Done(Value::integer(i64::from(c)).unwrap())); }
         return byte_of_char(i64::from(c)).map(Step::Done);
     }
     let (point, begv, zv) = cx.point_extent()?;

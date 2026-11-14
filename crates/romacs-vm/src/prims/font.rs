@@ -1476,8 +1476,8 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
         return Ok(Step::Call { f, args: vec![Value::integer(at).unwrap()], then: font_object_of_char, saved: vec![] });
     }
     let at = position.integer_value().ok_or(Fault::Wrong("fixnump", position))?;
-    let text = cx.string_view(string)?;
-    let ch = usize::try_from(at).ok().and_then(|at| text.chars().nth(at));
+    cx.string_shape(string)?;
+    let ch = match usize::try_from(at) { Ok(at) => cx.string_char(string, at)?, Err(_) => None };
     let Some(ch) = ch else { return Err(Fault::Range(string, position)) };
     if cx.font_host().is_none() { return Ok(Step::Done(Value::NIL)); }
     font_object_of_char(cx, Value::integer(i64::from(ch)).unwrap(), &[])
