@@ -357,4 +357,96 @@ state root that has said two things, its writes to its harness in
       (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
       (should (eq (car outcome) :done)))))
 
+(defun romacs-agent-renew-tests--noted (session asked live outcome-cell reply)
+  "Answer SESSION's note turn with REPLY (a done's plist), once ASKED (a
+function) says it was asked: LIVE (a cell) says its harness is there
+until then."
+  (let ((end (+ (float-time) 30)))
+    (while (and (not (funcall asked)) (< (float-time) end))
+      (accept-process-output nil 0.05)))
+  (setcar live nil)
+  (romacs-agent--raise session (list :type 'input :text "note?" :own "renew-note" :seq 20))
+  (romacs-agent--raise session (append (list :type 'done :seq 21) reply))
+  (let ((end (+ (float-time) 30)))
+    (while (and (not (car outcome-cell)) (< (float-time) end)) (accept-process-output nil 0.05))))
+
+(defmacro romacs-agent-renew-tests--asking (&rest body)
+  "BODY with `session' (a delegated task) asked for its note: its harness
+there (`live') and ready; `outcome' the renewal's outcome cell."
+  (declare (indent 0))
+  `(romacs-agent-renew-tests--with 'claude
+     (let ((live (list t)) (outcome (list nil)))
+       (setf (romacs-agent-options session) (list :parent "pppppppp-0000-4000-8000-000000000000")
+             (romacs-agent-driver-state session) (list :ready t))
+       (cl-letf (((symbol-function 'romacs-agent--harness-live-p) (lambda (_) (car live))))
+         (romacs-agent-renew session "full" (lambda (result) (setcar outcome result)))
+         ,@body))))
+
+(ert-deftest romacs-agent-renew-leads-with-the-sessions-own-note ()
+  ;; One more turn, Romacs's own: the session writes its note, which the
+  ;; brief leads with; that turn's end goes to no parent.
+  (romacs-agent-renew-tests--asking
+    (romacs-agent-renew-tests--noted session (lambda () (cl-find-if (lambda (w) (hash-table-p (cdr w))) written))
+                                     live outcome '(:text "Goal: the parser. Next: its tests."))
+    (should (eq (car (car outcome)) :done))
+    (let ((asked (cdr (cl-find-if (lambda (w) (hash-table-p (cdr w))) written))))
+      (should (equal (gethash "romacsOwn" asked) "renew-note")))
+    (should-not (romacs-agent-ends session))
+    (let ((note (car (romacs-agent-renew-tests--notes session))))
+      (should (equal (gethash "summary" note) "note"))
+      (should (string-search "Handoff note, written by this session" (gethash "brief" note)))
+      (should (string-search "Goal: the parser. Next: its tests." (gethash "brief" note))))))
+
+(ert-deftest romacs-agent-renew-without-a-note-when-it-fails ()
+  (romacs-agent-renew-tests--asking
+    (romacs-agent-renew-tests--noted session (lambda () (cl-find-if (lambda (w) (hash-table-p (cdr w))) written))
+                                     live outcome '(:text "x" :error t :reason "API error"))
+    (should (eq (car (car outcome)) :done))
+    (let ((note (car (romacs-agent-renew-tests--notes session))))
+      (should (equal (gethash "summary" note) "selection"))
+      (should-not (string-search "Handoff note" (gethash "brief" note))))))
+
+(ert-deftest romacs-agent-renew-takes-a-compaction-summary-or-the-turns-alone ()
+  ;; A compaction since its last turn: its summary is the note, no turn
+  ;; asked.  With selection chosen: no turn asked either.
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-driver-state session) (list :ready t))
+    (cl-letf (((symbol-function 'romacs-agent--harness-live-p) (lambda (_) nil)))
+      (let ((events (list '(:type done :text "ok") '(:type compacted :text "Summary: all of it."))))
+        (let ((got nil))
+          (romacs-agent-renew--with-note session nil events (lambda (note source) (setq got (list note source))))
+          (should (equal got '("Summary: all of it." "compaction"))))
+        (let ((got nil))
+          (romacs-agent-renew--with-note session nil (reverse events) (lambda (note source) (setq got (list note source))))
+          (should (equal got '(nil "selection"))))))
+    (let ((romacs-agent-renew-summary 'selection) (got nil))
+      (cl-letf (((symbol-function 'romacs-agent--harness-live-p) (lambda (_) t)))
+        (romacs-agent-renew--with-note session nil nil (lambda (note source) (setq got (list note source)))))
+      (should (equal got '(nil "selection")))
+      (should-not written))))
+
+(ert-deftest romacs-agent-renew-by-itself-past-its-threshold ()
+  ;; Past the threshold at a turn's end: renewed by itself, once a
+  ;; conversation; not below it, not at its own note turn's end.
+  (romacs-agent-renew-tests--with 'claude
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t))
+              ((symbol-function 'romacs-agent-renew) (lambda (s why &rest _) (push (cons s why) relaunched))))
+      (setq relaunched nil)
+      (setf (romacs-agent-context-window session) 200000 (romacs-agent-context-used session) 100000)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (should-not relaunched)
+      (setf (romacs-agent-context-used session) 170000 (romacs-agent-own-turn session) "renew-note")
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (should-not relaunched)
+      (setf (romacs-agent-own-turn session) nil)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (should (equal relaunched (list (cons session "context 85%"))))
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (should (= (length relaunched) 1))
+      ;; Off: never.
+      (let ((romacs-agent-renew-at nil))
+        (setf (romacs-agent-harness-session session) (romacs-agent--uuid))
+        (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+        (should (= (length relaunched) 1))))))
+
 ;;; romacs-agent-renew-tests.el ends here

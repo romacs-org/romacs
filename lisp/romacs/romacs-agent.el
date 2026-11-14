@@ -373,7 +373,11 @@ loading it would undo that one's changes; merge it first")
   ;; message to the new conversation: folded from the note, the message
   ;; written clears it.  And the seq of a renewal journaled that no run of
   ;; its harness has followed yet: until one does, messages wait.
-  brief renewing)
+  brief renewing
+  ;; What Romacs asked of it itself, when its last turn began with such a
+  ;; prompt (`romacs-agent--input''s OWN, e.g. a renewal's note): that
+  ;; turn's end is no one's answer.
+  own-turn)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1254,20 +1258,24 @@ it waits.  A file left out is said, as its message goes on without it."
 for its driver.  Only what was attached: nothing is ever read from a
 message's text, which a child's result or a quote can fill.")
 
-(defun romacs-agent--input (session text &optional images)
+(defun romacs-agent--input (session text &optional images own)
   "Write TEXT to SESSION's persistent harness as the user's message, with
-the attached IMAGES.  The journal keeps the message as it would be without
-them, and their files: a replay reads every record, and no image's bytes.
-Both are made with one request id: the journal's is the one written."
+the attached IMAGES.  OWN, when given, names what Romacs asks of it itself
+\(a string kept as the record's romacsOwn): no one's message, and its
+turn's end no one's answer (`romacs-agent-own-turn').  The journal keeps
+the message as it would be without them, and their files: a replay reads
+every record, and no image's bytes.  Both are made with one request id:
+the journal's is the one written."
   (let* ((input (romacs-agent--harness-get session :input))
          (images (romacs-agent--sendable-images images))
          (id (romacs-agent-request-id session))
          (record (funcall input session text id))
          ;; A renewal's brief goes with the message; the journal has it in
          ;; the renewal's note, and the message as the user wrote it.
-         (brief (romacs-agent-brief session)))
+         (brief (and (not own) (romacs-agent-brief session))))
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
+    (when own (puthash "romacsOwn" own record))
     (when images (puthash "images" (vconcat images) record))
     (when brief (puthash "romacsBrief" t record))
     (romacs-agent--line session
@@ -1396,12 +1404,16 @@ itself, so the turn goes on whatever becomes of this server."
                                    (and (string-match-p "\\`[ \t\n]*/compact\\(?:[ \t\n]\\|\\'\\)"
                                                         (or (plist-get event :text) ""))
                                         t)))))
+            ;; A turn it begins is Romacs's own, or not (a steer leaves it).
+            (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
+              (setf (romacs-agent-own-turn session) (plist-get event :own)))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
-                  (romacs-agent-brief session) nil
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
-            (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
+            (unless (plist-get event :own)
+              (setf (romacs-agent-brief session) nil)
+              (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text)))))
     ;; A plan presented: captured, its call told to stop (T3 Code's way);
     ;; the plan is the user's to take up.  A tool call the policy answers
     ;; waits on no one: its answer goes now, or on catching up.
@@ -1579,8 +1591,9 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
   (romacs-agent--raise session (list :type 'settled)))
 
 (defun romacs-agent--note-end (session)
-  "Keep SESSION's turn end for its parent, when it has one."
-  (when (plist-get (romacs-agent-options session) :parent)
+  "Keep SESSION's turn end for its parent, when it has one, unless the turn
+was Romacs's own (`romacs-agent-own-turn')."
+  (when (and (plist-get (romacs-agent-options session) :parent) (not (romacs-agent-own-turn session)))
     (push (list (romacs-agent-done-seq session) (romacs-agent-reply session) (romacs-agent-failed session))
           (romacs-agent-ends session))))
 
@@ -1607,10 +1620,11 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
                              (list (list :type 'input :text (gethash "prompt" in)
                                          :images (append (gethash "images" in) nil))))
                             ((hash-table-p in)
-                             (let ((request (gethash "romacsRequest" in)))
+                             (let ((request (gethash "romacsRequest" in))
+                                   (own (romacs-agent--value (gethash "romacsOwn" in))))
                                (mapcar (lambda (event)
                                          (if (and request (eq (plist-get event :type) 'input))
-                                             (append event (list :request request))
+                                             (append event (list :request request) (and own (list :own own)))
                                            event))
                                        (funcall (or (romacs-agent--harness-get session :input-events) #'ignore)
                                                 session in))))
