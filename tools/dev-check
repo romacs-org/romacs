@@ -21,6 +21,11 @@
 
 One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
+
+cargo and cargo-nextest are looked for on PATH, then in the host's pins
+ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
+where its PATH lacks the toolchain. Found there, they are put on PATH for what
+this check runs.
 """
 import argparse
 from collections import Counter
@@ -207,6 +212,21 @@ def queue_runs(answer):
     return f'the queue runs {slow}, the parity ratchets' + (f' and the harnesses {harnesses}' if harnesses else '')
 
 
+def toolchain_path(env):
+    """The PATH ENV's commands find cargo and cargo-nextest on: ENV's own, with
+    the pinned directories (ROMACS_TOOLCHAIN_BIN, ROMACS_NEXTEST_BIN) after it
+    when it lacks either; None when neither way has both. Cargo looks for a
+    subcommand in its home's bin before PATH unless PATH names that directory,
+    so the PATH ends with it: the cargo-nextest found here is the one run."""
+    path = env.get('PATH', '')
+    pins = [env[name] for name in ('ROMACS_TOOLCHAIN_BIN', 'ROMACS_NEXTEST_BIN') if env.get(name)]
+    home = os.path.join(env.get('CARGO_HOME') or os.path.join(env.get('HOME', ''), '.cargo'), 'bin')
+    for candidate in (path, os.pathsep.join([path, *pins]) if pins else None):
+        if candidate is not None and all(shutil.which(tool, path=candidate) for tool in ('cargo', 'cargo-nextest')):
+            return candidate if home in candidate.split(os.pathsep) else os.pathsep.join([candidate, home])
+    return None
+
+
 def failures(log):
     """The failing tests of a nextest LOG, each (TEST, WHY): WHY the lines its panic printed."""
     found, lines = {}, log.splitlines()
@@ -232,7 +252,8 @@ def build_errors(log, limit=4):
     run that did not build says, rather than leaving the log to be read."""
     lines, found = log.splitlines(), []
     for index, line in enumerate(lines):
-        if re.match(r'error(\[E\d+\])?: ', line) and not line.startswith(('error: could not compile', 'error: command')):
+        # nextest's own closing words are no compiler error.
+        if re.match(r'error(\[E\d+\])?: ', line) and not line.startswith(('error: could not compile', 'error: command', 'error: test run failed')):
             at = next((after.strip().removeprefix('--> ') for after in lines[index + 1:index + 4] if '-->' in after), '')
             found.append(f'{at}: {line}' if at else line)
     return list(dict.fromkeys(found))[:limit]
@@ -246,8 +267,24 @@ def log_path(root):
 
 def tests(root, names, threads):
     """(STATUS, SUMMARY, FINDINGS) of the tests a change to the paths NAMES can reach, on ROOT's tree."""
-    if not shutil.which('cargo'):
-        return 'SKIP', 'cargo is not on PATH', ['fix: run tools/dev-check from a shell with the toolchain']
+    path = toolchain_path(os.environ)
+    if path is None:
+        return 'SKIP', 'incomplete: no cargo (neither PATH nor ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN has cargo and cargo-nextest)', [
+            'fix: set ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN to the pinned toolchain, or put it on PATH']
+    # What the stage runs finds the toolchain on PATH; its caller's PATH is put back.
+    before = os.environ.get('PATH')
+    os.environ['PATH'] = path
+    try:
+        return run_tests(root, names, threads)
+    finally:
+        if before is None:
+            del os.environ['PATH']
+        else:
+            os.environ['PATH'] = before
+
+
+def run_tests(root, names, threads):
+    """The tests stage on ROOT's tree, with the toolchain on PATH."""
     answer = impact.select(names, root, impact.metadata_of(root))
     runs = plan(answer, root)
     if runs is None:

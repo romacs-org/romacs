@@ -1,6 +1,7 @@
 """tools/dev-check: how a conflict is classed, what the structural run is, and the report."""
 import importlib.machinery
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -137,6 +138,61 @@ def answer(packages=(), files=(), everything=False, harnesses=()):
             'files': {f: 'changed' for f in files}, 'harnesses': {h: 'changed' for h in harnesses}}
 
 
+class Toolchain(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        for name in ('rust/cargo', 'nextest/cargo-nextest', 'both/cargo', 'both/cargo-nextest'):
+            path = self.root / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_text('#!/bin/sh\n')
+            path.chmod(0o755)
+
+    def test_a_path_that_has_both_is_kept(self):
+        both = str(self.root / 'both')
+        self.assertEqual(check.toolchain_path({'PATH': both, 'ROMACS_TOOLCHAIN_BIN': '/x', 'CARGO_HOME': '/h'}),
+                         os.pathsep.join([both, '/h/bin']))
+
+    def test_the_pins_complete_a_path_that_lacks_them(self):
+        env = {'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': str(self.root / 'rust'), 'ROMACS_NEXTEST_BIN': str(self.root / 'nextest'),
+               'HOME': '/u'}
+        self.assertEqual(check.toolchain_path(env),
+                         os.pathsep.join(['/usr/bin', str(self.root / 'rust'), str(self.root / 'nextest'), '/u/.cargo/bin']))
+
+    def test_cargos_home_comes_last_so_it_does_not_win(self):
+        # Cargo puts its home's bin before PATH only when PATH lacks it.
+        both = str(self.root / 'both')
+        self.assertEqual(check.toolchain_path({'PATH': os.pathsep.join(['/h/bin', both]), 'CARGO_HOME': '/h'}),
+                         os.pathsep.join(['/h/bin', both]))
+
+    def test_the_stage_runs_on_the_toolchains_path_and_puts_its_callers_back(self):
+        seen, keep = [], {name: os.environ.get(name) for name in ('PATH', 'ROMACS_TOOLCHAIN_BIN', 'ROMACS_NEXTEST_BIN', 'CARGO_HOME')}
+        real = check.run_tests
+        check.run_tests = lambda root, names, threads: seen.append(os.environ['PATH']) or ('ok', 'ran', [])
+        try:
+            os.environ.update(PATH='/nowhere', ROMACS_TOOLCHAIN_BIN=str(self.root / 'rust'),
+                              ROMACS_NEXTEST_BIN=str(self.root / 'nextest'), CARGO_HOME='/h')
+            self.assertEqual(check.tests(ROOT, [], 1), ('ok', 'ran', []))
+            self.assertEqual(seen, [os.pathsep.join(['/nowhere', str(self.root / 'rust'), str(self.root / 'nextest'), '/h/bin'])])
+            self.assertEqual(os.environ['PATH'], '/nowhere')
+            del os.environ['ROMACS_TOOLCHAIN_BIN']
+            self.assertEqual(check.tests(ROOT, [], 1)[0], 'SKIP')
+            self.assertEqual((os.environ['PATH'], len(seen)), ('/nowhere', 1))
+        finally:
+            check.run_tests = real
+            for name, value in keep.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def test_neither_way_is_no_toolchain(self):
+        self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin'}))
+        # cargo without nextest runs no test.
+        self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': str(self.root / 'rust')}))
+
+
 class Tests(unittest.TestCase):
     def test_a_change_that_reaches_no_package_runs_the_quick_rules(self):
         runs = {package: (flags, rule) for package, flags, rule in check.plan(answer(), ROOT)}
@@ -195,6 +251,7 @@ class Tests(unittest.TestCase):
             '',
             'error[E0433]: cannot find type `Path` in this scope',
             '   --> crates/romacs-gnu-tests/tests/x.rs:3:16',
+            'error: test run failed',
         ])
         self.assertEqual(check.failed_runs(log, '9 s'), ('FAIL', '1 test(s) failed of what the change reaches; and a package did not build (9 s)', [
             'romacs-vm::all quit_async::c_g_stops: it did not stop',
