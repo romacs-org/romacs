@@ -9,6 +9,7 @@
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
 use crate::prim::Fault;
+use crate::properties::Key;
 use data::Object;
 
 type Faulty<T> = std::result::Result<T, Fault>;
@@ -17,7 +18,9 @@ type Faulty<T> = std::result::Result<T, Fault>;
 pub(crate) struct Prepared {
     /// `inhibit-modification-hooks' was set: no hook runs and the mark stays.
     pub inhibited: bool,
-    /// `undo-auto--undoable-change' runs first (the undo list is not t).
+    /// The buffer keeps undo: its undo list is not t.
+    pub undo: bool,
+    /// `undo-auto--undoable-change` runs first (the buffer keeps undo).
     pub undoable: bool,
     /// Some Lisp must run before the change.
     pub before: bool,
@@ -37,8 +40,8 @@ pub(crate) struct Prepared {
 /// The variables (and the one function) the bracket reads on every change.
 #[derive(Clone, Copy)]
 pub(crate) struct ChangeSlots {
-    read_only: usize,
-    inhibit_read_only: usize,
+    pub(crate) read_only: usize,
+    pub(crate) inhibit_read_only: usize,
     inhibit_hooks: usize,
     before: usize,
     after: usize,
@@ -50,8 +53,10 @@ pub(crate) struct ChangeSlots {
     deactivate: usize,
     undoable: usize,
     pub(crate) inhibit_record_point: usize,
+    /// `overriding-plist-environment', which textget reads for a `category'.
+    pub(crate) environment: usize,
 }
-romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, deactivate, undoable, inhibit_record_point });
+romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, deactivate, undoable, inhibit_record_point, environment });
 
 /// An insertion that may skip the bracket (`Vm::quiet_insertion'): whether
 /// modification hooks are inhibited, and buffer, point and modified state
@@ -137,13 +142,14 @@ impl Vm {
             deactivate: self.slot("deactivate-mark"),
             undoable: self.slot("undo-auto--undoable-change"),
             inhibit_record_point: self.slot("undo-inhibit-record-point"),
+            environment: self.slot("overriding-plist-environment"),
         };
         self.change_slots = Some(slots);
         slots
     }
 
     /// A variable's current value, nil when void.
-    fn change_value(&mut self, slot: usize) -> Faulty<Value> {
+    pub(crate) fn change_value(&mut self, slot: usize) -> Faulty<Value> {
         let value = self.variable_value(slot).map_err(Fault::Error)?;
         Ok(if value == Value::UNBOUND { Value::NIL } else { value })
     }
@@ -158,18 +164,9 @@ impl Vm {
     /// barf-if-buffer-read-only, verify_interval_modification's read-only
     /// checks and hooks, and what signal_before_change would run.
     pub(crate) fn prepare_change(&mut self, start: i64, end: i64) -> Faulty<Prepared> {
-        self.prepare_change_of(start, end, false)
-    }
-
-    /// prepare_change for a change that gives the text an interval tree
-    /// first if it has none (a property change: add_text_properties_1
-    /// makes the root interval before it prepares, so the read-only checks
-    /// always run).
-    pub(crate) fn prepare_change_of(&mut self, start: i64, end: i64, intervals: bool) -> Faulty<Prepared> {
-        let slots = self.change_slots();
         let buffer = self.current_buffer_value()?;
         let index = buffer.index(0).map_err(Fault::Error)? - 1;
-        let intervals = intervals || self.buffer_has_intervals(buffer);
+        let intervals = self.buffer_has_intervals(buffer);
         let overlays = self.buffer_has_overlays(index);
         // Positions are read only for the text's intervals and overlays.
         let bytes = if intervals || overlays {
@@ -177,33 +174,52 @@ impl Vm {
         } else {
             None
         };
+        self.prepare_change_at(buffer, start, end, bytes, intervals, overlays)
+    }
+
+    /// `prepare_change` for a property change of BYTES, characters START..END
+    /// of BUFFER, the current one: `add_text_properties_1` gives the text an
+    /// interval tree before it prepares, so the read-only checks always run.
+    pub(crate) fn prepare_property_change(&mut self, buffer: Value, start: i64, end: i64, bytes: std::ops::Range<ByteOffset>) -> Faulty<Prepared> {
+        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        let overlays = self.buffer_has_overlays(index);
+        self.prepare_change_at(buffer, start, end, Some((bytes.start, bytes.end)), true, overlays)
+    }
+
+    /// `prepare_change` of BUFFER, the current one, given the change's BYTES
+    /// when the text has INTERVALS or OVERLAYS.
+    fn prepare_change_at(&mut self, buffer: Value, start: i64, end: i64, bytes: Option<(ByteOffset, ByteOffset)>, intervals: bool, overlays: bool) -> Faulty<Prepared> {
+        let slots = self.change_slots();
+        let index = buffer.index(0).map_err(Fault::Error)? - 1;
         // Fbarf_if_buffer_read_only (START).
-        if self.change_value(slots.read_only)? != Value::NIL
+        let read_only = self.change_value(slots.read_only)?;
+        if read_only != Value::NIL
             && self.change_value(slots.inhibit_read_only)? == Value::NIL
             && match bytes {
                 Some((start_byte, _)) if intervals => {
                     let plist = self.char_properties(buffer, start_byte);
-                    self.text_property_in(&plist, "inhibit-read-only")? == Value::NIL
+                    self.text_property_in(&plist, Key::INHIBIT_READ_ONLY)? == Value::NIL
                 }
                 _ => true,
             }
         {
             return Err(self.text_property_signal("buffer-read-only", &[buffer]));
         }
-        let undoable = self.undo_list_of(index) != Value::TRUE && self.undo_auto_bound();
+        let undo = self.undo_list_of(index) != Value::TRUE;
+        let undoable = undo && self.undo_auto_bound();
         let inhibited = self.change_value(slots.inhibit_hooks)? != Value::NIL;
         let (mut behind, mut in_front, mut modification_hooks) = (Value::NIL, Value::NIL, Vec::new());
         if let Some((start_byte, end_byte)) = bytes.filter(|_| intervals) {
             if start == end {
                 (behind, in_front) = self.verify_insertion(buffer, start, start_byte)?;
             } else {
-                self.check_text_property_edit(buffer, start_byte..end_byte)?;
+                self.check_text_edit(buffer, start_byte..end_byte, read_only)?;
                 if !inhibited {
                     modification_hooks = self.modification_hooks_in(buffer, start_byte..end_byte)?;
                 }
             }
         }
-        let mut prepared = Prepared { inhibited, undoable, before: undoable, modification_hooks, behind, in_front, overlays: false, after: false };
+        let mut prepared = Prepared { inhibited, undo, undoable, before: undoable, modification_hooks, behind, in_front, overlays: false, after: false };
         if inhibited {
             return Ok(prepared);
         }
@@ -250,34 +266,35 @@ impl Vm {
         } else {
             None
         };
-        let inhibit = self.text_property_variable("inhibit-read-only")?;
+        let slot = self.change_slots().inhibit_read_only;
+        let inhibit = self.change_value(slot)?;
         if inhibit == Value::NIL || self.cons_pair(inhibit).is_ok() {
-            let (read_only, category) = (self.intern("read-only"), self.intern("category"));
-            let raw = |plist: &[(String, Value)]| plist.iter().any(|(k, v)| k == "read-only" && *v != Value::NIL);
+            let (read_only, category) = (Key::READ_ONLY.symbol(), Key::CATEGORY.symbol());
+            let raw = |plist: &[(Key, Value)]| plist.iter().any(|(k, v)| *k == Key::READ_ONLY && *v != Value::NIL);
             let refused = |vm: &mut Self, value: Value| -> Faulty<bool> {
                 Ok(value != Value::NIL && vm.text_property_find(inhibit, |item| item == value)?.is_none())
             };
             if let Some(plist) = &after {
-                let value = self.text_property_in(plist, "read-only")?;
+                let value = self.text_property_in(plist, Key::READ_ONLY)?;
                 if refused(self, value)? {
-                    let sticky = self.text_property_in(plist, "front-sticky")?;
+                    let sticky = self.text_property_in(plist, Key::FRONT_STICKY)?;
                     if tmem(self, read_only, sticky) || (!raw(plist) && tmem(self, category, sticky)) {
                         return Err(self.text_read_only(value));
                     }
                 }
             }
             if let Some(plist) = &before {
-                let value = self.text_property_in(plist, "read-only")?;
+                let value = self.text_property_in(plist, Key::READ_ONLY)?;
                 if refused(self, value)? {
-                    let nonsticky = self.text_property_in(plist, "rear-nonsticky")?;
+                    let nonsticky = self.text_property_in(plist, Key::REAR_NONSTICKY)?;
                     if !tmem(self, read_only, nonsticky) && (raw(plist) || !tmem(self, category, nonsticky)) {
                         return Err(self.text_read_only(value));
                     }
                 }
             }
         }
-        let behind = match &before { Some(plist) => self.text_property_in(plist, "insert-behind-hooks")?, None => Value::NIL };
-        let in_front = match &after { Some(plist) => self.text_property_in(plist, "insert-in-front-hooks")?, None => Value::NIL };
+        let behind = match &before { Some(plist) => self.text_property_in(plist, Key::INSERT_BEHIND_HOOKS)?, None => Value::NIL };
+        let in_front = match &after { Some(plist) => self.text_property_in(plist, Key::INSERT_IN_FRONT_HOOKS)?, None => Value::NIL };
         Ok((behind, in_front))
     }
 

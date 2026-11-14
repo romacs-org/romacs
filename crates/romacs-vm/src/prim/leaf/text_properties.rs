@@ -27,9 +27,8 @@ impl Leaf<'_> {
         for (start, end, values) in runs.unwrap_or_default().into_iter().rev() {
             let mut plist = Value::NIL;
             for (key, value) in values.into_iter().rev() {
-                let key = self.vm.property_key_symbol(&key);
                 plist = self.cons(value, plist);
-                plist = self.cons(key, plist);
+                plist = self.cons(key.symbol(), plist);
             }
             let interval = [Value::integer(start as i64).map_err(Fault::Error)?, Value::integer(end as i64).map_err(Fault::Error)?, plist];
             let interval = interval.into_iter().rev().fold(Value::NIL, |tail, v| self.cons(v, tail));
@@ -52,18 +51,19 @@ impl Leaf<'_> {
         let Some(plan) = self.vm.property_plan(edit, start, end, object, false)? else { return Ok(PropertyBegin::Done(Value::NIL)) };
         let buffer = plan.object;
         if !matches!(self.vm.object_if(buffer), Some(data::Object::Buffer(_) | data::Object::ByteBuffer(_))) {
-            self.vm.property_apply(plan, false)?;
+            self.vm.property_apply(plan, false, false)?;
             return Ok(PropertyBegin::Done(Value::TRUE));
         }
-        let (start, end) = (plan.start, plan.end);
+        let (start, end, bytes) = (plan.start, plan.end, plan.range.clone());
         let prepared = self.in_buffer(buffer, |cx| {
-            let prepared = cx.vm.prepare_change_of(start, end, true)?;
-            let after = !prepared.inhibited && cx.vm.after_change_runs(false, false)?;
-            Ok(if prepared.before || after { Ok(prepared) } else { Err(!prepared.inhibited) })
+            let prepared = cx.vm.prepare_property_change(buffer, start, end, bytes)?;
+            // signal_after_change with no overlay or insert hook: `after-change-functions' alone.
+            Ok(if prepared.before || prepared.after { Ok(prepared) } else { Err((!prepared.inhibited, prepared.undo)) })
         })?;
         match prepared {
-            Err(hooks) => {
-                self.vm.property_apply(plan, hooks)?;
+            // No Lisp runs: what was just read of the buffer still holds.
+            Err((hooks, undo)) => {
+                self.vm.property_apply(plan, hooks, undo)?;
                 Ok(PropertyBegin::Done(Value::TRUE))
             }
             Ok(prepared) => {
@@ -112,7 +112,8 @@ impl Leaf<'_> {
         self.vm.property_modify_tail(buffer, hooks)?;
         let Some(plan) = plan else { return Ok(None) };
         let positions = (plan.start, plan.end);
-        self.vm.property_install(plan)?;
+        let undo = self.vm.keeps_undo(buffer)?;
+        self.vm.property_install(plan, undo)?;
         Ok(Some(positions))
     }
 

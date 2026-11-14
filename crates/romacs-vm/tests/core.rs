@@ -85,9 +85,11 @@ fn ir_query_is_readable_stable_and_does_not_execute() {
     let mut vm = Vm::new();
     let code = compile(&mut vm, json!(["progn", ["setq", "q", 99], ["+", 20, 22]]));
     let dump = vm.dump_ir(code).unwrap();
-    assert!(dump.contains("symbol s0 = +"));
+    // The symbol table names `+`, and the call refers to it by that slot,
+    // wherever the VM's start put it.
+    let plus = dump.lines().find_map(|line| line.strip_prefix("symbol ")?.strip_suffix(" = +")).expect("`+` in the symbol table");
     assert!(dump.contains("const 20"));
-    assert!(dump.contains("sealed s0"), "{dump}");
+    assert!(dump.contains(&format!("sealed {plus} ")), "{dump}");
     assert_eq!(dump, vm.dump_ir(code).unwrap());
     let q = compile(&mut vm, json!("q"));
     assert!(vm.execute(q).is_err());

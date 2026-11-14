@@ -239,13 +239,7 @@ fn wheel_input_atomically_carries_its_presented_region() {
         winit::event::TouchPhase::Moved,
     );
 
-    let crate::thread_comm::InputEvent::Tracked { receipt, event } =
-        emacs.input_rx.try_recv().unwrap()
-    else {
-        panic!("wheel delivery must carry its completion receipt");
-    };
-    assert!(!receipt.receipt().cancelled());
-    let event = *event;
+    let event = emacs.input_rx.try_recv().unwrap();
     assert!(matches!(
         event,
         crate::thread_comm::InputEvent::PositionedPointer(
@@ -327,14 +321,10 @@ fn continuous_x11_scroll_reaches_pixel_delivery_at_fractional_and_whole_units() 
             winit::event::MouseScrollDelta::ContinuousLineDelta(0.0, -units),
             winit::event::TouchPhase::Moved,
         );
-        let crate::thread_comm::InputEvent::Tracked { event, .. } = emacs
+        let event = emacs
             .input_rx
             .try_recv()
-            .expect("XI2 motion must reach the pixel command path")
-        else {
-            panic!("missing receipt")
-        };
-        let event = *event;
+            .expect("XI2 motion must reach the pixel command path");
         assert!(
             matches!(event, crate::thread_comm::InputEvent::PositionedPointer(crate::thread_comm::PositionedPointerInput { action: crate::thread_comm::PointerAction::Scroll { delta: crate::thread_comm::ScrollDelta::Pixels {x:0.0, y}, .. }, .. }) if y == -pixels)
         );

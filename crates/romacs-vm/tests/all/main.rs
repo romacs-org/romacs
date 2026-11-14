@@ -7,7 +7,7 @@
 //! FILE` still builds and runs one file alone.
 //!
 //! The modules are listed when this target builds, from the directory's
-//! files (crates/romacs-vm-test-modules), so a new test file edits no list.
+//! files (crates/romacs-vm-test-build), so a new test file edits no list.
 //! A file that cannot be a module is named in `standalone.txt` with its
 //! reason, and a check runs its target beside this one
 //! (`tools/lib/test_modules.py targets`).
@@ -16,4 +16,4 @@
 // those files' own targets.
 #![allow(clippy::duplicate_mod)]
 
-romacs_vm_test_modules::modules!();
+romacs_vm_test_build::modules!();

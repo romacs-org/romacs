@@ -25,7 +25,9 @@ def line_of(path, marker):
     raise SystemExit(f"no line {marker!r} in {path}")
 
 
-CHECK = (PT, line_of(PT, "assert!(bad.is_empty()"))
+# The harness is rendered by `primh_harness!()`, so its asserts report the
+# line of that call.
+CHECK = (PT, line_of(PT, "primh_harness!"))
 CONTENT = (GT, line_of(GT, '"{setup}: contents after a moving collection"'))
 FREED = (GT, line_of(GT, '"{setup}: objects live only through the window"'))
 PARENT = (GT, line_of(GT, '"parent normal sizes after a moving collection"') - 3)

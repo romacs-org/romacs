@@ -12,6 +12,8 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 romacs-vm = { path = "../romacs-vm" }
+# The icon font, for the tests that draw icons (tests/fringe.rs).
+romacs-icon-font = { path = "../romacs-icon-font" }
 
 [lints]
 workspace = true

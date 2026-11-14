@@ -48,7 +48,7 @@ fn planted(p: &Path, dir: &Path, file: &File) {
     vm.slot("process-environment"); // expect: slot:process-environment
     vm.slot("initial-environment"); // expect: slot:initial-environment
     vm.slot("exec-path"); // expect: slot:exec-path
-    self.forwarded.lookup("default-directory"); // expect: slot:default-directory
+    Forwarded::lookup("default-directory"); // expect: slot:default-directory
     p.try_exists(); // expect: Path::try_exists
     p.is_symlink(); // expect: Path::is_symlink
     p.read_link(); // expect: Path::read_link

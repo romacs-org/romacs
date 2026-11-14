@@ -128,18 +128,10 @@ pub struct PositionedPointerInput {
 /// Input event from render thread to Emacs
 #[derive(Debug, Clone)]
 pub enum InputEvent {
+    /// A pressed key: the evaluator's dropping it marks its receipt taken.
     Tracked {
-        receipt: romacs_display_protocol::input_progress::InputDelivery,
+        delivery: romacs_display_protocol::input_progress::InputDelivery,
         event: Box<InputEvent>,
-    },
-    /// Bytes read directly from a Unix TTY.
-    ///
-    /// This transport fact deliberately carries no terminal-sequence or
-    /// modifier interpretation.  The evaluator applies
-    /// `keyboard-coding-system` and `input-decode-map` in input order.
-    RawTtyBytes {
-        bytes: Vec<u8>,
-        emacs_frame_id: u64,
     },
     Key {
         key: crate::host_types::FrontendKey,
@@ -338,8 +330,6 @@ pub(crate) enum WindowCommand {
         adopt_primary: bool,
         // Deferred realization owns readiness; legacy ownership is admission-only.
         reply: Option<Sender<Result<(), String>>>,
-        live: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        deadline: std::time::Instant,
     },
     /// Associate the already-created primary OS window with its real Emacs frame ID.
     AdoptPrimaryFrame { frame: FrameRef },
@@ -537,9 +527,7 @@ impl ThreadComms {
             key_repeats: self.key_repeats,
             input_interrupt: None,
             keep_alive_without_frames: false,
-            native_window_waits: None,
             paint_diagnostics: None,
-            input_stream: Default::default(),
             frame_opacity: self.frame_opacity,
             lost_images: self.lost_images,
             model_renderer: self.model_renderer,
@@ -590,8 +578,6 @@ pub(crate) struct RenderComms {
     pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
     pub keep_alive_without_frames: bool,
-    pub native_window_waits: Option<Arc<crate::native_window_wait::NativeWindowWaits>>,
-    input_stream: romacs_display_protocol::input_progress::InputStream,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
@@ -600,22 +586,6 @@ pub(crate) struct RenderComms {
 }
 
 impl RenderComms {
-    pub(crate) fn create_window(
-        &self,
-        event_loop: &dyn winit::event_loop::ActiveEventLoop,
-        attrs: winit::window::WindowAttributes,
-        frame: u64,
-    ) -> Result<Box<dyn winit::window::Window>, String> {
-        let create = || {
-            event_loop
-                .create_window(attrs)
-                .map_err(|error| error.to_string())
-        };
-        match &self.native_window_waits {
-            Some(waits) => waits.run(frame, create),
-            None => create(),
-        }
-    }
     /// Record a pressed key's or a scroll's platform receive time in the
     /// presentation trace, when one is open.
     fn trace_input_received(event: &InputEvent) {
@@ -668,7 +638,6 @@ impl RenderComms {
     fn event_name(event: &InputEvent) -> &'static str {
         match event {
             InputEvent::Tracked { event, .. } => Self::event_name(event),
-            InputEvent::RawTtyBytes { .. } => "raw-tty-bytes",
             InputEvent::Key { .. } => "key",
             InputEvent::PositionedPointer(PositionedPointerInput { action, .. }) => match action {
                 PointerAction::Button { .. } => "positioned-pointer-button",
@@ -705,14 +674,7 @@ impl RenderComms {
     /// After converting the display event, the bridge owns notifying the
     /// evaluator's wait backend.
     pub(crate) fn send_input(&self, event: InputEvent) {
-        let _ = self.send_input_with_receipt(event);
-    }
-
-    pub(crate) fn send_input_with_receipt(
-        &self,
-        event: InputEvent,
-    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
-        self.send_input_with_tracking(event, None)
+        self.queue_input(event, None);
     }
 
     /// Native key repeats use evaluator consumption, not bridge dequeueing,
@@ -725,50 +687,22 @@ impl RenderComms {
             return None;
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
-            .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
-        let read = delivery.as_ref().map(|delivery| delivery.receipt());
-        self.send_input_with_tracking(event, delivery);
-        read
+            .then(romacs_display_protocol::input_progress::InputDelivery::new);
+        let receipt = delivery.as_ref().map(|delivery| delivery.receipt());
+        self.queue_input(event, delivery);
+        receipt
     }
 
-    fn send_input_with_tracking(
+    fn queue_input(
         &self,
         event: InputEvent,
-        read: Option<romacs_display_protocol::input_progress::InputDelivery>,
-    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
-        crate::paint_host::trace_key_enqueue(&event, read.as_ref());
-        let receipt = if matches!(
-            &event,
-            InputEvent::Key {
-                key: crate::host_types::FrontendKey::Keysym(0xff55 | 0xff56),
-                pressed: true,
-                ..
-            } | InputEvent::PositionedPointer(PositionedPointerInput {
-                action: PointerAction::Scroll { .. },
-                ..
-            })
-        ) {
-            self.input_stream.issue()
-        } else {
-            None
-        };
-        let observer = receipt.as_ref().map(|delivery| delivery.receipt());
+        delivery: Option<romacs_display_protocol::input_progress::InputDelivery>,
+    ) {
+        crate::paint_host::trace_key_enqueue(&event, delivery.as_ref());
         Self::trace_input_received(&event);
-        let event = if let Some(receipt) = receipt {
-            InputEvent::Tracked {
-                receipt,
-                event: Box::new(event),
-            }
-        } else {
-            event
-        };
-        let event = if let Some(receipt) = read {
-            InputEvent::Tracked {
-                receipt,
-                event: Box::new(event),
-            }
-        } else {
-            event
+        let event = match delivery {
+            Some(delivery) => InputEvent::Tracked { delivery, event: Box::new(event) },
+            None => event,
         };
         let log_delivery = Self::should_log_delivery(&event);
         let event_name = Self::event_name(&event);
@@ -792,7 +726,7 @@ impl RenderComms {
                     );
                 }
             }
-            return observer;
+            return;
         }
 
         match self.input_tx.send(event) {
@@ -808,7 +742,6 @@ impl RenderComms {
                 );
             }
         }
-        observer
     }
 }
 

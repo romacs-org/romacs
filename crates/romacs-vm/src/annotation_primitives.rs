@@ -12,8 +12,8 @@ use crate::{
 };
 /// What a walk of the runs that decide a property found.
 enum RunWalk<T> {
-    /// The object's properties are not kept by key, or the property names
-    /// no interned symbol: read by position.
+    /// The object's properties are not kept by key, or the property is no
+    /// symbol: read by position.
     ByPosition,
     /// What the walk's function answered, or None when no run made it
     /// answer.
@@ -656,15 +656,15 @@ impl Vm {
     /// either kind or a string: args-out-of-range outside its text.
     pub(crate) fn text_property_at(&self, object: Value, position: i64, property: Value) -> std::result::Result<Value, crate::prim::Fault> {
         use crate::prim::Fault;
-        let raw = match usize::try_from(position).ok().map(|at| self.annotation_raw(object, at)) {
-            Some(Ok(raw)) => raw,
+        let place = match usize::try_from(position).ok().map(|at| self.annotation_place(object, at)) {
+            Some(Ok(place)) => place,
             Some(Err(e)) if e != "index out of range" => return Err(Fault::Error(e)),
             _ => {
                 let at = Value::integer(position).map_err(Fault::Error)?;
                 return Err(Fault::Range(at, at));
             }
         };
-        self.annotation_resolve(&raw, property).map_err(Fault::Error)
+        self.annotation_resolve(&place, property).map_err(Fault::Error)
     }
 
     /// `get_char_property_and_overlay` (textprop.c) with a window as OBJECT,
@@ -685,11 +685,11 @@ impl Vm {
     }
     /// The text properties whose runs decide PROPERTY's char-property
     /// value: its own, `category`, and its `char-property-alias-alist`
-    /// aliases.
-    pub(crate) fn deciding_keys(&self, property: Value) -> Result<Vec<String>> {
-        let mut keys = vec![self.annotation_key_name(property)?.to_owned(), "category".to_owned()];
-        for alias in self.annotation_alias_names(property)? {
-            if !keys.iter().any(|key| key == alias) { keys.push(alias.to_owned()); }
+    /// aliases. A PROPERTY that is no symbol has no runs of its own.
+    pub(crate) fn deciding_keys(&self, property: Value) -> Result<Vec<crate::properties::Key>> {
+        let mut keys: Vec<_> = crate::properties::Key::of(property).into_iter().collect();
+        for key in std::iter::once(crate::properties::Key::CATEGORY).chain(self.annotation_alias_keys(property)?) {
+            if !keys.contains(&key) { keys.push(key); }
         }
         Ok(keys)
     }
@@ -698,13 +698,13 @@ impl Vm {
     /// property KEYS decide may change, so a walk by it pays for those runs,
     /// not every property's. A unibyte buffer's properties are not kept by
     /// key: there, where any may.
-    pub(crate) fn next_keys_change(&self, buffer: Value, (pos, end): (i64, i64), keys: &[String]) -> Result<i64> {
+    pub(crate) fn next_keys_change(&self, buffer: Value, (pos, end): (i64, i64), keys: &[crate::properties::Key]) -> Result<i64> {
         let text = self.shown_text(buffer)?;
         let offset = |n: i64| usize::try_from(n - 1).map(CharOffset).map_err(|_| "position out of range".to_owned());
         let (at, limit) = (text.byte_of_char(offset(pos)?)?, text.byte_of_char(offset(end)?)?);
         let next = match self.object_if(buffer) {
             Some(Object::Buffer(b)) => keys.iter()
-                .fold(limit, |next, key| next.min(b.properties.next_single_change(at, key, next)))
+                .fold(limit, |next, key| next.min(b.properties.next_single_change(at, *key, next)))
                 .min(self.next_overlay_change_byte(buffer, at)?),
             _ => self.next_property_boundary(buffer, at, limit)?,
         };
@@ -746,7 +746,7 @@ impl Vm {
             _ => object,
         };
         // Fget_text_property: (args-out-of-range AT AT) outside the text.
-        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(String, Value)>, Fault> {
+        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(crate::properties::Key, Value)>, Fault> {
             match usize::try_from(at).ok().map(|at| vm.annotation_raw(object, at)) {
                 Some(Ok(raw)) => Ok(raw),
                 Some(Err(e)) if e != "index out of range" => Err(Fault::Error(e)),
@@ -1324,11 +1324,11 @@ impl Vm {
             Some(Object::Buffer(b)) => &b.properties,
             _ => return Ok(RunWalk::ByPosition),
         };
-        let Ok(name) = self.annotation_key_name(prop) else { return Ok(RunWalk::ByPosition) };
+        let Some(name) = crate::properties::Key::of(prop) else { return Ok(RunWalk::ByPosition) };
         // PROP's aliases decide only where PROP itself is unset: they are
         // looked up at the first such run, and the walk goes on from that
         // run with their boundaries too.
-        let mut keys = vec![name, "category"];
+        let mut keys = vec![name, crate::properties::Key::CATEGORY];
         let mut looked_up = false;
         let mut from = bytes.start;
         // Where none of the keys is set, the defaults alone answer.
@@ -1337,7 +1337,7 @@ impl Vm {
             for (run, values) in properties.key_runs(from..bytes.end, keys.iter().copied()) {
                 if !looked_up && !values.iter().any(|(key, _)| *key == name) {
                     looked_up = true;
-                    let Ok(aliases) = self.annotation_alias_names(prop) else { return Ok(RunWalk::ByPosition) };
+                    let Ok(aliases) = self.annotation_alias_keys(prop) else { return Ok(RunWalk::ByPosition) };
                     if !aliases.is_empty() {
                         keys.extend(aliases);
                         from = run.start;

@@ -36,7 +36,6 @@ pub(crate) mod presented_frame;
 pub mod presented_pointer;
 pub mod scene;
 pub mod scroll_animation;
-pub mod scroll_coverage;
 pub mod scroll_input;
 pub(crate) mod snapshot_text;
 pub mod terminal_color;

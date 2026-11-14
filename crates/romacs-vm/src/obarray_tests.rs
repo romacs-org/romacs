@@ -99,3 +99,29 @@ fn obarray_symbol_survives_as_weak_table_value() {
     let result = run(&mut vm, "(symbol-value (gethash 'permanent ob-hash))");
     assert_eq!(vm.display(result).unwrap(), "42", "weak-key table must strongly retain custom-symbol value");
 }
+/// A text property's key keeps its symbol: a symbol of a dead obarray that
+/// only a property names survives collections, in a unibyte buffer, a
+/// multibyte buffer and a string, and its slot is not given to the
+/// symbols made next.  The buffers keep no undo, whose records would
+/// name the key too.  The dead obarray's other symbol is reclaimed.
+#[test]
+fn a_text_property_key_keeps_its_obarray_symbol() {
+    let mut vm = Vm::new();
+    run(&mut vm, "(setq tpk-unibyte (get-buffer-create \"tpk-unibyte\") tpk-multibyte (get-buffer-create \"tpk-multibyte\") \
+                        tpk-string (copy-sequence \"x\")) \
+                  (let ((o (obarray-make))) \
+                    (intern \"dropped\" o) \
+                    (with-current-buffer tpk-unibyte (setq buffer-undo-list t) (set-buffer-multibyte nil) (insert \"x\") (put-text-property 1 2 (intern \"kept-unibyte\" o) t)) \
+                    (with-current-buffer tpk-multibyte (setq buffer-undo-list t) (insert \"x\") (put-text-property 1 2 (intern \"kept-multibyte\" o) t)) \
+                    (put-text-property 0 1 (intern \"kept-string\" o) t tpk-string)) \
+                  nil");
+    vm.collect(&mut []);
+    vm.collect(&mut []);
+    let names: std::collections::BTreeSet<&str> = vm.obarray_symbol_names.keys().map(|&slot| vm.symbol_names[slot].as_str()).collect();
+    assert!(!names.contains("dropped"), "the dead obarray's unnamed symbol is reclaimed: {names:?}");
+    run(&mut vm, "(let ((reuse (obarray-make))) (dotimes (i 100) (intern (format \"reused-%d\" i) reuse)))");
+    let keys = run(&mut vm, "(list (symbol-name (car (with-current-buffer tpk-unibyte (text-properties-at 1)))) \
+                                   (symbol-name (car (with-current-buffer tpk-multibyte (text-properties-at 1)))) \
+                                   (symbol-name (car (text-properties-at 0 tpk-string))))");
+    assert_eq!(vm.display(keys).unwrap(), "(\"kept-unibyte\" \"kept-multibyte\" \"kept-string\")");
+}

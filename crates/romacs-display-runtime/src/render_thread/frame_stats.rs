@@ -62,9 +62,6 @@ pub(super) static PLAN_REBUILD_SCENE: AtomicU64 = AtomicU64::new(0);
 /// Retained static-scene rebuilds — one per scene generation while the
 /// cursor-only fast path is active (frame scheduling plan, Stage 4).
 pub(super) static RETAINED_STATIC_BUILDS: AtomicU64 = AtomicU64::new(0);
-/// Certified off-screen body rasterizations and viewport crops of those rasters.
-pub(super) static SCROLL_RASTER_BUILDS: AtomicU64 = AtomicU64::new(0);
-pub(super) static SCROLL_RASTER_BLITS: AtomicU64 = AtomicU64::new(0);
 /// Frames served by the retained-static composite fast path (blit + cursor,
 /// no glyph pipeline).
 pub(super) static COMPOSITE_ONLY_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -217,8 +214,6 @@ pub struct FrameSchedSnapshot {
     pub plan_repaint_layers: u64,
     pub plan_rebuild_scene: u64,
     pub retained_static_builds: u64,
-    pub scroll_raster_builds: u64,
-    pub scroll_raster_blits: u64,
     pub composite_only_frames: u64,
     /// Latest commit-to-submission latency; historical diagnostic field name.
     pub last_commit_to_present_us: u64,
@@ -265,8 +260,6 @@ pub fn snapshot() -> FrameSchedSnapshot {
         plan_repaint_layers: PLAN_REPAINT_LAYERS.load(Ordering::Relaxed),
         plan_rebuild_scene: PLAN_REBUILD_SCENE.load(Ordering::Relaxed),
         retained_static_builds: RETAINED_STATIC_BUILDS.load(Ordering::Relaxed),
-        scroll_raster_builds: SCROLL_RASTER_BUILDS.load(Ordering::Relaxed),
-        scroll_raster_blits: SCROLL_RASTER_BLITS.load(Ordering::Relaxed),
         composite_only_frames: COMPOSITE_ONLY_FRAMES.load(Ordering::Relaxed),
         last_commit_to_present_us: LAST_COMMIT_TO_SUBMISSION_US.load(Ordering::Relaxed),
         max_commit_to_present_us: MAX_COMMIT_TO_SUBMISSION_US.load(Ordering::Relaxed),

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 romacs-vm = { path = "../romacs-vm" }
+romacs-icon-font = { path = "../romacs-icon-font" }
 romacs-grammars = { path = "../romacs-grammars" }
 romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-layout-input = { path = "../romacs-layout-input" }

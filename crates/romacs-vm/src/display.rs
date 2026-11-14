@@ -1,5 +1,5 @@
 //! G1a's single VM-owned frame/window. Only owned data leaves this module.
-use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, *};
+use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, properties::Key, *};
 #[cfg(test)]
 #[path = "display_tests.rs"]
 mod tests;
@@ -373,7 +373,7 @@ impl DisplayState {
                 Attribute::Background => FaceValue::Str("#000000".into()),
                 Attribute::Height => FaceValue::Height(romacs_face::Height::Absolute(150)),
                 Attribute::Width | Attribute::Weight | Attribute::Slant => {
-                    FaceValue::Symbol("normal")
+                    FaceValue::Symbol("normal".into())
                 }
                 _ => FaceValue::Bool(false),
             };
@@ -2097,7 +2097,8 @@ impl Vm {
         let around = ByteOffset(low)..ByteOffset(high);
         for name in ["display", "invisible", "category"] {
             if b.properties.is_empty() { break; }
-            if b.properties.get_property(at, name).is_some() || b.properties.next_single_change(at, name, end) < end { return Ok(true); }
+            let Some(key) = self.property_key(name) else { continue };
+            if b.properties.get_property(at, key).is_some() || b.properties.next_single_change(at, key, end) < end { return Ok(true); }
         }
         let aliases = self.list_values(self.annotation_variable("char-property-alias-alist"))?;
         for entry in aliases {
@@ -2833,9 +2834,9 @@ impl Vm {
                 None => (face != Value::NIL).then_some(face),
             };
             // A later put lists its property first.
-            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), "face", face); }
-            if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
-            if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
+            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), Key::FACE, face); }
+            if let Some(n) = elt { string.properties.put(range.clone(), Key::MODE_LINE_ELT_NO, Value::integer(n)?); }
+            if own.is_some() && let Some(face) = added { string.properties.put(range, Key::FACE, face); }
         }
         let string = self.allocate_object(Object::String(Box::new(string)));
         if band.props.is_empty() { return Ok(string); }
@@ -2849,14 +2850,14 @@ impl Vm {
             let mut made: std::collections::HashMap<(*const Form, &'static str), Value> = std::collections::HashMap::new();
             for (range, projected) in &band.props {
                 for (name, form) in projected.iter() {
-                    self.intern(name);
+                    let property = self.intern_property_key(name);
                     let key = (std::rc::Rc::as_ptr(form), *name);
                     let value = match made.get(&key) {
                         Some(&value) => value,
                         None => { let value = self.ml_prop_value(form)?; made.insert(key, value); value }
                     };
                     let Object::String(s) = self.object_mut(self.slots[slot].value)? else { return Err("mode-line string required".into()) };
-                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), name, value);
+                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), property, value);
                 }
             }
             Ok(())
@@ -3288,12 +3289,9 @@ impl Vm {
             let text_face = match self.shown_text(sources.buffer) {
                 Ok(_) if at >= sources.end => Value::NIL,
                 // The property itself, where nothing could stand in for it.
-                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
-                    b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
-                Ok(b) => {
-                    let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                    self.annotation_resolve(&raw, sources.face)?
-                }
+                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), Key::CATEGORY).is_none() =>
+                    b.properties.get_property(ByteOffset(at), Key::FACE).unwrap_or(Value::NIL),
+                Ok(b) => self.annotation_resolve(&b.properties.properties_at(ByteOffset(at)), sources.face)?,
                 _ => return Err("Unicode display buffer required".into()),
             };
             let end = sources.end.max(at + 1);

@@ -3662,6 +3662,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-icon-font"
+version = "0.0.20"
+dependencies = [
+ "allsorts",
+ "kurbo",
+ "svgtypes",
+]
+
+[[package]]
 name = "romacs-imaging"
 version = "0.0.20"
 dependencies = [
@@ -3704,6 +3713,7 @@ version = "0.0.20"
 dependencies = [
  "romacs-display-protocol",
  "romacs-font",
+ "romacs-icon-font",
  "romacs-layout-input",
  "romacs-vm",
  "rustc-hash 2.1.3",
@@ -3875,6 +3885,7 @@ dependencies = [
  "libloading",
  "libsqlite3-sys",
  "md-5",
+ "memchr",
  "num-bigint",
  "num-integer",
  "rayon",
@@ -3891,7 +3902,7 @@ dependencies = [
  "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
- "romacs-vm-test-modules",
+ "romacs-vm-test-build",
  "ropey",
  "rustc-hash 2.1.3",
  "rustix",
@@ -3922,6 +3933,7 @@ dependencies = [
  "romacs-face",
  "romacs-font",
  "romacs-grammars",
+ "romacs-icon-font",
  "romacs-imaging",
  "romacs-keeper",
  "romacs-layout",
@@ -3940,7 +3952,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-vm-test-modules"
+name = "romacs-vm-test-build"
 version = "0.0.20"
 
 [[package]]

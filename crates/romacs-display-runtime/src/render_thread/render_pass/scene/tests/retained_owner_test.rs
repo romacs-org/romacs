@@ -1,5 +1,5 @@
 //! Real pooled/unpooled ownership through the production mandatory boundary.
-use super::super::super::{composition_targets as targets, retained_scroll, retained_static};
+use super::super::super::{composition_targets as targets, retained_static};
 use super::native_boundary::full_plan;
 use super::pane_size_boundary::{install_pane_change, pane_frame};
 use super::*;
@@ -76,11 +76,6 @@ fn refused(
 ) {
     let current = render.compositor.current_frame.clone();
     let interaction = format!("{:?}", render.compositor.interaction);
-    let scroll = render
-        .compositor
-        .input_scroll
-        .staged_projection()
-        .map(|(s, o)| (s.coverage().epoch, o));
     let pending = (
         render.compositor.pending.scrolls.len(),
         render.compositor.pending.reflows.len(),
@@ -102,14 +97,6 @@ fn refused(
         assert_eq!(render.compositor.current_frame, current);
         assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
         assert_eq!(
-            render
-                .compositor
-                .input_scroll
-                .staged_projection()
-                .map(|(s, o)| (s.coverage().epoch, o)),
-            scroll
-        );
-        assert_eq!(
             (
                 render.compositor.pending.scrolls.len(),
                 render.compositor.pending.reflows.len(),
@@ -127,25 +114,12 @@ fn admitted(
 ) -> targets::FrameTargets {
     let current = render.compositor.current_frame.clone();
     let interaction = format!("{:?}", render.compositor.interaction);
-    let scroll = render
-        .compositor
-        .input_scroll
-        .staged_projection()
-        .map(|(s, o)| (s.coverage().epoch, o));
     let result =
         targets::prepare_frame_targets(renderer, render, mapping(root, W, H).surface(), plan)
             .expect(
                 "obsolete owner must retire before mandatory admission under SAME held pressure",
             );
     assert!(result.picture.is_some());
-    assert_eq!(
-        render
-            .compositor
-            .input_scroll
-            .staged_projection()
-            .map(|(s, o)| (s.coverage().epoch, o)),
-        scroll
-    );
     assert_eq!(render.compositor.current_frame, current);
     assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
     result
@@ -495,75 +469,4 @@ fn terminal_unique_pane_retires_without_surrendering_fractional_native() {
     assert!(settled.projection.is_some());
     present(&mut renderer, &mut render, &after, result);
     drop(pressure);
-}
-
-fn scroll(dead: bool) {
-    let (mut renderer, mut render, _) = setup();
-    let mut root = retained_scroll::tests::fixture();
-    root.set_frame_identity(
-        DisplayFrameId::new(42),
-        DisplayFrameId::new(0),
-        0.0,
-        0.0,
-        0,
-        false,
-        0.0,
-        Color::BLACK,
-        false,
-        1.0,
-    );
-    render.set_current_frame(
-        Some(root.clone()),
-        None,
-        Default::default(),
-        Default::default(),
-    );
-    let stream = romacs_display_protocol::input_progress::InputStream::default();
-    let delivery = stream.issue().unwrap();
-    assert!(
-        render
-            .compositor
-            .input_scroll
-            .push(&root, 11.0, 11.0, 4.0, delivery.receipt())
-    );
-    render.compositor.input_scroll.paint(&mut root);
-    let prepared = retained_scroll::prepare(
-        &mut renderer,
-        &mut render,
-        &root,
-        mapping(&root, W, H),
-        false,
-    )
-    .expect("actual warmed scroll raster");
-    drop(prepared);
-    render.compositor.current_frame = Some(root.clone());
-    child(&mut render, 0.5);
-    let pressure = hold(&mut renderer, u64::from(W * H * 2));
-    refused(&mut renderer, &mut render, &root, &full_plan());
-    if dead {
-        root.scroll_surfaces.clear();
-        render.compositor.input_scroll = Default::default();
-    } else {
-        render.overlays.idle_dim.active = true;
-    }
-    render.compositor.current_frame = Some(root.clone());
-    let result = admitted(&mut renderer, &mut render, &root, &full_plan());
-    assert!(render.compositor.retained_scroll.is_none());
-    present(&mut renderer, &mut render, &root, result);
-    drop(pressure);
-    drop(delivery);
-}
-#[test]
-fn dead_scroll_epoch_retires_under_held_pressure() {
-    if !budget_one("dead_scroll_epoch_retires_under_held_pressure") {
-        return;
-    }
-    scroll(true)
-}
-#[test]
-fn ineligible_scroll_overlay_retires_under_held_pressure() {
-    if !budget_one("ineligible_scroll_overlay_retires_under_held_pressure") {
-        return;
-    }
-    scroll(false)
 }

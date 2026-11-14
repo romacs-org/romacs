@@ -137,11 +137,7 @@ impl RenderApp {
                 height,
                 title
             );
-            match self.comms.create_window(
-                event_loop,
-                attrs,
-                self.frame_windows.primary_event_frame_id(),
-            ) {
+            match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());

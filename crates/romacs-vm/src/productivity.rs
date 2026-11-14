@@ -265,7 +265,7 @@ impl Vm {
             for (range, values) in own.runs(ByteOffset(0)..ByteOffset(view.bytes().len())) {
                 let span = landing[char_of(range.start)]..landing[char_of(range.end)];
                 if span.is_empty() { continue; }
-                for (key, value) in values { properties.put(ByteOffset(span.start)..ByteOffset(span.end), &key, value); }
+                for (key, value) in values { properties.put(ByteOffset(span.start)..ByteOffset(span.end), key, value); }
             }
         }
         if fields.is_empty() { return properties; }
@@ -282,7 +282,7 @@ impl Vm {
                 if begin >= new_end || values.is_empty() { continue; }
                 let end = if (end == old_end && end != new_end) || end > new_end { new_end } else { end };
                 let span = ByteOffset(out_starts[first + begin])..ByteOffset(out_starts[first + end]);
-                for (key, value) in values { properties.put(span.clone(), &key, value); }
+                for (key, value) in values { properties.put(span.clone(), key, value); }
             }
         }
         properties

@@ -150,39 +150,4 @@ impl WgpuRenderer {
         let vertices = self.pane_vertices(frame);
         self.draw_pane_vertices(render_pass, &vertices, draw)
     }
-
-    /// Draw FRAME's panes again into VIEW inside CLIP, logical pixels, a
-    /// region a blit replaced after the root pass had drawn them (a
-    /// retained-scroll body), as MAPPING presents the frame.
-    pub fn render_panes_within(&mut self, view: &wgpu::TextureView, frame: &FrameGlyphBuffer,
-                               mapping: romacs_display_protocol::PresentMapping, clip: Rect) {
-        if frame.panes.is_empty() { return; }
-        let scale = self.scale_factor;
-        let [x0, y0] = [clip.x, clip.y].map(|e| device_edge(e, scale).max(0.0) as u32);
-        let x1 = (device_edge(clip.x + clip.width, scale).max(0.0) as u32).min(self.width);
-        let y1 = (device_edge(clip.y + clip.height, scale).max(0.0) as u32).min(self.height);
-        if x1 <= x0 || y1 <= y0 { return; }
-        let vertices = self.pane_vertices(frame);
-        let (_, _, draw) = self.prepare_frame_uniforms(mapping);
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Pane Chrome Encoder") });
-        let quads = {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Pane Chrome Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-            self.draw_pane_vertices(&mut pass, &vertices, &draw)
-        };
-        self.submit_commands(std::iter::once(encoder.finish()));
-        self.pane_quads += quads;
-    }
 }
