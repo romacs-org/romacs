@@ -230,6 +230,7 @@ a time, `allow' marks it allowed."
            (romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key))
            (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
+      (ignore #'allow #'names)
       (puthash "c" session romacs-agent--sessions)
       (romacs-agent--manifest session nil)
       (spend "claude" soon) (spend "claude2" (+ soon 600)) (spend "claude3" (+ soon 900))
