@@ -78,6 +78,17 @@ pub fn fraction(expected: &Profile, seen: &[(String, f64)], elapsed: f64) -> f64
     (elapsed.clamp(low, high.max(low)) / total).min(CAP)
 }
 
+/// A step that counts how far it is (`romacs-progress-functions': a
+/// restore's buffers, the agent sessions), as it last said.
+#[derive(Clone, Debug, PartialEq)]
+struct Step {
+    stage: String,
+    label: String,
+    /// Done of how many.
+    count: Option<(u64, u64)>,
+    failed: bool,
+}
+
 /// What startup reported so far, while the screen shows.
 struct Report {
     began: Instant,
@@ -85,6 +96,8 @@ struct Report {
     seen: Vec<(String, f64)>,
     counts: HashMap<String, u32>,
     label: String,
+    /// The steps that count, in the order they first spoke.
+    steps: Vec<Step>,
 }
 
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
@@ -95,23 +108,36 @@ fn report() -> std::sync::MutexGuard<'static, Option<Report>> {
 
 impl Report {
     fn new(expected: Profile) -> Self {
-        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned() }
+        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned(), steps: vec![] }
     }
 
-    /// STAGE reached, now at LABEL (empty: the words stay).
-    fn step(&mut self, stage: &str, label: &str) {
-        let count = self.counts.entry(stage.to_owned()).or_insert(0);
-        *count += 1;
-        let key = if *count == 1 { stage.to_owned() } else { format!("{stage}#{count}") };
+    /// STAGE reached, now at LABEL (empty: the words stay); a step that
+    /// counts or failed (COUNT, FAILED) says LABEL on its own line.
+    fn step(&mut self, stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) {
+        let n = self.counts.entry(stage.to_owned()).or_insert(0);
+        *n += 1;
+        let key = if *n == 1 { stage.to_owned() } else { format!("{stage}#{n}") };
         self.seen.push((key, self.began.elapsed().as_secs_f64()));
-        if !label.is_empty() { label.clone_into(&mut self.label); }
+        let own_line = count.is_some() || failed;
+        if !label.is_empty() && !own_line { label.clone_into(&mut self.label); }
+        if own_line {
+            let line = Step { stage: stage.to_owned(), label: if label.is_empty() { stage.to_owned() } else { label.to_owned() }, count, failed };
+            match self.steps.iter_mut().find(|s| s.stage == stage) {
+                Some(known) => *known = line,
+                None => self.steps.push(line),
+            }
+        }
     }
 }
 
 /// Startup reached STAGE, now at LABEL (empty: the words stay).  Nothing
 /// once the screen has gone, or when none shows.
-pub fn step(stage: &str, label: &str) {
-    if let Some(report) = report().as_mut() { report.step(stage, label); }
+pub fn step(stage: &str, label: &str) { step_counted(stage, label, None, false); }
+
+/// [`step`], for a step that counts (COUNT: done of how many) or FAILED:
+/// whether a screen showed it.
+pub fn step_counted(stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) -> bool {
+    report().as_mut().map(|report| report.step(stage, label, count, failed)).is_some()
 }
 
 /// What a finished startup phase (`startup::mark_phase`) leads to next,
@@ -134,12 +160,32 @@ pub fn phase(phase: &str) {
 }
 
 impl Report {
-    fn phase(&mut self, phase: &str) { self.step(phase, after(phase).unwrap_or("")); }
+    fn phase(&mut self, phase: &str) { self.step(phase, after(phase).unwrap_or(""), None, false); }
 }
 
-/// The words and the bar now.
-fn view() -> Option<(String, f64)> {
-    report().as_ref().map(|r| (r.label.clone(), fraction(&r.expected, &r.seen, r.began.elapsed().as_secs_f64())))
+/// What the screen says at one moment.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Now {
+    label: String,
+    /// The bar, 0 to 1.
+    filled: f64,
+    steps: Vec<Step>,
+}
+
+impl Now {
+    /// Whether NEXT shows what this does: the same words and steps, the
+    /// bar at the same cell.
+    fn looks_like(&self, next: &Self) -> bool {
+        let cells = |f: f64| (f * BAR as f64).round() as usize;
+        self.label == next.label && self.steps == next.steps && cells(self.filled) == cells(next.filled)
+    }
+}
+
+/// The words, the bar and the counting steps now.
+fn view() -> Option<Now> {
+    report().as_ref().map(|r| Now {
+        label: r.label.clone(), filled: fraction(&r.expected, &r.seen, r.began.elapsed().as_secs_f64()), steps: r.steps.clone(),
+    })
 }
 
 /// The user's Romacs state directory's profile of launches.
@@ -204,17 +250,19 @@ struct Shown<'a> {
     label: &'a str,
     /// How full the bar is, 0 to 1.
     filled: f64,
+    /// A line each, under the bar.
+    steps: &'a [Step],
 }
 
 /// SHOWN in a WIDTH by HEIGHT window of CELL (line height, character
 /// width) cells: the logo, and under it the words over the bar.
 fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &Shown<'_>) -> FrameSnapshot {
-    let Shown { t, scale, label, filled } = *shown;
+    let Shown { t, scale, label, filled, steps } = *shown;
     let (line, char_width) = (cell.0.max(1), cell.1.max(1));
     let (columns, lines) = ((width / char_width) as usize, (height / line) as usize);
     let view = romacs_logo::View {
         cols: columns.saturating_sub(1).clamp(1, 400),
-        rows: ((lines.saturating_sub(5) as f64 * scale) as usize).clamp(1, 200),
+        rows: ((lines.saturating_sub(5 + steps.len()) as f64 * scale) as usize).clamp(1, 200),
         cell_aspect: (f64::from(char_width) / f64::from(line)).clamp(0.05, 2.0),
     };
     let cells = romacs_logo::frame(view, t);
@@ -252,6 +300,23 @@ fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &
     let rest = utf8.len();
     utf8.push_str(&"─".repeat(bar - full));
     run(&mut face_runs, rest..utf8.len(), dim);
+    // Each counting step: its words over a bar of its own, or its failure.
+    let short = (bar / 3).max(4);
+    for step in steps {
+        let line = match (step.failed, step.count) {
+            (true, _) => format!("✗ {}", step.label),
+            (false, Some((done, of))) => {
+                let lit_cells = if of == 0 { short } else { ((done.min(of) as f64 / of as f64) * short as f64).round() as usize };
+                format!("{}  {}{}  {done}/{of}", step.label, "━".repeat(lit_cells), "─".repeat(short - lit_cells))
+            }
+            (false, None) => step.label.clone(),
+        };
+        utf8.push('\n');
+        utf8.push_str(&centred(line.chars().count()));
+        let start = utf8.len();
+        utf8.push_str(&line);
+        if step.failed { run(&mut face_runs, start..utf8.len(), handle(&mut faces, rgb(0xff5f59))); }
+    }
     FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width, height,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
@@ -281,13 +346,13 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<
         // may stand taller than the face's cell, so the words and the bar
         // under it are laid out again until they show.
         let mut scales: HashMap<(u32, u32), f64> = HashMap::new();
-        let mut paint = |presentation: u64, (width, height): (u32, u32), t: f64, label: &str, filled: f64| -> Result<(), String> {
+        let mut paint = |presentation: u64, (width, height): (u32, u32), t: f64, now: &Now| -> Result<(), String> {
             let engine = match &mut engine { Some(engine) => engine, None => engine.insert(romacs_layout::LayoutEngine::new()?) };
             let cell = engine.frame_metrics(&face)?;
             let scale = scales.entry((width, height)).or_insert(1.0);
             let mut tries = 0;
             loop {
-                let screen = snapshot(&face, (width, height), cell, &Shown { t, scale: *scale, label, filled });
+                let screen = snapshot(&face, (width, height), cell, &Shown { t, scale: *scale, label: &now.label, filled: now.filled, steps: &now.steps });
                 let length = screen.windows[0].snapshot.text.utf8.len();
                 let (frame, ends) = engine.layout_frame(&screen, presentation, None)?;
                 tries += 1;
@@ -298,8 +363,8 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<
         // The window's size as the compositor made it, once it says.
         let size = || sender.window_size(romacs_display_runtime::paint_host::INITIAL_FRAME).unwrap_or((width, height));
         let (mut t, mut presentation, mut shown) = (0.0, 1, size());
-        let (mut label, mut filled) = view().unwrap_or_default();
-        let painted = paint(presentation, shown, t, &label, filled);
+        let mut now = view().unwrap_or_default();
+        let painted = paint(presentation, shown, t, &now);
         let failed = painted.is_err();
         let _ = first_tx.send(painted);
         if failed { return presentation; }
@@ -311,18 +376,17 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<
             if animates.is_none() { last = Instant::now(); continue; }
             let dt = last.elapsed().min(Duration::from_millis(80)).as_secs_f64();
             last = Instant::now();
-            let (now_label, now_filled, now_size) = view().map_or_else(|| (String::new(), 0.0, size()), |(l, f)| (l, f, size()));
-            let cells = |f: f64| (f * BAR as f64).round() as usize;
+            let (next, size_now) = (view().unwrap_or_default(), size());
             if animates == Some(true) {
                 t += dt;
-            } else if now_label == label && cells(now_filled) == cells(filled) && now_size == shown {
+            } else if now.looks_like(&next) && size_now == shown {
                 continue;
             }
-            (label, filled, shown) = (now_label, now_filled, now_size);
+            (now, shown) = (next, size_now);
             // Counted before it is painted: a frame submitted and not
             // rendered in time still holds its presentation.
             presentation += 1;
-            if paint(presentation, shown, t, &label, filled).is_err() { break; }
+            if paint(presentation, shown, t, &now).is_err() { break; }
             // Paced by the renderer: the next frame waits for this one, a
             // slow one only slows the motion. In slices, so a stop (the
             // session's first frame) ends the wait at once rather than
@@ -375,10 +439,13 @@ mod tests {
     #[test]
     fn repeated_stages_count_and_a_profile_round_trips() {
         let mut taken = Report::new(Profile::default());
-        taken.step("init", "Loading your init: org");
-        taken.step("init", "");
+        taken.step("init", "Loading your init: org", None, false);
+        taken.step("init", "", None, false);
+        taken.step("restore", "Restoring buffers 1/4", Some((1, 4)), false);
+        taken.step("restore", "Restoring buffers 2/4", Some((2, 4)), false);
         taken.phase("user-init");
-        assert_eq!(taken.seen.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["init", "init#2", "user-init"]);
+        assert_eq!(taken.seen.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["init", "init#2", "restore", "restore#2", "user-init"]);
+        assert_eq!(taken.steps, [Step { stage: "restore".into(), label: "Restoring buffers 2/4".into(), count: Some((2, 4)), failed: false }]);
         assert_eq!(taken.label, "Finishing startup");
         let dir = std::env::temp_dir().join(format!("romacs-loading-{}", std::process::id()));
         let path = dir.join("launch-profile.json");
@@ -391,14 +458,19 @@ mod tests {
     #[test]
     fn the_screen_says_what_startup_does_over_its_bar() {
         let face = romacs_vm::Vm::new().display_default_face().expect("a default face");
-        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: "Loading your init: org", filled: 0.5 });
+        let steps = [Step { stage: "agents".into(), label: "Agents".into(), count: Some((3, 12)), failed: false },
+                     Step { stage: "restore".into(), label: "Restoring buffers".into(), count: None, failed: true }];
+        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: "Loading your init: org", filled: 0.5, steps: &steps });
         let text = &frame.windows[0].snapshot.text.utf8;
         assert!(text.contains("Loading your init: org"));
-        assert_eq!(text.matches('━').count(), BAR / 2);
-        assert_eq!(text.matches('─').count(), BAR - BAR / 2);
+        let short = (BAR / 3).max(4);
+        let agents_lit = (3.0 / 12.0 * short as f64).round() as usize;
+        assert_eq!(text.matches('━').count(), BAR / 2 + agents_lit);
+        assert_eq!(text.matches('─').count(), BAR - BAR / 2 + short - agents_lit);
+        assert!(text.contains("Agents") && text.contains("3/12") && text.contains("✗ Restoring buffers"));
         let cell = romacs_layout::LayoutEngine::new().unwrap().frame_metrics(&face).unwrap();
         for (width, height) in [(1280, 900), (800, 600), (1600, 1000), (640, 1400)] {
-            let frame = snapshot(&face, (width, height), cell, &Shown { t: 0.0, scale: 1.0, label: "x", filled: 0.0 });
+            let frame = snapshot(&face, (width, height), cell, &Shown { t: 0.0, scale: 1.0, label: "x", filled: 0.0, steps: &[] });
             let rows = frame.windows[0].snapshot.text.utf8.lines().count();
             assert!(rows as u32 * cell.0 <= height, "{width}x{height}: {rows} rows of {} px", cell.0);
         }

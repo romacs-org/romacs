@@ -281,10 +281,13 @@ and has the features of :require loaded."
     isolate))
 
 (defun romacs--isolate-recycle ()
-  "Kill the idle workers a job changed the features of: they are not reused."
+  "End the idle workers a job changed the features of: they are not reused.
+Retired, not killed: each ends its loop by itself and nothing waits for
+its exit here, where a killed worker's end cost a spawn hundreds of
+milliseconds of the editor's under load."
   (dolist (isolate (copy-sequence romacs--isolates))
     (when (and (isolate-live-p isolate) (aref isolate 6) (null (aref isolate 5)))
-      (isolate-kill isolate))))
+      (isolate-retire isolate))))
 
 (defun romacs--isolate-acquire (require fresh allow-source-boot)
   "A pooled worker for jobs requiring REQUIRE: an idle one with the same
