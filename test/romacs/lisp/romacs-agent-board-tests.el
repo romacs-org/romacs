@@ -439,4 +439,44 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (romacs-agent-board-tests--board
           (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two"))))))))
 
+(ert-deftest romacs-agent-board-folded-heading-past-a-filter-and-narrow ()
+  ;; Narrow, a folded heading cuts its path, never its count or state;
+  ;; under a filter TAB and S-TAB go by the folds kept; RET on a folded
+  ;; project opens the thread it would show first.
+  (romacs-agent-board-tests--with
+    (mk "a" "alpha" 'running 10 :cwd "/home/someone/Worktrees/romacs/a-long-project-name/")
+    (mk "b" "beta" 'idle 20 :cwd "/p/two/")
+    (let ((kept (make-hash-table :test #'equal)))
+      (puthash "/home/someone/Worktrees/romacs/a-long-project-name" t kept)
+      (let* ((row (car (rows :projects kept)))
+             (line (romacs-agent-board--line row 40)))
+        (should (<= (string-width line) 40))
+        (should (string-search "▸ 1 thread" line))
+        (should (string-search (romacs-agent-ui--rollup '(working)) line)))
+      (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
+                ((symbol-function 'romacs-agent-store-fold)
+                 (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
+        (romacs-agent-board-tests--board
+          ;; RET on the folded heading: its thread.
+          (goto-char (point-min))
+          (romacs-agent-board-next 1)
+          (should (plist-get (romacs-agent-board--row) :folded))
+          (romacs-agent-board-open)
+          (let ((shown nil))
+            (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq shown session))))
+              (funcall (car then)))
+            (should (equal (romacs-agent-id shown) "a")))
+          ;; Filtered, both projects show their threads; S-TAB twice folds
+          ;; then shows, as kept, and TAB on a kept-folded one shows it.
+          (setq romacs-agent-board--words '("a"))
+          (romacs-agent-board-cycle-projects)
+          (should (= (hash-table-count kept) 2))
+          (romacs-agent-board-cycle-projects)
+          (should (= (hash-table-count kept) 0))
+          (romacs-agent-board-cycle-projects)
+          (goto-char (point-min))
+          (romacs-agent-board-next 1)
+          (romacs-agent-board-fold)
+          (should (= (hash-table-count kept) 1)))))))
+
 ;;; romacs-agent-board-tests.el ends here

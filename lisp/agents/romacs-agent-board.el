@@ -204,8 +204,9 @@ then the newest, with what each delegated) and, off the Settled section,
 its transcripts.  A thread shows in the section it is in, a thread above
 it dim for context.  A project VIEW folds (its :projects) shows its row
 alone, saying how many threads it has and what they are at, unless a
-filter is on.  Each row is a plist of :kind (`project', `thread',
-`history' or `more') and :id, which names it across redraws."
+filter is on; its :first is the row it would show first.  Each row is a
+plist of :kind (`project', `thread', `history' or `more') and :id, which
+names it across redraws."
   (let ((keys (make-hash-table :test #'eq)) (order nil)
         (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal)))
     (dolist (session sessions) (puthash session (romacs-agent-board--key session) keys))
@@ -229,7 +230,8 @@ filter is on.  Each row is a plist of :kind (`project', `thread',
                         ((and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
                          (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks))
                                             threads)))
-                           (list (list :kind 'project :id cwd :cwd cwd :keys all :folded (length all)))))
+                           (list (list :kind 'project :id cwd :cwd cwd :keys all :folded (length all)
+                                       :first (car rows)))))
                         (t (cons (list :kind 'project :id cwd :cwd cwd
                                        :keys (mapcar (lambda (s) (gethash s keys)) threads))
                                  rows)))))
@@ -350,12 +352,17 @@ takes what the others and the gaps between them leave."
 (defun romacs-agent-board--line (row width)
   "ROW as a line WIDTH columns wide."
   (pcase (plist-get row :kind)
-    ('project (concat (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
-                      "  " (propertize (plist-get row :cwd) 'face 'romacs-agent-dim)
-                      (if-let* ((count (plist-get row :folded)))
-                          (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
-                        "")
-                      (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")))
+    ('project
+     ;; What its threads are at, and how many when folded, always show:
+     ;; the path is cut first.
+     (let ((tail (concat (if-let* ((count (plist-get row :folded)))
+                             (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                           "")
+                         (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) ""))))
+       (concat (romacs-truncate (concat (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
+                                        "  " (propertize (plist-get row :cwd) 'face 'romacs-agent-dim))
+                                (- width (string-width tail)))
+               tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
                 (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
@@ -614,6 +621,9 @@ window; with none, or no room, hide the card."
 newest thread; on \"more\", list every transcript."
   (interactive nil romacs-agent-board-mode)
   (let ((row (or (romacs-agent-board--row) (user-error "Nothing on this line"))))
+    (when-let* ((first (plist-get row :first)))
+      ;; A folded project: the row it would show first.
+      (setq row first))
     (when (eq (plist-get row :kind) 'project)
       ;; A project: its first row, what wants the user most, else the newest.
       (romacs-agent-board-next 1)
@@ -648,8 +658,11 @@ nil, flip them when `toggle'; on a delegated thread, its parent's; on a
 project, its threads."
   (let ((row (romacs-agent-board--row)))
     (cond ((eq (plist-get row :kind) 'project)
+           ;; As kept: a filter shows a folded project's threads.
            (romacs-agent-board--fold-project (plist-get row :cwd)
-                                             (if (eq open 'toggle) (not (plist-get row :folded)) (not open))))
+                                             (if (eq open 'toggle)
+                                                 (not (gethash (plist-get row :cwd) (romacs-agent-board--folded)))
+                                               (not open))))
           (t (unless (plist-get row :children)
                (when-let* ((parent (and (plist-get row :session) (romacs-agent-board--parent (plist-get row :session)))))
                  (setq row (list :id (romacs-agent-id parent) :open t :children t))))
@@ -676,11 +689,11 @@ project, its threads."
     (when at (goto-char (prop-match-beginning at)) (romacs-agent-board--follow))))
 
 (defun romacs-agent-board-cycle-projects ()
-  "Fold every project to its heading, or, when each shown is folded,
+  "Fold every project to its heading, or, when each shown is kept folded,
 show them all, as `org-global-cycle' does."
   (interactive nil romacs-agent-board-mode)
   (let* ((projects (seq-filter (lambda (row) (eq (plist-get row :kind) 'project)) (romacs-agent-board--shown-rows)))
-         (fold (seq-some (lambda (row) (not (plist-get row :folded))) projects))
+         (fold (seq-some (lambda (row) (not (gethash (plist-get row :cwd) (romacs-agent-board--folded)))) projects))
          (project (romacs-agent-board--project-row)))
     (unless projects (user-error "No projects"))
     (dolist (row projects) (romacs-agent-board--fold-project (plist-get row :cwd) fold))
