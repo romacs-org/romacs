@@ -3421,11 +3421,6 @@ its directory is moved into its rows, the first time, and its file removed."
             (when (romacs-agent--kept-put session text) (delete-file file))
             text)))))
 
-(defun romacs-agent-kept-p (dir)
-  "Whether the session recorded in DIR has its state kept."
-  (or (romacs-agent-turns-fold (file-name-nondirectory (directory-file-name dir)))
-      (file-exists-p (expand-file-name "state.eld" dir))))
-
 (defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a
 field holds what cannot be read back (a buffer, a process).  STATE, when
@@ -3910,8 +3905,9 @@ folds every journal in the editor."
   :type '(choice (const :tag "Always in the editor" nil) integer)
   :group 'romacs-agent)
 
-(defcustom romacs-agent-fold-jobs 4
-  "How many journals worker VMs fold at once."
+(defcustom romacs-agent-fold-jobs (max 4 (- (num-processors) 4))
+  "How many journals worker VMs fold at once: by default all but four of
+this machine's processors, at least four."
   :type 'natnum
   :group 'romacs-agent)
 
@@ -4105,11 +4101,11 @@ is not loaded: non-nil when something waits on it (a watch kept, a
 resume due), so it is loaded as a restore runs.")
 
 (defun romacs-agent--unloaded-p (dir)
-  "Whether the session recorded in DIR is left unloaded: listed, with
-neither its kept state nor its supervisor's socket, and nothing waiting
-on it (`romacs-agent-pending-functions')."
+  "Whether the session recorded in DIR is left unloaded at a start: listed,
+no supervisor's socket (a live one reattaches), and nothing waiting on it
+\(`romacs-agent-pending-functions').  Its kept state, if any, is read when
+it is first asked for: a start reads rows only."
   (and romacs-agent-listed-p
-       (not (romacs-agent-kept-p dir))
        (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
        (funcall romacs-agent-listed-p dir)
        (not (and romacs-agent-pending-functions
