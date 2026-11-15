@@ -182,6 +182,7 @@ impl WgpuRenderer {
         stats.rows_reused_verbatim += reuse_stats.rows_reused_verbatim;
         stats.rows_reused_shifted += reuse_stats.rows_reused_shifted;
         stats.row_reuse_bails += reuse_stats.reuse_bails;
+        crate::cost::add_rows(chunks.len(), reuse_stats.rows_tessellated, reuse_stats.rows_unmarked);
 
         TextGlyphBatches {
             mask_data: out.mask,
@@ -393,6 +394,12 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                         let glyph_w = content_rect.width() as f32 / sf;
                         let glyph_h = content_rect.height() as f32 / sf;
                         let raster_bounds = Rect::new(glyph_x, glyph_y, glyph_w, glyph_h);
+                        // An overstruck glyph is drawn a device pixel right again.
+                        let struck = if overstrike { 1.0 / sf } else { 0.0 };
+                        super::root_picture::reach::note(
+                            Rect::new(*x, *y, *width, *height),
+                            Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h),
+                        );
 
                         let tex_u_min = uv.min()[0];
                         let tex_u_max = uv.max()[0];
@@ -1168,6 +1175,11 @@ impl WgpuRenderer {
                             decoration_start,
                             effective_clip.as_ref(),
                         );
+                        // A wave or a low underline can leave the cell.
+                        super::root_picture::reach::note_points(
+                            Rect::new(*x, *y, *width, *height),
+                            decoration_vertices[decoration_start..].iter().map(|v| v.position),
+                        );
                     }
                 }
             }
@@ -1344,6 +1356,11 @@ impl WgpuRenderer {
                             decoration_start,
                             effective_clip.as_ref(),
                         );
+                        // A wave or a low underline can leave the cell.
+                        super::root_picture::reach::note_points(
+                            Rect::new(*x, *y, *width, *height),
+                            decoration_vertices[decoration_start..].iter().map(|v| v.position),
+                        );
                     }
                 }
             }
@@ -1390,6 +1407,7 @@ impl WgpuRenderer {
 
             for &span_idx in &pass_spans {
                 let span = &box_spans[span_idx];
+                let (sharp_start, rounded_start) = (sharp_border_vertices.len(), rounded_border_vertices.len());
                 if let Some(face) = faces.get(&span.face_id)
                     && self.append_box_border_geometry(
                         &mut sharp_border_vertices,
@@ -1403,6 +1421,13 @@ impl WgpuRenderer {
                 {
                     self.fx.has_animated_borders = true;
                 }
+                super::root_picture::reach::note_points(
+                    Rect::new(span.x, span.y, span.width, span.height),
+                    sharp_border_vertices[sharp_start..]
+                        .iter()
+                        .map(|v| v.position)
+                        .chain(rounded_border_vertices[rounded_start..].iter().map(|v| v.position)),
+                );
             }
 
             // Draw sharp box borders

@@ -1293,6 +1293,129 @@ impl FrameGlyphBuffer {
             .and_then(|font_id| self.fonts.get(&font_id))
     }
 
+    /// Whether SELF and OTHER set their glyphs alike: every field a pass
+    /// over a frame's glyphs reads besides the glyphs themselves, their
+    /// font tables and their cursors is equal. The fields are destructured
+    /// whole, so one added to the frame is placed here on purpose: compared
+    /// (lengths bit for bit), or named with why a pass's pixels do not
+    /// depend on it. A field
+    /// compared here is one [`Self::glyph_pass_copy`] keeps.
+    #[must_use]
+    pub fn sets_glyphs_like(&self, other: &Self) -> bool {
+        let Self {
+            // Compared.
+            width,
+            height,
+            char_width,
+            char_height,
+            font_pixel_size,
+            background,
+            background_alpha,
+            text_over_backgrounds,
+            frame_chrome,
+            panes,
+            status_bar,
+            rounded_fills,
+            fringe_bitmaps,
+            cursor_effects_by_window,
+            font_catalog_generation,
+            // The glyphs and the tables they name, compared by the caller.
+            glyphs: _,
+            faces: _,
+            fonts: _,
+            char_fonts: _,
+            shaped_clusters: _,
+            // The cursors, drawn apart, and what names one presentation of
+            // the frame: where it is placed, why it was made, which layout
+            // made it, what input it answers, how to hit-test and scroll it.
+            window_cursors: _,
+            cursor_blinked_off: _,
+            presentation_id: _,
+            frame_placement: _,
+            origin: _,
+            layout_identity: _,
+            presented_pointer: _,
+            presented_pointer_source: _,
+            presented_hit_index: _,
+            scroll_input_policy: _,
+            transition_hints: _,
+            status_bar_places: _,
+            // Read only by passes that are not a frame's own glyph pass
+            // (child-frame placement and decoration, window effects).
+            window_infos: _,
+            layer: _,
+            frame_alpha: _,
+            no_accept_focus: _,
+            undecorated: _,
+            border_width: _,
+            border_color: _,
+            outer_border_width: _,
+            outer_border_color: _,
+            // The builder's state while glyphs are added.
+            current_face_id: _,
+            current_fg: _,
+            current_bg: _,
+            current_font_family: _,
+            current_font_size: _,
+            current_overstrike: _,
+            current_window_id: _,
+            current_row_role: _,
+            current_clip_rect: _,
+        } = self;
+        width.to_bits() == other.width.to_bits()
+            && height.to_bits() == other.height.to_bits()
+            && char_width.to_bits() == other.char_width.to_bits()
+            && char_height.to_bits() == other.char_height.to_bits()
+            && font_pixel_size.to_bits() == other.font_pixel_size.to_bits()
+            && *background == other.background
+            && background_alpha.to_bits() == other.background_alpha.to_bits()
+            && *text_over_backgrounds == other.text_over_backgrounds
+            && *frame_chrome == other.frame_chrome
+            && *panes == other.panes
+            && *status_bar == other.status_bar
+            && *rounded_fills == other.rounded_fills
+            && *fringe_bitmaps == other.fringe_bitmaps
+            && *cursor_effects_by_window == other.cursor_effects_by_window
+            && *font_catalog_generation == other.font_catalog_generation
+    }
+
+    /// What a pass over this frame's glyphs reads of it: the fields
+    /// [`Self::sets_glyphs_like`] compares, the glyphs, their tables, the
+    /// cursors and the presentation they show; the rest (hit testing,
+    /// scrolling, input, child-frame placement) empty. A copy kept to
+    /// compare with the next frame and to draw from need not carry those.
+    #[must_use]
+    pub fn glyph_pass_copy(&self) -> Self {
+        Self {
+            width: self.width,
+            height: self.height,
+            char_width: self.char_width,
+            char_height: self.char_height,
+            font_pixel_size: self.font_pixel_size,
+            background: self.background,
+            background_alpha: self.background_alpha,
+            text_over_backgrounds: self.text_over_backgrounds,
+            frame_chrome: self.frame_chrome.clone(),
+            panes: self.panes.clone(),
+            status_bar: self.status_bar,
+            rounded_fills: self.rounded_fills.clone(),
+            fringe_bitmaps: self.fringe_bitmaps.clone(),
+            cursor_effects_by_window: self.cursor_effects_by_window.clone(),
+            font_catalog_generation: self.font_catalog_generation,
+            glyphs: self.glyphs.clone(),
+            faces: self.faces.clone(),
+            fonts: self.fonts.clone(),
+            char_fonts: self.char_fonts.clone(),
+            shaped_clusters: self.shaped_clusters.clone(),
+            window_cursors: self.window_cursors.clone(),
+            cursor_blinked_off: self.cursor_blinked_off,
+            presentation_id: self.presentation_id,
+            frame_placement: self.frame_placement,
+            layout_identity: self.layout_identity,
+            ..Self::default()
+        }
+    }
+
     /// Borrow every font binding for this exact frame as one coherent value.
     #[must_use]
     pub fn font_bindings(&self) -> crate::font::FrameFontBindings<'_> {
@@ -2234,6 +2357,30 @@ impl FrameGlyphBuffer {
         self.glyphs
             .iter()
             .find(|glyph| glyph.slot_id().is_some_and(|slot| slot == slot_id))
+    }
+
+    /// The position of the glyph [`Self::cursor_draw_rect`] reads to place a
+    /// cursor on `slot_id`: the slot's own glyph, else the nearest glyph
+    /// before it in its row. A frame that holds it places the cursor where
+    /// this one does.
+    #[must_use]
+    pub fn cursor_anchor(&self, slot_id: DisplaySlotId) -> Option<usize> {
+        let in_slot = |glyph: &FrameGlyph| glyph.slot_id() == Some(slot_id);
+        self.glyphs.iter().position(in_slot).or_else(|| {
+            self.glyphs
+                .iter()
+                .enumerate()
+                .filter_map(|(at, glyph)| {
+                    let slot = glyph.slot_id()?;
+                    (slot.window_id == slot_id.window_id
+                        && slot.row == slot_id.row
+                        && slot.col < slot_id.col
+                        && glyph.cell_rect().is_some())
+                    .then_some((slot.col, at))
+                })
+                .max_by_key(|(col, _)| *col)
+                .map(|(_, at)| at)
+        })
     }
 
     /// The pixel x where a glyph in `slot_id`'s column would begin: the right

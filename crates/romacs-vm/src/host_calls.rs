@@ -75,12 +75,12 @@ const SIDES: &[(&str, Side)] = &[
     // paint_host.rs, one-way commands queued for the render thread:
     ("sender.submit_scene", Cross), ("sender.load_image", Cross), ("sender.retire_image", Cross),
     ("sender.debug_lose_device", Cross), ("sender.set_frame_alpha", Cross), ("sender.set_title", Cross),
-    ("sender.hide_primary", Cross), ("sender.set_visual_config", Cross), ("sender.raise_primary", Cross),
+    ("sender.hide", Cross), ("sender.set_visual_config", Cross), ("sender.raise", Cross),
     ("sender.shutdown", Cross), ("sender.on_render", Cross), ("sender.create_model", Cross), ("sender.update_model", Cross), ("sender.free_surface", Cross),
     // requests that block for the render thread's answer (a rendered
     // presentation, the clipboard, a window made):
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
-    ("sender.show_primary", Cross),
+    ("sender.realize", Cross),
     // and reads of what the evaluator's own input bridge keeps of the
     // render thread's events (romacs-display-runtime `input_bridge'): the
     // queue of the rest, the latest rendered presentation, the lost images,

@@ -46,7 +46,6 @@ mod composition_targets;
 mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
-pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
 mod scene;
 pub(in crate::render_thread) mod surface;
@@ -298,7 +297,9 @@ fn render_frame_window_contents_reserved(
             render.emacs_frame_id,
             present_mapping.presentation(),
         );
-        surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)?
+        romacs_display_protocol::meter::spent(crate::render_thread::frame_cost::ACQUIRE, || {
+            surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)
+        })?
     };
 
     // Placed here, after the surface is in hand: `sample_pane_layout`
@@ -366,6 +367,8 @@ fn render_frame_window_contents_reserved(
     feature_plan.prepare_frame(&mut frame);
     render.begin_presentable_render();
     if extra_line_spacing != 0.0 || extra_letter_spacing != 0.0 {
+        // Moved glyphs are no longer the layout's (see `layout_identity`).
+        frame.layout_identity = 0;
         RenderApp::apply_extra_spacing(
             &mut frame.glyphs,
             &mut frame.window_cursors,

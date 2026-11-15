@@ -166,8 +166,8 @@ pub(super) fn report_unpooled_gpu_textures(
         Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedStaticScene),
     }
-    match render.compositor.retained_root.as_ref() {
-        Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
+    match render.compositor.root_picture.as_ref() {
+        Some(picture) => renderer.record_full_frame_texture(owner, picture.texture()),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedRootScene),
     }
     let atlas_bytes = render

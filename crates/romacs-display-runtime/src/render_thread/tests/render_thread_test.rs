@@ -859,7 +859,7 @@ fn installing_frame_emits_activation_before_replaced_presentation_retirement() {
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
         true,
     );
-    let primary = crate::paint_host::PRIMARY_FRAME;
+    let primary = crate::paint_host::INITIAL_FRAME;
     app.frame_windows.adopt_primary_frame_id(primary);
 
     app.ingest_paint(presentation_frame(primary, 0, 41).into());
@@ -1022,7 +1022,7 @@ fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
     let mut app = RenderApp::new(render, 800, 600, "test".to_string(),
         Arc::new(crate::render_thread::ImageRenderState::default()),
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())), true);
-    let id = crate::paint_host::PRIMARY_FRAME;
+    let id = crate::paint_host::INITIAL_FRAME;
     let frame = |presentation: u64, blinked_off: bool| {
         let mut frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
         frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);

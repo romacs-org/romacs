@@ -39,6 +39,10 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+;; What the hints read of functions no defsubr classifies (its `pure'),
+;; loaded before any file the lint loads: a file can leave the machine
+;; unable to load a library after it, as the loadup bootstrap does.
+(require 'byte-opt nil t)
 
 (defconst romacs-lint--function-binders
   '(defun defmacro defsubst defalias cl-defun cl-defmacro cl-defgeneric
@@ -366,7 +370,7 @@ VISITING are the functions being judged."
 (defun romacs-lint--worker-hints (definitions callees)
   "Hints for each of DEFINITIONS, (LINE . NAME), that can run in a worker:
 a function of some size that reaches no machine state, by CALLEES."
-  (and (fboundp 'isolate-spawn) (fboundp 'romacs--subr-effect) (require 'byte-opt nil t)
+  (and (fboundp 'isolate-spawn) (fboundp 'romacs--subr-effect) (featurep 'byte-opt)
        (cl-loop for (line . name) in definitions
                 when (and (> (length (cdr (assq name callees))) 7)
                           (romacs-lint--stateless-p name callees))

@@ -18,6 +18,8 @@ mod indent_guides_test;
 mod menu_test;
 #[path = "offscreen_frame/opacity_test.rs"]
 mod opacity_test;
+#[path = "offscreen_frame/root_picture_test.rs"]
+mod root_picture_test;
 use romacs_display_protocol::frame_chrome::PresentationId;
 use romacs_display_protocol::frame_glyphs::{
     CursorStyle, DisplaySlotId, FrameGlyph, FrameGlyphBuffer, GlyphRowRole, PhysCursor,

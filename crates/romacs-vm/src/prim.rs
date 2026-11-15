@@ -1988,6 +1988,8 @@ mod leaf {
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
+    mod labeled_restrictions;
+    mod hash_walk;
     mod width;
     pub(crate) mod graphics;
     mod coding_safe;

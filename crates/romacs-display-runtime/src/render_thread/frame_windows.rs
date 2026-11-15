@@ -2543,8 +2543,7 @@ impl GuiFrameWindowManager {
             render.reported_presentation = 0;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
-            render.compositor.retained_root = None;
-            render.compositor.last_root_key = None;
+            render.compositor.root_picture = None;
             // Composition ring plus every running transition's leased
             // source picture.
             clear_frame_transition_textures(&mut render.compositor.transitions);

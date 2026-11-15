@@ -65,7 +65,7 @@ pub(super) static RETAINED_STATIC_BUILDS: AtomicU64 = AtomicU64::new(0);
 /// Frames served by the retained-static composite fast path (blit + cursor,
 /// no glyph pipeline).
 pub(super) static COMPOSITE_ONLY_FRAMES: AtomicU64 = AtomicU64::new(0);
-/// Root glyph passes served by blitting the retained root picture.
+/// Root glyph passes the root picture served without repainting any of it.
 pub(super) static RETAINED_ROOT_BLITS: AtomicU64 = AtomicU64::new(0);
 /// Full-frame textures the GPU budget refused. Each one costs that frame its
 /// offscreen composition (so its transitions and pane motion) or its post

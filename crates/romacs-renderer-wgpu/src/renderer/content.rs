@@ -240,6 +240,7 @@ impl WgpuRenderer {
 
         let mut stats = GlyphRenderStats::new();
         stats.total_frame_glyphs = frame.glyphs.len();
+        crate::cost::add(crate::cost::GLYPHS_WALKED, frame.glyphs.len());
         let mut seen_single_keys: HashSet<GlyphKey> = HashSet::new();
         let mut seen_composed_keys: HashSet<ComposedGlyphKey> = HashSet::new();
         let faces = &frame.faces;
@@ -1770,6 +1771,7 @@ impl WgpuRenderer {
         stats.cache_hits = glyph_atlas.cache_hits_this_frame;
         stats.cache_misses = glyph_atlas.cache_misses_this_frame;
         stats.glyph_texture_uploads = glyph_atlas.cache_misses_this_frame;
+        glyph_atlas.count_font_identities();
         stats.log_if_enabled();
 
         #[cfg(feature = "video")]

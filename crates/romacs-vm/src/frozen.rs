@@ -102,6 +102,30 @@ impl Backing {
     }
 }
 
+/// The VM's frozen regions by id. Id 0 is the VM's own heap and never a
+/// region, so a VM starts with that slot alone, and holds that at rest:
+/// what a restored VM remakes (`romacs_snapshot::Schema::renew`).
+pub(crate) struct Regions(Vec<Option<Box<Region>>>);
+
+impl Default for Regions {
+    fn default() -> Self {
+        Self(vec![None])
+    }
+}
+
+impl std::ops::Deref for Regions {
+    type Target = Vec<Option<Box<Region>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Regions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// A region attached to this VM: decoded once, never written again.
 pub(crate) struct Region {
     pub(crate) conses: Vec<(Value, Value)>,

@@ -34,7 +34,7 @@ pub fn consider(vm: &mut Vm, sender: &romacs_display_runtime::paint_host::PaintS
     let shown = host.borrow().window_shown();
     if let Some(server) = host.borrow_mut().server.as_mut() { server.title = title.clone(); }
     if crate::diagnostics() { eprintln!("{}", serde_json::json!({"window_title": title})); }
-    if shown { let _ = sender.set_title(title); }
+    if shown { let _ = sender.set_title(romacs_display_runtime::paint_host::INITIAL_FRAME, title); }
 }
 
 /// The title's text.  One that does not read back as text (raw bytes)

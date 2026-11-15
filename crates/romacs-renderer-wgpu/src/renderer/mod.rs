@@ -57,6 +57,8 @@ mod pattern_effects;
 mod pointer_override;
 mod resources;
 mod row_reuse;
+mod root_picture;
+pub use root_picture::{Painted, PaintTarget, RootPicture};
 mod scene_placements;
 mod scissor;
 mod snapshot_pool;
