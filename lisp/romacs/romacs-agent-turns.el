@@ -144,8 +144,8 @@ they came.  The number written."
 
 (defun romacs-agent-turns-fill-batch ()
   "`romacs-agent-turns-fill' for the sessions the command line names (all
-recorded ones, with none) whose records go on past their rows, in a
-batch process."
+recorded ones, with none), in a batch process: each fills from where its
+rows end, nothing when its records end there too."
   (let ((written 0) (t0 (float-time))
         (ids (prog1 command-line-args-left (setq command-line-args-left nil))))
     (dolist (dir (if ids (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
@@ -154,9 +154,10 @@ batch process."
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
           (romacs-agent--load dir))
         (when-let* ((session (romacs-agent-get (file-name-nondirectory dir))))
-          (when (> (romacs-agent-seq session) (or (romacs-agent-turns--last session) 0))
-            (setq written (+ written (condition-case err (romacs-agent-turns-fill session)
-                                       (error (message "romacs-agent-turns: %s: %s" dir (error-message-string err)) 0)))))
+          ;; Whether records came since its rows is the records' to say: a
+          ;; session loaded beside its running supervisor has an older seq.
+          (setq written (+ written (condition-case err (romacs-agent-turns-fill session)
+                                     (error (message "romacs-agent-turns: %s: %s" dir (error-message-string err)) 0))))
           (remhash (romacs-agent-id session) romacs-agent--sessions))))
     (princ (format "romacs-agent-turns: %d turns written in %.0f s\n" written (- (float-time) t0)))))
 

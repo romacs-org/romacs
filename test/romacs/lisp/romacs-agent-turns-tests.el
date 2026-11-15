@@ -91,7 +91,15 @@ call and result, an answer and a result a turn."
             (should (= (romacs-agent-turns-count session) 9))
             (should (= (romacs-agent-turns-fill session) 3))
             (should (= (romacs-agent-turns-count session) 12))
-            (should (= (romacs-agent-turns-fill session) 0))))
+            (should (= (romacs-agent-turns-fill session) 0))
+            ;; A batch's session loaded with an older seq than its records
+            ;; (its supervisor running): its rows are caught up all the same.
+            (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq > 52" (list id))
+            (cl-letf (((symbol-function 'romacs-agent--load)
+                       (lambda (_dir) (setf (romacs-agent-seq session) 46) (puthash id session romacs-agent--sessions)))
+                      ((symbol-function 'princ) #'ignore))
+              (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
+            (should (= (romacs-agent-turns-count session) 12))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
