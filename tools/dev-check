@@ -8,7 +8,7 @@
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
   agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
-  lint        tools/romacs-lint on the files of lisp/romacs the change touches:
+  lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
   tests       the Rust tests the change can reach, by tools/lib/impact.py (the
@@ -43,6 +43,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 import agents_md  # noqa: E402
+import lisp_layout  # noqa: E402
 import generated_files  # noqa: E402
 import impact  # noqa: E402
 import test_modules  # noqa: E402
@@ -164,8 +165,11 @@ def agents(root):
 # The lint.
 
 def lisp_files(names, root):
-    """The files of Romacs's own Lisp among the changed paths NAMES that ROOT still has."""
-    return sorted(name for name in names if name.startswith('lisp/romacs/') and name.endswith('.el') and (root / name).is_file())
+    """The runtime Lisp among the changed paths NAMES that ROOT still has: every .el under
+    lisp/ but the bundled packages' (the lint reports only what the change adds)."""
+    packages = 'lisp/' + lisp_layout.layout(root)['packages'] + '/'
+    return sorted(name for name in names if name.startswith('lisp/') and name.endswith('.el')
+                  and not name.startswith(packages) and (root / name).is_file())
 
 
 def lint_stage(status, output, errors):
@@ -188,7 +192,7 @@ def lint(root, names, trunk, binary):
     what the branch adds since its merge-base with TRUNK, the base the paths were taken from."""
     files = lisp_files(names, root)
     if not files:
-        return 'ok', 'no file of lisp/romacs changed', []
+        return 'ok', 'no runtime Lisp file changed', []
     base = git(root, 'merge-base', 'HEAD', trunk).stdout.strip()
     done = subprocess.run(lint_command(root, files, base, binary), cwd=root, capture_output=True, text=True,
                           errors='replace', stdin=subprocess.DEVNULL)

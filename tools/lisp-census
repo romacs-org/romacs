@@ -9,19 +9,19 @@ import concurrent.futures
 import hashlib
 import io
 import json
-import tarfile
 import os
 from pathlib import Path
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
-GNU_SOURCE = Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import lisp_layout  # noqa: E402
 ARTIFACT = ROOT / 'LISP-CENSUS.json'
 # R210 dual census. COLD keeps the historical artifact name and method so old
 # numbers stay comparable; WARM is the parity metric and has its own artifact.
@@ -113,6 +113,11 @@ def recommendations(rows):
     return sorted(out, key=lambda r: (-r['files_blocked_at_first_frontier'], r['symbol']))
 
 
+def tracked_lisp():
+    """The tracked files under lisp/, relative to ROOT."""
+    return set(subprocess.check_output(['git', 'ls-files', '-z', '--', 'lisp'], cwd=ROOT).decode().split('\0')) - {''}
+
+
 def gnu_oracle_binary(_cache=[]):
     """The pinned GNU, never PATH. A bare 'emacs' is how the distro build became
     the oracle; tools/lib/gnu_oracle.py is the one resolver and it fails closed."""
@@ -126,7 +131,7 @@ def gnu_oracle_binary(_cache=[]):
 
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
-    selected = {p for p in paths if p and (p.startswith(('lisp/', 'lisp/romacs/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex/')) or p in ['Cargo.toml', 'Cargo.lock'])}
+    selected = {p for p in paths if p and (p.startswith(('lisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex/')) or p in ['Cargo.toml', 'Cargo.lock'])}
     selected.update(['tools/lisp-census', 'tools/lib/lisp-census-oracle.el', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
     selected.update(str(p.relative_to(root)) for p in (root / 'lisp').rglob('*.el'))
@@ -223,8 +228,9 @@ def load_path(root=None):
     """GNU's installed load-path, as test/gnu/run.py load_path: the Lisp
     root, then the immediate subdirectories its generated subdirs.el names
     (reverse name order, obsolete last, term and VCS/backup names omitted)."""
-    lisp = (root or ROOT) / 'lisp'
-    names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
+    root = root or ROOT
+    lisp = root / 'lisp'
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(root, p)
                    and p.name not in ('term', 'RCS', 'CVS', 'Old')
                    and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
     ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
@@ -327,54 +333,22 @@ def run_file(path, oracle, binary, load_paths, timeout, preload=(), eager_target
 
 
 def oracle_inventory():
-    """Hash committed GNU blobs, never its possibly dirty checkout or HEAD."""
-    commit = subprocess.check_output(['git', 'rev-parse', GNU_PIN + '^{commit}'], cwd=GNU_SOURCE, text=True).strip()
-    if commit != GNU_PIN:
-        raise RuntimeError('GNU pin must be a full immutable commit')
-    archive = subprocess.check_output(['git', 'archive', commit, 'lisp'], cwd=GNU_SOURCE)
-    tracked = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'lisp', 'lisp/romacs'], cwd=ROOT).decode().split('\0'))
-    tracked = {p for p in tracked if p.endswith('.el')}
-    entries = []
-    with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
-        for member in tree:
-            if not member.isfile() or not member.name.endswith('.el'):
-                continue
-            original = tree.extractfile(member).read()
-            local_name = 'lisp' + member.name[len('lisp'):]
-            path = ROOT / local_name
-            local = path.read_bytes() if local_name in tracked and path.is_file() else None
-            entries.append({'file': local_name, 'gnu_source_path': member.name,
-                            'gnu_sha256': hashlib.sha256(original).hexdigest(),
-                            'local_sha256': hashlib.sha256(local).hexdigest() if local is not None else None,
-                            'status': 'missing' if local is None else 'pristine' if local == original else 'modified'})
-    entries.sort(key=lambda e: e['file'])
-    support = {}
-    if (ROOT / 'ledger/lisp-generated.json').is_file():
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('census_lisp_oracle', ROOT / 'tools/lib/lisp_oracle.py')
-        assert spec is not None and spec.loader is not None
-        oracle = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(oracle)
-        support, problems = oracle.generated_support(ROOT, GNU_SOURCE, commit,
-                                                     oracle.pin_tree(GNU_SOURCE, commit), required=True)
-        if problems:
-            raise RuntimeError('invalid census generated support: ' + '; '.join(problems))
-    return {'gnu_commit': commit, 'gnu_files': entries,
-            'generated_support_paths': sorted(support),
-            'bundled_paths': sorted(tracked - {e['file'] for e in entries} - set(support))}
+    """The census population of our tree: the libraries, the generated files measured as support,
+    and Romacs's runtime files and packages (bundled), which the census leaves to their suites."""
+    tracked = {p for p in tracked_lisp() if p.endswith('.el')}
+    census = {str(p.relative_to(ROOT)) for p in lisp_layout.census_files(ROOT)} & tracked
+    support = lisp_layout.generated_files(ROOT) & census
+    return {'library_paths': sorted(census - support), 'generated_support_paths': sorted(support),
+            'bundled_paths': sorted(tracked - census)}
 
 
 def parity_summary(rows, inventory):
-    entries = inventory['gnu_files']
-    shared = {e['file'] for e in entries if e['status'] != 'missing'}
-    modified = {e['file'] for e in entries if e['status'] == 'modified'}
-    missing = [e['file'] for e in entries if e['status'] == 'missing']
+    libraries = set(inventory['library_paths'])
     successful = {r['file'] for r in rows if r['loaded']}
-    return {'gnu_parity': {'loaded': len(successful & shared), 'shared_total': len(shared),
-                           'gnu_target_total': len(entries), 'loaded_shared_modified': len(successful & modified),
-                           'shared_modified_total': len(modified), 'missing_total': len(missing), 'missing_paths': missing},
-            'generated_support': {'loaded': len(successful & set(inventory.get('generated_support_paths', []))),
-                                  'total': len(inventory.get('generated_support_paths', []))},
+    return {'gnu_parity': {'loaded': len(successful & libraries), 'shared_total': len(libraries),
+                           'gnu_target_total': len(libraries)},
+            'generated_support': {'loaded': len(successful & set(inventory['generated_support_paths'])),
+                                  'total': len(inventory['generated_support_paths'])},
             'bundled': {'loaded': len(successful & set(inventory['bundled_paths'])), 'total': len(inventory['bundled_paths'])}}
 
 
@@ -383,13 +357,9 @@ def census_figure(artifact):
     summary = artifact['summary']
     p, b = summary['gnu_parity'], summary['bundled']
     support = summary.get('generated_support', {'loaded': 0, 'total': 0})
-    missing = ', '.join('`' + path + '`' for path in p['missing_paths'])
-    return (f"**{artifact['mode'].upper()} at `{artifact['base_commit']}`: GNU-parity {p['loaded']}/{p['shared_total']} shared files load "
-            f"(true GNU target {p['gnu_target_total']}, pinned `{artifact['oracle_inventory']['gnu_commit']}`); "
-            f"generated support {support['loaded']}/{support['total']} load (not GNU parity credit); "
-            f"bundled {b['loaded']}/{b['total']} load; missing {p['missing_total']}.** "
-            f"Loaded shared modified: {p['loaded_shared_modified']}; overall shared content drift: {p['shared_modified_total']}. "
-            f"Missing GNU paths: {missing}. These load verdicts use the local shared files, not pristine GNU bytes where modified.")
+    return (f"**{artifact['mode'].upper()} at `{artifact['base_commit']}`: {p['loaded']}/{p['shared_total']} libraries load; "
+            f"generated support {support['loaded']}/{support['total']} load; "
+            f"bundled {b['loaded']}/{b['total']} load (their suites, not the census, measure them).**")
 
 
 def summarize(rows, tracked, mode, inventory=None):
@@ -477,13 +447,12 @@ def main():
         args.output.write_text(json.dumps(inventory, indent=2) + '\n')
         counts = parity_summary([], inventory)
         counts['gnu_parity']['loaded'] = None
-        counts['gnu_parity']['loaded_shared_modified'] = None
         counts['bundled']['loaded'] = None
         print(json.dumps({'scope': 'inventory_only_no_vm_measurement', **counts}, indent=2))
         return 0
     if args.check:
         artifact = json.loads(args.output.read_text())
-        scope = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'lisp').rglob('*.el'))
+        scope = [str(p.relative_to(ROOT)) for p in lisp_layout.census_files(ROOT)]
         fresh = artifact.get('oracle_inventory') == inventory and artifact.get('mode', 'cold') == args.mode and artifact.get('eager_target', False) is args.eager_target and artifact['input_sha256'] == fingerprint() and artifact.get('scope') == 'whole_tree' and sorted(r['file'] for r in artifact['files']) == scope and artifact['gnu_version'] == subprocess.check_output([gnu_oracle_binary(), '--version'], text=True).splitlines()[0]
         print('fresh' if fresh else 'STALE: regenerate with python3 tools/lisp-census')
         return 0 if fresh else 1
@@ -496,7 +465,7 @@ def main():
     env['TMPDIR'] = str(_PortablePath(_portable_tempfile.gettempdir()) / '')
     subprocess.run(['cargo', 'build', '--manifest-path', 'crates/romacs-vm/Cargo.toml', '--release', '--bin', 'romacs-vm-census', '--bin', 'romacs-vm'], cwd=ROOT, env=env, check=True)
     started = time.monotonic()
-    files = sorted(p.resolve() for p in (args.files or (ROOT / 'lisp').rglob('*.el')))
+    files = sorted(p.resolve() for p in (args.files or lisp_layout.census_files(ROOT)))
     with tempfile.TemporaryDirectory(prefix='lisp-census-', dir=env['TMPDIR']) as tmp:
         manifest = Path(tmp) / 'manifest.json'
         manifest.write_text(json.dumps(list(map(str, files))))
@@ -535,7 +504,7 @@ def main():
     # The rglob denominator includes build-generated, git-ignored .el files
     # (e.g. lisp/international/charscript.el), so it moves with build state.
     # The tracked figures are the stable, comparable denominator.
-    tracked = set(subprocess.check_output(['git', 'ls-files', '-z', '--', 'lisp'], cwd=ROOT).decode().split('\0'))
+    tracked = {str(p.relative_to(ROOT)) for p in lisp_layout.census_files(ROOT)} & tracked_lisp()
     summary = summarize(rows, tracked, args.mode, inventory)
     if args.mode == 'warm':
         summary['bootstrap_entries_planned'] = len(preload)

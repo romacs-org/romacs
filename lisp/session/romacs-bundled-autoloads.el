@@ -9,11 +9,16 @@
 ;; defines their autoloads, as `package-activate-all' loads installed
 ;; packages' autoload files before site and user init.
 ;;
-;; Each directory lisp/bundled.json declares (a root, then its immediate
-;; subdirectories but the excluded ones, in `load-path' order) is scanned
-;; with GNU's own scraper, `loaddefs-generate--parse-file', as package.el
-;; scans an installed package: the package's own directory holds the
-;; output, so each autoload names its library by bare load name.  The
+;; Romacs's runtime files and the bundled packages are scanned, directory
+;; by directory in
+;; `load-path' order, with GNU's own scraper, `loaddefs-generate--parse-file',
+;; as package.el scans an installed package: the file's own directory holds
+;; the output, so each autoload names its library by bare load name.
+;; Romacs's runtime files are those in its subsystem directories, every
+;; `romacs-' file elsewhere on the load-path, and the files lisp/bundled.json
+;; `files' names (tools/lib/lisp_layout.py is_scanned holds the same rule);
+;; their cookies run here, after loadup.  Every other file's autoloads are in
+;; the loaddefs files tools/lisp-loaddefs makes, which loadup loads.  The
 ;; forms are evaluated in the order the loaddefs file `loaddefs-generate'
 ;; would write holds them; nothing is written.
 ;;
@@ -36,24 +41,56 @@
 (require 'cl-lib)
 (require 'loaddefs-gen)
 
+;; The layout is read here, not from Rust: the installed copy may differ.
+(defun romacs-bundled-autoloads--layout (root)
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "lisp/bundled.json" root))
+    (json-parse-buffer :object-type 'alist :array-type 'list)))
+
+(defun romacs-bundled-autoloads--subdirectories (dir)
+  (cl-remove-if-not #'file-directory-p
+                    (directory-files dir t directory-files-no-dot-files-regexp)))
+
+(defun romacs-bundled-autoloads--path (root)
+  "The load-path directories under ROOT, the runtime root, in order: lisp/,
+GNU's directories, Romacs's subsystem directories, then each package."
+  (let* ((layout (romacs-bundled-autoloads--layout root))
+         (lisp (expand-file-name "lisp" root))
+         (own (append (alist-get 'directories layout) (alist-get 'off_path layout)
+                      (list (alist-get 'packages layout))))
+         (packages (expand-file-name (alist-get 'packages layout) lisp)))
+    (append (list lisp)
+            (cl-remove-if (lambda (dir) (member (file-name-nondirectory dir) own))
+                          (romacs-bundled-autoloads--subdirectories lisp))
+            (cl-remove-if-not #'file-directory-p
+                              (mapcar (lambda (name) (expand-file-name name lisp))
+                                      (alist-get 'directories layout)))
+            (and (file-directory-p packages)
+                 (romacs-bundled-autoloads--subdirectories packages)))))
+
+(defun romacs-bundled-autoloads--scan (root)
+  "((DIR . FILES) ...): the directories under ROOT with files to scan, in
+`load-path' order: all of a Romacs directory's or a package's files, and in
+the others only `romacs-' files and those lisp/bundled.json `files' names."
+  (let* ((layout (romacs-bundled-autoloads--layout root))
+         (lisp (expand-file-name "lisp" root))
+         (own (mapcar (lambda (name) (expand-file-name name lisp)) (alist-get 'directories layout)))
+         (packages (expand-file-name (alist-get 'packages layout) lisp))
+         (named (mapcar (lambda (file) (expand-file-name file root)) (alist-get 'files layout))))
+    (cl-loop for dir in (romacs-bundled-autoloads--path root)
+             for whole = (or (member dir own) (equal (file-name-directory (directory-file-name dir))
+                                                     (file-name-as-directory packages)))
+             for files = (cl-remove-if-not
+                          (lambda (file)
+                            (or whole (string-prefix-p "romacs-" (file-name-nondirectory file))
+                                (member file named)))
+                          (romacs-bundled-autoloads--files dir))
+             when files collect (cons dir files))))
+
 (defun romacs-bundled-autoloads-directories (root)
-  "The bundled package directories under ROOT, the runtime root.
-Each root lisp/bundled.json declares, then its immediate subdirectories
-but the excluded ones, sorted: the order they follow GNU's `load-path' in."
-  (let ((layout (with-temp-buffer
-                  (insert-file-contents (expand-file-name "lisp/bundled.json" root))
-                  (json-parse-buffer :object-type 'alist :array-type 'list)))
-        (found nil))
-    (dolist (entry (alist-get 'roots layout))
-      (let ((base (expand-file-name (alist-get 'path entry) root)))
-        (when (file-directory-p base)
-          (push base found)
-          (dolist (name (directory-files base nil directory-files-no-dot-files-regexp))
-            (let ((sub (expand-file-name name base)))
-              (when (and (file-directory-p sub)
-                         (not (member name (alist-get 'exclude entry))))
-                (push sub found)))))))
-    (nreverse found)))
+  "The directories under ROOT, the runtime root, whose files the scan reads,
+in the order they follow GNU's `load-path' in."
+  (mapcar #'car (romacs-bundled-autoloads--scan root)))
 
 (defun romacs-bundled-autoloads--files (dir)
   "DIR's Lisp files `loaddefs-generate' scans, by library name."
@@ -107,10 +144,10 @@ notices would go to; the notices are not shown either."
            (before-change-functions nil)
            (message-log-max nil)
            (inhibit-message t)
-           (dirs (romacs-bundled-autoloads-directories root))
-           (files (mapcar #'romacs-bundled-autoloads--files dirs))
-           (loaddefs--load-error-files (apply #'append files)))
-      (apply #'append (cl-mapcar #'romacs-bundled-autoloads--forms dirs files)))))
+           (scan (romacs-bundled-autoloads--scan root))
+           (loaddefs--load-error-files (apply #'append (mapcar #'cdr scan))))
+      (apply #'append (mapcar (lambda (entry) (romacs-bundled-autoloads--forms (car entry) (cdr entry)))
+                              scan)))))
 
 (dolist (form (romacs-bundled-autoloads-forms
                (expand-file-name "../.." (file-name-directory (or load-file-name buffer-file-name)))))

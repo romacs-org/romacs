@@ -38,7 +38,7 @@ fn explicit_interactive_marker_preserves_slots_and_spec() {
 
 fn load_gnu_generic(vm: &mut Vm) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let paths = ["lisp", "lisp/emacs-lisp", "lisp/progmodes", "lisp/international", "lisp/textmodes", "lisp/romacs"]
+    let paths = ["lisp", "lisp/emacs-lisp", "lisp/progmodes", "lisp/international", "lisp/textmodes"]
         .map(|path| format!("{:?}", root.join(path).to_str().unwrap())).join(" ");
     vm.eval_source(&format!("(setq load-path '({paths}))")).unwrap();
     for file in [

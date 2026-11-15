@@ -227,7 +227,7 @@ loading that file leaves the one that loads it changed."
          (status nil))
     (skip-unless (and root (file-exists-p file)))
     (with-temp-buffer
-      (setq status (call-process host nil t nil "-Q" "--batch" "-L" (expand-file-name "lisp/romacs" root)
+      (setq status (call-process host nil t nil "-Q" "--batch" "-L" (expand-file-name "lisp/emacs-lisp" root)
                                  "-l" "romacs-lint" "-f" "romacs-lint-batch" file))
       (should (memq status '(0 1)))
       (goto-char (point-min))

@@ -107,22 +107,22 @@ class Forecast(unittest.TestCase):
 
 
 class Lint(unittest.TestCase):
-    def test_only_our_lisp_that_is_still_there_is_linted(self):
-        names = {'lisp/emacs-lisp/romacs-lint.el', 'lisp/romacs/romacs-deleted-by-the-change.el', 'lisp/simple.el',
-                 'lisp/romacs/README', 'crates/romacs-vm/src/gc.rs'}
-        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el'])
+    def test_runtime_lisp_that_is_still_there_is_linted(self):
+        names = {'lisp/emacs-lisp/romacs-lint.el', 'lisp/session/romacs-deleted-by-the-change.el', 'lisp/simple.el',
+                 'lisp/session/README', 'crates/romacs-vm/src/gc.rs', 'lisp/packages/jabber/jabber.el'}
+        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el', 'lisp/simple.el'])
 
     def test_the_lint_is_given_the_base_the_paths_came_from(self):
         # Left to itself the lint compares with beta, whatever trunk was asked for.
-        command = check.lint_command(ROOT, ['lisp/romacs/a.el'], 'abc123', '/x/romacs-vm-gui')
-        self.assertEqual(command[2:], [str(ROOT / 'tools/romacs-lint'), '--base', 'abc123', '--binary', '/x/romacs-vm-gui', 'lisp/romacs/a.el'])
-        self.assertNotIn('--binary', check.lint_command(ROOT, ['lisp/romacs/a.el'], 'abc123', None))
+        command = check.lint_command(ROOT, ['lisp/session/a.el'], 'abc123', '/x/romacs-vm-gui')
+        self.assertEqual(command[2:], [str(ROOT / 'tools/romacs-lint'), '--base', 'abc123', '--binary', '/x/romacs-vm-gui', 'lisp/session/a.el'])
+        self.assertNotIn('--binary', check.lint_command(ROOT, ['lisp/session/a.el'], 'abc123', None))
 
     def test_the_lints_closing_line_is_the_summary(self):
-        output = "lisp/romacs/a.el:3: error: in f: `g' is not defined; fix: require its library\nromacs-lint: 1 file, 1 error, 0 warnings, 0 hints new since abc\n"
+        output = "lisp/session/a.el:3: error: in f: `g' is not defined; fix: require its library\nromacs-lint: 1 file, 1 error, 0 warnings, 0 hints new since abc\n"
         self.assertEqual(check.lint_stage(1, output, ''),
                          ('FAIL', '1 file, 1 error, 0 warnings, 0 hints new since abc',
-                          ["lisp/romacs/a.el:3: error: in f: `g' is not defined; fix: require its library"]))
+                          ["lisp/session/a.el:3: error: in f: `g' is not defined; fix: require its library"]))
         self.assertEqual(check.lint_stage(0, 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints\n', ''),
                          ('ok', '1 file, 0 errors, 0 warnings, 0 hints', []))
 

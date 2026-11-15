@@ -577,7 +577,7 @@ pub fn load_path(vm: &mut Vm) -> Result<Vec<String>, String> {
 /// Non-C GNU builds can order mixed-case/punctuation names differently,
 /// changing load-path precedence; the pin's names agree under en_US.UTF-8
 /// (measured, LOADUP.md).
-pub fn update_subdirs(dir: &Path) -> Result<SubdirsEl, String> {
+pub fn update_subdirs(dir: &Path, skip: &[String]) -> Result<SubdirsEl, String> {
     use std::os::unix::ffi::OsStrExt;
     let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?
         .map(|e| e.map(|e| e.file_name()).map_err(|e| e.to_string()))
@@ -589,7 +589,7 @@ pub fn update_subdirs(dir: &Path) -> Result<SubdirsEl, String> {
         let b = file.as_bytes();
         let skipped = [&b".elc"[..], b".el", b"~", b".orig", b".rej"].iter().any(|s| b.ends_with(s))
             || [&b"term"[..], b"RCS", b"CVS", b"Old"].contains(&b) || b.starts_with(b"=");
-        if skipped || !dir.join(&file).is_dir() { continue; }
+        if skipped || skip.iter().any(|s| s.as_bytes() == b) || !dir.join(&file).is_dir() { continue; }
         if !portable(b) { odd.push(file.to_string_lossy().into_owned()); continue; }
         let file = file.to_string_lossy().into_owned();
         // ONE decision per name for both the text and the names.
@@ -644,10 +644,16 @@ fn gnu_subdirs_el(lisp: &Path, dir: &Path) -> SubdirsEl {
     if !rel.components().all(|c| portable(c.as_os_str().as_bytes())) {
         return SubdirsEl::Unsupported(format!("directory {} is outside the reproduced domain", rel.display()));
     }
+    // GNU's build sees GNU's tree: Romacs's own directories of lisp/ (lisp/bundled.json)
+    // are no GNU directory, and follow GNU's on load-path by their own rule.
+    let own = crate::startup::own_directories().unwrap_or_default();
+    if rel.components().next().is_some_and(|c| own.iter().any(|o| c.as_os_str() == o.as_str())) {
+        return SubdirsEl::None;
+    }
     let rel = rel.to_string_lossy();
     if rel.starts_with("cedet") || rel.starts_with("leim") { return SubdirsEl::None; }
     // An unreadable directory: the script's `cd` fails and writes nothing.
-    update_subdirs(&real).unwrap_or(SubdirsEl::None)
+    update_subdirs(&real, if rel.is_empty() { &own } else { &[] }).unwrap_or(SubdirsEl::None)
 }
 
 /// GNU's `normal-top-level-add-to-load-path` (startup.el:472-486): find
@@ -820,10 +826,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_nested_file_is_named_from_gnus_lisp_directory() {
-        let gnu = Path::new("/usr/share/romacs/lisp");
-        assert_eq!(nested_name("/usr/share/romacs/lisp/emacs-lisp/pcase.el", gnu), "emacs-lisp/pcase.el");
-        assert_eq!(nested_name("/usr/share/romacs/lisp/emacs-lisp/romacs-test.el", gnu), "/usr/share/romacs/lisp/emacs-lisp/romacs-test.el");
+    fn a_nested_file_is_named_from_the_lisp_directory() {
+        let lisp = Path::new("/usr/share/romacs/lisp");
+        assert_eq!(nested_name("/usr/share/romacs/lisp/emacs-lisp/pcase.el", lisp), "emacs-lisp/pcase.el");
+        assert_eq!(nested_name("/usr/share/romacs/lisp/emacs-lisp/romacs-test.el", lisp), "emacs-lisp/romacs-test.el");
+        assert_eq!(nested_name("/home/u/.emacs.d/init.el", lisp), "/home/u/.emacs.d/init.el");
     }
 
     #[test]
@@ -1090,7 +1097,7 @@ fn subdirs_el_text(list: &str) -> String {
         for name in ["Zed", "abc", "a-c", "ab"] {
             std::fs::create_dir_all(dir.join(name)).unwrap();
         }
-        let actual = update_subdirs(&dir).unwrap();
+        let actual = update_subdirs(&dir, &[]).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(actual, SubdirsEl::File {
             list: "\"abc\" \"ab\" \"a-c\" \"Zed\" ".into(),
@@ -1101,7 +1108,7 @@ fn subdirs_el_text(list: &str) -> String {
     #[test]
     fn update_subdirs_writes_what_gnus_script_writes() {
         let lisp = subdirs_fixture("script");
-        let text = |dir: &Path| match update_subdirs(dir).unwrap() {
+        let text = |dir: &Path| match update_subdirs(dir, &[]).unwrap() {
             SubdirsEl::File { list, .. } => Some(subdirs_el_text(&list)),
             SubdirsEl::None => None,
             other => panic!("{other:?}"),
@@ -1112,13 +1119,18 @@ fn subdirs_el_text(list: &str) -> String {
         assert_eq!(text(&lisp.join("b")).map(line3).as_deref(), Some(r#"(normal-top-level-add-to-load-path '("c" ))"#));
         assert_eq!(text(&lisp.join("empty")), None);
         // The script would write one in cedet/, but GNU's Makefile never runs it there.
-        assert_eq!(update_subdirs(&lisp.join("cedet")).unwrap(), SubdirsEl::File { list: "\"semantic\" ".into(), names: vec!["semantic".into()] });
+        assert_eq!(update_subdirs(&lisp.join("cedet"), &[]).unwrap(), SubdirsEl::File { list: "\"semantic\" ".into(), names: vec!["semantic".into()] });
         assert_eq!((gnu_subdirs_el(&lisp, &lisp.join("cedet")), gnu_subdirs_el(&lisp, &lisp.join("leim"))), (SubdirsEl::None, SubdirsEl::None));
         assert_eq!(gnu_subdirs_el(&lisp, &lisp.parent().unwrap().join("elsewhere")), SubdirsEl::None);
         std::fs::remove_dir_all(lisp.ancestors().nth(2).unwrap()).unwrap();
-        // This tree's lisp/: GNU's script output on the pin's directories
+        // This tree's lisp/: GNU's script output on the pin's directories, Romacs's own
+        // directories left out as gnu_subdirs_el leaves them
         // (sha256 c706f2735d0d95e1b5834cabed47c9815ef07632a8bf1021afa6945081f3cb23).
-        let ours = text(&crate::startup::lisp_dir().canonicalize().unwrap()).unwrap();
+        let real = crate::startup::lisp_dir().canonicalize().unwrap();
+        let ours = match gnu_subdirs_el(&real, &real) {
+            SubdirsEl::File { list, .. } => subdirs_el_text(&list),
+            other => panic!("{other:?}"),
+        };
         assert_eq!(ours, concat!(
             ";; In load-path, after this directory should come  -*- lexical-binding: t -*-\n",
             ";; certain of its subdirectories.  Here we specify them.\n",

@@ -767,7 +767,7 @@ const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
 /// own directory or absolute.
 pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 
-/// The runtime tree (lisp/, lisp/romacs/, etc/), found from where the
+/// The runtime tree (lisp/, etc/), found from where the
 /// executable is, never from where it was once built:
 ///   1. `ROMACS_RUNTIME_ROOT`, said outright (the Nix wrapper sets it);
 ///   2. `share/romacs` beside the executable's `bin/` (an installation, or an

@@ -257,9 +257,9 @@ mod tests {
     #[test]
     fn the_world_holds_the_bootstrap_and_its_tree() {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let tree = paths(&["/r/lisp/session/romacs-loadup-bootstrap.el", "/r/lisp/help-fns.el", "/r/lisp/emacs-lisp/romacs-cl-print.el", "/case/setup.el", "/r/lisp/romacs/x.el"]);
+        let tree = paths(&["/r/lisp/session/romacs-loadup-bootstrap.el", "/r/lisp/help-fns.el", "/r/lisp/emacs-lisp/romacs-cl-print.el", "/case/setup.el", "/r/lisp/session/x.el"]);
         assert_eq!(world_preloads(&tree), 3);
-        assert_eq!(world_preloads(&paths(&["/r/lisp/romacs/x.el"])), 0);
+        assert_eq!(world_preloads(&paths(&["/r/lisp/session/x.el"])), 0);
         assert_eq!(world_preloads(&[]), 0);
     }
 
@@ -268,11 +268,11 @@ mod tests {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
         let preload = paths(&["/r/lisp/session/romacs-loadup-bootstrap.el"]);
         // run.py's layout: the tree's entries, then the test's directory.
-        assert_eq!(world_load_path(&paths(&["/r/lisp", "/r/lisp/romacs", "/t/run-1"]), &preload), paths(&["/r/lisp", "/r/lisp/romacs"]));
+        assert_eq!(world_load_path(&paths(&["/r/lisp", "/r/lisp/session", "/t/run-1"]), &preload), paths(&["/r/lisp", "/r/lisp/session"]));
         // Another layout keys on the whole path, whose order a restore keeps.
-        let before = paths(&["/t/run-1", "/r/lisp", "/r/lisp/romacs"]);
+        let before = paths(&["/t/run-1", "/r/lisp", "/r/lisp/session"]);
         assert_eq!(world_load_path(&before, &preload), before);
-        let between = paths(&["/r/lisp", "/t/run-1", "/r/lisp/romacs"]);
+        let between = paths(&["/r/lisp", "/t/run-1", "/r/lisp/session"]);
         assert_eq!(world_load_path(&between, &preload), between);
         // A tree entry given twice: where the run's own go is unclear.
         let twice = paths(&["/r/a", "/r/b", "/r/a", "/t/run-1"]);

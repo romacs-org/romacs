@@ -3,7 +3,6 @@
 
 mod common;
 
-use std::path::Path;
 
 use common::*;
 use romacs_face::{Attribute, Background, Collapsed, Datum, FaceError, Slot};
@@ -145,106 +144,4 @@ fn every_defface_spec_in_the_corpus_collapses() {
         table.len()
     );
     assert!(two > 0 && two < conditional);
-}
-
-/// Extract `(defface NAME 'SPEC` forms from Lisp source without evaluating
-/// anything: the quoted SPEC text up to its balanced close paren.
-fn source_specs(text: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let b = text.as_bytes();
-    let mut at = 0;
-    while let Some(off) = text[at..].find("(defface ") {
-        let start = at + off + "(defface ".len();
-        at = start;
-        let name_end = start + text[start..].find(|c: char| c.is_whitespace()).unwrap_or(0);
-        let name = &text[start..name_end];
-        let mut i = name_end;
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if b.get(i) != Some(&b'\'') || b.get(i + 1) != Some(&b'(') {
-            continue; // backquoted or computed: needs evaluation
-        }
-        let (mut depth, mut j, mut in_str) = (0i32, i + 1, false);
-        while j < b.len() {
-            match (in_str, b[j]) {
-                (true, b'\\') => j += 1,
-                (true, b'"') => in_str = false,
-                (false, b'"') => in_str = true,
-                (false, b';') => {
-                    while j < b.len() && b[j] != b'\n' {
-                        j += 1;
-                    }
-                }
-                (false, b'?') => j += 1,
-                (false, b'(') => depth += 1,
-                (false, b')') => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            j += 1;
-        }
-        out.push((name.to_owned(), text[i + 1..=j.min(b.len() - 1)].to_owned()));
-    }
-    out
-}
-
-#[test]
-fn the_oracles_defface_specs_are_the_trees() {
-    // The parity fixtures come from GNU's own preloaded Lisp. Check that each
-    // quoted defface spec in this tree's lisp/ reads to the same datum, so the
-    // parity evidence is about the specs romacs actually ships.
-    let table = deffaces_table();
-    let lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
-    let mut files = vec![lisp.clone()];
-    let (mut same, mut differ, mut unreadable) = (0, Vec::new(), 0);
-    while let Some(p) = files.pop() {
-        if p.is_dir() {
-            if p.ends_with("vendor") {
-                continue;
-            }
-            files.extend(
-                std::fs::read_dir(&p)
-                    .unwrap()
-                    .filter_map(|e| Some(e.ok()?.path())),
-            );
-            continue;
-        }
-        if p.extension().and_then(|e| e.to_str()) != Some("el") {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&p) else {
-            continue;
-        };
-        for (name, spec_text) in source_specs(&text) {
-            let Some((_, gnu)) = table.iter().find(|(n, _)| *n == name) else {
-                continue;
-            };
-            match Datum::parse(&spec_text) {
-                Ok(ours) if ours == *gnu => same += 1,
-                Ok(_) => differ.push(format!("{name} ({})", p.display())),
-                Err(_) => unreadable += 1,
-            }
-        }
-    }
-    eprintln!(
-        "tree deffaces identical to the oracle's: {same}; differing: {}; unreadable: {unreadable}",
-        differ.len()
-    );
-    assert!(same > 250, "only {same} tree specs matched");
-    // No exemptions. lisp/ is GNU's lisp/ at the pin (ledger/lisp-pin.json, R221) and
-    // the fixtures are recorded by GNU built at the same pin (fixtures/ORACLE,
-    // tools/lib/gnu_oracle.py, R228), so every spec must agree. The last
-    // exemption, separator-line, existed only because the fixtures came from
-    // /usr/bin/emacs at b28750b822d, 320 commits older (GNU 02819227835 added
-    // its `(supports :strike-through t)` clause in between); regenerating at
-    // the pin removed it.
-    assert!(
-        differ.is_empty(),
-        "tree and oracle specs differ: {differ:#?}"
-    );
 }

@@ -66,7 +66,7 @@ fn scratch(name: &str) -> PathBuf {
     let unique = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("romacs-world-layer-{}-{unique}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("lisp/romacs")).unwrap();
+    std::fs::create_dir_all(dir.join("lisp/session")).unwrap();
     std::fs::create_dir_all(dir.join("lisp")).unwrap();
     for (name, text) in LIBRARIES {
         std::fs::write(dir.join(format!("lisp/{name}.el")), text).unwrap();

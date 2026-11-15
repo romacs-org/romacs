@@ -100,7 +100,7 @@ fn a_missing_explicit_init_file_is_an_error() {
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing-init.el");
     let mut child = Command::new(romacs)
-        .arg("--batch").arg(root.join("lisp/romacs")).arg("--init-file").arg(&missing)
+        .arg("--batch").arg(root.join("lisp")).arg("--init-file").arg(&missing)
         .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("lisp"))
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
         .spawn().unwrap();

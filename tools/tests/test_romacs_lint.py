@@ -9,10 +9,10 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 lint = importlib.util.module_from_spec(spec)
 loader.exec_module(lint)
 
-OLD = "lisp/romacs/a.el:10: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
-MOVED = "lisp/romacs/a.el:42: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
-NEW = "lisp/romacs/a.el:50: error: in g: `h' is not defined: fix: require its library"
-HINT = "lisp/romacs/b.el:3: hint: in k: `syntax-ppss': served another way"
+OLD = "lisp/session/a.el:10: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+MOVED = "lisp/session/a.el:42: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+NEW = "lisp/session/a.el:50: error: in g: `h' is not defined: fix: require its library"
+HINT = "lisp/session/b.el:3: hint: in k: `syntax-ppss': served another way"
 
 
 class AddedTest(unittest.TestCase):
@@ -27,8 +27,8 @@ class AddedTest(unittest.TestCase):
         self.assertEqual(lint.added([OLD, MOVED], [OLD]), [MOVED])
 
     def test_a_finding_whose_suggestion_changed_is_not_new(self):
-        was = "lisp/romacs/a.el:5: error: in g: `strng-trim' is not defined; fix: did you mean `string-trim'? else require its library"
-        now = "lisp/romacs/a.el:9: error: in g: `strng-trim' is not defined; fix: did you mean `strng-trip'? else require its library"
+        was = "lisp/session/a.el:5: error: in g: `strng-trim' is not defined; fix: did you mean `string-trim'? else require its library"
+        now = "lisp/session/a.el:9: error: in g: `strng-trim' is not defined; fix: did you mean `strng-trip'? else require its library"
         self.assertEqual(lint.added([now], [was]), [])
 
     def test_a_host_that_ends_before_the_closing_line_gave_no_result(self):

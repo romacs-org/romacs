@@ -58,6 +58,8 @@ import tomllib
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import lisp_layout  # noqa: E402
 TESTS = HERE / 'test'
 PIN_FILE = ROOT / 'ledger/gnu-tests-pin.json'
 LEDGER = ROOT / 'ledger/gnu-test-exclusions.toml'
@@ -658,11 +660,25 @@ def load_path() -> list[str]:
     subdirectories named by its generated subdirs.el (build-aux/update-subdirs):
     reverse name order, obsolete last, term and VCS/backup names omitted."""
     lisp = ROOT / 'lisp'
-    names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p)
                    and p.name not in ('term', 'RCS', 'CVS', 'Old')
                    and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
     ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
     return [str(lisp)] + [str(lisp / name) for name in ordered]
+
+
+def pristine_gnu_file(rel: str, directory: pathlib.Path) -> pathlib.Path:
+    """GNU's REL at the suite's pinned commit (the oracle binary's), from the oracle's source
+    checkout, written into DIRECTORY: our tree's copy is ours and may differ."""
+    try:
+        data = subprocess.run(['git', '-C', str(GNU_MIRROR), 'show', f'{PIN_COMMIT}:{rel}'],
+                              check=True, capture_output=True).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Refusal(3, f'cannot read pristine {rel} at the pin: {error}') from error
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / pathlib.PurePosixPath(rel).name
+    path.write_bytes(data)
+    return path
 
 
 def build_adapter() -> pathlib.Path:
@@ -692,7 +708,9 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
         if bootstrap == 'ert':
-            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'lisp/romacs')]
+            cmd += ['--bootstrap-regime', 'gnu-ert']
+            for d in lisp_layout.romacs_load_path(ROOT):
+                cmd += ['--load-path', str(d)]
             for link in ERT_SOURCE_BOOTSTRAP:
                 cmd += ['--preload', str(ROOT / link)]
         else:
@@ -1095,24 +1113,12 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
     return rows
 
 
-def verify_real_lisp(pin):
-    command = [sys.executable, str(ROOT / 'tools/lib/lisp_oracle.py'), 'check',
-               '--root', str(ROOT), '--gnu', str(GNU_MIRROR), '--pin', pin]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True)
-    except OSError as error:
-        raise Refusal(3, f'cannot verify real ERT Lisp tree: {error}') from error
-    if result.returncode:
-        raise Refusal(3, f'real ERT Lisp tree validation failed: {result.stdout}{result.stderr}')
-
-
 def cmd_scoreboard(args) -> int:
     """Real ERT execution; no mini classification or stale baseline can bless it."""
     from ert_report import ReportError, parse_report, run_native
     sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     p = verify_pin()
-    verify_real_lisp(p['gnu_commit'])
     # The oracle's binary identity, not the checkout name, binds GNU evidence.
     oracle_binary = os.environ.get('ROMACS_GNU_ORACLE') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
     ident = gnu_oracle.require(oracle_binary)
@@ -1128,10 +1134,12 @@ def cmd_scoreboard(args) -> int:
     ledger = load_ledger(LEDGER)
     engine = 'gnu' if args.harness_fidelity else args.engine
     binary = (pathlib.Path(args.bin) if args.bin else build_adapter()) if engine == 'romacs' else None
-    ert = ROOT / 'lisp' / 'emacs-lisp' / 'ert.el'
     rows, defects, reports, errors, executions = [], [], {}, {}, {}
     with ScratchTree(), tempfile.TemporaryDirectory(prefix='gts-real-') as tmp:
         scratch = pathlib.Path(tmp)
+        # Both sides run GNU's ert.el at the commit the oracle and the suite are pinned to, so the
+        # harness is GNU ERT by construction; our editable lisp/emacs-lisp/ert.el is the subject's.
+        ert = pristine_gnu_file('lisp/emacs-lisp/ert.el', scratch / 'reference')
 
         def one(rel):
             home = scratch / rel.replace('/', '__')
@@ -1152,7 +1160,7 @@ def cmd_scoreboard(args) -> int:
                            '--plan', plan['path'], '--selector', getattr(args, 'selector', 't')]
                     if getattr(args, 'ert_adapter', 'none') != 'none':
                         cmd += ['--ert-adapter', args.ert_adapter]
-                    for directory in load_path() + [str(ROOT / 'lisp/romacs'), str(target.parent)]:
+                    for directory in load_path() + [str(d) for d in lisp_layout.romacs_load_path(ROOT)] + [str(target.parent)]:
                         cmd += ['--load-path', directory]
                     if getattr(args, 'bootstrap', 'standard') == 'ordered':
                         cmd += ['--measurement-regime', 'retained-bindings-prefix']

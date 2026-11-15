@@ -41,7 +41,7 @@ today and are only recorded.
 
 usage: term_keep_live.py --romacs BIN --runtime DIR --harness DIR --output DIR --work DIR [--runs N] [modes]
 BIN is the host binary, with romacs-keeper beside it; DIR for --runtime is
-a tree with lisp, lisp/romacs and etc; --harness is this directory.
+a tree with lisp and etc; --harness is this directory.
 """
 import argparse
 import hashlib

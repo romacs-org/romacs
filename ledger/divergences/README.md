@@ -267,9 +267,9 @@ deleted one.
   `vm2/oracle`). Each row described an edit made IN PLACE to a GNU file under
   `lisp/` (`byte-run.el`'s `eval-and-compile`; `subr.el`'s
   `buffer-local-restore-state`, `dolist` length guard, octal/`logior`/`setf`
-  spellings; `macroexp.el`'s `cadr`), which R221 forbids: a number measured on
-  an edited oracle file is not a number. GNU's files are restored byte for
-  byte (`tools/lib/lisp_oracle.py check`), so the divergences no longer exist; the
+  spellings; `macroexp.el`'s `cadr`), which R221 then forbade (retired
+  2026-11-15, when lisp/ became ours). The files were restored byte for byte
+  (by a check since retired), so the divergences no longer exist; the
   VM gaps they hid were tracked as tickets G1-G8.
   The old row text is in git history (`git show 18e249d7:DIVERGENCES.md`).
 - **VM2-EXCUR1, VM2-RESTRICT1 — a unibyte buffer with a saved excursion

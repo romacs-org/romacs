@@ -1,7 +1,7 @@
 """Session profiles for the bench, perfbench and the app parity harnesses.
 
-Two profiles.  stock, the default: no one's init, only the stock lisp
-and lisp/romacs, on a generic project (bench/fixture.py); GNU runs with -Q and
+Two profiles.  stock, the default: no one's init, only the stock lisp/,
+on a generic project (bench/fixture.py); GNU runs with -Q and
 loads the bench's endpoint with -l, Romacs runs --loadup with that endpoint
 as its only init (its GUI has -Q but no -l).  init: a real init, described
 by a profile config outside the repository.  Both give GNU the settings

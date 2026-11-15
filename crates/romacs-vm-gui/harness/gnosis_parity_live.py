@@ -35,6 +35,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools/lib'))
+import lisp_layout  # noqa: E402
 
 from parity_live import (ROOT, C, Harness, K, M, MODE_IS, POPUP_HAS, PROMPT_IS, BUFFER_IS, T, gnu_engine, key,
                          lisp_copy, lisp_list, lisp_string, main, mx, private_tree, romacs_engine, typed)
@@ -105,9 +107,9 @@ def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
     # their directories on `load-path' and the same bundled autoloads
-    # Romacs's --loadup loads, whose lisp/romacs/ libraries (romacs-video's
-    # find-file-hook) need lisp/romacs/ too.  gnosis and keymap-popup come byte-compiled.
-    bundled = [lisp] + [ROOT / 'lisp/romacs' / d for d in ('', 'jabber', 'deps/fsm', 'deps/markdown-mode')]
+    # Romacs's --loadup loads, whose libraries (romacs-video's find-file-hook)
+    # need Romacs's directories too.  gnosis and keymap-popup come byte-compiled.
+    bundled = [lisp] + [d for d in lisp_layout.romacs_load_path(ROOT) if d.name not in ('gnosis', 'keymap-popup')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'
         f' (list {" ".join(lisp_string(str(d)) for d in bundled[1:])})))\n'

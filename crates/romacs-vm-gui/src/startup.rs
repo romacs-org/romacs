@@ -313,19 +313,59 @@ pub fn cache_dir(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<std
     Some(cache.join("romacs"))
 }
 
-/// The runtime tree around the GNU Lisp directory `dir`
-/// (`<root>/lisp`): the checkout or an installed `share/romacs`, which
-/// the bundled Lisp and lisp/bundled.json's paths are relative to.
+/// The runtime tree around the Lisp directory `dir` (`<root>/lisp`): the
+/// checkout or an installed `share/romacs`, which lisp/bundled.json's paths
+/// are relative to.
 #[must_use]
 pub fn runtime_of(dir: &std::path::Path) -> Option<&std::path::Path> {
-    dir.parent()?.parent()
+    dir.parent()
 }
 
-/// Where the bundled Lisp lives beside lisp/, declared once for
+/// The Lisp tree's layout, declared once in lisp/bundled.json for
 /// [`runtime_load_path`], the bundled autoloads (lisp/session/romacs-bundled-autoloads.el,
-/// which reads the installed copy) and tools/test-ert.
+/// which reads the installed copy) and tools/test-ert: Romacs's subsystem
+/// directories in load-path order, the packages' directory, and the
+/// directories on no load path.
+struct Layout {
+    directories: Vec<String>,
+    packages: String,
+    off_path: Vec<String>,
+}
+
 fn bundled_layout() -> Result<serde_json::Value, String> {
     serde_json::from_str(include_str!("../../../lisp/bundled.json")).map_err(|e| format!("lisp/bundled.json: {e}"))
+}
+
+fn layout() -> Result<Layout, String> {
+    let json = bundled_layout()?;
+    let names = |key: &str| -> Result<Vec<String>, String> {
+        json[key].as_array().ok_or(format!("lisp/bundled.json: no {key}"))?.iter()
+            .map(|v| v.as_str().map(str::to_owned).ok_or(format!("lisp/bundled.json: malformed {key}"))).collect()
+    };
+    Ok(Layout {
+        directories: names("directories")?,
+        packages: json["packages"].as_str().ok_or("lisp/bundled.json: no packages")?.to_owned(),
+        off_path: names("off_path")?,
+    })
+}
+
+/// The names under lisp/ that are Romacs's, not GNU's directories: its
+/// subsystems, the packages' directory and those on no load-path.
+pub fn own_directories() -> Result<Vec<String>, String> {
+    let layout = layout()?;
+    Ok(layout.directories.into_iter().chain(layout.off_path).chain([layout.packages]).collect())
+}
+
+fn sorted_subdirectories(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut children = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?.path();
+        if entry.is_dir() {
+            children.push(entry);
+        }
+    }
+    children.sort();
+    Ok(children)
 }
 
 /// The GNU-loadup chain `--loadup` shares with the batch package runner,
@@ -349,11 +389,17 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
     crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)
 }
 
-/// romacs' bundled Lisp (lisp/romacs/, beside lisp/): it follows GNU's own
-/// load-path, so it stays loadable by name and cannot be found in place of a
-/// GNU file on that path.
+/// Romacs's own directories of the Lisp tree `dir`, on top of GNU's: its
+/// subsystem directories, in lisp/bundled.json's order, then each package
+/// in lisp/packages/. No name in them is another library's, so they follow GNU's load-path without shadowing it.
 pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    Ok(runtime_load_path(dir)?.into_iter().filter(|p| !p.starts_with(dir)).collect())
+    let layout = layout()?;
+    let mut path: Vec<_> = layout.directories.iter().map(|name| dir.join(name)).filter(|p| p.is_dir()).collect();
+    let packages = dir.join(&layout.packages);
+    if packages.is_dir() {
+        path.extend(sorted_subdirectories(&packages)?);
+    }
+    Ok(path)
 }
 
 /// The library that defines the bundled packages' autoloads as it loads, by
@@ -363,34 +409,15 @@ pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::Path
     Ok(runtime_of(dir).map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
 }
 
-/// GNU libraries precede Romacs libraries and their temporary dependencies.
-/// VM helper sources are compile-time inputs and stay off the public path.
+/// The session's load-path: `dir`, its GNU subdirectories sorted (GNU's
+/// `term/` among them), then [`bundled_load_path`]. The VM's Lisp halves
+/// (lisp/vm/) are compile-time inputs and stay off it.
 pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    fn root_and_children(root: &std::path::Path, path: &mut Vec<std::path::PathBuf>, excluded: &[&str]) -> Result<(), String> {
-        path.push(root.to_path_buf());
-        let mut children = Vec::new();
-        for entry in std::fs::read_dir(root).map_err(|e| format!("{}: {e}", root.display()))? {
-            let entry = entry.map_err(|e| e.to_string())?.path();
-            if entry.is_dir() && !excluded.iter().any(|name| entry.file_name() == Some(std::ffi::OsStr::new(name))) {
-                children.push(entry);
-            }
-        }
-        children.sort();
-        path.extend(children);
-        Ok(())
-    }
-    let mut path = Vec::new();
-    root_and_children(dir, &mut path, &[])?;
-    let layout = bundled_layout()?;
-    for root in layout["roots"].as_array().ok_or("lisp/bundled.json: no roots")? {
-        let bad = || format!("lisp/bundled.json: malformed root {root}");
-        let relative = root["path"].as_str().ok_or_else(bad)?;
-        let excluded: Vec<&str> = root["exclude"].as_array().ok_or_else(bad)?.iter()
-            .map(|name| name.as_str().ok_or_else(bad)).collect::<Result<_, _>>()?;
-        if let Some(owned) = runtime_of(dir).map(|p| p.join(relative)).filter(|p| p.is_dir()) {
-            root_and_children(&owned, &mut path, &excluded)?;
-        }
-    }
+    let own = own_directories()?;
+    let mut path = vec![dir.to_path_buf()];
+    path.extend(sorted_subdirectories(dir)?.into_iter()
+        .filter(|p| !own.iter().any(|name| p.file_name() == Some(std::ffi::OsStr::new(name)))));
+    path.extend(bundled_load_path(dir)?);
     Ok(path)
 }
 
@@ -478,6 +505,14 @@ pub fn initialize_files_from_sources(vm: &mut Vm, files: &[std::path::PathBuf], 
     initialize_files_with_sources(vm, files, Some(root))
 }
 
+/// Evaluate the Romacs Lisp file at `path`, relative to lisp/: from the
+/// editable source tree `root` when there is one, else the copy compiled in.
+macro_rules! policy {
+    ($vm:expr, $root:expr, $path:literal) => {
+        policy($vm, $root, $path, include_str!(concat!("../../../lisp/", $path)))
+    };
+}
+
 fn policy(vm: &mut Vm, root: Option<&std::path::Path>, name: &str, embedded: &str) -> Result<(), String> {
     if let Some(root) = root {
         let path = root.join(name);
@@ -500,9 +535,9 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
 /// with Custom enables the theme itself, at the end of its chain
 /// (romacs-loadup-bootstrap.el); `--gnu-lisp' shows GNU's Lisp alone.
 fn declare_stock_theme(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
-    policy(vm, root, "romacs-theme.el", include_str!("../../../lisp/ui/romacs-theme.el"))?;
-    policy(vm, root, "../../etc/themes/romacs-theme-rum.el", include_str!("../../../etc/themes/romacs-theme-rum.el"))?;
-    policy(vm, root, "../../etc/themes/default-theme.el", include_str!("../../../etc/themes/default-theme.el"))
+    policy!(vm, root, "ui/romacs-theme.el")?;
+    policy!(vm, root, "../etc/themes/romacs-theme-rum.el")?;
+    policy!(vm, root, "../etc/themes/default-theme.el")
 }
 
 /// The workspace with its showcase when SHOWCASE, before any file is visited.
@@ -510,21 +545,21 @@ fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool)
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
     install_window_change(vm)?;
-    policy(vm, root, "romacs-startup.el", include_str!("../../../lisp/session/romacs-startup.el"))?;
+    policy!(vm, root, "session/romacs-startup.el")?;
     declare_stock_theme(vm, root)?;
-    policy(vm, root, "romacs-find-file.el", include_str!("../../../lisp/romacs-find-file.el"))?;
-    policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../lisp/completion/romacs-buffer-switch.el"))?;
+    policy!(vm, root, "romacs-find-file.el")?;
+    policy!(vm, root, "completion/romacs-buffer-switch.el")?;
     initialize_editing_from_sources(vm, root)?;
     // No GNU minibuffer.el here: the workspace's own readers.
-    policy(vm, root, "romacs-workspace-completion.el", include_str!("../../../lisp/completion/romacs-workspace-completion.el"))?;
+    policy!(vm, root, "completion/romacs-workspace-completion.el")?;
     initialize_coding(vm, root)?;
-    policy(vm, root, "romacs-dired.el", include_str!("../../../lisp/romacs-dired.el"))?;
-    policy(vm, root, "romacs-key-hint.el", include_str!("../../../lisp/ui/romacs-key-hint.el"))?;
-    policy(vm, root, "romacs-term.el", include_str!("../../../lisp/terminal/romacs-term.el"))?;
-    policy(vm, root, "vm/process.el", include_str!("../../../lisp/vm/process.el"))?;
-    policy(vm, root, "romacs-install-command.el", include_str!("../../../lisp/session/romacs-install-command.el"))?;
-    policy(vm, root, "romacs-project.el", include_str!("../../../lisp/progmodes/romacs-project.el"))?;
-    policy(vm, root, "romacs-fontify.el", include_str!("../../../lisp/romacs-fontify.el"))?;
+    policy!(vm, root, "romacs-dired.el")?;
+    policy!(vm, root, "ui/romacs-key-hint.el")?;
+    policy!(vm, root, "terminal/romacs-term.el")?;
+    policy!(vm, root, "vm/process.el")?;
+    policy!(vm, root, "session/romacs-install-command.el")?;
+    policy!(vm, root, "progmodes/romacs-project.el")?;
+    policy!(vm, root, "romacs-fontify.el")?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
     let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false, files: vec![] };
@@ -552,7 +587,7 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     open_workspace(vm, session, &files, dir)
 }
 
-/// One canonical directory for loadup and for finding lisp/romacs/ beside it:
+/// One canonical directory for loadup and for finding the runtime around it:
 /// `.` or a symlinked lisp/ must not pick a different sibling.
 pub fn lisp_root(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     romacs_vm::host::canonicalize(dir).map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))
@@ -592,14 +627,13 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
     Ok(loadup)
 }
 
-/// The Lisp a launch's chain reads under DIR, GNU's Lisp directory: that
-/// directory, the runtime's own Lisp and bundled layout beside it, and the
-/// bundled packages' directories. What a world's builder may read of Lisp
-/// (`world::build_roots`, `test_world`).
+/// The Lisp a launch's chain reads under DIR, the Lisp tree: that
+/// directory, the bundled layout, and Romacs's directories and packages
+/// in it. What a world's builder may read of Lisp (`world::build_roots`,
+/// `test_world`).
 #[must_use]
 pub fn lisp_roots(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = vec![dir.to_owned()];
-    roots.extend(runtime_of(dir).map(|root| root.join("lisp/romacs")));
     // The bundled layout, which the bundled autoloads' scan reads.
     roots.extend(runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
     roots.extend(bundled_load_path(dir).unwrap_or_default());
@@ -721,8 +755,9 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
         // defaults for GNU's minibuffer completion, which the user's init
         // may override.
         vm.open_display();
-        for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
-            let file = loadup_bootstrap(dir).with_file_name(name);
+        for path in ["session/romacs-gui-loadup.el", "completion/romacs-completion-defaults.el"] {
+            let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+            let file = runtime_of(dir).unwrap_or(dir).join("lisp").join(path);
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
             mark_phase(name);
         }
@@ -838,7 +873,7 @@ fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
 }
 
 fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
-    policy(vm, root, "romacs-editing.el", include_str!("../../../lisp/romacs-editing.el"))?;
+    policy!(vm, root, "romacs-editing.el")?;
     for (source, names) in [
         (include_str!("../../../lisp/subr.el"), &[
             "plusp", "add-to-history", "ignore", "string=", "undefined",
@@ -959,18 +994,18 @@ fn initialize_coding(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), 
             vm.eval_source(form)?;
         }
     }
-    policy(vm, root, "romacs-coding.el", include_str!("../../../lisp/international/romacs-coding.el"))
+    policy!(vm, root, "international/romacs-coding.el")
 }
 
 /// Evaluate sorted `.el` command modules beside GNU's runtime Lisp directory.
 /// Both checkouts and installed `share/romacs` use
-/// `lisp/romacs/romacs-gui-extensions`; a missing directory is optional.
+/// `lisp/session/romacs-gui-extensions`; a missing directory is optional.
 /// Modules call `romacs-gui-install-command` with a key and quoted definition.
 /// Errors abort startup with the module path; GNU-only startup does not load them.
 pub fn load_gui_extensions(vm: &mut Vm, dir: &std::path::Path) -> Result<(), String> {
     let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
     let root = runtime_of(&dir).ok_or("Lisp directory is not in a runtime tree")?
-        .join("lisp/romacs/romacs-gui-extensions");
+        .join("lisp/session/romacs-gui-extensions");
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1942,15 +1977,17 @@ mod tests {
         dir
     }
 
-    /// A runtime root for `--loadup`: `lisp/` holding FILES and, beside
-    /// it, `lisp/romacs/` holding BOOTSTRAP as the shared chain and an interactive
+    /// A runtime root for `--loadup`: `lisp/` holding FILES, and in it
+    /// `session/` holding BOOTSTRAP as the shared chain and an interactive
     /// session file that clears `noninteractive` and stands in for the
     /// startup sequence. Returns `lisp/`.
     fn scratch_runtime(name: &str, bootstrap: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
         let root = scratch_lisp(name, &[]);
         let gnu = root.join("lisp");
         std::fs::create_dir_all(&gnu).unwrap();
-        std::fs::create_dir_all(root.join("lisp/romacs")).unwrap();
+        for directory in ["lisp/session", "lisp/completion"] {
+            std::fs::create_dir_all(root.join(directory)).unwrap();
+        }
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         // A scratch chain has no startup.el: its session file clears
@@ -1990,18 +2027,17 @@ mod tests {
     #[test]
     fn runtime_load_path_finds_dependencies_without_exporting_vm_helpers() {
         let dir = lisp_dir().canonicalize().unwrap();
-        let owned = runtime_of(&dir).unwrap().join("lisp/romacs");
         let path = runtime_load_path(&dir).unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&path).unwrap();
-        for name in ["fsm", "markdown-mode"] {
-            let directory = owned.join("deps").join(name);
+        for name in ["fsm"] {
+            let directory = dir.join("packages").join(name);
             assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: {name}");
             let expected = directory.join(format!("{name}.el"));
             assert_eq!(printed(&mut vm, &format!("(locate-file-internal {} load-path '(\".el\"))", lisp_string(name))),
                 lisp_string(&expected.to_string_lossy()));
         }
-        assert!(!path.contains(&owned.join("vm")), "VM helpers are compile-time inputs, not public libraries");
+        assert!(!path.contains(&dir.join("vm")), "VM helpers are compile-time inputs, not public libraries");
     }
 
     #[test]
@@ -2014,10 +2050,11 @@ mod tests {
         let gnu = root.join("lisp/obsolete/gnus-dbus.el");
         assert!(gnu.is_file());
         assert_eq!(locate(&mut vm, "gnus-dbus"), lisp_string(&gnu.to_string_lossy()));
-        for (name, file) in [("jabber", "jabber/jabber.el"),
-                             ("gnosis", "gnosis/gnosis.el"), ("keymap-popup", "emacs-lisp/keymap-popup.el")] {
-            assert_eq!(locate(&mut vm, name), lisp_string(&root.join("lisp/romacs").join(file).to_string_lossy()), "{name}");
+        for (name, file) in [("jabber", "jabber/jabber.el"), ("gnosis", "gnosis/gnosis.el"),
+                             ("keymap-popup", "keymap-popup/keymap-popup.el")] {
+            assert_eq!(locate(&mut vm, name), lisp_string(&root.join("lisp/packages").join(file).to_string_lossy()), "{name}");
         }
+        assert_eq!(locate(&mut vm, "romacs-mcp-companion"), lisp_string(&root.join("lisp/agents/romacs-mcp-companion.el").to_string_lossy()));
         assert_eq!(locate(&mut vm, "romacs-win"), "nil");
     }
 
@@ -2025,29 +2062,28 @@ mod tests {
     fn runtime_load_path_finds_bundled_lisp_beside_gnu_lisp() {
         let dir = lisp_dir().canonicalize().unwrap();
         let path = runtime_load_path(&dir).unwrap();
-        let owned = runtime_of(&dir).unwrap().join("lisp/romacs");
-        let deps = owned.join("deps");
-        let first_owned = path.iter().position(|p| p == &owned).expect("lisp/romacs on load-path");
-        let first_deps = path.iter().position(|p| p == &deps).expect("lisp/romacs/deps on load-path");
-        assert!(path[..first_owned].iter().all(|p| p.starts_with(&dir)), "GNU entries precede owned: {path:?}");
-        assert!(path[first_owned..first_deps].iter().all(|p| p.starts_with(&owned) && !p.starts_with(&deps)), "{path:?}");
-        assert!(path[first_deps..].iter().all(|p| p.starts_with(&deps)), "{path:?}");
-        assert!(owned.join("romacs-mcp-companion.el").is_file());
-        for (directory, file) in [("gnosis", "gnosis.el"), ("jabber", "jabber.el"), ("deps/fsm", "fsm.el")] {
-            let entry = owned.join(directory);
+        let bundled = bundled_load_path(&dir).unwrap();
+        let first = path.iter().position(|p| bundled.contains(p)).expect("Romacs's directories on load-path");
+        assert_eq!(path[first..], bundled[..], "Romacs's directories follow GNU's, in order: {path:?}");
+        assert!(path[..first].iter().all(|p| p == &dir || p.parent() == Some(dir.as_path())), "{path:?}");
+        let packages = bundled.iter().position(|p| p.parent() == Some(dir.join("packages").as_path())).expect("packages");
+        assert!(bundled[..packages].iter().all(|p| p.parent() == Some(dir.as_path())), "subsystems before packages: {bundled:?}");
+        assert!(dir.join("agents/romacs-mcp-companion.el").is_file());
+        for (directory, file) in [("agents", "romacs-agent.el"), ("packages/jabber", "jabber.el"), ("packages/fsm", "fsm.el")] {
+            let entry = dir.join(directory);
             assert!(path.contains(&entry) && entry.join(file).is_file(), "{} not loadable from {path:?}", entry.join(file).display());
         }
         let root = std::env::temp_dir().join(format!("romacs-loadpath-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("lisp/emacs-lisp")).unwrap();
         assert_eq!(runtime_load_path(&root.join("lisp")).unwrap(), vec![root.join("lisp"), root.join("lisp/emacs-lisp")]);
-        for directory in ["lisp/packages/gnosis", "lisp/packages/fsm", "lisp/vm"] {
+        for directory in ["lisp/ui", "lisp/packages/websocket", "lisp/vm"] {
             std::fs::create_dir_all(root.join(directory)).unwrap();
         }
         let installed = runtime_load_path(&root.join("lisp")).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
-        assert_eq!(installed, vec![root.join("lisp"), root.join("lisp/emacs-lisp"), root.join("lisp/romacs"),
-            root.join("lisp/packages/gnosis"), root.join("lisp/romacs/deps"), root.join("lisp/packages/fsm")]);
+        assert_eq!(installed, vec![root.join("lisp"), root.join("lisp/emacs-lisp"), root.join("lisp/ui"),
+            root.join("lisp/packages/websocket")]);
     }
 
     #[test]
@@ -2055,7 +2091,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("romacs-loadpath-collision-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let gnu = root.join("lisp");
-        let owned = root.join("lisp/romacs/example");
+        let owned = root.join("lisp/packages/example");
         std::fs::create_dir_all(&gnu).unwrap();
         std::fs::create_dir_all(&owned).unwrap();
         std::fs::write(gnu.join("loadup.el"), "").unwrap();
@@ -2082,15 +2118,15 @@ mod tests {
         let real = lisp_dir().canonicalize().unwrap();
         let root = std::env::temp_dir().join(format!("romacs-loadup-link-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("lisp")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
         std::os::unix::fs::symlink(&real, root.join("lisp")).unwrap();
         let link = root.join("lisp");
-        let gnosis = runtime_of(&real).unwrap().join("lisp/romacs").join("gnosis");
+        let jabber = real.join("packages/jabber");
         let found = on_evaluator(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &link).unwrap();
-            let v = vm.eval_source(&format!("(and (member {} load-path) t)", lisp_string(&gnosis.to_string_lossy()))).unwrap();
+            let v = vm.eval_source(&format!("(and (member {} load-path) t)", lisp_string(&jabber.to_string_lossy()))).unwrap();
             v.display().unwrap()
         });
         std::fs::remove_dir_all(&root).unwrap();
@@ -2115,12 +2151,11 @@ mod tests {
             private_home(&mut vm, "autoloads");
             let started = resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
-            // A command, its package's feature (also its library) and file.
-            let commands = [("gnosis-dashboard", "gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("jabber-info", "jabber", "jabber/jabber.el")];
-            let loadup = commands.map(|(name, feature, file)| {
-                let file = lisp_string(&owned.join("lisp/romacs").join(file).to_string_lossy());
-                query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{feature})
-                                               (equal (locate-file-internal \"{feature}\" load-path '(\".el\")) {file})
+            let loadup = [("gnosis-dashboard", "gnosis-dashboard", "gnosis/gnosis-dashboard.el"),
+                          ("jabber-customize", "jabber", "jabber/jabber.el")].map(|(name, library, file)| {
+                let file = lisp_string(&owned.join("lisp/packages").join(file).to_string_lossy());
+                query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{library})
+                                               (equal (locate-file-internal \"{library}\" load-path '(\".el\")) {file})
                                                (and (assoc {file} load-history) t))"))
             });
             (gnu_only, loadup)
@@ -2137,8 +2172,9 @@ mod tests {
     #[test]
     fn loadup_load_path_finds_every_gnu_file_before_bundled_lisp() {
         let dir = lisp_dir().canonicalize().unwrap();
-        let bundled = runtime_of(&dir).unwrap().join("lisp/romacs");
+        let bundled = bundled_load_path(&dir).unwrap();
         let in_vm = dir.clone();
+        let romacs = bundled.clone();
         let (dbus, path, collisions) = on_evaluator(move || {
             let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
             resume_loadup(&mut vm, Launch::GnuOnly, loadup).unwrap();
@@ -2153,9 +2189,9 @@ mod tests {
                 std::path::PathBuf::from(serde_json::from_str::<String>(&v.display().unwrap()).unwrap())
             }).collect();
             // Every bundled .el whose name a GNU load-path directory also has.
-            let gnu: Vec<_> = path.iter().filter(|p| p.starts_with(&in_vm)).cloned().collect();
+            let gnu: Vec<_> = path.iter().filter(|p| !romacs.contains(p)).cloned().collect();
             let mut collisions = vec![];
-            for entry in path.iter().filter(|p| !p.starts_with(&in_vm)) {
+            for entry in path.iter().filter(|p| romacs.contains(p)) {
                 let mut names: Vec<_> = std::fs::read_dir(entry).unwrap().map(|e| e.unwrap().path())
                     .filter(|p| p.extension().is_some_and(|x| x == "el")).collect();
                 names.sort();
@@ -2173,9 +2209,9 @@ mod tests {
 
         let wrong: Vec<_> = collisions.iter().filter(|(_, gnu, found)| gnu != found).collect();
         assert!(wrong.is_empty(), "bundled files found in place of GNU's: {wrong:?}");
-        let first = path.iter().position(|p| p.starts_with(&bundled)).expect("lisp/romacs on load-path");
-        assert!(path[..first].iter().all(|p| p.starts_with(&dir))
-            && path[first..].iter().all(|p| p.starts_with(&bundled)), "{path:?}");
+        let first = path.iter().position(|p| bundled.contains(p)).expect("Romacs's directories on load-path");
+        assert!(path[..first].iter().all(|p| !bundled.contains(p))
+            && path[first..].iter().all(|p| bundled.contains(p)), "{path:?}");
     }
 
     /// `--loadup`: GNU's command takes a key only when the chain's GNU
@@ -2411,10 +2447,11 @@ mod tests {
             finish_loadup(&mut vm, &started).unwrap();
             let loadup = started.loadup.as_ref().unwrap();
             let rows: Vec<String> = loadup.rows.iter().map(|r| r.site.name.clone()).collect();
-            // A nested GNU file is named from GNU's directory, as a row is.
+            // A nested file of the Lisp tree is named from its directory, as a row is.
             let nested: Vec<&str> = loadup.rows.iter().flat_map(|r| &r.nested).map(|n| n.0.as_str()).collect();
             assert!(nested.contains(&"emacs-lisp/pcase.el"), "{}", loadup.table());
-            assert!(!nested.iter().any(|n| n.contains("lisp/")), "{}", loadup.table());
+            let tree = lisp_dir().canonicalize().unwrap().to_string_lossy().into_owned();
+            assert!(!nested.iter().any(|n| n.starts_with(&tree)), "{}", loadup.table());
             let complete = (loadup.complete(), loadup.form_failures.len(), printed(&mut vm, "(list noninteractive (featurep 'romacs-loadup-bootstrap) (display-graphic-p))"));
             let text = std::fs::read_to_string(loadup_bootstrap(&lisp_dir())).unwrap();
             let sites: Vec<String> = crate::loadup::load_sites(&text).unwrap().1.into_iter().map(|s| s.name).collect();
@@ -2432,8 +2469,8 @@ mod tests {
                 Ok(v) => v.display().unwrap(),
                 Err(error) => format!("ERR {error}"),
             };
-            let gnosis = runtime_of(&lisp_dir().canonicalize().unwrap()).unwrap().join("lisp/romacs").join("gnosis");
-            let bundled = ask(&mut vm, &format!("(and (member {} load-path) t)", lisp_string(&gnosis.to_string_lossy())));
+            let jabber = lisp_dir().canonicalize().unwrap().join("packages/jabber");
+            let bundled = ask(&mut vm, &format!("(and (member {} load-path) t)", lisp_string(&jabber.to_string_lossy())));
             let mut live = vec![ask(&mut vm, SELECTED_TAIL)];
             let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
             let mut press = |vm: &mut Vm, keys: &[i64]| -> Vec<String> {
@@ -2463,7 +2500,7 @@ mod tests {
         // The startup screen's one window; C-x 2, C-x 3 split, C-x o moves,
         // C-x 1 leaves one; C-x C-e evaluates; all with GNU's window.el loaded.
         // romacs' bundled Lisp follows GNU's installed load-path.
-        assert_eq!(bundled, "t", "lisp/packages/gnosis not on load-path after loadup");
+        assert_eq!(bundled, "t", "lisp/packages/jabber not on load-path after loadup");
         assert_eq!(live, ["1", "2", "3", "3", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
         assert!(ran.iter().all(|r| !r.contains("SIGNAL")), "{ran:?}");
         assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");

@@ -16,9 +16,8 @@ def main():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'lib'))
     generated = subprocess.run([sys.executable, '-B', 'tools/lib/generated_files.py', 'check', '--root', str(root)], cwd=root)
     tests = subprocess.run([sys.executable, '-B', 'tools/lib/python_tests.py', '--root', str(root)], cwd=root)
-    oracle = subprocess.run([sys.executable, 'tools/lib/lisp_oracle.py', 'check', '--root', str(root)], cwd=root)
-    import lisp_oracle
-    gnu_pin = subprocess.run([sys.executable, '-B', 'test/gnu/run.py', 'verify-pin', '--gnu', lisp_oracle.GNU_SOURCE], cwd=root)
+    import gnu_oracle
+    gnu_pin = subprocess.run([sys.executable, '-B', 'test/gnu/run.py', 'verify-pin', '--gnu', gnu_oracle.GNU_SOURCE], cwd=root)
     ratchet = subprocess.run([sys.executable, 'tools/lib/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     arity = subprocess.run([sys.executable, 'tools/lib/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
     defvars = subprocess.run([sys.executable, '-B', 'tools/lib/gnu_defvars.py', 'check', '--root', str(root)], cwd=root)

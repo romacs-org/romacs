@@ -84,7 +84,7 @@ against SHA-256s; the 5,000 files are generated and checked by manifest.
 usage: perfbench.py --romacs BIN [--runtime DIR] [--commit SHA] [--only AREA|ROW ...] [--list]
                     [--runs 3] [--max-load 8] [--out ~/.cache/romacs/perf-bench (ROMACS_PERFBENCH_OUT)]
                     [--previous RESULTS.json] [--romacs-source] [--neomacs BIN [--neomacs-commit SHA]]
-A binary installed beside its runtime (lisp/, lisp/romacs/) uses that
+A binary installed beside its runtime (lisp/) uses that
 runtime; otherwise give --runtime.
 """
 import argparse
@@ -1686,9 +1686,9 @@ def neomacs_build(args):
 def runtime_of(args):
     binary = Path(args.romacs).resolve()
     for candidate in (args.runtime, os.environ.get('ROMACS_RUNTIME_ROOT'), binary.parent):
-        if candidate and (Path(candidate) / 'lisp').is_dir() and (Path(candidate) / 'lisp/romacs').is_dir():
+        if candidate and (Path(candidate) / 'lisp/bundled.json').is_file():
             return Path(candidate).resolve()
-    raise SystemExit('no runtime: give --runtime DIR (holding lisp/ and lisp/romacs/)')
+    raise SystemExit('no runtime: give --runtime DIR (holding lisp/ with its bundled.json)')
 
 
 def commit_of(args):

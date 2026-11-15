@@ -24,12 +24,11 @@ fn bootstrapped(user: &Path) -> Vm {
     let lisp = root.join("lisp");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
+        .filter(|name| !["term", "RCS", "CVS", "Old", "vm", "packages"].contains(&name.as_str()) && !name.starts_with('='))
         .collect();
     names.sort();
     let mut paths = vec![lisp.clone()];
     paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
     vm.set_load_path(&paths).unwrap();
     vm.install_lisp_prelude().unwrap();
     vm.load_file(&root.join("lisp/session/romacs-loadup-bootstrap.el")).unwrap();

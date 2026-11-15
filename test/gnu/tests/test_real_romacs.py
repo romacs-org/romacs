@@ -34,7 +34,7 @@ class RealRomacs(unittest.TestCase):
                    '--plan', str(plan), '--selector', selector, '--ert-adapter', 'romacs-batch']
         for path in run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert', harness='real')):
             command += ['--preload', str(run.ROOT / path)]
-        for directory in run.load_path() + [str(run.ROOT / 'lisp/romacs')]:
+        for directory in run.load_path() + [str(d) for d in run.lisp_layout.romacs_load_path(run.ROOT)]:
             command += ['--load-path', directory]
         return command
 

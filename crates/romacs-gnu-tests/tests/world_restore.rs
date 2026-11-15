@@ -59,12 +59,14 @@ fn run_in(tree: &Path, preloads: &[PathBuf], scratch: &Path, store: &Path, dir: 
         command.arg("--preload").arg(preload);
     }
     command.arg("--load-path").arg(&lisp);
-    let mut subdirs: Vec<PathBuf> = fs::read_dir(&lisp).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+    // GNU's and Romacs's directories; the VM's halves and the packages are on no such path.
+    let mut subdirs: Vec<PathBuf> = fs::read_dir(&lisp).unwrap().filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_dir() && !p.ends_with("vm") && !p.ends_with("packages")).collect();
     subdirs.sort();
     for subdir in subdirs {
         command.arg("--load-path").arg(subdir);
     }
-    command.arg("--load-path").arg(tree.join("lisp/romacs")).arg("--load-path").arg(&dir).arg("--world-store").arg(store);
+    command.arg("--load-path").arg(&dir).arg("--world-store").arg(store);
     let output = command.output().unwrap();
     let world = events(&output).into_iter().find(|e| e["event"] == "world").unwrap_or(Value::Null);
     let loaded = output.status.success() && String::from_utf8_lossy(&output.stdout).contains(&format!("SIBLING {name}\n"));
@@ -105,12 +107,15 @@ fn a_batch_world_store_build_restores_for_a_test_elsewhere() {
 fn a_world_whose_preloads_change_load_path_is_not_published() {
     let scratch = scratch("pushing");
     let tree = scratch.join("tree");
-    fs::create_dir_all(tree.join("lisp/romacs")).unwrap();
-    std::os::unix::fs::symlink(root().join("lisp"), tree.join("lisp")).unwrap();
-    for entry in fs::read_dir(root().join("lisp/romacs")).unwrap().filter_map(|e| e.ok()) {
-        std::os::unix::fs::symlink(entry.path(), tree.join("lisp/romacs").join(entry.file_name())).unwrap();
+    // The checkout's tree, with one more file of Romacs's own in session/.
+    fs::create_dir_all(tree.join("lisp/session")).unwrap();
+    for entry in fs::read_dir(root().join("lisp")).unwrap().flatten().filter(|e| e.file_name() != "session") {
+        std::os::unix::fs::symlink(entry.path(), tree.join("lisp").join(entry.file_name())).unwrap();
     }
-    let push = tree.join("lisp/romacs/wr-push.el");
+    for entry in fs::read_dir(root().join("lisp/session")).unwrap().flatten() {
+        std::os::unix::fs::symlink(entry.path(), tree.join("lisp/session").join(entry.file_name())).unwrap();
+    }
+    let push = tree.join("lisp/session/wr-push.el");
     fs::write(&push, format!("(push {:?} load-path)\n", tree.join("lisp").display().to_string())).unwrap();
     let store = scratch.join("store");
     fs::create_dir_all(&store).unwrap();

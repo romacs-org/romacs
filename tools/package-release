@@ -8,7 +8,7 @@
 #
 #   bin/romacs-vm-gui  bin/romacs-keeper  bin/romacs-mcp  bin/romacs-agent-host
 #   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
-#   share/romacs/{lisp,lisp/romacs,etc,assets/fonts}  share/applications  share/icons
+#   share/romacs/{lisp,etc,assets/fonts}  share/applications  share/icons
 #
 # The binary finds share/romacs beside its bin/ (host::runtime_root), so the
 # tree works wherever it is unpacked. tools/ci/smoke-release checks the

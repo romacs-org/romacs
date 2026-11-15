@@ -626,7 +626,7 @@ fn romacs_theme_author_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
 }
 
-/// lisp/romacs's commands declare where they apply and its key hints come from
+/// Romacs's commands declare where they apply and its key hints come from
 /// bindings (tests/romacs-idioms-test.el).
 #[test]
 fn romacs_idioms_tests_pass() {

@@ -72,7 +72,7 @@ fn the_bar_takes_a_band_above_the_mini_window() {
 #[test]
 fn the_bar_moves_to_the_top() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/ui");
     for file in ["romacs-layer.el", "romacs-chrome.el"] { vm.load_file(&root.join(file)).unwrap(); }
     let probe = "(list (window-pixel-top (frame-root-window)) (window-pixel-height (frame-root-window)) (window-body-height) (window-pixel-top (minibuffer-window)) (romacs-chrome-top) (romacs-chrome-bottom))";
     assert_eq!(eval(&mut vm, probe), "(0 826 33 851 0 826)");
@@ -229,7 +229,7 @@ fn no_window_draws_a_band_of_its_own() {
 /// A session whose bar shows Romacs's mode line.
 fn romacs_lines() -> Vm {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/ui");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -493,7 +493,7 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 #[test]
 fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/ui");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -515,7 +515,7 @@ fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/ui");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }
@@ -604,7 +604,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
 #[test]
 fn a_strings_own_marks_reach_the_bar() {
     let mut vm = session();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/romacs");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/ui");
     for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el"] {
         vm.load_file(&root.join(file)).unwrap();
     }

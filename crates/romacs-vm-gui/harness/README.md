@@ -151,7 +151,7 @@ and its comparison policy in its docstring:
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
-with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp and lisp/romacs, on a
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init

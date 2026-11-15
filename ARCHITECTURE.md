@@ -40,9 +40,8 @@ frozen snapshots.
 | Faces, themes, fonts | `crates/romacs-face`, `crates/romacs-font`, `crates/romacs-font-materializer` |
 | Drawing | `crates/romacs-display-runtime` (the render thread), `romacs-renderer-wgpu`, `romacs-scene` |
 | Images and video | `crates/romacs-imaging`, `crates/romacs-video`, `crates/romacs-video-model` |
-| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/romacs-agent*.el` |
-| GNU's Lisp, pinned | `lisp/` (pin: `ledger/lisp-pin.json`) |
-| Romacs's own Lisp and bundled packages | `lisp/romacs/`; bundled roots in `lisp/bundled.json` |
+| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/` |
+| The Lisp | `lisp/` by subsystem, ours (GNU's files at GNU's paths; GNU's later changes: `tools/lisp-upstream`); Romacs's own directories and `lisp/packages/` in `lisp/bundled.json` |
 | What a session loads, in order | `lisp/session/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |

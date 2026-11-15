@@ -34,6 +34,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools/lib'))
+import lisp_layout  # noqa: E402
 import tempfile
 import time
 
@@ -157,8 +160,8 @@ def session(engine, binary, theme, args, out):
         (config / 'rc.xml').write_text(live.RC_XML)
         src = root / 'src'
         src.mkdir()
-        for name in ('romacs-defaults.el', 'romacs-theme.el', 'romacs-frame.el', 'romacs-chrome.el'):
-            shutil.copy(ROOT / 'lisp/romacs' / name, src / name)
+        for name in ('session/romacs-defaults.el', 'ui/romacs-theme.el', 'ui/romacs-frame.el', 'ui/romacs-chrome.el'):
+            shutil.copy(ROOT / 'lisp' / name, src / Path(name).name)
         diff = subprocess.run(['git', '-C', str(ROOT), 'log', '-1', '-p', '--format=', '--', 'lisp/ui/romacs-theme.el'],
                               capture_output=True, text=True).stdout or ';; no diff\n'
         (root / 'sample.diff').write_text(diff)
@@ -183,7 +186,7 @@ def session(engine, binary, theme, args, out):
             # The packages Romacs bundles (gnosis among them), on GNU's
             # `load-path' with Romacs's bundled autoloads, as
             # gnosis_parity_live.py gives them.
-            bundled = ' '.join(f'"{ROOT / "lisp/romacs" / d}"' for d in ('gnosis', 'emacs-lisp', '', 'deps/fsm', 'deps/markdown-mode'))
+            bundled = ' '.join(f'"{d}"' for d in lisp_layout.romacs_load_path(ROOT))
             packages = (f'(setq load-path (append (list {bundled}) load-path))\n'
                         f'(load "{ROOT / "lisp/session/romacs-bundled-autoloads.el"}" nil t)\n') if args.gnosis_db else ''
             (home / 'init.el').write_text(GNU_RUM % {'inputs': INPUTS} + packages + SCENES)

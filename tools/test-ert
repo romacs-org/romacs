@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'test/gnu'))
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
+import lisp_layout
 
 SELECTOR_DEFAULT = '(not (or (tag :expensive-test) (tag :unstable)))'
 TIMEOUT_DEFAULT = 600.0
@@ -37,16 +38,10 @@ XDG = ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME')
 
 
 def directories(root):
-    """The bundled package directories (lisp/bundled.json): each root, then its
-    immediate subdirectories but the excluded ones, in runtime_load_path order
+    """The load-path directories of Romacs's own Lisp beyond GNU's (lisp/bundled.json):
+    its subsystem directories, then each bundled package, in runtime_load_path order
     (crates/romacs-vm-gui/src/startup.rs)."""
-    found = []
-    for entry in json.loads((root / 'lisp/bundled.json').read_text())['roots']:
-        base = root / entry['path']
-        if base.is_dir():
-            found.append(base)
-            found.extend(sorted(p for p in base.iterdir() if p.is_dir() and p.name not in entry['exclude']))
-    return found
+    return lisp_layout.romacs_load_path(root)
 
 
 def is_suite(path):
@@ -58,14 +53,17 @@ def suites_under(directory):
 
 
 def bundled_names(bases):
-    """What a test directory or MODULE may name: bundled packages and libraries."""
-    return {base.name for base in bases} | {p.stem for base in bases for p in base.glob('*.el')}
+    """What a test directory or MODULE may name: bundled packages and the libraries on the
+    load-path (lisp/, its directories, Romacs's and the packages')."""
+    lisp = ROOT / 'lisp'
+    path = {lisp, *bases, *(p for p in lisp.iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p))}
+    return {base.name for base in bases} | {p.stem for d in path for p in d.glob('*.el')}
 
 
 def packages(bases):
     """Test directories of bundled code; GNU's own run under test/gnu."""
     names = bundled_names(bases)
-    gnu = {p.name for p in (ROOT / 'lisp').iterdir()}
+    gnu = {p.name for p in (ROOT / 'lisp').iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p)}
     return sorted(d for tests in SUITES for d in tests.iterdir()
                   if d.is_dir() and d.name in names and d.name not in gnu)
 

@@ -352,7 +352,7 @@ fn themed_session() -> Vm {
     let mut vm = gnu_session();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     eval(&mut vm, &format!("(progn (push {:?} load-path) (push {:?} custom-theme-load-path) (require 'romacs-chrome) (romacs-chrome-refresh))",
-                           root.join("lisp/romacs"), root.join("etc/themes")));
+                           root.join("lisp/ui"), root.join("etc/themes")));
     vm
 }
 

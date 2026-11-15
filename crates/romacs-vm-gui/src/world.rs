@@ -538,12 +538,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
-    /// The bundled autoloads' scan reads the layout beside lisp/romacs, which a
+    /// The bundled autoloads' scan reads the layout in lisp/, which a
     /// confined build reads only inside its roots.
     #[test]
     fn a_build_reads_the_bundled_trees_and_their_layout() {
         let roots = build_roots(std::path::Path::new("/r/lisp"));
-        for path in ["/r/lisp", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
+        for path in ["/r/lisp", "/r/lisp/bundled.json"] {
             assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
         }
     }

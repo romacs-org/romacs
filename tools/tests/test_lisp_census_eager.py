@@ -60,9 +60,10 @@ class EagerArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettempdir()) / '')) as tmp:
             root = Path(tmp)
             (root / 'lisp').mkdir(parents=True)
+            (root / 'lisp/bundled.json').write_text(json.dumps({'directories': [], 'packages': 'packages', 'off_path': ['vm']}))
             artifact = root / 'measurement.json'
             data = {'mode': 'warm', 'oracle_inventory': {}, 'input_sha256': 'same', 'scope': 'whole_tree', 'files': [], 'gnu_version': 'GNU test'}
-            with patch.object(census, 'ROOT', root), patch.object(census, 'oracle_inventory', return_value={}), patch.object(census, 'fingerprint', return_value='same'), patch.object(census, 'gnu_oracle_binary', return_value='/unit-test-gnu'), patch.object(census.subprocess, 'check_output', return_value='GNU test\n'), contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(census, 'ROOT', root), patch.object(census, 'oracle_inventory', return_value={}), patch.object(census, 'fingerprint', return_value='same'), patch.object(census, 'tracked_lisp', return_value=set()), patch.object(census, 'gnu_oracle_binary', return_value='/unit-test-gnu'), patch.object(census.subprocess, 'check_output', return_value='GNU test\n'), contextlib.redirect_stdout(io.StringIO()):
                 for flag in [False, True]:
                     data['eager_target'] = flag
                     artifact.write_text(json.dumps(data))

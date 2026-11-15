@@ -169,11 +169,11 @@ const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
 /// PATH is being compiled already up the chain (its compile-time loads
 /// read source, as GNU's would with no `.elc`).
 /// Whether PATH is in the installation's Lisp trees: the configured ones,
-/// else the runtime root's lisp/ and lisp/romacs/.
+/// else the runtime root's lisp/.
 fn installed_lisp(path: &Path) -> bool {
     match config() {
         Some(config) => config.runtime.iter().any(|root| path.starts_with(root)),
-        None => { let root = host::runtime_root(); ["lisp", "lisp/romacs"].iter().any(|tree| path.starts_with(root.join(tree))) }
+        None => { let root = host::runtime_root(); path.starts_with(root.join("lisp")) }
     }
 }
 
@@ -344,7 +344,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
 
     /// Whether GNU would load the source file PATH compiled: a file of the
     /// installation's Lisp trees (the configured ones, else the runtime
-    /// root's lisp/ and lisp/romacs/), or one beside a current `.elc`.  When
+    /// root's lisp/), or one beside a current `.elc`.  When
     /// not, GNU's readevalloop interprets it.
     pub(crate) fn gnu_loads_compiled(&self, path: &Path) -> bool {
         installed_lisp(path) || self.current_elc(path)

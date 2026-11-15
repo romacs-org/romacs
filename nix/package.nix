@@ -182,7 +182,7 @@ craneLib.buildPackage (
         ${lib.concatStringsSep " \\\n        " wrapArgs}
 
       # Refuse to produce a package whose runtime Lisp is not the source's:
-      # every lisp/, lisp/romacs/ and etc/ file byte-identical, and the
+      # every lisp/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
       bash tools/check-installed-runtime.sh "$out" .
     '';

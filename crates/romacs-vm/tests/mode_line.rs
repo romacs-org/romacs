@@ -212,7 +212,7 @@ fn romacs_mode_line_enters_the_evaluator_only_where_due() {
 fn romacs_mode_line_lisp_tests_pass() {
     let mut vm = gui_probe::gnu_session();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    vm.eval_source(&format!("(setq load-path (cons {:?} load-path))", root.join("lisp/romacs").to_str().unwrap())).unwrap();
+    vm.eval_source(&format!("(setq load-path (cons {:?} load-path))", root.join("lisp/ui").to_str().unwrap())).unwrap();
     for file in ["lisp/emacs-lisp/romacs-test.el", "lisp/ui/romacs-layer.el", "lisp/ui/romacs-chrome.el", "lisp/ui/romacs-icons.el",
                  "lisp/ui/romacs-mode-line.el", "crates/romacs-vm/tests/romacs-mode-line-test.el"] {
         vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));

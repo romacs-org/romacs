@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/warm-restart-session.el");
-const ROMACS_LISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/romacs");
+const ROMACS_LISP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/session");
 
 fn dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("romacs-warm-restart-{name}-{}", std::process::id()));

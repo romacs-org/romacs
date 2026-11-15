@@ -1,8 +1,8 @@
 {
-  "what": "Where the bundled Lisp lives, relative to the runtime root (this checkout or an installed share/romacs, beside lisp/). Each root and its immediate subdirectories, minus excluded ones, follow GNU's load-path (crates/romacs-vm-gui/src/startup.rs runtime_load_path). The autoloads library scans the same directories (each root's own files are Romacs's runtime Lisp, preloaded or loaded on demand; its subdirectories are packages) with GNU's autoload scraper and defines what it finds as it loads; --loadup loads it into its world, before the user's init.",
-  "roots": [
-    {"path": "lisp/romacs", "exclude": ["vm", "deps"]},
-    {"path": "lisp/romacs/deps", "exclude": []}
-  ],
-  "autoloads": "lisp/session/romacs-bundled-autoloads.el"
+  "what": "The Lisp tree's layout, relative to lisp/ in the runtime root (this checkout or an installed share/romacs). GNU's files keep GNU's paths; `directories` are Romacs's own subsystems, which follow GNU's directories on the load-path in this order (crates/romacs-vm-gui/src/startup.rs runtime_load_path); each directory in `packages` is a bundled package, after them; `off_path` is on no load-path (the VM's Lisp halves, compile-time inputs). The autoloads library scans Romacs's runtime files (its subsystem directories, `romacs-*` files elsewhere on the load-path, and `files`) and each package with GNU's autoload scraper, and defines what it finds as it loads, after loadup (every other file's autoloads are in the loaddefs files tools/lisp-loaddefs makes); --loadup loads it into its world, before the user's init.",
+  "directories": ["agents", "completion", "graphics", "session", "terminal", "ui"],
+  "packages": "packages",
+  "off_path": ["vm"],
+  "autoloads": "lisp/session/romacs-bundled-autoloads.el",
+  "files": []
 }
