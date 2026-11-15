@@ -167,7 +167,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
                 indices
                     .iter()
                     .map(|&i| old.runs[i].bounds)
-                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, inks.drawn(*bounds), new))),
+                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, inks.drawn(key.0, *bounds), new))),
             );
         }
     }

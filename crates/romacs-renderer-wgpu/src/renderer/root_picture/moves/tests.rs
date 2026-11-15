@@ -39,7 +39,7 @@ fn a_scroll_by_a_line_moves_the_rows_that_stay_and_repaints_the_one_that_entered
     };
     // Rows two to five, at 10..50 and as wide as "three", move up a row;
     // six enters at 40..50, where five was.
-    assert_eq!(moves, [Move { from: Rect::new(1.0, 10.0, 6.0 * 5.0, 40.0), dy: -ROW }]);
+    assert_eq!(moves, [Move { window: 1, from: Rect::new(1.0, 10.0, 6.0 * 5.0, 40.0), dy: -ROW }]);
     assert_eq!(regions, [Rect::new(1.0, 40.0, 6.0 * 4.0, ROW)]);
     assert_eq!(rows_kept, 5, "four moved, and the mode line");
 }
@@ -173,7 +173,7 @@ fn ink_of_a_row_that_left_reaching_past_the_band_is_repainted() {
     let new = window(&lines, 1, 5);
     let reach = Reach { right: 10.0, ..Reach::default() };
     // Every row of the old picture drawn with ink reaching that far.
-    let rows = Rows::of_rows((0..5u8).map(|row| ((ROW * f32::from(row), ROW), reach)));
+    let rows = Rows::of_rows((0..5u8).map(|row| ((1, ROW * f32::from(row), ROW), reach)));
     let inks = Inks { all: reach, rows: &rows };
     let Plan::Regions { moves, regions, .. } = damage::plan(&old, &new, &damage::runs(&new.glyphs), inks, 1.0) else {
         panic!("a scroll is a move and regions");

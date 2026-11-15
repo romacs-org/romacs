@@ -50,6 +50,8 @@ use super::reach::{Inks, Reach};
 /// whole device pixels, and how far down it goes (up when negative).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Move {
+    /// The window whose rows it moves.
+    pub(crate) window: i64,
     pub(crate) from: Rect,
     pub(crate) dy: f32,
 }
@@ -120,13 +122,13 @@ fn band(sides: &Sides<'_>, changed: &[Key], window: i64, dy: f32, inks: Inks<'_>
     let rows = placed
         .iter()
         .flat_map(|key| sides.after[key].iter().map(|&at| sides.runs[at].bounds))
-        .map(|r| inks.drawn(Rect::new(r.x, r.y - dy, r.width, r.height)).grow(r))
+        .map(|r| inks.drawn(window, Rect::new(r.x, r.y - dy, r.width, r.height)).grow(r))
         .reduce(damage::union)?;
     let frame = Rect::new(0.0, 0.0, sides.new.width, sides.new.height);
     let area = outward(intersection(rows, frame)?, scale);
     let from = Rect::new(area.x, area.y - dy, area.width, area.height);
     let inside = from.y >= 0.0 && from.y + from.height <= sides.new.height;
-    let step = Move { from, dy };
+    let step = Move { window, from, dy };
     (inside && alone(sides, changed, &placed, (area, step), inks, scale)).then_some((step, area, placed))
 }
 
@@ -244,7 +246,7 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, inks: Inks<'_>, scale: f32) -> bo
     let Some(bounds) = is.iter().map(|&at| sides.runs[at].bounds).reduce(damage::union) else {
         return false;
     };
-    let reach = inks.drawn(Rect::new(bounds.x, bounds.y - dy, bounds.width, bounds.height));
+    let reach = inks.drawn(key.0, Rect::new(bounds.x, bounds.y - dy, bounds.width, bounds.height));
     let inked = reach.grow(bounds);
     let before = Rect::new(inked.x, inked.y - dy, inked.width, inked.height);
     let inside = |clip: Rect, rect: Rect| clip.y <= rect.y && rect.y + rect.height <= clip.y + clip.height;
@@ -485,7 +487,7 @@ fn outward(rect: Rect, scale: f32) -> Rect {
 /// touches either, no edge touches FROM, and an edge in AREA is opaque and
 /// the same in both frames, drawn over the band after the copy.
 fn alone(sides: &Sides<'_>, changed: &[Key], placed: &[Key], (area, step): (Rect, Move), inks: Inks<'_>, scale: f32) -> bool {
-    let Move { from, dy } = step;
+    let Move { from, dy, .. } = step;
     let span = (from.y.min(area.y), (from.y + from.height).max(area.y + area.height));
     let spans = |r: Rect| r.y <= span.0 && r.y + r.height >= span.1;
     // A window's background, or a border as its clip cuts it.
@@ -516,7 +518,7 @@ fn alone(sides: &Sides<'_>, changed: &[Key], placed: &[Key], (area, step): (Rect
         groups.iter().filter(|(key, _)| moving.binary_search(key).is_err()).all(|(key, at)| {
             let drawn = !new || changed.binary_search(key).is_err();
             at.iter().all(|&i| {
-                let reach = if drawn { inks.drawn(runs[i].bounds) } else { inks.all };
+                let reach = if drawn { inks.drawn(key.0, runs[i].bounds) } else { inks.all };
                 fits(frame, &runs[i], place, reach)
             })
         })
