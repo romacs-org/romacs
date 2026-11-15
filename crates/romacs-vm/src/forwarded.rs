@@ -543,9 +543,11 @@ pub(crate) struct CVariable {
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
     // The collector's pacing reads both (`Vm::collection_due`), scaling the
-    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    // percentage internally. The threshold starts at 128 MiB, not GNU's
+    // 800000: a floor that bounds the garbage between collections whatever
+    // the heap's size (DIVERGENCES VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(128 << 20) },
     // benchmark.el's `benchmark-run' reads both around its body.
     CVariable { name: "gc-elapsed", gnu: "alloc.c:7536", kind: Kind::Lisp(Init::GcElapsed) },
     CVariable { name: "gcs-done", gnu: "alloc.c:7539", kind: Kind::Int(0) },

@@ -96,7 +96,8 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     let mut vm = Vm::new();
     vm.set_gc_stress(0);
     let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
-    assert_eq!(eval(&mut vm, "(list gc-cons-threshold gc-cons-percentage)"), "(800000 0.1)", "GNU's defaults");
+    // GNU's percentage; a 128 MiB threshold for GNU's 800000 (VM2-GC-PACING).
+    assert_eq!(eval(&mut vm, "(list gc-cons-threshold gc-cons-percentage)"), "(134217728 0.1)", "Romacs's defaults");
     // 160000 bytes is 10000 objects; nil drops the proportional term.
     vm.eval_source("(setq gc-cons-threshold 160000 gc-cons-percentage nil)").unwrap();
     let plain = churn(&mut vm, 200_000);
@@ -164,7 +165,8 @@ fn finalizers_run_once_after_the_collection_that_finds_them_unreachable() {
 /// seeing `gc-elapsed' already counted, and a `throw' leaves through it.
 #[test]
 fn automatic_collections_run_finalizers_and_post_gc_hook() {
-    let setup = "(progn (defvar hook-runs 0) (defvar hook-elapsed nil) (defvar fin-ran nil) \
+    // GNU's threshold, so that the churn below collects (VM2-GC-PACING).
+    let setup = "(progn (setq gc-cons-threshold 800000) (defvar hook-runs 0) (defvar hook-elapsed nil) (defvar fin-ran nil) \
         (fset 'hook-note (lambda () (setq hook-runs (1+ hook-runs) hook-elapsed gc-elapsed))) \
         (fset 'fin-make (lambda () (make-finalizer (lambda () (setq fin-ran t))) nil)) \
         (fset 'hook-churn (lambda (n) (let ((i 0)) (while (< i n) (cons i nil) (setq i (1+ i)))))) t)";
@@ -324,7 +326,8 @@ fn gnu_and_candidate(forms: &[&str], check: &str) -> (String, String) {
 /// starts the next collection as the hook ends.)
 #[test]
 fn a_collection_inside_post_gc_hook_is_an_ordinary_one() {
-    let setup = "(progn (defvar hk-runs 0) (defvar hk-inner nil) (defvar hk-churned nil) \
+    // GNU's threshold, so that the churn in the hook collects (VM2-GC-PACING).
+    let setup = "(progn (setq gc-cons-threshold 800000) (defvar hk-runs 0) (defvar hk-inner nil) (defvar hk-churned nil) \
         (fset 'hk-churn (lambda () (let ((done gcs-done) (i 0)) \
           (while (< i 3000000) (cons i nil) (setq i (1+ i))) (- gcs-done done)))) t)";
     let check = "(let ((done gcs-done)) \
@@ -631,7 +634,9 @@ fn a_collection_its_unwinding_made_due_is_taken_at_the_handlers_first_tick() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_gc_stress(0);
-    vm.eval_source("(progn (defvar lt-big nil) (fset 'lt-tick (lambda () nil)) (garbage-collect) t)").unwrap();
+    // GNU's threshold, which the unbinding restores: the list made under the
+    // bound one is past it (VM2-GC-PACING).
+    vm.eval_source("(progn (setq gc-cons-threshold 800000) (defvar lt-big nil) (fset 'lt-tick (lambda () nil)) (garbage-collect) t)").unwrap();
     let collected = vm.eval_source("(let ((g gcs-done)) \
         (catch 'lt-out (let ((gc-cons-threshold most-positive-fixnum) (gc-cons-percentage 2.0)) \
                          (setq lt-big (make-list 2000000 nil)) (dotimes (_ 20000)) (throw 'lt-out nil))) \
@@ -852,7 +857,8 @@ fn a_collection_in_a_finalizer_leaves_the_hook_to_its_run() {
 /// both.
 #[test]
 fn post_gc_work_keeps_the_match_data_and_buffer_it_interrupted() {
-    let setup = "(progn (set-buffer (get-buffer-create \"md-subject\")) (insert \"abc\") (goto-char 1) \
+    // GNU's threshold, so that the churn below collects (VM2-GC-PACING).
+    let setup = "(progn (setq gc-cons-threshold 800000) (set-buffer (get-buffer-create \"md-subject\")) (insert \"abc\") (goto-char 1) \
         (re-search-forward \"b\") \
         (defvar md-finalized nil) \
         (make-finalizer (lambda () (setq md-finalized t) (string-match \"z\" \"xz\") (set-buffer (get-buffer-create \" md-other\")))) \
