@@ -168,8 +168,12 @@ DOC documents it.  SPEC is a plist:
        ,@(when compute
            `(,@(and local `((make-variable-buffer-local ',variable)))
              (defun ,(intern (format "romacs-mode-line-refresh-%s" name)) ()
-               ,(format "Compute the segment `%s' again in the current buffer." name)
-               (let* ((text (funcall ,compute))
+               ,(format "Compute the segment `%s' again in the current buffer.
+An error in its computation leaves the segment empty and is reported,
+as redisplay reports a mode-line form that signals: it never reaches
+the command or hook that asked (a save, a revert, a timer)." name)
+               (let* ((text (condition-case err (funcall ,compute)
+                              (error (message "Error in mode-line segment `%s': %S" ',name err) nil)))
                       (value (and text ,(if face `(propertize text 'face ',face) 'text))))
                  (unless (equal-including-properties value ,variable)
                    (setq ,variable value)

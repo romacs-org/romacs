@@ -26,4 +26,27 @@
   (should (equal (romacs-mode-line--path "/tmp/a/proj/src/x.el" "/tmp/a/proj/" 'truncate-with-project) "proj/s/x.el"))
   (should (equal (romacs-mode-line--path "/tmp/a/proj/src/x.el" "/tmp/a/proj/" 'truncate-upto-project) "/t/a/proj/src/x.el")))
 
+;; A segment's computation runs from the hooks that make it stale, as
+;; `after-revert-hook' and `after-save-hook'.  One that signalled took the
+;; revert with it, and with it `auto-revert-buffers''s timer (#207).
+(romacs-mode-line-define-segment test-signalling
+  "A segment whose computation signals."
+  :compute (lambda () (error "Segment failure"))
+  :hooks (after-revert-hook))
+
+(ert-deftest romacs-mode-line-a-failing-segment-leaves-its-hook-alone ()
+  (let ((file (make-temp-file "romacs-mode-line" nil ".txt" "one\n")))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (unwind-protect
+              (progn
+                (should-not (condition-case nil (progn (romacs-mode-line-refresh-test-signalling) nil) (error t)))
+                (should-not romacs-mode-line-test-signalling)
+                (with-temp-file file (insert "two\n"))
+                (should-not (condition-case err (progn (revert-buffer t t) nil) (error err)))
+                (should (equal (buffer-string) "two\n")))
+            (set-buffer-modified-p nil)
+            (kill-buffer)))
+      (delete-file file))))
+
 ;;; romacs-mode-line-tests.el ends here
