@@ -1,4 +1,4 @@
-//! window.c's window change functions (lisp/romacs/vm/window-change.el, run by
+//! window.c's window change functions (lisp/vm/window-change.el, run by
 //! each redisplay's frame snapshot). Against pinned GNU, which runs no
 //! redisplay in batch: `run-window-configuration-change-hook' runs each
 //! window's buffer-local functions with that window selected and its
@@ -35,14 +35,14 @@ fn configuration_change_hook_matches_pinned_gnu() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
     let mut vm = gnu_lisp(&[]);
-    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/vm/window-change.el")).unwrap();
     assert_eq!(vm.eval_source(CONFIGURATION).unwrap().display().unwrap(), expected);
 }
 
 #[test]
 fn redisplay_runs_window_change_functions() {
     let mut vm = gnu_lisp(&[]);
-    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/vm/window-change.el")).unwrap();
     let source = r#"(let ((log nil) (a (get-buffer-create "wc-a")) (b (get-buffer-create "wc-b")))
   (delete-other-windows)
   (switch-to-buffer a)
@@ -71,7 +71,7 @@ fn redisplay_runs_window_change_functions() {
 #[test]
 fn frame_snapshots_run_window_change_functions_on_changes() {
     let mut vm = gnu_lisp(&[]);
-    vm.eval_source(include_str!("../../../lisp/romacs/vm/window-change.el")).unwrap();
+    vm.eval_source(include_str!("../../../lisp/vm/window-change.el")).unwrap();
     vm.eval_source(r#"(progn (delete-other-windows) (switch-to-buffer (get-buffer-create "wc-a")) (setq wc-log nil))"#).unwrap();
     // The first snapshot lays the frame out at its size, a size change.
     vm.frame_snapshot(800, 600).unwrap();

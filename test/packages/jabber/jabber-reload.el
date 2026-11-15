@@ -21,8 +21,8 @@
    (sort (file-expand-wildcards
           (expand-file-name
            (cond
-            ((file-directory-p (expand-file-name "lisp/romacs/jabber" root))
-             "lisp/romacs/jabber/*.el")
+            ((file-directory-p (expand-file-name "lisp/packages/jabber" root))
+             "lisp/packages/jabber/*.el")
             ((file-directory-p (expand-file-name "lisp/jabber" root))
              "lisp/jabber/*.el")
             (t "lisp/*.el"))
