@@ -1611,6 +1611,12 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
   (let ((seq (gethash "seq" record)))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
+      ;; Whether it was rolled back with nothing said since, kept as its
+      ;; records come, so a resume need not read them all to know.
+      (cond ((romacs-agent--rollback-note-p record)
+             (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolled-back t)))
+            ((romacs-agent--record-request record)
+             (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolled-back nil))))
       (let ((out (gethash "out" record :absent))
             (in (gethash "in" record :absent))
             (exit (gethash "exit" record :absent))
