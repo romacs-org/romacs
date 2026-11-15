@@ -11,6 +11,9 @@
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
+  loaddefs    lisp/'s loaddefs files are what tools/lisp-loaddefs makes of the tree,
+              when the change touches a .el under lisp/ or etc/themes. It runs the
+              pinned GNU binary; without one the stage cannot run.
   tests       the Rust tests the change can reach, by tools/lib/impact.py (the
               packages and test files it selects, and the structural rules),
               run on this tree into CARGO_TARGET_DIR. The rules that run the
@@ -199,6 +202,25 @@ def lint(root, names, trunk, binary):
     return lint_stage(done.returncode, done.stdout, done.stderr)
 
 
+# The loaddefs files.
+
+def loaddefs(root, names):
+    """(STATUS, SUMMARY, FINDINGS) of tools/lisp-loaddefs --check, for a change that can move them."""
+    touched = [n for n in names if (n.startswith('lisp/') and n.endswith('.el')) or n.startswith('etc/themes/')]
+    if not touched:
+        return 'ok', 'no Lisp or theme file changed', []
+    done = subprocess.run([sys.executable, '-B', str(root / 'tools/lisp-loaddefs'), '--check'], cwd=root,
+                          capture_output=True, text=True)
+    if done.returncode == 0:
+        return 'ok', 'the loaddefs files are current', []
+    findings = [line for line in done.stdout.splitlines() if line.startswith('lisp/')]
+    if findings:
+        return 'FAIL', f'{len(findings)} loaddefs file(s) out of date', findings
+    why = (done.stderr.strip().splitlines() or ['no output'])[-1]
+    return 'SKIP', 'tools/lisp-loaddefs could not run', [f'{why}; fix: set ROMACS_GNU_ORACLE to the pinned GNU binary']
+
+
+
 # The tests a change can reach.
 
 def plan(answer, root):
@@ -348,7 +370,7 @@ def main():
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
     stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
-              ('lint', *lint(ROOT, names, trunk, args.binary))]
+              ('lint', *lint(ROOT, names, trunk, args.binary)), ('loaddefs', *loaddefs(ROOT, names))]
     if not args.no_tests:
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)

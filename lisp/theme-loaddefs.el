@@ -7,97 +7,214 @@
 
 
 
-;;; Generated autoloads from ../etc/themes/adwaita-theme.el
+;;; Generated autoloads from ../etc/themes/acario-dark-theme.el
 
-(put 'adwaita 'theme-properties (list :background-mode 'light :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/adwaita-theme" '("adwaita"))
-
-
-;;; Generated autoloads from ../etc/themes/deeper-blue-theme.el
-
-(put 'deeper-blue 'theme-properties (list :background-mode 'dark :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/deeper-blue-theme" '("deeper-blue"))
+(register-definition-prefixes "etc/themes/acario-dark-theme" '("acario-dark"))
 
 
-;;; Generated autoloads from ../etc/themes/dichromacy-theme.el
+;;; Generated autoloads from ../etc/themes/acario-light-theme.el
 
-(put 'dichromacy 'theme-properties (list :background-mode 'light :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/dichromacy-theme" '("dichromacy"))
-
-
-;;; Generated autoloads from ../etc/themes/leuven-dark-theme.el
-
-(put 'leuven-dark 'theme-properties (list :background-mode 'dark :family 'leuven :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/leuven-dark-theme" '("leuven-dark"))
+(register-definition-prefixes "etc/themes/acario-light-theme" '("acario-light"))
 
 
-;;; Generated autoloads from ../etc/themes/leuven-theme.el
+;;; Generated autoloads from ../etc/themes/ayu-dark-theme.el
 
-(put 'leuven 'theme-properties (list :background-mode 'light :kind 'color-scheme :family 'leuven))
-(register-definition-prefixes "etc/themes/leuven-theme" '("leuven"))
-
-
-;;; Generated autoloads from ../etc/themes/light-blue-theme.el
-
-(put 'light-blue 'theme-properties (list :background-mode 'light :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/light-blue-theme" '("light-blue"))
+(register-definition-prefixes "etc/themes/ayu-dark-theme" '("ayu-dark"))
 
 
-;;; Generated autoloads from ../etc/themes/manoj-dark-theme.el
+;;; Generated autoloads from ../etc/themes/ayu-light-theme.el
 
-(put 'manoj-dark 'theme-properties (list :background-mode 'dark :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/manoj-dark-theme" '("manoj-dark"))
-
-
-;;; Generated autoloads from ../etc/themes/misterioso-theme.el
-
-(put 'misterioso 'theme-properties (list :background-mode 'dark :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/misterioso-theme" '("misterioso"))
+(register-definition-prefixes "etc/themes/ayu-light-theme" '("ayu-light"))
 
 
-;;; Generated autoloads from ../etc/themes/modus-operandi-deuteranopia-theme.el
+;;; Generated autoloads from ../etc/themes/ayu-mirage-theme.el
 
-(register-definition-prefixes "etc/themes/modus-operandi-deuteranopia-theme" '("modus-operandi-deuteranopia-palette-"))
-
-
-;;; Generated autoloads from ../etc/themes/modus-operandi-theme.el
-
-(register-definition-prefixes "etc/themes/modus-operandi-theme" '("modus-operandi-palette-"))
+(register-definition-prefixes "etc/themes/ayu-mirage-theme" '("ayu-mirage"))
 
 
-;;; Generated autoloads from ../etc/themes/modus-operandi-tinted-theme.el
+;;; Generated autoloads from ../etc/themes/badger-theme.el
 
-(register-definition-prefixes "etc/themes/modus-operandi-tinted-theme" '("modus-operandi-tinted-palette-"))
-
-
-;;; Generated autoloads from ../etc/themes/modus-operandi-tritanopia-theme.el
-
-(register-definition-prefixes "etc/themes/modus-operandi-tritanopia-theme" '("modus-operandi-tritanopia-palette-"))
+(register-definition-prefixes "etc/themes/badger-theme" '("badger"))
 
 
-;;; Generated autoloads from ../etc/themes/modus-themes.el
+;;; Generated autoloads from ../etc/themes/bluloco-dark-theme.el
 
-(register-definition-prefixes "etc/themes/modus-themes" '("modus-themes-"))
-
-
-;;; Generated autoloads from ../etc/themes/modus-vivendi-deuteranopia-theme.el
-
-(register-definition-prefixes "etc/themes/modus-vivendi-deuteranopia-theme" '("modus-vivendi-deuteranopia-palette-"))
+(register-definition-prefixes "etc/themes/bluloco-dark-theme" '("bluloco-dark"))
 
 
-;;; Generated autoloads from ../etc/themes/modus-vivendi-theme.el
+;;; Generated autoloads from ../etc/themes/bluloco-light-theme.el
 
-(register-definition-prefixes "etc/themes/modus-vivendi-theme" '("modus-vivendi-palette-"))
-
-
-;;; Generated autoloads from ../etc/themes/modus-vivendi-tinted-theme.el
-
-(register-definition-prefixes "etc/themes/modus-vivendi-tinted-theme" '("modus-vivendi-tinted-palette-"))
+(register-definition-prefixes "etc/themes/bluloco-light-theme" '("bluloco-light"))
 
 
-;;; Generated autoloads from ../etc/themes/modus-vivendi-tritanopia-theme.el
+;;; Generated autoloads from ../etc/themes/catppuccin-latte-theme.el
 
-(register-definition-prefixes "etc/themes/modus-vivendi-tritanopia-theme" '("modus-vivendi-tritanopia-palette-"))
+(register-definition-prefixes "etc/themes/catppuccin-latte-theme" '("catppuccin-latte"))
+
+
+;;; Generated autoloads from ../etc/themes/catppuccin-mocha-theme.el
+
+(register-definition-prefixes "etc/themes/catppuccin-mocha-theme" '("catppuccin-mocha"))
+
+
+;;; Generated autoloads from ../etc/themes/challenger-deep-theme.el
+
+(register-definition-prefixes "etc/themes/challenger-deep-theme" '("challenger-deep"))
+
+
+;;; Generated autoloads from ../etc/themes/city-lights-theme.el
+
+(register-definition-prefixes "etc/themes/city-lights-theme" '("city-lights"))
+
+
+;;; Generated autoloads from ../etc/themes/dark-plus-theme.el
+
+(register-definition-prefixes "etc/themes/dark-plus-theme" '("dark-plus"))
+
+
+;;; Generated autoloads from ../etc/themes/default-theme.el
+
+(register-definition-prefixes "etc/themes/default-theme" '("romacs-theme-default-"))
+
+
+;;; Generated autoloads from ../etc/themes/dracula-theme.el
+
+(register-definition-prefixes "etc/themes/dracula-theme" '("dracula"))
+
+
+;;; Generated autoloads from ../etc/themes/earl-grey-theme.el
+
+(register-definition-prefixes "etc/themes/earl-grey-theme" '("earl-grey"))
+
+
+;;; Generated autoloads from ../etc/themes/ephemeral-theme.el
+
+(register-definition-prefixes "etc/themes/ephemeral-theme" '("ephemeral"))
+
+
+;;; Generated autoloads from ../etc/themes/everforest-dark-theme.el
+
+(register-definition-prefixes "etc/themes/everforest-dark-theme" '("everforest-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/everforest-light-theme.el
+
+(register-definition-prefixes "etc/themes/everforest-light-theme" '("everforest-light"))
+
+
+;;; Generated autoloads from ../etc/themes/fairy-floss-theme.el
+
+(register-definition-prefixes "etc/themes/fairy-floss-theme" '("fairy-floss"))
+
+
+;;; Generated autoloads from ../etc/themes/feather-dark-theme.el
+
+(register-definition-prefixes "etc/themes/feather-dark-theme" '("feather-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/feather-light-theme.el
+
+(register-definition-prefixes "etc/themes/feather-light-theme" '("feather-light"))
+
+
+;;; Generated autoloads from ../etc/themes/flatwhite-theme.el
+
+(register-definition-prefixes "etc/themes/flatwhite-theme" '("flatwhite"))
+
+
+;;; Generated autoloads from ../etc/themes/gruvbox-dark-theme.el
+
+(register-definition-prefixes "etc/themes/gruvbox-dark-theme" '("gruvbox-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/gruvbox-light-theme.el
+
+(register-definition-prefixes "etc/themes/gruvbox-light-theme" '("gruvbox-light"))
+
+
+;;; Generated autoloads from ../etc/themes/henna-theme.el
+
+(register-definition-prefixes "etc/themes/henna-theme" '("henna"))
+
+
+;;; Generated autoloads from ../etc/themes/homage-black-theme.el
+
+(register-definition-prefixes "etc/themes/homage-black-theme" '("homage-black"))
+
+
+;;; Generated autoloads from ../etc/themes/homage-white-theme.el
+
+(register-definition-prefixes "etc/themes/homage-white-theme" '("homage-white"))
+
+
+;;; Generated autoloads from ../etc/themes/horizon-theme.el
+
+(register-definition-prefixes "etc/themes/horizon-theme" '("horizon"))
+
+
+;;; Generated autoloads from ../etc/themes/iosvkem-theme.el
+
+(register-definition-prefixes "etc/themes/iosvkem-theme" '("iosvkem"))
+
+
+;;; Generated autoloads from ../etc/themes/ir-black-theme.el
+
+(register-definition-prefixes "etc/themes/ir-black-theme" '("ir-black"))
+
+
+;;; Generated autoloads from ../etc/themes/kanagawa-lotus-theme.el
+
+(register-definition-prefixes "etc/themes/kanagawa-lotus-theme" '("kanagawa-lotus"))
+
+
+;;; Generated autoloads from ../etc/themes/kanagawa-wave-theme.el
+
+(register-definition-prefixes "etc/themes/kanagawa-wave-theme" '("kanagawa-wave"))
+
+
+;;; Generated autoloads from ../etc/themes/lantern-theme.el
+
+(register-definition-prefixes "etc/themes/lantern-theme" '("lantern"))
+
+
+;;; Generated autoloads from ../etc/themes/laserwave-theme.el
+
+(register-definition-prefixes "etc/themes/laserwave-theme" '("laserwave"))
+
+
+;;; Generated autoloads from ../etc/themes/leet-theme.el
+
+(register-definition-prefixes "etc/themes/leet-theme" '("leet"))
+
+
+;;; Generated autoloads from ../etc/themes/manegarm-theme.el
+
+(register-definition-prefixes "etc/themes/manegarm-theme" '("manegarm"))
+
+
+;;; Generated autoloads from ../etc/themes/material-theme.el
+
+(register-definition-prefixes "etc/themes/material-theme" '("material"))
+
+
+;;; Generated autoloads from ../etc/themes/miramare-theme.el
+
+(register-definition-prefixes "etc/themes/miramare-theme" '("miramare"))
+
+
+;;; Generated autoloads from ../etc/themes/molokai-theme.el
+
+(register-definition-prefixes "etc/themes/molokai-theme" '("molokai"))
+
+
+;;; Generated autoloads from ../etc/themes/monokai-classic-theme.el
+
+(register-definition-prefixes "etc/themes/monokai-classic-theme" '("monokai-classic"))
+
+
+;;; Generated autoloads from ../etc/themes/moonlight-theme.el
+
+(register-definition-prefixes "etc/themes/moonlight-theme" '("moonlight"))
 
 
 ;;; Generated autoloads from ../etc/themes/newcomers-presets-theme.el
@@ -106,46 +223,189 @@
 (register-definition-prefixes "etc/themes/newcomers-presets-theme" '("newcomers-presets"))
 
 
-;;; Generated autoloads from ../etc/themes/tango-dark-theme.el
+;;; Generated autoloads from ../etc/themes/nord-aurora-theme.el
 
-(put 'tango-dark 'theme-properties (list :background-mode 'dark :kind 'color-scheme :family 'tango))
-(register-definition-prefixes "etc/themes/tango-dark-theme" '("tango-dark"))
-
-
-;;; Generated autoloads from ../etc/themes/tango-theme.el
-
-(put 'tango 'theme-properties (list :background-mode 'light :kind 'color-scheme :family 'tango))
-(register-definition-prefixes "etc/themes/tango-theme" '("tango"))
+(register-definition-prefixes "etc/themes/nord-aurora-theme" '("nord-aurora"))
 
 
-;;; Generated autoloads from ../etc/themes/tsdh-dark-theme.el
+;;; Generated autoloads from ../etc/themes/nord-light-theme.el
 
-(put 'tsdh-dark 'theme-properties (list :background-mode 'dark :kind 'color-scheme :family 'tsdh))
-(register-definition-prefixes "etc/themes/tsdh-dark-theme" '("tsdh-dark"))
-
-
-;;; Generated autoloads from ../etc/themes/tsdh-light-theme.el
-
-(put 'tsdh-light 'theme-properties (list :background-mode 'light :kind 'color-scheme :family 'tsdh))
-(register-definition-prefixes "etc/themes/tsdh-light-theme" '("tsdh-light"))
+(register-definition-prefixes "etc/themes/nord-light-theme" '("nord-light"))
 
 
-;;; Generated autoloads from ../etc/themes/wheatgrass-theme.el
+;;; Generated autoloads from ../etc/themes/nord-theme.el
 
-(put 'wheatgrass 'theme-properties (list :background-mode 'dark :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/wheatgrass-theme" '("wheatgrass"))
-
-
-;;; Generated autoloads from ../etc/themes/whiteboard-theme.el
-
-(put 'whiteboard 'theme-properties (list :background-mode 'light :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/whiteboard-theme" '("whiteboard"))
+(register-definition-prefixes "etc/themes/nord-theme" '("nord"))
 
 
-;;; Generated autoloads from ../etc/themes/wombat-theme.el
+;;; Generated autoloads from ../etc/themes/nova-theme.el
 
-(put 'wombat 'theme-properties (list :background-mode 'dark :kind 'color-scheme))
-(register-definition-prefixes "etc/themes/wombat-theme" '("wombat"))
+(register-definition-prefixes "etc/themes/nova-theme" '("nova"))
+
+
+;;; Generated autoloads from ../etc/themes/oceanic-next-theme.el
+
+(register-definition-prefixes "etc/themes/oceanic-next-theme" '("oceanic-next"))
+
+
+;;; Generated autoloads from ../etc/themes/oksolar-dark-theme.el
+
+(register-definition-prefixes "etc/themes/oksolar-dark-theme" '("oksolar-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/oksolar-light-theme.el
+
+(register-definition-prefixes "etc/themes/oksolar-light-theme" '("oksolar-light"))
+
+
+;;; Generated autoloads from ../etc/themes/old-hope-theme.el
+
+(register-definition-prefixes "etc/themes/old-hope-theme" '("old-hope"))
+
+
+;;; Generated autoloads from ../etc/themes/one-dark-theme.el
+
+(register-definition-prefixes "etc/themes/one-dark-theme" '("one-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/one-light-theme.el
+
+(register-definition-prefixes "etc/themes/one-light-theme" '("one-light"))
+
+
+;;; Generated autoloads from ../etc/themes/opera-light-theme.el
+
+(register-definition-prefixes "etc/themes/opera-light-theme" '("opera-light"))
+
+
+;;; Generated autoloads from ../etc/themes/outrun-electric-theme.el
+
+(register-definition-prefixes "etc/themes/outrun-electric-theme" '("outrun-electric"))
+
+
+;;; Generated autoloads from ../etc/themes/peacock-theme.el
+
+(register-definition-prefixes "etc/themes/peacock-theme" '("peacock"))
+
+
+;;; Generated autoloads from ../etc/themes/pine-theme.el
+
+(register-definition-prefixes "etc/themes/pine-theme" '("pine"))
+
+
+;;; Generated autoloads from ../etc/themes/plain-dark-theme.el
+
+(register-definition-prefixes "etc/themes/plain-dark-theme" '("plain-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/plain-theme.el
+
+(register-definition-prefixes "etc/themes/plain-theme" '("plain"))
+
+
+;;; Generated autoloads from ../etc/themes/romacs-theme-rum.el
+
+(register-definition-prefixes "etc/themes/romacs-theme-rum" '("romacs-theme-rum"))
+
+
+;;; Generated autoloads from ../etc/themes/rose-pine-dawn-theme.el
+
+(register-definition-prefixes "etc/themes/rose-pine-dawn-theme" '("rose-pine-dawn"))
+
+
+;;; Generated autoloads from ../etc/themes/rose-pine-main-theme.el
+
+(register-definition-prefixes "etc/themes/rose-pine-main-theme" '("rose-pine-main"))
+
+
+;;; Generated autoloads from ../etc/themes/rouge-theme.el
+
+(register-definition-prefixes "etc/themes/rouge-theme" '("rouge"))
+
+
+;;; Generated autoloads from ../etc/themes/shades-of-purple-theme.el
+
+(register-definition-prefixes "etc/themes/shades-of-purple-theme" '("shades-of-purple"))
+
+
+;;; Generated autoloads from ../etc/themes/snazzy-theme.el
+
+(register-definition-prefixes "etc/themes/snazzy-theme" '("snazzy"))
+
+
+;;; Generated autoloads from ../etc/themes/solarized-dark-high-contrast-theme.el
+
+(register-definition-prefixes "etc/themes/solarized-dark-high-contrast-theme" '("solarized-dark-high-contrast"))
+
+
+;;; Generated autoloads from ../etc/themes/solarized-dark-theme.el
+
+(register-definition-prefixes "etc/themes/solarized-dark-theme" '("solarized-dark"))
+
+
+;;; Generated autoloads from ../etc/themes/solarized-light-theme.el
+
+(register-definition-prefixes "etc/themes/solarized-light-theme" '("solarized-light"))
+
+
+;;; Generated autoloads from ../etc/themes/sourcerer-theme.el
+
+(register-definition-prefixes "etc/themes/sourcerer-theme" '("sourcerer"))
+
+
+;;; Generated autoloads from ../etc/themes/spacegrey-theme.el
+
+(register-definition-prefixes "etc/themes/spacegrey-theme" '("spacegrey"))
+
+
+;;; Generated autoloads from ../etc/themes/tokyonight-day-theme.el
+
+(register-definition-prefixes "etc/themes/tokyonight-day-theme" '("tokyonight-day"))
+
+
+;;; Generated autoloads from ../etc/themes/tokyonight-night-theme.el
+
+(register-definition-prefixes "etc/themes/tokyonight-night-theme" '("tokyonight-night"))
+
+
+;;; Generated autoloads from ../etc/themes/tomorrow-day-theme.el
+
+(register-definition-prefixes "etc/themes/tomorrow-day-theme" '("tomorrow-day"))
+
+
+;;; Generated autoloads from ../etc/themes/tomorrow-night-theme.el
+
+(register-definition-prefixes "etc/themes/tomorrow-night-theme" '("tomorrow-night"))
+
+
+;;; Generated autoloads from ../etc/themes/vibrant-theme.el
+
+(register-definition-prefixes "etc/themes/vibrant-theme" '("vibrant"))
+
+
+;;; Generated autoloads from ../etc/themes/wilmersdorf-theme.el
+
+(register-definition-prefixes "etc/themes/wilmersdorf-theme" '("wilmersdorf"))
+
+
+;;; Generated autoloads from ../etc/themes/winter-is-coming-dark-blue-theme.el
+
+(register-definition-prefixes "etc/themes/winter-is-coming-dark-blue-theme" '("winter-is-coming-dark-blue"))
+
+
+;;; Generated autoloads from ../etc/themes/winter-is-coming-light-theme.el
+
+(register-definition-prefixes "etc/themes/winter-is-coming-light-theme" '("winter-is-coming-light"))
+
+
+;;; Generated autoloads from ../etc/themes/xcode-theme.el
+
+(register-definition-prefixes "etc/themes/xcode-theme" '("xcode"))
+
+
+;;; Generated autoloads from ../etc/themes/zenburn-theme.el
+
+(register-definition-prefixes "etc/themes/zenburn-theme" '("zenburn"))
 
 ;;; End of scraped data
 

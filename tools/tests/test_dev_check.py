@@ -112,6 +112,10 @@ class Lint(unittest.TestCase):
                  'lisp/session/README', 'crates/romacs-vm/src/gc.rs', 'lisp/packages/jabber/jabber.el'}
         self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el', 'lisp/simple.el'])
 
+    def test_the_loaddefs_stage_runs_only_for_lisp_and_themes(self):
+        self.assertEqual(check.loaddefs(ROOT, {'crates/romacs-vm/src/gc.rs', 'lisp/GENERATED'}),
+                         ('ok', 'no Lisp or theme file changed', []))
+
     def test_the_lint_is_given_the_base_the_paths_came_from(self):
         # Left to itself the lint compares with beta, whatever trunk was asked for.
         command = check.lint_command(ROOT, ['lisp/session/a.el'], 'abc123', '/x/romacs-vm-gui')
