@@ -353,15 +353,21 @@ takes what the others and the gaps between them leave."
   "ROW as a line WIDTH columns wide."
   (pcase (plist-get row :kind)
     ('project
-     ;; What its threads are at, and how many when folded, always show:
-     ;; the path is cut first.
-     (let ((tail (concat (if-let* ((count (plist-get row :folded)))
-                             (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
-                           "")
-                         (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) ""))))
-       (concat (romacs-truncate (concat (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
-                                        "  " (propertize (plist-get row :cwd) 'face 'romacs-agent-dim))
-                                (- width (string-width tail)))
+     ;; Its name always shows, then what its threads are at, then how
+     ;; many when folded, cut from the end only when nothing else is
+     ;; left; the path takes the room after them.
+     (let* ((name (romacs-truncate (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
+                                   width))
+            (room (- width (string-width name)))
+            (tail (romacs-truncate
+                   (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
+                           (if-let* ((count (plist-get row :folded)))
+                               (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                             ""))
+                   room)))
+       (concat name
+               (romacs-truncate (propertize (concat "  " (plist-get row :cwd)) 'face 'romacs-agent-dim)
+                                (- room (string-width tail)))
                tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))

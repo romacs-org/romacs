@@ -402,7 +402,18 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (should (= (plist-get (car shown) :folded) 2))
         (let ((line (romacs-agent-board--line (car shown) 100)))
           (should (string-search "▸ 2 threads" line))
-          (should (string-search (romacs-agent-ui--rollup '(working)) line))))
+          (should (string-search (romacs-agent-ui--rollup '(working)) line))
+        ;; States in words, wider than the board: the name stays, the
+        ;; line keeps to the width, what is cut says so.
+        (let* ((words (romacs-agent-ui--rollup '(approval question working)))
+               (line (romacs-agent-board--line (list :kind 'project :cwd "/p/a-long-project-name" :folded 3
+                                                     :keys '(approval question working))
+                                               40)))
+          (should (> (string-width words) 30))
+          (should (string-prefix-p "a-long-project-name" line))
+          (should (<= (string-width line) 40))
+          (should (string-search (substring-no-properties words 0 10) line))
+          (should (string-suffix-p (truncate-string-ellipsis) line)))))
       (should (member "lead" (romacs-agent-board-tests--ids (rows :projects projects :words '("lead"))))))))
 
 (ert-deftest romacs-agent-board-keys-fold-projects ()
@@ -451,8 +462,9 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (let* ((row (car (rows :projects kept)))
              (line (romacs-agent-board--line row 40)))
         (should (<= (string-width line) 40))
-        (should (string-search "▸ 1 thread" line))
-        (should (string-search (romacs-agent-ui--rollup '(working)) line)))
+        ;; What it is at shows before how many, which goes first.
+        (should (string-search (romacs-agent-ui--rollup '(working)) line))
+        (should (string-search "▸ 1 thread" (romacs-agent-board--line row 60))))
       (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
                 ((symbol-function 'romacs-agent-store-fold)
                  (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
