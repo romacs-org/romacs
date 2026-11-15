@@ -311,8 +311,8 @@ fn is_gnu_lisp(dir: &std::path::Path) -> bool {
 
 /// `ROMACS_LISP_DIR` when IS_GNU_LISP says it holds GNU's Lisp, else the
 /// runtime tree's `lisp/gnu/` (`romacs_vm::host::runtime_root`), with the
-/// override it ignored: one left from another build's layout (its
-/// `gnu-lisp/', gone) must not end the start.
+/// override it ignored: one left from another build's layout (a tree
+/// that layout had, gone) must not end the start.
 fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce() -> std::path::PathBuf,
                  is_gnu_lisp: impl Fn(&std::path::Path) -> bool) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
     match lisp_dir.map(std::path::PathBuf::from) {
@@ -1992,10 +1992,10 @@ mod tests {
         assert_eq!(lisp_dir_from(None, root, |_| true), (own.clone(), None));
         // The more specific override still wins.
         assert_eq!(lisp_dir_from(Some("/elsewhere/lisp".into()), root, |_| true), ("/elsewhere/lisp".into(), None));
-        // One that does not (an older layout's gnu-lisp/, gone) gives way to
+        // One that does not (a tree an older layout had, gone) gives way to
         // the runtime's own, and is named.
-        assert_eq!(lisp_dir_from(Some("/opt/romacs/share/romacs/gnu-lisp".into()), root, |_| false),
-                   (own, Some("/opt/romacs/share/romacs/gnu-lisp".into())));
+        assert_eq!(lisp_dir_from(Some("/opt/romacs/share/romacs/no-such-lisp".into()), root, |_| false),
+                   (own, Some("/opt/romacs/share/romacs/no-such-lisp".into())));
     }
 
     #[test]
