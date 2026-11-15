@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; romacs-mule.el replaces definitions of GNU's mule.el.  GNU's own are
-;; still in lisp/gnu/: these tests read them from that file and hold
+;; still in lisp/: these tests read them from that file and hold
 ;; Romacs's to the same tables and the same errors, and to their cost.
 
 ;;; Code:

@@ -66,7 +66,7 @@ fn scratch(name: &str) -> PathBuf {
     let unique = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("romacs-world-layer-{}-{unique}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("lisp/romacs")).unwrap();
+    std::fs::create_dir_all(dir.join("lisp/session")).unwrap();
     std::fs::create_dir_all(dir.join("lisp")).unwrap();
     for (name, text) in LIBRARIES {
         std::fs::write(dir.join(format!("lisp/{name}.el")), text).unwrap();
@@ -84,12 +84,12 @@ fn plan(dir: &Path, names: &[&str]) -> Plan {
 /// and the trace.
 fn build(name: &str, names: &[&str]) -> (Vm, Vec<(usize, String)>, Json) {
     let dir = scratch(name);
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan(&dir, names), &[]);
     let trace = host::leave_build().unwrap();
     (vm, refused, trace)
@@ -163,14 +163,14 @@ fn build_libraries(name: &str, libraries: &[(&str, &str)], bootstrap: &str) -> (
     for (library, source) in libraries {
         std::fs::write(dir.join(format!("lisp/{library}.el")), format!("{source}(provide '{library})\n")).unwrap();
     }
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
     let names: Vec<&str> = libraries.iter().map(|(library, _)| *library).collect();
     let plan = plan(&dir, &names);
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     (vm, refused, trace)
@@ -212,7 +212,7 @@ fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
         (unless (and org-persist--disable-when-emacs-Q nil)\n  \
         (setq org-persist--refresh-gc-lock-timer (car (setq timer-list (cons (list 'lock (current-time)) timer-list)))))\n\
         (provide 'org-persist)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
     let paths = vec![vec![extra.display().to_string(), org.display().to_string()]];
     let plan = Plan::new(&dir.join("init.el"), vec![require("cl-extra"), require("org-persist")], paths).unwrap();
@@ -220,7 +220,7 @@ fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
@@ -339,14 +339,14 @@ fn a_loaded_library_is_refused_for_reading_a_secret() {
     let dir = scratch("loaded-secret");
     std::fs::write(dir.join("lisp/lib-r.el"), "(defun auth-source-netrc-parse (&rest _) (list (list :secret \"romacs-fixture-netrc-4c1d\")))\n\
 (defvar lib-r-secret (auth-source-netrc-parse :file \"~/.authinfo\"))\n(provide 'lib-r)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let plan = plan(&dir, &["lib-a", "lib-r", "lib-v"]);
     std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
@@ -365,13 +365,13 @@ fn a_library_s_credential_read_is_kept_as_code_for_restore() {
                        dir.join(".authinfo").display().to_string());
     std::fs::write(dir.join("lisp/lib-c.el"), format!(
         "(defvar lib-c-text {read})\n(setq lib-c-plain {read})\n(defvar lib-c-after 1)\n(provide 'lib-c)\n")).unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let plan = plan(&dir, &["lib-c"]);
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
@@ -389,13 +389,13 @@ fn a_definition_stays_one_across_a_load_it_makes() {
     let dir = scratch("nested");
     std::fs::write(dir.join("lisp/lib-inner.el"), "(defvar lib-inner-x 1)\n(setq lib-inner-y 2)\n(provide 'lib-inner)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-outer.el"), "(defvar lib-outer-path (progn (require 'lib-inner) (car exec-path)))\n(provide 'lib-outer)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let plan = plan(&dir, &["lib-outer"]);
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
@@ -412,13 +412,13 @@ fn a_form_keeps_its_ask_across_a_load_it_makes() {
     std::fs::write(dir.join("lisp/lib-asks.el"), format!(
         "(progn (condition-case nil (with-temp-buffer (insert-file-contents {:?})) (error nil)) (require 'lib-inner2))\n(provide 'lib-asks)\n",
         dir.join(".netrc").display().to_string())).unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let plan = plan(&dir, &["lib-asks"]);
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
@@ -437,7 +437,7 @@ fn a_declared_library_is_refused_for_a_secret_or_a_connection() {
     std::fs::write(dir.join("lisp/lib-n.el"), "(defvar lib-n-connection (condition-case nil (make-network-process :name \"n\" :host \"127.0.0.1\" :service 9) (error nil)))\n(provide 'lib-n)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-u.el"), "(require 'lib-v)\n(provide 'lib-u)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"),
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"),
                    format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))
 (defun romacs--layer-load-configured (library forms)
   (require library) (mapc (lambda (f) (eval (cdr (car (read-from-string f))) t)) forms))\n")).unwrap();
@@ -454,7 +454,7 @@ fn a_declared_library_is_refused_for_a_secret_or_a_connection() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
@@ -585,7 +585,7 @@ fn a_refused_configuration_carries_into_the_next_build() {
     std::fs::write(dir.join("lisp/lib-s2.el"), "(defvar lib-s2 1)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-t.el"), "(load \"lib-s2\" nil t)\n(provide 'lib-t)\n").unwrap();
     let bare_alias = dir.join("alias/lib-s2").display().to_string();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"),
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"),
                    format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))\n")).unwrap();
     let declared = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: Vec::new() };
     let after = |name: &str, file: Option<&str>| Entry { kind: Kind::After, name: name.into(), file: file.map(str::to_owned), noerror: true, load_path: 0, declared: true, forms: vec!["(t . 1)".into()] };
@@ -595,7 +595,7 @@ fn a_refused_configuration_carries_into_the_next_build() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[after("lib-v", None), after(&alias, Some(&alias)), after("lib-q", Some("lib-q")),
                                               after(&bare_alias, Some(&bare_alias))]);
     let _ = host::leave_build();

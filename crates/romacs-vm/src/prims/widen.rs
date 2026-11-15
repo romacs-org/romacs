@@ -282,7 +282,7 @@ fn suffix_member(cx: &Leaf<'_>, needle: Value, list: Value) -> std::result::Resu
 
 // `concat' of the elements of a list with SEPARATOR between each two (nil
 // for none): Fmapconcat's Fconcat over its results, which the prelude's
-// `mapconcat' collects (lisp/romacs/vm/prelude.el). The parts are walked
+// `mapconcat' collects (lisp/vm/prelude.el). The parts are walked
 // once; ASCII strings are joined without building the interleaved list.
 defsubr! { name = "romacs--concat-list", gnu = "fns.c:3484", effect = Pure,
 fn concat_list(cx, parts: Value; optional separator: Value) {
