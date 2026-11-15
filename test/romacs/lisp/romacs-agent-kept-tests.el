@@ -501,6 +501,26 @@ contents, so two equal states print the same."
             (should (equal (romacs-agent-kept-tests--state session) (romacs-agent-kept-tests--state replayed)))
             (should (eq (romacs-agent-state session) (romacs-agent-state replayed)))))))))
 
+(ert-deftest romacs-agent-kept-a-long-tail-past-its-kept-state-folds-aside ()
+  ;; Kept at its first turn's end, then much more journaled (a long turn
+  ;; under way): what is left past its kept state is folded aside too, on
+  ;; from that state; the session shows its kept state meanwhile.
+  (romacs-agent-kept-tests--with
+    (let* ((records (romacs-agent-kept-tests--claude))
+           (head (cl-subseq records 0 12)) (tail (nthcdr 12 records)))
+      (romacs-agent-kept-tests--write dir head)
+      (romacs-agent-kept-tests--load dir)
+      (romacs-agent-kept-tests--write dir tail t)
+      (romacs-agent-kept-tests--with-workers
+        (setq romacs-agent-fold-bytes 10)
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (= (romacs-agent-seq session) 12))
+          (should (= (length jobs) 1))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= (romacs-agent-seq session) (length records)))
+          (should (equal (romacs-agent-reply session) "bye")))))))
+
 (ert-deftest romacs-agent-kept-a-restore-ends-after-its-folds ()
   ;; The restore's tail (attaching, sweeping, the restored hook) waits for
   ;; the sessions folded aside; its progress says running until then.

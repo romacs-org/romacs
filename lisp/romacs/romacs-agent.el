@@ -3631,9 +3631,9 @@ folded yet."
 
 (defun romacs-agent--load (dir)
   "The session recorded in DIR, attached when its supervisor runs.  A long
-journal with no kept state this build reads is folded by a worker VM
-first (`romacs-agent--fold-aside'): the session is known at once, and
-loads on once its kept state is written."
+journal past its kept state (or with none this build reads) is folded by
+a worker VM first (`romacs-agent--fold-aside'): the session is known at
+once, and loads on once its kept state is written."
   (let ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
     (when (and manifest (not (gethash (gethash "id" manifest) romacs-agent--sessions)))
       (let ((session (romacs-agent--of-manifest dir manifest)))
@@ -3642,7 +3642,7 @@ loads on once its kept state is written."
         ;; Its kept state back, its journal is read on from there: by its
         ;; supervisor's replay from that record, or here.
         (let ((from (romacs-agent--restore-kept session)))
-          (if (and (not from) (romacs-agent--fold-aside-p session))
+          (if (romacs-agent--fold-aside-p session from)
               (romacs-agent--fold-aside session manifest)
             (when from (setf (romacs-agent-journal-start session) from))
             (romacs-agent--load-rest session manifest)))
@@ -3681,10 +3681,10 @@ supervisor runs, else its journal read on here."
 (declare-function isolate-main-p "isolate" ())
 
 (defcustom romacs-agent-fold-bytes 1048576
-  "A recorded session's journal longer than this, with no kept state this
-build reads, is folded by a worker VM instead of the editor's: a journal
-of tens of megabytes folds for many seconds.  nil folds every journal in
-the editor."
+  "A recorded session with more than this of its journal to fold, past
+the kept state this build reads or from its start, is folded by a worker
+VM instead of the editor's: tens of megabytes fold for many seconds.  nil
+folds every journal in the editor."
   :type '(choice (const :tag "Always in the editor" nil) integer)
   :group 'romacs-agent)
 
@@ -3706,12 +3706,15 @@ the editor."
   "Non-nil while every journal is folded in this VM: a restore that ends
 at once (`romacs-agent-restore').")
 
-(defun romacs-agent--fold-aside-p (session)
-  "Whether SESSION, with no kept state back, is folded by a worker VM."
+(defun romacs-agent--fold-aside-p (session from)
+  "Whether a worker VM folds SESSION's journal from byte FROM, where its
+kept state ends (nil: its start): more than `romacs-agent-fold-bytes' of
+it is left to read."
   (and romacs-agent-fold-bytes (not romacs-agent--fold-here)
        (fboundp 'isolate-spawn) (isolate-main-p)
-       (> (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
-              0)
+       (> (- (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+                 0)
+             (or from 0))
           romacs-agent-fold-bytes)))
 
 (defun romacs-agent--fold-aside (session manifest)
