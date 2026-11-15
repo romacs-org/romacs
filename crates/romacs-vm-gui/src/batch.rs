@@ -81,11 +81,11 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
             std::process::exit(code)
         })));
         let args: Vec<String> = args.iter().map(|arg| super::startup::lisp_string(arg)).collect();
-        let quick = if quick { super::startup::QUICK_START } else { "" };
+        let start = if quick { super::startup::QUICK_START } else { super::startup::SITE_LISP_START };
         vm.eval_source(&format!(
             "(progn (setq command-line-args (cons (expand-file-name invocation-name invocation-directory) (list {}))
                           command-line-default-directory default-directory)
-                    {quick}
+                    {start}
                     (romacs--after-init)
                     (condition-case err (command-line-1 (cdr command-line-args))
                       ((debug t) (funcall command-error-function err \"\" nil) (kill-emacs -1)))
@@ -334,7 +334,7 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
 
 /// `--world-build`'s batch half, beside the GUI's world: the batch world
 /// in STORE made usable, unless the installation's serves this executable
-/// already. The GUI's world is what the build is for: a batch world refused
+/// already. The GUI's world is what the build is for: a batch world not captured
 /// or failed is a warning, and its sessions boot from source.
 pub fn prepare_beside(store: PathBuf) {
     let installed = super::startup::lisp_root(&super::startup::lisp_dir()).ok()

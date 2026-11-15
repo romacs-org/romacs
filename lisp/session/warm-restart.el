@@ -27,6 +27,8 @@
 ;;   buffer cannot be handed over now; a restart refuses until none does.
 ;; - `warm-restart-regenerable' (buffer-local) marks a view its package
 ;;   rebuilds, which is listed and not carried.
+;; - `warm-restart-left-out' (buffer-local) keeps a buffer out of every
+;;   image, unsaved edits and all; the restored session names it.
 ;; - desktop.el's `desktop-save-buffer' and `desktop-buffer-mode-handlers'
 ;;   carry a buffer as its package's own data instead of its text.
 ;; - A handler that would attach live resources checks
@@ -47,6 +49,10 @@
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
+(declare-function romacs-agent-load-session "romacs-agent" (id))
+(declare-function romacs-agent-tools--deliver "romacs-agent-tools" (session text delivered &optional valid))
+(declare-function romacs-agent-tools--restart-wake-file "romacs-agent-tools" (session))
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 (defvar savehist-minibuffer-history-variables)
 (defvar savehist-additional-variables)
 (defvar uniquify-managed)
@@ -70,6 +76,11 @@ buffer-locally.")
   "Non-nil when this buffer is a view its package rebuilds.
 A string is the reason listed.  A writable buffer with unsaved edits is
 carried anyway.")
+
+(defvar-local warm-restart-left-out nil
+  "A reason string when this buffer never goes into a session image,
+unsaved edits and all: a restart goes ahead without it, and the restored
+session names it if its text was unsaved (romacs-ram-files.el).")
 
 (defvar-local warm-restart-buffer-id nil
   "This buffer's identity in session images, made at its first image:
@@ -232,6 +243,7 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
         regenerable)
     (cond
      (blocker (cons 'blocked blocker))
+     ((stringp warm-restart-left-out) (cons 'dropped warm-restart-left-out))
      ((string-prefix-p " " (buffer-name)) nil)
      (base (if (memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
                (cons 'indirect (format "indirect buffer of %s" (buffer-name base)))
@@ -486,7 +498,8 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                        :frames (warm-restart--frames)
                        :lost (append (cl-loop for e in (plist-get plan :buffers)
                                               when (eq (plist-get e :strategy) 'dropped)
-                                              collect (list :buffer (plist-get e :name) :reason (plist-get e :reason)))
+                                              collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
+                                                              (and (plist-get e :modified) (list :unsaved t))))
                                      (cl-loop for r in records when (plist-member r :lost)
                                               collect (list :buffer (plist-get r :lost) :reason (plist-get r :reason)))
                                      (mapcar (lambda (p) (append p (list :reason "ends with this process")))
@@ -683,11 +696,30 @@ or nil when there is neither."
   (with-current-buffer buffer (set-buffer-modified-p nil))
   (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))
 
+(defun warm-restart--beside (record blobs existing)
+  "EXISTING, a buffer edited here before RECORD's turn in the restore came,
+which keeps its edits; RECORD's carried text goes in a new buffer beside
+it, and the problem names both."
+  (when-let* ((text (warm-restart--carried-text record blobs)))
+    (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
+      (warm-restart--put-text text (plist-get record :unibyte))
+      (setq default-directory (plist-get record :directory))
+      (push (list :buffer (plist-get record :name) :text t
+                  :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
+                                  (buffer-name existing) (buffer-name)))
+            warm-restart--problems)))
+  existing)
+
 (defun warm-restart--restore-buffer (record blobs buffers)
   "Restore RECORD; record its buffer under its id in BUFFERS.
-When it fails, a buffer the attempt made is replaced by the rescue."
+When it fails, a buffer the attempt made is replaced by the rescue.  A
+buffer it would reuse that was edited here first is left as it is
+\(`warm-restart--beside')."
   (let* ((existing (warm-restart--made-buffer record))
          (buffer
+         (if (and (buffer-live-p existing) (buffer-modified-p existing)
+                  (memq (plist-get record :strategy) '(file text)))
+             (warm-restart--beside record blobs existing)
          (condition-case condition
              (let ((buffer (pcase (plist-get record :strategy)
                              ('file (warm-restart--restore-file record blobs))
@@ -701,7 +733,7 @@ When it fails, a buffer the attempt made is replaced by the rescue."
                   (or (warm-restart--rescue record blobs condition)
                       (progn (push (list :buffer (plist-get record :name) :reason (error-message-string condition))
                                    warm-restart--problems)
-                             nil))))))
+                             nil)))))))
     (when buffer (puthash (plist-get record :id) buffer buffers))))
 
 (defun warm-restart--verify (records buffers)
@@ -926,20 +958,79 @@ it is applied."
       (error "Not a usable session image: %s" why))
     (cons form blobs)))
 
+(defun warm-restart--ordered (records)
+  "RECORDS in the order they are restored: each indirect buffer after the
+buffers it may be based on."
+  (append (cl-remove 'indirect records :key (lambda (r) (plist-get r :strategy)))
+          (cl-remove-if-not (lambda (r) (eq (plist-get r :strategy) 'indirect)) records)))
+
+(defun warm-restart--restore-one (record blobs buffers)
+  "Restore RECORD with BLOBS into BUFFERS: passively, locking nothing, and
+asking nothing, since no one may be there to answer (a prompt signals,
+and the buffer is rescued as text).  Its problems."
+  (let ((warm-restart-passive t) (create-lockfiles nil) (inhibit-interaction t)
+        (warm-restart--problems nil))
+    (warm-restart--restore-buffer record blobs buffers)
+    warm-restart--problems))
+
+(defun warm-restart--applied (form records buffers problems)
+  "The restore's state once FORM's RECORDS are back in BUFFERS with
+PROBLEMS: its globals restored, and the text checked."
+  (let ((warm-restart-passive t)) (warm-restart--restore-globals form buffers))
+  (list :form form :records records :buffers buffers
+        :problems (append (warm-restart--verify records buffers) problems)))
+
 (defun warm-restart--apply (form blobs)
   "Recreate FORM's buffers with BLOBS, and its globals.
 Return the restore's state: FORM, the records, the buffers by id, and
 the problems so far."
-  (let* ((records (plist-get form :buffers))
-         (ordered (append (cl-remove 'indirect records :key (lambda (r) (plist-get r :strategy)))
-                          (cl-remove-if-not (lambda (r) (eq (plist-get r :strategy) 'indirect)) records)))
-         (buffers (make-hash-table :test #'equal))
-         (warm-restart--problems nil))
-    (let ((warm-restart-passive t) (create-lockfiles nil))
-      (dolist (record ordered) (warm-restart--restore-buffer record blobs buffers))
-      (warm-restart--restore-globals form buffers))
-    (list :form form :records records :buffers buffers
-          :problems (append (warm-restart--verify records buffers) warm-restart--problems))))
+  (let ((records (plist-get form :buffers)) (buffers (make-hash-table :test #'equal)) (problems nil))
+    (dolist (record (warm-restart--ordered records))
+      (setq problems (nconc (warm-restart--restore-one record blobs buffers) problems)))
+    (warm-restart--applied form records buffers problems)))
+
+(defun warm-restart--restore-later (file)
+  "Restore image FILE from the command loop, a record a turn: a session's
+socket and window come first, and no large buffer holds them back or
+freezes the session.  Then lay out its windows and report.  Its progress
+is the `restore' stage of `romacs-startup-progress'."
+  (let ((start (float-time)))
+    (condition-case err
+        (pcase-let* ((`(,form . ,blobs) (progn (warm-restart--claim-pending file) (warm-restart--read file)))
+                     (records (plist-get form :buffers)))
+          (romacs-startup-progress 'restore (format "Restoring buffers 0/%d" (length records))
+                                   (list :status 'running :done 0 :of (length records) :seconds 0))
+          (warm-restart--step file start form blobs records (warm-restart--ordered records) 0
+                              (make-hash-table :test #'equal) nil))
+      ((error quit) (warm-restart--report-later file start (list :error (error-message-string err)))))))
+
+(defun warm-restart--step (file start form blobs records pending done buffers problems)
+  "Restore the first of PENDING, the records of FORM's RECORDS after the
+DONE restored, then the rest from the next turns of the command loop;
+with none left, finish the restore of FILE begun at START."
+  (condition-case err
+      (if (null pending)
+          (warm-restart--report-later file start (warm-restart--applied form records buffers problems))
+        (let ((problems (nconc (warm-restart--restore-one (car pending) blobs buffers) problems))
+              (message-log-max nil))
+          (romacs-startup-progress 'restore (format "Restoring buffers %d/%d" (1+ done) (length records))
+                                   (list :status 'running :done (1+ done) :of (length records)
+                                         :name (plist-get (car pending) :name) :seconds (- (float-time) start)))
+          (message "Restoring session: %d/%d" (1+ done) (length records))
+          (run-at-time 0 nil #'warm-restart--step file start form blobs records (cdr pending) (1+ done) buffers problems)))
+    ((error quit)
+     (warm-restart--report-later file start (list :error (format "stopped after %d of %d records: %s" done (length records)
+                                                                (error-message-string err)))))))
+
+(defun warm-restart--report-later (file start state)
+  "Finish the restore of FILE begun at START with STATE, as the
+`restore' step's end."
+  (let ((report (warm-restart--report file start state)))
+    (romacs-startup-progress 'restore (if (plist-get report :error) "Session restore failed" "Session restored")
+                             (list :status (if (plist-get report :error) 'failed 'done)
+                                   :done (plist-get report :buffers) :of (plist-get report :records)
+                                   :error (plist-get report :error) :seconds (plist-get report :seconds)))
+    report))
 
 (defun warm-restart--finish (state)
   "Lay out STATE's windows, order its buffers and activate them; return
@@ -975,16 +1066,20 @@ the report."
   (rename-file file (expand-file-name "restored.image" (file-name-directory file)) t))
 
 (defun warm-restart--announce (report)
-  "Say what REPORT's restore did; a failure is a warning, which shows."
-  (let ((lost (length (plist-get report :lost)))
-        (problems (length (plist-get report :problems))))
+  "Say what REPORT's restore did; a failure is a warning, which shows.
+Either way it names each buffer whose unsaved text the image left out."
+  (let* ((lost (length (plist-get report :lost)))
+         (unsaved (cl-loop for entry in (plist-get report :lost)
+                           when (plist-get entry :unsaved) collect (plist-get entry :buffer)))
+         (unsaved (if unsaved (format "; unsaved text not carried: %s" (string-join unsaved ", ")) ""))
+         (problems (length (plist-get report :problems))))
     (if (warm-restart--keep-p report)
         (display-warning 'warm-restart
-                         (format "Session restore incomplete: %s; the image stays at %s (M-x warm-restart-report)"
+                         (format "Session restore incomplete: %s; the image stays at %s (M-x warm-restart-report)%s"
                                  (or (plist-get report :error) (format "%d problems" problems))
-                                 (plist-get report :file)))
-      (message "Session restored: %d buffers in %.2f s%s%s%s"
-               (plist-get report :buffers) (plist-get report :seconds)
+                                 (plist-get report :file) unsaved))
+      (message "Session restored: %d buffers in %.2f s%s%s%s%s"
+               (plist-get report :buffers) (plist-get report :seconds) unsaved
                (if (> lost 0) (format "; %d not carried" lost) "")
                (if (> problems 0) (format "; %d problems" problems) "")
                (if (> (+ lost problems) 0) " (M-x warm-restart-report)" "")))))
@@ -1004,16 +1099,6 @@ the report."
     (setq warm-restart-last-report report)
     (warm-restart--announce report)
     report))
-
-(defun warm-restart--after-startup (function)
-  "Call FUNCTION once, from `window-setup-hook' after the startup hooks,
-or from the first timer if that hook does not run."
-  (let ((done nil) once)
-    (setq once (lambda ()
-                 (remove-hook 'window-setup-hook once)
-                 (unless done (setq done t) (funcall function))))
-    (add-hook 'window-setup-hook once 90)
-    (run-at-time 0 nil once)))
 
 (defun warm-restart-pending-file (server)
   "The file naming the image server SERVER's successor restores, while a
@@ -1053,19 +1138,20 @@ started by someone else (a launcher) before the restart's successor."
 ;;;###autoload
 (defun warm-restart-restore-image (file &optional startup)
   "Restore the session image FILE over this session; return the report.
-Under STARTUP, as `--restore' passes it, the windows are laid out and
-the buffers activated after the startup hooks, and the value is nil.
-The image is kept as restored.image, or left where it is when any
-carried text may not have arrived."
+Under STARTUP, as `--restore' passes it, the restore begins once the
+session serves, a record a turn of the command loop
+\=(`warm-restart--restore-later'), and the value is nil.  The image is
+kept as restored.image, or left where it is when any carried text may
+not have arrived."
   (interactive (list (read-file-name "Session image: " (warm-restart--directory) nil t)))
-  (warm-restart--claim-pending file)
-  (let* ((start (float-time))
-         (state (condition-case err
-                    (pcase-let ((`(,form . ,blobs) (warm-restart--read file)))
-                      (warm-restart--apply form blobs))
-                  (error (list :error (error-message-string err))))))
-    (if (and startup (not (plist-get state :error)))
-        (progn (warm-restart--after-startup (lambda () (warm-restart--report file start state))) nil)
+  (if startup
+      (progn (run-at-time 0 nil #'warm-restart--restore-later file) nil)
+    (warm-restart--claim-pending file)
+    (let* ((start (float-time))
+           (state (condition-case err
+                      (pcase-let ((`(,form . ,blobs) (warm-restart--read file)))
+                        (warm-restart--apply form blobs))
+                    (error (list :error (error-message-string err))))))
       (warm-restart--report file start state))))
 
 ;;;; Commands
@@ -1141,54 +1227,127 @@ build names its runtime here.")
                                                             "MANAGERPID" "SYSTEMD_EXEC_PID"))))
            collect (concat "--setenv=" (match-string 1 entry))))
 
-(defun romacs-restart--spawn (image)
-  "Start the successor restoring IMAGE, detached from this process; its
-output goes to the image's .log file.  A server's successor is the same
-server: it starts once this process is gone (its unit inactive, when it
-runs as one), outside this process's unit, whose end would end it too."
-  (pcase-let* ((`(,command . ,own-runtime) (romacs-restart--command))
-               (process-environment
-                (append romacs-restart-environment
-                        (if own-runtime
-                            (cl-remove-if (lambda (entry)
-                                            (cl-some (lambda (var) (or (equal entry var) (string-prefix-p (concat var "=") entry)))
-                                                     romacs-restart-unset-environment))
-                                          process-environment)
-                          process-environment)))
-               (default-directory (or (bound-and-true-p command-line-default-directory) (expand-file-name "~/")))
-               (log (concat (file-name-sans-extension image) ".log"))
-               (server (bound-and-true-p romacs-server-name)))
-    (romacs-restart--start command image log server)))
+(defcustom romacs-restart-deadlines '(:exit 60 :start 180 :ready 300)
+  "Seconds a server's restart gives each step: this session's end (then it
+is ended), the new session's socket and window, and its init and restore
+done.  A step past its deadline rolls the restart back."
+  :type '(plist :value-type natnum))
 
-(defun romacs-restart--start (command image log server)
-  "Run COMMAND restoring IMAGE, its output to LOG; as server SERVER when given."
-  (cond ((not server)
-         (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c" "exec \"$@\" >>\"$0\" 2>&1 </dev/null"
-                log (append command (list "--restore" image))))
-        ((getenv "INVOCATION_ID")
-         ;; A unit's server: a helper unit waits for this unit to end.
-         (let ((unit (format "romacs-server-%s" server)))
-           (unless (zerop (apply #'call-process "systemd-run" nil nil nil
-                                 (append (list "--user" "--quiet" "--collect"
-                                               (format "--unit=romacs-restart-%s-%d" server (emacs-pid)))
-                                         (romacs-restart--environment-arguments)
-                                         (list "--" "sh" "-c"
-                                               ;; Until this server's own invocation of the unit has
-                                               ;; ended, past its deactivation (ExecStopPost); a new
-                                               ;; invocation (a launcher's) ends the wait too.
-                                               (concat "old=$1; shift; while [ \"$(systemctl --user show -p InvocationID --value \"$0\")\" = \"$old\" ] && "
-                                                       "case $(systemctl --user show -p ActiveState --value \"$0\") in "
-                                                       "active|activating|deactivating|reloading|refreshing) true;; *) false;; esac; "
-                                                       "do sleep 0.1; done; exec \"$@\" </dev/null")
-                                               unit (getenv "INVOCATION_ID") (car command) "--server" server "-n")
-                                         (cdr command) (list "--restore" image))))
-             (error "systemd-run could not start the successor"))))
-        (t
-         (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c"
-                (concat "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; shift; "
-                        "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
-                log (number-to-string (emacs-pid)) (car command) "--server" server "-n"
-                (append (cdr command) (list "--restore" image))))))
+(defvar romacs-restart-requester nil
+  "The agent session the running restart was asked for by, told its verdict.")
+
+(defun romacs-restart--directory ()
+  "Where restarts' plans, records and kept images go."
+  (expand-file-name "romacs/restarts/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+
+(defun romacs-restart--plan (image command own-runtime server)
+  "Write the plan of a supervised restart of server SERVER into COMMAND
+\=(program and launch flags; with OWN-RUNTIME, one that chooses its runtime),
+restoring IMAGE; return its file.  The image is kept beside it for a
+rollback, as the restore consumes it."
+  (let* ((dir (progn (make-directory (romacs-restart--directory) t) (romacs-restart--directory)))
+         (id (file-name-base image))
+         (keep (expand-file-name (concat id ".image") dir))
+         (file (expand-file-name (concat id ".plan.json") dir))
+         (set (let ((table (make-hash-table :test #'equal)))
+                (dolist (entry romacs-restart-environment table)
+                  (when (string-match "\\`\\([^=]+\\)=\\(.*\\)\\'" entry)
+                    (puthash (match-string 1 entry) (match-string 2 entry) table))))))
+    (condition-case nil (add-name-to-file image keep t) (file-error (copy-file image keep t)))
+    (with-temp-file file
+      (insert (json-serialize
+               (list :id id :server server :image (expand-file-name image) :keep keep
+                     :record (expand-file-name (concat id ".json") dir)
+                     :requester (or romacs-restart-requester :null)
+                     :old (list :pid (emacs-pid) :exe (expand-file-name invocation-name invocation-directory)
+                                :flags (vconcat (warm-restart--launch-flags (cdr (warm-restart--argv)))))
+                     :target (list :exe (car command) :flags (vconcat (cdr command)) :set set
+                                   :unset (if own-runtime (vconcat romacs-restart-unset-environment) []))
+                     :deadlines romacs-restart-deadlines))))
+    (set-file-modes file #o600)
+    file))
+
+(defun romacs-restart--spawn (image)
+  "Start the successor restoring IMAGE, detached from this process.  A
+server's successor is the same server, started and judged by a
+supervisor (`romacs --restart-supervise PLAN') outside this process's
+unit, whose end would end it too; it rolls back to this build when the
+successor does not come up, so it keeps this session's environment and
+gives the successor's changes to the successor alone.  Another session's
+successor starts once this one is gone, its output in the image's .log
+file."
+  (pcase-let* ((`(,command . ,own-runtime) (romacs-restart--command))
+               (default-directory (or (bound-and-true-p command-line-default-directory) (expand-file-name "~/")))
+               (server (bound-and-true-p romacs-server-name)))
+    (if server
+        (romacs-restart--supervise (romacs-restart--plan image command own-runtime server) server)
+      (let ((process-environment
+             (append romacs-restart-environment
+                     (if own-runtime
+                         (cl-remove-if (lambda (entry)
+                                         (cl-some (lambda (var) (or (equal entry var) (string-prefix-p (concat var "=") entry)))
+                                                  romacs-restart-unset-environment))
+                                       process-environment)
+                       process-environment))))
+        (romacs-restart--start command image (concat (file-name-sans-extension image) ".log"))))))
+
+(defun romacs-restart--supervise (plan server)
+  "Start PLAN's supervisor for server SERVER, this build's own binary,
+outside this process's unit."
+  (let ((program (expand-file-name invocation-name invocation-directory)))
+    (if (getenv "INVOCATION_ID")
+        (unless (zerop (apply #'call-process "systemd-run" nil nil nil
+                              (append (list "--user" "--quiet" "--collect"
+                                            (format "--unit=romacs-restart-%s-%d" server (emacs-pid)))
+                                      (romacs-restart--environment-arguments)
+                                      (list "--" program "--restart-supervise" plan))))
+          (error "systemd-run could not start the restart's supervisor"))
+      (call-process "setsid" nil 0 nil "-f" program "--restart-supervise" plan))))
+
+(defun romacs-restart-record (&optional id)
+  "The record of restart ID, the newest when nil, as a hash table; nil when
+there is none."
+  (let* ((dir (romacs-restart--directory))
+         (file (if id (expand-file-name (concat id ".json") dir)
+                 (and (file-directory-p dir)
+                      (car (sort (directory-files dir t "\\`[^.].*[0-9]\\.json\\'" t) #'file-newer-than-file-p))))))
+    (when (and file (file-readable-p file))
+      (with-temp-buffer (insert-file-contents file) (json-parse-buffer)))))
+
+(defun romacs-restart--summary (record)
+  "One line saying how RECORD's restart ended."
+  (let* ((plan (gethash "plan" record))
+         (phases (gethash "phases" record))
+         (seconds (and (> (length phases) 0) (gethash "at" (aref phases (1- (length phases)))))))
+    (pcase (gethash "verdict" record)
+      ("verified" (format "Romacs restart %s verified: %s, up in %.1f s" (gethash "id" plan)
+                          (gethash "exe" (gethash "target" plan)) (or seconds 0)))
+      ("rolled-back" (format "Romacs restart %s rolled back to %s: %s" (gethash "id" plan)
+                             (gethash "exe" (gethash "old" plan)) (gethash "failed" record)))
+      (verdict (format "Romacs restart %s: %s %s" (gethash "id" plan) (or verdict (gethash "state" record))
+                       (or (gethash "failed" record "") ""))))))
+
+(defun romacs-restart-verdict (file)
+  "Say how the restart whose record is FILE ended: in the echo area, and
+to the agent session that asked for it.  The supervisor calls this in the
+session that serves once it has judged it."
+  (let* ((record (with-temp-buffer (insert-file-contents file) (json-parse-buffer)))
+         (text (romacs-restart--summary record))
+         (requester (gethash "requester" (gethash "plan" record))))
+    (message "%s" text)
+    (when (and (stringp requester) (require 'romacs-agent nil t) (fboundp 'romacs-agent-tools--deliver))
+      (when-let* ((session (romacs-agent-load-session requester)))
+        (romacs-agent-tools--deliver session (format "%s\nRecord: %s" text file)
+                                     (lambda () (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))))))
+    text))
+
+(defun romacs-restart--start (command image log)
+  "Run COMMAND restoring IMAGE once this process is gone, detached, its
+output to LOG: the successor of a session that is no server."
+  (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c"
+         (concat "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; shift; "
+                 "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
+         log (number-to-string (emacs-pid)) (append command (list "--restore" image))))
 
 ;;;###autoload
 (defun romacs-restart (&optional force)
@@ -1216,19 +1375,27 @@ for running a newer build."
       ;; next restores the image, the successor or a server a launcher
       ;; started first (`warm-restart-adopt-pending').
       (when server (warm-restart--publish-pending image server))
+      ;; The successor's start first: its supervisor waits for this
+      ;; session's end, and ends it past a deadline, so from here nothing
+      ;; a hook does can hold the restart.
       (condition-case err
-          (progn
-            ;; A restart, not a quit: what the keeper holds for this
-            ;; session stays for the successor (romacs-keeper.el).
-            (let ((romacs-keeper-restarting t))
-              (run-hooks 'kill-emacs-hook))
-            ;; The new process locks these files again; this one's locks
-            ;; would name a pid that is about to end.
-            (dolist (buffer (buffer-list))
-              (with-current-buffer buffer (when (and buffer-file-name (buffer-modified-p)) (unlock-buffer))))
-            (romacs-restart--spawn image))
+          (romacs-restart--spawn image)
         (error (when server (warm-restart--withdraw-pending image server))
                (user-error "Restart failed, this session goes on: %s (image %s)" (error-message-string err) image)))
+      ;; A restart, not a quit: what the keeper holds for this session
+      ;; stays for the successor (romacs-keeper.el).  Each hook alone, and
+      ;; asking nothing, since nobody may be there to answer: one that
+      ;; fails is said, and the others run.
+      (let ((romacs-keeper-restarting t) (inhibit-interaction t))
+        (run-hook-wrapped 'kill-emacs-hook
+                          (lambda (function)
+                            (condition-case err (funcall function)
+                              ((error quit) (message "Restart: %s failed: %s" function (error-message-string err))))
+                            nil)))
+      ;; The new process locks these files again; this one's locks would
+      ;; name a pid that is about to end.
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer (when (and buffer-file-name (buffer-modified-p)) (ignore-errors (unlock-buffer)))))
       (dolist (process (process-list)) (set-process-query-on-exit-flag process nil))
       (let ((kill-emacs-hook nil)) (kill-emacs 0)))))
 
@@ -1298,7 +1465,11 @@ layout of that tree restarts as well."
   (when (eq request warm-restart--request)
     (let ((obstacles (warm-restart--obstacles request)) (now (float-time)))
       (cond ((> now (plist-get request :deadline))
-             (warm-restart--request-end (list :status 'expired :obstacles obstacles)))
+             (warm-restart--request-end (list :status 'expired :obstacles obstacles))
+             (when-let* ((failed (plist-get request :failed)))
+               (ignore-errors (funcall failed (format "it waited %d s and these were still in the way: %s"
+                                                      (round (- now (plist-get request :since-request)))
+                                                      (string-join obstacles "; "))))))
             (obstacles
              (setf (plist-get request :since) nil)
              (setq warm-restart-last-result (list :status 'deferred :obstacles obstacles)))
@@ -1360,7 +1531,8 @@ replaces a pending one.  Return `warm-restart-last-result'."
   (warm-restart-cancel)
   ;; Every key the checks set is present: `setf' of a missing one would
   ;; cons a new head the timer's copy never sees.
-  (let ((request (list :timer nil :since nil :ready ready :target target :force force :before before :failed failed
+  (let ((request (list :timer nil :since nil :since-request (float-time) :ready ready :target target :force force
+                       :before before :failed failed
                        :delay (or delay warm-restart-request-delay)
                        :deadline (+ (float-time) (or expiry warm-restart-request-expiry)))))
     (setf (plist-get request :timer)
