@@ -80,8 +80,8 @@ mod model_tests {
         assert!(small.0 <= 2 && small.1 <= 3, "{small:?}");
     }
 
-    /// A collection that moves objects drops both indices; they are listed
-    /// again from the heap and the local tables, and a kill still releases
+    /// After a collection, which keeps the referrers index and drops the
+    /// local one for the local tables to list again, a kill still releases
     /// only the killed buffer's state.
     #[test]
     fn kill_after_collection_releases_own_state() {
@@ -95,6 +95,166 @@ mod model_tests {
         let checks = vm.eval_source_raw("(list (marker-buffer mb) (local-variable-p 'kb-x b) (eq (marker-buffer ma) a) (buffer-local-value 'kb-x a))").unwrap();
         let a = vm.intern("a");
         assert_eq!(vm.list_values(checks).unwrap(), [Value::NIL, Value::NIL, Value::TRUE, a]);
+    }
+
+    /// The windows, and each buffer's markers and overlays that name it,
+    /// sorted; the chains' members that left them are no part of it.
+    fn referrers_meaning(vm: &Vm, referrers: &Referrers) -> (Vec<usize>, Vec<(usize, Vec<usize>)>) {
+        let mut windows = referrers.windows.clone();
+        windows.sort_unstable();
+        let mut chains: Vec<(usize, Vec<usize>)> = referrers.chains.iter().map(|(&buffer, chain)| {
+            let named = Value::reference(buffer + 1, 0);
+            let mut members: Vec<usize> = chain.members.iter().copied().filter(|&i| match vm.objects.get(i) {
+                Some(Object::Marker(m)) => m.buffer == named,
+                Some(Object::Overlay(o)) => o.buffer == named,
+                _ => false,
+            }).collect();
+            members.sort_unstable();
+            members.dedup();
+            (buffer, members)
+        }).filter(|(_, members)| !members.is_empty()).collect();
+        chains.sort_unstable();
+        (windows, chains)
+    }
+
+    /// A window made, and one made and deleted, from the window primitives
+    /// alone (`window_tests.rs`): a bare VM has no `window.el`.
+    const KR_WINDOWS: &str = "
+      (defun kr-window ()
+        (let ((a (selected-window))) (set-window-new-pixel a 230) (split-window-internal a 230 nil 0.5)))
+      (defun kr-window-dies ()
+        (let* ((a (selected-window)) (b (kr-window)))
+          (set-window-new-pixel (window-parent a) 460) (set-window-new-pixel a 460) (delete-window-internal b)))";
+
+    /// The index VM kept is the one a walk of its heap lists now, and
+    /// every entry names a live window, marker or overlay.
+    fn assert_referrers_kept(vm: &Vm) {
+        let kept = vm.referrers.as_ref().expect("the index survives the collection");
+        let mut afresh = Referrers::default();
+        for (i, object) in vm.objects.iter().enumerate() { afresh.list(i, object); }
+        assert_eq!(referrers_meaning(vm, kept), referrers_meaning(vm, &afresh));
+        for &i in &kept.windows { assert!(matches!(vm.objects.get(i), Some(Object::Window(_))), "window entry {i}"); }
+        for &i in kept.chains.values().flat_map(|chain| &chain.members) {
+            assert!(matches!(vm.objects.get(i), Some(Object::Marker(_) | Object::Overlay(_))), "chain entry {i}");
+        }
+    }
+
+    /// A collection keeps the referrers index rather than dropping it for a
+    /// walk of the heap: the windows, markers, overlays and buffers that
+    /// died leave it, and what a compaction moved is found where it went.
+    /// In place, as a minor and compacting, then with the slots it freed
+    /// used again, and under stress collections, whose compactions put
+    /// fillers below what moves.
+    #[test]
+    fn a_collection_keeps_the_referrers_index() {
+        let collections: [fn(&mut Vm); 3] = [|vm| vm.collect(&mut []), |vm| assert!(vm.collect_minor(&[])), Vm::collect_compacting];
+        for collect in collections {
+            let mut vm = Vm::new();
+            vm.eval_source_raw(KR_WINDOWS).unwrap();
+            // Settled, so that a minor finds the objects below young.
+            vm.collect(&mut []);
+            vm.eval_source_raw(r#"
+              (setq kr-garbage (make-list 50 nil))
+              (dotimes (i 50) (setcar (nthcdr i kr-garbage) (make-string 3 ?x)))
+              (setq kr (get-buffer-create "kr"))
+              (set-buffer kr) (insert "abcdef")
+              (copy-marker 2)
+              (delete-overlay (make-overlay 1 3))
+              (setq kr-marker (copy-marker 3) kr-overlay (make-overlay 2 4))
+              (with-current-buffer (get-buffer-create "kr-dead") (insert "ab") (copy-marker 1) (make-overlay 1 2))
+              (kill-buffer "kr-dead")
+              (kr-window-dies)
+              (setq kr-garbage nil)"#).unwrap();
+            let before = vm.referrers().clone();
+            collect(&mut vm);
+            assert_referrers_kept(&vm);
+            let after = vm.referrers.as_ref().unwrap();
+            assert!(after.windows.len() < before.windows.len(), "a window died");
+            let index = |vm: &mut Vm, name: &str| { let slot = vm.slot(name); vm.slots[slot].value.index(0).unwrap() - 1 };
+            let (kr, marker, overlay) = (index(&mut vm, "kr"), index(&mut vm, "kr-marker"), index(&mut vm, "kr-overlay"));
+            let mut expected = vec![marker, overlay];
+            expected.sort_unstable();
+            assert_eq!(vm.buffer_referrers(kr), expected, "the dead marker and overlay left, the live ones are where they are");
+            vm.eval_source_raw("(with-current-buffer kr (delete-region 1 5))").unwrap();
+            let checks = vm.eval_source_raw("(list (marker-position kr-marker) (overlay-start kr-overlay) (overlay-end kr-overlay))").unwrap();
+            assert_eq!(vm.list_values(checks).unwrap(), [Value::integer(1).unwrap(); 3]);
+            // The freed slots, used again.
+            vm.eval_source_raw(r#"
+              (setq kr-again (list (copy-marker 2) (make-overlay 1 2) (kr-window)
+                                   (with-current-buffer (get-buffer-create "kr-new") (copy-marker 1))))"#).unwrap();
+            assert_referrers_kept(&vm);
+            collect(&mut vm);
+            assert_referrers_kept(&vm);
+        }
+        let mut vm = Vm::new();
+        vm.eval_source_raw(KR_WINDOWS).unwrap();
+        vm.referrers();
+        vm.eval_source_raw(r#"
+          (setq ks-a (get-buffer-create "ks-a") ks-b (get-buffer-create "ks-b") ks-kept nil)
+          (with-current-buffer ks-a (insert "abcdef"))
+          (with-current-buffer ks-b (insert "abcdef"))
+          (defun ks-step (i)
+            (let ((m (with-current-buffer ks-a (copy-marker 2))) (o (with-current-buffer ks-b (make-overlay 1 3))))
+              (when (= (% i 3) 0) (set-marker m 3 ks-b))
+              (when (= (% i 5) 0) (push m ks-kept) (push o ks-kept))
+              (unless (memq o ks-kept) (delete-overlay o))
+              (when (= (% i 50) 0) (kr-window-dies))))"#).unwrap();
+        // A stress collection comes at an engine's entry: each step is one,
+        // so collections land among the steps' markers, overlays and windows.
+        vm.set_gc_stress(3);
+        let before = vm.gc_stats.collections;
+        for i in 0..200 { vm.eval_source_raw(&format!("(ks-step {i})")).unwrap(); }
+        vm.set_gc_stress(0);
+        assert!(vm.gc_stats.collections - before >= 50, "{} stress collections", vm.gc_stats.collections - before);
+        assert_referrers_kept(&vm);
+    }
+
+    /// A marker that moved to another buffer, or left every buffer, and
+    /// died leaves every chain a sweep finds it in, not only its last
+    /// buffer's: no entry names a freed or cut slot, so a kill and a
+    /// compaction after the sweep read only live objects. Without the
+    /// verifying mode, whose sweep keeps the table's tail.
+    #[test]
+    fn a_sweep_drops_dead_markers_from_chains_they_left() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(r#"
+          (setq sa (get-buffer-create "sa") sb (get-buffer-create "sb"))
+          (with-current-buffer sa (insert "abcdef"))
+          (with-current-buffer sb (insert "abcdef"))"#).unwrap();
+        vm.referrers();
+        vm.eval_source_raw("
+          (let ((moved (with-current-buffer sa (copy-marker 2)))
+                (detached (with-current-buffer sa (copy-marker 3))))
+            (set-marker moved 2 sb)
+            (set-marker detached nil))
+          (dotimes (_ 100) (with-current-buffer sa (save-excursion (goto-char 4))))").unwrap();
+        vm.collect(&mut []);
+        let referrers = vm.referrers.as_ref().expect("the index survives the collection");
+        for &i in referrers.chains.values().flat_map(|chain| &chain.members) {
+            assert!(matches!(vm.objects.get(i), Some(Object::Marker(_) | Object::Overlay(_))), "entry {i} names a dead object");
+        }
+        vm.eval_source_raw("(kill-buffer sa)").unwrap();
+        vm.collect_compacting();
+        assert_eq!(vm.eval_source_raw("(buffer-live-p sb)").unwrap(), Value::TRUE);
+    }
+
+    /// `save-excursion` markers are listed in their buffer as they are made
+    /// and die detached: collections between excursions keep the chain to
+    /// what is live.
+    #[test]
+    fn excursions_between_collections_keep_chains_bounded() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(r#"(setq ex (get-buffer-create "ex")) (with-current-buffer ex (insert "abcdef"))"#).unwrap();
+        vm.referrers();
+        let slot = vm.slot("ex");
+        let ex = vm.slots[slot].value.index(0).unwrap() - 1;
+        for _ in 0..20 {
+            vm.eval_source_raw("(dotimes (_ 200) (with-current-buffer ex (save-excursion (goto-char 3))))").unwrap();
+            vm.collect(&mut []);
+        }
+        let referrers = vm.referrers.as_ref().expect("the index survives the collections");
+        let listed = referrers.chains.get(&ex).map_or(0, |c| c.members.len());
+        assert!(listed < 64, "{listed}");
     }
 
     /// A marker moved back and forth between two buffers stays listed once
@@ -306,10 +466,35 @@ impl Referrers {
     }
     /// List the object at index I in BUFFER's chain, returned.
     fn attach(&mut self, buffer: Value, i: usize) -> Option<&mut Chain> {
-        let chain = self.chains.entry(buffer.index_if(0)?.checked_sub(1)?).or_default();
+        let chain = self.chains.entry(chain_key(buffer)?).or_default();
         chain.members.push(i);
         Some(chain)
     }
+    /// After a collection that moved the heap: each entry at the index TO
+    /// gives it, or gone with what died (None).
+    pub(crate) fn forward(&mut self, to: impl Fn(usize) -> Option<usize>) {
+        self.windows = self.windows.iter().filter_map(|&i| to(i)).collect();
+        self.chains = std::mem::take(&mut self.chains).into_iter().filter_map(|(buffer, mut chain)| {
+            chain.members = chain.members.iter().filter_map(|&i| to(i)).collect();
+            chain.pruned = chain.pruned.min(chain.members.len());
+            Some((to(buffer)?, chain))
+        }).collect();
+    }
+    /// After a sweep in place, which frees DEAD in OBJECTS and moves
+    /// nothing: every list drops the dead windows, markers, overlays and
+    /// buffers, read before they are freed. A dead marker may be in chains
+    /// it left, or have left every buffer, so all of them are walked: the
+    /// index's size, not the heap's.
+    pub(crate) fn forget(&mut self, dead: &[u32], objects: &table::Table<Object>) {
+        let gone: HashSet<usize> = dead.iter().map(|&i| i as usize).filter(|&i| matches!(&objects[i],
+            Object::Window(_) | Object::Marker(_) | Object::Overlay(_) | Object::Buffer(_) | Object::ByteBuffer(_))).collect();
+        if !gone.is_empty() { self.forward(|i| (!gone.contains(&i)).then_some(i)); }
+    }
+}
+
+/// The key of BUFFER's chain: its index in `objects`, or None for nil.
+fn chain_key(buffer: Value) -> Option<usize> {
+    buffer.index_if(0)?.checked_sub(1)
 }
 
 impl Vm {
@@ -840,6 +1025,14 @@ impl Vm {
         if p == CurrentBuffer {
             return Ok(self.slots[self.buffer_slot].value);
         }
+        // A labeled restriction bounds narrowing and widening
+        // (prim/leaf/labeled_restrictions.rs).
+        let (p, n, args) = if matches!(p, Narrow | Widen) {
+            let (p, args) = self.labeled_bounds_call(index, p, args)?;
+            (p, args.len(), args)
+        } else {
+            (p, n, args)
+        };
         if matches!(p, Insert | DeleteRegion) {
             self.ensure_buffer_writable()?;
         }

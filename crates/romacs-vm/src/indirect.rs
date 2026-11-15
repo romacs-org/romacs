@@ -44,6 +44,11 @@ impl<T: romacs_snapshot::Schema> romacs_snapshot::Schema for Shared<T> {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut romacs_snapshot::Settle) {
+        if s.first(Rc::as_ptr(&self.0).cast::<u8>() as usize) {
+            (**self).settle(s);
+        }
+    }
 }
 
 impl<T> Shared<T> {
@@ -193,6 +198,8 @@ impl Vm {
         // Its list is its base's (`per_buffer_owner'): a copy of the head
         // would hold the history as it stands now, past any cut.
         per_buffer.clear_local(self.undo_list_index());
+        // Its base's labeled restrictions are its base's (editfns.c keys them by buffer).
+        per_buffer.set_labeled_restrictions(Value::NIL);
         let mark = per_buffer.editor_mark();
         let Object::Buffer(to) = self.objects.entry_mut(arena(buffer)?) else { return Err("buffer required".into()) };
         to.per_buffer = per_buffer;

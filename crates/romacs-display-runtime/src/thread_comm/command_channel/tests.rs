@@ -22,7 +22,7 @@ fn asset_id(command: RenderCommand) -> ImageId {
 fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     let (tx, rx) = command_channel(64);
     tx.try_send(asset(1)).unwrap();
-    tx.try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+    tx.try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     tx.try_send(asset(2)).unwrap();
     tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow {
@@ -36,7 +36,7 @@ fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     assert!(matches!(tx.try_send(asset(63)), Err(TrySendError::Full(_))));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
@@ -73,7 +73,7 @@ fn ordinary_receive_prioritizes_shutdown_without_reordering_assets() {
 fn selective_consumption_unblocks_a_backpressured_sender_without_asset_loss() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     let (done, result) = bounded(1);
     let worker = std::thread::spawn(move || {
@@ -81,7 +81,7 @@ fn selective_consumption_unblocks_a_backpressured_sender_without_asset_loss() {
     });
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(result.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
     assert_eq!(asset_id(rx.recv().unwrap()), ImageId::new(1));
@@ -129,7 +129,7 @@ fn sender_clones_disconnect_only_after_last_drop_and_pending_commands_are_draine
 #[test]
 fn tty_select_wake_is_rearmed_for_pending_work_and_stale_wakes_are_not_disconnects() {
     let (tx, rx) = command_channel(2);
-    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     tx.send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
         .unwrap();
@@ -189,12 +189,12 @@ fn cloned_producers_keep_stream_alive_and_disconnect_returns_ownership() {
     drop(sender);
     assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
     other
-        .send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     drop(other);
     assert!(matches!(
         receiver.recv().unwrap(),
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(matches!(
         receiver.try_recv(),
@@ -322,7 +322,7 @@ fn independent_shutdown_retains_len_timeout_fifo_and_last_sender_disconnect() {
 fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     assert!(!rx.has_startup_command_for(false));
     assert!(rx.has_startup_command_for(true));
@@ -337,7 +337,7 @@ fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     ));
     assert!(matches!(
         rx.try_recv_startup_for(true, true).unwrap(),
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity)
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(!rx.has_startup_command_for(true));
     assert!(matches!(
@@ -395,4 +395,70 @@ fn a_newer_paint_supersedes_a_queued_one_behind_the_commands_between() {
     sender.try_send(paint(400.0)).unwrap();
     assert!(sender.try_send(paint(500.0)).is_ok(), "a waiting paint makes room for its successor");
     assert_eq!(receiver.len(), 4);
+}
+
+/// A full channel still takes a frame's opacity setting and a window's
+/// destruction, in order behind what waits: their producers never block on
+/// a render thread that may be waiting on them.
+#[test]
+fn a_full_channel_takes_opacity_and_destruction_in_order() {
+    let (tx, rx) = command_channel(2);
+    tx.try_send(asset(1)).unwrap();
+    tx.try_send(asset(2)).unwrap();
+    assert!(matches!(tx.try_send(asset(3)), Err(TrySendError::Full(_))));
+    tx.try_send(RenderCommand::Window(WindowCommand::SetFrameAlpha { frame: 1, alpha: [0.5, 0.5], limit: 0.0 })).unwrap();
+    tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(42) })).unwrap();
+    let order: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).map(|command| match command {
+        RenderCommand::Asset(_) => "asset",
+        RenderCommand::Window(WindowCommand::SetFrameAlpha { .. }) => "alpha",
+        RenderCommand::Window(WindowCommand::DestroyWindow { .. }) => "destroy",
+        _ => "other",
+    }).collect();
+    assert_eq!(order, ["asset", "asset", "alpha", "destroy"]);
+}
+
+/// However fast Lisp sets a frame's alpha, at most the setters that decide
+/// its state wait: the last, and the last to set each alpha; and a frame's
+/// destruction waits once.
+#[test]
+fn exempt_commands_stay_bounded_and_keep_their_effect() {
+    let (tx, rx) = command_channel(2);
+    let alpha = |frame, alpha: [f32; 2]| RenderCommand::Window(WindowCommand::SetFrameAlpha { frame, alpha, limit: 0.0 });
+    for step in 0..100 { tx.try_send(alpha(1, [step as f32 / 100.0, 0.5])).unwrap(); }
+    tx.try_send(alpha(2, [0.3, 0.3])).unwrap();
+    tx.try_send(alpha(1, [-1.0, 0.7])).unwrap();
+    for _ in 0..10 {
+        tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(9) })).unwrap();
+    }
+    let queued: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).map(|command| match command {
+        RenderCommand::Window(WindowCommand::SetFrameAlpha { frame, alpha, .. }) => format!("{frame}:{:?}", alpha),
+        RenderCommand::Window(WindowCommand::DestroyWindow { .. }) => "destroy".to_owned(),
+        _ => "other".to_owned(),
+    }).collect();
+    // Frame 1: the last setter of its active alpha (0.99), then the last,
+    // which sets inactive and keeps the active scalar 0.99 applied.
+    assert_eq!(queued, ["1:[0.99, 0.5]", "2:[0.3, 0.3]", "1:[-1.0, 0.7]", "destroy"]);
+}
+
+/// The mailbox is per top-level frame: a paint replaces an unread paint of
+/// its own frame only, never another frame's.
+#[test]
+fn a_paint_replaces_only_its_own_frames_unread_paint() {
+    use romacs_display_protocol::{DisplayFrameId, FrameGlyphBuffer, types::Color};
+    let paint = |frame: u64, width: f32| {
+        let mut buffer = FrameGlyphBuffer::with_size(width, 10.0);
+        buffer.set_frame_identity(DisplayFrameId::new(frame), DisplayFrameId::new(0), 0.0, 0.0, 0, false, 0.0, Color::BLACK, false, 1.0);
+        RenderCommand::Paint(Box::new(buffer.into()))
+    };
+    let drawn = |command: RenderCommand| match command {
+        RenderCommand::Paint(scene) => (scene.root.frame_placement.frame().get(), scene.root.width as u32),
+        _ => panic!("not a paint"),
+    };
+    let (sender, receiver) = command_channel(8);
+    sender.try_send(paint(1, 100.0)).unwrap();
+    sender.try_send(paint(2, 200.0)).unwrap();
+    sender.try_send(paint(1, 110.0)).unwrap();
+    sender.try_send(paint(2, 210.0)).unwrap();
+    let order: Vec<_> = std::iter::from_fn(|| receiver.try_recv().ok()).map(drawn).collect();
+    assert_eq!(order, [(1, 110), (2, 210)], "each frame's newest, in the order sent");
 }

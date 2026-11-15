@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -63,13 +64,15 @@ second turn, then its exit.  Its first turn ends at seq 12."
                   nil (expand-file-name "journal.jsonl" dir) append 'silent)))
 
 (defmacro romacs-agent-kept-tests--with (&rest body)
-  "BODY with private state and runtime roots under `root', and `dir' and
-`twin', two recorded sessions of one id under two state roots: `dir' the
-one under the current state root."
+  "BODY with a private state root under `root', a private runtime root
+`run' short enough for its sockets (`romacs-test-socket-directory'), and
+`dir' and `twin', two recorded sessions of one id under two state roots:
+`dir' the one under the current state root."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-kept-" t))
+          (run (romacs-test-socket-directory "kept-"))
           (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
-                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                             (concat "XDG_RUNTIME_DIR=" run))
                                        process-environment))
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--keeping nil)
@@ -83,7 +86,7 @@ one under the current state root."
                             "cwd" root "title" "kept" "titleAuto" :false "argv" [] "options" (romacs-mcp--object)
                             "seenSeq" 0)))
      (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
-       (unwind-protect (progn ,@body) (delete-directory root t)))))
+       (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
 (defun romacs-agent-kept-tests--load (dir)
   "The session recorded in DIR, loaded by a server knowing no session,
@@ -354,7 +357,7 @@ contents, so two equal states print the same."
   ;; A recorded state copied under another runtime directory: its
   ;; manifest's socket path, a supervisor elsewhere, is never connected to.
   (romacs-agent-kept-tests--with
-    (let* ((elsewhere (expand-file-name "elsewhere/host.sock" root))
+    (let* ((elsewhere (expand-file-name "elsewhere/host.sock" run))
            (connected nil)
            (server (progn (make-directory (file-name-directory elsewhere) t)
                           (make-network-process :name "romacs-kept-elsewhere" :family 'local :service elsewhere
@@ -367,7 +370,7 @@ contents, so two equal states print the same."
             (let ((session (romacs-agent-kept-tests--load dir)))
               (accept-process-output nil 0.2)
               (should-not connected)
-              (should (string-prefix-p (expand-file-name "run/" root) (romacs-agent-host-socket session)))
+              (should (string-prefix-p (expand-file-name "romacs/" run) (romacs-agent-host-socket session)))
               (should (eq (romacs-agent-state session) 'ended))))
         (delete-process server)))))
 

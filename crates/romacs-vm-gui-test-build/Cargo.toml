@@ -1,0 +1,12 @@
+[package]
+name = "romacs-vm-gui-test-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "romacs-vm-gui's test sources made when its tests build: the module list of the `all` target"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

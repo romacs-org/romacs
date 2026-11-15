@@ -17,14 +17,7 @@
 
 (declare-function treesit-font-lock-fontify-region "treesit" (start end &optional loudly))
 
-(defconst romacs-treesit--mode-languages
-  '((bash-ts-mode . bash) (c-ts-mode . c) (c++-ts-mode . cpp)
-    (c-or-c++-ts-mode . c) (css-ts-mode . css) (go-ts-mode . go)
-    (js-ts-mode . javascript) (json-ts-mode . json)
-    (mhtml-ts-mode . html) (python-ts-mode . python)
-    (rust-ts-mode . rust) (toml-ts-mode . toml) (tsx-ts-mode . tsx)
-    (typescript-ts-mode . typescript) (yaml-ts-mode . yaml))
-  "The language each tree-sitter mode's primary parser reads.")
+(require 'romacs-treesit)    ; `romacs-treesit--mode-languages'
 
 (defvar-local romacs-treesit--code-buffers nil
   "This buffer's hidden code buffers, as (LANGUAGE . BUFFER).

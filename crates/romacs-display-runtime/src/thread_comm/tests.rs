@@ -513,10 +513,11 @@ fn render_command_image_retire() {
 #[test]
 fn render_command_set_window_title() {
     let cmd = RenderCommand::Window(WindowCommand::SetWindowTitle {
+        frame: FrameRef::Frame(1),
         title: "Romacs - main.rs".to_string(),
     });
     match cmd {
-        RenderCommand::Window(WindowCommand::SetWindowTitle { title }) => {
+        RenderCommand::Window(WindowCommand::SetWindowTitle { title, .. }) => {
             assert_eq!(title, "Romacs - main.rs");
         }
         other => panic!("Expected SetWindowTitle, got {:?}", other),
@@ -551,9 +552,9 @@ fn render_command_set_frame_geometry_hints() {
 
 #[test]
 fn render_command_request_attention() {
-    let cmd = RenderCommand::Window(WindowCommand::RequestAttention { urgent: true });
+    let cmd = RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: true });
     match cmd {
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent }) => assert!(urgent),
+        RenderCommand::Window(WindowCommand::RequestAttention { urgent, .. }) => assert!(urgent),
         other => panic!("Expected RequestAttention, got {:?}", other),
     }
 }
@@ -823,7 +824,7 @@ fn cross_thread_command_delivery() {
     let handle = std::thread::spawn(move || {
         let cmd = render.cmd_rx.recv().unwrap();
         match cmd {
-            RenderCommand::Window(WindowCommand::SetWindowTitle { title }) => {
+            RenderCommand::Window(WindowCommand::SetWindowTitle { title, .. }) => {
                 assert_eq!(title, "test-title");
             }
             other => panic!("Expected SetWindowTitle, got {:?}", other),
@@ -833,6 +834,7 @@ fn cross_thread_command_delivery() {
     emacs
         .cmd_tx
         .send(RenderCommand::Window(WindowCommand::SetWindowTitle {
+        frame: FrameRef::Frame(1),
             title: "test-title".to_string(),
         }))
         .unwrap();
@@ -848,14 +850,14 @@ fn thread_comms_cmd_channel_bounded_capacity() {
     for _ in 0..COMMAND_CHANNEL_CAPACITY {
         comms
             .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
             .unwrap();
     }
 
     // Next ordinary try_send should fail (channel full)
     let result = comms
         .cmd_tx
-        .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity));
+        .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }));
     assert!(
         result.is_err(),
         "cmd channel should be full after {} sends",
@@ -873,7 +875,7 @@ fn channel_sends_multiple_commands_in_order() {
         .unwrap();
     comms
         .cmd_tx
-        .send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        .send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     comms
         .cmd_tx
@@ -887,7 +889,7 @@ fn channel_sends_multiple_commands_in_order() {
         other => panic!("Expected Shutdown, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {
-        RenderCommand::Window(WindowCommand::RefreshFrameOpacity) => {}
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }) => {}
         other => panic!("Expected RefreshFrameOpacity, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {
@@ -896,4 +898,111 @@ fn channel_sends_multiple_commands_in_order() {
     }
 
     assert!(comms.cmd_rx.try_recv().is_err());
+}
+
+/// SOURCE's fields that are not plain data, by the type that holds them:
+/// those of the MESSAGES, of every type SOURCE declares that they reach
+/// (aliases included), and of the HANDLES, which may hold their transport.
+/// Fields are read whole with whitespace removed; comments are dropped.
+fn seam_violations(source: &str, messages: &[&str], handles: &[&str]) -> (Vec<(String, String)>, Vec<String>) {
+    const TRANSPORT: &[&str] = &["CommandSender", "CommandReceiver", "Sender<InputEvent>", "Receiver<InputEvent>",
+                                 "Sender<Fact>", "Receiver<Fact>"];
+    const FORBIDDEN: &[&str] = &["Arc<", "Rc<", "Mutex", "RwLock", "Cell<", "Atomic", "dyn", "Instant", "Sender<",
+                                 "Receiver<", "InputDelivery", "CommandSender", "CommandReceiver"];
+    let source: String = source.lines().map(|line| line.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+    // NAME's declaration in SOURCE: an enum's or struct's body, or an alias's type.
+    let declared = |name: &str| -> Option<String> {
+        let at = ["enum ", "struct ", "type "].iter().find_map(|kind| {
+            source.match_indices(&format!("{kind}{name}")).map(|(at, _)| at + kind.len() + name.len())
+                .find(|&end| !source[end..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+        })?;
+        let rest = &source[at..];
+        let open = rest.find(['{', '(', '=', ';'])?;
+        if rest[open..].starts_with(';') { return Some(String::new()); }
+        if rest[open..].starts_with('=') { return Some(rest[open + 1..rest.find(';')?].to_owned()); }
+        let mut depth = 0;
+        let close = rest[open..].char_indices().find_map(|(index, c)| {
+            depth += match c { '{' | '(' => 1, '}' | ')' => -1, _ => 0 };
+            (depth == 0).then_some(open + index)
+        })?;
+        Some(rest[open + 1..close].to_owned())
+    };
+    // BODY's leaf fields, whitespace removed: split at commas, and at a
+    // variant's braces and parentheses, outside generic arguments.
+    let fields = |body: &str| -> Vec<String> {
+        let (mut out, mut field, mut generic) = (Vec::new(), String::new(), 0i32);
+        for c in body.chars().filter(|c| !c.is_whitespace()) {
+            generic += match c { '<' => 1, '>' => -1, _ => 0 };
+            if generic == 0 && matches!(c, ',' | '{' | '}' | '(' | ')') { out.push(std::mem::take(&mut field)); } else { field.push(c); }
+        }
+        out.push(field);
+        out.into_iter().filter(|field| !field.is_empty()).collect()
+    };
+    let mut found = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let mut work: Vec<(String, bool)> = messages.iter().map(|name| ((*name).to_owned(), false))
+        .chain(handles.iter().map(|name| ((*name).to_owned(), true))).collect();
+    while let Some((name, handle)) = work.pop() {
+        if seen.contains(&name) { continue; }
+        seen.push(name.clone());
+        let Some(body) = declared(&name) else { continue };
+        for field in fields(&body) {
+            let kind = field.split_once(':').map_or(field.as_str(), |(_, kind)| kind);
+            if handle && TRANSPORT.contains(&kind) { continue; }
+            if FORBIDDEN.iter().any(|form| field.contains(form)) { found.push((name.clone(), field.clone())); }
+        }
+        for word in body.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|word| !word.is_empty()) {
+            if word != name && declared(word).is_some() { work.push((word.to_owned(), false)); }
+        }
+    }
+    (found, seen)
+}
+
+/// The seam between the evaluator and the render thread carries plain data,
+/// so thread or process is a transport choice (design: process split).
+/// No field may hold shared memory, a callback, a channel end or a
+/// process-local clock (`seam_violations`), except those listed with the
+/// slice that removes them.  Types from other modules (`FrameGlyphBuffer`,
+/// `VisualConfig`) are leaves here: flat frames hold those.  An exception
+/// that no longer occurs must leave the list: the list only shrinks.
+#[test]
+fn the_seam_carries_plain_data_but_its_listed_exceptions() {
+    // (type, the field with its whitespace removed, what removes it)
+    const EXCEPTIONS: &[(&str, &str, &str)] = &[
+        ("AssetCommand", "decoded:std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoded>",
+         "S4: pixels by a shared-memory region"),
+        ("ClipboardCommand", "expires_at:Instant", "S4: deadlines on a clock both processes share"),
+        ("InputEvent", "delivery:romacs_display_protocol::input_progress::InputDelivery",
+         "S2b: key receipts as a control-page word"),
+        ("RenderComms", "pubinput_interrupt:Option<Arc<dynInputInterrupt>>", "S2b: the quit test on the control page"),
+    ];
+    let (found, seen) = seam_violations(include_str!("../thread_comm.rs"),
+        &["PaintScene", "RenderCommand", "InputEvent", "Fact", "Reply"], &["EmacsComms", "RenderComms", "ThreadComms"]);
+    for (name, field) in &found {
+        assert!(EXCEPTIONS.iter().any(|(known, text, _)| known == name && text == field), "{name}: `{field}` is not plain data");
+    }
+    for (name, field, by) in EXCEPTIONS {
+        assert!(found.iter().any(|(known, text)| known == name && text == field), "{name}: `{field}` is gone ({by}): take it off the list");
+    }
+    assert!(seen.iter().any(|name| name == "MonitorInfo") && seen.iter().any(|name| name == "WindowCommand"),
+            "payload types are followed: {seen:?}");
+}
+
+/// The scanner finds a field split over lines, one behind an alias or in
+/// a nested payload, and a handle's field beside its transport.
+#[test]
+fn seam_violations_are_found_however_they_are_written() {
+    let source = "
+        pub enum Message { Plain(u64), Split { bytes: std::sync::Arc
+            <u8> }, Aliased(Shared), Nested(Inner) }
+        pub(crate) type Shared = Arc<u8>;
+        pub struct Inner { at: std::time::Instant, ok: Vec<(u32, u32)> }
+        pub(crate) struct Handle { pub tx: Sender<Fact>, pub hook: Box<dyn Fn()> }
+    ";
+    let (found, _) = seam_violations(source, &["Message"], &["Handle"]);
+    let found: Vec<String> = found.into_iter().map(|(name, field)| format!("{name} {field}")).collect();
+    assert_eq!(found.len(), 4, "{found:?}");
+    for expected in ["Message bytes:std::sync::Arc<u8>", "Shared Arc<u8>", "Inner at:std::time::Instant", "Handle pubhook:Box<dynFn()>"] {
+        assert!(found.iter().any(|item| item == expected), "missed {expected}: {found:?}");
+    }
 }

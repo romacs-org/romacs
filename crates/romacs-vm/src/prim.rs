@@ -597,6 +597,22 @@ mod leaf {
                 .map(|view| view.to_owned())
                 .ok_or(Fault::Wrong("stringp", v))
         }
+        /// String V's text from character FROM on, through its own cursor
+        /// (`Vm::str_view_from`), borrowed.
+        pub(crate) fn string_view_from(&self, v: Value, from: usize) -> std::result::Result<crate::lstring::StrView<'_>, Fault> {
+            self.vm.str_view_from(v, from).ok_or(Fault::Wrong("stringp", v))
+        }
+        /// String V's length in characters and whether it is multibyte, with
+        /// nothing copied.
+        pub(crate) fn string_shape(&self, v: Value) -> std::result::Result<(usize, bool), Fault> {
+            self.vm.str_view(v).map(|view| (view.chars, view.multibyte)).ok_or(Fault::Wrong("stringp", v))
+        }
+        /// The character at index N of string V, read through the string's
+        /// own cursor (`Vm::str_view_from`), with nothing copied; None past
+        /// the end.
+        pub(crate) fn string_char(&self, v: Value, n: usize) -> std::result::Result<Option<u32>, Fault> {
+            Ok(self.vm.str_view_from(v, n).ok_or(Fault::Wrong("stringp", v))?.chars().next())
+        }
         /// GNU string-lessp's order, compared in place: a symbol orders by
         /// its name, a string by its characters.
         pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
@@ -1935,6 +1951,7 @@ mod leaf {
     mod host_calls;
     mod display_stats;
     mod fontify_stops;
+    mod markdown;
     mod compiled_lisp;
     mod casetab;
     mod casing;
@@ -1971,6 +1988,8 @@ mod leaf {
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
+    mod labeled_restrictions;
+    mod hash_walk;
     mod width;
     pub(crate) mod graphics;
     mod coding_safe;

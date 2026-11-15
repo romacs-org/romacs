@@ -26,6 +26,7 @@ pub mod input_progress;
 pub mod interaction_projection;
 pub mod key_repeat_log;
 pub mod menu;
+pub mod meter;
 pub mod model;
 pub mod modifier_policy;
 pub mod motion_spec;

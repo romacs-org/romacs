@@ -295,10 +295,9 @@ romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 (romacs_send_keys, romacs_wait_idle); options (romacs_option_search/describe, \
 romacs_option_set/save); agents (romacs_delegate_task, \
 romacs_task_status/send/list/watch/switch/cancel, romacs_orchestrator_capabilities); restart \
-(romacs_restart_request, romacs_call_outcome); development (romacs_dev_guide: \
-what this Romacs offers for writing its Lisp; romacs_dev_check: a Romacs branch's merge \
-forecast, lint and rules, before it is submitted); gnosis_* \
-(spaced-repetition practice and review). romacs_help lists them all, one line each."
+(romacs_restart_request, romacs_call_outcome); development (romacs_dev_guide, \
+romacs_dev_check); gnosis_* (spaced-repetition practice and review). romacs_help \
+lists them all, one line each."
   "What an MCP client is told at initialization: the entry points and the
 tools' groups, short, since every session pays for it.")
 
@@ -450,9 +449,11 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
                       ;; Quit is the call's error (`with-local-quit' would
                       ;; return nil for it): C-g or a deadline tells the caller.
                       (let ((inhibit-quit nil))
+                        ;; With no request active (a call made from Lisp), no peer and no id.
                         (funcall romacs-mcp-call-function
                                  (plist-get romacs-mcp--active :peer)
-                                 (gethash "id" (plist-get romacs-mcp--active :message) nil)
+                                 (when-let* ((message (plist-get romacs-mcp--active :message)))
+                                   (gethash "id" message nil))
                                  (gethash "name" params)
                                  (lambda () (funcall (plist-get tool :handler) arguments))))
                     ((error quit)

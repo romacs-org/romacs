@@ -88,7 +88,10 @@ impl RenderApp {
             .or_else(|| self.comms.cmd_rx.try_recv().ok())
         {
             match cmd {
-                RenderCommand::Paint(scene) => self.ingest_paint(*scene),
+                RenderCommand::Paint(scene) => romacs_display_protocol::meter::spent(
+                    super::frame_cost::INGEST,
+                    || self.ingest_paint(*scene),
+                ),
                 RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
                     tracing::info!("Render thread received shutdown command");
                     self.lifecycle_flags
@@ -109,7 +112,10 @@ impl RenderApp {
     fn handle_clipboard(&mut self, command: ClipboardCommand) {
         match &self.clipboard {
             Ok(clipboard) => clipboard.submit(command),
-            Err(err) => crate::clipboard::reject_command(command, err.clone()),
+            Err(err) => {
+                let (request, reply) = crate::clipboard::reject_command(command, err.clone());
+                self.comms.tell(crate::thread_comm::Fact::Reply { request, reply });
+            }
         }
     }
 }

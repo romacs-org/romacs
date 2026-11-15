@@ -224,8 +224,10 @@ impl RenderApp {
         {
             self.frame_windows.mark_top_level_dirty();
         }
-        self.comms
-            .send_input(crate::thread_comm::InputEvent::ImageStateChanged { event });
+        match event {
+            crate::thread_comm::ImageStateEvent::Evicted(image) => self.comms.tell(crate::thread_comm::Fact::ImageEvicted(image.get())),
+            event => self.comms.send_input(crate::thread_comm::InputEvent::ImageStateChanged { event }),
+        }
     }
 
     /// Publish the complete set of image identities which can still be drawn.
