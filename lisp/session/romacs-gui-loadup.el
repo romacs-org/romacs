@@ -131,6 +131,18 @@ by `romacs-startup-progress': STATE a plist of :status (`running', `done'
 or `failed'), :done, :of, :name, :error and :seconds.  A restart's
 supervisor reads it over the server's socket.")
 
+;; A start's long steps (a restore's buffers, the agent sessions) show on
+;; the launch screen, or after it in a card (romacs-progress-view.el), which
+;; loads when the first step with a state reports.
+(autoload 'romacs-progress-view-update "romacs-progress-view")
+
+(defun romacs-gui-loadup--progress-view (on-screen)
+  "Show the start's steps (`romacs-progress-view-update', ON-SCREEN as
+there); `romacs-startup-progress' calls this.  A failure to show them is
+said, and the step that reported goes on."
+  (with-demoted-errors "Startup progress view: %S"
+    (romacs-progress-view-update on-screen)))
+
 (defun romacs-gui-loadup--init-loaded (file)
   "Tell the launch screen the init loaded FILE (`after-load-functions')."
   (romacs-startup-progress 'init (concat "Loading your init: " (file-name-base file))))
