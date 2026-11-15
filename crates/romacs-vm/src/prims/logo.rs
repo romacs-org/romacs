@@ -1,5 +1,5 @@
 //! `romacs--logo-frame`: a frame of the Romacs mark and wordmark in braille
-//! cells (the romacs-logo crate) for lisp/romacs/romacs-landing.el.
+//! cells (the romacs-logo crate) for lisp/ui/romacs-landing.el.
 use super::leaf_scalars::number;
 use super::orderless::list;
 use super::*;

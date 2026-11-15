@@ -1,4 +1,4 @@
-//! lisp/romacs/romacs-orderless.el against orderless itself: pinned GNU loads
+//! lisp/completion/romacs-orderless.el against orderless itself: pinned GNU loads
 //! orderless.el e271a8e (tests/fixtures/orderless-e271a8e) and Romacs its
 //! native port, and the same program must print the same, case by case:
 //! the candidates `orderless-all-completions' returns, in order, with the
@@ -116,7 +116,7 @@ fn romacs_orderless_matches_orderless_on_pinned_gnu() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
     let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = gnu_lisp(&["lisp/romacs/romacs-orderless.el"]);
+        let mut vm = gnu_lisp(&["lisp/completion/romacs-orderless.el"]);
         vm.eval_source(PROGRAM).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap().unwrap();
