@@ -67,3 +67,10 @@ impl Leaf<'_> {
         Ok(Value::TRUE)
     }
 }
+
+impl Leaf<'_> {
+    /// keyboard.c Fevent_convert_list over keymap.rs's port of it.
+    pub(crate) fn event_convert_list(&mut self, event_desc: Value) -> crate::prim::Out {
+        self.vm.key_event_from_list(event_desc).map_err(Fault::Error)
+    }
+}

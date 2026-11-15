@@ -430,7 +430,7 @@ impl Vm {
         if base == 0 { return Ok(event); }
         Ok(self.modified_key_event_symbol(&name[base..], modifiers))
     }
-    fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
+    pub(crate) fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
         // the base, so (shift control a) and (control shift a) agree.
         let parts = self.list_values(event)?;
