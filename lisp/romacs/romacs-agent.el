@@ -1969,7 +1969,7 @@ says: one that has ended its journal, or been cancelled, is left as it is."
          (delay (nth tries romacs-agent--reattach-delays)))
     (when (and delay (not (romacs-agent--per-turn-p session)) (not (romacs-agent-cancelled session))
                (not (eq (romacs-agent-state session) 'ended))
-               (file-exists-p (romacs-agent-host-socket session)))
+               (romacs-agent--supervisor-listens-p session))
       (puthash session (1+ tries) romacs-agent--reattaching)
       (run-at-time delay nil #'romacs-agent--reattach session))))
 
@@ -2035,9 +2035,28 @@ while it does not yet listen; the connection it replaces is let go."
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
               nil)))))
 
+(defun romacs-agent--supervisor-listens-p (session)
+  "Whether SESSION's supervisor answers at its socket.  A socket of this
+user's nothing answers at is one an ended supervisor left (a unit stop ends
+it before it removes its socket): it is dead, and removed, so SESSION and
+every later start load from what it kept, as with no socket, instead of
+replaying its whole journal each time.  One a supervisor starting now has
+bound there since it was looked at is another file, and stays."
+  (let* ((socket (romacs-agent-host-socket session))
+         (seen (file-attributes socket 'integer)))
+    (cond ((null seen) nil)
+          ((romacs-agent--listening-p socket) t)
+          (t (let ((now (file-attributes socket 'integer)) (delete-by-moving-to-trash nil))
+               (when (and now (eql (file-attribute-inode-number now) (file-attribute-inode-number seen))
+                          (eql (file-attribute-user-id now) (user-uid))
+                          (string-prefix-p "s" (file-attribute-modes now)))
+                 (ignore-errors (delete-file socket))))
+             nil))))
+
 (defun romacs-agent--caught-up-p (session)
   "Replay what SESSION's last supervisor journaled since it started, unseen
-here; non-nil when that ends with the harness's exit."
+here; non-nil when that ends with the harness's exit.  What the replay
+folded is kept, so the next start reads on from there."
   (when (romacs-agent-journal-start session)
     (let ((ended nil))
       (romacs-agent--read-journal
@@ -2045,6 +2064,7 @@ here; non-nil when that ends with the harness's exit."
                  (unless (eq (gethash "exit" record :absent) :absent) (setq ended t))
                  (romacs-agent--record session record))
        (romacs-agent-journal-start session))
+      (romacs-agent--keep-soon session)
       ended)))
 
 (defun romacs-agent--run-ended (session)
@@ -3531,7 +3551,7 @@ untouched."
         ;; supervisor's replay from that record, or here.
         (when-let* ((from (romacs-agent--restore-kept session)))
           (setf (romacs-agent-journal-start session) from))
-        (if (file-exists-p (romacs-agent-host-socket session))
+        (if (romacs-agent--supervisor-listens-p session)
             (romacs-agent--attach session 0)
           ;; No supervisor: what the journal says is all there is.
           (let ((romacs-agent-event-functions nil))
@@ -3573,12 +3593,13 @@ A server runs this at its start, so sessions survive it."
   (dolist (session (hash-table-values romacs-agent--sessions))
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
                (not (process-live-p (romacs-agent-connection session)))
-               (file-exists-p (romacs-agent-host-socket session)))
+               (romacs-agent--supervisor-listens-p session))
       (remhash session romacs-agent--reattaching)
       (romacs-agent--attach session 0)))
   ;; A session whose supervisor runs may call a tool any moment: the
   ;; endpoint listens now, where its relay looks.
-  (when (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
+  (when (cl-some (lambda (session) (or (process-live-p (romacs-agent-connection session))
+                                       (romacs-agent--supervisor-listens-p session)))
                  (hash-table-values romacs-agent--sessions))
     (romacs-agent--endpoint))
   (romacs-agent--sweep)
