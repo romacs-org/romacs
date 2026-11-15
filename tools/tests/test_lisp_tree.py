@@ -1,124 +1,92 @@
-#!/usr/bin/env python3
-"""tools/lib/lisp_tree.py: the trees move under lisp/, every reference follows
-except GNU's text, the vendored packages and the options, and a branch that
-merges the move catches up by rerunning.
-
-Run: python3 -m unittest discover -s tools/tests -p test_lisp_tree.py -v
-"""
-import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
-TOOL = Path(__file__).resolve().parents[1] / 'lib/lisp_tree.py'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+import lisp_tree
+
+MAP = lisp_tree.load_map('''# kind\tfrom\tto
+file\tlisp/romacs/term/romacs-preload.el\tlisp/ui/romacs-preload.el
+dir\tlisp/romacs/gnosis/\tlisp/packages/gnosis/
+dir\tlisp/romacs/vm/\tlisp/vm/
+dir\tlisp/gnu/\tlisp/
+gone\tlisp/romacs/hermes/\tdeleted by another lane
+rule\tromacs-agent*.el\tlisp/agents/
+rule\tromacs-dired.el\tlisp/
+''')
+
 FILES = {
-    'gnu-lisp/a.el': ';; GNU text that says rlisp stays\n',
-    'rlisp/b.el': '(load "gnu-lisp/a")\n',
-    'rlisp/deps/pkg/pkg.el': ';; vendored: rlisp stays\n',
-    'tests/fixture/repo/rlisp/theme.el': ';; a fixture mirroring the layout\n',
-    'src/main.rs': ('const A: &str = include_str!("../gnu-lisp/a.el");\n'
-                    'const ARGS: [&str; 2] = ["--gnu-lisp", "--no-gnu-lisp"];\n'
-                    'fn owned_modules_live_in_rlisp() {}\n'
-                    'const IGNORE: &str = "gnu-lisp/x.elc\\ngnu-lisp/y.elc\\n\\trlisp/z.elc";\n'),
+    'lisp/gnu/subr.el': ';; GNU\n',
+    'lisp/gnu/emacs-lisp/pcase.el': ';; GNU\n',
+    'lisp/romacs/romacs-agent.el': '(load "lisp/romacs/romacs-dired")\n',
+    'lisp/romacs/romacs-dired.el': ';; ours\n',
+    'lisp/romacs/vm/prelude.el': ';; vm\n',
+    'lisp/romacs/gnosis/gnosis.el': ';; package, own text: lisp/romacs/vm/\n',
+    'lisp/romacs/term/romacs-preload.el': ';; preload\n',
+    'tools/tests/fixture/repo/lisp/romacs/romacs-dired.el': ';; a fixture\n',
+    'tools/x.py': ("ROOT / 'lisp/gnu' / 'emacs-lisp'\n'lisp/gnu/subr.el', 'lisp/romacs/romacs-agent.el'.\n"
+                   "'lisp/gnu-tests' 'lisp/romacs/vm/prelude.el' 'lisp/romacs/'\n"),
 }
 
 
-def git(root, *args):
-    return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, text=True).stdout
+class Placement(unittest.TestCase):
+    def test_rows_rules_and_directories(self):
+        self.assertEqual(lisp_tree.target('lisp/romacs/romacs-agent-ui.el', MAP), 'lisp/agents/romacs-agent-ui.el')
+        self.assertEqual(lisp_tree.target('lisp/romacs/romacs-dired.el', MAP), 'lisp/romacs-dired.el')
+        self.assertEqual(lisp_tree.target('lisp/gnu/emacs-lisp/pcase.el', MAP), 'lisp/emacs-lisp/pcase.el')
+        self.assertEqual(lisp_tree.target('lisp/romacs/term/romacs-preload.el', MAP), 'lisp/ui/romacs-preload.el')
+        self.assertEqual(lisp_tree.placed('t/repo/lisp/romacs/romacs-dired.el', MAP), 't/repo/lisp/romacs-dired.el')
+
+    def test_unplaced_and_gone_are_refused(self):
+        with self.assertRaisesRegex(lisp_tree.Unplaced, 'place lisp/romacs/romacs-new.el'):
+            lisp_tree.target('lisp/romacs/romacs-new.el', MAP)
+        with self.assertRaisesRegex(lisp_tree.Unplaced, 'deleted by another lane'):
+            lisp_tree.target('lisp/romacs/hermes/hermes.el', MAP)
+
+    def test_references_follow_and_the_unplaceable_are_listed(self):
+        text, left = lisp_tree.rewrite(FILES['tools/x.py'], MAP)
+        self.assertEqual(text, ("ROOT / 'lisp' / 'emacs-lisp'\n'lisp/subr.el', 'lisp/agents/romacs-agent.el'.\n"
+                                "'lisp/gnu-tests' 'lisp/vm/prelude.el' 'lisp/romacs/'\n"))
+        self.assertEqual(left, ['lisp/romacs/'])
 
 
-def tool(root, *args):
-    return subprocess.run([sys.executable, '-B', str(TOOL), *args, str(root)], capture_output=True, text=True)
-
-
-class LispTreeTest(unittest.TestCase):
+class Move(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix='lisp-tree-', dir=os.environ.get('TMPDIR'))
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
-        git(self.root, 'init', '-q', '-b', 'trunk')
-        for key, value in (('user.name', 'Fixture'), ('user.email', 'fixture@example.invalid'),
-                           ('commit.gpgsign', 'false')):
-            git(self.root, 'config', key, value)
+        self.scratch = tempfile.TemporaryDirectory()
+        self.root = Path(self.scratch.name)
         for path, text in FILES.items():
             (self.root / path).parent.mkdir(parents=True, exist_ok=True)
             (self.root / path).write_text(text)
-        git(self.root, 'add', '-A')
-        git(self.root, 'commit', '-qm', 'base')
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'add', '-A'], check=True)
+
+    def tearDown(self):
+        self.scratch.cleanup()
 
     def read(self, path):
         return (self.root / path).read_text()
 
-    def run_all(self):
-        for command in ('move', 'relink'):
-            self.assertEqual(tool(self.root, command).returncode, 0)
-        return tool(self.root, 'check')
+    def test_move_then_relink_is_whole_and_idempotent(self):
+        lisp_tree.move(self.root, MAP)
+        self.assertFalse((self.root / 'lisp/gnu').exists() or (self.root / 'lisp/romacs').exists())
+        self.assertEqual(self.read('lisp/emacs-lisp/pcase.el'), ';; GNU\n')
+        self.assertEqual(self.read('lisp/packages/gnosis/gnosis.el'), FILES['lisp/romacs/gnosis/gnosis.el'])
+        self.assertTrue((self.root / 'tools/tests/fixture/repo/lisp/romacs-dired.el').is_file())
+        self.assertFalse((self.root / 'tools/tests/fixture/repo/lisp/romacs').exists())
+        self.assertEqual(lisp_tree.move(self.root, MAP), [])
+        changes, unplaced = lisp_tree.plan(self.root, MAP)
+        self.assertEqual(changes['lisp/agents/romacs-agent.el'], '(load "lisp/romacs-dired")\n')
+        self.assertNotIn('lisp/packages/gnosis/gnosis.el', changes, 'a package keeps its own text')
+        self.assertEqual(unplaced, {'tools/x.py': ['lisp/romacs/']})
 
-    def test_the_trees_move_and_the_references_follow(self):
-        self.assertEqual(tool(self.root, 'check').returncode, 1)
-        check = self.run_all()
-        self.assertEqual(self.read('lisp/gnu/a.el'), FILES['gnu-lisp/a.el'])
-        self.assertEqual(self.read('lisp/romacs/b.el'), '(load "lisp/gnu/a")\n')
-        self.assertEqual(self.read('lisp/romacs/deps/pkg/pkg.el'), FILES['rlisp/deps/pkg/pkg.el'])
-        self.assertEqual(self.read('tests/fixture/repo/lisp/romacs/theme.el'), FILES['tests/fixture/repo/rlisp/theme.el'])
-        self.assertFalse((self.root / 'tests/fixture/repo/rlisp').exists())
-        self.assertEqual(self.read('src/main.rs'), FILES['src/main.rs'].replace(
-            '../gnu-lisp/a.el', '../lisp/gnu/a.el').replace('"gnu-lisp/x.elc\\ngnu-lisp/y.elc\\n\\trlisp/z.elc',
-                                                            '"lisp/gnu/x.elc\\nlisp/gnu/y.elc\\n\\tlisp/romacs/z.elc'))
-        self.assertEqual((check.returncode, check.stdout.strip()), (0, 'lisp tree: ok'))
-
-    def test_check_names_a_reference_that_came_back(self):
-        self.run_all()
-        (self.root / 'src/late.rs').write_text('const B: &str = "rlisp/b.el";\n')
-        git(self.root, 'add', 'src/late.rs')
-        check = tool(self.root, 'check')
-        self.assertEqual((check.returncode, check.stdout.strip()), (1, 'src/late.rs: names an old tree'))
-        (self.root / 'rlisp').mkdir()
-        self.assertIn('rlisp/ still exists', tool(self.root, 'check').stdout)
-
-    def test_check_names_a_link_into_an_old_tree(self):
-        self.run_all()
-        (self.root / 'link.el').symlink_to('rlisp/b.el')
-        git(self.root, 'add', 'link.el')
-        self.assertIn('link.el: a link into an old tree', tool(self.root, 'check').stdout)
-
-    def test_move_refuses_an_unresolved_merge(self):
-        git(self.root, 'checkout', '-q', '-b', 'lane')
-        (self.root / 'rlisp/b.el').write_text('(lane)\n')
-        git(self.root, 'commit', '-qam', 'lane edits')
-        git(self.root, 'checkout', '-q', 'trunk')
-        (self.root / 'rlisp/b.el').write_text('(trunk)\n')
-        git(self.root, 'commit', '-qam', 'trunk edits')
-        subprocess.run(['git', '-C', str(self.root), 'merge', '-q', 'lane'], capture_output=True)
-        moved = tool(self.root, 'move')
-        self.assertNotEqual(moved.returncode, 0)
-        self.assertIn('unmerged paths', moved.stderr)
-
-    def test_a_second_run_changes_nothing(self):
-        self.run_all()
-        git(self.root, 'add', '-A')
-        git(self.root, 'commit', '-qm', 'moved')
-        self.run_all()
-        self.assertEqual(git(self.root, 'status', '--porcelain'), '')
-
-    def test_a_branch_catches_up_after_merging_the_move(self):
-        git(self.root, 'checkout', '-q', '-b', 'lane')
-        (self.root / 'rlisp/new.el').write_text('(load "rlisp/b")\n')
-        git(self.root, 'add', 'rlisp/new.el')
-        git(self.root, 'commit', '-qm', 'lane adds a file')
-        git(self.root, 'checkout', '-q', 'trunk')
-        self.run_all()
-        git(self.root, 'add', '-A')
-        git(self.root, 'commit', '-qm', 'moved')
-        git(self.root, 'checkout', '-q', 'lane')
-        git(self.root, '-c', 'merge.directoryRenames=false', 'merge', '-q', '--no-edit', 'trunk')
-        self.assertTrue((self.root / 'rlisp/new.el').is_file())
-        check = self.run_all()
-        self.assertEqual(self.read('lisp/romacs/new.el'), '(load "lisp/romacs/b")\n')
-        self.assertFalse((self.root / 'rlisp').exists())
-        self.assertEqual(check.returncode, 0)
+    def test_a_branch_file_no_rule_places_stops_the_move(self):
+        (self.root / 'lisp/romacs/romacs-new.el').write_text(';; new\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '-A'], check=True)
+        with self.assertRaisesRegex(SystemExit, 'place lisp/romacs/romacs-new.el'):
+            lisp_tree.move(self.root, MAP)
+        self.assertTrue((self.root / 'lisp/gnu/subr.el').is_file(), 'nothing moved')
 
 
 if __name__ == '__main__':

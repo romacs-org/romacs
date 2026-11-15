@@ -16,7 +16,7 @@
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
-//! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
+//! startup steps (lisp/session/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! does not capture, so a restored launch takes them itself.
 //!

@@ -79,7 +79,7 @@ def start(args, base, name):
         directory = runtime(root, args.romacs)
         (home / args.launcher_runtime).parent.mkdir(parents=True, exist_ok=True)
         (home / args.launcher_runtime).symlink_to(directory)
-        env.update(ROMACS_RUNTIME_ROOT=str(directory), ROMACS_LISP_DIR=str(directory / 'lisp/gnu'))
+        env.update(ROMACS_RUNTIME_ROOT=str(directory), ROMACS_LISP_DIR=str(directory / 'lisp'))
         argv = [args.launcher]
     else:
         env['ROMACS_USAGE_LOG'] = str(root / 'usage.jsonl')

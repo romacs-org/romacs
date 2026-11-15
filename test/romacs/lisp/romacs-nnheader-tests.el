@@ -1,7 +1,7 @@
 ;;; romacs-nnheader-tests.el --- Gnus finds its shipped data  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; What lisp/romacs/romacs-nnheader.el adds to GNU's
+;; What lisp/gnus/romacs-nnheader.el adds to GNU's
 ;; `nnheader-find-etc-directory': the shipped etc/ is `data-directory'.
 
 (require 'ert)

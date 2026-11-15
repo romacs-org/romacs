@@ -117,7 +117,7 @@ fn world_build_prepares_the_init_layer_and_rebuilds_it_only_for_its_inputs() {
 #[test]
 fn an_init_layer_loads_cus_start_in_full() {
     let home = Home::new("cus-start");
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp").canonicalize().unwrap();
     home.build();
     home.plan_requiring("cus-start", &gnu_lisp);
     let said = home.build();
@@ -238,12 +238,15 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         after("layer-netrc", format!("(t setq layer-netrc-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", authinfo.display().to_string())),
     ];
     // As an init's `load-path' is: its own directory before the installation's.
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp").canonicalize().unwrap();
     let mut load_path = vec![lisp.display().to_string()];
+    let gnu_lisp_root = gnu_lisp.clone();
     let mut dirs = vec![gnu_lisp];
     while let Some(dir) = dirs.pop() {
         load_path.push(dir.display().to_string());
-        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.is_dir()).collect();
+        // The VM's halves and the bundled packages are on no such path.
+        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir() && !(dir == gnu_lisp_root && (p.ends_with("vm") || p.ends_with("packages")))).collect();
         subdirs.sort();
         dirs.extend(subdirs.into_iter().rev());
     }

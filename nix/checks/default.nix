@@ -58,9 +58,9 @@ let
         grep -Fq '${checkedPackage}/bin/.romacs-vm-gui-wrapped' \
           ${checkedPackage}/bin/romacs-vm-gui
 
-        test -d ${checkedPackage}/share/romacs/lisp/gnu
-        test -d ${checkedPackage}/share/romacs/lisp/romacs
-        test -d ${checkedPackage}/share/romacs/lisp/romacs/deps
+        test -d ${checkedPackage}/share/romacs/lisp
+        test -f ${checkedPackage}/share/romacs/lisp/bundled.json
+        test -d ${checkedPackage}/share/romacs/lisp/packages
         test ! -e ${checkedPackage}/share/romacs/vendor-lisp
         test ! -e ${checkedPackage}/share/romacs/lisp-bundled
         test -d ${checkedPackage}/share/romacs/etc
