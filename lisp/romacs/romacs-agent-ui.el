@@ -1721,8 +1721,7 @@ composer as it is."
 its journal the first time a window shows it: a start brings back every
 chat that was open, and reads no journal for one not looked at."
   (let ((id (plist-get misc :session)))
-    (unless (romacs-agent-get id) (romacs-agent-restore))
-    (when-let* ((session (romacs-agent-get id))
+    (when-let* ((session (romacs-agent-load-session id))
                 (buffer (let ((live (romacs-agent-buffer session)))
                           (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer

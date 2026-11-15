@@ -43,4 +43,28 @@
             (should-not (condition-case err (progn (posn-at-point 1) nil) (error err)))))
       (kill-buffer rebuilt))))
 
+(ert-deftest warm-restart-a-start-restores-once-it-serves ()
+  ;; `--restore' at a start applies nothing while the start runs: the
+  ;; records come back from the command loop, a turn each, and the
+  ;; `restore' step says how far it is, then that it is done.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (buffer (get-buffer-create "wr-carried"))
+         (events nil) image)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer (text-mode) (insert "carried\n"))
+          (setq image (warm-restart-write))
+          (kill-buffer buffer)
+          (let ((romacs-progress-functions
+                 (list (lambda (step state) (when (eq step 'restore) (push (plist-get state :status) events))))))
+            (should-not (warm-restart-restore-image image t))
+            (should-not (get-buffer "wr-carried"))
+            (with-timeout (20 (ert-fail "the restore did not end"))
+              (while (not (memq 'done events)) (accept-process-output nil 0.05)))
+            (should (memq 'running events))
+            (should (equal (with-current-buffer "wr-carried" (buffer-string)) "carried\n"))
+            (should (eq (plist-get (alist-get 'restore romacs-progress-state) :status) 'done))))
+      (ignore-errors (kill-buffer "wr-carried"))
+      (delete-directory warm-restart-directory t))))
+
 ;;; warm-restart-tests.el ends here

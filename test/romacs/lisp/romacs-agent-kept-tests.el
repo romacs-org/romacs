@@ -405,4 +405,27 @@ contents, so two equal states print the same."
                  (should (file-exists-p socket)))
         (delete-process server)))))
 
+(ert-deftest romacs-agent-kept-restore-soon-loads-every-session-in-turns ()
+  ;; A server's start: sessions load from the command loop after it, the
+  ;; `agents' step saying how far, and a restored chat's one loads alone.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let* ((romacs-agent--restore-pending nil) (restored 0) (steps nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored))))
+           (romacs-progress-functions (list (lambda (step state) (when (eq step 'agents) (push (plist-get state :status) steps))))))
+      (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore))
+        (should (romacs-agent-load-session romacs-agent-kept-tests--id))
+        (should (= restored 0))
+        (clrhash romacs-agent--sessions)
+        (romacs-agent-restore-soon)
+        (should romacs-agent--restore-pending)
+        (should-not (romacs-agent-get romacs-agent-kept-tests--id))
+        (with-timeout (10 (ert-fail "the restore did not end"))
+          (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+        (should (romacs-agent-get romacs-agent-kept-tests--id))
+        (should (= restored 1))
+        (should (equal (car steps) 'done))))))
+
 ;;; romacs-agent-kept-tests.el ends here
