@@ -130,6 +130,8 @@ and the reader use by default.")
 (with-eval-after-load 'nnheader (require 'romacs-nnheader))
 ;; json.el's reader through the native parser (DIVERGENCES LISP-JSON-READ).
 (romacs-follow-gnu-file 'json "romacs-json")
+;; treesit.el's font-lock loop, run natively (LISP-TREESIT-FONTIFY).
+(romacs-follow-gnu-file 'treesit "romacs-treesit-font-lock")
 (load "simple.el" nil t t)
 ;; The region is drawn natively (`snapshot_region'): no overlay for it.
 (setq redisplay-highlight-region-function #'romacs--native-region)
@@ -429,6 +431,19 @@ and `after-init-time' its clock."
   "The per-process startup steps this session took last.
 A session that takes its own after the chain's sets it to them
 \(lisp/romacs/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
+(defun romacs--after-init ()
+  "End initialization as startup.el `command-line' does after the init file.
+`after-init-time' takes the clock, `after-init-hook' and
+`delayed-warnings-hook' run, and *scratch*, while it is still in
+`fundamental-mode', takes `initial-major-mode' (startup.el:1717-1727).
+A batch session takes this step before its command-line arguments, the
+GUI once the user's init has loaded (`romacs-gui-loadup-after-init')."
+  (setq after-init-time (current-time))
+  (run-hooks 'after-init-hook 'delayed-warnings-hook)
+  (when (get-buffer "*scratch*")
+    (with-current-buffer "*scratch*"
+      (when (eq major-mode 'fundamental-mode)
+        (funcall initial-major-mode)))))
 ;; startup.el normal-top-level (startup.el:843): the initial frame's faces
 ;; for its background mode and display type.  It reads no per-process fact
 ;; in batch, and GNU calls it idempotent, so it is loadup's, not startup's:

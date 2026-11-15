@@ -1988,6 +1988,8 @@ mod leaf {
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
+    mod labeled_restrictions;
+    mod hash_walk;
     mod width;
     pub(crate) mod graphics;
     mod coding_safe;
@@ -2874,45 +2876,28 @@ mod tests {
 /// TEXT, within LOW..HIGH (`forward-line' from that line's start): at LOW
 /// or HIGH when there are fewer lines.
 pub(crate) fn line_beginning(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, lines: i64) -> usize {
-    let start_of = |at: usize| text.previous_newline(at, low).map_or(low, |i| i + 1);
-    let mut pos = start_of(point);
-    if lines >= 0 {
-        for _ in 0..lines {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-    } else {
-        for _ in lines..0 {
-            if pos == low { break; }
-            pos = start_of(pos - 1);
-        }
+    if lines < 0 {
+        // Point's line start is one newline back, then -LINES more.
+        let wanted = crate::text::newline_count(lines).saturating_add(1);
+        let found = text.newlines_before(point, low, wanted);
+        return found.last.filter(|_| found.count == wanted).map_or(low, |i| i + 1);
     }
-    pos
+    let start = text.previous_newline(point, low).map_or(low, |i| i + 1);
+    if lines == 0 { return start; }
+    let wanted = crate::text::newline_count(lines);
+    let found = text.newlines_after(start, high, wanted);
+    found.last.filter(|_| found.count == wanted).map_or(high, |i| i + 1)
 }
 
 /// GNU find_before_next_newline from byte POINT of TEXT within LOW..HIGH:
 /// for COUNT > 0 the COUNTth newline on, else the -COUNTth newline back;
 /// with fewer newlines, HIGH or LOW.
 pub(crate) fn line_end_after(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, count: i64) -> usize {
-    let mut pos = point;
-    if count > 0 {
-        for _ in 0..count {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-        return pos - 1;
-    }
-    for _ in count..0 {
-        match text.previous_newline(pos, low) {
-            Some(i) => pos = i,
-            None => return low,
-        }
-    }
-    pos
+    if count == 0 { return point; }
+    let wanted = crate::text::newline_count(count);
+    let (found, short) = if count > 0 { (text.newlines_after(point, high, wanted), high) }
+        else { (text.newlines_before(point, low, wanted), low) };
+    found.last.filter(|_| found.count == wanted).unwrap_or(short)
 }
 
 #[cfg(test)]

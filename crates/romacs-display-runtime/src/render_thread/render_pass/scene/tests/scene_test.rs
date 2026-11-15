@@ -10,6 +10,8 @@ mod pinned_lifecycle;
 mod retained_owner;
 #[path = "frame_submission_test.rs"]
 mod frame_submission;
+#[path = "root_picture_reset_test.rs"]
+mod root_picture_reset;
 
 fn target(renderer: &WgpuRenderer) -> wgpu::Texture {
     renderer.device().create_texture(&wgpu::TextureDescriptor {
@@ -39,7 +41,6 @@ fn draw_root(
         render.compositor.glyph_atlas.as_mut().unwrap(),
         mapping(root, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -84,7 +85,7 @@ fn install_layout(
     origin: romacs_display_protocol::frame_time::EventTime,
 ) {
     render.measure_pane_layout(Some(root), origin);
-    render.compositor.current_frame = Some(root.clone());
+    render.compositor.current_frame = Some(std::sync::Arc::new(root.clone()));
     render.begin_presentable_render();
 }
 fn seed_pending_layout(
@@ -141,7 +142,6 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
     root.background_alpha = 0.0;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -452,7 +452,7 @@ fn expired_child_lifecycle_needs_no_scratch_under_unchanged_pressure() {
             false,
             1.0,
         );
-        render.set_current_frame(Some(root), None, Default::default(), Default::default());
+        render.set_current_frame(Some(root), Default::default(), Default::default());
         assert!(
             render
                 .compositor
@@ -651,7 +651,6 @@ fn missing_child_scratch_returns_retry_without_drawing_and_recovers() {
     root.background = Color::BLUE;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );

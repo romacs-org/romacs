@@ -126,7 +126,7 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce()) -> Option<(Box<Vm>, Carry)> {
     match world.launch::<Carry>(|| builder_args(world, width, height, floor, None), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
-            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
+            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"], "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some((vm, carry))
         }
         Launch::Build => build_and_exit(world, width, height, floor, None),
@@ -289,7 +289,7 @@ pub fn restore_layer(layer: &Layer) -> Option<(Box<Vm>, Carry)> {
     match layer.world.restore_only::<Carry>() {
         Ok(restored) => {
             let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
-            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": key, "layer": {"entries": layer.plan.entries.len(), "excluded": layer.excluded}}));
+            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": key, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard()), "layer": {"entries": layer.plan.entries.len(), "excluded": layer.excluded}}));
             Some(restored)
         }
         Err(reason) => {

@@ -59,7 +59,7 @@ jobs:
           save-if: ${{ github.ref_type == 'branch' }}
 
       - name: Build
-        run: cargo build --release --locked -p romacs-vm-gui -p romacs-mcp
+        run: cargo build --release --locked -p romacs-vm-gui -p romacs-keeper -p romacs-mcp
 
       - name: Package
         run: |

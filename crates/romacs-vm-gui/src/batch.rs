@@ -58,7 +58,8 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
 /// GNU's `emacs --batch ARGS': the GNU-loadup chain `--loadup' shares with
 /// the batch package runner, then startup.el's `command-line' as a batch
 /// session takes it: the leading options it consumes, no init file and no
-/// packages (startup.el:1367), then `command-line-1' over the rest (`-L',
+/// packages (startup.el:1367), the end of initialization
+/// (`romacs--after-init'), then `command-line-1' over the rest (`-L',
 /// `-l', `-f', `--eval' and the others), then `(kill-emacs t)'
 /// (startup.el:1748-1751). An error that reaches top level goes to
 /// `command-error-function' as keyboard.c cmd_error sends it, whose batch
@@ -85,6 +86,7 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
             "(progn (setq command-line-args (cons (expand-file-name invocation-name invocation-directory) (list {}))
                           command-line-default-directory default-directory)
                     {quick}
+                    (romacs--after-init)
                     (condition-case err (command-line-1 (cdr command-line-args))
                       ((debug t) (funcall command-error-function err \"\" nil) (kill-emacs -1)))
                     (kill-emacs t))",
@@ -288,7 +290,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
-            diagnose(&serde_json::json!({"mode": "restored", "store": world.store}));
+            diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             restarted(*vm)
         }
         Launch::Build => {
@@ -321,7 +323,7 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
     let store = beside_executable("worlds").filter(|store| store.is_dir() && !romacs_vm::world::store::disabled())?;
     match World::restore_read_only::<()>(&store, recipe(dir)) {
         Ok((vm, ())) => {
-            diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true}));
+            diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some(vm)
         }
         Err(reason) => {

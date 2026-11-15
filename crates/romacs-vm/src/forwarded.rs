@@ -341,6 +341,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "recenter-redisplay", gnu: "window.c:9484", kind: Kind::Lisp(Init::Symbol("tty")) },
     CVariable { name: "record-all-keys", gnu: "keyboard.c:14462", kind: Kind::Bool(false) },
     CVariable { name: "redisplay-adhoc-scroll-in-resize-mini-windows", gnu: "xdisp.c:39491", kind: Kind::Bool(true) },
+    CVariable { name: "region-extract-function", gnu: "casefiddle.c:723", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "report-emacs-bug-address", gnu: "emacs.c:3613", kind: Kind::Lisp(Init::Str("bug-gnu-emacs@gnu.org")) },
     CVariable { name: "resize-mini-frames", gnu: "frame.c:7566", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "resize-mini-windows", gnu: "xdisp.c:39045", kind: Kind::Lisp(Init::Nil) },
@@ -1039,10 +1040,12 @@ impl Forwarded {
 
 /// A buffer's per-buffer variable values (GNU keeps them in `struct buffer`
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
-/// local here": the buffer sees the default.
+/// local here": the buffer sees the default. Beside them, the visited
+/// file's modification time, identity and truename bytes, the mark marker,
+/// and the labeled restrictions (`prim/leaf/labeled_restrictions.rs`).
 #[derive(Clone, Default)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>);
-romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>);
+romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4, f5));
 impl PerBuffer {
     /// How many per-buffer variables it has a slot for, each at its
     /// forwarded place (`Fwd::Buffer`).
@@ -1081,6 +1084,9 @@ impl PerBuffer {
         self.3 = None;
     }
     pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
+    /// Its labeled restrictions, nil when it has none.
+    pub(crate) fn labeled_restrictions(&self) -> Value { self.5.unwrap_or(Value::NIL) }
+    pub(crate) fn set_labeled_restrictions(&mut self, list: Value) { self.5 = (list != Value::NIL).then_some(list); }
     /// buffer-swap-text: exchange the bindings at SLOTS and the mark
     /// marker with OTHER's, as GNU swaps them with the text.
     pub(crate) fn swap_text_slots(&mut self, other: &mut Self, slots: &[u16]) {
@@ -1119,6 +1125,7 @@ impl PerBuffer {
     /// Every Value it holds, passing over slot SKIP.
     pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
+        if let Some(list) = &mut self.5 { visit(list); }
         let skip = skip.map(usize::from);
         for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
             if let Some(v) = v { visit(v); }
@@ -1396,14 +1403,14 @@ impl Vm {
         self.forwarded.defaults[i as usize] = value;
         value
     }
-    fn per_buffer(&self, buffer: usize) -> Option<&PerBuffer> {
+    pub(crate) fn per_buffer(&self, buffer: usize) -> Option<&PerBuffer> {
         match self.objects.get(buffer)? {
             data::Object::Buffer(b) => Some(&b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&b.per_buffer),
             _ => None,
         }
     }
-    fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
+    pub(crate) fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
         match self.objects.get_entry_mut(buffer)? {
             data::Object::Buffer(b) => Some(&mut b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&mut b.per_buffer),

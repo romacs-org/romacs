@@ -272,7 +272,7 @@ fn render(frame: &FrameGlyphBuffer) -> Rendered {
         ),
     );
     renderer.render_frame_glyphs(
-        &view, frame, &mut atlas, mapping, false, None, None, None, None, None,
+        &view, frame, &mut atlas, mapping, false, None, None, None, None,
     );
     Rendered {
         pixels: read_back(&renderer, &target),

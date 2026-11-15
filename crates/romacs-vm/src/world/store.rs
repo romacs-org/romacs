@@ -867,7 +867,7 @@ impl World {
     /// failure leaves: a step's failure is transient, retried after a while
     /// (`retry_in`), and `finish_build` records its own. The image's
     /// length, or the failure to report.
-    pub fn build<T: super::safe::SnapshotSafe + 'static>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
+    pub fn build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
         -> Result<usize, String> {
         match steps() {
             Ok((vm, carry, events)) => self.finish_build(vm, carry, events),
@@ -916,7 +916,7 @@ impl World {
     /// printed, in its manifest. A build with any refusal publishes its
     /// manifest only, so launches boot from source until its records
     /// change. The image's length.
-    fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
+    fn finish_build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         // Kept to the end: whatever fails from here on is recorded with it.
         let trace = host::leave_build().ok_or("no world build was recording")?;
@@ -944,7 +944,7 @@ impl World {
 
     /// Capture VM and CARRY as this world's image and publish it with the
     /// manifest of TRACE and EVENTS: the image's length.
-    fn publish_world<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
+    fn publish_world<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
         let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
         vm.world_lift();
         vm.world_normalize();

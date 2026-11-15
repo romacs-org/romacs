@@ -5,6 +5,7 @@
 //! to the narrowing before a parse (`treesit_sync_visible_region`), and the
 //! line/column caches of tracking buffers. Byte positions are GNU's
 //! 1-based ones; `TextBody` offsets are 0-based.
+pub(crate) mod ahead;
 pub(crate) mod native;
 
 use crate::text::{FrozenText, TextBody};
@@ -65,6 +66,8 @@ pub(crate) struct Core {
     pub visible: (i64, i64),
     /// `visi_beg/end_linecol`; None unless the parser tracks linecols.
     pub linecols: Option<(Linecol, Linecol)>,
+    /// The reparse an edit's frame started on a thread (`ahead`).
+    pub ahead: Option<ahead::Ahead>,
 }
 
 /// One text change, GNU's `treesit_record_change` arguments: 1-based bytes
@@ -108,6 +111,7 @@ impl romacs_snapshot::Schema for Registry {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
 }
 
 /// The most first parses running at once, whatever a session visits.
@@ -255,11 +259,14 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 
 impl Core {
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, fresh: false, visible, linecols }
+        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.
     fn record(&mut self, c: Change, text: &TextBody) {
+        if self.ahead.as_mut().is_some_and(|ahead| !ahead.record(c)) {
+            self.ahead = None;
+        }
         let Some(tree) = &self.tree else { return };
         let (visible_beg, visible_end) = self.visible;
         let start_offset = visible_end.min(visible_beg.max(c.start)) - visible_beg;
@@ -556,6 +563,33 @@ pub(crate) struct Capture {
     /// Indices into MATCHES of the matches that passed.
     pub passed: Vec<usize>,
     pub timestamp: u64,
+    /// For `romacs--treesit-fontify`: the region the faces go in, the
+    /// settings the query's patterns belong to, and the order and progress
+    /// of applying the captures once the predicates have run.
+    pub fontify: Option<Fontify>,
+}
+
+/// The faces part of a capture task (`romacs--treesit-fontify`).
+pub(crate) struct Fontify {
+    pub start: i64,
+    pub end: i64,
+    /// Each setting's first pattern in the query, ascending.
+    pub settings: Vec<u32>,
+    /// The first match of the setting whose predicates and captures are
+    /// under way: the capture task's matches are in setting order, each
+    /// setting's in the order the query found them, and a setting's
+    /// predicates run only once the one before it is applied, as GNU runs
+    /// one setting's query after another.
+    pub batch: usize,
+    /// The next capture of the setting's passed matches: (index into
+    /// PASSED, capture of that match).
+    pub next: (usize, usize),
+}
+impl Fontify {
+    /// The setting PATTERN belongs to.
+    pub(crate) fn setting(&self, pattern: u32) -> usize {
+        self.settings.partition_point(|&first| first <= pattern).saturating_sub(1)
+    }
 }
 
 /// A walk of a tree (search, sparse tree, match) between predicate calls:

@@ -2,12 +2,12 @@ use super::{
     AnyAtlasEntry, BitmapFontReplayCache, ComposedGlyphKey, FontconfigSubpixelOrder,
     GlyphAtlasError, GlyphKey, GlyphPixelKind, RasterizeResult, SampledSubGlyph, SingleCharGlyph,
     SubGlyph, SubpixelBin, SubpixelRequest, WgpuGlyphAtlas, effective_font_size,
-    frame_font_bindings_identity, glyph_font_identity, key_uses_default_font_metrics,
+    glyph_font_identity, key_uses_default_font_metrics,
     normalize_subpixel_mask, rasterize_missing_glyph_box, resolved_glyph_stream_identity,
 };
 use romacs_display_protocol::face::Face;
 use romacs_display_protocol::font::{
-    CharFontTable, FontFileAsset, FontOutlineAsset, FontReplay, GlyphSampling, ResolvedCharGlyph,
+    FontFileAsset, FontOutlineAsset, FontReplay, GlyphSampling,
     ResolvedFont, ResolvedFontId, ResolvedFontIdentity, ResolvedGlyph, ResolvedGlyphId,
 };
 use romacs_display_protocol::types::FaceId;
@@ -122,70 +122,6 @@ fn color_bitmap_pixels_always_keep_linear_sampling() {
             GlyphSampling::Nearest,
         ),
         GlyphSampling::Linear
-    );
-}
-
-#[test]
-fn frame_font_binding_identity_changes_with_an_exact_char_binding() {
-    let mut original = CharFontTable::default();
-    original.entry(FaceId::new(7)).or_default().insert(
-        '©',
-        ResolvedCharGlyph {
-            resolved_font_id: ResolvedFontId(1),
-            glyph_id: ResolvedGlyphId::new(2),
-            advance_px: 8.0,
-        },
-    );
-    let mut changed = original.clone();
-    changed.get_mut(&FaceId::new(7)).unwrap().insert(
-        '©',
-        ResolvedCharGlyph {
-            resolved_font_id: ResolvedFontId(3),
-            glyph_id: ResolvedGlyphId::new(4),
-            advance_px: 8.0,
-        },
-    );
-
-    assert_ne!(
-        frame_font_bindings_identity(
-            &Default::default(),
-            &Default::default(),
-            &original,
-            &Default::default()
-        ),
-        frame_font_bindings_identity(
-            &Default::default(),
-            &Default::default(),
-            &changed,
-            &Default::default()
-        )
-    );
-}
-
-#[test]
-fn frame_font_binding_identity_includes_each_faces_primary_font() {
-    use romacs_display_protocol::face::Face;
-
-    let mut first_face = Face::new(FaceId::new(7));
-    first_face.default_resolved_font_id = Some(ResolvedFontId(1));
-    let mut second_face = first_face.clone();
-    second_face.default_resolved_font_id = Some(ResolvedFontId(2));
-    let first = [(first_face.id, first_face)].into_iter().collect();
-    let second = [(second_face.id, second_face)].into_iter().collect();
-
-    assert_ne!(
-        frame_font_bindings_identity(
-            &first,
-            &Default::default(),
-            &Default::default(),
-            &Default::default()
-        ),
-        frame_font_bindings_identity(
-            &second,
-            &Default::default(),
-            &Default::default(),
-            &Default::default()
-        )
     );
 }
 
@@ -462,16 +398,14 @@ fn frame_font_installation_invalidates_atlas_on_catalog_generation_change() {
     let mut frame = romacs_display_protocol::FrameGlyphBuffer::default();
     let initial = romacs_display_protocol::font::FontCatalogGeneration::default();
 
-    let before_first_frame = atlas.eviction_generation();
     atlas.set_current_frame_fonts(frame.font_bindings());
-    let established = atlas.eviction_generation();
-    assert!(established > before_first_frame);
+    atlas.cached_char_width = Some(7.0);
     atlas.set_current_frame_fonts(frame.font_bindings());
-    assert_eq!(atlas.eviction_generation(), established);
+    assert_eq!(atlas.cached_char_width, Some(7.0), "the same catalog keeps what the atlas holds");
 
     frame.font_catalog_generation = initial.next();
     atlas.set_current_frame_fonts(frame.font_bindings());
-    assert!(atlas.eviction_generation() > established);
+    assert_eq!(atlas.cached_char_width, None, "a new catalog clears it");
 }
 
 #[test]
@@ -1326,7 +1260,7 @@ fn color_rasters_are_not_shared_across_foregrounds() {
 
 /// The other half of the foreground rule: a face whose font has no color
 /// source resolves no palette index to the text foreground, so its glyph
-/// identities — and therefore its atlas and row-reuse hit rates — must not
+/// identities — and therefore its atlas hit rate — must not
 /// depend on the foreground colour.
 #[test]
 fn mask_glyph_identities_ignore_the_foreground() {
