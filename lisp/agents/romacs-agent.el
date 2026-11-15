@@ -3987,6 +3987,11 @@ on it (`romacs-agent-pending-functions')."
                   'romacs-agent-pending-functions dir
                   (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))))
 
+(defun romacs-agent--restore-load (dir)
+  "Load the session recorded in DIR as a restore does: unless it is left
+unloaded (`romacs-agent--unloaded-p')."
+  (unless (romacs-agent--unloaded-p dir) (romacs-agent--load dir)))
+
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
@@ -4052,7 +4057,7 @@ A server runs this at its start, so sessions survive it; a restore
 `romacs-agent-restore-soon' began ends here, at once."
   (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t))
     (setq romacs-agent--restore-pending nil romacs-agent--restoring nil)
-    (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
+    (if pending (mapc #'romacs-agent--restore-load pending) (romacs-agent--load-new))
     (romacs-agent--fold-all-now)
     (romacs-agent--restore-tail)
     (when pending (romacs-agent--restore-progress 'done))))
@@ -4081,7 +4086,7 @@ on."
   (when romacs-agent--restore-pending
     (let ((until (+ (float-time) romacs-agent--restore-turn)))
       (while (when-let* ((dir (pop romacs-agent--restore-pending)))
-               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load dir))
+               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--restore-load dir))
                (romacs-agent--restore-progress 'running)
                (< (float-time) until))))
     (if romacs-agent--restore-pending
