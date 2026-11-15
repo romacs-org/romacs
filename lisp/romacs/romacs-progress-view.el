@@ -61,30 +61,35 @@
     (if (and (stringp name) (not (string-empty-p name))) (format "%s: %s" words name) words)))
 
 (defun romacs-progress-view--line (step state width)
-  "STEP at STATE as a line at most WIDTH columns: a glyph, its words, then
-its bar and counts, or its error; the words and the error are cut to fit
-\(the error is whole in *Messages*)."
+  "STEP at STATE as a line of at most WIDTH columns: a glyph, its words,
+then its bar and counts, or its error.  The bar narrows before the words
+do; a failure's words and error share what the line leaves, cut with an
+ellipsis (the error is whole in *Messages*)."
   (let* ((status (plist-get state :status))
          (done (plist-get state :done)) (of (plist-get state :of))
-         (lit (if (and (natnump done) (natnump of) (> of 0))
-                  (round (* romacs-progress-view--bar (/ (float (min done of)) of)))
-                (if (eq status 'done) romacs-progress-view--bar 0)))
          (glyph (pcase status
                   ('done (propertize "✓ " 'face 'romacs-progress-view-bar))
                   ('failed (propertize "✗ " 'face 'romacs-progress-view-failed))
                   (_ "  ")))
-         (tail (unless (eq status 'failed)
-                 (concat (propertize (make-string lit ?━) 'face 'romacs-progress-view-bar)
-                         (propertize (make-string (- romacs-progress-view--bar lit) ?─) 'face 'romacs-progress-view-rest)
-                         (and (natnump done) (natnump of)
-                              (propertize (format "  %d/%d" done of) 'face 'romacs-progress-view-rest)))))
-         (room (max 8 (- width 2 (if tail (+ 2 (string-width tail)) 0))))
-         (words (truncate-string-to-width (romacs-progress-view--words step state) room nil nil "…")))
-    (concat glyph words "  "
-            (or tail
-                (propertize (truncate-string-to-width (format "%s" (or (plist-get state :error) "failed"))
-                                                      (max 8 (- width 4 (string-width words))) nil nil "…")
-                            'face 'romacs-progress-view-failed)))))
+         (words (romacs-progress-view--words step state))
+         ;; The glyph and the gap after the words.
+         (room (max 0 (- width 4)))
+         (cut (lambda (text columns) (truncate-string-to-width text (max 0 columns) nil nil "…"))))
+    (if (eq status 'failed)
+        (let* ((error (format "%s" (or (plist-get state :error) "failed")))
+               (words-room (min (string-width words) (max (/ room 2) (- room (string-width error)))))
+               (words (funcall cut words words-room)))
+          (concat glyph words "  "
+                  (propertize (funcall cut error (- room (string-width words))) 'face 'romacs-progress-view-failed)))
+      (let* ((counts (and (natnump done) (natnump of) (format "  %d/%d" done of)))
+             (bar (max 4 (min romacs-progress-view--bar (- room (length counts) 6))))
+             (lit (if (and counts (> of 0))
+                      (round (* bar (/ (float (min done of)) of)))
+                    (if (eq status 'done) bar 0)))
+             (tail (concat (propertize (make-string lit ?━) 'face 'romacs-progress-view-bar)
+                           (propertize (make-string (- bar lit) ?─) 'face 'romacs-progress-view-rest)
+                           (and counts (propertize counts 'face 'romacs-progress-view-rest)))))
+        (concat glyph (funcall cut words (- room (string-width tail))) "  " tail)))))
 
 (defun romacs-progress-view--card ()
   "Show every step of `romacs-progress-state' in the card, in the frame's

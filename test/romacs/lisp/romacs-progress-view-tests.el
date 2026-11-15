@@ -31,8 +31,18 @@ counts stay whole."
          (failed (romacs-progress-view--line 'restore (list :status 'failed :error name) 50)))
     (should (<= (string-width running) 50))
     (should (string-suffix-p "1/9" running))
-    (should (= (+ (cl-count ?━ running) (cl-count ?─ running)) romacs-progress-view--bar))
-    (should (<= (string-width failed) 50))))
+    (should (<= 4 (+ (cl-count ?━ running) (cl-count ?─ running)) romacs-progress-view--bar))
+    (should (<= (string-width failed) 50))
+    ;; Narrow: the bar gives way first, the counts stay.
+    (dolist (width '(24 30 40))
+      (let ((line (romacs-progress-view--line 'restore (list :status 'running :done 1 :of 9 :name name) width)))
+        (should (<= (string-width line) width))
+        (should (string-suffix-p "1/9" line))))
+    ;; A failure's long words and long error share the line.
+    (dolist (width '(24 50 80))
+      (let ((line (romacs-progress-view--line 'restore (list :status 'failed :name name :error name) width)))
+        (should (<= (string-width line) width))
+        (should (string-match-p "…  x" line))))))
 
 (ert-deftest romacs-progress-view-takes-the-launch-screen-first ()
   "While the launch screen shows a step, no card is drawn; after it, the card."
