@@ -347,8 +347,14 @@ fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) ->
     if !meta.file_type().is_dir() {
         return refuse("not a directory");
     }
-    if meta.uid() != host::euid() || meta.permissions().mode() & 0o777 != 0o700 {
-        return refuse("not private to this user (0700)");
+    if meta.uid() != host::euid() {
+        return refuse("not this user's");
+    }
+    // The user's own store, open to others: made private again, as a world
+    // maps its images and its directory holds no one else's.
+    if meta.permissions().mode() & 0o777 != 0o700
+        && host::make_store_private(dir).is_err() {
+        return refuse("open to others, and not made private (0700)");
     }
     let same = |other: &Path| host::metadata(other).is_ok_and(|m| (m.dev(), m.ino()) == (meta.dev(), meta.ino()));
     if same(Path::new("/")) || home.is_some_and(same) {
@@ -1411,10 +1417,11 @@ mod tests {
         assert!(reset_in(&plain, true, None).is_err());
         assert!(world(&plain).prune_in(None, false, MOST_WORLDS).is_err());
         assert!(plain.join(format!("{key}.failed")).exists());
-        // Marked, but open to others: refused.
+        // Marked and the user's, but open to others: made private, then reset.
         let open = marked_store("open");
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(reset_in(&open, true, None).is_err());
+        assert!(reset_in(&open, true, None).is_ok());
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o700);
         // The home directory, or the root, even marked: refused.
         let home = marked_store("home");
         assert!(reset_in(&home, true, Some(&home)).is_err());
