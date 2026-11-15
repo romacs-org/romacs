@@ -40,6 +40,7 @@ mod exit;
 mod preparing;
 mod quit;
 mod client;
+mod restart;
 #[cfg(test)]
 #[path = "../tests/support/home.rs"]
 mod test_home;
@@ -694,6 +695,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
+    if argv.first().map(String::as_str) == Some("--restart-supervise") { std::process::exit(restart::supervise(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).

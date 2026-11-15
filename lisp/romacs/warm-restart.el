@@ -48,6 +48,9 @@
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
+(declare-function romacs-agent-load-session "romacs-agent" (id))
+(declare-function romacs-agent-tools--deliver "romacs-agent-tools" (session text delivered &optional valid))
+(declare-function romacs-agent-tools--restart-wake-file "romacs-agent-tools" (session))
 (defvar savehist-minibuffer-history-variables)
 (defvar savehist-additional-variables)
 (defvar uniquify-managed)
@@ -1208,54 +1211,127 @@ build names its runtime here.")
                                                             "MANAGERPID" "SYSTEMD_EXEC_PID"))))
            collect (concat "--setenv=" (match-string 1 entry))))
 
-(defun romacs-restart--spawn (image)
-  "Start the successor restoring IMAGE, detached from this process; its
-output goes to the image's .log file.  A server's successor is the same
-server: it starts once this process is gone (its unit inactive, when it
-runs as one), outside this process's unit, whose end would end it too."
-  (pcase-let* ((`(,command . ,own-runtime) (romacs-restart--command))
-               (process-environment
-                (append romacs-restart-environment
-                        (if own-runtime
-                            (cl-remove-if (lambda (entry)
-                                            (cl-some (lambda (var) (or (equal entry var) (string-prefix-p (concat var "=") entry)))
-                                                     romacs-restart-unset-environment))
-                                          process-environment)
-                          process-environment)))
-               (default-directory (or (bound-and-true-p command-line-default-directory) (expand-file-name "~/")))
-               (log (concat (file-name-sans-extension image) ".log"))
-               (server (bound-and-true-p romacs-server-name)))
-    (romacs-restart--start command image log server)))
+(defcustom romacs-restart-deadlines '(:exit 60 :start 180 :ready 300)
+  "Seconds a server's restart gives each step: this session's end (then it
+is ended), the new session's socket and window, and its init and restore
+done.  A step past its deadline rolls the restart back."
+  :type '(plist :value-type natnum))
 
-(defun romacs-restart--start (command image log server)
-  "Run COMMAND restoring IMAGE, its output to LOG; as server SERVER when given."
-  (cond ((not server)
-         (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c" "exec \"$@\" >>\"$0\" 2>&1 </dev/null"
-                log (append command (list "--restore" image))))
-        ((getenv "INVOCATION_ID")
-         ;; A unit's server: a helper unit waits for this unit to end.
-         (let ((unit (format "romacs-server-%s" server)))
-           (unless (zerop (apply #'call-process "systemd-run" nil nil nil
-                                 (append (list "--user" "--quiet" "--collect"
-                                               (format "--unit=romacs-restart-%s-%d" server (emacs-pid)))
-                                         (romacs-restart--environment-arguments)
-                                         (list "--" "sh" "-c"
-                                               ;; Until this server's own invocation of the unit has
-                                               ;; ended, past its deactivation (ExecStopPost); a new
-                                               ;; invocation (a launcher's) ends the wait too.
-                                               (concat "old=$1; shift; while [ \"$(systemctl --user show -p InvocationID --value \"$0\")\" = \"$old\" ] && "
-                                                       "case $(systemctl --user show -p ActiveState --value \"$0\") in "
-                                                       "active|activating|deactivating|reloading|refreshing) true;; *) false;; esac; "
-                                                       "do sleep 0.1; done; exec \"$@\" </dev/null")
-                                               unit (getenv "INVOCATION_ID") (car command) "--server" server "-n")
-                                         (cdr command) (list "--restore" image))))
-             (error "systemd-run could not start the successor"))))
-        (t
-         (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c"
-                (concat "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; shift; "
-                        "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
-                log (number-to-string (emacs-pid)) (car command) "--server" server "-n"
-                (append (cdr command) (list "--restore" image))))))
+(defvar romacs-restart-requester nil
+  "The agent session the running restart was asked for by, told its verdict.")
+
+(defun romacs-restart--directory ()
+  "Where restarts' plans, records and kept images go."
+  (expand-file-name "romacs/restarts/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+
+(defun romacs-restart--plan (image command own-runtime server)
+  "Write the plan of a supervised restart of server SERVER into COMMAND
+\=(program and launch flags; with OWN-RUNTIME, one that chooses its runtime),
+restoring IMAGE; return its file.  The image is kept beside it for a
+rollback, as the restore consumes it."
+  (let* ((dir (progn (make-directory (romacs-restart--directory) t) (romacs-restart--directory)))
+         (id (file-name-base image))
+         (keep (expand-file-name (concat id ".image") dir))
+         (file (expand-file-name (concat id ".plan.json") dir))
+         (set (let ((table (make-hash-table :test #'equal)))
+                (dolist (entry romacs-restart-environment table)
+                  (when (string-match "\\`\\([^=]+\\)=\\(.*\\)\\'" entry)
+                    (puthash (match-string 1 entry) (match-string 2 entry) table))))))
+    (condition-case nil (add-name-to-file image keep t) (file-error (copy-file image keep t)))
+    (with-temp-file file
+      (insert (json-serialize
+               (list :id id :server server :image (expand-file-name image) :keep keep
+                     :record (expand-file-name (concat id ".json") dir)
+                     :requester (or romacs-restart-requester :null)
+                     :old (list :pid (emacs-pid) :exe (expand-file-name invocation-name invocation-directory)
+                                :flags (vconcat (warm-restart--launch-flags (cdr (warm-restart--argv)))))
+                     :target (list :exe (car command) :flags (vconcat (cdr command)) :set set
+                                   :unset (if own-runtime (vconcat romacs-restart-unset-environment) []))
+                     :deadlines romacs-restart-deadlines))))
+    (set-file-modes file #o600)
+    file))
+
+(defun romacs-restart--spawn (image)
+  "Start the successor restoring IMAGE, detached from this process.  A
+server's successor is the same server, started and judged by a
+supervisor (`romacs --restart-supervise PLAN') outside this process's
+unit, whose end would end it too; it rolls back to this build when the
+successor does not come up, so it keeps this session's environment and
+gives the successor's changes to the successor alone.  Another session's
+successor starts once this one is gone, its output in the image's .log
+file."
+  (pcase-let* ((`(,command . ,own-runtime) (romacs-restart--command))
+               (default-directory (or (bound-and-true-p command-line-default-directory) (expand-file-name "~/")))
+               (server (bound-and-true-p romacs-server-name)))
+    (if server
+        (romacs-restart--supervise (romacs-restart--plan image command own-runtime server) server)
+      (let ((process-environment
+             (append romacs-restart-environment
+                     (if own-runtime
+                         (cl-remove-if (lambda (entry)
+                                         (cl-some (lambda (var) (or (equal entry var) (string-prefix-p (concat var "=") entry)))
+                                                  romacs-restart-unset-environment))
+                                       process-environment)
+                       process-environment))))
+        (romacs-restart--start command image (concat (file-name-sans-extension image) ".log"))))))
+
+(defun romacs-restart--supervise (plan server)
+  "Start PLAN's supervisor for server SERVER, this build's own binary,
+outside this process's unit."
+  (let ((program (expand-file-name invocation-name invocation-directory)))
+    (if (getenv "INVOCATION_ID")
+        (unless (zerop (apply #'call-process "systemd-run" nil nil nil
+                              (append (list "--user" "--quiet" "--collect"
+                                            (format "--unit=romacs-restart-%s-%d" server (emacs-pid)))
+                                      (romacs-restart--environment-arguments)
+                                      (list "--" program "--restart-supervise" plan))))
+          (error "systemd-run could not start the restart's supervisor"))
+      (call-process "setsid" nil 0 nil "-f" program "--restart-supervise" plan))))
+
+(defun romacs-restart-record (&optional id)
+  "The record of restart ID, the newest when nil, as a hash table; nil when
+there is none."
+  (let* ((dir (romacs-restart--directory))
+         (file (if id (expand-file-name (concat id ".json") dir)
+                 (and (file-directory-p dir)
+                      (car (sort (directory-files dir t "\\`[^.].*[0-9]\\.json\\'" t) #'file-newer-than-file-p))))))
+    (when (and file (file-readable-p file))
+      (with-temp-buffer (insert-file-contents file) (json-parse-buffer)))))
+
+(defun romacs-restart--summary (record)
+  "One line saying how RECORD's restart ended."
+  (let* ((plan (gethash "plan" record))
+         (phases (gethash "phases" record))
+         (seconds (and (> (length phases) 0) (gethash "at" (aref phases (1- (length phases)))))))
+    (pcase (gethash "verdict" record)
+      ("verified" (format "Romacs restart %s verified: %s, up in %.1f s" (gethash "id" plan)
+                          (gethash "exe" (gethash "target" plan)) (or seconds 0)))
+      ("rolled-back" (format "Romacs restart %s rolled back to %s: %s" (gethash "id" plan)
+                             (gethash "exe" (gethash "old" plan)) (gethash "failed" record)))
+      (verdict (format "Romacs restart %s: %s %s" (gethash "id" plan) (or verdict (gethash "state" record))
+                       (or (gethash "failed" record "") ""))))))
+
+(defun romacs-restart-verdict (file)
+  "Say how the restart whose record is FILE ended: in the echo area, and
+to the agent session that asked for it.  The supervisor calls this in the
+session that serves once it has judged it."
+  (let* ((record (with-temp-buffer (insert-file-contents file) (json-parse-buffer)))
+         (text (romacs-restart--summary record))
+         (requester (gethash "requester" (gethash "plan" record))))
+    (message "%s" text)
+    (when (and (stringp requester) (require 'romacs-agent nil t) (fboundp 'romacs-agent-tools--deliver))
+      (when-let* ((session (romacs-agent-load-session requester)))
+        (romacs-agent-tools--deliver session (format "%s\nRecord: %s" text file)
+                                     (lambda () (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))))))
+    text))
+
+(defun romacs-restart--start (command image log)
+  "Run COMMAND restoring IMAGE once this process is gone, detached, its
+output to LOG: the successor of a session that is no server."
+  (apply #'call-process "setsid" nil 0 nil "-f" "sh" "-c"
+         (concat "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; shift; "
+                 "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
+         log (number-to-string (emacs-pid)) (append command (list "--restore" image))))
 
 ;;;###autoload
 (defun romacs-restart (&optional force)
@@ -1287,7 +1363,9 @@ for running a newer build."
           (progn
             ;; A restart, not a quit: what the keeper holds for this
             ;; session stays for the successor (romacs-keeper.el).
-            (let ((romacs-keeper-restarting t))
+            ;; Nobody may be there to answer: a hook's question signals,
+            ;; and the restart stops with this session going on.
+            (let ((romacs-keeper-restarting t) (inhibit-interaction t))
               (run-hooks 'kill-emacs-hook))
             ;; The new process locks these files again; this one's locks
             ;; would name a pid that is about to end.
@@ -1365,7 +1443,11 @@ layout of that tree restarts as well."
   (when (eq request warm-restart--request)
     (let ((obstacles (warm-restart--obstacles request)) (now (float-time)))
       (cond ((> now (plist-get request :deadline))
-             (warm-restart--request-end (list :status 'expired :obstacles obstacles)))
+             (warm-restart--request-end (list :status 'expired :obstacles obstacles))
+             (when-let* ((failed (plist-get request :failed)))
+               (ignore-errors (funcall failed (format "it waited %d s and these were still in the way: %s"
+                                                      (round (- now (plist-get request :since-request)))
+                                                      (string-join obstacles "; "))))))
             (obstacles
              (setf (plist-get request :since) nil)
              (setq warm-restart-last-result (list :status 'deferred :obstacles obstacles)))
@@ -1427,7 +1509,8 @@ replaces a pending one.  Return `warm-restart-last-result'."
   (warm-restart-cancel)
   ;; Every key the checks set is present: `setf' of a missing one would
   ;; cons a new head the timer's copy never sees.
-  (let ((request (list :timer nil :since nil :ready ready :target target :force force :before before :failed failed
+  (let ((request (list :timer nil :since nil :since-request (float-time) :ready ready :target target :force force
+                       :before before :failed failed
                        :delay (or delay warm-restart-request-delay)
                        :deadline (+ (float-time) (or expiry warm-restart-request-expiry)))))
     (setf (plist-get request :timer)
