@@ -624,7 +624,7 @@ fn text_animation_lines(text: &[u8], limit: usize) -> usize {
 impl Vm {
     /// The text animations the display draws over the frame being frozen
     /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
-    /// which lisp/romacs/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
+    /// which lisp/ui/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
     /// START COLS ROWS FPS MOVING KIND), each while WINDOW is live and shows
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
@@ -748,7 +748,7 @@ impl Vm {
     }
     /// Top-level frame FRAME's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
-    /// (lisp/romacs/romacs-chrome.el) and the `romacs-pane-focus' and
+    /// (lisp/ui/romacs-chrome.el) and the `romacs-pane-focus' and
     /// `romacs-pane-border' faces' foregrounds: the window with the focus edge
     /// is the one the status bar shows (`status_bar_owner'), whether or
     /// not the frame shows one (VM2-PANE-CHROME).
@@ -2513,7 +2513,7 @@ impl Vm {
     /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
     /// the current buffer, which WINDOW shows. The walk over the positions
     /// the display iterator would call at and the calls are Lisp
-    /// (`romacs--redisplay-fontify`, lisp/romacs/vm/prelude.el), so nothing
+    /// (`romacs--redisplay-fontify`, lisp/vm/prelude.el), so nothing
     /// is held across them; a signal is logged there and never ends
     /// redisplay, and any other failure becomes a display diagnostic. False
     /// when `fontification-functions` is nil, so no Lisp ran.
