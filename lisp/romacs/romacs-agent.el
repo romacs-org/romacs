@@ -1808,6 +1808,9 @@ before while `romacs-agent--received-limit' lasts."
                                                       :reply (gethash "reply" note) :by-user (eq (gethash "byUser" note) t))))
                                ("messages" (list (list :type 'incoming :text (gethash "text" note) :prompt (gethash "prompt" note)
                                                        :messages (romacs-agent--messages-of (gethash "messages" note)))))
+                               ("attachments" (list (list :type 'attachments :id (gethash "id" note)
+                                                          :attachments (romacs-agent--attachments-of (gethash "items" note))
+                                                          :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
                                ("handoff" (list (list :type 'status
                                                       :text (format "%s: %s%s"
                                                                     (if (stringp (gethash "to" note))
@@ -1939,6 +1942,16 @@ at a time between the editor's other work: a long journal never holds it."
   "The request id of RECORD, a user's message written, or nil."
   (let ((in (gethash "in" record)))
     (and (hash-table-p in) (gethash "romacsRequest" in))))
+
+(defun romacs-agent--attachments-of (items)
+  "ITEMS, an attachments note's (romacs-agent-attachments.el), as an
+event carries them: plists of :path :kind (image, file or capture) :alt
+:size :sha."
+  (mapcar (lambda (item)
+            (list :path (gethash "path" item) :kind (intern (gethash "kind" item))
+                  :alt (romacs-agent--value (gethash "alt" item)) :size (romacs-agent--value (gethash "size" item))
+                  :sha (romacs-agent--value (gethash "sha" item))))
+          (append items nil)))
 
 (defun romacs-agent--rollback-note-p (record)
   (let ((note (gethash "note" record)))

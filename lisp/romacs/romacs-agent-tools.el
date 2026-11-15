@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
 (defcustom romacs-agent-eval-budget 5000
