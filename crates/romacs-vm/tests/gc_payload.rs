@@ -20,6 +20,9 @@ fn rss_kb() -> usize {
 fn vm(setup: &str) -> Vm {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
+    // GNU's threshold: a megabyte a run is then a collection every few runs
+    // (Romacs starts at 128 MiB, VM2-GC-PACING).
+    vm.eval_source("(setq gc-cons-threshold 800000)").unwrap();
     vm.eval_source("(progn (set-buffer (get-buffer-create \"gc-payload\")) (insert (make-string (* 1024 1024) ?x)))").unwrap();
     vm.eval_source(setup).unwrap();
     vm
@@ -78,6 +81,9 @@ fn thawed_strings_are_collected_as_they_are_made() {
 #[test]
 fn a_big_kept_vector_paces_collection_by_its_size() {
     let mut vm = vm("(progn (defvar gc-payload-kept (make-vector 10000000 nil)) (garbage-collect))");
+    // Fulls, which the percentage paces; minors come with allocation alone
+    // (VM2-GC-GENERATIONS).
+    vm.set_gc_minor(false);
     let made = collections(&mut vm, "(make-string 1048576 ?x)", N);
     assert!((made as usize) <= N / 8, "{made} collections over {N} strings beside a ten-million-slot vector");
 }
