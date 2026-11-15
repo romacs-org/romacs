@@ -133,9 +133,8 @@ supervisor reads it over the server's socket.")
 
 ;; A start's long steps (a restore's buffers, the agent sessions) show on
 ;; the launch screen, or after it in a card (romacs-progress-view.el), which
-;; loads when the first step speaks.
+;; loads when the first step with a state reports.
 (autoload 'romacs-progress-view-update "romacs-progress-view")
-(add-hook 'romacs-progress-functions #'romacs-progress-view-update)
 
 (defun romacs-gui-loadup--init-loaded (file)
   "Tell the launch screen the init loaded FILE (`after-load-functions')."

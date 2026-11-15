@@ -4,25 +4,29 @@
 
 ;;; Commentary:
 
-;; What `romacs-progress-functions' reports of a start's long steps (a
-;; restore's buffers, the agent sessions loading), shown where the user
-;; looks: on the launch screen while it shows (`romacs-startup-progress'),
-;; else in a card in the frame's corner, a line and a bar per step.  The
-;; card goes once every step is done; a step that failed stays a while, and
-;; its error is in *Messages* too.
+;; A start's long steps (a restore's buffers, the agent sessions loading)
+;; report through `romacs-startup-progress', which keeps each one's latest
+;; state in `romacs-progress-state'.  The launch screen shows them while it
+;; shows; past it, `romacs-startup-progress' calls
+;; `romacs-progress-view-update', which shows the steps that have a state
+;; in a card in the frame's corner, a line and a bar per step.  The card
+;; goes once every step is done; a step that failed stays a while, and its
+;; error is in *Messages* too.
 
 ;;; Code:
 
 (require 'seq)
 (require 'subr-x)
-(require 'romacs-popup)
 
-(declare-function romacs-startup-progress "animate.rs" (stage &optional label done of failed))
+(declare-function romacs-popup-show "romacs-popup" (kind buffer &rest args))
+(declare-function romacs-popup-hide "romacs-popup" (buffer))
+(declare-function romacs-layer--root-frame "romacs-layer" ())
+
 (defvar romacs-progress-state)
 
 (defgroup romacs-progress-view nil
   "A start's long steps, shown as they go."
-  :group 'romacs-popup)
+  :group 'frames)
 
 (defface romacs-progress-view-bar '((t :inherit success))
   "The part of a step's bar done.")
@@ -91,12 +95,19 @@ ellipsis (the error is whole in *Messages*)."
                            (and counts (propertize counts 'face 'romacs-progress-view-rest)))))
         (concat glyph (funcall cut words (- room (string-width tail))) "  " tail)))))
 
+(defun romacs-progress-view--steps ()
+  "The steps of `romacs-progress-state' with a state, as (STEP . STATE),
+in the order they first reported."
+  (seq-filter (lambda (entry) (plist-get (cdr entry) :status)) (reverse (bound-and-true-p romacs-progress-state))))
+
 (defun romacs-progress-view--card ()
-  "Show every step of `romacs-progress-state' in the card, in the frame's
-bottom-right corner; hide it a while after the last one ended."
+  "Show every step with a state in the card, in the frame's bottom-right
+corner; hide it a while after the last one ended.  The menus' library
+loads here, not with this one, which a start may load early."
+  (require 'romacs-popup)
   (let* ((root (romacs-layer--root-frame))
          (room (max 24 (min 80 (- (frame-width root) 8))))
-         (steps (reverse (bound-and-true-p romacs-progress-state)))
+         (steps (romacs-progress-view--steps))
          (lines (mapcar (lambda (entry) (romacs-progress-view--line (car entry) (cdr entry) room)) steps))
          (buffer (get-buffer-create romacs-progress-view--name))
          (columns (min room (+ 2 (apply #'max 20 (mapcar #'string-width lines))))))
@@ -128,23 +139,32 @@ bottom-right corner; hide it a while after the last one ended."
   "The launch screen gave way (timers run once the session's first frame
 is up): the steps still going go on in the card."
   (setq romacs-progress-view--handoff nil)
-  (when (seq-some (lambda (entry) (eq (plist-get (cdr entry) :status) 'running)) (bound-and-true-p romacs-progress-state))
+  (when (seq-some (lambda (entry) (eq (plist-get (cdr entry) :status) 'running)) (romacs-progress-view--steps))
     (romacs-progress-view--card)))
 
-(defun romacs-progress-view-update (step state)
-  "Show STEP at STATE (`romacs-progress-functions'): on the launch screen
-while it shows, else in the frame's card; a failure in *Messages* too."
-  (let ((failed (eq (plist-get state :status) 'failed)))
-    (when failed
-      (message "%s failed: %s" (romacs-progress-view--words step state) (or (plist-get state :error) "")))
-    (cond ((and (fboundp 'romacs-startup-progress)
-                (romacs-startup-progress step (romacs-progress-view--words step state)
-                                         (plist-get state :done) (plist-get state :of) failed))
-           ;; A step the screen showed that goes on goes on in the card.
-           (unless romacs-progress-view--handoff
-             (setq romacs-progress-view--handoff (run-at-time 0 nil #'romacs-progress-view--handoff))))
-          ((and (display-graphic-p) (not noninteractive))
-           (romacs-progress-view--card)))))
+(defvar romacs-progress-view--told nil
+  "The failures said in *Messages* already, as (STEP . ERROR).")
+
+(defun romacs-progress-view-update (&optional on-screen)
+  "Show `romacs-progress-state' (`romacs-startup-progress' calls this when
+a step with a state reports): in the card past the launch screen; a step
+the screen shows (ON-SCREEN) that goes on moves to the card once the
+session's first frame is up.  Each failure is said in *Messages* once."
+  (dolist (entry (romacs-progress-view--steps))
+    (let ((told (cons (car entry) (plist-get (cdr entry) :error))))
+      (when (and (eq (plist-get (cdr entry) :status) 'failed) (not (member told romacs-progress-view--told)))
+        (push told romacs-progress-view--told)
+        (message "%s failed: %s" (romacs-progress-view--words (car entry) (cdr entry)) (or (cdr told) "")))))
+  (cond (on-screen
+         (unless romacs-progress-view--handoff
+           (setq romacs-progress-view--handoff (run-at-time 0 nil #'romacs-progress-view--handoff))))
+        ((and (display-graphic-p) (not noninteractive)
+              ;; A card shows while a step goes on or failed; one already up
+              ;; follows its steps to the end.
+              (or (get-buffer-window romacs-progress-view--name t)
+                  (seq-some (lambda (entry) (memq (plist-get (cdr entry) :status) '(running failed)))
+                            (romacs-progress-view--steps))))
+         (romacs-progress-view--card))))
 
 (provide 'romacs-progress-view)
 ;;; romacs-progress-view.el ends here
