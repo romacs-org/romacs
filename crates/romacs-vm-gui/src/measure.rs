@@ -394,6 +394,24 @@ mod tests {
         }
     }
 
+    /// A line longer than a measurement's batch is measured in parts, but
+    /// never cut inside a sequence the layout composes into one glyph: a
+    /// flag across the cut measures as the one glyph it paints.
+    #[test]
+    fn a_long_line_is_never_measured_apart_inside_a_composed_glyph() {
+        let mut h = hosted();
+        let width = |h: &mut Hosted, text: &str| h.eval(&format!(
+            "(progn (setq truncate-lines t) (erase-buffer) (insert {text}) (car (window-text-pixel-size nil 1 nil 100000000)))"))
+            .parse::<i64>().unwrap();
+        let long = "(make-string 16384 ?a)";
+        let flag = "\"\u{1F1EC}\u{1F1F7}\"";
+        let (alone, flagged) = (width(&mut h, long), width(&mut h, flag));
+        // The batches of the line after "x\n" put their cut where the flag is.
+        for lead in ["\"x\\n\"", "\"\""] {
+            assert_eq!(width(&mut h, &format!("{lead} {long} {flag} \"\\n\"")), alone + flagged, "after {lead}");
+        }
+    }
+
     /// With the pane gap's bottom divider and internal border
     /// (VM2-PANE-CHROME), moving point down a line at a time keeps the
     /// cursor on a whole row above the mode line: the visibility check lays

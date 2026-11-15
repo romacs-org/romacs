@@ -29,6 +29,17 @@ const FIRST_REACH: usize = 128;
 /// apart, one seam per BATCH elements of such a line.
 const BATCH: usize = 16384;
 
+/// Whether C continues the composed sequence SHOWN ends in, which the
+/// layout measures as one glyph (`romacs_layout_input::cluster`): it joins
+/// the last character, or it completes a flag, a run's odd regional
+/// indicator being the first of its pair.
+fn continues(shown: &[(char, FaceKey)], c: char) -> bool {
+    let Some(&(last, _)) = shown.last() else { return false };
+    let indicator = |ch: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&ch);
+    let run = shown.iter().rev().take_while(|&&(ch, _)| indicator(ch)).count();
+    romacs_layout_input::cluster::joins(last, c) || indicator(c) && run % 2 == 1
+}
+
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
 /// Whether FAULT is such a refusal: what the display iterator cannot yet
 /// measure, not an error of the caller's.
@@ -233,8 +244,10 @@ impl<'l, 'a> Hosted<'l, 'a> {
             };
             let Some(e) = slot.elem else { break };
             let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
+            // A line past BATCH elements is cut, where no composed glyph crosses the cut.
+            if at - index > BATCH && !continues(&shown, c) { break; }
             shown.push((c, face_key(&e)));
-            if at - index >= self.reach && c == '\n' || at - index >= BATCH { break; }
+            if at - index >= self.reach && c == '\n' { break; }
         }
         self.reach = (self.reach * 2).clamp(FIRST_REACH, CHUNK);
         let window = self.source.window();
