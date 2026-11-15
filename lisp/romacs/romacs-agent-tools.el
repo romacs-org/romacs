@@ -1655,7 +1655,8 @@ last result."
 
 (romacs-mcp-register-tool
  "romacs_task_send"
- "Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
+ "Queued until the task's turn ends unless mode is \"steer\", which reaches a running task at its next tool \
+boundary. Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
 parent gets a copy with its next wake, never woken for it); any other session is refused. mode queue (default): at \
 once when the task is idle, after its running turn when it is busy, resuming its harness when it had ended; steer: \
 into its running turn; replace: in place of your messages still waiting for it; interrupt: its turn cut short, \
