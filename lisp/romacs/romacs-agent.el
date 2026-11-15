@@ -3643,7 +3643,7 @@ on."
   "The session ID names, loaded from its record when this editor does not
 know it yet, without loading every other one."
   (or (gethash id romacs-agent--sessions)
-      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]+\\'" id)
+      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[^/]*\\'" id)
            (let ((dir (expand-file-name id (romacs-agent--state-root))))
              (and (file-directory-p dir) (romacs-agent--load dir))))))
 
