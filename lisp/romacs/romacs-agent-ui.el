@@ -32,6 +32,7 @@
 (require 'romacs-agent)
 (require 'romacs-key-hint)
 (require 'romacs-agent-rows)
+(require 'romacs-agent-ask)
 (require 'romacs-markdown)
 
 ;;;###autoload
@@ -184,6 +185,9 @@ much of it its deltas wrote.")
   "Keys of a chat's transcript, the read-only text above its composer: a
 `keymap' text property, so they read it as a view and the composer below
 edits as any buffer does.  Typing in it types in the composer.")
+
+;; A question card's rows keep the transcript's keys beneath their own.
+(set-keymap-parent romacs-agent-ask-map romacs-agent-chat-transcript-map)
 
 (defun romacs-agent-ui--sealed (text)
   "TEXT as the transcript holds it: read-only, a field of its own (word
@@ -1098,16 +1102,22 @@ or a repeat."
                                 (substitute-command-keys
                                  "  \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-implement] implement it, or write what to change")
                                 'face 'romacs-agent-dim))
+        ;; Questions are a card to answer on (romacs-agent-ask.el).
+        ((and 'approval (guard (plist-get event :questions)))
+         (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
+         (romacs-agent-ui--line session event "")
+         (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
+         (romacs-agent-ui--insert (romacs-agent-ask-card (plist-get event :request-id) (plist-get event :questions))))
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
-                                (if-let* ((questions (plist-get event :questions)))
-                                    (format "◆ %s   [y] answer  [N] dismiss"
-                                            (mapconcat #'car questions "  "))
-                                  (format "◆ %s asks: %s  %s   [y] allow  [!] for this session  [N] deny"
-                                          (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
-                                          (or (plist-get event :description) "")))
+                                (format "◆ %s asks: %s  %s   [y] allow  [!] for this session  [N] deny"
+                                        (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
+                                        (or (plist-get event :description) ""))
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
+        ;; A question card answered settles: it says what was picked.
+        ((and 'answered (guard (plist-get (gethash (plist-get event :request-id) (romacs-agent-ui--asks)) :questions)))
+         (romacs-agent-ask-settle (plist-get event :request-id)))
         ;; Under an approval shown: one the policy answered had none.
         ((and 'answered (guard (gethash (plist-get event :request-id) (romacs-agent-ui--asks))))
          (romacs-agent-ui--line session event (romacs-agent-ui--noted

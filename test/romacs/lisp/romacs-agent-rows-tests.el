@@ -23,8 +23,49 @@
    (let ((row (romacs-agent-rows-tests--draw
                "romacs_buffer_read" :row (romacs-agent-rows-tests--table "instance" "i:1" "name" "notes" "start" 1))))
      (should (equal row "buffer read  notes · 1")))
-   ;; Another harness's tools keep the chat's generic row.
-   (should-not (romacs-agent-rows-get "Bash"))))
+   ;; A harness's tool with no renderer keeps the chat's generic row.
+   (should-not (romacs-agent-rows-get "NotebookRead"))))
+
+(ert-deftest romacs-agent-rows-harness-tools-are-one-line ()
+  (let ((T #'romacs-agent-rows-tests--table) (draw #'romacs-agent-rows-tests--draw))
+    ;; A file named without its directory.
+    (should (equal (funcall draw "Read" :row (funcall T "file_path" "x.el")) "◧ x.el"))
+    (should (equal (funcall draw "Bash" :row (funcall T "command" "make check\nmore" "description" "x"))
+                   "$ make check"))
+    (should (equal (funcall draw "Read" :row (funcall T "file_path" "/w/r/lisp/a.el" "offset" 10 "limit" 5))
+                   "◧ a.el:10-14  /w/r/lisp"))
+    (should (equal (funcall draw "Edit" :row (funcall T "file_path" "/w/a.el" "old_string" "x" "new_string" "y\nz"))
+                   "✎ a.el  /w  +2 −1"))
+    (should (equal (funcall draw "MultiEdit" :row
+                            (funcall T "file_path" "/w/a.el"
+                                     "edits" (vector (funcall T "old_string" "a" "new_string" "b")
+                                                     (funcall T "old_string" "c" "new_string" "d"))))
+                   "✎ a.el  /w  +2 −2"))
+    ;; Codex's file changes: the first file and how many more.
+    (should (equal (funcall draw "Edit" :row
+                            (funcall T "changes" (vector (funcall T "path" "/w/a.el") (funcall T "path" "/w/b.el"))))
+                   "✎ a.el  /w  +1 more"))
+    (should (equal (funcall draw "Write" :row (funcall T "file_path" "/w/n.el" "content" "1\n2\n3\n"))
+                   "✎ n.el  /w  written · 3 lines"))
+    (should (equal (funcall draw "Grep" :row (funcall T "pattern" "defun x" "path" "/w/lisp"))
+                   "⌕ defun x  in /w/lisp"))
+    (should (equal (funcall draw "Grep" :ended (funcall T "pattern" "defun x") "a.el:1\nb.el:2\n")
+                   "⌕ defun x · 2 lines"))
+    (should (equal (funcall draw "Glob" :ended (funcall T "pattern" "**/*.el") "a.el\n")
+                   "⌕ **/*.el · 1 file"))
+    (should (equal (funcall draw "WebFetch" :row (funcall T "url" "https://www.gnu.org/s/emacs"))
+                   "↗ gnu.org/s/emacs"))
+    (should (equal (funcall draw "WebSearch" :row (funcall T "query" "wgpu blur")) "◍ wgpu blur"))
+    (should (equal (funcall draw "TodoWrite" :row
+                            (funcall T "todos" (vector (funcall T "content" "a" "status" "completed")
+                                                       (funcall T "content" "b" "activeForm" "Doing b" "status" "in_progress")
+                                                       (funcall T "content" "c" "status" "pending"))))
+                   "☐ 1/3 done  Doing b"))
+    (let ((asked (funcall T "questions" (vector (funcall T "question" "Which one?")))))
+      (should (equal (funcall draw "AskUserQuestion" :row asked) "? Which one?"))
+      (should (equal (funcall draw "AskUserQuestion" :ended asked
+                              "User has answered your questions: \"Which one?\"=\"Tail\". You can now continue.")
+                     "? Which one?  → Tail")))))
 
 (ert-deftest romacs-agent-rows-messages-and-delegations ()
   (romacs-agent-rows-tests--plain

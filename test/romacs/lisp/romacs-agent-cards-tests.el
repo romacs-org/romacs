@@ -167,9 +167,12 @@
 ;; Runs: the steps between words, one row each.
 
 (defun romacs-agent-cards-tests--call (session id name input &optional state output time)
-  "Draw call ID of tool NAME on INPUT (a command), and its end in STATE."
+  "Draw call ID of tool NAME on INPUT (its command, file or pattern), and
+its end in STATE."
   (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id id :name name
-                                  :input (romacs-agent-cards-tests--table "command" input) :time time)
+                                  :input (romacs-agent-cards-tests--table
+                                          (pcase name ("Read" "file_path") ("Grep" "pattern") (_ "command")) input)
+                                  :time time)
   (when state
     (romacs-agent-cards-tests--draw session :type 'tool :state state :id id :output (or output "") :time time)))
 
@@ -179,20 +182,20 @@
     ;; While its run is open, the live rule says it, not the transcript.
     (should (equal (romacs-agent-cards-tests--visible) ""))
     (romacs-agent-ui--run-settle)
-    (should (equal (romacs-agent-cards-tests--visible) "▸ Bash  ls\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "▸ $ ls\n"))
     ;; TAB on the run's row shows its call; on the call's, its output.
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
-    (should (equal (romacs-agent-cards-tests--visible) "▾ Bash  ls\n  ✓ Bash  ls\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "▾ $ ls\n  ✓ $ ls\n"))
     (forward-line 1)
     (romacs-agent-chat-toggle)
     (should (string-suffix-p "{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))
     ;; Folding the run folds what it shows; showing it again, as it was.
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
-    (should (equal (romacs-agent-cards-tests--visible) "▸ Bash  ls\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "▸ $ ls\n"))
     (romacs-agent-chat-toggle)
-    (should (string-suffix-p "  ✓ Bash  ls\n{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-suffix-p "  ✓ $ ls\n{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-a-call-drawn-anew-is-its-runs-row ()
   ;; A renderer's words at the call's end are the run's row too, and its
@@ -221,16 +224,16 @@
     (romacs-agent-cards-tests--draw session :type 'delta :text "It failed.")
     ;; Two quiet calls in 42 s; the failed one shows, folded or not.
     (should (equal (romacs-agent-cards-tests--visible)
-                   "Looking.\n▸ 2 tools · 42s\n  ! Bash  make\nIt failed."))
+                   "Looking.\n▸ 2 tools · 42s\n  ! $ make\nIt failed."))
     (goto-char (point-min))
     (forward-line 1)
     (romacs-agent-chat-toggle)
     (should (equal (romacs-agent-cards-tests--visible)
-                   "Looking.\n▾ 2 tools · 42s\n  ✓ Bash  ls\n  ! Bash  make\n  ✓ Read  x.el\nIt failed."))
+                   "Looking.\n▾ 2 tools · 42s\n  ✓ $ ls\n  ! $ make\n  ✓ ◧ x.el\nIt failed."))
     ;; Collapsing all folds it again, the failure still shown.
     (romacs-agent-chat-collapse-all)
     (should (equal (romacs-agent-cards-tests--visible)
-                   "Looking.\n▸ 2 tools · 42s\n  ! Bash  make\nIt failed."))))
+                   "Looking.\n▸ 2 tools · 42s\n  ! $ make\nIt failed."))))
 
 (ert-deftest romacs-agent-a-failure-after-an-approval-leaves-the-runs-count ()
   ;; An approval the user is asked settles the run mid-call; the call
@@ -244,12 +247,12 @@
     (should (string-prefix-p "▸ 2 tools\n" (romacs-agent-cards-tests--visible)))
     (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "a" :output "")
     (romacs-agent-cards-tests--draw session :type 'tool :state 'failed :id "b" :output "denied")
-    (should (string-prefix-p "▸ Bash  ls\n  ! Bash  rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))
+    (should (string-prefix-p "▸ $ ls\n  ! $ rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))
     ;; Shown, the run's row says so as it counts again.
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
     (romacs-agent-cards-tests--draw session :type 'tool :state 'failed :id "a" :output "late")
-    (should (string-prefix-p "  ! Bash  ls\n  ! Bash  rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))))
+    (should (string-prefix-p "  ! $ ls\n  ! $ rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-live-rule-names-a-call-still-running ()
   (romacs-agent-cards-tests--with-chat session
@@ -259,9 +262,9 @@
       (romacs-agent-cards-tests--call session "a" "Grep" "first")
       (romacs-agent-cards-tests--call session "b" "Grep" "second")
       (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "b" :output "")
-      (should (string-search "· Grep  first ·" (rule)))
+      (should (string-search "· ⌕ first ·" (rule)))
       (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "a" :output "")
-      (should-not (string-search "Grep" (rule))))))
+      (should-not (string-search "⌕" (rule))))))
 
 (ert-deftest romacs-agent-an-open-run-only-grows-the-transcript ()
   ;; Calm: what shows above an open run never moves, and its settling
@@ -286,7 +289,7 @@
       (should (string-search "● Running 0s · thinking ─" (rule)))
       (romacs-agent-cards-tests--call session "a" "Bash" "ls" 'completed "x")
       (romacs-agent-cards-tests--call session "b" "Grep" "TODO")
-      (should (string-search "● Running 0s · Grep  TODO · 2 tools ─" (rule)))
+      (should (string-search "● Running 0s · ⌕ TODO · 2 tools ─" (rule)))
       ;; Its row starts the line: the rule needs no newline before it.
       (should (string-prefix-p "──" (rule)))
       (romacs-agent-cards-tests--draw session :type 'delta :text "Found it.")
@@ -309,10 +312,10 @@
     (romacs-agent-cards-tests--draw session :type 'thinking :text "Consider.\n")
     (romacs-agent-cards-tests--call session "r1" "Read" "/a" 'completed "")
     (romacs-agent-cards-tests--draw session :type 'delta :text "Done.")
-    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▸ Read  /a\nDone."))
+    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▸ ◧ a  /\nDone."))
     (goto-char (text-property-not-all (point-min) (point-max) 'romacs-agent-run-head nil))
     (romacs-agent-chat-toggle)
-    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▾ Read  /a\n  ∴ Consider.\n  ✓ Read  /a\nDone."))
+    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▾ ◧ a  /\n  ∴ Consider.\n  ✓ ◧ a  /\nDone."))
     (should-not (string-search "thinking" (buffer-string)))))
 
 (ert-deftest romacs-agent-subagent-words-are-its-calls-steps ()
@@ -332,7 +335,7 @@
     ;; not the run's own calls.
     (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers · Explore\nThree callers."))
     (romacs-agent-chat-expand-all)
-    (should (string-search "    Searching the tree.\n    ✓ Grep  callers\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-search "    Searching the tree.\n    ✓ ⌕ callers · 1 line\n" (romacs-agent-cards-tests--visible)))))
 
 ;; Messages between sessions: cards drawn from their record, never prompts.
 
