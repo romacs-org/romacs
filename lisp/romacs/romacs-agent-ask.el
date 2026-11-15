@@ -122,7 +122,9 @@ that it waits."
           (propertize (cond ((consp chosen)
                              (concat "  → " (mapconcat (lambda (pair) (string-join (cdr pair) ", ")) chosen " · ")))
                             (chosen "  · answered")
-                            (t "  · waiting: RET answers"))
+                            ;; The chat's key for its row (romacs-agent-ui.el).
+                            (t (substitute-command-keys
+                                "  · waiting: \\<romacs-agent-ui--asked-map>\\[romacs-agent-chat-answer] answers")))
                       'face 'romacs-agent-dim)))
 
 ;;; The layer

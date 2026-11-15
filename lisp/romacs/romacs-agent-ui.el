@@ -758,7 +758,8 @@ quiet call.  The row keeps RUN, for a late failure to count again."
                          clock)))
       (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
       (concat (propertize text 'romacs-agent-run-head run 'mouse-face 'highlight
-                          'help-echo "TAB: show the steps")
+                          'help-echo (substitute-command-keys
+                                      "\\<romacs-agent-chat-transcript-map>\\[romacs-agent-chat-toggle]: show the steps"))
               "\n"))))
 
 (defun romacs-agent-ui--run-settle ()
@@ -840,7 +841,9 @@ name and a marker at its reply hint, nil where nothing can answer it.")
 REPLY's row, a marker, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
               'romacs-agent-reply t
-              'help-echo (cond (reply "Answered: RET goes to the reply") (answered "Answered") (t "Not answered yet"))
+              'help-echo (cond (reply (substitute-command-keys
+                                       "Answered: \\<romacs-agent-ui--reply-link-map>\\[romacs-agent-chat-goto-reply] goes to the reply"))
+                                (answered "Answered") (t "Not answered yet"))
               'keymap (and reply romacs-agent-ui--reply-link-map)
               'mouse-face (and reply 'highlight) 'romacs-agent-reply-at reply))
 
@@ -1955,7 +1958,7 @@ and a running turn's live rule ticks."
 back): its journal is replayed the first time a window shows it, and no
 event is drawn in it before.")
 
-(defcustom romacs-agent-chat-turns 30
+(defcustom romacs-agent-chat-turns 12
   "How many of its last turns a chat draws, or nil for all of them.  The
 turns before are a key away (RET on the chat's first row), and a chat
 that grows past twice as many drops its oldest at a turn's end: a day's
@@ -2031,7 +2034,9 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
   "Put the row that draws earlier turns at the current chat's start."
   (romacs-agent-ui--insert-at
    (point-min)
-   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 30))
+   (propertize (format (substitute-command-keys
+                        "▴ Earlier turns: \\<romacs-agent-ui--earlier-map>\\[romacs-agent-chat-earlier] draws %d more\n")
+                       (or romacs-agent-chat-turns 12))
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
@@ -2100,7 +2105,7 @@ recorded before it would land elsewhere."
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
   (let ((drawn (length (romacs-agent-ui--input-starts))))
-    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 30)))
+    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12)))
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
     (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
@@ -2234,7 +2239,10 @@ its start) into the current chat buffer."
                    ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
-      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from)))
+      ;; A message said whole later is drawn whole, as one delta, not
+      ;; each of its stream's (its harness's `:streamed-skip').
+      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from nil
+                                  (romacs-agent--harness-get session :streamed-skip))))
   ;; A turn its journal leaves running goes on in its run; any other run
   ;; is done.
   (unless (romacs-agent-ui--running-p) (romacs-agent-ui--run-settle)))
