@@ -1586,7 +1586,7 @@ its journal the first time a window shows it: a start brings back every
 chat that was open, and reads no journal for one not looked at."
   (let ((id (plist-get misc :session)))
     (unless (romacs-agent-get id) (romacs-agent-know-sessions))
-    (when-let* ((session (romacs-agent-get id))
+    (when-let* ((session (romacs-agent-find id))
                 (buffer (let ((live (romacs-agent-buffer session)))
                           (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer

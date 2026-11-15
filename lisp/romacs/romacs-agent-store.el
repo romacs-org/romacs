@@ -202,7 +202,32 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                          (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process)))
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
 
+;;; Listing
+
+(defun romacs-agent-store-listed-p (dir)
+  "Whether the session recorded in DIR has a row."
+  (when-let* ((db (romacs-agent-store--open)))
+    (and (sqlite-select db "select 1 from sessions where id = ?" (list (file-name-nondirectory dir))) t)))
+
+(defun romacs-agent-store-unloaded ()
+  "The sessions that have a row but are not loaded, newest first, each a
+session record made from its row alone: to show, not to act on (acting
+on one loads it, `romacs-agent-find')."
+  (when-let* ((db (romacs-agent-store--open)))
+    (delq nil
+          (mapcar (lambda (row)
+                    (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost) row))
+                      (unless (romacs-agent-get id)
+                        (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
+                                            :title title :cwd cwd :options (and parent (list :parent parent))
+                                            :state (intern (or state "detached")) :last-time last :cost cost))))
+                  (sqlite-select db (concat "select id, dir, harness, provider, model, title, cwd, parent, state,"
+                                            " last_time, cost from sessions order by last_time desc"))))))
+
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
+;; Restored: the rows of sessions recorded with none are made, off the editor.
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
+(setq romacs-agent-listed-p #'romacs-agent-store-listed-p)
 
 (provide 'romacs-agent-store)
 ;;; romacs-agent-store.el ends here

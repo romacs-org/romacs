@@ -21,6 +21,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-store)
 (require 'romacs-agent-ui)
 (require 'romacs-popup)
 (require 'romacs-key-hint)
@@ -58,9 +59,34 @@ thread at point."
 
 ;;; Rows
 
+(defvar romacs-agent-board--unloaded nil
+  "While rows are made, the sessions shown from their rows alone
+\(`romacs-agent-store-unloaded'), by id, and their children: (BY-ID
+. CHILDREN), CHILDREN a table from a parent's id to them.")
+
 (defun romacs-agent-board--parent (session)
   "The known session SESSION was delegated by, or nil."
-  (romacs-agent-get (plist-get (romacs-agent-options session) :parent)))
+  (let ((parent (plist-get (romacs-agent-options session) :parent)))
+    (or (romacs-agent-get parent)
+        (and romacs-agent-board--unloaded (gethash parent (car romacs-agent-board--unloaded))))))
+
+(defun romacs-agent-board--children (session)
+  "The sessions SESSION delegated, loaded or not."
+  (append (romacs-agent-children session)
+          (and romacs-agent-board--unloaded
+               (gethash (romacs-agent-id session) (cdr romacs-agent-board--unloaded)))))
+
+(defun romacs-agent-board--sessions ()
+  "Every session to show: the loaded ones, then those shown from their rows
+alone, which `romacs-agent-board--unloaded' is set to know."
+  (let ((unloaded (romacs-agent-store-unloaded))
+        (by-id (make-hash-table :test #'equal)) (children (make-hash-table :test #'equal)))
+    (dolist (session unloaded)
+      (puthash (romacs-agent-id session) session by-id)
+      (when-let* ((parent (plist-get (romacs-agent-options session) :parent)))
+        (push session (gethash parent children))))
+    (setq romacs-agent-board--unloaded (cons by-id children))
+    (append (hash-table-values romacs-agent--sessions) unloaded)))
 
 (defun romacs-agent-board--key (session)
   "SESSION's state key on the board: its own, except that a delegated task
@@ -107,7 +133,7 @@ every session and its delegated ones."
                                      (romacs-agent-board--matches-p session (plist-get view :words))))
                            (under nil))
                        ;; Every child is marked: none is left for a later pass.
-                       (dolist (child (romacs-agent-children session))
+                       (dolist (child (romacs-agent-board--children session))
                          (when (mark child) (setq under t)))
                        (puthash session (cond (own 'own) (under 'context)) marks)))
                     (value value))))
@@ -129,7 +155,7 @@ while filtering or while one of them wants the user or works."
 they show under it (always, when it shows only for them), as VIEW shows
 them; KEYS has every session's key, MARKS whether it shows."
   (let* ((children (romacs-agent-board--sorted
-                    (seq-filter (lambda (child) (gethash child marks)) (romacs-agent-children session))
+                    (seq-filter (lambda (child) (gethash child marks)) (romacs-agent-board--children session))
                     keys))
          (context (eq (gethash session marks) 'context))
          (open (and children (or context (romacs-agent-board--open-p session children keys view)))))
@@ -407,7 +433,7 @@ on stays under point, else its line."
 moves there)."
   (let ((draw (lambda ()
                 (romacs-agent-board--draw
-                 (romacs-agent-board-rows (hash-table-values romacs-agent--sessions)
+                 (romacs-agent-board-rows (romacs-agent-board--sessions)
                                           (and (not romacs-agent-board--settled) (romacs-agent-history-items))
                                           (romacs-agent-board--view))
                  ;; Emoji draw a little wider than the two columns they
@@ -521,6 +547,8 @@ window; with none, or no room, hide the card."
     (romacs-agent-board--show buffer)))
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--refresh)
+;; The sessions' rows made: those left unloaded show.
+(add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--refresh)
 
 (defun romacs-agent-board--redraw ()
   "Draw the board, from one of its commands."
@@ -571,8 +599,12 @@ newest thread; on \"more\", list every transcript."
       ('more (romacs-agent-board-history)))))
 
 (defun romacs-agent-board--live (session)
-  "SESSION, unless no longer known: then the board is drawn again."
+  "SESSION, loaded first when it was shown from its row alone, unless no
+longer known: then the board is drawn again."
   (or (and (eq (romacs-agent-get (romacs-agent-id session)) session) session)
+      (and romacs-agent-board--unloaded
+           (eq (gethash (romacs-agent-id session) (car romacs-agent-board--unloaded)) session)
+           (romacs-agent-find (romacs-agent-id session)))
       (progn (romacs-agent-board--redraw)
              (user-error "That thread is gone: the board is drawn again"))))
 

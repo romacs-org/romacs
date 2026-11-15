@@ -326,7 +326,7 @@ call stays running until its answer is ready."
      "next" (if (equal status "running") (romacs-agent-tools--running-next session) :null))))
 
 (defun romacs-agent-tools--known (arguments)
-  (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
+  (or (romacs-agent-find (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
@@ -1221,7 +1221,7 @@ its parent and wake rule)."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
-         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
+         (task (or (romacs-agent-find id) (user-error "No task %s" id)))
          (provider (or (gethash "provider" arguments) (romacs-agent-provider task)))
          (instance (or (romacs-agent--configured provider) (user-error "No agent provider %s" provider)))
          (model (gethash "model" arguments)) (effort (gethash "effort" arguments))

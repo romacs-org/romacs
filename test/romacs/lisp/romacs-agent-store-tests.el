@@ -76,4 +76,34 @@ journal one turn long."
       (should (equal (sqlite-select (romacs-agent-store--open) "select title, state from sessions")
                      '(("second" "idle")))))))
 
+(ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()
+  ;; Restored: a listed session with no kept state and no supervisor is
+  ;; not loaded (its journal unread), one whose supervisor runs is; the
+  ;; board shows both, and asking for the first loads it.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-board)
+  (romacs-agent-store-tests--with
+    (let ((old "aaaaaaaa-0000-4000-8000-000000000001") (live "aaaaaaaa-0000-4000-8000-000000000002")
+          (journals nil))
+      (record old "old")
+      (record live "live" t)
+      (romacs-agent-store-fill)
+      (cl-letf* ((read (symbol-function 'romacs-agent--read-journal))
+                 ((symbol-function 'romacs-agent--read-journal)
+                  (lambda (session &rest args) (push (romacs-agent-id session) journals) (apply read session args)))
+                 ((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                 ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                 ((symbol-function 'romacs-agent--sweep) #'ignore)
+                 ((symbol-function 'romacs-agent-store-fill-soon) #'ignore))
+        (romacs-agent-restore)
+        (should-not (romacs-agent-get old))
+        (should (romacs-agent-get live))
+        (should-not (member old journals))
+        (let ((shown (mapcar #'romacs-agent-id (romacs-agent-board--sessions))))
+          (should (member old shown))
+          (should (member live shown)))
+        (let ((found (romacs-agent-find old)))
+          (should (equal (romacs-agent-title found) "old"))
+          (should (eq (romacs-agent-get old) found)))))))
+
 ;;; romacs-agent-store-tests.el ends here

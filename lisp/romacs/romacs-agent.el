@@ -3405,14 +3405,39 @@ own fields is taken back.")
 restored into (`romacs-agent-restore'), once: another table, as a test
 binds, is restored anew.")
 
+(defvar romacs-agent-listed-p nil
+  "When non-nil, a function of a session's directory saying whether a
+listing has it (romacs-agent-store): such a session with no kept state
+and no supervisor running is left unloaded, its journal unread, until it
+is asked for (`romacs-agent-find').")
+
+(defun romacs-agent--unloaded-p (dir)
+  "Whether the session recorded in DIR is left unloaded: listed, with
+neither its kept state nor its supervisor's socket."
+  (and romacs-agent-listed-p
+       (not (file-exists-p (expand-file-name "state.eld" dir)))
+       (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
+       (funcall romacs-agent-listed-p dir)))
+
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
-that is."
+that is, and none left unloaded (`romacs-agent--unloaded-p')."
   (when (file-directory-p (romacs-agent--state-root))
     (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
-      (unless (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+      (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                  (romacs-agent--unloaded-p dir))
         (romacs-agent--load dir)))))
+
+(defun romacs-agent-find (id)
+  "The session ID names, loaded from its record when it was left unloaded;
+nil when none is recorded."
+  (or (romacs-agent-get id)
+      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]+\\'" id)
+           (let ((dir (expand-file-name id (romacs-agent--state-root))))
+             (when (file-exists-p (expand-file-name "manifest.json" dir))
+               (romacs-agent--load dir)
+               (romacs-agent-get id))))))
 
 (defun romacs-agent-know-sessions ()
   "Know every recorded session, cheaply after the first time: restored
@@ -3519,4 +3544,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-ui)
 (require 'romacs-agent-tools)
 (require 'romacs-agent-watch)
+(require 'romacs-agent-store)
 ;;; romacs-agent.el ends here
