@@ -51,7 +51,13 @@
              :lost (list (list :buffer "entry.txt" :reason "a memory-only file, kept off the disk" :unsaved t)
                          (list :buffer "*Help*" :reason "generated buffer")))))
     (should (string-match-p "unsaved text not carried: entry\\.txt" shown))
-    (should-not (string-match-p "\\*Help\\*" shown))))
+    (should-not (string-match-p "\\*Help\\*" shown))
+    ;; An incomplete restore warns, and names it too.
+    (cl-letf (((symbol-function 'display-warning) (lambda (_type text &rest _) (setq shown text))))
+      (warm-restart--announce
+       (list :buffers 2 :records 3 :seconds 0.1 :file "/tmp/x.image"
+             :lost (list (list :buffer "entry.txt" :reason "a memory-only file, kept off the disk" :unsaved t)))))
+    (should (string-match-p "incomplete.*unsaved text not carried: entry\\.txt" shown))))
 
 (ert-deftest romacs-ram-files-tests-an-image-leaves-out-unsaved-ram-text-and-says-so ()
   (let* ((runtime (make-temp-file "romacs-ram-files-" t))

@@ -979,19 +979,20 @@ the report."
   (rename-file file (expand-file-name "restored.image" (file-name-directory file)) t))
 
 (defun warm-restart--announce (report)
-  "Say what REPORT's restore did; a failure is a warning, which shows."
-  (let ((lost (length (plist-get report :lost)))
-        (unsaved (cl-loop for entry in (plist-get report :lost)
-                          when (plist-get entry :unsaved) collect (plist-get entry :buffer)))
-        (problems (length (plist-get report :problems))))
+  "Say what REPORT's restore did; a failure is a warning, which shows.
+Either way it names each buffer whose unsaved text the image left out."
+  (let* ((lost (length (plist-get report :lost)))
+         (unsaved (cl-loop for entry in (plist-get report :lost)
+                           when (plist-get entry :unsaved) collect (plist-get entry :buffer)))
+         (unsaved (if unsaved (format "; unsaved text not carried: %s" (string-join unsaved ", ")) ""))
+         (problems (length (plist-get report :problems))))
     (if (warm-restart--keep-p report)
         (display-warning 'warm-restart
-                         (format "Session restore incomplete: %s; the image stays at %s (M-x warm-restart-report)"
+                         (format "Session restore incomplete: %s; the image stays at %s (M-x warm-restart-report)%s"
                                  (or (plist-get report :error) (format "%d problems" problems))
-                                 (plist-get report :file)))
+                                 (plist-get report :file) unsaved))
       (message "Session restored: %d buffers in %.2f s%s%s%s%s"
-               (plist-get report :buffers) (plist-get report :seconds)
-               (if unsaved (format "; unsaved text not carried: %s" (string-join unsaved ", ")) "")
+               (plist-get report :buffers) (plist-get report :seconds) unsaved
                (if (> lost 0) (format "; %d not carried" lost) "")
                (if (> problems 0) (format "; %d problems" problems) "")
                (if (> (+ lost problems) 0) " (M-x warm-restart-report)" "")))))
