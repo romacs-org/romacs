@@ -131,12 +131,7 @@ The GUI calls this after the user's init: the end of startup.el
 start of `command-line-1' (startup.el:2736).  The GUI visits the file
 arguments next with `romacs-gui-visit-file-noselect', then calls
 `romacs-gui-loadup-command-line-1'."
-  (setq after-init-time (current-time))
-  (run-hooks 'after-init-hook 'delayed-warnings-hook)
-  (when (get-buffer "*scratch*")
-    (with-current-buffer "*scratch*"
-      (when (eq major-mode 'fundamental-mode)
-        (funcall initial-major-mode))))
+  (romacs--after-init)
   (display-startup-echo-area-message))
 
 (defvar romacs-gui-loadup--old-face-font-rescale-alist face-font-rescale-alist

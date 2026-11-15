@@ -651,7 +651,7 @@ mod tests {
     /// xfaces.c Fface_font: on the display every face names the font
     /// painting draws it with, from the face's family and pixel size, and
     /// that font opens, so `window-font-width' (font.c `font-info' of
-    /// `face-font'), by which hermes sizes its tables in `fixed-pitch',
+    /// `face-font'), by which a chat sizes its tables in `fixed-pitch',
     /// measures a face other than `default' instead of signalling. A face
     /// the display theme does not hold paints, and so names, the default
     /// face's font.
@@ -679,10 +679,7 @@ mod tests {
         for screen in ["nil", "t"] {
             let answer = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
                 let mut vm = displayed();
-                let home = std::env::temp_dir().join(format!("romacs-fonts-alists-{}-{screen}", std::process::id()));
-                std::fs::create_dir_all(&home).unwrap();
-                vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                        home.display())).unwrap();
+                let home = crate::test_home::private_home(&mut vm, &format!("fonts-alists-{screen}"));
                 let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
                 printed(&mut vm, &format!("(progn (setq inhibit-startup-screen {screen})
                     (setf (alist-get 'alpha-background default-frame-alist) 80)
@@ -719,10 +716,7 @@ mod tests {
     fn loadup_on_the_display_finishes_startup_with_the_prettify_init() {
         let answer = std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
             let mut vm = displayed();
-            let home = std::env::temp_dir().join(format!("romacs-fonts-prettify-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                    home.display())).unwrap();
+            let home = crate::test_home::private_home(&mut vm, "fonts-prettify");
             let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
             printed(&mut vm, "(progn (add-hook 'emacs-lisp-mode-hook #'prettify-symbols-mode)
                 (add-hook 'emacs-startup-hook (lambda () (setq prettify-startup-ran t))) t)");

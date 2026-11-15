@@ -5,7 +5,6 @@
   :setup (let ((file (make-temp-file "scaling-transcript-" nil ".jsonl")))
            (scaling--agent)
            (require 'romacs-agent-history)
-           (romacs-agent-ui--helpers)
            (with-temp-file file
              (dotimes (i n)
                (insert (format "{\"type\":\"user\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-11-03T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"prompt %d\"}}\n" i)

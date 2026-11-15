@@ -48,7 +48,7 @@ fn scene_projection_uses_zero_emergency_font_lookups() {
             ),
         );
         renderer.render_frame_glyphs(
-            &view, &frame, &mut atlas, mapping, false, None, None, None, None, None,
+            &view, &frame, &mut atlas, mapping, false, None, None, None, None,
         );
         eprintln!(
             "presentation={presentation} unresolved_face_text_total={}",

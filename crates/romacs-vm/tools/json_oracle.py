@@ -63,7 +63,7 @@ def cases():
     yield "parse/unibyte-valid-utf8", '(json-parse-string (unibyte-string 34 195 169 34))'
     yield parse("parse/utf8-key-nul", '{"a\\u0000b":1}', ":object-type 'alist")
     yield "roundtrip/bignum", '(json-serialize (json-parse-string "1234567890123456789012345678901234567890"))'
-    yield parse("parse/hermes-lossless-contract", '[{},[],null,false]',
+    yield parse("parse/lossless-contract", '[{},[],null,false]',
                 ":null-object :json-null :false-object :json-false", projection=(
                     '(let ((a CALL)) (list (hash-table-p (aref a 0)) '
                     '(length (aref a 1)) (aref a 2) (aref a 3)))'))

@@ -272,7 +272,6 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-adjacent-tables-both-refit ()
   (romacs-agent-attach-tests--with-chat session
-    (romacs-agent-ui--helpers)
     (let ((table "| A | B |\n|---|---|\n| one | a rather long cell of text to wrap |\n"))
       (let ((width 70))
         (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))
@@ -331,7 +330,6 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-table-is-a-grid-and-refits ()
   (romacs-agent-attach-tests--with-chat session
-    (romacs-agent-ui--helpers)
     (let ((body "Before\n\n| Where | Cost |\n|---|---|\n| notmuch | a long description of what costs the time |\n\nAfter")
           (width 70))
       (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))

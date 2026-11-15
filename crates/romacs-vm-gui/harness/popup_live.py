@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""A hermes keymap popup sized by fit-window-to-buffer, in a private compositor.
+"""A keymap popup sized by fit-window-to-buffer, in a private compositor.
 
-A native --loadup session with a private HOME and init.el (hermes pointed at
-a loopback port nothing listens on) runs M-x hermes, then the dashboard's
-popup key (the dashboard opens the popup itself first; that one is
-dismissed with q).  keymap-popup displays its buffer in a bottom side window and
+A native --loadup session with a private HOME and init.el shows
+keymap_popup_fixture.el's menu with C-c p, dismisses it with q and shows
+it again.  keymap-popup displays its buffer in a bottom side window and
 fits it with `fit-window-to-buffer', which measures with
 `window-text-pixel-size' in the window the host has laid out.  An advice
 around the fit records, in the popup's window, what the fit asked and got
 and `posn-at-point' at the popup's first and last positions, and in the
-dashboard's window `posn-at-point' at point.
+main window `posn-at-point' at point.
 
 The judge is the painted scene, not those answers: the popup window's
 painted text rows must be exactly its buffer's lines, each row one line
@@ -39,13 +38,14 @@ import time
 import fileio_live as fio
 
 HERE = Path(__file__).resolve().parent
-import find_file_live as ff
 import live_oracle as live
 
-INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
-      hermes-dashboard-transport-start-mode 'remote
-      hermes-dashboard-transport-command "/nonexistent/hermes")
-(setq keymap-popup-backend #'keymap-popup-backend-side-window)
+# keymap_popup_fixture.el's menu, shown by C-c p.
+SHOW = '''(load {fixture} nil t)
+(global-set-key (kbd "C-c p") (lambda () (interactive) (keymap-popup keymap-popup-fixture-map)))
+'''
+
+INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-side-window)
 (defun popup-live--posn (window pos)
   (let ((posn (posn-at-point pos window)))
     (and posn (list (posn-point posn) (posn-x-y posn) (posn-actual-col-row posn)
@@ -56,7 +56,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
          (outcome (condition-case error (progn (funcall fit buffer) 'fitted)
                     (error (list 'error (error-message-string error)))))
          (window (get-buffer-window buffer))
-         (dashboard (get-buffer-window "*Hermes Dashboard*")))
+         (main (window-main-window)))
     (with-current-buffer buffer
       (write-region
        (prin1-to-string
@@ -78,10 +78,10 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
               :posn-last (condition-case error
                              (popup-live--posn window (save-excursion (goto-char (point-max)) (skip-chars-backward "\\n") (1- (point))))
                            (error (error-message-string error)))
-              :dashboard-posn (condition-case error (popup-live--posn dashboard (window-point dashboard))
+              :main-posn (condition-case error (popup-live--posn main (window-point main))
                                 (error (error-message-string error)))
-              :dashboard-top (nth 1 (window-edges dashboard nil nil t))
-              :dashboard-text-left (car (window-inside-pixel-edges dashboard))
+              :main-top (nth 1 (window-edges main nil nil t))
+              :main-text-left (car (window-inside-pixel-edges main))
               :line-starts (condition-case error
                                (save-excursion
                                  (goto-char (point-min))
@@ -100,10 +100,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
 '''
 
 
-CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
-      hermes-dashboard-transport-start-mode 'remote
-      hermes-dashboard-transport-command "/nonexistent/hermes")
-(setq keymap-popup-backend #'keymap-popup-backend-child-frame)
+CHILD_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-child-frame)
 (defun popup-live--root-windows ()
   (mapcar (lambda (w) (list (buffer-name (window-buffer w)) (window-pixel-top w) (window-pixel-height w)))
           (window-list (frame-parent (selected-frame)) 'nomini)))
@@ -137,10 +134,7 @@ CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
 '''
 
 
-LAYER_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
-      hermes-dashboard-transport-start-mode 'remote
-      hermes-dashboard-transport-command "/nonexistent/hermes")
-(setq keymap-popup-backend #'keymap-popup-backend-layer)
+LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
 (defun popup-live--root-windows ()
   (mapcar (lambda (w) (list (buffer-name (window-buffer w)) (window-pixel-top w) (window-pixel-height w)))
           (window-list (frame-parent (selected-frame)) 'nomini)))
@@ -177,7 +171,6 @@ LAYER_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
   (advice-add 'keymap-popup--fit-layer :after
             ;; Its first fit runs as the popup renders, before :show made the panel.
             (lambda (buffer) (when (keymap-popup--session-get buffer :frame) (popup-live--record buffer))))
-(load {fixture} nil t)
 (defun popup-live--fixture ()
   (interactive)
   (keymap-popup keymap-popup-fixture-map)
@@ -860,6 +853,11 @@ def check_layer_faces(args, output, report, env, process, faces_state, keys, gly
     keys('q')
 
 
+def show_popup(keys):
+    """C-c p: SHOW's binding."""
+    keys('-M', 'ctrl', 'c', '-m', 'ctrl', 'p')
+
+
 def check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path):
     """The popup is a child frame: its rows are its buffer's lines in its
     rect, painted over the root frame, whose windows never move."""
@@ -868,7 +866,8 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
 
     fio.wait(state.exists, args.timeout, 'first popup', process)
     state.unlink()
-    keys('h')
+    keys('q')
+    show_popup(keys)
     fio.wait(state.exists, args.timeout, 'popup shown', process)
     probe = read_plist(state.read_text())
     report['probe'] = probe
@@ -973,7 +972,7 @@ def main():
             init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
                         faces=json.dumps(str(paths['faces']))) if args.layer
             else init.format(state=json.dumps(str(state)), scenes=json.dumps(str(HERE / 'prompt_scenes.el'))) if args.prompts
-            else init.format(state=json.dumps(str(state))))
+            else init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el'))))
 
     with live.session(binary, output, prefix='popup-live-', size=f'{args.width}x800', prepare=prepare, report=report,
                       env={'ROMACS_GUI_FONT': args.font, 'ROMACS_GUI_FONT_SIZE': args.font_size}) as live_session:
@@ -1026,25 +1025,21 @@ def main():
             check_which_key(args, output, report, env, process, state, keys, glyphs)
             report['status'] = 'PASS'
             return
-        keys('-M', 'alt', 'x', '-m', 'alt')
-        fio.wait(lambda: ff.prompt_shown(ff.current_rows(log_path.read_text(errors='replace')), 'M-x '), args.timeout, 'M-x prompt', process)
-        keys('hermes', '-k', 'Return')
-        fio.wait(lambda: any('*Hermes Dashboard*' in row for row in mode_lines()), args.timeout, 'dashboard', process)
         time.sleep(1)
-        fio.shot(output / 'dashboard.png', env, report)
-        report['captures'].append({'name': 'dashboard', 'rows': text_rows(), 'mode_lines': mode_lines()})
+        report['captures'].append({'name': 'started', 'rows': text_rows(), 'mode_lines': mode_lines()})
+        show_popup(keys)
         if args.child_frame or args.layer:
             check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path)
             if args.layer:
                 check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs)
             report['status'] = 'PASS'
             return
-        # The dashboard opens its popup itself; the popup key shows
-        # it again, refitting.
+        # Shown, dismissed and shown again, refitting.
         fio.wait(state.exists, args.timeout, 'first popup fit', process)
         report['first_fit'] = state.read_text()
         state.unlink()
-        keys('h')
+        keys('q')
+        show_popup(keys)
         fio.wait(state.exists, args.timeout, 'popup fit', process)
         fio.wait(lambda: mode_lines() and any('Navigate' in row for row in text_rows()),
                  args.timeout, 'popup painted', process)
@@ -1101,14 +1096,14 @@ def main():
         # includes its header line (posn-at-x-y's doc).
         for name, window_top, text_left in (('posn-first', top, probe['text-left']),
                                             ('posn-last', top, probe['text-left']),
-                                            ('dashboard-posn', probe['dashboard-top'], probe['dashboard-text-left'])):
+                                            ('main-posn', probe['main-top'], probe['main-text-left'])):
             posn = probe[name]
             if not isinstance(posn, list):
                 raise AssertionError(f'{name}: {posn}')
             _, (x, y), _, _ = posn
             at = [g for g in painted if g['role'] == 'Text' and g['x'] == text_left + x and g['y'] == window_top + y]
             report['checks'].append({name: posn, 'text_left': text_left, 'painted': [g['char'] for g in at]})
-            if name != 'dashboard-posn' and not at:
+            if name != 'main-posn' and not at:
                 raise AssertionError(f'{name} {posn}: no glyph painted at ({text_left + x}, {window_top + y})')
         report['status'] = 'PASS'
     print(report['status'])

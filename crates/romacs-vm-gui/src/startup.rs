@@ -1131,6 +1131,7 @@ pub fn lisp_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_home::private_home;
     use romacs_vm::CommandEvent;
 
     fn printed(vm: &mut Vm, source: &str) -> String {
@@ -1927,17 +1928,6 @@ mod tests {
         dir
     }
 
-    /// A private HOME and XDG_CONFIG_HOME for `vm`'s session: the interactive
-    /// session's user directory, which GNU's startup creates, is never the
-    /// user's own.
-    fn private_home(vm: &mut Vm, name: &str) -> std::path::PathBuf {
-        let home = scratch_lisp(&format!("{name}-home"), &[]);
-        let entries = [format!("HOME={}", home.display()), format!("XDG_CONFIG_HOME={}", home.join("config").display())];
-        vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
-                                lisp_string(&entries[0]), lisp_string(&entries[1]))).unwrap();
-        home
-    }
-
     /// A runtime root for `--loadup`: `lisp/gnu/` holding FILES and, beside
     /// it, `lisp/romacs/` holding BOOTSTRAP as the shared chain and an interactive
     /// session file that clears `noninteractive` and stands in for the
@@ -1990,7 +1980,7 @@ mod tests {
         let path = runtime_load_path(&dir).unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&path).unwrap();
-        for name in ["websocket", "fsm", "markdown-mode"] {
+        for name in ["fsm", "markdown-mode"] {
             let directory = owned.join("deps").join(name);
             assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: {name}");
             let expected = directory.join(format!("{name}.el"));
@@ -2010,9 +2000,8 @@ mod tests {
         let gnu = root.join("lisp/gnu/obsolete/gnus-dbus.el");
         assert!(gnu.is_file());
         assert_eq!(locate(&mut vm, "gnus-dbus"), lisp_string(&gnu.to_string_lossy()));
-        for (name, file) in [("hermes", "hermes/hermes.el"), ("jabber", "jabber/jabber.el"),
-                             ("gnosis", "gnosis/gnosis.el"), ("keymap-popup", "emacs-lisp/keymap-popup.el"),
-                             ("websocket", "deps/websocket/websocket.el")] {
+        for (name, file) in [("jabber", "jabber/jabber.el"),
+                             ("gnosis", "gnosis/gnosis.el"), ("keymap-popup", "emacs-lisp/keymap-popup.el")] {
             assert_eq!(locate(&mut vm, name), lisp_string(&root.join("lisp/romacs").join(file).to_string_lossy()), "{name}");
         }
         assert_eq!(locate(&mut vm, "romacs-win"), "nil");
@@ -2030,7 +2019,7 @@ mod tests {
         assert!(path[first_owned..first_deps].iter().all(|p| p.starts_with(&owned) && !p.starts_with(&deps)), "{path:?}");
         assert!(path[first_deps..].iter().all(|p| p.starts_with(&deps)), "{path:?}");
         assert!(owned.join("romacs-mcp-companion.el").is_file());
-        for (directory, file) in [("hermes", "hermes.el"), ("jabber", "jabber.el"), ("deps/fsm", "fsm.el")] {
+        for (directory, file) in [("gnosis", "gnosis.el"), ("jabber", "jabber.el"), ("deps/fsm", "fsm.el")] {
             let entry = owned.join(directory);
             assert!(path.contains(&entry) && entry.join(file).is_file(), "{} not loadable from {path:?}", entry.join(file).display());
         }
@@ -2038,13 +2027,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("lisp/gnu/emacs-lisp")).unwrap();
         assert_eq!(runtime_load_path(&root.join("lisp/gnu")).unwrap(), vec![root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]);
-        for directory in ["lisp/romacs/hermes", "lisp/romacs/deps/websocket", "lisp/romacs/vm"] {
+        for directory in ["lisp/romacs/gnosis", "lisp/romacs/deps/fsm", "lisp/romacs/vm"] {
             std::fs::create_dir_all(root.join(directory)).unwrap();
         }
         let installed = runtime_load_path(&root.join("lisp/gnu")).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(installed, vec![root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp"), root.join("lisp/romacs"),
-            root.join("lisp/romacs/hermes"), root.join("lisp/romacs/deps"), root.join("lisp/romacs/deps/websocket")]);
+            root.join("lisp/romacs/gnosis"), root.join("lisp/romacs/deps"), root.join("lisp/romacs/deps/fsm")]);
     }
 
     #[test]
@@ -2082,12 +2071,12 @@ mod tests {
         std::fs::create_dir_all(root.join("lisp")).unwrap();
         std::os::unix::fs::symlink(&real, root.join("lisp/gnu")).unwrap();
         let link = root.join("lisp/gnu");
-        let hermes = runtime_of(&real).unwrap().join("lisp/romacs").join("hermes");
+        let gnosis = runtime_of(&real).unwrap().join("lisp/romacs").join("gnosis");
         let found = on_evaluator(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &link).unwrap();
-            let v = vm.eval_source(&format!("(and (member {} load-path) t)", lisp_string(&hermes.to_string_lossy()))).unwrap();
+            let v = vm.eval_source(&format!("(and (member {} load-path) t)", lisp_string(&gnosis.to_string_lossy()))).unwrap();
             v.display().unwrap()
         });
         std::fs::remove_dir_all(&root).unwrap();
@@ -2109,22 +2098,24 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &in_vm).unwrap();
-            let gnu_only = query(&mut vm, "(list (fboundp 'hermes) (featurep 'romacs-bundled-autoloads))");
+            let gnu_only = query(&mut vm, "(list (fboundp 'gnosis-dashboard) (featurep 'romacs-bundled-autoloads))");
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             private_home(&mut vm, "autoloads");
             let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
-            let loadup = [("gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("hermes", "hermes/hermes.el")].map(|(name, file)| {
+            // A command, its package's feature (also its library) and file.
+            let commands = [("gnosis-dashboard", "gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("jabber-info", "jabber", "jabber/jabber.el")];
+            let loadup = commands.map(|(name, feature, file)| {
                 let file = lisp_string(&owned.join("lisp/romacs").join(file).to_string_lossy());
-                query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{name})
-                                               (equal (locate-file-internal \"{name}\" load-path '(\".el\")) {file})
+                query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{feature})
+                                               (equal (locate-file-internal \"{feature}\" load-path '(\".el\")) {file})
                                                (and (assoc {file} load-history) t))"))
             });
             (gnu_only, loadup)
         });
         assert_eq!(gnu_only, "(nil nil)", "--gnu-lisp activates no bundled package");
-        assert_eq!(loadup, [r#"("gnosis-dashboard" t nil t nil)"#, r#"("hermes" t nil t nil)"#],
+        assert_eq!(loadup, [r#"("gnosis-dashboard" t nil t nil)"#, r#"("jabber" t nil t nil)"#],
             "interactive autoloads of the bundled files, not yet loaded");
     }
 
@@ -2400,8 +2391,8 @@ mod tests {
                 Ok(v) => v.display().unwrap(),
                 Err(error) => format!("ERR {error}"),
             };
-            let hermes = runtime_of(&lisp_dir().canonicalize().unwrap()).unwrap().join("lisp/romacs").join("hermes");
-            let bundled = ask(&mut vm, &format!("(and (member {} load-path) t)", lisp_string(&hermes.to_string_lossy())));
+            let gnosis = runtime_of(&lisp_dir().canonicalize().unwrap()).unwrap().join("lisp/romacs").join("gnosis");
+            let bundled = ask(&mut vm, &format!("(and (member {} load-path) t)", lisp_string(&gnosis.to_string_lossy())));
             let mut live = vec![ask(&mut vm, SELECTED_TAIL)];
             let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
             let mut press = |vm: &mut Vm, keys: &[i64]| -> Vec<String> {
@@ -2431,7 +2422,7 @@ mod tests {
         // The startup screen's one window; C-x 2, C-x 3 split, C-x o moves,
         // C-x 1 leaves one; C-x C-e evaluates; all with GNU's window.el loaded.
         // romacs' bundled Lisp follows GNU's installed load-path.
-        assert_eq!(bundled, "t", "lisp/romacs/hermes not on load-path after loadup");
+        assert_eq!(bundled, "t", "lisp/romacs/gnosis not on load-path after loadup");
         assert_eq!(live, ["1", "2", "3", "3", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
         assert!(ran.iter().all(|r| !r.contains("SIGNAL")), "{ran:?}");
         assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");

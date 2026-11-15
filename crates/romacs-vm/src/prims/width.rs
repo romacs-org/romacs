@@ -12,7 +12,7 @@ fn char_width(cx, ch: Value) {
 defsubr! { name = "string-width", gnu = "character.c:466", effect = Reads,
 fn string_width(cx, string: Value; optional from: Value, to: Value) {
     // CHECK_STRING, then validate_subarray (fns.c).
-    let size = cx.string_view(string).map_err(|_| Fault::Wrong("stringp", string))?.chars as i64;
+    let size = cx.string_shape(string)?.0 as i64;
     let bound = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
         if v == Value::NIL { return Ok(default); }
         let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;

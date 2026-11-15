@@ -1661,8 +1661,6 @@ pub struct PresentedPointerAppearance {
     pressed: PointerDrawMode,
     #[serde(skip)]
     damage_bounds: Option<FrameRect>,
-    #[serde(skip)]
-    damage_rows: Vec<PresentedPointerDamageRow>,
 }
 
 impl PartialEq for PresentedPointerAppearance {
@@ -1670,30 +1668,6 @@ impl PartialEq for PresentedPointerAppearance {
         self.paint_spans == other.paint_spans
             && self.hover == other.hover
             && self.pressed == other.pressed
-    }
-}
-
-/// One matrix row whose cached vertices can be affected by an appearance.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PresentedPointerDamageRow {
-    window_id: crate::DisplayWindowId,
-    row: u32,
-}
-
-impl PresentedPointerDamageRow {
-    #[must_use]
-    pub const fn new(window_id: crate::DisplayWindowId, row: u32) -> Self {
-        Self { window_id, row }
-    }
-
-    #[must_use]
-    pub const fn window_id(self) -> crate::DisplayWindowId {
-        self.window_id
-    }
-
-    #[must_use]
-    pub const fn row(self) -> u32 {
-        self.row
     }
 }
 
@@ -1747,7 +1721,6 @@ impl PresentedPointerAppearance {
             hover,
             pressed,
             damage_bounds: None,
-            damage_rows: Vec::new(),
         };
         appearance.rebuild_damage_bounds();
         appearance
@@ -1772,11 +1745,6 @@ impl PresentedPointerAppearance {
     pub fn damage_bounds(&self) -> FrameRect {
         self.damage_bounds
             .expect("validated pointer appearance has paint bounds")
-    }
-
-    #[must_use]
-    pub fn damage_rows(&self) -> &[PresentedPointerDamageRow] {
-        &self.damage_rows
     }
 
     fn rebuild_damage_bounds(&mut self) {
@@ -2238,38 +2206,7 @@ impl PresentedPointerMap {
         Ok(())
     }
 
-    pub(crate) fn rebuild_damage_index(&mut self, frame: &FrameGlyphBuffer) {
-        for appearance in &mut self.appearances {
-            appearance.rebuild_damage_bounds();
-            appearance.damage_rows.clear();
-            for span in &appearance.paint_spans {
-                let first = span.first as usize;
-                let end = first + span.len as usize;
-                for primitive in &frame.glyphs[first..end] {
-                    let slot = match primitive {
-                        FrameGlyph::Char { slot_id, .. } | FrameGlyph::Stretch { slot_id, .. } => {
-                            Some(*slot_id)
-                        }
-                        FrameGlyph::Image {
-                            slot_id: Some(slot_id),
-                            ..
-                        } => Some(*slot_id),
-                        _ => None,
-                    };
-                    if let Some(slot) = slot {
-                        let row = PresentedPointerDamageRow::new(slot.window_id, slot.row);
-                        appearance.damage_rows.push(row);
-                    }
-                }
-            }
-            appearance
-                .damage_rows
-                .sort_unstable_by_key(|row| (row.window_id().get(), row.row()));
-            appearance.damage_rows.dedup();
-        }
-    }
-
-    fn rebuild_damage_bounds(&mut self) {
+    pub(crate) fn rebuild_damage_bounds(&mut self) {
         for appearance in &mut self.appearances {
             appearance.rebuild_damage_bounds();
         }

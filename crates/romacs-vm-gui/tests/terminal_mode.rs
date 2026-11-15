@@ -1,6 +1,8 @@
 use romacs_vm_gui::{command, fonts, startup};
 use romacs_vm::{CommandEvent, TerminalHost, TerminalSnapshot, Vm};
 use std::{cell::RefCell, rc::Rc};
+#[path = "support/home.rs"]
+mod home;
 
 thread_local! {
     /// The foreground of the first cell this thread's terminal shows.
@@ -565,6 +567,7 @@ fn status_bar_shows_only_the_selected_window() {
     vm.set_frame_geometry(1000,700,20,10).unwrap();
     vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
     vm.set_terminal_host(Some(Box::new(Host(state.clone())))).unwrap();
+    home::private_home(&mut vm, "terminal-mode");
     startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
     open(&mut vm);
     // Wide enough that nothing is dropped to fit.

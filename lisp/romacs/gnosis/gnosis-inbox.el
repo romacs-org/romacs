@@ -22,7 +22,7 @@
 ;;   :GNOSIS_SPAN:     optional anchor inside the page (dedupe identity);
 ;;                     required to keep two questions with the same
 ;;                     answers on one page apart
-;;   :GNOSIS_AGENT:    who drafted it, e.g. hermes/default
+;;   :GNOSIS_AGENT:    who drafted it, e.g. claude/default
 ;;   :GNOSIS_REASON:   one line: why this card, e.g. "slide 13 step 1"
 ;;   :GNOSIS_CREATED:  ISO time
 ;;   :GNOSIS_KEY:      dedupe key (`gnosis-inbox-key'), filled by Gnosis

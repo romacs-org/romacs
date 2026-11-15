@@ -19,6 +19,7 @@ fn adjacent_box_paints_merge_across_interleaved_complements() {
     let face_id = FaceId::new(9);
     let clip = Some(Rect::new(0.0, 0.0, 20.0, 10.0));
     let make = |x, face_id, clip, box_vertical_edges| BoxSpan {
+        window: 0,
         x,
         y: 0.0,
         width: 10.0,
@@ -57,6 +58,7 @@ fn adjacent_same_face_box_runs_keep_explicit_internal_terminals() {
 
     let face_id = FaceId::new(9);
     let make = |x, edges| BoxSpan {
+        window: 0,
         x,
         y: 0.0,
         width: 10.0,
@@ -80,10 +82,41 @@ fn adjacent_same_face_box_runs_keep_explicit_internal_terminals() {
 }
 
 #[test]
+fn box_runs_of_two_windows_meet_without_joining() {
+    use crate::renderer::frame_pass::{BoxPaintPolicy, BoxSpan, BoxSpanAccumulator};
+
+    // The same boxed face, open at the seam, either side of a window edge:
+    // each window's run is its own, as GNU draws a window's boxes.
+    let make = |window, x, edges| BoxSpan {
+        window,
+        x,
+        y: 0.0,
+        width: 10.0,
+        height: 10.0,
+        face_id: FaceId::new(9),
+        row_role: GlyphRowRole::Text,
+        bg: Some(Color::BLACK),
+        clip: None,
+        policy: BoxPaintPolicy::Sharp,
+        requires_background_fill: false,
+        box_vertical_edges: edges,
+    };
+    let mut spans = BoxSpanAccumulator::default();
+    spans.push(make(1, 0.0, BoxVerticalEdges::Left));
+    spans.push(make(2, 10.0, BoxVerticalEdges::Right));
+    assert_eq!(spans.finish().len(), 2);
+    let mut spans = BoxSpanAccumulator::default();
+    spans.push(make(1, 0.0, BoxVerticalEdges::Left));
+    spans.push(make(1, 10.0, BoxVerticalEdges::Right));
+    assert_eq!(spans.finish().len(), 1, "within a window the run joins");
+}
+
+#[test]
 fn sharp_chrome_keeps_distinct_face_materials_while_edges_supply_continuity() {
     use crate::renderer::frame_pass::{BoxPaintPolicy, BoxSpan, BoxSpanAccumulator};
 
     let make = |x, face_id, row_role, policy| BoxSpan {
+        window: 0,
         x,
         y: 0.0,
         width: 10.0,
@@ -142,6 +175,7 @@ fn rounded_box_background_suppression_matches_exact_face_paint() {
     face.box_corner_radius = 4;
     let faces = rustc_hash::FxHashMap::from_iter([(face_id, face)]);
     let spans = [BoxSpan {
+        window: 0,
         x: 0.0,
         y: 0.0,
         width: 30.0,
@@ -193,6 +227,7 @@ fn merged_box_span_keeps_first_left_and_last_right_edge_ownership() {
 
     let mut spans = BoxSpanAccumulator::default();
     let span = |x, edges| BoxSpan {
+        window: 0,
         x,
         y: 0.0,
         width: 10.0,
@@ -236,6 +271,7 @@ fn transient_face_box_owns_only_the_mouse_highlight_run_terminals() {
 
     let mut spans = BoxSpanAccumulator::default();
     let span = |x, box_vertical_edges| BoxSpan {
+        window: 0,
         x,
         y: 0.0,
         width: 10.0,

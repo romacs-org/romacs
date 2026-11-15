@@ -5,6 +5,8 @@
 //! helper (tests/romacs-attach-test.el).
 use romacs_vm_gui::{fonts, startup};
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 const LINE: u32 = 20;
 
@@ -24,6 +26,7 @@ fn romacs_attach_lisp_tests_pass() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "attach");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         assert!(vm.open_display());
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

@@ -1,0 +1,4 @@
+# Test files that cannot be a module of `all`, one `FILE: reason` a line.
+# Each stays a test target of its own, which a check runs beside `all`
+# (tools/lib/test_modules.py targets romacs-vm-gui).
+bold_metrics: sets FONTCONFIG_FILE in its process's environment before fontconfig starts, which in `all` other tests' threads read and may have started already

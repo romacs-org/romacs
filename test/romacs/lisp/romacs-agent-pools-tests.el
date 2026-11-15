@@ -91,10 +91,13 @@ a time, `allow' marks it allowed."
                  ((symbol-function 'romacs-agent--keep-room) (lambda () (cl-incf writes) (funcall keep))))
         (spend "claude" 5000.0 1.0)
         (allow "claude2" 2.0)
-        ;; Each request's use alone is not written.
+        ;; Each request's use alone is not written, only a 5% step of it.
         (romacs-agent--note-room (romacs-agent--make :provider "claude2")
-                                 (list :status 'allowed :used 0.4 :window "five_hour" :time 3.0))
-        (should (= writes 2))))
+                                 (list :status 'allowed :used 0.21 :window "five_hour" :time 3.0))
+        (should (= writes 2))
+        (romacs-agent--note-room (romacs-agent--make :provider "claude2")
+                                 (list :status 'allowed :used 0.4 :window "five_hour" :time 4.0))
+        (should (= writes 3))))
     ;; A new server reads what was kept.
     (let ((romacs-agent--room (make-hash-table :test #'equal)) (romacs-agent--room-loaded nil))
       (should (eq (plist-get (romacs-agent-room-of "claude") :status) 'rejected))

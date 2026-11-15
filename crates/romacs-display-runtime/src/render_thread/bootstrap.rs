@@ -311,8 +311,8 @@ impl RenderApp {
                 .reconcile_video_service_deadline(None);
         }
 
-        // Per-window GPU-resident compositor state. `current_frame` /
-        // `current_row_damage` (CPU glyph data) are deliberately kept.
+        // Per-window GPU-resident compositor state. `current_frame` (CPU
+        // glyph data) is deliberately kept.
         self.frame_windows.clear_gpu_resident_state();
 
         // Toolbar icon ids point into the dropped renderer's image cache;

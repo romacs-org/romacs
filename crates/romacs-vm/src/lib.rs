@@ -85,6 +85,7 @@ impl romacs_snapshot::Schema for NameState {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
 }
 
 impl Default for NameState {
@@ -107,6 +108,7 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod treesit;
+pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
@@ -168,6 +170,7 @@ mod threaded;
 
 mod expand;
 mod save_excursion;
+mod closure_key;
 mod numbers;
 mod metadata;
 mod variable_definitions;
@@ -191,6 +194,7 @@ mod protocol;
 mod reader;
 mod regexp;
 mod syntax_index;
+mod markdown;
 mod syntax_scan;
 mod syntax_summary;
 mod surface;
@@ -518,7 +522,6 @@ enum Primitive {
     Puthash,
     Remhash,
     Clrhash,
-    Maphash,
     HashTableCount,
     HashTableP,
     HashTableTest,
@@ -778,7 +781,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("puthash", Primitive::Puthash),
     ("remhash", Primitive::Remhash),
     ("clrhash", Primitive::Clrhash),
-    ("maphash", Primitive::Maphash),
     ("hash-table-count", Primitive::HashTableCount),
     ("hash-table-p", Primitive::HashTableP),
     ("hash-table-test", Primitive::HashTableTest),
@@ -1061,8 +1063,13 @@ struct Function {
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
+    /// Its structural key (`closure_key`): closures of two lambdas with the
+    /// same key and `equal` captures are `equal`, as GNU's are. None where
+    /// the source has no canonical spelling; such closures compare by
+    /// identity.
+    key: Option<u128>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params, key });
 /// A function body a compiled load left in its artifact's bytes
 /// (`Vm::decode_pending`), with what the body names: a collection keeps
 /// its VALUES (moving them with the heap) and CHILDREN alive, and its
@@ -1508,6 +1515,10 @@ pub struct Vm {
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
+    /// Consumed by the next lambda compiled: the closure slots `closure`
+    /// takes out of its body (an interactive spec and its modes), which its
+    /// structural key covers as GNU's `equal` compares them (`closure_key`).
+    closure_key_extra: Vec<Form>,
     /// Eager `lambda' bodies being compiled around the current form.
     lambda_depth: usize,
     /// The windows the last window change functions run saw
@@ -1517,7 +1528,7 @@ pub struct Vm {
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
-    regions: Vec<Option<Box<frozen::Region>>>,
+    regions: frozen::Regions,
     region_free: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     region_collect: bool,
@@ -1654,8 +1665,9 @@ pub struct Vm {
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
-    /// `referrers` lists them again after a collection moved objects; it
-    /// may name dead ones.
+    /// `referrers` first lists them; a collection keeps it, without what
+    /// died and with what moved where it went (`Referrers::forget`,
+    /// `Referrers::forward`). A chain may name a member that left it.
     referrers: Option<buffer::Referrers>,
     /// The slots of the variables each buffer, by its index in `objects`,
     /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
@@ -1774,6 +1786,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     reached_generated,
     loader_order_request,
     keep_captures,
+    closure_key_extra,
     lambda_depth,
     window_change_seen,
     expanded_macros,
@@ -1863,6 +1876,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
     face_keys,
     debug_event_slots,
+    pending,
 } at_rest {
     site_leaf,
     regexp_cache,
@@ -1890,7 +1904,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     keeper,
     inotify,
     fence,
-    pending,
     execution,
     spare_programs,
     idle_since,
@@ -2013,12 +2026,13 @@ impl Vm {
             reached_generated: None,
             loader_order_request: false,
             keep_captures: false,
+            closure_key_extra: Vec::new(),
             lambda_depth: 0,
             window_change_seen: Vec::new(),
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
-            regions: vec![None],
+            regions: frozen::Regions::default(),
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
@@ -2391,6 +2405,7 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
@@ -2562,6 +2577,7 @@ impl Vm {
             pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
         Ok((id, names))
     }
@@ -2620,6 +2636,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2656,6 +2673,7 @@ impl Vm {
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();
@@ -2722,6 +2740,8 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
+        // The closure stays the one its key named before its first call.
+        function.key = self.functions[id].key;
         self.functions.set(id, Arc::new(function));
         Ok(())
     }
