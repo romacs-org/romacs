@@ -4,10 +4,11 @@
 //! ending. The supervisor waits for it to end, starts the target build
 //! as the same server, through that build's own client, restoring the
 //! image, then asks the new session, over its socket, until it is the
-//! target (its executable), shows a window, has run its init and has
-//! restored the image, or a deadline passes. A target that fails is
-//! stopped and the old build started again with the image kept for it,
-//! judged the same way. Every phase is written to the plan's record, a
+//! target (its executable), shows a window, has run its init, its restore
+//! has not failed, and it answers within a second twice in a row (its
+//! restore goes on behind the progress bar), or a deadline passes. A
+//! target that fails is stopped and the old build started again with the
+//! image kept for it, judged the same way. Every phase is written to the plan's record, a
 //! JSON file the session that serves reads back (`romacs_restart_status`),
 //! and the serving session is told the verdict (`romacs-restart-verdict`).
 use serde_json::{Value as Json, json};
@@ -93,12 +94,17 @@ fn missing(health: &Json, side: &Side) -> Option<String> {
     }
     if health["window"] != json!(true) { return Some("window: no window shown".into()); }
     if health["init"] != json!(true) { return Some("init: not done".into()); }
+    // A restore still going on is no obstacle: it goes on behind the
+    // progress bar while the session answers.
     match health["restore"].as_str() {
-        Some("done") => None,
         Some("failed") => Some(format!("restore: failed: {}", health["restoreError"].as_str().unwrap_or("?"))),
-        other => Some(format!("restore: {}", other.unwrap_or("?"))),
+        _ => None,
     }
 }
+
+/// How fast a session must answer to be up, and how many answers in a row.
+const ANSWER: Duration = Duration::from_secs(1);
+const ANSWERS: u32 = 2;
 
 /// The record: the plan's phases, checks and verdict, rewritten whole at
 /// each change so a reader never sees half of it.
@@ -221,22 +227,36 @@ fn judge(plan: &Plan, side: &Side, image: &Path, label: &str, record: &mut Recor
     let deadline = Instant::now() + plan.ready;
     let mut last = String::from("no answer");
     let mut pid = None;
+    // Up: the target's build, its window and init, answering within
+    // ANSWER that many times in a row (its restore may go on).
+    let mut answered = 0;
     while Instant::now() < deadline {
-        match run(command(side, &plan.server, &["--no-start", "-e", HEALTH]), Duration::from_secs(30)) {
+        let asked = Instant::now();
+        let answer = run(command(side, &plan.server, &["--no-start", "-e", HEALTH]), Duration::from_secs(30));
+        let took = asked.elapsed();
+        match answer {
             Ok((0, out)) => match lisp_string(&out).and_then(|text| serde_json::from_str::<Json>(&text).ok()) {
-                Some(health) => {
+                Some(mut health) => {
                     pid = health["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
                     match missing(&health, side) {
-                        None => { record.note(&format!("{label}-up"), health); return (None, pid); }
-                        Some(why) => last = why,
+                        None if took <= ANSWER => {
+                            answered += 1;
+                            if answered >= ANSWERS {
+                                health["answered"] = json!(took.as_secs_f64());
+                                record.note(&format!("{label}-up"), health);
+                                return (None, pid);
+                            }
+                        }
+                        None => { answered = 0; last = format!("answer: {:.1} s", took.as_secs_f64()); }
+                        Some(why) => { answered = 0; last = why; }
                     }
                 }
-                None => last = format!("health: unreadable answer: {}", tail(&out)),
+                None => { answered = 0; last = format!("health: unreadable answer: {}", tail(&out)); }
             },
-            Ok((code, out)) => last = format!("health: the client ended with {code}: {}", tail(&out)),
-            Err(why) => last = format!("health: {why}"),
+            Ok((code, out)) => { answered = 0; last = format!("health: the client ended with {code}: {}", tail(&out)); }
+            Err(why) => { answered = 0; last = format!("health: {why}"); }
         }
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_millis(if answered > 0 { 500 } else { 1000 }));
     }
     (Some(last), pid)
 }
@@ -354,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_is_up_when_it_is_the_build_with_a_window_its_init_and_its_restore() {
+    fn a_session_is_up_when_it_is_the_build_with_a_window_and_its_init_and_no_failed_restore() {
         let exe = std::env::current_exe().unwrap();
         let side = Side { exe: exe.clone(), flags: vec![], set: vec![], unset: vec![] };
         let up = json!({"exe": exe, "window": true, "init": true, "restore": "done"});
@@ -365,8 +385,9 @@ mod tests {
         no_window["window"] = json!(false);
         assert!(missing(&no_window, &side).unwrap().starts_with("window"));
         let mut pending = up.clone();
+        // A restore going on: up, it goes on behind the progress bar.
         pending["restore"] = json!("running");
-        assert_eq!(missing(&pending, &side).unwrap(), "restore: running");
+        assert_eq!(missing(&pending, &side), None);
         let mut failed = up;
         failed["restore"] = json!("failed");
         failed["restoreError"] = json!("Not a usable session image");
