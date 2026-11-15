@@ -613,7 +613,7 @@ impl World {
     /// When the restored VM's `romacs-world-restart` fails: the world is
     /// the test's to answer for.
     #[must_use]
-    pub fn for_test<T: super::safe::SnapshotSafe + 'static>(store: PathBuf, recipe: &[String], roots: Vec<PathBuf>,
+    pub fn for_test<T: super::safe::SnapshotSafe + super::safe::Schema + 'static>(store: PathBuf, recipe: &[String], roots: Vec<PathBuf>,
                                                             build: impl FnOnce() -> Result<(Vm, T), String>) -> Option<(Vm, T)> {
         // Before the key, which reads this executable.
         if !host::one_test_process() || !arena::serves_heap() || arena::mapped_image().is_some() {
