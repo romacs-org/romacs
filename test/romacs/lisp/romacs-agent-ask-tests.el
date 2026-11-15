@@ -156,6 +156,21 @@
   ;; As wide as its longest line, at most the room it has; as tall as
   ;; its lines wrapped there.
   (should (equal (romacs-agent-ask-size "abc\nde\n" 40) '(5 . 2)))
-  (should (equal (romacs-agent-ask-size (concat (make-string 90 ?x) "\nshort\n") 40) '(40 . 4))))
+  (should (equal (romacs-agent-ask-size (concat (make-string 90 ?x) "\nshort\n") 40) '(40 . 4)))
+  ;; At words: five 41-column words in 80 columns take five rows.
+  (should (equal (romacs-agent-ask-size (string-join (make-list 5 (make-string 41 ?w)) " ") 80) '(80 . 5))))
+
+(ert-deftest romacs-agent-ask-replay-leaves-live-layers ()
+  ;; A turn replayed (paging back) ends long ago: today's layer stays,
+  ;; picks and all; a live turn's end puts it away.
+  (romacs-agent-ask-tests--with-chat session
+    (let ((layer (romacs-agent-ask-open session "r7" '(("A?" :options ("x" "y") :multi t)))))
+      (with-current-buffer layer (romacs-agent-ask-pick))
+      (let ((romacs-agent-ui--replaying t))
+        (romacs-agent-ask-tests--draw session :type 'done :seq 40))
+      (should (buffer-live-p layer))
+      (should (equal (buffer-local-value 'romacs-agent-ask--picks layer) '((0 "x"))))
+      (romacs-agent-ask-tests--draw session :type 'done :seq 41)
+      (should-not (buffer-live-p layer)))))
 
 ;;; romacs-agent-ask-tests.el ends here

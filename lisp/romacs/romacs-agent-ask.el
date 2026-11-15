@@ -181,12 +181,26 @@ that it waits."
         (romacs-agent-ask--step t)))
     (romacs-agent-ask--follow)))
 
+(defun romacs-agent-ask--rows-of (line columns)
+  "How many rows LINE takes wrapped at words in COLUMNS, as the layer
+wraps it: a word too long for a row starts its own and runs on."
+  (let ((rows 1) (used 0))
+    (dolist (word (split-string line " "))
+      (let ((width (string-width word)))
+        (cond ((= used 0) (setq used width))
+              ((<= (+ used 1 width) columns) (setq used (+ used 1 width)))
+              (t (setq rows (1+ rows) used width)))
+        ;; A word wider than a row takes rows of its own.
+        (while (> used columns)
+          (setq rows (1+ rows) used (- used columns)))))
+    rows))
+
 (defun romacs-agent-ask-size (text most)
   "TEXT's layer size, (COLUMNS . LINES): as wide as its longest line, at
-most MOST columns, and as tall as its lines wrapped at that width."
-  (let* ((widths (mapcar #'string-width (split-string (string-trim-right text "\n") "\n")))
-         (columns (min most (+ 2 (apply #'max 1 widths)))))
-    (cons columns (apply #'+ (mapcar (lambda (width) (max 1 (ceiling width (float columns)))) widths)))))
+most MOST columns, and as tall as its lines wrapped at words there."
+  (let* ((lines (split-string (string-trim-right text "\n") "\n"))
+         (columns (min most (+ 2 (apply #'max 1 (mapcar #'string-width lines))))))
+    (cons columns (apply #'+ (mapcar (lambda (line) (romacs-agent-ask--rows-of line columns)) lines)))))
 
 (defun romacs-agent-ask--show (buffer)
   "Show BUFFER's layer, sized to its text and the frame, taking keys."

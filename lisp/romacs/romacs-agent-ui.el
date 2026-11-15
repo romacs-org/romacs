@@ -1157,8 +1157,9 @@ or a repeat."
         ('done (when-let* ((reason (plist-get event :reason)))
                  (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
                (romacs-agent-ui--footer session event)
-               ;; Its turn over, nothing waits for its questions' answers.
-               (romacs-agent-ask-close-all session)
+               ;; Its turn over, nothing waits for its questions' answers;
+               ;; a turn replayed is long over, and leaves today's alone.
+               (unless romacs-agent-ui--replaying (romacs-agent-ask-close-all session))
                (unless romacs-agent-ui--replaying (romacs-agent-ui--trim))
                (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ;; Its supervisor never came up: an end, failed, seen as `done' is.
@@ -1177,7 +1178,7 @@ or a repeat."
                                         (romacs-agent-ui--selection-label (plist-get event :to)))))
         ('exit
          ;; Its harness gone, so is what it asked.
-         (romacs-agent-ask-close-all session)
+         (unless romacs-agent-ui--replaying (romacs-agent-ask-close-all session))
          ;; A per-turn harness ends every turn: only a failed run is news.
          (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
            (romacs-agent-ui--note session event (format "harness exited (%s)" (plist-get event :status)))))
