@@ -3501,10 +3501,11 @@ sequence) would break that, and are read as raw bytes instead."
       (insert-file-contents-literally journal nil start end))
     start))
 
-(defconst romacs-agent-journal-tail-bytes (* 16 1024 1024)
+(defconst romacs-agent-journal-tail-bytes (* 3 1024 1024)
   "How far back from a journal's end its tail is looked for: a chat whose
 last turns go further back starts at the earliest turn within it, so no
-first show reads or replays more.")
+first show reads or replays more; a last turn longer than that is all
+read.")
 
 (defun romacs-agent--journal-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
