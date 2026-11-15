@@ -64,6 +64,13 @@ fn has_zero_byte(word: u64) -> bool {
     word.wrapping_sub(LOW_BITS) & !word & HIGH_BITS != 0
 }
 
+/// The index of WORD's first zero byte, there being one: the lowest flag
+/// `has_zero_byte`'s test raises is exact (only higher ones can be false).
+#[inline(always)]
+fn first_zero_byte(word: u64) -> usize {
+    (word.wrapping_sub(LOW_BITS) & !word & HIGH_BITS).trailing_zeros() as usize / 8
+}
+
 /// A table as a mark's threads see it (gc_mark.rs): entries one at a time, and
 /// atomic colours. Good only while the table neither grows nor is otherwise
 /// touched, which a stopped mutator ensures.
@@ -123,7 +130,8 @@ impl<T> RawTable<T> {
     /// A sweep of entries RANGE: each dead one through DESTROY, which leaves a
     /// tombstone owning nothing, then free (QUARANTINE: quarantined), and
     /// every survivor exactly old. The entries freed, the end of the last
-    /// still in use, and the lowest made free (`usize::MAX` for none). SAFETY: RANGE is this caller's alone, and starts on a
+    /// still in use, and the lowest free once it is done (`usize::MAX` for
+    /// none), whether this sweep freed it or found it so. SAFETY: RANGE is this caller's alone, and starts on a
     /// multiple of 8.
     pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> (usize, usize, usize) {
         assert!(range.end <= self.len, "a range past its table");
@@ -138,7 +146,7 @@ impl<T> RawTable<T> {
         let (colors, entries) = unsafe {
             (std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()), std::slice::from_raw_parts_mut(self.entries.add(base), range.len()))
         };
-        let (mut freed, mut last, mut first) = (0, 0, usize::MAX);
+        let (mut freed, mut last, mut lowest) = (0, 0, usize::MAX);
         let mut at = 0;
         // OLD's bit of each byte, moved down beside its in-use bit, counts
         // as a mark in a minor's sweep.
@@ -159,6 +167,10 @@ impl<T> RawTable<T> {
                     if clean != 0 {
                         last = base + end - clean.leading_zeros() as usize / 8;
                     }
+                    // A free entry the word held already: the lowest of them.
+                    if lowest == usize::MAX && has_zero_byte(clean) {
+                        lowest = base + at + first_zero_byte(clean);
+                    }
                     at = end;
                     continue;
                 }
@@ -169,16 +181,16 @@ impl<T> RawTable<T> {
                     destroy(base + i, &mut entries[i]);
                     colors[i] = dead;
                     freed += 1;
-                    if !quarantine { first = first.min(base + i); }
                     if quarantine { last = base + i + 1; }
                 } else if color != FREE {
                     if color & IN_USE != 0 { colors[i] = OLD | IN_USE; }
                     last = base + i + 1;
                 }
+                if colors[i] == FREE { lowest = lowest.min(base + i); }
             }
             at = end;
         }
-        (freed, last, first)
+        (freed, last, lowest)
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
@@ -638,18 +650,18 @@ impl<T> Table<T> {
     pub(crate) fn sweep(&mut self, quarantine: bool, destroy: impl FnMut(&mut T)) -> usize {
         let raw = tests::raw_of(self);
         let mut destroy = destroy;
-        let (freed, last, first) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
-        self.swept(freed, last, first, quarantine);
+        let (freed, last, lowest) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
+        self.swept(freed, last, lowest, quarantine);
         freed
     }
     /// The books of a sweep in ranges (`RawTable::sweep_range'): FREED entries
     /// in all, the last in use before LAST.
-    pub(crate) fn swept(&mut self, freed: usize, last: usize, first: usize, quarantine: bool) {
+    pub(crate) fn swept(&mut self, freed: usize, last: usize, lowest: usize, quarantine: bool) {
         if quarantine { self.quarantined += freed } else { self.free += freed }
-        // No free entry lay below the cursor, and the sweep freed none below
-        // FIRST: the next allocation looks from there, not through every
-        // live entry from the start.
-        self.cursor = self.cursor.min(first);
+        // The sweep read every colour: LOWEST is the first free entry, where
+        // the next allocation finds it at once, not after every live entry
+        // below it.
+        self.cursor = lowest;
         (self.marking, self.sticky) = (false, 0);
         self.generation += 1;
         // Every survivor is old and clean, so nothing logged still stands.
@@ -862,6 +874,25 @@ mod tests {
             assert!(table.mark(i), "{i} was in use");
         }
         table.sweep(false, |entry| *entry = u64::MAX)
+    }
+
+    /// A sweep leaves the cursor on the lowest free entry, one an earlier
+    /// sweep freed included, so the next allocation looks at nothing below.
+    #[test]
+    fn a_sweep_leaves_the_cursor_on_the_lowest_free_entry() {
+        let mut t = table(40);
+        let all_but = |t: &mut Table<u64>, dead: &[usize]| (0..t.len()).filter(|i| !dead.contains(i)).collect::<Vec<_>>();
+        // 20 and 30 freed first; 20 taken again, so the cursor moves past it.
+        let live = all_but(&mut t, &[30]);
+        sweep(&mut t, &live);
+        assert_eq!(t.cursor, 30);
+        let live = all_but(&mut t, &[20, 30, 35]);
+        sweep(&mut t, &live);
+        assert_eq!(t.cursor, 20);
+        assert_eq!(t.alloc(100), 20);
+        let live = all_but(&mut t, &[30, 35]);
+        sweep(&mut t, &live);
+        assert_eq!(t.cursor, 30, "a free entry this sweep did not free");
     }
 
     #[test]
@@ -1341,8 +1372,8 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        let (freed, last, first) = sweep_whole(&raw, false, |_, _| {});
-        t.swept(freed, last, first, false);
+        let (freed, last, lowest) = sweep_whole(&raw, false, |_, _| {});
+        t.swept(freed, last, lowest, false);
         assert!(!raw.holds(&t), "swept with every entry kept");
     }
 }
