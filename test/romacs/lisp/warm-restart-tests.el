@@ -5,6 +5,9 @@
 (require 'cl-lib)
 (require 'warm-restart)
 
+;; What `romacs-startup-progress' keeps: bound here around each restore.
+(defvar romacs-progress-state)
+
 (ert-deftest warm-restart-a-rebuilt-buffers-window-has-a-start ()
   ;; A window on a buffer its handler rebuilt (an agent chat, empty until
   ;; shown) is laid out from that buffer's own beginning and point, never
@@ -55,13 +58,16 @@
           (with-current-buffer buffer (text-mode) (insert "carried\n"))
           (setq image (warm-restart-write))
           (kill-buffer buffer)
-          (let ((romacs-progress-functions
-                 (list (lambda (step state) (when (eq step 'restore) (push (plist-get state :status) events))))))
+          (let ((romacs-progress-state nil)
+                (status (lambda () (plist-get (alist-get 'restore romacs-progress-state) :status))))
             (should-not (warm-restart-restore-image image t))
             (should-not (get-buffer "wr-carried"))
             (with-timeout (20 (ert-fail "the restore did not end"))
-              (while (not (memq 'done events)) (accept-process-output nil 0.05)))
+              (while (not (memq 'done events))
+                (accept-process-output nil 0.05)
+                (cl-pushnew (funcall status) events)))
             (should (memq 'running events))
+            (should (string-prefix-p "Session restored" (plist-get (alist-get 'restore romacs-progress-state) :label)))
             (should (equal (with-current-buffer "wr-carried" (buffer-string)) "carried\n"))
             (should (eq (plist-get (alist-get 'restore romacs-progress-state) :status) 'done))))
       (ignore-errors (kill-buffer "wr-carried"))

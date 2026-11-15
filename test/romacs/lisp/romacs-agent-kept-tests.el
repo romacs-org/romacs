@@ -6,6 +6,9 @@
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
 
+;; What `romacs-startup-progress' keeps: bound here around each restore.
+(defvar romacs-progress-state)
+
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
@@ -411,9 +414,8 @@ contents, so two equal states print the same."
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (clrhash romacs-agent--sessions)
-    (let* ((romacs-agent--restore-pending nil) (restored 0) (steps nil)
-           (romacs-agent-restored-hook (list (lambda () (cl-incf restored))))
-           (romacs-progress-functions (list (lambda (step state) (when (eq step 'agents) (push (plist-get state :status) steps))))))
+    (let* ((romacs-agent--restore-pending nil) (restored 0) (romacs-progress-state nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored)))))
       (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
                 ((symbol-function 'romacs-agent--sweep) #'ignore))
         (should (romacs-agent-load-session romacs-agent-kept-tests--id))
@@ -426,7 +428,9 @@ contents, so two equal states print the same."
           (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
         (should (romacs-agent-get romacs-agent-kept-tests--id))
         (should (= restored 1))
-        (should (equal (car steps) 'done))))))
+        (let ((agents (alist-get 'agents romacs-progress-state)))
+          (should (eq (plist-get agents :status) 'done))
+          (should (equal (plist-get agents :label) "Agent sessions 1/1")))))))
 
 (ert-deftest romacs-agent-kept-a-session-asked-for-mid-restore-loads-at-once ()
   ;; While sessions load a turn at a time, one attached early may ask for

@@ -25,7 +25,6 @@
 
 ;;; Code:
 (require 'cl-lib)
-(require 'romacs-progress)
 (require 'json)
 (require 'romacs-mcp)
 (declare-function romacs-agent-show "romacs-agent-ui")
@@ -3617,6 +3616,8 @@ opens."
     ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
     (when (romacs-agent--load-new) (run-hooks 'romacs-agent-restored-hook))))
 
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
+
 (defconst romacs-agent--restore-turn 0.2
   "Seconds of loading `romacs-agent-restore-soon' does in one turn of the
 command loop, past the turn's first session.")
@@ -3641,19 +3642,19 @@ A server runs this at its start, so sessions survive it; a restore
     (setq romacs-agent--restore-pending nil)
     (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
     (romacs-agent--restore-tail)
-    (when pending
-      (romacs-progress 'agents :status 'done :done romacs-agent--restore-count :of romacs-agent--restore-count))))
+    (when pending (romacs-agent--restore-progress 'done))))
 
 (defun romacs-agent-restore-soon ()
   "`romacs-agent-restore' from the command loop, `romacs-agent--restore-turn'
 seconds of it a turn: a server's start answers its socket and shows its
 window first, and the editor answers between turns however many sessions
-are recorded.  Its progress is the `agents' step of `romacs-progress'.  A
-server runs this at its start, so sessions survive it."
+are recorded.  Its progress is the `agents' stage of
+`romacs-startup-progress', a session at a time.  A server runs this at its
+start, so sessions survive it."
   (unless romacs-agent--restore-pending
     (if-let* ((dirs (romacs-agent--new-session-dirs)))
         (progn (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
-               (romacs-progress 'agents :status 'running :done 0 :of romacs-agent--restore-count)
+               (romacs-agent--restore-progress 'running)
                (run-at-time 0 nil #'romacs-agent--restore-step))
       (romacs-agent--restore-tail))))
 
@@ -3665,13 +3666,18 @@ on."
     (let ((until (+ (float-time) romacs-agent--restore-turn)))
       (while (when-let* ((dir (pop romacs-agent--restore-pending)))
                (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load dir))
+               (romacs-agent--restore-progress 'running)
                (< (float-time) until))))
-    (let ((done (- romacs-agent--restore-count (length romacs-agent--restore-pending))))
-      (if romacs-agent--restore-pending
-          (progn (romacs-progress 'agents :status 'running :done done :of romacs-agent--restore-count)
-                 (run-at-time 0 nil #'romacs-agent--restore-step))
-        (romacs-agent--restore-tail)
-        (romacs-progress 'agents :status 'done :done done :of romacs-agent--restore-count)))))
+    (if romacs-agent--restore-pending
+        (run-at-time 0 nil #'romacs-agent--restore-step)
+      (romacs-agent--restore-tail)
+      (romacs-agent--restore-progress 'done))))
+
+(defun romacs-agent--restore-progress (status)
+  "Say where a `romacs-agent-restore-soon' is, its STATUS `running' or `done'."
+  (let ((done (- romacs-agent--restore-count (length romacs-agent--restore-pending))))
+    (romacs-startup-progress 'agents (format "Agent sessions %d/%d" done romacs-agent--restore-count)
+                             (list :status status :done done :of romacs-agent--restore-count))))
 
 (defun romacs-agent-load-session (id)
   "The session ID names, loaded from its record when this editor does not

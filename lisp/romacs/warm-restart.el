@@ -43,11 +43,11 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'desktop)
-(require 'romacs-progress)
 
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 (defvar savehist-minibuffer-history-variables)
 (defvar savehist-additional-variables)
 (defvar uniquify-managed)
@@ -981,12 +981,13 @@ the problems so far."
   "Restore image FILE from the command loop, a record a turn: a session's
 socket and window come first, and no large buffer holds them back or
 freezes the session.  Then lay out its windows and report.  Its progress
-is the `restore' step of `romacs-progress'."
+is the `restore' stage of `romacs-startup-progress'."
   (let ((start (float-time)))
     (condition-case err
         (pcase-let* ((`(,form . ,blobs) (progn (warm-restart--claim-pending file) (warm-restart--read file)))
                      (records (plist-get form :buffers)))
-          (romacs-progress 'restore :status 'running :done 0 :of (length records) :seconds 0)
+          (romacs-startup-progress 'restore (format "Restoring buffers 0/%d" (length records))
+                                   (list :status 'running :done 0 :of (length records) :seconds 0))
           (warm-restart--step file start form blobs records (warm-restart--ordered records) 0
                               (make-hash-table :test #'equal) nil))
       ((error quit) (warm-restart--report-later file start (list :error (error-message-string err)))))))
@@ -1000,8 +1001,9 @@ with none left, finish the restore of FILE begun at START."
           (warm-restart--report-later file start (warm-restart--applied form records buffers problems))
         (let ((problems (nconc (warm-restart--restore-one (car pending) blobs buffers) problems))
               (message-log-max nil))
-          (romacs-progress 'restore :status 'running :done (1+ done) :of (length records)
-                           :name (plist-get (car pending) :name) :seconds (- (float-time) start))
+          (romacs-startup-progress 'restore (format "Restoring buffers %d/%d" (1+ done) (length records))
+                                   (list :status 'running :done (1+ done) :of (length records)
+                                         :name (plist-get (car pending) :name) :seconds (- (float-time) start)))
           (message "Restoring session: %d/%d" (1+ done) (length records))
           (run-at-time 0 nil #'warm-restart--step file start form blobs records (cdr pending) (1+ done) buffers problems)))
     ((error quit)
@@ -1012,9 +1014,10 @@ with none left, finish the restore of FILE begun at START."
   "Finish the restore of FILE begun at START with STATE, as the
 `restore' step's end."
   (let ((report (warm-restart--report file start state)))
-    (romacs-progress 'restore :status (if (plist-get report :error) 'failed 'done)
-                     :done (plist-get report :buffers) :of (plist-get report :records)
-                     :error (plist-get report :error) :seconds (plist-get report :seconds))
+    (romacs-startup-progress 'restore (if (plist-get report :error) "Session restore failed" "Session restored")
+                             (list :status (if (plist-get report :error) 'failed 'done)
+                                   :done (plist-get report :buffers) :of (plist-get report :records)
+                                   :error (plist-get report :error) :seconds (plist-get report :seconds)))
     report))
 
 (defun warm-restart--finish (state)

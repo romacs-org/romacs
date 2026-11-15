@@ -123,7 +123,13 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
 ;; (the Rum palette, the launch font) keeps its own spec.
 (frame-set-background-mode (selected-frame))
 
-(declare-function romacs-startup-progress "animate.rs" (stage &optional label))
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
+
+(defvar romacs-progress-state nil
+  "Each startup stage's latest state, as (STAGE :label LABEL . STATE), kept
+by `romacs-startup-progress': STATE a plist of :status (`running', `done'
+or `failed'), :done, :of, :name, :error and :seconds.  A restart's
+supervisor reads it over the server's socket.")
 
 (defun romacs-gui-loadup--init-loaded (file)
   "Tell the launch screen the init loaded FILE (`after-load-functions')."
