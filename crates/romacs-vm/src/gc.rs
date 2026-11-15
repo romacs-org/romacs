@@ -2925,6 +2925,9 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         vm.set_gc_verify(false);
+        // A table keeps room for the next cycle's allocation: GNU's threshold
+        // makes that small beside the bursts (VM2-GC-PACING).
+        vm.eval_source_raw("(setq gc-cons-threshold 800000)").unwrap();
         let mut after = vec![];
         for n in [160_000, 320_000, 640_000] {
             let list = conses(&mut vm, n);

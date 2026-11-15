@@ -20,6 +20,9 @@ fn rss_kb() -> usize {
 fn vm(setup: &str) -> Vm {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
+    // GNU's threshold: a megabyte a run is then a collection every few runs
+    // (Romacs starts at 128 MiB, VM2-GC-PACING).
+    vm.eval_source("(setq gc-cons-threshold 800000)").unwrap();
     vm.eval_source("(progn (set-buffer (get-buffer-create \"gc-payload\")) (insert (make-string (* 1024 1024) ?x)))").unwrap();
     vm.eval_source(setup).unwrap();
     vm
