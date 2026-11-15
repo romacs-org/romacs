@@ -16,8 +16,8 @@ user's copies, redefinition and advice must be the ones running, and the
 store's use log must show no bundled artifact of a shadowed library used
 after the bundled session.  Libraries a session loads before the init (one the
 base world preloads, thingatpt; one the defaults turn on, romacs-cursor) are
-reported, not checked: `require' finds them loaded and reads no copy, as GNU
-does for what it loads before an init.
+loaded again from the user's copy once the init has run (romacs-user-shadows.el),
+as a GNU session that first loads them then would, and checked in every launch.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY.  labwc and wlr-randr come from --tools or PATH.
@@ -39,7 +39,7 @@ import live_oracle as live
 SHADOWED = (('romacs-agent-diff', 'lisp/romacs/romacs-agent-diff.el'), ('hexl', 'lisp/gnu/hexl.el'))
 PRELOADED = (('thingatpt', 'lisp/gnu/thingatpt.el'), ('romacs-cursor', 'lisp/romacs/romacs-cursor.el'))
 
-STATE = '''(write-region
+STATE = '''(add-hook 'emacs-startup-hook (lambda () (write-region
  (prin1-to-string
   (list :diff-file (symbol-file 'romacs-agent-diff 'provide)
         :diff-marker (and (boundp 'romacs-shadowing-romacs-agent-diff) romacs-shadowing-romacs-agent-diff)
@@ -51,7 +51,7 @@ STATE = '''(write-region
         :thingatpt-marker (and (boundp 'romacs-shadowing-thingatpt) romacs-shadowing-thingatpt)
         :cursor-file (symbol-file 'romacs-cursor 'provide)
         :cursor-marker (and (boundp 'romacs-shadowing-romacs-cursor) romacs-shadowing-romacs-cursor)))
- nil {state})
+ nil {state})))
 '''
 
 BUNDLED_INIT = ''';; -*- lexical-binding: t -*-
@@ -106,7 +106,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     runtime = Path(args.runtime or os.environ.get('ROMACS_RUNTIME_ROOT') or Path(__file__).resolve().parents[3])
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
-              'status': 'FAIL', 'launches': [], 'checks': [], 'failures': [], 'pinned': []}
+              'status': 'FAIL', 'launches': [], 'checks': [], 'failures': []}
     compositor = None
     try:
         with tempfile.TemporaryDirectory(prefix='user-shadowing-') as temporary:
@@ -214,10 +214,12 @@ def main():
                             and ':redefined user-redefined' in found and ':advised user-advised' in found)
 
                 # Bundled sessions until the compiled-Lisp store holds both
-                # bundled copies and a session loads them from it: the first
-                # compiles in the background, a later one uses the artifacts.
+                # bundled copies and a session loads them from it: each
+                # session's background compiles reach the files its loads
+                # read from source, in turn; a store that starts empty may
+                # take several.
                 start_uses = {name: len([line for line in uses(Path(src).name) if str(my_lisp) not in line]) for name, src in SHADOWED}
-                for attempt in range(4):
+                for attempt in range(8):
                     bundled = launch(f'bundled-{attempt}', BUNDLED_INIT, compiles=True)
                     if attempt and bundled_used(start_uses):
                         break
@@ -257,17 +259,17 @@ def main():
                 check('no bundled artifact of a shadowed library is used once the user copies shadow it',
                       not any(bundled_paths.values()), {'after': bundled_paths, 'uses': later_uses})
                 for entry in (source, base, layer, compiled):
-                    for feature, src in PRELOADED:
-                        if f'{my_lisp}/{Path(src).name}' not in entry['state']:
-                            report['pinned'].append({'launch': entry['launch'], 'library': feature,
-                                                     'why': 'loaded before the init: require reads no copy'})
+                    found = entry['state']
+                    check(f"in the {entry['launch']} launch, a library loaded before the init runs the user's copy after it",
+                          all(f'{my_lisp}/{Path(src).name}' in found for _, src in PRELOADED)
+                          and ':thingatpt-marker user' in found and ':cursor-marker user' in found, found)
                 report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     finally:
         if compositor is not None:
             compositor.terminate()
             compositor.wait(timeout=15)
         (output / 'report.json').write_text(json.dumps(report, indent=2))
-    print(report['status'], json.dumps({'failures': report['failures'], 'pinned': report['pinned']}))
+    print(report['status'], json.dumps({'failures': report['failures']}))
     return 0 if report['status'] == 'PASS' else 1
 
 
