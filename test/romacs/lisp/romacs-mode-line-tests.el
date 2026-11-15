@@ -29,9 +29,12 @@
 ;; A segment's computation runs from the hooks that make it stale, as
 ;; `after-revert-hook' and `after-save-hook'.  One that signalled took the
 ;; revert with it, and with it `auto-revert-buffers''s timer (#207).
+(defvar romacs-mode-line-tests--computed 0
+  "How many times the signalling segment was computed.")
+
 (romacs-mode-line-define-segment test-signalling
   "A segment whose computation signals."
-  :compute (lambda () (error "Segment failure"))
+  :compute (lambda () (setq romacs-mode-line-tests--computed (1+ romacs-mode-line-tests--computed)) (error "Segment failure"))
   :hooks (after-revert-hook))
 
 (ert-deftest romacs-mode-line-a-failing-segment-leaves-its-hook-alone ()
@@ -43,7 +46,14 @@
                 (should-not (condition-case nil (progn (romacs-mode-line-refresh-test-signalling) nil) (error t)))
                 (should-not romacs-mode-line-test-signalling)
                 (with-temp-file file (insert "two\n"))
-                (should-not (condition-case err (progn (revert-buffer t t) nil) (error err)))
+                (let ((was (bound-and-true-p romacs-mode-line-mode))
+                      (before romacs-mode-line-tests--computed))
+                  (unwind-protect
+                      (progn
+                        (romacs-mode-line-mode 1)
+                        (should-not (condition-case err (progn (revert-buffer t t) nil) (error err)))
+                        (should (> romacs-mode-line-tests--computed before)))
+                    (romacs-mode-line-mode (if was 1 -1))))
                 (should (equal (buffer-string) "two\n")))
             (set-buffer-modified-p nil)
             (kill-buffer)))
