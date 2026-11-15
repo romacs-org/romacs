@@ -1,5 +1,5 @@
 //! The loads under way, for a caller that reports where an error came
-//! from (lisp/romacs/romacs-init-errors.el, the user's init).
+//! from (lisp/session/romacs-init-load.el, the user's init).
 use super::*;
 
 // Each load under way, outermost first: (FILE LINE ORDINAL BYTE), the

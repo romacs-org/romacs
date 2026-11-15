@@ -2,7 +2,7 @@
 """Broken user inits in a real GUI session (parity_live.py's private
 labwc, HOME, XDG): each starts, says in *Warnings* what stopped its init
 (the file, line, form and error, the backtrace a button away, as
-lisp/romacs/romacs-init-load.el words it), ends the launch screen's init
+lisp/session/romacs-init-load.el words it), ends the launch screen's init
 stage `failed', and stops at the failing form.  A loop, one that
 allocates, and a network call that never answers give way to C-g typed
 during the init.

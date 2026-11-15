@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; romacs-json.el replaces json.el's `json-read'.  GNU's own is still in
-;; lisp/gnu/json.el: these tests read it from that file, run it with
+;; lisp/json.el: these tests read it from that file, run it with
 ;; json.el's own reader throughout, and hold Romacs's to the same values,
 ;; points and errors, and to its cost.
 

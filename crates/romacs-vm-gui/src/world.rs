@@ -16,7 +16,7 @@
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
-//! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
+//! startup steps (lisp/session/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! refuses, so a restored launch takes them itself.
 //!
@@ -257,7 +257,8 @@ fn keep_last(layer: &Layer) {
 
 /// FULL's layer over BASE less the entries standing refusals name: each
 /// refused layer's entries are left out and the rest keyed again, until a
-/// key has no standing refusal. A refusal that names no entry (the startup
+/// key has no standing refusal. A library the init loads at startup that is
+/// left out takes every later entry with it, so the init keeps its order. A refusal that names no entry (the startup
 /// run after the libraries, the capture) leaves out the later half of the
 /// entries kept: capture ends earlier, and those load in the session as
 /// from source. None only when nothing is left.
@@ -283,6 +284,17 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
             }
             excluded.extend(later);
         } else {
+            // A library the init loads at startup that the layer cannot hold
+            // ends capture there: it and every later entry load in the
+            // session in the init's order, as from source, and so does a
+            // library declared before it that one of those names.
+            if let Some(cut) = named.iter().copied().filter(|&at| !full.entries[at].declared).min() {
+                let later: Vec<usize> = kept.iter().copied().filter(|&at| at > cut).collect();
+                let names: std::collections::HashSet<&str> = std::iter::once(cut).chain(later.iter().copied())
+                    .map(|at| full.entries[at].name.as_str()).collect();
+                let declared = kept.iter().copied().filter(|&at| at < cut && full.entries[at].declared && names.contains(full.entries[at].name.as_str()));
+                excluded.extend(later.iter().copied().chain(declared.collect::<Vec<_>>()));
+            }
             excluded.extend(named);
         }
         excluded.sort_unstable();
@@ -320,8 +332,8 @@ pub struct Worlds {
 /// The user's init has run and PLAN is what it loaded (None: nothing was
 /// recorded). Keep the plan when it differs from the store's in loads or
 /// in the init's content, and unless this launch restored the layer of
-/// these very loads, build that layer ahead of the next launch, on a
-/// thread of its own.
+/// these very loads, build that layer ahead of the next launch, in a
+/// process of its own (`build_ahead_apart`).
 pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     let Some(recorded) = plan else { return };
     // An init that loads nothing has no layer.
@@ -352,8 +364,30 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan) || layer.resolved_from.as_ref() == Some(&plan.digest())) {
         return;
     }
-    let (base, width, height, floor) = (worlds.base.clone(), worlds.width, worlds.height, worlds.floor);
-    std::thread::spawn(move || build_ahead(&base, plan, width, height, floor));
+    build_ahead_apart(worlds, &plan.init);
+}
+
+/// INIT's layer built ahead of the next launch by a process apart from
+/// this one (`--world-build-layer`), from the plan the store keeps: a
+/// build that refuses entries needs another without them, and a session
+/// that ends sooner than its rounds would leave the next launch to boot
+/// from the base and build them. The process logs in the store.
+fn build_ahead_apart(worlds: &Worlds, init: &Path) {
+    use std::os::unix::process::CommandExt;
+    let mut args = builder_args(&worlds.base, worlds.width, worlds.height, worlds.floor, None);
+    args.extend(["--world-build-layer".into(), init.as_os_str().to_owned()]);
+    let started = std::env::current_exe().and_then(|exe| {
+        let log = romacs_vm::host::open_store_file(worlds.base.store.join("layer-ahead.log"), romacs_vm::host::StoreOpen::Write { create: true, truncate: true })?;
+        std::process::Command::new(exe).args(args).stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?).stderr(log).process_group(0).spawn()
+    });
+    match started {
+        Ok(mut child) => {
+            eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "pid": child.id()}));
+            std::thread::spawn(move || child.wait());
+        }
+        Err(error) => eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "error": error.to_string()})),
+    }
 }
 
 /// The layer of FULL over BASE made usable: built here, or waited for,

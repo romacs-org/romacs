@@ -28,7 +28,7 @@ fn identify(vm: &mut Vm, path: &Path) -> Result<(), String> {
 
 /// A session with an init, even one not written yet, has somewhere to save
 /// settings: name PATH, then load the saved settings, after Romacs's
-/// defaults and before the init (lisp/romacs/romacs-saved-settings.el).
+/// defaults and before the init (lisp/session/romacs-saved-settings.el).
 pub fn start_saved_settings(vm: &mut Vm, path: &Path) -> Result<(), String> {
     identify(vm, path)?;
     vm.eval_source("(when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start))")?;
@@ -44,7 +44,7 @@ pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
         Ok(_) => {},
     }
     identify(vm, path)?;
-    // Through Lisp where the session has it (lisp/romacs/romacs-init-load.el):
+    // Through Lisp where the session has it (lisp/session/romacs-init-load.el):
     // an error's backtrace is kept as it happens, for the warning that says
     // so.  Its answer is nil, or the error worded as the loader words one.
     let file = serde_json::to_string(path.to_str().ok_or("init path is not UTF-8")?).map_err(|error| error.to_string())?;
