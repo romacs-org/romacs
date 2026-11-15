@@ -66,12 +66,67 @@ impl Leaf<'_> {
             }
         }
         let view = self.vm.str_view_from(string, from).expect("string-width takes a string");
-        let chars: Vec<u32> = if view.multibyte { view.chars().take(to - from).collect() }
+        let multibyte = view.multibyte;
+        let chars: Vec<u32> = if multibyte { view.chars().take(to - from).collect() }
             else { view.bytes[..to - from].iter().map(|&b| u32::from(b)).collect() };
         let display = self.display_table()?;
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
-        let mut width = 0i64;
-        for c in chars { width += self.char_width_in(c, display, &rule)?; }
+        let emoji = if multibyte { self.emoji_runs(&chars)? } else { vec![] };
+        let (mut width, mut i, mut runs) = (0i64, 0, emoji.into_iter().peekable());
+        while i < chars.len() {
+            if let Some(&(start, end)) = runs.peek() && start == i {
+                // compose-gstring-and-emoji-for-terminal: the composition is 2 columns.
+                width += 2;
+                i = end;
+                runs.next();
+                continue;
+            }
+            width += self.char_width_in(chars[i], display, &rule)?;
+            i += 1;
+        }
         Value::integer(width).map_err(Fault::Error)
+    }
+    /// The runs of CHARS lisp_string_width counts as one composition
+    /// (find_automatic_composition): those a rule of `composition-function-table'
+    /// whose function is `compose-gstring-and-emoji' matches, a rule for the
+    /// character PREV-CHARS after the run's start, its regexp anchored at the
+    /// start (nil: that character alone). Emoji, ZWJ, flag and VS-16
+    /// sequences (composite.el, emoji-zwj.el); other compositions keep their
+    /// characters' widths, as compose-gstring-for-terminal gives them.
+    fn emoji_runs(&mut self, chars: &[u32]) -> std::result::Result<Vec<(usize, usize)>, Fault> {
+        let table_symbol = self.intern("composition-function-table");
+        let Some(table) = self.variable_value(table_symbol)? else { return Ok(vec![]) };
+        if !matches!(self.vm.object_if(table), Some(crate::data::Object::CharTable(_))) { return Ok(vec![]); }
+        let emoji = self.intern("compose-gstring-and-emoji");
+        let (mut runs, mut i) = (vec![], 0);
+        'start: while i < chars.len() {
+            for k in 0..=3usize.min(chars.len() - 1 - i) {
+                let c = chars[i + k];
+                if c < 0x80 { continue; }
+                let mut rules = self.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
+                while let Some((item, rest)) = self.pair(rules) {
+                    rules = rest;
+                    let Ok(rule) = self.vector_values(item) else { continue };
+                    if rule.len() != 3 || rule[2] != emoji || rule[1].integer_value() != Some(k as i64) { continue; }
+                    let end = if rule[0] == Value::NIL {
+                        (k == 0).then_some(i + 1)
+                    } else {
+                        let pattern = format!("\\`{}", self.string_text(rule[0])?);
+                        let text: String = chars[i..].iter().map_while(|&c| char::from_u32(c)).collect();
+                        let (pattern, text) = (self.string(&pattern), self.string(&text));
+                        self.vm.string_match_groups(pattern, text, crate::regexp::Translation::None, None)?
+                            .and_then(|groups| groups.first().copied().flatten())
+                            .and_then(|(from, to)| (from == 0 && to > k).then_some(i + to))
+                    };
+                    if let Some(end) = end {
+                        runs.push((i, end));
+                        i = end;
+                        continue 'start;
+                    }
+                }
+            }
+            i += 1;
+        }
+        Ok(runs)
     }
 }
