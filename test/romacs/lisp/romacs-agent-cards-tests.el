@@ -60,7 +60,7 @@
 (ert-deftest romacs-agent-delegate-call-is-a-card-with-a-thread-link ()
   (romacs-agent-cards-tests--with-chat session
     (romacs-agent-cards-tests--delegate session)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Review it · codex  Working  thread\n"))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ◈ ⇢ Review it · codex  Working  thread\n"))
     (let ((shown nil))
       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
         (goto-char (point-min))
@@ -87,7 +87,7 @@
     (let ((text (romacs-agent-tools--wake-text child '(7 "all good\nsecond line" nil))))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 9))
     (should (equal (romacs-agent-cards-tests--visible)
-                   (concat "  ✓ ⇢ Review it · codex  Completed  thread\n"
+                   (concat "  ✓ ◈ ⇢ Review it · codex  Completed  thread\n"
                            "⇠ child · Completed  thread  all good\n")))
     (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
@@ -108,7 +108,7 @@
        :output (format "{\"taskId\":\"%s\",\"status\":\"%s\",\"result\":\"REVIEW RESULT\"}"
                        romacs-agent-cards-tests--child status))
       (romacs-agent-ui--run-settle)
-      (should (equal (romacs-agent-cards-tests--visible) (format "  ✓ ⇢ Review it  %s  thread\n" (capitalize status))))
+      (should (equal (romacs-agent-cards-tests--visible) (format "  ✓ ◈ ⇢ Review it  %s  thread\n" (capitalize status))))
       (goto-char (point-min))
       (romacs-agent-chat-toggle)
       (should (string-suffix-p "REVIEW RESULT\n" (romacs-agent-cards-tests--visible))))))
@@ -209,7 +209,7 @@ its end in STATE."
        session :type 'tool :state 'completed :id "d"
        :output (json-serialize (romacs-agent-cards-tests--table "verdict" "ok" "report" "lint: ok\ndev-check: ok")))
       (romacs-agent-ui--run-settle)
-      (should (equal (romacs-agent-cards-tests--visible) "▸ ⚑ dev-check ok · 1/1 stages\n"))
+      (should (equal (romacs-agent-cards-tests--visible) "▸ ◈ ⚑ dev-check ok · 1/1 stages\n"))
       (goto-char (point-min))
       (romacs-agent-chat-toggle)
       (search-forward "dev-check ok")
@@ -395,7 +395,7 @@ its end in STATE."
     ;; the message quoted under it; and copied, it has no bar.
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "✉ child · child  thread  ↩ ✓\n┃ Can you rebase?\n"
-                           "  ✓ ✉ to child  idle  thread\n┃ Rebased.\n┃ All green.\nDone.")))
+                           "  ✓ ◈ ✉ to child  idle  thread\n┃ Rebased.\n┃ All green.\nDone.")))
     (should (string-search "Can you rebase?\n" (romacs-agent-ui--text-of (point-min) (point-max))))
     (should-not (string-search "┃" (romacs-agent-ui--text-of (point-min) (point-max))))))
 
@@ -411,7 +411,7 @@ its end in STATE."
                      (append (romacs-agent-cards-tests--message "m-2" "child" :session romacs-agent-cards-tests--child)
                              (list :text "one more thing"))))
     (should (equal (romacs-agent-cards-tests--visible)
-                   (concat "  ✓ ⇢ Review it · codex  Completed  thread\n"
+                   (concat "  ✓ ◈ ⇢ Review it · codex  Completed  thread\n"
                            "⇠ child · Completed  thread  all good\n"
                            "✉ child · child  thread  ↩\n┃ one more thing\n")))
     ;; A reply to the result goes to its task, named by the task's record.
@@ -422,7 +422,7 @@ its end in STATE."
      session :type 'tool :state 'completed :id "r"
      :output (format "{\"taskId\":\"%s\",\"title\":\"child\",\"status\":\"idle\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (string-suffix-p "  ✓ ✉ to child  idle  thread\n┃ Thanks.\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-suffix-p "  ✓ ◈ ✉ to child  idle  thread\n┃ Thanks.\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-an-answered-message-links-its-reply ()
   (romacs-agent-cards-tests--with-chat session
@@ -453,7 +453,7 @@ its end in STATE."
     ;; Not answered; the failure is loud, and shows the message and why.
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "✉ child · child  thread  ↩\n┃ Can you rebase?\n"
-                           "  ! ✉ reply\n┃ Rebased.\n\nMessage m-1's sender is gone\n")))))
+                           "  ! ◈ ✉ reply\n┃ Rebased.\n\nMessage m-1's sender is gone\n")))))
 
 (ert-deftest romacs-agent-a-message-sent-is-a-card ()
   (romacs-agent-cards-tests--with-chat session
@@ -464,7 +464,7 @@ its end in STATE."
      session :type 'tool :state 'completed :id "s"
      :output (format "{\"taskId\":\"%s\",\"status\":\"running\",\"messageId\":\"m-9\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ✉ to child  Working  thread\n┃ Rebase, please.\n"))))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ◈ ✉ to child  Working  thread\n┃ Rebase, please.\n"))))
 
 (ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
   (romacs-agent-cards-tests--with-chat session

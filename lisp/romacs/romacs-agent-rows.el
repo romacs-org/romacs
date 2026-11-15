@@ -45,9 +45,13 @@ romacs_ tool, or nil, the chat's generic row."
 
 ;;; Pieces
 
+(defface romacs-agent-romacs-tool '((t :inherit font-lock-keyword-face))
+  "The mark of a call of Romacs's own tools, which tells them from a
+harness's: it keeps its colour as the row settles and dims.")
+
 (defun romacs-agent-rows--romacs (text)
-  "TEXT behind Romacs's icon, where it can be drawn."
-  (if-let* ((icon (romacs-icon 'romacs))) (concat icon " " text) text))
+  "TEXT behind Romacs's mark: its icon where it can be drawn, else ◈."
+  (concat (propertize (or (romacs-icon 'romacs) "◈") 'face 'romacs-agent-romacs-tool) " " text))
 
 (defun romacs-agent-rows--field (table key)
   "TABLE's KEY when TABLE is a hash table and KEY holds a string."

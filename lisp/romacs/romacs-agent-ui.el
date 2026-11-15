@@ -186,8 +186,13 @@ much of it its deltas wrote.")
 `keymap' text property, so they read it as a view and the composer below
 edits as any buffer does.  Typing in it types in the composer.")
 
-;; A question card's rows keep the transcript's keys beneath their own.
-(set-keymap-parent romacs-agent-ask-map romacs-agent-chat-transcript-map)
+(defvar romacs-agent-ui--asked-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map romacs-agent-chat-transcript-map)
+    (define-key map (kbd "RET") #'romacs-agent-chat-answer)
+    (define-key map [mouse-1] #'romacs-agent-chat-answer)
+    map)
+  "Keys of a chat's row for questions an agent asks.")
 
 (defun romacs-agent-ui--sealed (text)
   "TEXT as the transcript holds it: read-only, a field of its own (word
@@ -1106,12 +1111,16 @@ or a repeat."
                                 (substitute-command-keys
                                  "  \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-implement] implement it, or write what to change")
                                 'face 'romacs-agent-dim))
-        ;; Questions are a card to answer on (romacs-agent-ask.el).
+        ;; Questions are answered in a layer (romacs-agent-ask.el), shown
+        ;; at once in a chat in view; the chat keeps one row of them.
         ((and 'approval (guard (plist-get event :questions)))
-         (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
-         (romacs-agent-ui--line session event "")
-         (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
-         (romacs-agent-ui--insert (romacs-agent-ask-card (plist-get event :request-id) (plist-get event :questions))))
+         (let ((id (plist-get event :request-id)) (questions (plist-get event :questions)))
+           (puthash id event (romacs-agent-ui--asks))
+           (romacs-agent-ui--line session event (romacs-agent-ask-record questions nil)
+                                  'face 'romacs-agent-approval 'romacs-agent-approval id 'romacs-agent-asked id
+                                  'keymap romacs-agent-ui--asked-map 'mouse-face 'highlight
+                                  'help-echo "Answer these questions")
+           (when (romacs-agent-ui--seen-p) (romacs-agent-ask-open session id questions))))
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
@@ -1119,9 +1128,9 @@ or a repeat."
                                         (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
                                         (or (plist-get event :description) ""))
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
-        ;; A question card answered settles: it says what was picked.
+        ;; Questions answered: their row says how, their layer goes.
         ((and 'answered (guard (plist-get (gethash (plist-get event :request-id) (romacs-agent-ui--asks)) :questions)))
-         (romacs-agent-ask-settle (plist-get event :request-id)))
+         (romacs-agent-ui--answered (plist-get event :request-id)))
         ;; Under an approval shown: one the policy answered had none.
         ((and 'answered (guard (gethash (plist-get event :request-id) (romacs-agent-ui--asks))))
          (romacs-agent-ui--line session event (romacs-agent-ui--noted
@@ -2212,35 +2221,60 @@ PROPERTY: the previous one is the run point is in, past its start."
       (let ((ids (hash-table-keys (romacs-agent-approvals romacs-agent-ui--session))))
         (and (= (length ids) 1) (car ids)))))
 
-(defun romacs-agent-ui--read-answers (questions)
-  "The user's answers to QUESTIONS (an `approval' event's), as ((QUESTION
-. ANSWER) ...): one of each question's options, or words of their own;
-several, comma-separated, where it takes several."
-  (mapcar (lambda (question)
-            (let* ((prompt (format-prompt (car question) nil))
-                   (notes (plist-get (cdr question) :notes))
-                   (table (romacs-agent--ordered-table
-                           (plist-get (cdr question) :options)
-                           (cons 'annotation-function
-                                 (lambda (label)
-                                   (when-let* ((note (cdr (assoc label notes))))
-                                     (propertize (concat "  " note) 'face 'completions-annotations)))))))
-              (cons (car question)
-                    (if (plist-get (cdr question) :multi)
-                        (mapconcat #'identity (completing-read-multiple prompt table) ", ")
-                      (completing-read prompt table)))))
-          questions))
-
 (defun romacs-agent-chat-allow ()
   "Allow the tool call the harness asks about; answer the questions it asks."
   (interactive nil romacs-agent-chat-mode)
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
-    (if (not questions) (romacs-agent-respond romacs-agent-ui--session id t)
-      (let ((answers (romacs-agent-ui--read-answers questions)))
-        ;; Its card settles on them.
-        (romacs-agent-ask-note-sent id answers)
-        (romacs-agent-respond romacs-agent-ui--session id (list :answers answers))))))
+    (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions)
+      (romacs-agent-respond romacs-agent-ui--session id t))))
+
+(defun romacs-agent-chat-answer ()
+  "Answer the questions on this row, in their layer."
+  (interactive nil romacs-agent-chat-mode)
+  (let* ((id (or (get-text-property (line-beginning-position) 'romacs-agent-asked) (user-error "No question here")))
+         (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
+    (unless (member id (romacs-agent-asks romacs-agent-ui--session))
+      (user-error "These questions are answered"))
+    (romacs-agent-ask-open romacs-agent-ui--session id questions)))
+
+(defvar-local romacs-agent-ui--chosen nil
+  "The labels this chat's questions were answered with, by request id.")
+
+(defun romacs-agent-ui--note-chosen (session id chosen)
+  "SESSION's request ID was answered with CHOSEN: its chat's row says so."
+  (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (setf (alist-get id romacs-agent-ui--chosen nil nil #'equal) chosen))))
+
+(add-hook 'romacs-agent-ask-sent-functions #'romacs-agent-ui--note-chosen)
+
+(defun romacs-agent-ui--answered (id)
+  "Questions ID are answered: their row says with what, when this chat
+sent it, and their layer goes."
+  (romacs-agent-ask-close id)
+  (let ((questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions))
+        (chosen (or (alist-get id romacs-agent-ui--chosen nil nil #'equal) t)))
+    (setq romacs-agent-ui--chosen (cl-remove id romacs-agent-ui--chosen :key #'car :test #'equal))
+    (when-let* ((found (save-excursion
+                         (goto-char (point-min))
+                         (text-property-search-forward 'romacs-agent-asked id #'equal)))
+                (start (prop-match-beginning found)))
+      (save-excursion
+        (goto-char start)
+        (let ((inhibit-read-only t) (end (line-end-position))
+              (properties (text-properties-at start)))
+          (delete-region start end)
+          (insert (apply #'propertize (romacs-agent-ask-record questions chosen)
+                         (cl-loop for (key value) on properties by #'cddr
+                                  unless (memq key '(keymap mouse-face help-echo romacs-agent-asked face))
+                                  append (list key value))))
+          ;; Its newline is the row's too.
+          (remove-text-properties (point) (min (1+ (point)) romacs-agent-ui--end)
+                                  '(romacs-agent-asked nil mouse-face nil help-echo nil))
+          (put-text-property (point) (min (1+ (point)) romacs-agent-ui--end) 'keymap romacs-agent-chat-transcript-map)
+          ;; Answered, it recedes.
+          (add-face-text-property start (line-end-position) 'romacs-agent-dim t))))))
 
 (defun romacs-agent-chat-allow-always ()
   "Allow the tool call the harness asks about, and its like for the rest
