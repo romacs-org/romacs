@@ -171,8 +171,6 @@ int86	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal--hash-table-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--hash-table-histogram	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--hash-table-index-size	absent	GNU hash-table and obarray internals: Romacs's differ
-internal--labeled-narrow-to-region	needed	lane A (editing, windows, frames, minibuffer readers, display)
-internal--labeled-widen	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal--obarray-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--set-buffer-modified-tick	absent	no shipped Lisp calls it and it is no command
 internal--track-mouse	needed	lane A (editing, windows, frames, minibuffer readers, display)
