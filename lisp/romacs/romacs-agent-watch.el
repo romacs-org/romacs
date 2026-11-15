@@ -265,6 +265,9 @@ at once; report what changed."
   (romacs-agent-watch--schedule))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-watch--restore)
+;; A session with watches kept is loaded as a restore runs, so they go on.
+(add-hook 'romacs-agent-pending-functions
+          (lambda (dir _manifest) (file-exists-p (expand-file-name "watches.json" dir))))
 
 ;;; The tool
 

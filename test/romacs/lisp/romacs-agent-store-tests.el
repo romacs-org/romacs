@@ -106,4 +106,56 @@ journal one turn long."
           (should (equal (romacs-agent-title found) "old"))
           (should (eq (romacs-agent-get old) found)))))))
 
+(ert-deftest romacs-agent-store-what-waits-is-loaded ()
+  ;; A session with watches kept, or a resume due, is loaded as a restore
+  ;; runs, though listed with no kept state and no supervisor.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-tools)
+  (romacs-agent-store-tests--with
+    (let ((watched "aaaaaaaa-0000-4000-8000-000000000001") (resuming "aaaaaaaa-0000-4000-8000-000000000002")
+          (idle "aaaaaaaa-0000-4000-8000-000000000003"))
+      (record watched "w") (record resuming "r") (record idle "i")
+      (write-region "[]" nil (expand-file-name (concat watched "/watches.json") root) nil 'silent)
+      (let ((file (expand-file-name (concat resuming "/manifest.json") root)))
+        (write-region (json-serialize (romacs-mcp--object "id" resuming "harness" "claude" "title" "r" "cwd" "/p/one/"
+                                                          "resumeAt" 2000000000.0))
+                      nil file nil 'silent))
+      (romacs-agent-store-fill)
+      (should (romacs-agent--unloaded-p (expand-file-name idle root)))
+      (should-not (romacs-agent--unloaded-p (expand-file-name watched root)))
+      (should-not (romacs-agent--unloaded-p (expand-file-name resuming root))))))
+
+(ert-deftest romacs-agent-store-unloaded-keep-what-the-board-reads ()
+  ;; Shown from its row alone, a settled session is still settled; its
+  ;; parent's task list has it; settling the finished acts on it loaded.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-board)
+  (require 'romacs-agent-tools)
+  (romacs-agent-store-tests--with
+    (let* ((child "aaaaaaaa-0000-4000-8000-000000000005") (parent "aaaaaaaa-0000-4000-8000-000000000006"))
+      (record child "child")
+      (let ((file (expand-file-name (concat child "/manifest.json") root)))
+        (write-region (json-serialize (romacs-mcp--object "id" child "harness" "claude" "title" "child" "cwd" "/p/one/"
+                                                          "settledSeq" 5 "options" (romacs-mcp--object "parent" parent)))
+                      nil file nil 'silent))
+      (romacs-agent-store-fill)
+      (let ((shown (cl-find child (romacs-agent-store-unloaded) :key #'romacs-agent-id :test #'equal)))
+        (should (romacs-agent-settled-p shown))
+        (should (equal (plist-get (romacs-agent-options shown) :parent) parent)))
+      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () parent)))
+        (should (equal (mapcar (lambda (task) (gethash "taskId" task))
+                               (gethash "tasks" (romacs-agent-tools--list (romacs-mcp--object))))
+                       (list child))))
+      (let ((settled nil))
+        (cl-letf (((symbol-function 'romacs-agent-board--finished)
+                   (lambda (_rows) (list (gethash child (car romacs-agent-board--unloaded)))))
+                  ((symbol-function 'romacs-agent-board--shown-rows) #'ignore)
+                  ((symbol-function 'romacs-agent-board--redraw) #'ignore)
+                  ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                  ((symbol-function 'romacs-agent-settle) (lambda (s) (push s settled))))
+          (romacs-agent-board--sessions)
+          (romacs-agent-board-settle-finished))
+        (should (equal (mapcar #'romacs-agent-id settled) (list child)))
+        (should (eq (car settled) (romacs-agent-get child)))))))
+
 ;;; romacs-agent-store-tests.el ends here

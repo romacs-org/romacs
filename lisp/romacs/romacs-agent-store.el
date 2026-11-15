@@ -24,18 +24,24 @@
 (declare-function romacs-agent-history--get "romacs-agent-history" (harness key))
 
 (defconst romacs-agent-store--columns
-  '(id dir harness provider model title cwd parent state last_time cost transcript)
+  '(id dir harness provider model title cwd parent state last_time cost transcript
+       input_seq done_seq seen_seq settled_seq)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
   '("create table if not exists sessions (
        id text primary key, dir text not null, harness text, provider text, model text,
-       title text, cwd text, parent text, state text, last_time real, cost real, transcript text)"
+       title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
+       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
     "create index if not exists sessions_parent on sessions (parent)")
   "The table and its indexes, made when the database is opened.")
+
+(defconst romacs-agent-store--version 2
+  "The table's form (`user_version'): a database of another is made again,
+as a cache is.")
 
 (defvar romacs-agent-store--db nil
   "The open database, as (FILE . DB), or nil.")
@@ -56,6 +62,9 @@ this build has no SQLite or it cannot be opened."
             (let ((db (sqlite-open file)))
               (sqlite-pragma db "journal_mode = WAL")
               (sqlite-pragma db "busy_timeout = 200")
+              (unless (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version)
+                (sqlite-execute db "drop table if exists sessions")
+                (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version)))
               (dolist (statement romacs-agent-store--schema) (sqlite-execute db statement))
               (set-file-modes file #o600)
               (setq romacs-agent-store--db (cons file db))
@@ -90,17 +99,19 @@ CONFIG-DIR (nil: its default), or nil."
             (gethash native (romacs-agent-store--listed harness home))
           (funcall (romacs-agent-history--get harness :find) home native))))))
 
-(defun romacs-agent-store-write (row)
+(defun romacs-agent-store-write (row &optional absent)
   "Put ROW, a plist of the columns' values (`romacs-agent-store--columns',
-as keywords), in place of its session's; quietly nothing when the
-database cannot be written."
+as keywords), in place of its session's, or only when it has none with
+ABSENT; non-nil when it was written, quietly nil when the database cannot
+be written."
   (when-let* ((db (romacs-agent-store--open)))
     (condition-case err
-        (sqlite-execute db (format "insert or replace into sessions values (%s)"
-                                   (mapconcat (lambda (_) "?") romacs-agent-store--columns ","))
-                        (mapcar (lambda (column) (plist-get row (intern (format ":%s" column))))
-                                romacs-agent-store--columns))
-      (error (message "romacs-agent-store: %s" (error-message-string err))))))
+        (> (sqlite-execute db (format "insert or %s into sessions values (%s)" (if absent "ignore" "replace")
+                                      (mapconcat (lambda (_) "?") romacs-agent-store--columns ","))
+                           (mapcar (lambda (column) (plist-get row (intern (format ":%s" column))))
+                                   romacs-agent-store--columns))
+           0)
+      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
 (defun romacs-agent-store-put (session &optional state)
   "Write SESSION's row, its state STATE when given (as its records left it)."
@@ -112,7 +123,9 @@ database cannot be written."
          :state (symbol-name (or state (romacs-agent-state session) 'detached))
          :last_time (romacs-agent-last-time session) :cost (romacs-agent-cost session)
          :transcript (romacs-agent-store--transcript (romacs-agent-harness session) (romacs-agent-config-dir session)
-                                                     (romacs-agent-harness-session session)))))
+                                                     (romacs-agent-harness-session session))
+         :input_seq (romacs-agent-input-seq session) :done_seq (romacs-agent-done-seq session)
+         :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session))))
 
 ;;; Filling it
 
@@ -150,7 +163,10 @@ manifest."
                            (let ((file (or transcript journal)))
                              (and (file-exists-p file)
                                   (float-time (file-attribute-modification-time (file-attributes file))))))
-            :cost (funcall field 'cost) :transcript transcript))))
+            :cost (funcall field 'cost) :transcript transcript
+            :input_seq (funcall field 'input-seq) :done_seq (funcall field 'done-seq)
+            :seen_seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
+            :settled_seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))))))
 
 (defun romacs-agent-store--missing ()
   "The directories of recorded sessions that have no row."
@@ -166,17 +182,19 @@ manifest."
 (`romacs-agent-store--recorded-row'); return how many were written."
   (let ((count 0) (db (romacs-agent-store--open))
         (romacs-agent-store--transcripts (make-hash-table :test #'equal)))
+    ;; Written only where no row is (a loaded session's own, written
+    ;; meanwhile, is newer), fifty rows a short transaction that takes the
+    ;; write lock as it begins.
     (when db
-      ;; One transaction: hundreds of rows are one write.
-      (sqlite-transaction db)
-      (unwind-protect
-          (dolist (dir (romacs-agent-store--missing))
-            (when-let* ((row (condition-case err (romacs-agent-store--recorded-row dir)
-                               (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil))))
-              (romacs-agent-store-write row)
-              (cl-incf count)))
-        (sqlite-commit db)))
-    count))
+      (dolist (dirs (seq-partition (romacs-agent-store--missing) 50))
+        (when (ignore-errors (sqlite-execute db "begin immediate") t)
+          (unwind-protect
+              (dolist (dir dirs)
+                (when-let* ((row (condition-case err (romacs-agent-store--recorded-row dir)
+                                   (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil))))
+                  (when (romacs-agent-store-write row t) (cl-incf count))))
+            (ignore-errors (sqlite-execute db "commit")))))
+      count)))
 
 (defun romacs-agent-store-fill-batch ()
   "`romacs-agent-store-fill' in a batch process, its count printed."
@@ -216,13 +234,17 @@ on one loads it, `romacs-agent-find')."
   (when-let* ((db (romacs-agent-store--open)))
     (delq nil
           (mapcar (lambda (row)
-                    (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost) row))
+                    (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost
+                                   ,input ,done ,seen ,settled)
+                                 row))
                       (unless (romacs-agent-get id)
                         (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
                                             :title title :cwd cwd :options (and parent (list :parent parent))
-                                            :state (intern (or state "detached")) :last-time last :cost cost))))
+                                            :state (intern (or state "detached")) :last-time last :cost cost
+                                            :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled))))
                   (sqlite-select db (concat "select id, dir, harness, provider, model, title, cwd, parent, state,"
-                                            " last_time, cost from sessions order by last_time desc"))))))
+                                            " last_time, cost, input_seq, done_seq, seen_seq, settled_seq"
+                                            " from sessions order by last_time desc"))))))
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.

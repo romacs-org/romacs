@@ -3414,13 +3414,23 @@ listing has it (romacs-agent-store): such a session with no kept state
 and no supervisor running is left unloaded, its journal unread, until it
 is asked for (`romacs-agent-find').")
 
+(defvar romacs-agent-pending-functions nil
+  "Called with a session's directory and its manifest (a table) while it
+is not loaded: non-nil when something waits on it (a watch kept, a
+resume due), so it is loaded as a restore runs.")
+
 (defun romacs-agent--unloaded-p (dir)
   "Whether the session recorded in DIR is left unloaded: listed, with
-neither its kept state nor its supervisor's socket."
+neither its kept state nor its supervisor's socket, and nothing waiting
+on it (`romacs-agent-pending-functions')."
   (and romacs-agent-listed-p
        (not (file-exists-p (expand-file-name "state.eld" dir)))
        (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
-       (funcall romacs-agent-listed-p dir)))
+       (funcall romacs-agent-listed-p dir)
+       (not (and romacs-agent-pending-functions
+                 (run-hook-with-args-until-success
+                  'romacs-agent-pending-functions dir
+                  (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))))
 
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a

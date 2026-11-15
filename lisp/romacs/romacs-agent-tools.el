@@ -29,6 +29,8 @@
 (require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
+(declare-function romacs-agent-store-unloaded "romacs-agent-store" ())
+
 (defcustom romacs-agent-eval-budget 5000
   "Milliseconds an agent's `romacs_eval' may run before it is quit, as
 by C-g, at its next safepoint.  0 means no budget."
@@ -998,7 +1000,8 @@ sessions' own on disk: a restarted server lists them all."
          (tasks (cl-remove-if-not
                  (lambda (session) (let ((parent (plist-get (romacs-agent-options session) :parent)))
                                      (or (equal parent caller) (and all parent))))
-                 (romacs-agent-sessions))))
+                 ;; Those left unloaded too, as their rows have them.
+                 (append (romacs-agent-sessions) (romacs-agent-store-unloaded)))))
     (romacs-mcp--object
      "tasks" (vconcat (mapcar #'romacs-agent-tools--row
                               (sort tasks (lambda (a b) (> (or (romacs-agent-last-time a) 0)
@@ -1450,6 +1453,10 @@ from; and each one Romacs cannot run, with why."
                                        (lambda () (file-exists-p file))))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
+;; A session due to resume when its limit resets is loaded as a restore
+;; runs, so its resume is set again.
+(add-hook 'romacs-agent-pending-functions
+          (lambda (_dir manifest) (numberp (gethash "resumeAt" manifest))))
 
 ;;; Options
 
