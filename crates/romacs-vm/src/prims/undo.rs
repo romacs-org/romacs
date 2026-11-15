@@ -12,7 +12,7 @@ fn buffer_enable_undo(cx; optional buffer: Value) {
     cx.buffer_enable_undo(buffer)
 }}
 
-// The command loop's Lisp half (lisp/romacs/vm/keyboard.el) notes point before
+// The command loop's Lisp half (lisp/vm/keyboard.el) notes point before
 // each command, as command_loop_1 does.
 defsubr! { name = "romacs--note-command-point", gnu = "keyboard.c:1536", effect = Global,
 fn note_command_point(cx) {
@@ -21,7 +21,7 @@ fn note_command_point(cx) {
 
 // The next buffer `undo-outer-limit-function' is to be asked about, with the
 // size to ask, (BUFFER . SIZE), as things stand now, for
-// `romacs--offer-undo-lists' (lisp/romacs/vm/prelude.el). ASKED is the list
+// `romacs--offer-undo-lists' (lisp/vm/prelude.el). ASKED is the list
 // of buffers the run has asked about already, none of which is offered
 // again; with it nil, nil too when no collection has found one since the
 // last run of them (VM2-UNDO-OUTER).

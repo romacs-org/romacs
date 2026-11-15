@@ -75,7 +75,7 @@ def main():
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    subr = Path(__file__).resolve().parents[3] / 'lisp/gnu' / 'subr.el'
+    subr = Path(__file__).resolve().parents[3] / 'lisp' / 'subr.el'
     report = {'binary': str(binary), 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'status': 'FAIL', 'captures': [], 'checks': []}
     paths = {}

@@ -1,6 +1,6 @@
 //! Isolates: worker VMs in child processes that exchange frozen values
 //! (vm-concurrency design §4, §4.6). This is the substrate the Lisp half
-//! (lisp/romacs/vm/isolate.el) drives: spawning a worker with a control socket,
+//! (lisp/vm/isolate.el) drives: spawning a worker with a control socket,
 //! packets of frozen values in either direction, waiting on the sockets and
 //! on the workers' pidfds, signals, and the children a worker reports so the
 //! parent can reach their process groups after a kill.
