@@ -207,27 +207,44 @@ what the transcript grew or shrank before it (`romacs-agent-ui--undo-shifted')."
     `(let ((,at (and (markerp romacs-agent-ui--end) (marker-position romacs-agent-ui--end)))
            (,size (buffer-size)))
        (prog1 (let ((buffer-undo-list t)) ,@body)
-         (when (and ,at (consp buffer-undo-list))
-           (romacs-agent-ui--undo-shifted buffer-undo-list ,at (- (buffer-size) ,size)))))))
+         (when ,at
+           (let ((seen (make-hash-table :test #'eq)) (delta (- (buffer-size) ,size)))
+             (when (consp buffer-undo-list)
+               (setq buffer-undo-list (romacs-agent-ui--undo-shifted buffer-undo-list ,at delta seen)))
+             ;; An undo under way in a region works from a list of its own.
+             (when (consp pending-undo-list)
+               (setq pending-undo-list (romacs-agent-ui--undo-shifted pending-undo-list ,at delta seen)))))))))
 
-(defun romacs-agent-ui--undo-shifted (entries at delta)
+(defun romacs-agent-ui--undo-shifted (entries at delta &optional seen)
   "Undo ENTRIES with their places at or past AT moved by DELTA, in place:
 text that many characters long was put in before them.  The list and its
 entries stay the same conses: undo's tables and a pending undo know them
-so."
-  (let ((shift (lambda (pos) (if (and (integerp pos) (>= (abs pos) at)) (if (< pos 0) (- pos delta) (+ pos delta)) pos))))
+so.  SEEN, an `eq' table, has the conses moved already (a pending undo
+shares them).  An entry whose places cannot be told, a function applied
+with no bounds, ends the list there: what came before it is not undone,
+rather than undone in the wrong place."
+  (let ((shift (lambda (pos) (if (and (integerp pos) (>= (abs pos) at)) (if (< pos 0) (- pos delta) (+ pos delta)) pos)))
+        (seen (or seen (make-hash-table :test #'eq))))
     (when (and (/= delta 0) (listp entries))
-      (let ((cell entries))
+      (let ((cell entries) (previous nil))
         (while (consp cell)
           (let ((entry (car cell)))
-            (pcase entry
-              ((pred integerp) (setcar cell (funcall shift entry)))
-              (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
-               (setcar entry (funcall shift beg)) (setcdr entry (funcall shift end)))
-              (`(,(pred stringp) . ,(and pos (pred integerp))) (setcdr entry (funcall shift pos)))
-              (`(nil ,_ ,_ ,(and beg (pred integerp)) . ,(and end (pred integerp)))
-               (let ((tail (nthcdr 3 entry))) (setcar tail (funcall shift beg)) (setcdr tail (funcall shift end))))))
-          (setq cell (cdr cell)))))
+            (unless (gethash (if (consp entry) entry cell) seen)
+              (puthash (if (consp entry) entry cell) t seen)
+              (pcase entry
+                ((pred integerp) (setcar cell (funcall shift entry)))
+                (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                 (setcar entry (funcall shift beg)) (setcdr entry (funcall shift end)))
+                (`(,(pred stringp) . ,(and pos (pred integerp))) (setcdr entry (funcall shift pos)))
+                (`(nil ,_ ,_ ,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                 (let ((tail (nthcdr 3 entry))) (setcar tail (funcall shift beg)) (setcdr tail (funcall shift end))))
+                ;; A change combined (`combine-change-calls'): its bounds move.
+                (`(apply ,(pred integerp) ,(and beg (pred integerp)) ,(and end (pred integerp)) . ,_)
+                 (setcar (nthcdr 2 entry) (funcall shift beg)) (setcar (nthcdr 3 entry) (funcall shift end)))
+                ((and `(apply . ,_) (guard previous))
+                 (setcdr previous nil) (setq cell nil))
+                (`(apply . ,_) (setq entries nil cell nil)))))
+          (setq previous cell cell (cdr-safe cell)))))
     entries))
 
 (defun romacs-agent-ui--sealed (text)

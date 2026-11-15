@@ -391,4 +391,19 @@ unless CUT, then its turn's end."
     (should (eq (cadr entries) entry))
     (should (equal entries '(nil (14 . 18) 19)))))
 
+(ert-deftest romacs-agent-chat-undo-shift-applies-and-pending ()
+  ;; A combined change's bounds move; one that cannot be placed ends the
+  ;; list; a pending undo sharing the entries moves them once.
+  (let ((entries (list nil (list 'apply 2 12 14 'ignore) 15)))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (apply 2 16 18 ignore) 19))))
+  (let ((entries (list nil (cons 12 14) (list 'apply 'ignore 1) (cons 20 22))))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (16 . 18)))))
+  (let* ((shared (cons 12 14)) (entries (list nil shared)) (pending (list shared))
+         (seen (make-hash-table :test #'eq)))
+    (romacs-agent-ui--undo-shifted entries 10 4 seen)
+    (romacs-agent-ui--undo-shifted pending 10 4 seen)
+    (should (equal shared '(16 . 18)))))
+
 ;;; romacs-agent-tail-tests.el ends here
