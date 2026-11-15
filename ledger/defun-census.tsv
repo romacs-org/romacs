@@ -119,7 +119,6 @@ frame-scroll-bar-height	needed	lane A (editing, windows, frames, minibuffer read
 frame-scroll-bar-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
 frame-window-state-change	absent	no shipped Lisp calls it and it is no command
 fringe-bitmaps-at-pos	needed	lane A (editing, windows, frames, minibuffer readers, display)
-funcall-with-delayed-message	needed	lane A (editing, windows, frames, minibuffer readers, display)
 gap-position	absent	no shipped Lisp calls it and it is no command
 garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
 get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
