@@ -266,6 +266,27 @@ fn a_library_s_credential_read_is_kept_as_code_for_restore() {
                "((defvar lib-c-text defvar t) (form nil setq t))");
 }
 
+/// A definition that loads another file before it reads a per-process
+/// fact is still a definition once that file is loaded: it is re-seeded at
+/// restore, not refused (the file's own forms are judged as theirs).
+#[test]
+fn a_definition_stays_one_across_a_load_it_makes() {
+    let dir = scratch("nested");
+    std::fs::write(dir.join("lisp/lib-inner.el"), "(defvar lib-inner-x 1)\n(setq lib-inner-y 2)\n(provide 'lib-inner)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-outer.el"), "(defvar lib-outer-path (progn (require 'lib-inner) (car exec-path)))\n(provide 'lib-outer)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-outer"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (nth 1 e)) romacs--world-reseed-forms)"), "(lib-outer-path)");
+}
+
 /// A declared library's definitions that read a per-process fact are kept
 /// as declared, so restore may leave them pending; one whose load or
 /// configuration reads a secret, or that connects to the network, is

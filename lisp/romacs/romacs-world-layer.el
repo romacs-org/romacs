@@ -31,6 +31,9 @@
 ;; that fetches a secret, never the secret.  The condition is no `error',
 ;; as `quit' is none, so no handler a library or `use-package' wraps around
 ;; its configuration takes it for a failure; its data holds no secret.
+(declare-function romacs--world-secret-asked "world.rs" ())
+(declare-function romacs--world-take-secret "world.rs" ())
+
 (put 'romacs-world-deferred 'error-conditions '(romacs-world-deferred))
 (put 'romacs-world-deferred 'error-message "Left to the session")
 (put 'romacs-secret-deferred 'error-conditions '(romacs-secret-deferred romacs-world-deferred))
@@ -145,7 +148,8 @@ layer is restored only for the init content its plan was recorded from.")
 Each key is (LIBRARY . N), as in `romacs--layer-baked-after-loads'; its
 value the forms of that call that asked for a secret, each (LEXICAL . FORM)
 in order, FORM within the handlers that enclosed it.  The init's call
-evaluates them, where GNU evaluates the whole call (`romacs--init-eval-after-load').")
+evaluates them, where GNU evaluates the whole call
+\(`romacs--init-eval-after-load').")
 
 (defun romacs--layer-walk (library n lexical form wrap)
   "Evaluate FORM, part of the init's Nth configuration form for LIBRARY,

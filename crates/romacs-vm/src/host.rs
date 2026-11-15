@@ -489,12 +489,21 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>);
+pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>);
+
+/// A layer build's state of the top-level form loading: the definition it
+/// is, if one, and whether it read a per-process fact or an effect cut it.
+type LayerForm = (Option<(&'static str, String)>, bool, bool);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.0.take() {
             with_build(|b| b.site = previous);
+        }
+        // A file a form loads has forms of its own: once it is loaded, the
+        // form that loaded it goes on as it was, a definition still one.
+        if let Some((form, tainted, cut)) = self.1.take() {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
         }
     }
 }
@@ -510,11 +519,12 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None);
+        return SiteGuard(None, None);
     }
     let site = Rc::new(site());
+    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
     layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer)
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
