@@ -471,11 +471,15 @@ contents, so two equal states print the same."
                    ((symbol-function 'romacs-agent--kept-put)
                     (lambda (s text) (and (> (cl-incf tries) 1) (funcall put s text))))
                    ((symbol-function 'run-with-idle-timer) (lambda (&rest _) nil)))
-          (romacs-agent--keep session)
+          ;; Kept as its records left it (idle), its connection's view
+          ;; (detached) laid over it meanwhile.
+          (romacs-agent--keep session 'idle)
+          (setf (romacs-agent-state session) 'detached)
           (should-not (gethash session romacs-agent--kept))
-          (should romacs-agent--keeping)
+          (should (equal romacs-agent--keeping (list (list session (romacs-agent-seq session) 'idle))))
           (romacs-agent--keep-pending))
         (should (= tries 2))
-        (should (eql (gethash session romacs-agent--kept) (romacs-agent-seq session)))))))
+        (should (eql (gethash session romacs-agent--kept) (romacs-agent-seq session)))
+        (should (eq (cdr (assq 'state (plist-get (romacs-agent--read-kept session) :fields))) 'idle))))))
 
 ;;; romacs-agent-kept-tests.el ends here

@@ -3397,10 +3397,18 @@ its records left it (`romacs-agent--keep-soon')."
             ;; Not kept (the database another writer's a while): tried again
             ;; at the next idle moment, a few times, as of the same record.
             (when (< (cl-incf (alist-get session romacs-agent--keep-tries 0)) romacs-agent--keep-retries)
-              (romacs-agent--keep-soon session))
+              (romacs-agent--keep-again session seq state))
           (setf (alist-get session romacs-agent--keep-tries nil t) nil)
           (puthash session seq romacs-agent--kept)
           (run-hook-with-args 'romacs-agent-kept-functions session state))))))
+
+(defun romacs-agent--keep-again (session seq state)
+  "Keep SESSION's state at the editor's next idle moment as of record SEQ,
+STATE its state as its records left it: what failed to be kept, unless a
+record since is waiting to be kept in its place."
+  (unless (assq session romacs-agent--keeping)
+    (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
+    (push (list session seq state) romacs-agent--keeping)))
 
 (defconst romacs-agent--keep-retries 20
   "How many times a session's state that could not be kept is tried again.")
