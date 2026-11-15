@@ -3,6 +3,7 @@
 //! with romacs stand-ins only where GNU's own command did not load, and
 //! `--gnu-lisp` runs GNU's loadup.el alone. All visible results come from this VM.
 use romacs_vm::Vm;
+use crate::lisp_layout;
 
 /// How the GUI starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -321,41 +322,6 @@ pub fn runtime_of(dir: &std::path::Path) -> Option<&std::path::Path> {
     dir.parent()
 }
 
-/// The Lisp tree's layout, declared once in lisp/bundled.json for
-/// [`runtime_load_path`], the bundled autoloads (lisp/session/romacs-bundled-autoloads.el,
-/// which reads the installed copy) and tools/test-ert: Romacs's subsystem
-/// directories in load-path order, the packages' directory, and the
-/// directories on no load path.
-struct Layout {
-    directories: Vec<String>,
-    packages: String,
-    off_path: Vec<String>,
-}
-
-fn bundled_layout() -> Result<serde_json::Value, String> {
-    serde_json::from_str(include_str!("../../../lisp/bundled.json")).map_err(|e| format!("lisp/bundled.json: {e}"))
-}
-
-fn layout() -> Result<Layout, String> {
-    let json = bundled_layout()?;
-    let names = |key: &str| -> Result<Vec<String>, String> {
-        json[key].as_array().ok_or(format!("lisp/bundled.json: no {key}"))?.iter()
-            .map(|v| v.as_str().map(str::to_owned).ok_or(format!("lisp/bundled.json: malformed {key}"))).collect()
-    };
-    Ok(Layout {
-        directories: names("directories")?,
-        packages: json["packages"].as_str().ok_or("lisp/bundled.json: no packages")?.to_owned(),
-        off_path: names("off_path")?,
-    })
-}
-
-/// The names under lisp/ that are Romacs's, not GNU's directories: its
-/// subsystems, the packages' directory and those on no load-path.
-pub fn own_directories() -> Result<Vec<String>, String> {
-    let layout = layout()?;
-    Ok(layout.directories.into_iter().chain(layout.off_path).chain([layout.packages]).collect())
-}
-
 fn sorted_subdirectories(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
     let mut children = Vec::new();
     for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
@@ -393,7 +359,7 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
 /// subsystem directories, in lisp/bundled.json's order, then each package
 /// in lisp/packages/. No name in them is another library's, so they follow GNU's load-path without shadowing it.
 pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let layout = layout()?;
+    let layout = lisp_layout::layout()?;
     let mut path: Vec<_> = layout.directories.iter().map(|name| dir.join(name)).filter(|p| p.is_dir()).collect();
     let packages = dir.join(&layout.packages);
     if packages.is_dir() {
@@ -405,7 +371,7 @@ pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
 /// The library that defines the bundled packages' autoloads as it loads, by
 /// scanning their directories, beside the GNU Lisp directory `dir`, when present.
 pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
-    let file = bundled_layout()?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
+    let file = lisp_layout::bundled_layout()?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
     Ok(runtime_of(dir).map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
 }
 
@@ -413,7 +379,7 @@ pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::Path
 /// `term/` among them), then [`bundled_load_path`]. The VM's Lisp halves
 /// (lisp/vm/) are compile-time inputs and stay off it.
 pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let own = own_directories()?;
+    let own = lisp_layout::own_directories()?;
     let mut path = vec![dir.to_path_buf()];
     path.extend(sorted_subdirectories(dir)?.into_iter()
         .filter(|p| !own.iter().any(|name| p.file_name() == Some(std::ffi::OsStr::new(name)))));
