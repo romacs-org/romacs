@@ -154,11 +154,13 @@ moment later, unless AGAIN says this is that try."
 state (`romacs-agent--kept-text'); no journal is read.  Nil with no
 manifest."
   (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
-    (let* ((kept (let ((file (expand-file-name "state.eld" dir)))
-                   (and (file-readable-p file)
-                        (with-temp-buffer
-                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                          (ignore-errors (plist-get (read (current-buffer)) :fields))))))
+    (let* ((kept (let ((text (or (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))
+                                 (let ((file (expand-file-name "state.eld" dir)))
+                                   (and (file-readable-p file)
+                                        (with-temp-buffer
+                                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                          (buffer-string)))))))
+                   (and text (ignore-errors (plist-get (car (read-from-string text)) :fields)))))
            (field (lambda (slot) (cdr (assq slot kept))))
            (options (gethash "options" manifest))
            (harness (gethash "harness" manifest))

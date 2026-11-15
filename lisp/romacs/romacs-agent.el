@@ -28,6 +28,8 @@
 (require 'json)
 (require 'romacs-mcp)
 (declare-function romacs-agent-show "romacs-agent-ui")
+(declare-function romacs-agent-turns-fold-put "romacs-agent-turns" (id text))
+(declare-function romacs-agent-turns-fold "romacs-agent-turns" (id))
 
 (defgroup romacs-agent nil
   "Agent sessions in Romacs."
@@ -3297,9 +3299,10 @@ neither callback runs after it."
 
 ;;; A session's state, kept
 
-;; A server restoring a session reads its journal only after the state
-;; it kept: what the journal's records had folded the session into, as of
-;; one of them (state.eld in its directory).  It is written once the editor
+;; A server restoring a session reads its records only after the state
+;; it kept: what its records had folded the session into, as of one of
+;; them, kept in its rows of the agents' database, one copy a session
+;; (romacs-agent-turns; an earlier build's state.eld is moved in once).  It is written once the editor
 ;; is idle after a record ending a turn or a run where its records are the
 ;; live ones, and after a restore or an attachment has caught up with the
 ;; journal: a record is handled whole before any timer runs, so the state
@@ -3327,7 +3330,31 @@ The others are what its journal's records fold into.")
 wrote or read it: it is not written again for the same seq.")
 
 (defun romacs-agent--kept-file (session)
+  "Where an earlier build kept SESSION's state: read once, then removed
+\(`romacs-agent--kept-get')."
   (expand-file-name "state.eld" (romacs-agent-dir session)))
+
+(defun romacs-agent--kept-put (session text)
+  "Keep TEXT as SESSION's state (`romacs-agent--kept-text'), its only copy,
+in its rows (`romacs-agent-turns-fold-put'); non-nil when kept."
+  (romacs-agent-turns-fold-put (romacs-agent-id session) text))
+
+(defun romacs-agent--kept-get (session)
+  "SESSION's state as kept, as text, or nil.  One an earlier build kept in
+its directory is moved into its rows, the first time, and its file removed."
+  (or (romacs-agent-turns-fold (romacs-agent-id session))
+      (let ((file (romacs-agent--kept-file session)))
+        (when (file-readable-p file)
+          (let ((text (with-temp-buffer
+                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                        (buffer-string))))
+            (when (romacs-agent--kept-put session text) (delete-file file))
+            text)))))
+
+(defun romacs-agent-kept-p (dir)
+  "Whether the session recorded in DIR has its state kept."
+  (or (romacs-agent-turns-fold (file-name-nondirectory (directory-file-name dir)))
+      (file-exists-p (expand-file-name "state.eld" dir))))
 
 (defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a
@@ -3365,11 +3392,8 @@ its records left it (`romacs-agent--keep-soon')."
     (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
                (eq (romacs-agent-get (romacs-agent-id session)) session)
                (not (eql seq (gethash session romacs-agent--kept))))
-      (when-let* ((text (romacs-agent--kept-text session state)))
-        (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
-          (with-temp-file (concat file ".tmp") (insert text))
-          (set-file-modes (concat file ".tmp") #o600)
-          (rename-file (concat file ".tmp") file t))
+      (when-let* ((text (romacs-agent--kept-text session state))
+                  ((romacs-agent--kept-put session text)))
         (puthash session seq romacs-agent--kept)
         (run-hook-with-args 'romacs-agent-kept-functions session state)))))
 
@@ -3630,11 +3654,8 @@ no string in a record can hold, and only those are parsed."
 
 (defun romacs-agent--read-kept (session)
   "SESSION's kept state as written, or nil when there is none it can read."
-  (let ((file (romacs-agent--kept-file session)))
-    (when (file-readable-p file)
-      (with-temp-buffer
-        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-        (ignore-errors (read (current-buffer)))))))
+  (when-let* ((text (romacs-agent--kept-get session)))
+    (ignore-errors (car (read-from-string text)))))
 
 (defun romacs-agent--restore-kept (session)
   "Put SESSION's kept state back, when this build's session record has
@@ -3748,7 +3769,7 @@ resume due), so it is loaded as a restore runs.")
 neither its kept state nor its supervisor's socket, and nothing waiting
 on it (`romacs-agent-pending-functions')."
   (and romacs-agent-listed-p
-       (not (file-exists-p (expand-file-name "state.eld" dir)))
+       (not (romacs-agent-kept-p dir))
        (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
        (funcall romacs-agent-listed-p dir)
        (not (and romacs-agent-pending-functions

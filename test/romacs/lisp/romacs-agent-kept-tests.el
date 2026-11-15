@@ -109,7 +109,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir head)
       (let ((first (romacs-agent-kept-tests--load dir)))
         (should (= (romacs-agent-seq first) 12))
-        (should (file-exists-p (romacs-agent--kept-file first))))
+        (should (romacs-agent--kept-get first)))
       (romacs-agent-kept-tests--write dir tail t)
       (let* ((read nil)
              (restored (cl-letf* ((real (symbol-function 'romacs-agent--record))
@@ -275,12 +275,11 @@ contents, so two equal states print the same."
     (let ((records (romacs-agent-kept-tests--claude)))
       (romacs-agent-kept-tests--write dir records)
       (let* ((session (romacs-agent-kept-tests--load dir))
-             (file (romacs-agent--kept-file session))
-             (good (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (good (romacs-agent--kept-get session)))
         (dolist (bad (list (replace-regexp-in-string ":layout (id " ":layout (old id " good t t)
                            (replace-regexp-in-string ":seq [0-9]+" ":seq 999" good)
                            (substring good 0 (/ (length good) 2))))
-          (with-temp-file file (insert bad))
+          (romacs-agent--kept-put session bad)
           (let* ((read 0)
                  (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
                                    ((symbol-function 'romacs-agent--record)
@@ -293,48 +292,46 @@ contents, so two equal states print the same."
   ;; Kept by a build that lacked a field this one has: read back, no record
   ;; read again, the new field at its default.
   (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
     (let ((records (romacs-agent-kept-tests--claude)))
       (romacs-agent-kept-tests--write dir records)
       (let* ((session (romacs-agent-kept-tests--load dir))
-             (file (romacs-agent--kept-file session))
-             (kept (with-temp-buffer (insert-file-contents file) (read (current-buffer))))
+             (kept (car (read-from-string (romacs-agent--kept-get session))))
              (dropped (car (car (last (plist-get kept :fields))))))
-        (with-temp-file file
-          (let ((print-circle t) (print-length nil) (print-level nil))
-            (prin1 (plist-put (plist-put (copy-sequence kept) :layout (remq dropped (plist-get kept :layout)))
-                              :fields (assq-delete-all dropped (copy-alist (plist-get kept :fields))))
-                   (current-buffer))))
+        (romacs-agent--kept-put
+         session (let ((print-circle t) (print-length nil) (print-level nil))
+                   (prin1-to-string (plist-put (plist-put (copy-sequence kept) :layout (remq dropped (plist-get kept :layout)))
+                                               :fields (assq-delete-all dropped (copy-alist (plist-get kept :fields)))))))
         (let* ((read 0)
                (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
                                  ((symbol-function 'romacs-agent--record)
                                   (lambda (session record) (cl-incf read) (funcall real session record))))
                         (romacs-agent-kept-tests--load dir))))
           (should (= read 0))
-          (should (equal (romacs-agent-reply again) "bye")))))))
-
+          (should (equal (romacs-agent-reply again) "bye"))))))))
 (ert-deftest romacs-agent-kept-only-what-reads-back ()
   ;; A field holding what cannot be read back: nothing is kept.
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (let ((session (romacs-agent-kept-tests--load dir)))
-      (delete-file (romacs-agent--kept-file session))
+      (romacs-agent--kept-put session nil)
       (remhash session romacs-agent--kept)
       (setf (romacs-agent-message session) (current-buffer))
       (should-not (romacs-agent--kept-text session))
       (romacs-agent--keep session)
-      (should-not (file-exists-p (romacs-agent--kept-file session))))))
+      (should-not (romacs-agent--kept-get session)))))
 
 (ert-deftest romacs-agent-kept-a-copy-keeps-nothing ()
   ;; A copy replaying the journal (a chat drawn) never writes the session's state.
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (let ((session (romacs-agent-kept-tests--load dir)))
-      (delete-file (romacs-agent--kept-file session))
+      (romacs-agent--kept-put session nil)
       (let ((scratch (romacs-agent--scratch session)))
         (setf (romacs-agent-caught-up scratch) t)
         (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
         (romacs-agent--keep scratch))
-      (should-not (file-exists-p (romacs-agent--kept-file session))))))
+      (should-not (romacs-agent--kept-get session)))))
 
 (ert-deftest romacs-agent-kept-journal-after-either-key-order ()
   (romacs-agent-kept-tests--with
@@ -412,7 +409,7 @@ contents, so two equal states print the same."
                                 (lambda (&rest _) (ert-fail "attached where nothing answers"))))
                        (romacs-agent-kept-tests--load dir))))
         (should (eq (romacs-agent-state session) 'ended))
-        (should (file-exists-p (romacs-agent--kept-file session)))
+        (should (romacs-agent--kept-get session))
         (should-not (file-exists-p socket))))))
 
 (ert-deftest romacs-agent-kept-a-live-socket-is-left-and-attached ()
@@ -428,4 +425,26 @@ contents, so two equal states print the same."
                  (should (file-exists-p socket)))
         (delete-process server)))))
 
+(ert-deftest romacs-agent-kept-one-copy-and-an-old-file-moved-in ()
+  ;; Kept in its rows, one copy however often it is written and however
+  ;; many turns it has; a state an earlier build kept in a file is read,
+  ;; moved into its rows and the file removed, the first time.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (let* ((session (romacs-agent-kept-tests--load dir)) (id (romacs-agent-id session))
+           (db (romacs-agent-turns--db)))
+      (sqlite-execute db "insert into turns (session, first_seq, last_seq) values (?, 5, 12), (?, 13, 20)" (list id id))
+      (romacs-agent--kept-put session "(:a 1)")
+      (romacs-agent--kept-put session "(:a 2)")
+      (should (equal (sqlite-select db "select first_seq, fold from turns where session = ? and fold is not null" (list id))
+                     '((13 "(:a 2)"))))
+      ;; From a file, once.
+      (romacs-agent--kept-put session nil)
+      (write-region "(:a 3)" nil (romacs-agent--kept-file session) nil 'silent)
+      (should (equal (romacs-agent--kept-get session) "(:a 3)"))
+      (should-not (file-exists-p (romacs-agent--kept-file session)))
+      (should (equal (romacs-agent--kept-get session) "(:a 3)"))
+      (should (= (caar (sqlite-select db "select count(*) from turns where session = ? and fold is not null" (list id))) 1))))))
 ;;; romacs-agent-kept-tests.el ends here

@@ -37,6 +37,9 @@
   (when-let* ((db (romacs-agent-store--open)))
     (unless (eq romacs-agent-turns--made db)
       (dolist (statement romacs-agent-turns--schema) (sqlite-execute db statement))
+      ;; The session's folded state, on one row of its own (`romacs-agent-turns-fold-put').
+      (unless (assoc "fold" (mapcar #'cdr (sqlite-select db "pragma table_info(turns)")))
+        (sqlite-execute db "alter table turns add column fold text"))
       (ignore-errors (dolist (statement romacs-agent-turns--search-schema) (sqlite-execute db statement)))
       (setq romacs-agent-turns--made db))
     db))
@@ -77,7 +80,12 @@
       (condition-case err
           (progn
             (sqlite-execute db "begin immediate")
-            (sqlite-execute db "insert or replace into turns values (?, ?, ?, ?, ?, ?, ?, ?)" row)
+            ;; Its folded state, on it, is left as it is.
+            (sqlite-execute db (concat "insert into turns (session, first_seq, last_seq, t, prompt, reply, tools, cost)"
+                                       " values (?, ?, ?, ?, ?, ?, ?, ?) on conflict (session, first_seq) do update set"
+                                       " last_seq = excluded.last_seq, t = excluded.t, prompt = excluded.prompt,"
+                                       " reply = excluded.reply, tools = excluded.tools, cost = excluded.cost")
+                            row)
             (when (sqlite-select db "select 1 from sqlite_master where name = 'turns_fts'")
               (sqlite-execute db "delete from turns_fts where session = ? and first_seq = ?" (list (nth 0 row) (nth 1 row)))
               (sqlite-execute db "insert into turns_fts values (?, ?, ?, ?, ?)"
@@ -126,7 +134,7 @@ batch process (`romacs-agent-turns-fill-soon'), not here."
 (defun romacs-agent-turns--last (session)
   "The seq SESSION's latest row ends at, or nil with no row."
   (when-let* ((db (romacs-agent-turns--db)))
-    (caar (sqlite-select db "select max(last_seq) from turns where session = ?" (list (romacs-agent-id session))))))
+    (caar (sqlite-select db "select max(last_seq) from turns where session = ? and first_seq > 0" (list (romacs-agent-id session))))))
 
 (defun romacs-agent-turns-fill (session)
   "Write the rows of SESSION's turns its rows do not have yet: its records
@@ -199,14 +207,14 @@ runs, once it ends."
   "The first seqs of SESSION's latest N turns (before seq BEFORE when
 given), the latest first."
   (when-let* ((db (romacs-agent-turns--db)))
-    (mapcar #'car (sqlite-select db (concat "select first_seq from turns where session = ?"
+    (mapcar #'car (sqlite-select db (concat "select first_seq from turns where session = ? and first_seq > 0"
                                             (if before " and first_seq < ?" "") " order by first_seq desc limit ?")
                                  (append (list (romacs-agent-id session)) (and before (list before)) (list n))))))
 
 (defun romacs-agent-turns-count (session)
   "How many turns SESSION has rows for."
   (or (and-let* ((db (romacs-agent-turns--db)))
-        (caar (sqlite-select db "select count(*) from turns where session = ?" (list (romacs-agent-id session)))))
+        (caar (sqlite-select db "select count(*) from turns where session = ? and first_seq > 0" (list (romacs-agent-id session)))))
       0))
 
 (defun romacs-agent-turns-search (query &optional limit)
@@ -217,6 +225,36 @@ given), the latest first."
       (sqlite-select db (concat "select session, first_seq, snippet(turns_fts, -1, '[', ']', '…', 12) from turns_fts"
                                 " where turns_fts match ? order by rank limit ?")
                      (list query (or limit 20))))))
+
+;;; A session's folded state
+
+;; What a session's records fold to (`romacs-agent--kept-text'), so a
+;; restore reads it and the records after its seq instead of them all,
+;; is kept on one of its rows: its latest turn's, else a row of its own
+;; with no turn (first seq 0).  One copy a session, moved as it is written.
+
+(defun romacs-agent-turns-fold-put (id text)
+  "Keep TEXT as the session ID's folded state, its only copy; non-nil when
+kept."
+  (when-let* ((db (romacs-agent-turns--db)))
+    (condition-case err
+        (progn
+          (sqlite-execute db "begin immediate")
+          (sqlite-execute db "update turns set fold = null where session = ? and fold is not null" (list id))
+          (when (zerop (sqlite-execute db (concat "update turns set fold = ? where session = ? and first_seq ="
+                                                  " (select max(first_seq) from turns where session = ?)")
+                                       (list text id id)))
+            (sqlite-execute db "insert into turns (session, first_seq, fold) values (?, 0, ?)" (list id text)))
+          (sqlite-execute db "commit")
+          t)
+      (error (ignore-errors (sqlite-execute db "rollback"))
+             (message "romacs-agent-turns: %s" (error-message-string err))
+             nil))))
+
+(defun romacs-agent-turns-fold (id)
+  "The session ID's folded state as kept, or nil."
+  (when-let* ((db (romacs-agent-turns--db)))
+    (caar (sqlite-select db "select fold from turns where session = ? and fold is not null limit 1" (list id)))))
 
 (provide 'romacs-agent-turns)
 ;;; romacs-agent-turns.el ends here
