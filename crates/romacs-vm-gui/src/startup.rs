@@ -778,14 +778,20 @@ pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf
 pub const QUICK_START: &str = "(progn (setq init-file-user nil site-run-file nil inhibit-x-resources t)
   (put 'site-run-file 'standard-value '(nil)))";
 
+/// What a session that is not -Q takes instead of [`QUICK_START`]: the
+/// system's site-lisp directories before `load-path`, each with its
+/// subdirs.el, as GNU's startup has them (lisp/session/romacs-site-lisp.el).
+pub const SITE_LISP_START: &str = "(progn (require 'romacs-site-lisp) (romacs-site-lisp-start))";
+
 /// A --loadup session's last steps before the user's init: -Q's settings
-/// ([`QUICK_START`]), then the session's start of lisp/session/romacs-defaults.el:
+/// ([`QUICK_START`]) or else the site-lisp ([`SITE_LISP_START`]), then the
+/// session's start of lisp/session/romacs-defaults.el:
 /// its libraries' per-user files, and Romacs's interactive defaults unless
 /// -Q, which keeps GNU's values; the init may override them or turn them
 /// off with `romacs-defaults-mode'.
 pub fn before_init(vm: &mut Vm, launch: Launch, quick: bool) -> Result<(), String> {
     if launch == Launch::Loadup {
-        if quick { vm.eval_source(QUICK_START)?; }
+        vm.eval_source(if quick { QUICK_START } else { SITE_LISP_START })?;
         vm.eval_source(&format!("(when (fboundp 'romacs-defaults-start) (romacs-defaults-start {}))",
                                 if quick { "t" } else { "nil" }))?;
     }
