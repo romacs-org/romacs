@@ -18,12 +18,15 @@ impl Leaf<'_> {
 impl Leaf<'_> {
     /// `romacs-startup-progress': STAGE (a symbol or string) and LABEL told
     /// to the display, for its launch screen; and STAGE's latest state,
-    /// (STAGE :label LABEL . STATE), kept in `romacs-progress-state' in place
-    /// of its earlier one.
+    /// (STAGE :label LABEL . STATE) with STAGE as a symbol, kept in
+    /// `romacs-progress-state' in place of its earlier one.
     pub(crate) fn startup_progress(&mut self, stage: Value, label: Value, state: Value) -> Out {
         let text = |leaf: &mut Self, v: Value| if leaf.kind(v) == Kind::Symbol { leaf.symbol_name(v) } else { leaf.string_text(v) };
         let (shown, said) = (text(self, stage)?, if label == Value::NIL { String::new() } else { text(self, label)? });
         if let Some(host) = self.vm.window_system_host() { host.startup_progress(&shown, &said); }
+        // Kept by the stage's symbol, a string stage's too, so two equal
+        // names are one stage.
+        let stage = if self.kind(stage) == Kind::Symbol { stage } else { self.intern(&shown) };
         let slot = self.vm.slot("romacs-progress-state");
         let old = self.vm.slots[slot].value;
         let mut others = Vec::new();
