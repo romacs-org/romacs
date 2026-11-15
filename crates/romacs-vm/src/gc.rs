@@ -1158,6 +1158,7 @@ impl Vm {
         // target is old.
         self.shared_holders = None;
         self.caches_filled.clear();
+        self.permanent_names_added.clear();
         self.conses.settle_old();
         self.closures.settle_old();
         self.cells.settle_old();
@@ -1831,6 +1832,7 @@ impl Vm {
     fn settle_minor(&mut self) {
         // A forced collection is over (a full's takes its fillers with it).
         self.gc_stress.shift = false;
+        self.permanent_names_added.clear();
         self.functions.settle();
         self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
@@ -1841,6 +1843,7 @@ impl Vm {
     fn settle_collection(&mut self, before: usize) {
         // A full's survivors are old unmet, and a compaction moved them.
         self.shared_holders = None;
+        self.permanent_names_added.clear();
         self.functions.settle();
         self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
@@ -1894,7 +1897,7 @@ impl Vm {
         let keep = |v: &Value| traced(*v, in_obarray);
         self.undo_list_index();
         let undo_limits = self.undo_view();
-        let mut pending = self.mark_roots(roots, in_obarray);
+        let mut pending = self.mark_roots(roots, in_obarray, matches!(r#for, MarkFor::Minor));
         let mut local_live = HashSet::default();
         // HOST(dynamic:saved): collector: forwards the saved values
         for &(slot, old, buffer, _) in &self.dynamic {
@@ -1907,18 +1910,19 @@ impl Vm {
         }
         let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
         let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
-        let mut code_pending: Vec<_> = self
-            .request_code
-            .live
-            .iter()
-            .enumerate()
-            .filter_map(|(id, &live)| {
-                (live && (active || self.request_code.permanent[id])).then_some(id)
-            })
-            .collect();
-        self.source_code_roots(&mut code_pending);
         let minor_changed = matches!(r#for, MarkFor::Minor).then(|| self.minor_code(&mut code_marks));
-        if let Some(changed) = &minor_changed { code_pending.clone_from(changed); }
+        // A minor reads the functions changed since the last collection, and
+        // no other code root.
+        let mut code_pending: Vec<_> = match &minor_changed {
+            Some(changed) => changed.clone(),
+            None => {
+                let mut pending: Vec<_> = self.request_code.live.iter().enumerate()
+                    .filter_map(|(id, &live)| (live && (active || self.request_code.permanent[id])).then_some(id))
+                    .collect();
+                self.source_code_roots(&mut pending);
+                pending
+            }
+        };
         for (id, entry) in &self.conditions.entries {
             let custom = id.value().index_if(7).and_then(|n| n.checked_sub(1))
                 .is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
@@ -1996,7 +2000,7 @@ impl Vm {
     /// engines', the finalizers doomed, permanent symbols, terminal bindings,
     /// the escape in flight, signal handlers, the backtrace and the profiler,
     /// GNU's C globals, the case tables, the command point and the charsets.
-    fn mark_roots(&mut self, roots: &[Value], in_obarray: &[bool]) -> Vec<Value> {
+    fn mark_roots(&mut self, roots: &[Value], in_obarray: &[bool], minor: bool) -> Vec<Value> {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.external_roots);
@@ -2004,7 +2008,13 @@ impl Vm {
             engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
         }
         pending.extend(self.doomed_finalizers.iter().copied());
-        pending.extend(self.permanent_symbol_names.values().copied());
+        // A minor's are the names made since the last collection: the rest
+        // are old.
+        if minor {
+            pending.extend_from_slice(&self.permanent_names_added);
+        } else {
+            pending.extend(self.permanent_symbol_names.values().copied());
+        }
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
         if let Some(escape) = &mut self.propagated_escape {
@@ -2027,8 +2037,10 @@ impl Vm {
     /// every other starts reached in `code_marks`, as the old entries do.
     fn minor_code(&self, code_marks: &mut [std::sync::atomic::AtomicBool]) -> Vec<usize> {
         let changed = self.functions.changed().expect("a minor with the record lost promotes instead").to_vec();
-        let set: HashSet<usize> = changed.iter().copied().collect();
-        for (id, mark) in code_marks.iter_mut().enumerate() { *mark.get_mut() = !set.contains(&id); }
+        for mark in code_marks.iter_mut() { *mark.get_mut() = true; }
+        for &id in &changed {
+            if let Some(mark) = code_marks.get_mut(id) { *mark.get_mut() = false; }
+        }
         changed
     }
     /// A minor reclaims no region and no symbol: to its weak rounds every
@@ -2267,6 +2279,21 @@ mod tests {
         assert!(vm.closures.is_free(callee.payload() as usize), "the young closure died");
         assert!(vm.caches.iter().all(|c| c.target != callee), "no cache names it");
         assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
+    }
+
+    /// A symbol's name string first asked for since the last collection is
+    /// held by the names map alone: a minor reads the names made since, and
+    /// keeps it, its oracle agreeing.
+    #[test]
+    fn a_minor_keeps_a_symbol_name_made_since_the_last_collection() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000) (intern \"minor-named-symbol\")").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(symbol-name 'minor-named-symbol)").unwrap();
+        assert!(vm.collect_minor(&[]));
+        assert_eq!(vm.eval_source_raw("(equal (symbol-name 'minor-named-symbol) \"minor-named-symbol\")").unwrap(), Value::TRUE);
     }
 
     /// A collection leaves every survivor old and no log; Lisp's stores into

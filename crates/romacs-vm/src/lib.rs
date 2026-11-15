@@ -1619,6 +1619,9 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    /// The names `permanent_symbol_names` took since the last collection,
+    /// the only ones a minor can find young.
+    permanent_names_added: Vec<Value>,
     // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
@@ -1889,6 +1892,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     flat_tables,
     shared_holders,
     caches_filled,
+    permanent_names_added,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1973,6 +1977,7 @@ impl Vm {
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
             caches_filled: Vec::new(),
+            permanent_names_added: Vec::new(),
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
