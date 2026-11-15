@@ -1481,9 +1481,11 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project).
+                        # tree is (the tour's project); romacs_attach and romacs_task_reply from a
+                        # caller that is no agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch', 'romacs_dev_check')
+                                                                  'romacs_task_watch', 'romacs_dev_check',
+                                                                  'romacs_attach', 'romacs_task_reply')
                                 for n in errors)
                         and task is not None)
         return result
