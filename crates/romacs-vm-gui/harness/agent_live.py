@@ -2275,7 +2275,7 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-c C-; a, RET): on a project, its
+    """The agent board by real keys (C-x C-a a, RET): on a project, its
     first row opens, the thread that wants the user most, else the newest
     (a delegated one folds under its parent) or, with no thread, its
     newest transcript; on "◇ N more", every transcript is shown and the
@@ -2322,7 +2322,7 @@ def board_keys(args, base):
             # host (seen: no command ran for it): keys must reach the frame,
             # then the board, before one is relied on.
             a.keyboard_ready()
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
+            a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
                 before = a.log().count('"native_command":"romacs-agent-board-next"')

@@ -2,7 +2,7 @@
 
 Romacs runs coding-agent harnesses (Claude Code, Codex) as agent sessions:
 each one a chat buffer, kept by a supervisor that outlives the editor, so a
-session survives a restart.  ~C-c C-; n~ starts one, and ~C-c C-; a~ shows
+session survives a restart.  ~C-x C-a n~ starts one, and ~C-x C-a a~ shows
 every session on the agent board.
 
 * Accounts and usage limits

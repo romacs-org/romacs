@@ -43,7 +43,10 @@
   "Global prefix map for starting and finding agent sessions.
 \\{romacs-agents-map}")
 
-;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
+;; Global, so under C-x (C-c C-<key> is a major mode's).  Its keys are plain
+;; letters: gud's and edebug's under C-x C-a are control keys, and the
+;; prefix maps merge.
+;;;###autoload (define-key ctl-x-map "\C-a" romacs-agents-map)
 
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
