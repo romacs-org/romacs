@@ -335,7 +335,7 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
 
 /// `--world-build`'s batch half, beside the GUI's world: the batch world
 /// in STORE made usable, unless the installation's serves this executable
-/// already. The GUI's world is what the build is for: a batch world refused
+/// already. The GUI's world is what the build is for: a batch world not captured
 /// or failed is a warning, and its sessions boot from source.
 pub fn prepare_beside(store: PathBuf) {
     let installed = super::startup::lisp_root(&super::startup::lisp_dir()).ok()

@@ -154,12 +154,12 @@ threaded_lend.rs unwind_to unwind 1 clean  # the binding stack is traced; the re
 threaded_lend.rs watched bind_variable 1 suspended  # the value is read from the frame just before; the caller's stay in registers
 threaded_lend.rs watched set_variable_value 1 suspended  # it roots the value it was given; the caller's stay in registers
 threaded_lend.rs write_from set_variable_value 1 rooted  # the value is the frame's, read just before; the requester holds no Value
-variable_runtime.rs bind_variable bind_variable 1 clean  # a fenced variable's binding, again through the fence: VALUE is passed on and nothing is used after
+variable_runtime.rs bind_variable bind_variable 1 clean  # a tracked variable's binding, again through the tracking: VALUE is passed on and nothing is used after
 variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
-variable_runtime.rs variable_primitive notify_watchers_at 1 held  # defvar's set-default, in place: a fenced variable's defvar records its saved write at the call, which a queued store would repeat as a plain write
+variable_runtime.rs variable_primitive notify_watchers_at 1 held  # defvar's set-default, in place: a tracked variable's defvar records its saved write at the call, which a queued store would repeat as a plain write
 variable_runtime.rs variable_primitive set_variable_value 1 held  # the file-local defvar's `macroexp--dynvars`, in place beside defvar's set-default; its engine is not suspended, so nothing collects
 variable_runtime.rs variable_primitive write_from_native 1 held  # set and makunbound: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back

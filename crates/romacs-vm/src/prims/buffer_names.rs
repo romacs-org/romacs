@@ -8,7 +8,7 @@ fn generate_new_buffer_name(cx, name: Value; optional ignore: Value) {
 /// Fgenerate_new_buffer_name: NAME if no live buffer has it (or it is
 /// IGNORE), else NAME<2>, NAME<3>...; a name starting with a space first
 /// tries NAME-N with N from get_random () % 1000000. The random name only
-/// spares the search, so a world build, which fences the random state,
+/// spares the search, so a world build, which tracks the random state,
 /// searches: a temporary buffer made inside another (`with-temp-buffer'
 /// in `with-temp-buffer') is named the same in every build.
 fn generate(cx: &mut Leaf<'_>, name: Value, ignore: Value) -> Out {
@@ -31,7 +31,7 @@ fn generate(cx: &mut Leaf<'_>, name: Value, ignore: Value) -> Out {
     }
     let mut base = view.bytes;
     let mut chars = view.chars;
-    if base.first() == Some(&b' ') && !cx.random_fenced() {
+    if base.first() == Some(&b' ') && !cx.random_tracked() {
         let suffix = format!("-{}", cx.random_bits() % 1_000_000);
         chars += suffix.len();
         base.extend_from_slice(suffix.as_bytes());

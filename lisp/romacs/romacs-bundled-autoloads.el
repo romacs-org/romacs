@@ -89,8 +89,8 @@ as package.el leaves it."
 
 (defun romacs-bundled-autoloads-forms (root)
   "The autoload forms of the bundled packages under ROOT, in order.
-The scan keeps its state to itself, as a world build, which refuses a
-write to what startup read, needs: in a buffer of its own, it binds the
+The scan keeps its state to itself, as a world build, which does not
+capture a write to what startup read, needs: in a buffer of its own, it binds the
 coding its reads set, the hooks its buffers' Lisp mode would run or add
 to (it needs Lisp syntax, not the mode's hooks), and the message log its
 notices would go to; the notices are not shown either."

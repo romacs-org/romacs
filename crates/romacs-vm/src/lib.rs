@@ -1640,8 +1640,8 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
-    /// A world build's P fence (`world`); None outside build mode.
-    fence: Option<Box<world::Fence>>,
+    /// A world build's P tracking (`world`); None outside build mode.
+    tracking: Option<Box<world::Tracking>>,
     /// The re-seed definitions waiting for their variable's first access
     /// (`world::pending`), by slot.
     pending: std::collections::BTreeMap<usize, world::pending::Pending>,
@@ -1719,7 +1719,7 @@ pub struct Vm {
 }
 // What a world image may hold of a VM (`world::safe`): every field, each
 // SnapshotSafe or, at rest, checked by `world_quiescent`: the hosts, the
-// children and jobs, the mapped code image, the fence, the lowered code
+// children and jobs, the mapped code image, the tracking, the lowered code
 // (function pointers), the suspended engines (pointers into it), the
 // compiled patterns (their SIMD searchers hold function pointers) and the
 // idle clock reading (process-relative).
@@ -1899,7 +1899,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     isolates,
     keeper,
     inotify,
-    fence,
+    tracking,
     execution,
     spare_programs,
     idle_since,
@@ -2083,7 +2083,7 @@ impl Vm {
             cells: Default::default(),
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
-            fence: None,
+            tracking: None,
             pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
@@ -2256,8 +2256,8 @@ impl Vm {
     /// Slot stamps retain precise source-macro dependencies; the world epoch
     /// guards speculative dispatch, including intervening writes to other slots.
     fn define_function(&mut self, slot: usize, value: Value, is_macro: bool) -> Result<()> {
-        if self.fence.is_some() {
-            self.fence_function(slot);
+        if self.tracking.is_some() {
+            self.tracked_function(slot);
         }
         let world = self
             .world_version
@@ -3818,11 +3818,11 @@ impl Vm {
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
-        // A `let' moves a fenced value back unread; a watcher would see it.
-        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(slot) {
-            self.fence_unbound(cell as usize);
-            self.fence_watched(cell as usize);
-            return self.unfenced(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+        // A `let' moves a tracked value back unread; a watcher would see it.
+        if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
+            self.tracked_unbound(cell as usize);
+            self.tracked_watched(cell as usize);
+            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
         }
         self.restore_binding(slot, base, value, owner, let_default)
     }

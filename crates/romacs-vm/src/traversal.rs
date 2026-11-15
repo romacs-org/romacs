@@ -162,13 +162,13 @@ impl Vm {
         }
         if tail == Value::NIL { Value::NIL } else { Value::UNBOUND }
     }
-    /// `get' of an ordinary property, else UNBOUND: a fence observes the
+    /// `get' of an ordinary property, else UNBOUND: the tracking observes the
     /// read, and the condition properties live in the registry.
     #[inline(never)]
     pub(super) fn get_kernel(&self, symbol: Value, property: Value) -> Value {
         let registry = property.index_if(7).and_then(|i| i.checked_sub(1)).and_then(|slot| self.symbol_names.get(slot))
             .is_some_and(|name| name == "error-conditions" || name == "error-message");
-        if registry || self.fence.is_some() {
+        if registry || self.tracking.is_some() {
             return Value::UNBOUND;
         }
         self.symbol_property(symbol, property).unwrap_or(Value::UNBOUND)

@@ -6,7 +6,7 @@
 //! embedder roots and the process-global counters. The startup steps then
 //! run again in Lisp (`romacs-world-restart`).
 //!
-//! Capture is refused, naming the field, unless the VM is at rest (Q) and
+//! No image is captured, naming the field, unless the VM is at rest (Q) and
 //! holds nothing of the process beyond its heap (X): no host attachment,
 //! child, job, code image, lowered code, compiled pattern or local
 //! time-zone rule, and no object holding a resource (`Object::
@@ -68,7 +68,7 @@ impl Vm {
             ("keeper", self.keeper.is_none()),
             ("inotify", self.inotify.is_none()),
             ("local_zone", matches!(self.local_zone, LocalZone::Process)),
-            ("fence", self.fence.is_none()),
+            ("tracking", self.tracking.is_none()),
             ("rooted", self.rooted.is_empty()),
             ("execution", self.execution.holds_nothing()),
             ("spare_programs", self.spare_programs.is_empty()),
@@ -93,10 +93,10 @@ impl Vm {
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
-            return Err(format!("world capture refused: {field} is not at rest"));
+            return Err(format!("no world captured: {field} is not at rest"));
         }
         match self.objects.iter().enumerate().find_map(|(at, object)| Some((at, object.foreign_resource()?))) {
-            Some((at, what)) => Err(format!("world capture refused: object {at} is {what}, a resource of this process")),
+            Some((at, what)) => Err(format!("no world captured: object {at} is {what}, a resource of this process")),
             None => Ok(()),
         }
     }
@@ -134,7 +134,7 @@ impl Vm {
 }
 
 /// Capture VM, and CARRY, what the embedder keeps beside it, into FILE as an
-/// image keyed KEY: refused unless the VM is at rest. The arena is this
+/// image keyed KEY: none unless the VM is at rest. The arena is this
 /// process's heap; nothing else allocates while the image is written, and
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
@@ -171,7 +171,7 @@ fn whole_in_memory(file: &std::fs::File, len: usize) -> Result<(), String> {
 
 /// Make VM and CARRY hold nothing of the executable (`romacs_snapshot::
 /// Settle`): every empty hash table they hold gets an allocation of its
-/// own, so an image restores wherever this process's executable lay. Refused,
+/// own, so an image restores wherever this process's executable lay. None,
 /// naming the type, when a table out of reach is empty.
 fn settle<T: super::safe::Schema>(vm: &mut Vm, carry: &mut T) -> Result<(), String> {
     let mut settle = romacs_snapshot::Settle::default();
@@ -179,7 +179,7 @@ fn settle<T: super::safe::Schema>(vm: &mut Vm, carry: &mut T) -> Result<(), Stri
     carry.settle(&mut settle);
     match settle.unsettled() {
         [] => Ok(()),
-        held => Err(format!("world capture refused: an empty hash table, out of reach, in {}", held.join(", "))),
+        held => Err(format!("no world captured: an empty hash table, out of reach, in {}", held.join(", "))),
     }
 }
 
@@ -319,20 +319,20 @@ mod tests {
     }
 
     #[test]
-    fn the_collectors_reentry_state_is_at_rest_or_refused() {
-        let refusal = |change: fn(&mut Vm)| {
+    fn the_collectors_reentry_state_is_at_rest_or_not_captured() {
+        let not_captured = |change: fn(&mut Vm)| {
             let mut vm = Vm::new();
             assert_eq!(vm.world_quiescent(), Ok(()));
             change(&mut vm);
             vm.world_quiescent().unwrap_err()
         };
-        assert!(refusal(|vm| vm.suspended_stacks.push(vec![])).contains("suspended_stacks"));
-        assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
-        assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
-        assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));
-        assert!(refusal(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
+        assert!(not_captured(|vm| vm.suspended_stacks.push(vec![])).contains("suspended_stacks"));
+        assert!(not_captured(|vm| vm.running_engines = 1).contains("running_engines"));
+        assert!(not_captured(|vm| vm.gc_holds = 1).contains("gc_holds"));
+        assert!(not_captured(|vm| vm.rooted_write = true).contains("rooted_write"));
+        assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
-        assert!(refusal(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
+        assert!(not_captured(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
     }
 
     #[test]

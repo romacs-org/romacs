@@ -11,27 +11,27 @@
 //! `--world-store`, or else in `$XDG_CACHE_HOME/romacs/worlds`
 //! (`default_store`). A launch that finds its world missing or stale builds
 //! it first, which costs about what a boot from source does, and boots from
-//! it; later launches restore it. A build refused or failed on the same
+//! it; later launches restore it. A build that could not capture or failed on the same
 //! inputs is not tried again until one of them changes.
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
 //! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
-//! refuses, so a restored launch takes them itself.
+//! does not capture, so a restored launch takes them itself.
 //!
 //! A launch that loads the user's init restores the init's layer instead
 //! when the store holds one (`romacs_vm::world::layer`): the base world
 //! with the libraries the init's recorded plan loads, keyed by the base
 //! and the plan, replayed after the chain. The launch checks the init is
-//! the one planned and leaves out the entries a build refused; a stale or
+//! the one planned and leaves out the entries a build left to the session; a stale or
 //! missing layer boots from the base world, records the plan the init
 //! makes now, and builds the layer ahead of the next launch, on a thread
 //! of its own (`after_init`). `--world-build` prepares the layer with the
 //! base once a plan exists.
 use crate::startup;
 use romacs_vm::Vm;
-use romacs_vm::world::layer::{Entry, Kind, Plan, REFUSAL};
+use romacs_vm::world::layer::{Entry, Kind, Plan, LIVE_ENTRY};
 use romacs_vm::world::store::{Launch, World};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -120,7 +120,7 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 /// from source. A missing or stale world is built first, or the build
 /// another launch runs waited for, which costs about what a boot from
 /// source does, and the launch then boots from it; ON_WAIT runs before it
-/// blocks for that. One whose build was refused on these very inputs, or
+/// blocks for that. One whose build could not capture these very inputs, or
 /// failed lately (`romacs_vm::world::store`), boots from source. A builder
 /// process builds and exits here.
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce()) -> Option<(Box<Vm>, Carry)> {
@@ -142,7 +142,7 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
 /// `builder_args` gives), and exit. The plan is the store's for INIT less
 /// EXCLUDED, and must have DIGEST: a plan that changed since the launch
 /// resolved it is not built under its key. The configurations EXCLUDED
-/// refused stay deferred in this build too (`Vm::world_layer_load`).
+/// left to the session stay deferred in this build too (`Vm::world_layer_load`).
 pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, init: Option<&InitLayerArgs>) -> Result<(), String> {
     let Launch::Build = base.launch::<Carry>(Vec::new, false, || {}) else { return Err("not a world builder".into()) };
     let Some(args) = init else { build_and_exit(base, width, height, floor, None) };
@@ -191,7 +191,7 @@ impl InitLayerArgs {
 
 /// An init's layer over its base world, as a launch resolved it: the plan
 /// the store keeps for the init, the entries left out (indices in that
-/// plan) because a build refused them, and the plan replayed.
+/// plan) because a build left them to the session, and the plan replayed.
 pub struct Layer {
     pub world: World,
     full: Plan,
@@ -219,7 +219,7 @@ impl Layer {
 /// The last layer usable for INIT (`Plan::write_last`) stands in when it was
 /// planned from the same init content and everything it holds is still in
 /// the plan: at once, when it was resolved from this very plan, so a launch
-/// reads none of the refusals that resolution went through; and while the
+/// reads none of what that resolution found uncaptured; and while the
 /// plan's own layer is not built yet, whose libraries it lacks load at
 /// their first use and which the launch builds (`after_init`). After an
 /// edit of the init, its configuration forms are other code, so the base
@@ -227,7 +227,7 @@ impl Layer {
 pub fn layer(base: &World, init: &Path) -> Option<Layer> {
     let plan = Plan::read(&base.store, init)?;
     if !plan.current() {
-        eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init changed since its plan"}));
+        eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init, or what lies beside its load-path directories, changed since its plan"}));
         return None;
     }
     let last = Plan::read_last(&base.store, init).filter(|(last, _, _)| last.init_digest == plan.init_digest && last.within(&plan));
@@ -259,10 +259,11 @@ fn keep_last(layer: &Layer) {
     }
 }
 
-/// FULL's layer over BASE less the entries standing refusals name: each
-/// refused layer's entries are left out and the rest keyed again, until a
-/// key has no standing refusal. A library the init loads at startup that is
-/// left out takes every later entry with it, so the init keeps its order. A refusal that names no entry (the startup
+/// FULL's layer over BASE less the entries a standing build left to the
+/// session: each such build's entries are left out and the rest keyed again,
+/// until a key's build captured everything. A library the init loads at startup that is
+/// left out takes every later entry with it, so the init keeps its order. What
+/// a build could not capture that names no entry (the startup
 /// run after the libraries, the capture) leaves out the later half of the
 /// entries kept: capture ends earlier, and those load in the session as
 /// from source. None only when nothing is left.
@@ -275,19 +276,19 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
             return None;
         }
         let world = base.layered(plan.recipe());
-        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan, resolved_from: None, preload }) };
-        // A declared library refused loads ahead of its use, as it loaded.
-        for name in refusals.iter().filter(|r| r["kind"] == REFUSAL).flat_map(|r| r["features"].as_array().cloned().unwrap_or_default()) {
+        let Some(uncaptured) = world.standing_uncaptured() else { return Some(Layer { world, full, excluded, plan, resolved_from: None, preload }) };
+        // A declared library left to the session loads ahead of its use, as it loaded.
+        for name in uncaptured.iter().filter(|r| r["kind"] == LIVE_ENTRY).flat_map(|r| r["features"].as_array().cloned().unwrap_or_default()) {
             if let Some(name) = name.as_str() && !preload.iter().any(|kept| kept == name) { preload.push(name.to_owned()); }
         }
         // The build replayed the trimmed plan: its entry indices are
         // positions among the entries kept.
         let kept: Vec<usize> = (0..full.entries.len()).filter(|i| !excluded.contains(i)).collect();
-        let named: Vec<usize> = refusals.iter().filter(|r| r["kind"] == REFUSAL)
+        let named: Vec<usize> = uncaptured.iter().filter(|r| r["kind"] == LIVE_ENTRY)
             .filter_map(|r| r["entry"].as_u64()).filter_map(|j| kept.get(j as usize).copied()).collect();
         if named.is_empty() {
             let later = kept.get(kept.len().div_ceil(2)..).unwrap_or_default();
-            eprintln!("romacs-world: {}", json!({"event": "layer", "shortened": later.len(), "reason": {"refused": refusals}}));
+            eprintln!("romacs-world: {}", json!({"event": "layer", "shortened": later.len(), "reason": {"uncaptured": uncaptured}}));
             if later.is_empty() {
                 return None;
             }
@@ -381,13 +382,31 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
 /// (`romacs--layer-preload`), when there are any.
 pub fn preload_form(worlds: &Worlds) -> Option<String> {
     let layer = worlds.layer.as_ref().filter(|layer| worlds.from_layer && !layer.preload.is_empty())?;
-    let names: Vec<String> = layer.preload.iter().map(|name| format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))).collect();
+    let names: Vec<String> = layer.preload.iter().map(|name| lisp_string(name)).collect();
     Some(format!("(romacs--layer-preload '({}))", names.join(" ")))
+}
+
+/// The warning a session shows once when its world store cannot be used
+/// and it boots from source: REASON names the path and what is wrong. The
+/// store's checks keep a directory another local user owns, or could swap,
+/// from handing this session an image of theirs, which runs as code.
+pub fn store_warning_form(reason: &str) -> String {
+    let message = format!(
+        "Romacs started from source, without its saved world, because {reason}. \
+         A world store holds images this session runs as code, so Romacs uses one only where no one else \
+         can change it or the directories above it. To fix it, correct the ownership or permissions named \
+         above, or give the store a directory of your own with --world-store DIR or XDG_CACHE_HOME.");
+    format!("(display-warning 'romacs-world {} :warning)", lisp_string(&message))
+}
+
+/// TEXT in Lisp's string read syntax.
+fn lisp_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// INIT's layer built ahead of the next launch by a process apart from
 /// this one (`--world-build-layer`), from the plan the store keeps: a
-/// build that refuses entries needs another without them, and a session
+/// build that leaves entries to the session needs another without them, and a session
 /// that ends sooner than its rounds would leave the next launch to boot
 /// from the base and build them. The process logs in the store.
 fn build_ahead_apart(worlds: &Worlds, init: &Path) {
@@ -409,7 +428,7 @@ fn build_ahead_apart(worlds: &Worlds, init: &Path) {
 }
 
 /// The layer of FULL over BASE made usable: built here, or waited for,
-/// and after a build that refused entries, or a shortened one, built again
+/// and after a build that left entries to the session, or a shortened one, built again
 /// without them, a few times over. Whether a layer is usable at the end.
 fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<usize>) -> bool {
     for _ in 0..8 {
@@ -428,7 +447,7 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
             }
             Err(reason) => {
                 eprintln!("romacs-world: {}", json!({"event": "layer-build-failed", "key": key, "reason": reason}));
-                if layer.world.standing_refusal().is_none() {
+                if layer.world.standing_uncaptured().is_none() {
                     return false;
                 }
             }
@@ -457,7 +476,7 @@ pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: 
             let built = build_ahead(base, plan, width, height, floor);
             eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": built}));
         }
-        Some(_) => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "the init changed since its plan"})),
+        Some(_) => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "the init, or what lies beside its load-path directories, changed since its plan"})),
         None => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "no plan: the init has not run"})),
     }
 }
@@ -509,7 +528,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Opt
 
 /// The build's steps once it records: up to the chain's end, then PLAN's
 /// libraries for a layer. The world's VM, its carry and its events (the
-/// plan replayed, with the entries refused), for `World::build` to publish.
+/// plan replayed, with the entries left to the session), for `World::build` to publish.
 fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
                engine: std::rc::Rc<std::cell::RefCell<romacs_layout::LayoutEngine>>, plan: Option<&(Plan, Vec<Entry>)>) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
@@ -528,9 +547,9 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
     let events = match plan {
         Some((plan, deferred)) => {
-            let refused = vm.world_layer_load(plan, deferred);
-            eprintln!("romacs-world: {}", json!({"event": "layer-load", "entries": plan.entries.len(), "refused": refused}));
-            json!({"init-layer": plan.json(), "refused": refused})
+            let live = vm.world_layer_load(plan, deferred);
+            eprintln!("romacs-world: {}", json!({"event": "layer-load", "entries": plan.entries.len(), "live": live}));
+            json!({"init-layer": plan.json(), "live": live})
         }
         None => json!({}),
     };
@@ -551,6 +570,15 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unusable_store_says_why_and_how_to_fix_it() {
+        let form = store_warning_form("/tmp/x is writable by others and not sticky");
+        assert!(form.starts_with("(display-warning 'romacs-world \"Romacs started from source"), "{form}");
+        assert!(form.contains("because /tmp/x is writable by others and not sticky.") && form.contains("--world-store DIR"), "{form}");
+        // A reason's quotes and backslashes stay inside the one string.
+        assert!(store_warning_form(r#"/a "b" \c"#).contains(r#"/a \"b\" \\c"#));
+    }
 
     #[test]
     fn a_launch_keeps_its_worlds_in_the_users_cache_by_default() {

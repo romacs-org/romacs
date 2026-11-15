@@ -47,18 +47,18 @@ pub(crate) enum Fwd {
     Bool(u16),
     Int(u16),
     Buffer(u16),
-    /// A world build's fence (`crate::world`) around the variable at this
-    /// slot: its own redirect is kept by the fence, and every access checks
-    /// the fence, then acts through that redirect. Only `native_forwarding`
+    /// A world build's tracking (`crate::world`) around the variable at this
+    /// slot: its own redirect is kept by the tracking, and every access checks
+    /// the tracking, then acts through that redirect. Only `native_forwarding`
     /// sees it; the kind queries see the redirect it keeps.
-    Fence(u32),
+    Tracked(u32),
 }
 romacs_snapshot::snapshot_enum!(Fwd {
     Fwd::Obj(f0) => (f0),
     Fwd::Bool(f0) => (f0),
     Fwd::Int(f0) => (f0),
     Fwd::Buffer(f0) => (f0),
-    Fwd::Fence(f0) => (f0),
+    Fwd::Tracked(f0) => (f0),
 });
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
@@ -983,7 +983,7 @@ impl Forwarded {
             Fwd::Bool(i) => Some(if self.bools[i as usize] { Value::TRUE } else { Value::NIL }),
             Fwd::Int(i) => Value::integer(self.ints[i as usize]).ok(),
             Fwd::Obj(i) => Some(self.objects[i as usize]).filter(|&value| value != Value::UNBOUND),
-            Fwd::Buffer(_) | Fwd::Fence(_) => None,
+            Fwd::Buffer(_) | Fwd::Tracked(_) => None,
         }
     }
     #[inline(always)]
@@ -1186,8 +1186,8 @@ impl Vm {
     }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
-    /// A fenced built-in variable is the forwarding the fence keeps; a
-    /// fenced plain one is `Fwd::Fence`.
+    /// A tracked built-in variable is the forwarding the tracking keeps; a
+    /// tracked plain one is `Fwd::Tracked`.
     /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
     /// the only ones a `Fwd::Buffer' forwards.
     pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
@@ -1196,9 +1196,9 @@ impl Vm {
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => match self.fenced_forwarding(slot) {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => match self.tracked_forwarding(slot) {
                 Some(kept) => Some(kept),
-                // A fenced buffer-local variable is no built-in.
+                // A tracked buffer-local variable is no built-in.
                 None if matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => None,
                 None => Some(fwd),
             },
@@ -1206,8 +1206,8 @@ impl Vm {
             _ => None,
         }
     }
-    /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
-    /// variable is `Fwd::Fence`.
+    /// [`Vm::forwarding`] as the access paths dispatch on it: every tracked
+    /// variable is `Fwd::Tracked`.
     pub(super) fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
@@ -1229,7 +1229,7 @@ impl Vm {
     /// [`Vm::forwarding`] without caching, for `&self` readers.
     pub(super) fn forwarding_ref(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => Some(self.tracked_forwarding(slot).unwrap_or(fwd)),
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             Some(_) => None,
             None => {
@@ -1602,7 +1602,7 @@ impl Vm {
                 let buffer = self.buffer_index()?;
                 self.forwarded_buffer_value(buffer, i)
             }
-            Fwd::Fence(slot) => return self.fenced(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
+            Fwd::Tracked(slot) => return self.tracked(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
         })
     }
     /// GNU `default_value`, SYMBOL_FORWARDED arm: a per-buffer variable's
@@ -1610,7 +1610,7 @@ impl Vm {
     pub(super) fn forwarded_default(&mut self, fwd: Fwd) -> Result<Value> {
         match fwd {
             Fwd::Buffer(i) => Ok(self.per_buffer_default(i)),
-            Fwd::Fence(slot) => self.fenced(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
+            Fwd::Tracked(slot) => self.tracked(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
             _ => self.forwarded_value(fwd),
         }
     }
@@ -1655,7 +1655,7 @@ impl Vm {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
             }
-            Fwd::Fence(_) => unreachable!("set_forwarded acts through the fence"),
+            Fwd::Tracked(_) => unreachable!("set_forwarded acts through the tracking"),
         }
         Ok(())
     }
@@ -1673,8 +1673,8 @@ impl Vm {
     }
     /// GNU `set_internal`, SYMBOL_FORWARDED arm (data.c:1791-1818).
     pub(super) fn set_forwarded(&mut self, slot: usize, fwd: Fwd, value: Value, flag: SetFlag) -> std::result::Result<(), Fault> {
-        if let Fwd::Fence(cell) = fwd {
-            return self.fenced(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
+        if let Fwd::Tracked(cell) = fwd {
+            return self.tracked(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
         }
         if value == Value::UNBOUND {
             return Err(Fault::Error(format!("{UNBINDABLE}{}", self.symbol_names[slot])));
@@ -1704,7 +1704,7 @@ impl Vm {
                 self.forwarded.defaults[i as usize] = value;
                 Ok(())
             }
-            Fwd::Fence(cell) => self.fenced(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
+            Fwd::Tracked(cell) => self.tracked(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
             _ => self.set_forwarded(slot, fwd, value, flag),
         }
     }
@@ -1761,7 +1761,7 @@ impl Vm {
             local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
-            Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
+            Fwd::Tracked(_) => unreachable!("unbind_one restores a tracked binding through the tracking"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
             Fwd::Bool(i) => {
                 self.forwarded.bools[i as usize] = old != Value::NIL;
@@ -1812,7 +1812,7 @@ impl Vm {
                 }
                 Ok(())
             }
-            Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
+            Fwd::Tracked(_) => self.tracked(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
     /// The condition GNU signals for a forwarded store fault rendered by
