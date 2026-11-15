@@ -22,7 +22,7 @@ fn asset_id(command: RenderCommand) -> ImageId {
 fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     let (tx, rx) = command_channel(64);
     tx.try_send(asset(1)).unwrap();
-    tx.try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+    tx.try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     tx.try_send(asset(2)).unwrap();
     tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow {
@@ -36,7 +36,7 @@ fn selective_startup_preserves_capacity_and_fifo_for_every_queued_asset() {
     assert!(matches!(tx.try_send(asset(63)), Err(TrySendError::Full(_))));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false })
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
@@ -73,7 +73,7 @@ fn ordinary_receive_prioritizes_shutdown_without_reordering_assets() {
 fn selective_consumption_unblocks_a_backpressured_sender_without_asset_loss() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     let (done, result) = bounded(1);
     let worker = std::thread::spawn(move || {
@@ -81,7 +81,7 @@ fn selective_consumption_unblocks_a_backpressured_sender_without_asset_loss() {
     });
     assert!(matches!(
         rx.try_recv_startup().unwrap(),
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false })
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(result.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
     assert_eq!(asset_id(rx.recv().unwrap()), ImageId::new(1));
@@ -129,7 +129,7 @@ fn sender_clones_disconnect_only_after_last_drop_and_pending_commands_are_draine
 #[test]
 fn tty_select_wake_is_rearmed_for_pending_work_and_stale_wakes_are_not_disconnects() {
     let (tx, rx) = command_channel(2);
-    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     tx.send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
         .unwrap();
@@ -189,12 +189,12 @@ fn cloned_producers_keep_stream_alive_and_disconnect_returns_ownership() {
     drop(sender);
     assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
     other
-        .send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+        .send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     drop(other);
     assert!(matches!(
         receiver.recv().unwrap(),
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false })
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(matches!(
         receiver.try_recv(),
@@ -322,7 +322,7 @@ fn independent_shutdown_retains_len_timeout_fifo_and_last_sender_disconnect() {
 fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     let (tx, rx) = command_channel(2);
     tx.send(asset(1)).unwrap();
-    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+    tx.send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     assert!(!rx.has_startup_command_for(false));
     assert!(rx.has_startup_command_for(true));
@@ -337,7 +337,7 @@ fn unserviceable_startup_backlog_is_not_disconnected_or_spuriously_pollable() {
     ));
     assert!(matches!(
         rx.try_recv_startup_for(true, true).unwrap(),
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false })
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false })
     ));
     assert!(!rx.has_startup_command_for(true));
     assert!(matches!(

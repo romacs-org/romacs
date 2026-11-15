@@ -56,6 +56,7 @@ impl romacs_snapshot::Schema for LambdaList {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
 }
 impl LambdaList {
     /// Each Value the entry holds, to VISIT: its closure and every object

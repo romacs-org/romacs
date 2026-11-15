@@ -9,7 +9,9 @@ use crate::thread_comm::{
 };
 use romacs_display_protocol::FrameGlyphBuffer;
 
-pub const PRIMARY_FRAME: u64 = 1;
+/// The id of the evaluator's initial frame, `F1`: the frame a session's
+/// first window shows. Every other frame has the id the evaluator gave it.
+pub const INITIAL_FRAME: u64 = 1;
 
 pub use crate::input_bridge::PaintDiagnostic;
 
@@ -44,7 +46,7 @@ impl PaintHost {
         Self::wayland_with(socket, width, height, title, false)
     }
 
-    /// A server's host: no window until [`PaintSender::show_primary`] asks
+    /// A server's host: no window until [`PaintSender::realize`] asks
     /// for one, and the session outlives each window it shows. The GPU
     /// starts with the first window and stays for the next.
     #[cfg(target_os = "linux")]
@@ -82,7 +84,7 @@ impl PaintHost {
         if !server {
             cmd_tx
                 .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
-                    frame: FrameRef::Frame(PRIMARY_FRAME),
+                    frame: FrameRef::Frame(INITIAL_FRAME),
                 }))
                 .map_err(|error| error.to_string())?;
         }
@@ -187,8 +189,8 @@ impl PaintSender {
         self.requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
     }
 
-    /// Call WAKE, from the input bridge, when a presentation of the primary
-    /// frame newer than any before it has rendered: a paint's completion then ends a wait
+    /// Call WAKE, from the input bridge, when a presentation of any frame
+    /// newer than any before it has rendered: a paint's completion then ends a wait
     /// for input itself. One waiter per sender: a second registration
     /// would leave its wait unwoken, and is refused.
     ///
@@ -263,30 +265,33 @@ impl PaintSender {
         })?
     }
 
-    /// Wait for a successfully rendered primary presentation, not merely ingress
-    /// activation: PRESENTATION or a later one, since this bounded snapshot
-    /// retains only the latest. No sample exists before the first successful render.
+    /// Wait for a successfully rendered presentation of FRAME, not merely
+    /// ingress activation: PRESENTATION or a later one, since this bounded
+    /// snapshot retains only the latest. No sample exists before the frame's
+    /// first successful render.
     pub fn wait_for_render(
         &self,
+        frame: u64,
         presentation: u64,
         timeout: std::time::Duration,
     ) -> Result<PaintDiagnostic, String> {
         romacs_display_protocol::call_count::count(if timeout.is_zero() { "sender.render_poll" } else { "sender.wait_for_render" });
-        self.facts.wait_for_render(PRIMARY_FRAME, presentation, timeout)
+        self.facts.wait_for_render(frame, presentation, timeout)
     }
 
-    /// Queue one complete frame, including `fonts` and `char_fonts`. Returns
-    /// backpressure rather than silently dropping a repaint. The producer must
-    /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
+    /// Queue one complete top-level frame, including `fonts` and
+    /// `char_fonts`. Returns backpressure rather than silently dropping a
+    /// repaint. The producer must use a fresh nonzero presentation ID for
+    /// every revision.
     pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
         self.submit_scene(frame, Vec::new(), Vec::new())
     }
 
-    /// Queue a frame, the child frames shown over it, lowest first, and the
-    /// text animations drawn over it, as one paint: each child names
-    /// PRIMARY_FRAME as its parent and carries the frame's presentation. A
-    /// child or an animation the last scene showed and this one does not is
-    /// removed.
+    /// Queue a top-level frame, the child frames shown over it, lowest
+    /// first, and the text animations drawn over it, as one paint: each
+    /// child's parent is the frame or a child before it, and each carries
+    /// the frame's presentation. A child or an animation the frame's last
+    /// scene showed and this one does not is removed.
     pub fn submit_scene(
         &self,
         frame: FrameGlyphBuffer,
@@ -421,7 +426,7 @@ impl PaintSender {
         result
     }
 
-    /// Apply FRAME's `alpha' setter, the primary frame's or a child's: ALPHA
+    /// Apply FRAME's `alpha' setter, a top-level frame's or a child's: ALPHA
     /// while active and inactive (negative leaves its opacity alone),
     /// raised to LIMIT.
     pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
@@ -435,17 +440,18 @@ impl PaintSender {
         result
     }
 
-    /// A server's window for the primary frame, WIDTH by HEIGHT: made
-    /// when none shows, asked for the focus when one does. The receiver
-    /// answers once the window and its surface exist (or failed), within
-    /// 30 s; paint the frame after that.
-    pub fn show_primary(
+    /// A server's window for FRAME, WIDTH by HEIGHT: made when none shows,
+    /// asked for the focus when one does. The receiver answers once the
+    /// window and its surface exist (or failed), within 30 s; paint the
+    /// frame after that.
+    pub fn realize(
         &self,
+        frame: u64,
         width: u32,
         height: u32,
         title: String,
     ) -> Result<crossbeam_channel::Receiver<Result<(), String>>, String> {
-        romacs_display_protocol::call_count::count("sender.show_primary");
+        romacs_display_protocol::call_count::count("sender.realize");
         let (reply, ready) = crossbeam_channel::bounded(1);
         let request = self.next_request();
         // A window made after its waiter gave up is destroyed, not left.
@@ -456,7 +462,7 @@ impl PaintSender {
                 other => Err(format!("window realization answered {other:?}")),
             };
             if reply.send(made.clone()).is_err() && made.is_ok() {
-                let _ = commands.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(PRIMARY_FRAME) }));
+                let _ = commands.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(frame) }));
                 proxy.wake_up();
             }
         }));
@@ -465,7 +471,7 @@ impl PaintSender {
         };
         let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::RealizeFrame {
-                frame: FrameRef::Frame(PRIMARY_FRAME),
+                frame: FrameRef::Frame(frame),
                 width,
                 height,
                 title,
@@ -480,8 +486,9 @@ impl PaintSender {
         result.map(|()| ready)
     }
 
-    /// Where the pointer is over the primary window, if it is.
-    pub fn pointer(&self) -> Option<(i32, i32)> {
+    /// The frame whose window the pointer is over, and where in it, if it
+    /// is over one.
+    pub fn pointer(&self) -> Option<(u64, (i32, i32))> {
         romacs_display_protocol::call_count::count("sender.pointer");
         self.facts.pointer()
     }
@@ -493,21 +500,21 @@ impl PaintSender {
         self.facts.take_key_repeats()
     }
 
-    /// Title the primary window (xdisp.c gui_consider_frame_title).
-    pub fn set_title(&self, title: String) -> Result<(), String> {
+    /// Title FRAME's window (xdisp.c gui_consider_frame_title).
+    pub fn set_title(&self, frame: u64, title: String) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_title");
         let result = self.commands
-            .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { title }))
+            .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { frame: FrameRef::Frame(frame), title }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
     }
 
-    /// Close a server's primary window; the render loop and the GPU stay.
-    pub fn hide_primary(&self) -> Result<(), String> {
-        romacs_display_protocol::call_count::count("sender.hide_primary");
+    /// Close a server's window of FRAME; the render loop and the GPU stay.
+    pub fn hide(&self, frame: u64) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.hide");
         let result = self.commands
-            .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Primary }))
+            .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(frame) }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
@@ -525,11 +532,11 @@ impl PaintSender {
         result
     }
 
-    /// Ask the compositor to bring the primary window to the user.
-    pub fn raise_primary(&self) -> Result<(), String> {
-        romacs_display_protocol::call_count::count("sender.raise_primary");
+    /// Ask the compositor to bring FRAME's window to the user.
+    pub fn raise(&self, frame: u64) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.raise");
         let result = self.commands
-            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: FrameRef::Frame(frame), urgent: false }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
@@ -556,25 +563,31 @@ impl Drop for PaintSender {
     }
 }
 
-/// Children of ROOT, distinct and none the primary frame.
+/// Children of ROOT, distinct and none ROOT itself, each parented to ROOT
+/// or to a child before it: the scene lists them lowest first, and a
+/// child is drawn above its parent.
 pub(crate) fn validate_children(root: &FrameGlyphBuffer, children: &[FrameGlyphBuffer]) -> Result<(), String> {
+    let root_id = root.frame_placement.frame().get();
     let mut ids = std::collections::HashSet::new();
     for child in children {
         let placement = child.frame_placement;
         let id = placement.frame().get();
-        if id == PRIMARY_FRAME
+        let parented = placement.parent().map(|p| p.get()).is_some_and(|p| p == root_id || ids.contains(&p));
+        if id == root_id
+            || !parented
             || !ids.insert(id)
-            || placement.parent().map(|p| p.get()) != Some(PRIMARY_FRAME)
             || child.presentation_id != root.presentation_id
             || placement.presentation() != root.presentation_id
             || !(child.width.is_finite() && child.height.is_finite() && child.width > 0.0 && child.height > 0.0)
         {
-            return Err("paint host requires distinct child frames of the primary presentation".into());
+            return Err("paint host requires distinct child frames of the root presentation".into());
         }
     }
     Ok(())
 }
 
+/// ROOT is a top-level frame: no parent, at its own origin, a positive
+/// size, and a nonzero presentation it carries.
 pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {
     let rect = frame.frame_placement.outer_in_parent();
     if !frame.width.is_finite()
@@ -588,12 +601,11 @@ pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {
     {
         return Err("paint host requires coherent positive root geometry".into());
     }
-    if frame.frame_placement.frame().get() != PRIMARY_FRAME
-        || frame.frame_placement.parent().is_some()
+    if frame.frame_placement.parent().is_some()
         || frame.presentation_id.get() == 0
         || frame.frame_placement.presentation() != frame.presentation_id
     {
-        return Err("paint host requires coherent nonzero primary presentation".into());
+        return Err("paint host requires a coherent nonzero top-level presentation".into());
     }
     Ok(())
 }

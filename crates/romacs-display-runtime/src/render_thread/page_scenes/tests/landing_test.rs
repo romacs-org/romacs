@@ -538,7 +538,7 @@ mod gpu {
             GeometrySize::<LogicalPixels>::from_px(page_frame.width, page_frame.height).expect("size"),
         ));
         renderer.render_frame_glyphs(&target.create_view(&Default::default()), &page_frame, &mut atlas, mapping,
-                                     false, None, None, None, None, None);
+                                     false, None, None, None, None);
         let shown = read(&device, &queue, &target);
 
         // The page, away from the landing and at the placement's edges.

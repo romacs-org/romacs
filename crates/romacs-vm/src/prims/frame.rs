@@ -747,7 +747,7 @@ fn frame_after_make_frame(cx, frame: Value, made: Value) {
 defsubr! { name = "tab-bar-height", gnu = "xdisp.c:15013", effect = Reads,
 fn tab_bar_height(cx; optional frame: Value, pixelwise: Value) {
     let frame = cx.windows().decode_live_frame(frame)?;
-    let lines = if cx.windows().is_child_frame(frame)? { 0 } else { i64::from(cx.windows().tab_bar_lines()) };
+    let lines = if cx.windows().is_child_frame(frame)? { 0 } else { i64::from(cx.windows().tab_bar_lines(frame)) };
     let unit = if pixelwise != Value::NIL { i64::from(char_size(cx, false)?) } else { 1 };
     Ok(Value::integer(lines * unit).unwrap())
 }}

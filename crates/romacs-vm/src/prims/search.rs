@@ -54,17 +54,17 @@ fn moved(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 defsubr! { name = "string-search", gnu = "fns.c:6576", effect = Pure,
 fn string_search(cx, needle: Value, haystack: Value; optional start_pos: Value) {
     let needle = cx.string_view(needle)?;
-    let haystack = cx.string_view(haystack)?;
+    let (len, multibyte) = cx.string_shape(haystack)?;
     let start = if start_pos == Value::NIL { 0 } else {
         start_pos.integer_value().ok_or(Fault::Wrong("fixnump", start_pos))?
     };
-    if start < 0 || start as usize > haystack.len() {
+    if start < 0 || start as usize > len {
         return Err(Fault::Range1(start_pos));
     }
     let start = start as usize;
-    if needle.len() > haystack.len() - start { return Ok(Value::NIL); }
+    if needle.len() > len - start { return Ok(Value::NIL); }
     let mut pattern = needle.bytes().to_vec();
-    if haystack.is_multibyte() && !needle.is_multibyte() && !pattern.is_ascii() {
+    if multibyte && !needle.is_multibyte() && !pattern.is_ascii() {
         pattern.clear();
         for code in needle.chars() {
             let code = if code >= 128 { code + crate::lstring::BYTE8_OFFSET } else { code };
@@ -72,7 +72,7 @@ fn string_search(cx, needle: Value, haystack: Value; optional start_pos: Value) 
             let width = crate::lstring::char_string(code, &mut encoded);
             pattern.extend_from_slice(&encoded[..width]);
         }
-    } else if !haystack.is_multibyte() && needle.is_multibyte() {
+    } else if !multibyte && needle.is_multibyte() {
         pattern.clear();
         for code in needle.chars() {
             if code < 128 { pattern.push(code as u8); }
@@ -81,28 +81,20 @@ fn string_search(cx, needle: Value, haystack: Value; optional start_pos: Value) 
             } else { return Ok(Value::NIL); }
         }
     }
-    // Build boundaries from the canonical GNU decoder, not Rust UTF-8:
-    // raw-byte characters, surrogates and five-byte characters are valid here.
-    let mut boundaries = Vec::with_capacity(haystack.len() + 1);
-    let mut byte = 0;
-    boundaries.push(byte);
-    for code in haystack.chars() {
-        byte += if haystack.is_multibyte() {
-            crate::lstring::char_string(code, &mut [0; 5])
-        } else { 1 };
-        boundaries.push(byte);
-    }
-    let start_byte = boundaries[start];
-    let found = if pattern.is_empty() { Some(start_byte) } else {
-        haystack.bytes()[start_byte..].windows(pattern.len())
-            .position(|window| window == pattern).map(|offset| start_byte + offset)
+    // The haystack from START, found through its own cursor, so a scan at
+    // increasing STARTs reads each character once; a match's position counts
+    // the characters before it with the canonical GNU decoder (raw-byte
+    // characters, surrogates and five-byte characters are characters here).
+    let rest = cx.string_view_from(haystack, start)?;
+    let found = if pattern.is_empty() { Some(0) } else {
+        rest.bytes().windows(pattern.len()).position(|window| window == pattern)
     };
-    match found {
-        None => Ok(Value::NIL),
-        Some(byte) => {
-            let character = boundaries.partition_point(|&boundary| boundary <= byte) - 1;
-            Ok(Value::integer(character as i64).unwrap())
+    Ok(match found {
+        None => Value::NIL,
+        Some(offset) => {
+            let before = crate::lstring::StrView { bytes: &rest.bytes()[..offset], chars: 0, multibyte };
+            Value::integer(i64::try_from(start + before.chars().count()).expect("a string index is a fixnum")).unwrap()
         }
-    }
+    })
 }}
 
