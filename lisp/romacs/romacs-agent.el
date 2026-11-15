@@ -3297,42 +3297,85 @@ record SEQ (`romacs-agent--record-line-end')."
     (and (integerp found) found)))
 
 (defconst romacs-agent--prompt-line-end
-  ",\"romacsRequest\":[0-9]+,\"type\":\"user\"},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
-  "How a prompt's record line ends: the request id it was sent under, the
-last key of its `in' (the supervisor writes keys sorted).")
+  "\"romacsRequest\":[0-9]+\\(?:,\"[A-Za-z]+\":\"[^\"\\\\]*\"\\)*},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
+  "How a prompt's record line ends, whatever its harness: the request id
+Romacs sent it under, the `in' object's last key but for plain words
+after it (the supervisor writes keys sorted).  No string in a record can
+hold it, as its quotes would be escaped there.")
 
-(defun romacs-agent--journal-tail (session turns)
-  "The byte at which SESSION's journal's last TURNS prompts start, nil
-when it holds no more than TURNS: a prompt's record is told from its
-line's end (`romacs-agent--prompt-line-end'), looked for from the
-journal's end in growing spans, so a long journal is read only as far
-back as its last turns go."
+(defconst romacs-agent--turn-free-reach 400
+  "How many records before a prompt are looked at to tell whether a turn
+was under way when it came.")
+
+(defun romacs-agent--turn-free-p (session probe from-start)
+  "Whether the records before point (a line's start in a buffer of
+SESSION's journal bytes) leave no turn under way: the last one telling
+either ends a turn or its harness, or there is none and FROM-START says
+the buffer starts at the journal's start.  PROBE, a scratch copy of
+SESSION (`romacs-agent--scratch'), is what the harness parses them in."
+  (save-excursion
+    (let ((verdict nil) (steps 0) (events (romacs-agent--harness-get session :events)))
+      (while (not verdict)
+        (if (or (bobp) (>= steps romacs-agent--turn-free-reach))
+            (setq verdict (if (and (bobp) from-start) 'free 'busy))
+          (forward-line -1)
+          (setq steps (1+ steps))
+          (let ((record (ignore-errors
+                          (json-parse-string (decode-coding-string (buffer-substring (point) (line-end-position)) 'utf-8)
+                                             :object-type 'hash-table :null-object :null :false-object :false))))
+            (when (hash-table-p record)
+              (let ((out (gethash "out" record)) (in (gethash "in" record)))
+                (cond ((gethash "exit" record) (setq verdict 'free))
+                      ;; Another prompt and no end between: this one came into its turn.
+                      ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
+                      ((hash-table-p out)
+                       (let ((types (mapcar (lambda (event) (plist-get event :type))
+                                            (ignore-errors (funcall events probe out)))))
+                         (cond ((memq 'done types) (setq verdict 'free))
+                               ((seq-intersection types '(delta thinking tool message-end approval))
+                                (setq verdict 'busy)))))))))))
+      (eq verdict 'free))))
+
+(defun romacs-agent--journal-tail (session turns &optional end)
+  "Where to replay SESSION's journal from to draw its last TURNS prompts
+before byte END (its end by default): (FROM . PROMPTS), FROM the byte
+of a prompt that started its turn with none under way, at least TURNS
+back, or nil to replay all of it, which then holds PROMPTS prompts.
+A prompt's record is told from its line's end
+\(`romacs-agent--prompt-line-end'), looked for from END in growing
+spans, so a long journal is read only as far back as its last turns
+go."
   (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-         (size (file-attribute-size (file-attributes journal)))
+         (end (or end (file-attribute-size (file-attributes journal))))
+         (probe (romacs-agent--scratch session))
          (span 262144) (found nil))
-    (when (and size (> turns 0))
+    (if (not (and end (file-readable-p journal))) (cons nil 0)
       (with-temp-buffer
         (set-buffer-multibyte nil)
         (while (not found)
-          (let ((start (max 0 (- size span))) (seen 0) (at nil))
+          (let ((start (max 0 (- end span))) (seen 0) (cut nil) (at nil))
             (widen)
             (erase-buffer)
-            (insert-file-contents-literally journal nil start size)
+            (insert-file-contents-literally journal nil start end)
             ;; Begun inside a record: its part is no line's start.
             (when (> start 0)
               (goto-char (point-min))
               (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (goto-char (point-max))
-            ;; One prompt more than TURNS: the journal has turns before.
-            (while (and (<= seen turns) (re-search-backward romacs-agent--prompt-line-end nil t))
+            ;; Back to the TURNSth prompt, then on to one that came with
+            ;; no turn under way: a replay from it parses nothing begun
+            ;; before it.  With no prompt before it, it is no cut.
+            (while (and (not (and cut (> seen cut)))
+                        (re-search-backward romacs-agent--prompt-line-end nil t))
               (beginning-of-line)
               (when (looking-at-p "{\"in\":")
                 (setq seen (1+ seen))
-                (when (= seen turns) (setq at (+ start (1- (point)))))))
-            (setq found (cond ((> seen turns) at)
-                              ((= start 0) 'all)))
+                (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start 0)))
+                  (setq cut seen at (+ start (1- (point)))))))
+            (setq found (cond ((and cut (> seen cut)) (cons at cut))
+                              ((= start 0) (cons nil seen))))
             (setq span (* 4 span))))))
-    (and (integerp found) found)))
+    found))
 
 (defun romacs-agent--read-kept (session)
   "SESSION's kept state as written, or nil when there is none it can read."

@@ -20,9 +20,9 @@
   "Record SEQ's line as the supervisor writes it: keys sorted."
   (concat (json-serialize (romacs-mcp--object key value "seq" seq "t" (+ 1794600000.25 seq))) "\n"))
 
-(defun romacs-agent-tail-tests--turn (n seq &optional padding)
+(defun romacs-agent-tail-tests--turn (n seq &optional padding unended)
   "Turn N's lines from SEQ: its prompt, its answer (PADDING characters
-more), its result."
+more), its result, unless UNENDED (the next prompt steers it)."
   (concat (romacs-agent-tail-tests--line
            seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
                                         "romacsRequest" n "type" "user"))
@@ -34,12 +34,14 @@ more), its result."
                                                           "type" "text"))
                                        "id" (format "m%d" n))
                             "parent_tool_use_id" :null "type" "assistant"))
-          (romacs-agent-tail-tests--line
-           (+ seq 2) "out" (romacs-mcp--object "result" (format "answer %d" n) "type" "result"))))
+          (if unended ""
+            (romacs-agent-tail-tests--line
+             (+ seq 2) "out" (romacs-mcp--object "result" (format "answer %d" n) "type" "result")))))
 
-(defun romacs-agent-tail-tests--with-session (turns padding body)
+(defun romacs-agent-tail-tests--with-session (turns padding body &optional unended)
   "Call BODY with a session whose journal holds TURNS turns, each answer
-PADDING characters long, and its journal's file."
+PADDING characters long, and its journal's file; turn UNENDED has no
+result."
   (let* ((root (make-temp-file "romacs-tail-" t))
          (run (romacs-test-socket-directory "tail-"))
          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
@@ -58,7 +60,7 @@ PADDING characters long, and its journal's file."
                                                         "hostSocket" (expand-file-name "none/host.sock" root)))
           (let ((coding-system-for-write 'utf-8-unix))
             (write-region (concat (romacs-agent-tail-tests--line 1 "note" (romacs-mcp--object "type" "run"))
-                                  (mapconcat (lambda (n) (romacs-agent-tail-tests--turn n (+ 2 (* 3 (1- n))) padding))
+                                  (mapconcat (lambda (n) (romacs-agent-tail-tests--turn n (+ 2 (* 3 (1- n))) padding (eql n unended)))
                                              (number-sequence 1 turns) ""))
                           nil journal nil 'silent))
           (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
@@ -83,13 +85,32 @@ PADDING characters long, and its journal's file."
     (romacs-agent-tail-tests--with-session
      5 padding
      (lambda (session journal)
-       (should (= (romacs-agent--journal-tail session 2)
-                  (romacs-agent-tail-tests--byte-of journal "\"question 4\"")))
-       (should (= (romacs-agent--journal-tail session 4)
-                  (romacs-agent-tail-tests--byte-of journal "\"question 2\"")))
-       ;; No more than that many: the whole journal.
-       (should-not (romacs-agent--journal-tail session 5))
-       (should-not (romacs-agent--journal-tail session 9))))))
+       (should (equal (romacs-agent--journal-tail session 2)
+                      (cons (romacs-agent-tail-tests--byte-of journal "\"question 4\"") 2)))
+       (should (equal (romacs-agent--journal-tail session 4)
+                      (cons (romacs-agent-tail-tests--byte-of journal "\"question 2\"") 4)))
+       ;; No more than that many: the whole journal, and how many it holds.
+       (should (equal (romacs-agent--journal-tail session 5) '(nil . 5)))
+       (should (equal (romacs-agent--journal-tail session 9) '(nil . 5)))))))
+
+(ert-deftest romacs-agent-journal-tail-starts-where-no-turn-is-under-way ()
+  ;; Prompt 4 came while turn 3 went on: a replay from it would parse
+  ;; turn 3's end without its start, so the tail starts at prompt 3.
+  (romacs-agent-tail-tests--with-session
+   5 0
+   (lambda (session journal)
+     (should (equal (romacs-agent--journal-tail session 2)
+                    (cons (romacs-agent-tail-tests--byte-of journal "\"question 3\"") 3))))
+   3))
+
+(ert-deftest romacs-agent-prompt-line-end-fits-every-harness ()
+  ;; Claude's prompt, Codex's turn start and its steering: the request id
+  ;; Romacs sent it under; a tool's output quoting one is no prompt.
+  (dolist (line '("{\"in\":{\"message\":{\"content\":\"hi\",\"role\":\"user\"},\"romacsRequest\":7,\"type\":\"user\"},\"seq\":12,\"t\":1794662969.3}"
+                  "{\"in\":{\"id\":\"turn/start:4\",\"method\":\"turn/start\",\"params\":{\"input\":[]},\"romacsRequest\":4},\"seq\":21,\"t\":1794662969.3056054}"))
+    (should (string-match-p romacs-agent--prompt-line-end line)))
+  (should-not (string-match-p romacs-agent--prompt-line-end
+                              "{\"out\":{\"text\":\"\\\"romacsRequest\\\":7},\"},\"seq\":13,\"t\":1.5}")))
 
 (defun romacs-agent-tail-tests--open (session)
   "SESSION's chat, drawn, point at its end."
@@ -123,8 +144,14 @@ PADDING characters long, and its journal's file."
              (romacs-agent-chat-earlier)
              (should (equal (romacs-agent-tail-tests--questions buffer) '(2 3 4 5)))
              (should (looking-at-p "> question 4"))
-             ;; Then the rest: the row goes.
+             ;; A draft written before paging is kept; its undo history,
+             ;; whose places the redraw moved, goes.
+             (goto-char (point-max))
+             (insert "a draft")
              (romacs-agent-chat-earlier)
+             (should (equal (romacs-agent-ui--composer-text) "a draft"))
+             (should-not buffer-undo-list)
+             ;; Then the rest: the row goes.
              (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5)))
              (should-not (string-search "Earlier turns" (buffer-string)))
              (should (string-search "answer 1" (buffer-string))))
@@ -153,11 +180,30 @@ PADDING characters long, and its journal's file."
              (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5)))
              (should (string-prefix-p "▴ Earlier turns" (buffer-string)))
              (should (string-search "answer 5" (buffer-string)))
+             ;; Its rules' fills are all in the buffer: a resize refits them.
+             (should romacs-agent-ui--fills)
+             (should (seq-every-p #'marker-position romacs-agent-ui--fills))
+             (romacs-agent-ui--refit-rules)
              ;; Point among the oldest: they stay.
              (dolist (n '(6 7)) (funcall turn n))
              (goto-char (point-min))
              (funcall turn 8)
              (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5 6 7 8))))
+         (kill-buffer buffer))))))
+
+;; A turn rolled back to, before the turns drawn: all of them dim.
+(ert-deftest romacs-agent-chat-dims-a-rollback-past-its-start ()
+  (romacs-agent-tail-tests--with-session
+   5 0
+   (lambda (session _journal)
+     (let* ((romacs-agent-chat-turns 2) (buffer (romacs-agent-tail-tests--open session)))
+       (unwind-protect
+           (with-current-buffer buffer
+             (romacs-agent-ui--render session (list :type 'rolled-back :to 1 :turns 5 :prompt "question 1"
+                                                    :seq 20 :last t))
+             (goto-char (point-min))
+             (search-forward "> question 4")
+             (should (memq 'romacs-agent-dim (ensure-list (get-text-property (point) 'face)))))
          (kill-buffer buffer))))))
 
 ;;; romacs-agent-tail-tests.el ends here
