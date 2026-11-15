@@ -377,4 +377,18 @@ unless CUT, then its turn's end."
              (should (memq 'romacs-agent-dim (ensure-list (get-text-property (point) 'face)))))
          (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-chat-undo-moves-with-the-transcript ()
+  ;; Undo entries past where the transcript grew move with the text after
+  ;; it; those before stay.
+  (should (equal (romacs-agent-ui--undo-shifted '(nil (10 . 14) ("ab" . 12) ("cd" . -13) 15 (t . 0) (nil face x 11 . 13) (3 . 5))
+                                                10 4)
+                 '(nil (14 . 18) ("ab" . 16) ("cd" . -17) 19 (t . 0) (nil face x 15 . 17) (3 . 5)))))
+
+(ert-deftest romacs-agent-chat-undo-shifts-in-place ()
+  ;; The list and its entries stay the same conses.
+  (let* ((entry (cons 10 14)) (entries (list nil entry 15)))
+    (should (eq (romacs-agent-ui--undo-shifted entries 10 4) entries))
+    (should (eq (cadr entries) entry))
+    (should (equal entries '(nil (14 . 18) 19)))))
+
 ;;; romacs-agent-tail-tests.el ends here

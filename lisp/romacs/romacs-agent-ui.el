@@ -197,6 +197,39 @@ edits as any buffer does.  Typing in it types in the composer.")
     map)
   "Keys of a chat's row for questions an agent asks.")
 
+(defmacro romacs-agent-ui--editing (&rest body)
+  "Run BODY, which draws the current chat's transcript: nothing it does is
+recorded to undo (undone, the transcript would lose text with nothing to
+draw it again), and the composer's undo, below the transcript, moves by
+what the transcript grew or shrank before it (`romacs-agent-ui--undo-shifted')."
+  (declare (indent 0) (debug t))
+  (let ((at (make-symbol "at")) (size (make-symbol "size")))
+    `(let ((,at (and (markerp romacs-agent-ui--end) (marker-position romacs-agent-ui--end)))
+           (,size (buffer-size)))
+       (prog1 (let ((buffer-undo-list t)) ,@body)
+         (when (and ,at (consp buffer-undo-list))
+           (romacs-agent-ui--undo-shifted buffer-undo-list ,at (- (buffer-size) ,size)))))))
+
+(defun romacs-agent-ui--undo-shifted (entries at delta)
+  "Undo ENTRIES with their places at or past AT moved by DELTA, in place:
+text that many characters long was put in before them.  The list and its
+entries stay the same conses: undo's tables and a pending undo know them
+so."
+  (let ((shift (lambda (pos) (if (and (integerp pos) (>= (abs pos) at)) (if (< pos 0) (- pos delta) (+ pos delta)) pos))))
+    (when (and (/= delta 0) (listp entries))
+      (let ((cell entries))
+        (while (consp cell)
+          (let ((entry (car cell)))
+            (pcase entry
+              ((pred integerp) (setcar cell (funcall shift entry)))
+              (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
+               (setcar entry (funcall shift beg)) (setcdr entry (funcall shift end)))
+              (`(,(pred stringp) . ,(and pos (pred integerp))) (setcdr entry (funcall shift pos)))
+              (`(nil ,_ ,_ ,(and beg (pred integerp)) . ,(and end (pred integerp)))
+               (let ((tail (nthcdr 3 entry))) (setcar tail (funcall shift beg)) (setcdr tail (funcall shift end))))))
+          (setq cell (cdr cell)))))
+    entries))
+
 (defun romacs-agent-ui--sealed (text)
   "TEXT as the transcript holds it: read-only, a field of its own (word
 and line motion stop at the composer's start), with the transcript's keys
@@ -1107,7 +1140,8 @@ already that wide is left alone."
     (let ((width (romacs-agent-ui--rule-width)))
       (unless (eql width romacs-agent-ui--fitted)
         (setq romacs-agent-ui--fitted width)
-        (let ((inhibit-read-only t))
+        (romacs-agent-ui--editing
+          (let ((inhibit-read-only t))
           (save-excursion
             (dolist (marker romacs-agent-ui--fills)
               (let* ((start (marker-position marker))
@@ -1124,7 +1158,7 @@ already that wide is left alone."
                                             'face 'romacs-agent-rule 'romacs-agent-rule-fill t))))
                       ((< fill (- end start))
                        (delete-region (+ start fill) end)))))
-            (romacs-agent-ui--refit-tables)))
+            (romacs-agent-ui--refit-tables))))
         (romacs-agent-ui--composer-update)))))
 
 (defun romacs-agent-ui--render (session event)
@@ -1137,7 +1171,8 @@ or a repeat."
               ((> (or (plist-get event :seq) 0) (buffer-local-value 'romacs-agent-ui--shown buffer))))
     (with-current-buffer buffer
       (when (plist-get event :last) (setq romacs-agent-ui--shown (plist-get event :seq)))
-      (romacs-agent-ui--draw session event buffer))))
+      ;; Drawn live or replayed, the transcript is no edit to undo.
+      (romacs-agent-ui--editing (romacs-agent-ui--draw session event buffer)))))
 
 (defun romacs-agent-ui--selection-label (selection)
   "SELECTION, a model and effort, for a person: unnamed, the harness's own."

@@ -527,3 +527,19 @@ its end in STATE."
              "todos" (vector (romacs-agent-cards-tests--table "content" "a" "activeForm" "Fixing parser\nand tests"
                                                               "status" "in_progress"))))
     (should (string-search "Fixing parser and tests" (buffer-string)))))
+
+(ert-deftest romacs-agent-transcript-is-no-edit-to-undo ()
+  ;; A draft typed, then a reply streamed in above it: undo takes back the
+  ;; draft, never the transcript.
+  (romacs-agent-cards-tests--with-chat session
+    (setf (romacs-agent-buffer session) (current-buffer))
+    (buffer-enable-undo)
+    (goto-char (point-max))
+    (insert "my draft")
+    (undo-boundary)
+    (romacs-agent-ui--render session (list :type 'delta :text "streamed words" :message "m1" :seq 1 :last t))
+    (should (string-search "streamed words" (buffer-string)))
+    (goto-char (point-max))
+    (primitive-undo 1 (cdr buffer-undo-list))
+    (should (string-search "streamed words" (buffer-string)))
+    (should-not (string-search "my draft" (buffer-string)))))
