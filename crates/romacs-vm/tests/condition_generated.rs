@@ -30,15 +30,15 @@ fn custom_bootstrap_frontier() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")])
+    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")])
         .unwrap();
     for relative in [
-        "lisp/gnu/emacs-lisp/byte-run.el",
-        "lisp/gnu/subr.el",
-        "lisp/gnu/emacs-lisp/macroexp.el",
-        "lisp/gnu/emacs-lisp/pcase.el",
-        "lisp/gnu/custom.el",
-        "lisp/gnu/files.el",
+        "lisp/emacs-lisp/byte-run.el",
+        "lisp/subr.el",
+        "lisp/emacs-lisp/macroexp.el",
+        "lisp/emacs-lisp/pcase.el",
+        "lisp/custom.el",
+        "lisp/files.el",
     ] {
         let path = root.join(relative);
         let result = vm.load_file(&path).map(drop);
@@ -56,7 +56,7 @@ fn custom_bootstrap_frontier() {
         {
             eprintln!("CUSTOM_FAILURE {step}");
         }
-        if relative == "lisp/gnu/custom.el" {
+        if relative == "lisp/custom.el" {
             let callable = vm
                 .eval_source("(fboundp 'custom--standard-value-p)")
                 .unwrap()

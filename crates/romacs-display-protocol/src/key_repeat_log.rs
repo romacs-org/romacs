@@ -1,5 +1,5 @@
 //! What the render thread saw of native key repeat, for the usage log
-//! (lisp/romacs/romacs-usage-log.el, its `repeat` record): how many repeats
+//! (lisp/session/romacs-usage-log.el, its `repeat` record): how many repeats
 //! it let through to the evaluator, how long after their key's press each
 //! came, and the longest a key was held, from the press it saw to the
 //! release it saw. A key repeats on the client while its release has not
