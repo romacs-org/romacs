@@ -537,21 +537,15 @@ impl<T> Table<T> {
             self.push(value);
         }
     }
-    /// The lowest free entry at or above `cursor', there being one.
+    /// The lowest free entry at or above `cursor', there being one: the
+    /// first zero colour, found as `memchr` finds a byte, many at a time.
     #[inline]
     fn next_free(&self) -> usize {
-        let mut at = self.cursor;
+        let at = self.cursor;
         if self.colors[at] == FREE {
             return at;
         }
-        let mut words = self.colors[at..].chunks_exact(8);
-        for word in &mut words {
-            if has_zero_byte(u64::from_le_bytes(word.try_into().expect("eight bytes"))) {
-                break;
-            }
-            at += 8;
-        }
-        at + self.colors[at..].iter().position(|&color| color == FREE).expect("a table's count of free entries")
+        at + memchr::memchr(FREE, &self.colors[at..]).expect("a table's count of free entries")
     }
     /// Room for at least one more: past RESERVE_FROM, where a copy would be
     /// a stall a person can feel, once and for all (`may_reserve').
