@@ -688,7 +688,8 @@ quiet call.  The row keeps RUN, for a late failure to count again."
                          clock)))
       (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
       (concat (propertize text 'romacs-agent-run-head run 'mouse-face 'highlight
-                          'help-echo "TAB: show the steps")
+                          'help-echo (substitute-command-keys
+                                      "\\<romacs-agent-chat-transcript-map>\\[romacs-agent-chat-toggle]: show the steps"))
               "\n"))))
 
 (defun romacs-agent-ui--run-settle ()
