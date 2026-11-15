@@ -210,20 +210,30 @@ SESSION_LISP = HERE / 'perfbench-session.el'
 SESSION_METRICS = ('wall', 'block', 'instructions', 'first', 'key', 'keys', 'cores')
 # The comparison session's per-key rows: (row, areas).  Text rows type into a
 # 200-line text; code rows visit their file afresh each round, C in c-ts-mode,
-# and type at its middle or scroll from its top.
+# and type at its middle, scroll from its top, or jump far: F6 and F7 are
+# goto-line 1,800 lines below or above the last jump (perfbench-gui.el), past
+# the 100 lines redisplay searches below a window before it recentres.
 LAUNCH = [('launch to first paint', ('startup',)), ('launch to idle', ('startup',))]
 TEXT_KEYS = {'key self-insert text': ['a'], 'key C-f text': ['-M', 'ctrl', 'f', '-m', 'ctrl'],
              'key C-n text': ['-M', 'ctrl', 'n', '-m', 'ctrl']}
 CTRL = lambda keys: ['-M', 'ctrl', *[a for k in keys for a in ('-k', k)], '-m', 'ctrl']  # noqa: E731
-# (row, file in the tree, c-ts-mode, where point starts, the key, seconds between keys, areas)
-CODE_KEYS = [('key self-insert xdisp.c c-ts-mode', 'src/xdisp.c', True, 'middle', ['x'], .15,
+ALT = lambda key: ['-M', 'alt', '-k', key, '-m', 'alt']  # noqa: E731
+# (row, file in the tree, c-ts-mode, where point starts, the keys typed in
+# turn, seconds between keys, areas)
+CODE_KEYS = [('key self-insert xdisp.c c-ts-mode', 'src/xdisp.c', True, 'middle', (['x'],), .15,
               ('typing', 'font-lock', 'c-ts-mode', 'xdisp.c')),
-             ('key self-insert subr.el emacs-lisp-mode', 'lisp/subr.el', False, 'middle', ['x'], .15,
+             ('key self-insert subr.el emacs-lisp-mode', 'lisp/subr.el', False, 'middle', (['x'],), .15,
               ('typing', 'font-lock', 'emacs-lisp-mode', 'subr.el')),
-             ('scroll C-v xdisp.c c-ts-mode', 'src/xdisp.c', True, 'top', CTRL(['v']), .2,
-              ('scroll', 'font-lock', 'c-ts-mode', 'xdisp.c')),
-             ('scroll C-v subr.el emacs-lisp-mode', 'lisp/subr.el', False, 'top', CTRL(['v']), .2,
-              ('scroll', 'font-lock', 'emacs-lisp-mode', 'subr.el'))]
+             ('scroll C-v xdisp.c c-ts-mode', 'src/xdisp.c', True, 'top', (CTRL(['v']),), .2,
+              ('scroll', 'motion', 'font-lock', 'c-ts-mode', 'xdisp.c')),
+             ('scroll C-v subr.el emacs-lisp-mode', 'lisp/subr.el', False, 'top', (CTRL(['v']),), .2,
+              ('scroll', 'motion', 'font-lock', 'emacs-lisp-mode', 'subr.el')),
+             ('jump goto-line forward xdisp.c c-ts-mode', 'src/xdisp.c', True, 'top', (['-k', 'F6'],), .3,
+              ('motion', 'font-lock', 'c-ts-mode', 'xdisp.c')),
+             ('jump goto-line back xdisp.c c-ts-mode', 'src/xdisp.c', True, 'bottom', (['-k', 'F7'],), .3,
+              ('motion', 'font-lock', 'c-ts-mode', 'xdisp.c')),
+             ('jump M-> and M-< xdisp.c c-ts-mode', 'src/xdisp.c', True, 'top', (ALT('greater'), ALT('less')), .3,
+              ('motion', 'font-lock', 'c-ts-mode', 'xdisp.c'))]
 # (row, the keys that open the prompt, the keys typed into it, completion, areas)
 KEYSYM = {'-': 'minus'}
 COMPLETIONS = [('C-x C-f 5000 files fido', CTRL(['x', 'f']), 'file-1', 'fido', ('find-file', 'completion')),
@@ -259,7 +269,7 @@ def catalogue():
     rows += [(name, areas) for name, *_, areas, _ in syntax_rows()]
     rows += [(name, ('lisp',)) for name, _ in MICRO + UNCOMPILED]
     rows += [(f'elb {member}', ('lisp', 'elb')) for member in ELB_DEFAULT]
-    rows += LAUNCH + [(name, ('typing',)) for name in TEXT_KEYS]
+    rows += LAUNCH + [(name, ('typing',) if 'self-insert' in name else ('typing', 'motion')) for name in TEXT_KEYS]
     rows += [(name, areas) for name, *_, areas in CODE_KEYS]
     rows += [(name, areas) for name, *_, areas in COMPLETIONS]
     rows += [(name, areas) for name, *_, areas in SESSION_SHIPPED]
@@ -1378,7 +1388,7 @@ def key_note(name, engines):
         note = f'{own}the keys of {completion_[2]}, latencies {samples}; candidates {candidates}'
     code = next((c for c in CODE_KEYS if c[0] == name), None)
     if code:
-        note = f'{"from the middle" if code[3] == "middle" else "from the top"}, each round in the file visited afresh; {note}'
+        note = f'from the {code[3]}, each round in the file visited afresh; {note}'
     return note
 
 
@@ -1396,9 +1406,9 @@ def comparison_figures(ctx, engine, repo, wanted):
         for name, group in TEXT_KEYS.items():
             if name in wanted:
                 figures[name] = session_row(session, name, lambda g=group: text_keys(session, text, g, rate, rounds), RECOVER)
-        for name, path, ts, where, group, gap, _ in CODE_KEYS:
+        for name, path, ts, where, groups, gap, _ in CODE_KEYS:
             if name in wanted:
-                figures[name] = session_row(session, name, lambda p=repo / path, s=ts, w=where, g=group, k=gap:
+                figures[name] = session_row(session, name, lambda p=repo / path, s=ts, w=where, g=groups, k=gap:
                                             code_keys(session, p, s, w, g, k, rate, rounds), RECOVER)
         for name, prompt, typed, display, _ in COMPLETIONS:
             if name in wanted and (display != 'layer' or engine == 'romacs'):
@@ -1428,15 +1438,16 @@ def text_keys(session, path, group, rate, rounds):
     return phase_medians(phases, check=None)
 
 
-def code_keys(session, path, ts, where, group, gap, rate, rounds):
-    """GROUP, KEYS_PER_ROUND times a round, GAP seconds apart, in PATH visited
-    afresh each round (C in c-ts-mode with TS), from WHERE: `middle' or `top'."""
+def code_keys(session, path, ts, where, groups, gap, rate, rounds):
+    """KEYS_PER_ROUND keys a round, GROUPS in turn, GAP seconds apart, in PATH
+    visited afresh each round (C in c-ts-mode with TS), from WHERE: `middle',
+    `top' or `bottom'."""
     phases, modes = [], []
     for _ in range(rounds):
         modes.append(session.ask(f'(perfbench-gui-visit {parity_live.lisp_string(str(path))} {"t" if ts else "nil"}'
                                  f' (quote {where}))', 120))
         time.sleep(1.5)  # its first screen fontified, a background parse done
-        phases.append(session.phase([group] * KEYS_PER_ROUND, gap, rate))
+        phases.append(session.phase([groups[k % len(groups)] for k in range(KEYS_PER_ROUND)], gap, rate))
     return phase_medians(phases, check=modes[0])
 
 
