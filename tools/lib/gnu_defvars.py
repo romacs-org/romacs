@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from gnu_arity import git, pin, sources  # noqa: E402
-from lisp_oracle import GNU_SOURCE  # noqa: E402
+from gnu_oracle import GNU_SOURCE  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = 'crates/romacs-vm/tests/fixtures/gnu_defvars.json'

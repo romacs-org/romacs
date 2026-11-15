@@ -123,11 +123,17 @@ possible; say so where you do.
 - Treat GNU Lisp as a source of behavior, not of architecture. Keep the Elisp API
   real packages observe; replace an implementation whose design is platform or era
   baggage (tty/termcap, per-window-system backend dispatch, charset-era MULE, byte
-  code in data files, startup rituals) with an API-compatible one in `lisp/romacs/`, and
+  code in data files, startup rituals) with an API-compatible one in the subsystem's directory of `lisp/`, and
   record it as a file named by its ID in `ledger/divergences/`. Keeping a
   mechanism because GNU has it is museum-keeping; deleting one because GNU has
   it is vandalism. Replace it when a better mechanism exists and real packages
   still work.
+- `lisp/` is ours, one tree by subsystem. GNU's files keep GNU's paths and are edited
+  like any other; nothing pins them. Take GNU's later changes by reading
+  `tools/lisp-upstream digest` and porting what helps (`port`); a port a package can
+  observe is a divergence until the oracle binary is rebuilt past it. The pinned GNU
+  binary stays the behaviour oracle. After changing autoload cookies or autoloaded
+  definitions outside Romacs's runtime files, run `tools/lisp-loaddefs`.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even
@@ -137,7 +143,7 @@ possible; say so where you do.
 - Back structural and performance claims with measurements on the development
   machine.
 - Judge the machine as a whole. Measure runtime and representation work on
-  corpus workloads (loading GNU's Lisp and `lisp/romacs/`, the GNU ERT suites) and on
+  corpus workloads (loading `lisp/`, GNU's Lisp and Romacs's, the GNU ERT suites) and on
   general use (find-file and the minibuffer, project commands, dired, vc,
   search, help, shells, org and text editing), not on one user's configuration
   or one package.

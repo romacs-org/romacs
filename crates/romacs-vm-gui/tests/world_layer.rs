@@ -117,7 +117,7 @@ fn world_build_prepares_the_init_layer_and_rebuilds_it_only_for_its_inputs() {
 #[test]
 fn an_init_layer_loads_cus_start_in_full() {
     let home = Home::new("cus-start");
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp").canonicalize().unwrap();
     home.build();
     home.plan_requiring("cus-start", &gnu_lisp);
     let said = home.build();
@@ -135,6 +135,51 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
     assert_eq!(plan.entries.len(), 1);
     assert!(plan.current());
     assert!(Plan::read(&home.store, Path::new("/elsewhere/init.el")).is_none());
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
+/// `--world-build-layer`, what a session starts once its init has run,
+/// builds the init's layer from the store's plan over the ready base world,
+/// with the round a refusal needs: the layer is usable when it exits, so a
+/// session that ends first leaves the next launch nothing to build.
+#[test]
+fn a_layer_built_apart_takes_every_round_it_needs() {
+    let home = Home::new("apart");
+    let lisp = home.home.join("lisp");
+    std::fs::write(lisp.join("layer-late.el"), "(defvar layer-late-dir (car exec-path))\n(setq layer-late-seen (car exec-path))\n(provide 'layer-late)\n").unwrap();
+    home.build();
+    let declared = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: true, forms: Vec::new() };
+    let plan = Plan::new(&home.init, vec![declared("layer-lib"), declared("layer-late")], vec![vec![lisp.display().to_string()]]).unwrap();
+    plan.write(&home.store).unwrap();
+    let (ok, said) = home.command(&["--loadup", "--world-build-layer", home.init.to_str().unwrap()]);
+    assert!(ok && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    assert_eq!(said.matches(r#""event":"layer-build""#).count(), 2, "a refused round, then one without it: {said}");
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
+/// A library the init loads at startup that the layer cannot hold (here
+/// it signals) takes every later entry with it: the layer holds the entries
+/// before it, and the init loads it and the rest in its own order.
+#[test]
+fn a_startup_library_left_out_ends_capture_there() {
+    let home = Home::new("prefix");
+    let lisp = home.home.join("lisp");
+    std::fs::write(lisp.join("layer-bad.el"), "(error \"romacs-fixture: this library fails\")\n").unwrap();
+    std::fs::write(lisp.join("layer-tail.el"), "(defvar layer-tail-loaded 1)\n(provide 'layer-tail)\n").unwrap();
+    home.build();
+    let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
+    let plan = Plan::new(&home.init, vec![require("layer-lib"), require("layer-bad"), require("layer-tail")], vec![vec![lisp.display().to_string()]]).unwrap();
+    plan.write(&home.store).unwrap();
+    let said = home.build();
+    assert!(said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    let built: Vec<Vec<String>> = std::fs::read_dir(&home.store).unwrap().filter_map(|e| {
+        let path = e.unwrap().path();
+        let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+        let entries = manifest["events"]["init-layer"]["entries"].as_array()?.clone();
+        manifest["refusals"].as_array().is_none_or(|r| r.is_empty())
+            .then(|| entries.iter().map(|e| e["name"].as_str().unwrap().to_owned()).collect())
+    }).collect();
+    assert_eq!(built, [vec!["layer-lib".to_owned()]], "{said}");
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
@@ -180,8 +225,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         // A `with-eval-after-load' closure, and a form withheld after a secret reader ran.
         after("layer-closure", "(t . #<interpreted-function>)".into()),
         after("layer-withheld", "#<after a secret reader>".into()),
-        // A configuration form that starts a timer: kept as code, the
-        // forms beside it captured.
+        // A configuration form that starts a timer leaves its library to
+        // the session: no image holds a time of the builder's.
         after("layer-timer", "(t progn (setq layer-timer-set 'built) (run-with-timer 60 nil #'ignore))".into()),
         // A secret asked in an `if''s test: the whole `if' is kept.
         after("layer-if", "(t if (auth-source-pass-get 'secret \"xmpp/me\") (setq layer-if-value 'then) (setq layer-if-value 'else))".into()),
@@ -193,12 +238,15 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         after("layer-netrc", format!("(t setq layer-netrc-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", authinfo.display().to_string())),
     ];
     // As an init's `load-path' is: its own directory before the installation's.
-    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp").canonicalize().unwrap();
     let mut load_path = vec![lisp.display().to_string()];
+    let gnu_lisp_root = gnu_lisp.clone();
     let mut dirs = vec![gnu_lisp];
     while let Some(dir) = dirs.pop() {
         load_path.push(dir.display().to_string());
-        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.is_dir()).collect();
+        // The VM's halves and the bundled packages are on no such path.
+        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir() && !(dir == gnu_lisp_root && (p.ends_with("vm") || p.ends_with("packages")))).collect();
         subdirs.sort();
         dirs.extend(subdirs.into_iter().rev());
     }
@@ -217,7 +265,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
     assert!(why.iter().any(|(name, why)| name == "layer-fn" && why.contains("the function was called")), "{why:?}");
     assert!(why.iter().any(|(name, why)| name == "layer-sym" && why.contains("the symbol function was called")), "{why:?}");
-    for name in ["layer-secret", "layer-reader", "layer-netrc", "layer-timer", "layer-if"] {
+    assert!(why.iter().any(|(name, _)| name == "layer-timer"), "{why:?}");
+    for name in ["layer-secret", "layer-reader", "layer-netrc", "layer-if"] {
         assert!(!why.iter().any(|(n, _)| n == name), "{name} was left out: {why:?}");
     }
     for name in ["layer-closure", "layer-withheld"] {
@@ -227,7 +276,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .filter(|m| m["events"]["init-layer"].is_object() && m["refusals"].as_array().is_none_or(|r| r.is_empty()))
         .map(|m| m["events"]["init-layer"]["entries"].clone()).collect();
     let names: Vec<Vec<&str>> = built.iter().map(|entries| entries.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect()).collect();
-    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-timer", "layer-if", "layer-netrc"]), "{names:?}");
+    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-if", "layer-netrc"]), "{names:?}");
     // No file the store holds contains the secret: images, manifests, plans.
     let mut files = vec![home.home.join("cache")];
     while let Some(path) = files.pop() {

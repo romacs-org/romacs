@@ -54,7 +54,8 @@
                                            "target" (romacs-agent-cards-tests--table "provider" "codex")))
   (romacs-agent-cards-tests--draw
    session :type 'tool :state 'completed :id "t1"
-   :output (format "{\"taskId\":\"%s\",\"status\":\"running\",\"title\":\"Review it\"}" romacs-agent-cards-tests--child)))
+   :output (format "{\"taskId\":\"%s\",\"status\":\"running\",\"title\":\"Review it\"}" romacs-agent-cards-tests--child))
+  (romacs-agent-ui--run-settle))
 
 (ert-deftest romacs-agent-delegate-call-is-a-card-with-a-thread-link ()
   (romacs-agent-cards-tests--with-chat session
@@ -123,6 +124,7 @@
        session :type 'tool :state 'completed :id "t1"
        :output (format "{\"taskId\":\"%s\",\"status\":\"%s\",\"result\":\"REVIEW RESULT\"}"
                        romacs-agent-cards-tests--child status))
+      (romacs-agent-ui--run-settle)
       (should (equal (romacs-agent-cards-tests--visible) (format "  ✓ ⇢ Review it  %s  thread\n" (capitalize status))))
       (goto-char (point-min))
       (romacs-agent-chat-toggle)
@@ -172,47 +174,164 @@
      session :type 'tool :state 'started :id "t2" :name "Agent"
      :input (romacs-agent-cards-tests--table "description" "Find callers" "subagent_type" "Explore" "prompt" "..."))
     (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "t2" :output "found 3")
+    (romacs-agent-ui--run-settle)
     (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers  Explore\n"))
     (should-not (text-property-any (point-min) (point-max) 'romacs-agent-chip t))
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
     (should (string-suffix-p "found 3\n" (romacs-agent-cards-tests--visible)))))
 
-(ert-deftest romacs-agent-other-tools-keep-their-rows ()
+;; Runs: the steps between words, one row each.
+
+(defun romacs-agent-cards-tests--call (session id name input &optional state output time)
+  "Draw call ID of tool NAME on INPUT (a command), and its end in STATE."
+  (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id id :name name
+                                  :input (romacs-agent-cards-tests--table "command" input) :time time)
+  (when state
+    (romacs-agent-cards-tests--draw session :type 'tool :state state :id id :output (or output "") :time time)))
+
+(ert-deftest romacs-agent-a-call-folds-into-its-runs-row ()
   (romacs-agent-cards-tests--with-chat session
-    (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id "t3" :name "Bash"
-                                    :input (romacs-agent-cards-tests--table "command" "ls"))
-    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "t3"
-                                    :output "{\"taskId\":\"x\"}")
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ Bash  ls\n"))
+    (romacs-agent-cards-tests--call session "t3" "Bash" "ls" 'completed "{\"taskId\":\"x\"}")
+    ;; While its run is open, the live rule says it, not the transcript.
+    (should (equal (romacs-agent-cards-tests--visible) ""))
+    (romacs-agent-ui--run-settle)
+    (should (equal (romacs-agent-cards-tests--visible) "▸ Bash  ls\n"))
+    ;; TAB on the run's row shows its call; on the call's, its output.
     (goto-char (point-min))
     (romacs-agent-chat-toggle)
-    (should (string-suffix-p "{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
+    (should (equal (romacs-agent-cards-tests--visible) "▾ Bash  ls\n  ✓ Bash  ls\n"))
+    (forward-line 1)
+    (romacs-agent-chat-toggle)
+    (should (string-suffix-p "{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))
+    ;; Folding the run folds what it shows; showing it again, as it was.
+    (goto-char (point-min))
+    (romacs-agent-chat-toggle)
+    (should (equal (romacs-agent-cards-tests--visible) "▸ Bash  ls\n"))
+    (romacs-agent-chat-toggle)
+    (should (string-suffix-p "  ✓ Bash  ls\n{\"taskId\":\"x\"}\n" (romacs-agent-cards-tests--visible)))))
 
-;; Only the essentials shown.
-
-(ert-deftest romacs-agent-thinking-is-folded-to-its-row ()
+(ert-deftest romacs-agent-run-says-what-it-did-and-failures-stay ()
   (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Looking.")
+    (romacs-agent-cards-tests--call session "a" "Bash" "ls" 'completed "a b" 100.0)
+    (romacs-agent-cards-tests--call session "b" "Bash" "make" 'failed "error 2" 110.0)
+    (romacs-agent-cards-tests--call session "c" "Read" "x.el" 'completed "" 142.5)
+    (romacs-agent-cards-tests--draw session :type 'delta :text "It failed.")
+    ;; Two quiet calls in 42 s; the failed one shows, folded or not.
+    (should (equal (romacs-agent-cards-tests--visible)
+                   "Looking.\n▸ 2 tools · 42s\n  ! Bash  make\nIt failed."))
+    (goto-char (point-min))
+    (forward-line 1)
+    (romacs-agent-chat-toggle)
+    (should (equal (romacs-agent-cards-tests--visible)
+                   "Looking.\n▾ 2 tools · 42s\n  ✓ Bash  ls\n  ! Bash  make\n  ✓ Read  x.el\nIt failed."))
+    ;; Collapsing all folds it again, the failure still shown.
+    (romacs-agent-chat-collapse-all)
+    (should (equal (romacs-agent-cards-tests--visible)
+                   "Looking.\n▸ 2 tools · 42s\n  ! Bash  make\nIt failed."))))
+
+(ert-deftest romacs-agent-a-failure-after-an-approval-leaves-the-runs-count ()
+  ;; An approval the user is asked settles the run mid-call; the call
+  ;; denied then fails.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--call session "a" "Bash" "ls")
+    (romacs-agent-cards-tests--call session "b" "Bash" "rm x")
+    (let ((romacs-agent-approval-policy 'ask))
+      (romacs-agent-cards-tests--draw session :type 'approval :request-id "q" :tool "Bash"
+                                      :input (romacs-agent-cards-tests--table "command" "rm x")))
+    (should (string-prefix-p "▸ 2 tools\n" (romacs-agent-cards-tests--visible)))
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "a" :output "")
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'failed :id "b" :output "denied")
+    (should (string-prefix-p "▸ Bash  ls\n  ! Bash  rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))
+    ;; Shown, the run's row says so as it counts again.
+    (goto-char (point-min))
+    (romacs-agent-chat-toggle)
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'failed :id "a" :output "late")
+    (should (string-prefix-p "  ! Bash  ls\n  ! Bash  rm x\n◆ Bash asks" (romacs-agent-cards-tests--visible)))))
+
+(ert-deftest romacs-agent-live-rule-names-a-call-still-running ()
+  (romacs-agent-cards-tests--with-chat session
+    (setf (romacs-agent-turn-start session) (float-time))
+    (setq romacs-agent-ui--composer (make-overlay (point-max) (point-max) nil nil nil))
+    (cl-flet ((rule () (substring-no-properties (overlay-get romacs-agent-ui--composer 'before-string))))
+      (romacs-agent-cards-tests--call session "a" "Grep" "first")
+      (romacs-agent-cards-tests--call session "b" "Grep" "second")
+      (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "b" :output "")
+      (should (string-search "· Grep  first ·" (rule)))
+      (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "a" :output "")
+      (should-not (string-search "Grep" (rule))))))
+
+(ert-deftest romacs-agent-an-open-run-only-grows-the-transcript ()
+  ;; Calm: what shows above an open run never moves, and its settling
+  ;; adds to the end alone.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'delta :text "First words.")
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh it.")
+    (romacs-agent-cards-tests--call session "a" "Bash" "ls")
+    (should (equal (romacs-agent-cards-tests--visible) "First words.\n"))
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "a" :output "x")
+    (romacs-agent-cards-tests--call session "b" "Bash" "pwd" 'completed "/")
+    (should (equal (romacs-agent-cards-tests--visible) "First words.\n"))
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Next.")
+    (should (equal (romacs-agent-cards-tests--visible) "First words.\n▸ 2 tools\nNext."))))
+
+(ert-deftest romacs-agent-live-rule-says-what-the-run-does ()
+  (romacs-agent-cards-tests--with-chat session
+    (setf (romacs-agent-turn-start session) (float-time))
+    (setq romacs-agent-ui--composer (make-overlay (point-max) (point-max) nil nil nil))
+    (cl-flet ((rule () (substring-no-properties (overlay-get romacs-agent-ui--composer 'before-string))))
+      (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh it.")
+      (should (string-search "● Running 0s · thinking ─" (rule)))
+      (romacs-agent-cards-tests--call session "a" "Bash" "ls" 'completed "x")
+      (romacs-agent-cards-tests--call session "b" "Grep" "TODO")
+      (should (string-search "● Running 0s · Grep  TODO · 2 tools ─" (rule)))
+      ;; Its row starts the line: the rule needs no newline before it.
+      (should (string-prefix-p "──" (rule)))
+      (romacs-agent-cards-tests--draw session :type 'delta :text "Found it.")
+      (should (string-match-p "\\`\n── ● Running 0s ─" (rule))))))
+
+(ert-deftest romacs-agent-thinking-is-a-state-not-a-row ()
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'thinking :text "  ")
     (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh ")
     (romacs-agent-cards-tests--draw session :type 'thinking :text "it all.")
     (romacs-agent-cards-tests--draw session :type 'delta :text "Answer.")
-    (should (string-prefix-p "∴ thinking\n" (romacs-agent-cards-tests--visible)))
-    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
-    ;; TAB on its row shows it all, on lines of its own; again, folds it.
-    (goto-char (point-min))
-    (romacs-agent-chat-toggle)
-    (should (string-prefix-p "∴ thinking\nWeigh it all.\n" (romacs-agent-cards-tests--visible)))
-    (romacs-agent-chat-toggle)
-    (should-not (string-search "Weigh" (romacs-agent-cards-tests--visible)))
-    ;; Ending in a newline, it still leaves the next row its own line.
+    ;; Thinking straight into words leaves nothing behind.
+    (should (equal (romacs-agent-cards-tests--visible) "Answer."))
+    ;; Expanding all shows it, where it was; collapsing folds it again.
+    (romacs-agent-chat-expand-all)
+    (should (equal (romacs-agent-cards-tests--visible) "  ∴ Weigh it all.\nAnswer."))
+    (romacs-agent-chat-collapse-all)
+    (should (equal (romacs-agent-cards-tests--visible) "Answer."))
+    ;; Thinking among calls is one of the run's steps.
     (romacs-agent-cards-tests--draw session :type 'thinking :text "Consider.\n")
-    (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id "r1" :name "Read"
-                                    :input (romacs-agent-cards-tests--table "file_path" "/a"))
-    (should (string-match-p "∴ thinking\n.*Read" (romacs-agent-cards-tests--visible)))
-    (should-not (string-match-p "∴ thinking.*Read" (romacs-agent-cards-tests--visible)))
-    ;; A second one is its own fold.
-    (romacs-agent-cards-tests--draw session :type 'thinking :text "Again.")
-    (should (= (how-many "∴ thinking" (point-min) (point-max)) 3))))
+    (romacs-agent-cards-tests--call session "r1" "Read" "/a" 'completed "")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Done.")
+    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▸ Read  /a\nDone."))
+    (goto-char (text-property-not-all (point-min) (point-max) 'romacs-agent-run-head nil))
+    (romacs-agent-chat-toggle)
+    (should (equal (romacs-agent-cards-tests--visible) "Answer.\n▾ Read  /a\n  ∴ Consider.\n  ✓ Read  /a\nDone."))
+    (should-not (string-search "thinking" (buffer-string)))))
+
+(ert-deftest romacs-agent-subagent-words-are-its-calls-steps ()
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw
+     session :type 'tool :state 'started :id "t2" :name "Agent"
+     :input (romacs-agent-cards-tests--table "description" "Find callers" "subagent_type" "Explore"))
+    (puthash "t2" t (romacs-agent-tools session))
+    (romacs-agent-cards-tests--draw session :type 'delta :parent "t2" :text "Searching the tree.")
+    (puthash "g" "t2" (romacs-agent-tools session))
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'started :id "g" :name "Grep" :parent "t2"
+                                    :input (romacs-agent-cards-tests--table "pattern" "callers"))
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "g" :output "3")
+    (romacs-agent-cards-tests--draw session :type 'tool :state 'completed :id "t2" :output "found 3")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Three callers.")
+    ;; The card shows; its subagent's words and calls are its steps,
+    ;; not the run's own calls.
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ⇢ Find callers  Explore\nThree callers."))
+    (romacs-agent-chat-expand-all)
+    (should (string-search "    Searching the tree.\n    ✓ Grep  callers\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
   (romacs-agent-cards-tests--with-chat session
@@ -234,10 +353,10 @@
           (should (equal (get-text-property (string-search "opus-5-5" text) 'help-echo text) "account claude2")))))))
 
 (ert-deftest romacs-agent-composer-starts-on-its-own-line ()
-  ;; Thinking left open while no turn runs: the composer is not glued to it.
+  ;; A reply left open while no turn runs: the composer is not glued to it.
   (romacs-agent-cards-tests--with-chat session
     (setq romacs-agent-ui--composer (make-overlay (point-max) (point-max) nil nil nil))
-    (romacs-agent-cards-tests--draw session :type 'thinking :text "Weigh it.")
+    (romacs-agent-cards-tests--draw session :type 'delta :text "Half a reply")
     (setf (romacs-agent-state session) 'idle)
     (romacs-agent-ui--composer-update)
     (should (string-prefix-p "\n" (overlay-get romacs-agent-ui--composer 'before-string)))
