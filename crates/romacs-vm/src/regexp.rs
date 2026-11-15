@@ -57,6 +57,12 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
     )
 }
 
+/// A string prepared for anchored matches (`Vm::string_subject').
+pub(crate) struct StringSubject {
+    input: Input<'static>,
+    string: Value,
+}
+
 struct Input<'a> {
     bytes: Cow<'a, [u8]>,
     multibyte: bool,
@@ -526,6 +532,34 @@ impl Vm {
         // A leaf reaches this search, and the matcher answers inspections.
         let found = if crate::host::inspect_enabled() { self.with_site_leaf(run) } else { run(self) };
         found.map_err(|fault| self.regexp_fault(fault))
+    }
+
+    /// STRING prepared once for anchored matches at many positions
+    /// ([`Self::subject_looking_at`]), as composite.c's fast_looking_at reads
+    /// one string at each candidate start.
+    pub(crate) fn string_subject(&mut self, string: Value) -> std::result::Result<StringSubject, prim::Fault> {
+        let input = self.regexp_input(string).map_err(|fault| self.regexp_fault(fault))?;
+        Ok(StringSubject { input, string })
+    }
+
+    /// The character where PATTERN, matched at character AT of SUBJECT and
+    /// no earlier, ends; case-sensitive, without match data.
+    pub(crate) fn subject_looking_at(&mut self, subject: &StringSubject, pattern: Value, at: usize)
+        -> std::result::Result<Option<usize>, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
+            let pattern = vm.regexp_input(pattern)?;
+            let source = vm.regexp_syntax(Some(subject.string))?;
+            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
+            let mut compiled = compiled.borrow_mut();
+            compiled.set_target_multibyte(subject.input.multibyte);
+            let syntax = syntax::VmSyntax::new(vm, source);
+            let start = subject.input.byte(at);
+            let found = regex::re_match(&compiled, &subject.input.bytes, start, subject.input.bytes.len(), &syntax, usize::MAX);
+            drop((syntax, compiled));
+            if regex::take_matcher_overflow() { return Ok(None); }
+            Ok(found.map(|(end, _)| subject.input.character(end)))
+        };
+        run(self).map_err(|fault| self.regexp_fault(fault))
     }
 
     fn regexp_fault(&mut self, fault: Fault) -> prim::Fault {

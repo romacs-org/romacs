@@ -28,7 +28,18 @@ fn emoji_sequences_are_as_wide_as_gnu_counts_them() {
                     "가" "\U0001F600" "a‍b" "\U0001F3F3️‍\U0001F308" "x️" "é"
                     "️" "a️️" "\U0001F468‍\U0001F469‍\U0001F467x" "plain ascii"))
       (string-width "ab❤️cd" 2 4) (string-width "ab❤️cd" 3 4)
-      (string-width "\U0001F468‍\U0001F469‍\U0001F467 Zoë Müller ❤️"))"#;
+      (string-width "\U0001F468‍\U0001F469‍\U0001F467 Zoë Müller ❤️")
+      ;; The first rule that matches wins, of any function; a composition may
+      ;; end past TO; any positive length; an ASCII entry in a multibyte string.
+      (string-width "é️") (string-width "❤️" 0 1)
+      (let ((composition-function-table (make-char-table nil)))
+        (set-char-table-range composition-function-table ?é (list (vector "é" 1 'compose-gstring-and-emoji)))
+        (string-width "éé"))
+      (let ((composition-function-table (make-char-table nil)))
+        (set-char-table-range composition-function-table ?a (list (vector nil 0 'compose-gstring-and-emoji)))
+        (string-width "aé"))
+      ;; Many compositions in one string: one pass, not one copy each.
+      (string-width (apply #'concat (make-list 3000 "\U0001F468‍\U0001F469‍\U0001F467"))))"#;
     let expected = batch(&gnu, &dir, form);
     assert!(expected.starts_with("((2 1 2 2 2 2 1 1 2 2 2 2 2 2 1"), "{expected}");
     assert_eq!(batch(romacs, &dir, form), expected);
