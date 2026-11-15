@@ -894,6 +894,49 @@ def restart_rollback(args, base):
         a.close()
 
 
+def restart_hang(args, base):
+    """`romacs_restart' into a build whose session never serves (its init
+    loops for ever): past the start deadline its supervisor ends the hung
+    server, found by its command line, starts this build again with the
+    session, and the requester is told why, once."""
+    a = Agents(args, base, 'rh')
+    a.persist()
+    with open(a.home / '.config/romacs/init.el', 'a') as init:
+        init.write('(when (string-match-p "build-hang0000" (or (getenv "ROMACS_RUNTIME_ROOT") "")) (while t (sleep-for 0.2)))\n')
+    try:
+        a.up()
+        target = build_dir(a, 'hang0000')
+        a.eval("(setq romacs-restart-deadlines '(:exit 30 :start 25 :ready 60))")
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        old_pid = a.pid
+        a.send(requester, 'call romacs_restart ' + json.dumps({'target': str(target), 'delay': 1}))
+        until(lambda: any(e.get('tool') == 'romacs_restart' for e in a.logged()), 30, 'requested')
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 300, 'requester told')
+        told = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        a.pid = int(a.eval('(emacs-pid)'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        # A server of this tree's still running besides the one that serves: the hung target.
+        def ours(pid):
+            try:
+                return str(a.root) in Path(f'/proc/{pid}/environ').read_bytes().decode(errors='replace')
+            except OSError:
+                return False
+        hung = [line for line in subprocess.run(['pgrep', '-af', '--', '--serve rh'], capture_output=True, text=True).stdout.splitlines()
+                if line.split()[1].endswith('romacs-vm-gui') and int(line.split()[0]) != a.pid and ours(line.split()[0])]
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
+        result = {'old_pid': old_pid, 'new_pid': a.pid, 'told': told, 'carried': carried, 'hung_left': hung,
+                  'verdict': record.get('verdict'), 'failed': record.get('failed'),
+                  'phases': [ph['phase'] for ph in record.get('phases', [])]}
+        result['ok'] = (a.pid != old_pid and len(told) == 1 and ' rolled back to ' in told[0] and not hung
+                        and record.get('verdict') == 'rolled-back' and carried == '"carried across\\n"')
+        return result
+    finally:
+        a.close()
+
+
 def restart_unit(args, base):
     """`restart' with the user manager: the server is the unit
     romacs-server-S, and its successor comes from a helper unit once that
@@ -3035,7 +3078,7 @@ def history_real(args, base):
 
 
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
-             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback,
+             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
              'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,

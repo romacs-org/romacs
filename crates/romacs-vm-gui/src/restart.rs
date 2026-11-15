@@ -23,7 +23,8 @@ const HEALTH: &str = r#"(json-serialize
         :window (if (seq-some (lambda (f) (and (frame-visible-p f) (display-graphic-p f))) (frame-list)) t :false)
         :restore (let ((step (and (boundp 'romacs-progress-state) (alist-get 'restore romacs-progress-state))))
                    (cond (step (symbol-name (plist-get step :status)))
-                         ((bound-and-true-p warm-restart-last-report) "done")
+                         ((bound-and-true-p warm-restart-last-report)
+                          (if (plist-get warm-restart-last-report :error) "failed" "done"))
                          (t "pending")))
         :restoreError (or (plist-get (bound-and-true-p warm-restart-last-report) :error) :null)
         :agents (let ((step (and (boundp 'romacs-progress-state) (alist-get 'agents romacs-progress-state))))
@@ -183,9 +184,28 @@ fn lisp_string(printed: &str) -> Option<String> {
     Some(text)
 }
 
+/// The process serving SERVER that was started restoring IMAGE, as its
+/// command line says: the server an attempt started, found whether or not
+/// it answers (a restart's image path names one restart alone).
+fn server_pid(server: &str, image: &str) -> Option<u32> {
+    std::fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
+        let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+        let cmdline = std::fs::read(entry.path().join("cmdline")).ok()?;
+        let args: Vec<&[u8]> = cmdline.split(|b| *b == 0).collect();
+        let serves = args.windows(2).any(|pair| pair[0] == b"--serve" && pair[1] == server.as_bytes());
+        (serves && args.contains(&image.as_bytes())).then_some(pid)
+    })
+}
+
 /// Start SIDE as the server, restoring IMAGE, and judge it: None when it
-/// is up, else what failed. The pid of the session it judged, when any.
+/// is up, else what failed. The pid of the server it started, when one
+/// runs, answering or not.
 fn attempt(plan: &Plan, side: &Side, image: &Path, label: &str, record: &mut Record) -> (Option<String>, Option<u32>) {
+    let (failed, pid) = judge(plan, side, image, label, record);
+    (failed, pid.or_else(|| server_pid(&plan.server, &image.display().to_string())))
+}
+
+fn judge(plan: &Plan, side: &Side, image: &Path, label: &str, record: &mut Record) -> (Option<String>, Option<u32>) {
     let image = image.display().to_string();
     let mut args: Vec<&str> = vec!["-n"];
     args.extend(side.flags.iter().map(String::as_str));
@@ -227,11 +247,13 @@ fn tail(text: &str) -> String {
 }
 
 /// End the server a failed attempt left: its unit stopped (TERM: a stop,
-/// not a crash), else its process.
+/// not a crash), and its process ended either way, so the next client
+/// finds no server answering and starts its own.
 fn stop(server: &str, pid: Option<u32>) {
     if unit_state(server).is_some_and(|state| state == "active" || state == "activating") {
         let _ = std::process::Command::new("systemctl").args(["--user", "stop", &unit(server)]).status();
-    } else if let Some(pid) = pid {
+    }
+    if let Some(pid) = pid.filter(|&pid| alive(pid)) {
         signal(pid, rustix::process::Signal::TERM);
         if !wait_until(Instant::now() + Duration::from_secs(15), || !alive(pid)) { signal(pid, rustix::process::Signal::KILL); }
     }
@@ -349,6 +371,11 @@ mod tests {
         failed["restore"] = json!("failed");
         failed["restoreError"] = json!("Not a usable session image");
         assert_eq!(missing(&failed, &side).unwrap(), "restore: failed: Not a usable session image");
+    }
+
+    #[test]
+    fn a_server_is_found_by_its_name_and_image_alone() {
+        assert_eq!(server_pid("no-such-server", "/no/such.image"), None);
     }
 
     #[test]

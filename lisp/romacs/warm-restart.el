@@ -1359,21 +1359,27 @@ for running a newer build."
       ;; next restores the image, the successor or a server a launcher
       ;; started first (`warm-restart-adopt-pending').
       (when server (warm-restart--publish-pending image server))
+      ;; The successor's start first: its supervisor waits for this
+      ;; session's end, and ends it past a deadline, so from here nothing
+      ;; a hook does can hold the restart.
       (condition-case err
-          (progn
-            ;; A restart, not a quit: what the keeper holds for this
-            ;; session stays for the successor (romacs-keeper.el).
-            ;; Nobody may be there to answer: a hook's question signals,
-            ;; and the restart stops with this session going on.
-            (let ((romacs-keeper-restarting t) (inhibit-interaction t))
-              (run-hooks 'kill-emacs-hook))
-            ;; The new process locks these files again; this one's locks
-            ;; would name a pid that is about to end.
-            (dolist (buffer (buffer-list))
-              (with-current-buffer buffer (when (and buffer-file-name (buffer-modified-p)) (unlock-buffer))))
-            (romacs-restart--spawn image))
+          (romacs-restart--spawn image)
         (error (when server (warm-restart--withdraw-pending image server))
                (user-error "Restart failed, this session goes on: %s (image %s)" (error-message-string err) image)))
+      ;; A restart, not a quit: what the keeper holds for this session
+      ;; stays for the successor (romacs-keeper.el).  Each hook alone, and
+      ;; asking nothing, since nobody may be there to answer: one that
+      ;; fails is said, and the others run.
+      (let ((romacs-keeper-restarting t) (inhibit-interaction t))
+        (run-hook-wrapped 'kill-emacs-hook
+                          (lambda (function)
+                            (condition-case err (funcall function)
+                              ((error quit) (message "Restart: %s failed: %s" function (error-message-string err))))
+                            nil)))
+      ;; The new process locks these files again; this one's locks would
+      ;; name a pid that is about to end.
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer (when (and buffer-file-name (buffer-modified-p)) (ignore-errors (unlock-buffer)))))
       (dolist (process (process-list)) (set-process-query-on-exit-flag process nil))
       (let ((kill-emacs-hook nil)) (kill-emacs 0)))))
 
