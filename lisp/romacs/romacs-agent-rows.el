@@ -362,8 +362,9 @@ known."
             (romacs-agent-rows--directory path))))
 
 (defun romacs-agent-rows--count (text)
-  "How many lines TEXT has that say something."
-  (if (not (stringp text)) 0
+  "How many lines TEXT has that say something: none when it says it
+found none."
+  (if (or (not (stringp text)) (string-match-p "\\`[ \t\n]*No \\(?:matches\\|files\\) found" text)) 0
     (cl-count-if (lambda (line) (string-match-p "[^ \t]" line)) (split-string text "\n"))))
 
 (defun romacs-agent-rows--lines (text)
@@ -373,10 +374,21 @@ known."
 (defun romacs-agent-rows--plural (n word)
   (format "%d %s%s" n word (if (= n 1) "" "s")))
 
+(defun romacs-agent-rows--command (command)
+  "COMMAND as a row says it: a string's first line, or an argument list
+\(Codex's) as words, a shell's `-c' script alone."
+  (cond ((stringp command) (romacs-agent-rows--line command))
+        ((and (vectorp command) (cl-every #'stringp command))
+         (let ((words (append command nil)))
+           (romacs-agent-rows--line
+            (if (and (= (length words) 3) (member (nth 1 words) '("-c" "-lc")))
+                (nth 2 words)
+              (string-join words " ")))))
+        (t "")))
+
 (romacs-agent-rows-define
  "Bash"
- :row (lambda (input)
-        (concat "$ " (romacs-agent-rows--line (or (romacs-agent-rows--field input "command") "")))))
+ :row (lambda (input) (concat "$ " (romacs-agent-rows--command (romacs-agent-rows--get input "command")))))
 
 (defun romacs-agent-rows--read-span (input)
   "Which of a file's lines a Read call took, as words, or nil for all."
@@ -391,11 +403,16 @@ known."
         (concat "◧ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")
                                              (romacs-agent-rows--read-span input)))))
 
-(defun romacs-agent-rows--change (old new)
-  "An edit of OLD to NEW as the lines it takes and adds: \"+A −R\"."
-  (let ((removed (romacs-agent-rows--lines old)) (added (romacs-agent-rows--lines new)))
+(defun romacs-agent-rows--change (edits)
+  "EDITS, (OLD . NEW) pairs, as the lines they add and take: \"+A −R\"."
+  (let ((added (apply #'+ (mapcar (lambda (edit) (romacs-agent-rows--lines (cdr edit))) edits)))
+        (removed (apply #'+ (mapcar (lambda (edit) (romacs-agent-rows--lines (car edit))) edits))))
     (concat (propertize (format "+%d" added) 'face 'romacs-agent-done) " "
             (propertize (format "−%d" removed) 'face 'romacs-agent-error))))
+
+(defun romacs-agent-rows--pair (edit)
+  "An edit's (OLD . NEW)."
+  (cons (romacs-agent-rows--field edit "old_string") (romacs-agent-rows--field edit "new_string")))
 
 (defun romacs-agent-rows--edit (input)
   "An Edit, MultiEdit or Codex file change's row."
@@ -410,13 +427,10 @@ known."
                     (romacs-agent-rows--dim (format "  +%d more" (1- (length changes)))) ""))))
      ((vectorp edits)
       (concat "✎ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")) "  "
-              (romacs-agent-rows--change
-               (mapconcat (lambda (edit) (or (romacs-agent-rows--field edit "old_string") "")) edits "\n")
-               (mapconcat (lambda (edit) (or (romacs-agent-rows--field edit "new_string") "")) edits "\n"))))
+              (romacs-agent-rows--change (mapcar #'romacs-agent-rows--pair edits))))
      (t
       (concat "✎ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")) "  "
-              (romacs-agent-rows--change (romacs-agent-rows--field input "old_string")
-                                         (romacs-agent-rows--field input "new_string")))))))
+              (romacs-agent-rows--change (list (romacs-agent-rows--pair input))))))))
 
 (romacs-agent-rows-define "Edit" :row #'romacs-agent-rows--edit)
 (romacs-agent-rows-define "MultiEdit" :row #'romacs-agent-rows--edit)
@@ -469,13 +483,16 @@ known."
                                                                    (romacs-agent-rows--field now "content") "")))
                     "")))))
 
+(defun romacs-agent-rows--asked (input)
+  "An AskUserQuestion's row: its first question."
+  (let ((questions (romacs-agent-rows--get input "questions")))
+    (concat "? " (if (and (vectorp questions) (> (length questions) 0))
+                     (romacs-agent-rows--line (or (romacs-agent-rows--field (aref questions 0) "question") ""))
+                   "a question"))))
+
 (romacs-agent-rows-define
  "AskUserQuestion"
- :row (lambda (input)
-        (let ((questions (romacs-agent-rows--get input "questions")))
-          (concat "? " (if (and (vectorp questions) (> (length questions) 0))
-                           (romacs-agent-rows--line (or (romacs-agent-rows--field (aref questions 0) "question") ""))
-                         "a question"))))
+ :row #'romacs-agent-rows--asked
  ;; Its answers, as the harness took them: the card above asked.
  :ended (lambda (input output)
           (let ((answers (and (stringp output)
@@ -485,8 +502,7 @@ known."
                                   (setq at (match-end 0)))
                                 (nreverse found)))))
             (and answers
-                 (concat "? " (romacs-agent-rows--line
-                               (or (romacs-agent-rows--field (aref (romacs-agent-rows--get input "questions") 0) "question") ""))
+                 (concat (romacs-agent-rows--asked input)
                          (romacs-agent-rows--dim (concat "  → " (string-join answers ", "))))))))
 
 ;;; Romacs's other tools

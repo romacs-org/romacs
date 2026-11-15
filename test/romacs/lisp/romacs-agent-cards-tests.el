@@ -500,3 +500,13 @@ its end in STATE."
     (setf (romacs-agent-state session) 'running)
     (romacs-agent-ui--composer-update)
     (should (string-match-p "Running" (overlay-get romacs-agent-ui--composer 'before-string)))))
+
+(ert-deftest romacs-agent-tool-rows-are-one-line ()
+  ;; A renderer's words with a newline in them stay on the row's line.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw
+     session :type 'tool :state 'started :id "t1" :name "TodoWrite"
+     :input (romacs-agent-cards-tests--table
+             "todos" (vector (romacs-agent-cards-tests--table "content" "a" "activeForm" "Fixing parser\nand tests"
+                                                              "status" "in_progress"))))
+    (should (string-search "Fixing parser and tests" (buffer-string)))))

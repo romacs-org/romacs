@@ -340,11 +340,15 @@ one, else nil: the workers' rows name it."
   "A call's INPUT as renderers take it: a hash table, empty when none."
   (if (hash-table-p input) input (make-hash-table :test #'equal)))
 
+(defun romacs-agent-ui--one-line (text)
+  "TEXT as one row: its newlines and tabs, spaces."
+  (replace-regexp-in-string "[\n\t\r]+" " " text))
+
 (defun romacs-agent-ui--tool-text (name input)
   "A tool row's text after its mark: what its renderer draws
 \(`romacs-agent-rows-get'), else NAME and a brief of INPUT."
   (if-let* ((renderer (romacs-agent-rows-get name)))
-      (concat " " (funcall (plist-get renderer :row) (romacs-agent-ui--input input)))
+      (concat " " (romacs-agent-ui--one-line (funcall (plist-get renderer :row) (romacs-agent-ui--input input))))
     (let ((brief (romacs-agent-ui--brief input)))
       (concat " " name (if (string-empty-p brief) "" (concat "  " brief))))))
 
@@ -503,7 +507,7 @@ link."
          ;; The row's words anew, fitted to its line.
          (again (and mark (not failed) (plist-get renderer :ended)
                      (when-let* ((words (funcall (plist-get renderer :ended) input output)))
-                       (romacs-agent-ui--fit words (romacs-agent-ui--row-taken
+                       (romacs-agent-ui--fit (romacs-agent-ui--one-line words) (romacs-agent-ui--row-taken
                                                     (save-excursion (goto-char mark) (current-column)) card)))))
          (answered (and (not failed) (plist-get renderer :answers) (funcall (plist-get renderer :answers) input))))
     (when answered (romacs-agent-ui--replied answered mark))
@@ -2232,8 +2236,11 @@ several, comma-separated, where it takes several."
   (interactive nil romacs-agent-chat-mode)
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
-    (romacs-agent-respond romacs-agent-ui--session id
-                          (if questions (list :answers (romacs-agent-ui--read-answers questions)) t))))
+    (if (not questions) (romacs-agent-respond romacs-agent-ui--session id t)
+      (let ((answers (romacs-agent-ui--read-answers questions)))
+        ;; Its card settles on them.
+        (romacs-agent-ask-note-sent id answers)
+        (romacs-agent-respond romacs-agent-ui--session id (list :answers answers))))))
 
 (defun romacs-agent-chat-allow-always ()
   "Allow the tool call the harness asks about, and its like for the rest

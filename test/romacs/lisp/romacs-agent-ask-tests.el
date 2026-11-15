@@ -95,4 +95,41 @@
         (romacs-agent-ask-pick)
         (should (equal sent '("r2" (:answers (("Which way?" . "Neither"))))))))))
 
+(ert-deftest romacs-agent-ask-settles-on-what-was-sent ()
+  ;; Picked on the card, then answered by y with other words: the card
+  ;; says what was sent.
+  (romacs-agent-ask-tests--with-chat session
+    (cl-letf (((symbol-function 'romacs-agent-respond) #'ignore)
+              ((symbol-function 'romacs-agent-ui--read-answers) (lambda (_) '(("A?" . "y")))))
+      (romacs-agent-ask-tests--draw session :type 'approval :request-id "r3" :user t
+                                    :questions '(("A?" :options ("x" "y") :multi t)))
+      (goto-char (point-min))
+      (search-forward "☐ x")
+      (romacs-agent-ask-pick)
+      (romacs-agent-chat-allow)
+      (romacs-agent-ask-tests--draw session :type 'answered :request-id "r3" :behavior "allow")
+      (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+        (should (string-search "☐ x" text))
+        (should (string-search "☑ y" text))
+        (should-not (string-search "Send" text)))))
+  ;; Words of one's own take the Other row.
+  (romacs-agent-ask-tests--with-chat session
+    (cl-letf (((symbol-function 'romacs-agent-respond) #'ignore)
+              ((symbol-function 'read-string) (lambda (&rest _) "Neither")))
+      (romacs-agent-ask-tests--draw session :type 'approval :request-id "r4" :user t
+                                    :questions romacs-agent-ask-tests--questions)
+      (goto-char (point-min))
+      (search-forward "Other")
+      (romacs-agent-ask-pick)
+      (romacs-agent-ask-tests--draw session :type 'answered :request-id "r4" :behavior "allow")
+      (should (string-search "    ● Neither\n" (buffer-string)))
+      (should-not (string-search "Other" (buffer-string)))))
+  ;; Answered where this chat sent nothing (a replay): it says so.
+  (romacs-agent-ask-tests--with-chat session
+    (romacs-agent-ask-tests--draw session :type 'approval :request-id "r5" :user t
+                                  :questions romacs-agent-ask-tests--questions)
+    (romacs-agent-ask-tests--draw session :type 'answered :request-id "r5" :behavior "allow")
+    (should (string-suffix-p "    ○ Virtual\n    ✓ answered\n" (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+    (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-ask nil))))
+
 ;;; romacs-agent-ask-tests.el ends here

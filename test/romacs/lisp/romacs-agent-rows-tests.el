@@ -32,6 +32,20 @@
     (should (equal (funcall draw "Read" :row (funcall T "file_path" "x.el")) "◧ x.el"))
     (should (equal (funcall draw "Bash" :row (funcall T "command" "make check\nmore" "description" "x"))
                    "$ make check"))
+    ;; Codex's argument lists: a shell's script alone.
+    (should (equal (funcall draw "Bash" :row (funcall T "command" ["bash" "-lc" "make check"])) "$ make check"))
+    (should (equal (funcall draw "Bash" :row (funcall T "command" ["git" "status"])) "$ git status"))
+    ;; Edits counted one by one: two deletions add nothing.
+    (should (equal (funcall draw "MultiEdit" :row
+                            (funcall T "file_path" "/w/a.el"
+                                     "edits" (vector (funcall T "old_string" "a" "new_string" "")
+                                                     (funcall T "old_string" "b" "new_string" ""))))
+                   "✎ a.el  /w  +0 −2"))
+    ;; Nothing found is none.
+    (should (equal (funcall draw "Grep" :ended (funcall T "pattern" "x") "No matches found") "⌕ x · 0 lines"))
+    (should (equal (funcall draw "Glob" :ended (funcall T "pattern" "x") "No files found") "⌕ x · 0 files"))
+    ;; A question's end with no questions given keeps its row.
+    (should (equal (funcall draw "AskUserQuestion" :ended (funcall T) "\"Q\"=\"A\"") "? a question  → A"))
     (should (equal (funcall draw "Read" :row (funcall T "file_path" "/w/r/lisp/a.el" "offset" 10 "limit" 5))
                    "◧ a.el:10-14  /w/r/lisp"))
     (should (equal (funcall draw "Edit" :row (funcall T "file_path" "/w/a.el" "old_string" "x" "new_string" "y\nz"))

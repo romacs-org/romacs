@@ -10,8 +10,11 @@
 ;; option a row under it, and a row for words of one's own.  RET on an
 ;; option picks it, n and p step through the options, and the card sends
 ;; once each question has its answer: at once for one question of one
-;; choice, else by its Send row.  Sent or answered elsewhere, the card
-;; settles: what was picked stays, the rest recedes, its keys go.
+;; choice, else by its Send row.  Answered, the card settles on the
+;; answers sent (`romacs-agent-ask-note-sent'), by it or by `y': they
+;; stay, words of one's own among them, the rest recedes, its keys go.
+;; Answered where this chat did not send it (another client, a replay),
+;; it says it was answered, and the call's row says how.
 ;;
 ;; `romacs-agent-ask-card' is pure: the chat inserts what it returns.  The
 ;; picks so far are the chat's, by request id.
@@ -28,6 +31,13 @@
   "An option of a question a chat is asked, not yet picked.")
 (defface romacs-agent-ask-picked '((t :inherit romacs-agent-done :weight bold))
   "The option picked for a question a chat was asked.")
+
+(defvar-local romacs-agent-ask--sent nil
+  "The answers this chat sent, by request id: ((QUESTION . ANSWER) ...).")
+
+(defun romacs-agent-ask-note-sent (id answers)
+  "Remember ANSWERS as what request ID was answered with, for its card."
+  (setf (alist-get id romacs-agent-ask--sent nil nil #'equal) answers))
 
 (defvar-local romacs-agent-ask--picks nil
   "Each question card's picks so far, by request id: an alist of
@@ -147,18 +157,61 @@ question of several choices, else the one."
               (put-text-property (+ glyph 2) (+ glyph 2 (length what)) 'face
                                  (if picked 'romacs-agent-ask-picked 'romacs-agent-ask-option)))))))))
 
+(defun romacs-agent-ask-chosen (question answer)
+  "The labels ANSWER (a string, as sent) chose for QUESTION, an
+`approval' event's: its options, and what it said in its own words."
+  (let* ((props (cdr question))
+         (said (if (plist-get props :multi) (split-string answer ", " t) (list answer)))
+         (options (plist-get props :options)))
+    (list (cl-intersection said options :test #'equal)
+          (cl-set-difference said options :test #'equal))))
+
+(declare-function romacs-agent-ui--insert-at "romacs-agent-ui" (position text))
+
 (defun romacs-agent-ask-settle (id)
-  "Settle request ID's card: answered, its keys go and what was not picked
-recedes."
-  (let ((picks (alist-get id romacs-agent-ask--picks nil nil #'equal)) (inhibit-read-only t))
-    (dolist (start (romacs-agent-ask--rows id))
-      (let ((end (next-single-property-change start 'romacs-agent-ask nil (point-max))))
-        (pcase-let ((`(,_ ,index ,what) (get-text-property start 'romacs-agent-ask)))
-          (put-text-property start end 'keymap romacs-agent-chat-transcript-map)
-          (remove-text-properties start end '(mouse-face nil))
-          (unless (and (stringp what) (member what (cdr (assq index picks))))
-            (add-face-text-property start end 'romacs-agent-dim)))))
-    (setq romacs-agent-ask--picks (cl-remove id romacs-agent-ask--picks :key #'car :test #'equal))))
+  "Settle request ID's card, answered: its keys go, the options its sent
+answers chose stay, words of one's own take the Other row, and the rest
+recedes.  With no answers known, its last row says it was answered."
+  (let* ((questions (romacs-agent-ask--asked id))
+         (answers (alist-get id romacs-agent-ask--sent nil nil #'equal))
+         (rows (romacs-agent-ask--rows id))
+         (last-other (car (last (cl-remove-if-not (lambda (at) (eq (nth 2 (get-text-property at 'romacs-agent-ask)) 'other))
+                                                  rows))))
+         (inhibit-read-only t))
+    ;; Marked as its answers chose.
+    (setf (alist-get id romacs-agent-ask--picks nil nil #'equal)
+          (cl-loop for question in questions
+                   for index from 0
+                   for answer = (cdr (assoc (car question) answers))
+                   when answer collect (cons index (car (romacs-agent-ask-chosen question answer)))))
+    (romacs-agent-ask--show-picks id)
+    (save-excursion
+      ;; Last first: a row rewritten moves none still to come.
+      (dolist (start (reverse rows))
+        (let ((end (next-single-property-change start 'romacs-agent-ask nil (point-max))))
+          (pcase-let* ((`(,_ ,index ,what) (get-text-property start 'romacs-agent-ask))
+                       (question (and index (nth index questions)))
+                       (answer (and question (cdr (assoc (car question) answers))))
+                       (`(,options ,own) (if answer (romacs-agent-ask-chosen question answer) '(nil nil))))
+            (cond
+             ((stringp what)
+              (put-text-property start end 'keymap romacs-agent-chat-transcript-map)
+              (remove-text-properties start end '(mouse-face nil))
+              (unless (member what options)
+                (add-face-text-property start end 'romacs-agent-dim)))
+             (t
+              (delete-region start end)
+              (let ((said (cond (own (propertize (concat "    ● " (string-join own ", ") "\n")
+                                                 'face 'romacs-agent-ask-picked))
+                                ((and (not answers) (eq start last-other))
+                                 (propertize "    ✓ answered\n" 'face 'romacs-agent-dim)))))
+                (when said (romacs-agent-ui--insert-at start said))))))))
+      ;; Settled, its rows are a card's no more.
+      (dolist (start (romacs-agent-ask--rows id))
+        (let ((end (next-single-property-change start 'romacs-agent-ask nil (point-max))))
+          (remove-text-properties start end '(romacs-agent-ask nil)))))
+    (setq romacs-agent-ask--picks (cl-remove id romacs-agent-ask--picks :key #'car :test #'equal)
+          romacs-agent-ask--sent (cl-remove id romacs-agent-ask--sent :key #'car :test #'equal))))
 
 (defun romacs-agent-ask--send (id)
   "Send request ID's answers, when each question has one."
@@ -166,6 +219,7 @@ recedes."
          (answers (romacs-agent-ask-answers questions (alist-get id romacs-agent-ask--picks nil nil #'equal))))
     (unless answers
       (user-error "Answer each question first"))
+    (romacs-agent-ask-note-sent id answers)
     (romacs-agent-respond romacs-agent-ui--session id (list :answers answers))))
 
 (defun romacs-agent-ask-pick ()
