@@ -26,9 +26,15 @@ fn a_delayed_message_shows_as_gnu_shows_it() {
                        (funcall-with-delayed-message 5 "never" (lambda () 42))
                        (condition-case e (funcall-with-delayed-message "x" "m" 'ignore) (error e))
                        (condition-case e (funcall-with-delayed-message 1 2 'ignore) (error e))
-                       (with-delayed-message (0.1 "macro-slow") (sleep-for 0.3) 7))"#;
+                       (with-delayed-message (0.1 "macro-slow") (sleep-for 0.3) 7)
+                       ;; Saturated timeouts: infinity never, the rest at the first wait.
+                       (funcall-with-delayed-message 1.0e+INF "inf" (lambda () (sleep-for 0.2) 1))
+                       (funcall-with-delayed-message -1.0e+INF "ninf" (lambda () (sleep-for 0.2) 2))
+                       (funcall-with-delayed-message 0.0e+NaN "nan" (lambda () (sleep-for 0.2) 3))
+                       (funcall-with-delayed-message -1 "neg" (lambda () (sleep-for 0.2) 4))
+                       (funcall-with-delayed-message 0 "zero" (lambda () (sleep-for 0.2) 5)))"#;
     let expected = batch(&gnu, &dir, form);
-    assert_eq!(expected.1, "slow-one\nmacro-slow", "{expected:?}");
+    assert_eq!(expected.1, "slow-one\nmacro-slow\nninf\nnan\nneg\nzero", "{expected:?}");
     assert_eq!(batch(romacs, &dir, form), expected);
     std::fs::remove_dir_all(&dir).unwrap();
 }

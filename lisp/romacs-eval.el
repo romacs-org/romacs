@@ -23,9 +23,16 @@ In Romacs the message is shown when FUNCTION waits (for process output,
 waits it is not shown."
   (unless (numberp timeout) (signal 'wrong-type-argument (list 'numberp timeout)))
   (unless (stringp message) (signal 'wrong-type-argument (list 'stringp message)))
-  (let ((timer (run-with-timer timeout nil (lambda () (message "%s" message)))))
+  ;; dtotimespec saturates: an infinite TIMEOUT never fires, a NaN or a
+  ;; negative infinity at once.
+  (let* ((timeout (cond ((not (floatp timeout)) timeout)
+                        ((isnan timeout) 0)
+                        ((= timeout 1.0e+INF) nil)
+                        ((= timeout -1.0e+INF) 0)
+                        (t timeout)))
+         (timer (and timeout (run-with-timer timeout nil (lambda () (message "%s" message))))))
     (unwind-protect (funcall function)
-      (cancel-timer timer))))
+      (when timer (cancel-timer timer)))))
 
 (put 'funcall-with-delayed-message 'romacs-lint-hint
      "its MESSAGE shows only while FUNCTION waits (process output, sit-for), not during a CPU loop")
