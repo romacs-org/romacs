@@ -134,6 +134,9 @@ much of it its deltas wrote.")
   "A marker at the start of each turn rule's fill, as they are drawn.")
 (defvar-local romacs-agent-ui--fitted nil
   "The width the rules' fills last fitted.")
+(defvar-local romacs-agent-ui--staying nil
+  "Markers that stay before text the transcript's end takes, as a
+window's start does: where what an event draws starts.")
 (defvar-local romacs-agent-ui--tool nil
   "The running tool's name, for the live rule.")
 
@@ -209,9 +212,11 @@ start is always taken after its own text is in."
       (goto-char start)
       (if (/= start romacs-agent-ui--end) (insert text)
         (let ((windows (seq-filter (lambda (window) (= (window-start window) start))
-                                   (get-buffer-window-list nil nil t))))
+                                   (get-buffer-window-list nil nil t)))
+              (staying (seq-filter (lambda (marker) (= marker start)) romacs-agent-ui--staying)))
           (insert-before-markers text)
-          (dolist (window windows) (set-window-start window start t))))
+          (dolist (window windows) (set-window-start window start t))
+          (dolist (marker staying) (set-marker marker start))))
       ;; A rule's fill, remembered: a resize refits the rules alone.
       (when-let* ((offset (text-property-any 0 (length text) 'romacs-agent-rule-fill t text)))
         (push (copy-marker (+ start offset)) romacs-agent-ui--fills)
@@ -638,20 +643,25 @@ or a repeat."
       (pcase (plist-get event :type)
         ('input
          (let ((wakes (romacs-agent-ui--wakes session (plist-get event :text)))
-               (start (marker-position romacs-agent-ui--end)))
-           (if wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake))
-             (romacs-agent-ui--line session event "")
-             (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
-             ;; A prompt carries its request id: what names its turn.
-             (romacs-agent-ui--insert "> " 'romacs-agent-turn (or (plist-get event :request) t))
-             (let ((images (plist-get event :images)))
-               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt
-                                        'romacs-agent-turn (or (plist-get event :request) t)
-                                        'romacs-agent-images images)
-               (romacs-agent-ui--insert "\n")
-               (dolist (file images)
-                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))
-           (romacs-agent-ui--mark-input start))
+               ;; Where its rows start, as cards above them change.
+               (start (copy-marker romacs-agent-ui--end)))
+           (push start romacs-agent-ui--staying)
+           (unwind-protect
+               (if wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake))
+                 (romacs-agent-ui--line session event "")
+                 (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
+                 ;; A prompt carries its request id: what names its turn.
+                 (romacs-agent-ui--insert "> " 'romacs-agent-turn (or (plist-get event :request) t))
+                 (let ((images (plist-get event :images)))
+                   (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt
+                                            'romacs-agent-turn (or (plist-get event :request) t)
+                                            'romacs-agent-images images)
+                   (romacs-agent-ui--insert "\n")
+                   (dolist (file images)
+                     (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))
+             (setq romacs-agent-ui--staying (delq start romacs-agent-ui--staying))
+             (romacs-agent-ui--mark-input start)
+             (set-marker start nil)))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
