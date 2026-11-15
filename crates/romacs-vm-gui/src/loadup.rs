@@ -1122,7 +1122,7 @@ fn subdirs_el_text(list: &str) -> String {
         assert_eq!(update_subdirs(&lisp.join("cedet"), &[]).unwrap(), SubdirsEl::File { list: "\"semantic\" ".into(), names: vec!["semantic".into()] });
         assert_eq!((gnu_subdirs_el(&lisp, &lisp.join("cedet")), gnu_subdirs_el(&lisp, &lisp.join("leim"))), (SubdirsEl::None, SubdirsEl::None));
         assert_eq!(gnu_subdirs_el(&lisp, &lisp.parent().unwrap().join("elsewhere")), SubdirsEl::None);
-        std::fs::remove_dir_all(lisp.ancestors().nth(2).unwrap()).unwrap();
+        std::fs::remove_dir_all(lisp.parent().unwrap()).unwrap();
         // This tree's lisp/: GNU's script output on the pin's directories, Romacs's own
         // directories left out as gnu_subdirs_el leaves them
         // (sha256 c706f2735d0d95e1b5834cabed47c9815ef07632a8bf1021afa6945081f3cb23).
@@ -1157,7 +1157,7 @@ fn subdirs_el_text(list: &str) -> String {
         assert_eq!(add_to_load_path(&mut tail, "/z/", &["d".to_owned()]), Some(1));
         assert_eq!(tail, ["/x", "/y", "/z/d"]);
         assert_eq!(add_to_load_path(&mut vec![], "/z", &["d".to_owned()]), None);
-        std::fs::remove_dir_all(lisp.ancestors().nth(2).unwrap()).unwrap();
+        std::fs::remove_dir_all(lisp.parent().unwrap()).unwrap();
     }
 
     /// Symlinked directories: GNU's Makefile finds directories with `find
