@@ -634,6 +634,8 @@ fn a_collection_its_unwinding_made_due_is_taken_at_the_handlers_first_tick() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_gc_stress(0);
+    // The full the threshold paces, counted alone (VM2-GC-GENERATIONS).
+    vm.set_gc_minor(false);
     // GNU's threshold, which the unbinding restores: the list made under the
     // bound one is past it (VM2-GC-PACING).
     vm.eval_source("(progn (setq gc-cons-threshold 800000) (defvar lt-big nil) (fset 'lt-tick (lambda () nil)) (garbage-collect) t)").unwrap();

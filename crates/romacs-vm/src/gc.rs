@@ -57,8 +57,8 @@ pub(crate) struct Stress {
     /// (`ROMACS_GC_INPLACE'): free entries are reused at once, so a Value a
     /// native frame kept names something else.
     inplace: bool,
-    /// Automatic collections may be minors (`ROMACS_GC_MINOR` or
-    /// [`Vm::set_gc_minor`]): off until a minor's pause meets its bar.
+    /// Automatic collections may be minors: on, unless `ROMACS_GC_MINOR` is
+    /// 0 or [`Vm::set_gc_minor`] says otherwise.
     minor: bool,
     /// Faults a test plants in this VM's collections, and no other's.
     #[cfg(test)]
@@ -406,7 +406,7 @@ impl Stress {
         // HOST(std::env::var_os): whether automatic collections may be minors (ROMACS_GC_MINOR): a
         // minor frees only what nothing reaches, as a full does; invisible to Lisp, read again on
         // restore (Stress::rearm)
-        let minor = std::env::var_os("ROMACS_GC_MINOR").is_some_and(|v| !v.is_empty() && v != "0");
+        let minor = std::env::var_os("ROMACS_GC_MINOR").is_none_or(|v| v != "0");
         Self { every, verify, threads, inplace, minor, ..Self::default() }
     }
     /// This process's test mode, from its environment, for a VM a world

@@ -372,7 +372,10 @@ fn an_automatic_collection_offers_the_list_at_a_safe_point() {
     let output = std::process::Command::new(oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
+    // A full offers the list; the loop's garbage, dead young, makes none due
+    // with minors on (VM2-GC-GENERATIONS).
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
+    vm.set_gc_minor(false);
     assert_eq!(shown(&mut vm, form), expected, "candidate");
 }
