@@ -1,4 +1,4 @@
-;;; romacs-agent-gate-tests.el --- An edit refused before it lands -*- lexical-binding: t; -*-
+;;; romacs-agent-gate-tests.el --- An edit that breaks a Lisp file, told before it lands -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
@@ -21,9 +21,9 @@
 (defun romacs-agent-gate-tests--input (&rest pairs)
   (apply #'romacs-mcp--object pairs))
 
-(ert-deftest romacs-agent-gate-refuses-an-edit-that-breaks-the-file ()
+(ert-deftest romacs-agent-gate-tells-of-an-edit-that-breaks-the-file ()
   (romacs-agent-gate-tests--with-file "(defun a ()\n  (list 1 2))\n\n(defun b () 3)\n"
-    ;; A dropped paren: refused, saying where; the file as it was.
+    ;; A dropped paren: told, saying where; the check writes nothing.
     (let ((why (romacs-agent-gate-check "Edit" (romacs-agent-gate-tests--input
                                                "file_path" file "old_string" "(list 1 2))" "new_string" "(list 1 2)"))))
       (should (string-match-p "unreadable as Emacs Lisp: the form that starts at line [0-9]+" why))
@@ -78,19 +78,20 @@
                                                                                    "request_id" (gethash "request_id" init)))))
           (romacs-agent--raise session event))
         (should (eq (romacs-agent--claude-next session) :ready)))
-      ;; A breaking edit: owed, judged as its reply is written, the
-      ;; refusal shown from the written reply.
+      ;; A breaking edit: owed, judged as its reply is written; the
+      ;; model is told as context, never refused, and the note is shown.
       (let ((events (romacs-agent--claude-events session (funcall callback "h1" "(a)" "(a"))))
         (should-not (cl-find 'status events :key (lambda (e) (plist-get e :type))))
         (dolist (event events) (romacs-agent--raise session event)))
       (let* ((reply (romacs-agent--claude-next session))
              (answer (gethash "hookSpecificOutput" (gethash "response" (gethash "response" reply)))))
         (should (equal (gethash "request_id" (gethash "response" reply)) "h1"))
-        (should (equal (gethash "permissionDecision" answer) "deny"))
+        (should-not (gethash "permissionDecision" answer))
+        (should (string-match-p "unreadable as Emacs Lisp" (gethash "additionalContext" answer)))
         ;; Its echo is known by its request id, not taken for another line's.
         (should (equal (romacs-agent--step-id reply) "h1"))
         (let ((paid (romacs-agent--claude-input-events session reply)))
-          (should (string-match-p "refused" (plist-get (cl-find 'status paid :key (lambda (e) (plist-get e :type))) :text)))
+          (should (string-match-p "Romacs lets it go on" (plist-get (cl-find 'status paid :key (lambda (e) (plist-get e :type))) :text)))
           (should-not (cl-find 'answered paid :key (lambda (e) (plist-get e :type))))
           (dolist (event paid) (romacs-agent--raise session event))))
       (should (eq (romacs-agent--claude-next session) :ready))
@@ -115,10 +116,9 @@
                                                                       "tool_input" (romacs-mcp--object "file_path" file
                                                                                                        "content" "("))))))
         (romacs-agent--raise session event))
-      (should (equal (gethash "permissionDecision"
-                              (gethash "hookSpecificOutput"
-                                       (gethash "response" (gethash "response" (romacs-agent--claude-next session)))))
-                     "deny")))))
+      (should (gethash "additionalContext"
+                       (gethash "hookSpecificOutput"
+                                (gethash "response" (gethash "response" (romacs-agent--claude-next session)))))))))
 
 (ert-deftest romacs-agent-gate-a-run-of-before-is-ready-as-it-is ()
   ;; A run that spoke before any initialize (started by older code) is not
