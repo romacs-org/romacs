@@ -12,7 +12,7 @@
 # ~/.local: it downloads, checks and unpacks, nothing more.  Romacs's
 # first start prepares its startup image, which its window shows as it
 # goes, and its Lisp compiles in the background while it is idle
-# (lisp/romacs/romacs-precompile.el). It asks before using sudo, and only to install missing system
+# (lisp/session/romacs-precompile.el). It asks before using sudo, and only to install missing system
 # libraries. The whole script is inside `main', so a truncated download
 # runs nothing.
 set -euo pipefail
