@@ -4,22 +4,6 @@ use super::*;
 use crate::brand::{Gc, Mx};
 use crate::gc::RootFrame;
 use std::path::{Path, PathBuf};
-thread_local! {
-    /// How many loads this thread began, source or compiled, whether they
-    /// went on to fail or loaded a file again (`loads_begun`).
-    static LOADS_BEGUN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// How many loads this thread began: a layer build's configuration form
-/// that began none met what it met itself (`romacs--layer-try`).
-pub(crate) fn loads_begun() -> usize {
-    LOADS_BEGUN.with(std::cell::Cell::get)
-}
-
-fn begin_load() {
-    LOADS_BEGUN.with(|n| n.set(n.get() + 1));
-}
-
 /// What a source load sets for its file, as it was: `Vm::enter_source_regime`.
 struct SourceRegime {
     lazy: bool,
@@ -595,7 +579,6 @@ impl Vm {
     /// Enter a source load of PATH: among the loads in progress, in its regime.
     /// What it replaces goes back with `Self::leave_source_regime`.
     fn enter_source_regime(&mut self, path: &Path, explicit: bool) {
-        begin_load();
         self.loader.active.push(path.to_owned());
         // GNU readevalloop (src/lread.c:2183-2188) decides ONCE per load:
         // forms are eagerly macroexpanded only if `internal-macroexpand-for-
@@ -899,7 +882,6 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
 /// (lread.c:1536), where a source load keeps them (`load-with-code-conversion`).
 fn load_compiled<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, named: &str, path: &Path, compiled: &crate::compiled_lisp::Compiled, values: &RootFrame, out: Out<'_>) -> Result<()> {
     let (outer, history_slot) = m.leaf(path, |vm, path| {
-        begin_load();
         vm.loader.active.push(path.to_owned());
         (vm.dynamic.len(), vm.slot("current-load-list"))
     });

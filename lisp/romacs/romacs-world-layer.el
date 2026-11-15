@@ -33,9 +33,6 @@
 ;; its configuration takes it for a failure; its data holds no secret.
 (declare-function romacs--world-secret-asked "world.rs" ())
 (declare-function romacs--world-take-secret "world.rs" ())
-(declare-function romacs--world-refusals "world.rs" ())
-(declare-function romacs--world-forget-refusals "world.rs" (mark))
-(declare-function romacs--world-loads "world.rs" ())
 
 (put 'romacs-world-deferred 'error-conditions '(romacs-world-deferred))
 (put 'romacs-world-deferred 'error-message "Left to the session")
@@ -146,6 +143,16 @@ layer is restored only for the init content its plan was recorded from.")
   (unless (load-history-filename-element (load-history-regexp file))
     (load file nil t)))
 
+(defvar romacs--layer-entry-timers nil
+  "The timers running as a layer build's entry began (`world::layer'):
+the ones the entry starts are cancelled at its end, as no image holds
+a time of the builder's.")
+
+(defvar romacs--layer-remade-timers nil
+  "At a layer build's entry's end, what restore sets again: the values
+of the variables re-seed forms set (`world::layer'), so a timer one of
+them holds is made again in each restored process.")
+
 (defvar romacs--layer-deferred-after-loads (make-hash-table :test #'equal)
   "The init's configuration forms a layer build left to the session.
 Each key is (LIBRARY . N), as in `romacs--layer-baked-after-loads'; its
@@ -158,10 +165,9 @@ evaluates them, where GNU evaluates the whole call
   "Evaluate FORM, part of the init's Nth configuration form for LIBRARY,
 one smallest whole form at a time: a `progn''s forms in turn, the body of a
 `condition-case' or `condition-case-unless-debug' within its handlers, the
-branch an `if' takes.  A form that asks for a secret, or meets what the
-build cannot hold (`romacs--layer-try'), is kept, WRAP applied (the handlers
-around it), for the session to run whole
-\(`romacs--layer-deferred-after-loads'), and the next goes on."
+branch an `if' takes.  A form that asks for a secret (`romacs--layer-try')
+is kept, WRAP applied (the handlers around it), for the session to run
+whole (`romacs--layer-deferred-after-loads'), and the next goes on."
   (pcase form
     (`(progn . ,body)
      (dolist (each body) (romacs--layer-walk library n lexical each wrap)))
@@ -179,44 +185,23 @@ around it), for the session to run whole
 
 (defun romacs--layer-try (form lexical)
   "Evaluate FORM, LEXICAL, in a layer build: (t . VALUE), or nil when it
-is the session's to run.  It is when it asked for a secret, or met, itself
-and not in a library it loaded (whose forms answer for theirs), a fact or
-an effect the build refused or a timer it started: the build then answers
-for nothing it met, and none of its timers runs.  An error after it met
-what the build cannot hold (a credential file's read fails there) is the
-build's, not the form's."
+asked for a secret, and is the session's to run as code.  Anything else
+it meets a build cannot hold stands, and leaves its entry to the
+session.  An error after its ask (a credential file's read fails in a
+build) is the ask's, not the form's."
   (romacs--world-take-secret)
-  (let ((refusals (romacs--world-refusals))
-        (timers (append timer-list timer-idle-list))
-        (loads (romacs--world-loads))
-        (deferred nil) (value nil))
+  (let ((deferred nil) (value nil))
     (condition-case err (setq value (eval form lexical))
       (romacs-world-deferred (setq deferred t))
-      (error (if (or (romacs--world-take-secret)
-                     (and (> (romacs--world-refusals) refusals) (= (romacs--world-loads) loads)))
-                 (setq deferred t)
-               (signal (car err) (cdr err)))))
-    (let ((started (romacs--layer-new-timers timers))
-          (own (= (romacs--world-loads) loads)))
-      (if (not (or (romacs--world-take-secret) deferred
-                   (and own (or started (> (romacs--world-refusals) refusals)))))
-          (cons t value)
-        (when own
-          (romacs--world-forget-refusals refusals)
-          (mapc #'cancel-timer started))
-        nil))))
+      (error (if (romacs--world-take-secret) (setq deferred t) (signal (car err) (cdr err)))))
+    (unless (or (romacs--world-take-secret) deferred)
+      (cons t value))))
 
 (defun romacs--layer-defer (library n lexical form)
   "Keep FORM, LEXICAL, for the init's Nth configuration call for LIBRARY."
   (let ((key (cons library n)))
     (puthash key (append (gethash key romacs--layer-deferred-after-loads) (list (cons lexical form)))
              romacs--layer-deferred-after-loads)))
-
-(defun romacs--layer-new-timers (before)
-  "The timers started since BEFORE, the timer lists as they were."
-  (let ((new nil))
-    (dolist (timer (append timer-list timer-idle-list) new)
-      (unless (memq timer before) (push timer new)))))
 
 (defun romacs--layer-load-configured (library forms)
   "Load LIBRARY, a feature or a file the init configured, after FORMS.
