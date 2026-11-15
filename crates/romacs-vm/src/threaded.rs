@@ -4465,7 +4465,7 @@ unsafe fn leaf_call(
     unsafe {
         let en: &mut Engine<'_> = &mut e;
         if en.native_mark.is_some() || en.apply_mark.is_some() || en.vm.profiler.active
-            || en.vm.backtrace.observing() || en.vm.fence.is_some()
+            || en.vm.backtrace.observing() || en.vm.tracking.is_some()
         {
             return enter_generated(e, r, pc, target, start, argc);
         }

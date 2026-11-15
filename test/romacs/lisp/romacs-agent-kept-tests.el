@@ -6,6 +6,9 @@
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
 
+;; What `romacs-startup-progress' keeps: bound here around each restore.
+(defvar romacs-progress-state)
+
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
@@ -427,5 +430,286 @@ contents, so two equal states print the same."
                                                                                  :host-socket socket)))
                  (should (file-exists-p socket)))
         (delete-process server)))))
+
+(ert-deftest romacs-agent-kept-restore-soon-loads-every-session-in-turns ()
+  ;; A server's start: sessions load from the command loop after it, the
+  ;; `agents' step saying how far, and a restored chat's one loads alone.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let* ((romacs-agent--restore-pending nil) (restored 0) (romacs-progress-state nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored)))))
+      (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore))
+        (should (romacs-agent-load-session romacs-agent-kept-tests--id))
+        (should (= restored 0))
+        (clrhash romacs-agent--sessions)
+        (romacs-agent-restore-soon)
+        (should romacs-agent--restore-pending)
+        (should-not (gethash romacs-agent-kept-tests--id romacs-agent--sessions))
+        (with-timeout (10 (ert-fail "the restore did not end"))
+          (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+        (should (romacs-agent-get romacs-agent-kept-tests--id))
+        (should (= restored 1))
+        (let ((agents (alist-get 'agents romacs-progress-state)))
+          (should (eq (plist-get agents :status) 'done))
+          (should (equal (plist-get agents :label) "Agent sessions 1/1")))))))
+
+(ert-deftest romacs-agent-kept-a-session-asked-for-mid-restore-loads-at-once ()
+  ;; While sessions load a turn at a time, one attached early may ask for
+  ;; another not reached yet (its child): it is loaded then and there.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending (list dir)))
+      (should (romacs-agent-get romacs-agent-kept-tests--id))
+      (should-not (romacs-agent-get "../escape")))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending nil))
+      (should-not (romacs-agent-get romacs-agent-kept-tests--id)))))
+
+;; Worker VMs as these tests see them: a job is held until `--work' runs
+;; it in a VM of its own (a private session table), then its callback.
+(defmacro romacs-agent-kept-tests--with-workers (&rest body)
+  "BODY with every journal folded aside, its job pushed on `jobs'."
+  (declare (indent 0))
+  `(let ((jobs nil) (romacs-agent-fold-bytes 0) (romacs-agent--folding (make-hash-table :test #'equal))
+         (romacs-agent--fold-queue nil) (romacs-agent--fold-running 0) (romacs-agent--fold-loading nil)
+         (romacs-agent--fold-load-timer nil) (romacs-agent--restoring nil))
+     (cl-letf (((symbol-function 'isolate-main-p) (lambda () t))
+               ((symbol-function 'isolate-spawn)
+                (lambda (function dir &rest keys) (car (push (list 'future function dir nil nil keys) jobs))))
+               ((symbol-function 'isolate-on-done) (lambda (future callback) (setf (nth 3 future) callback) future))
+               ((symbol-function 'isolate-await) (lambda (future &optional _) (nth 4 future))))
+       ,@body)))
+
+(defun romacs-agent-kept-tests--drain ()
+  "Load on now what the folds that ended left waiting."
+  (when romacs-agent--fold-load-timer (cancel-timer romacs-agent--fold-load-timer))
+  (while (or romacs-agent--fold-loading romacs-agent--fold-load-timer) (romacs-agent--fold-load-step)
+         (when romacs-agent--fold-load-timer (cancel-timer romacs-agent--fold-load-timer)
+               (setq romacs-agent--fold-load-timer nil))))
+
+(defun romacs-agent-kept-tests--work (future)
+  "Run FUTURE's job as its worker would, then its callback, then load on."
+  (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+                             (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
+                         (funcall (nth 1 future) (nth 2 future))))
+  (funcall (nth 3 future) future)
+  (romacs-agent-kept-tests--drain))
+
+(ert-deftest romacs-agent-kept-a-long-journal-folds-aside ()
+  ;; No kept state, a journal too long to fold in the editor: a worker
+  ;; folds it and keeps its state.  The session is known meanwhile, and
+  ;; loads on from that state, reading no record again: the same state as
+  ;; a whole replay here.
+  (romacs-agent-kept-tests--with
+    (let ((records (romacs-agent-kept-tests--claude)))
+      (romacs-agent-kept-tests--write dir records)
+      (romacs-agent-kept-tests--with-workers
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)) (read nil))
+          (should (eq (romacs-agent-get romacs-agent-kept-tests--id) session))
+          (should (= (romacs-agent-seq session) 0))
+          (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (should (= (length jobs) 1))
+          (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                     ((symbol-function 'romacs-agent--record)
+                      (lambda (session record) (push (gethash "seq" record) read) (funcall real session record))))
+            (let ((future (car jobs)))
+              (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+                                         (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
+                                     (funcall (nth 1 future) (nth 2 future))))
+              (should (equal (nth 4 future) (list (length records))))
+              (should (file-exists-p (romacs-agent--kept-file session)))
+              (setq read nil)
+              (funcall (nth 3 future) future)
+              (romacs-agent-kept-tests--drain)))
+          (should-not read)
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (romacs-agent-kept-tests--write twin records)
+          (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (romacs-agent-fold-bytes nil))
+                            (romacs-agent--load twin))))
+            (should (= (romacs-agent-seq session) (length records)))
+            (should (equal (romacs-agent-kept-tests--state session) (romacs-agent-kept-tests--state replayed)))
+            (should (eq (romacs-agent-state session) (romacs-agent-state replayed)))))))))
+
+(ert-deftest romacs-agent-kept-a-long-tail-past-its-kept-state-folds-aside ()
+  ;; Kept at its first turn's end, then much more journaled (a long turn
+  ;; under way): what is left past its kept state is folded aside too, on
+  ;; from that state; the session shows its kept state meanwhile.
+  (romacs-agent-kept-tests--with
+    (let* ((records (romacs-agent-kept-tests--claude))
+           (head (cl-subseq records 0 12)) (tail (nthcdr 12 records)))
+      (romacs-agent-kept-tests--write dir head)
+      (romacs-agent-kept-tests--load dir)
+      (romacs-agent-kept-tests--write dir tail t)
+      (romacs-agent-kept-tests--with-workers
+        (setq romacs-agent-fold-bytes 10)
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (= (romacs-agent-seq session) 12))
+          (should (= (length jobs) 1))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= (romacs-agent-seq session) (length records)))
+          (should (equal (romacs-agent-reply session) "bye")))))))
+
+(ert-deftest romacs-agent-kept-a-kept-state-far-back-is-not-searched-for-here ()
+  ;; Its kept record further back than a fold's worth of bytes: the editor
+  ;; does not search the journal for it, the worker does.
+  (romacs-agent-kept-tests--with
+    (let* ((records (romacs-agent-kept-tests--claude))
+           (head (cl-subseq records 0 12)) (tail (nthcdr 12 records)))
+      (romacs-agent-kept-tests--write dir head)
+      (romacs-agent-kept-tests--load dir)
+      (romacs-agent-kept-tests--write
+       dir (cl-loop for n from 100 to 400
+                    collect (romacs-agent-kept-tests--record n "note" (romacs-mcp--object "type" "pad" "text" (make-string 200 ?p))))
+       t)
+      (let ((session (romacs-agent--make :id romacs-agent-kept-tests--id :dir dir)))
+        (should (eq (romacs-agent--journal-after session 12 4096) 'beyond))
+        (should (integerp (romacs-agent--journal-after session 12)))
+        (should (integerp (romacs-agent--journal-after session 400 4096))))
+      (romacs-agent-kept-tests--with-workers
+        (setq romacs-agent-fold-bytes 4096)
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (= (romacs-agent-seq session) 0))
+          (should (= (length jobs) 1))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= (romacs-agent-seq session) 400)))))))
+
+(ert-deftest romacs-agent-kept-folds-go-in-bounded-batches-loaded-by-one-timer ()
+  ;; A batch takes journals while their bytes fit, one past the bound
+  ;; alone; folds that end together load on from one timer.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--with-workers
+      (let* ((romacs-agent--fold-batch '(8 . 100)) (romacs-agent-fold-jobs 4)
+             (made (mapcar (lambda (bytes)
+                             (let ((d (expand-file-name (format "b%d" bytes) root)))
+                               (make-directory d t)
+                               (write-region (make-string bytes ?x) nil (expand-file-name "journal.jsonl" d) nil 'silent)
+                               (cons (romacs-agent--make :id (format "b%d" bytes) :dir d) nil)))
+                           '(60 80 30))))
+        (setq romacs-agent--fold-queue made)
+        (romacs-agent--fold-next)
+        (should (equal (mapcar (lambda (job) (mapcar #'file-name-nondirectory (nth 2 job))) (reverse jobs))
+                       '(("b60") ("b80") ("b30"))))
+        (let ((timers (lambda () (cl-count #'romacs-agent--fold-load-step timer-list :key #'timer--function))))
+          (dolist (job jobs) (setf (nth 4 job) nil) (funcall (nth 3 job) job))
+          (should (= (funcall timers) 1))
+          (romacs-agent-kept-tests--drain)
+          (should (= (funcall timers) 0)))))))
+
+(ert-deftest romacs-agent-kept-a-restore-ends-after-its-folds ()
+  ;; The restore's tail (attaching, sweeping, the restored hook) waits for
+  ;; the sessions folded aside; its progress says running until then.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let* ((romacs-agent--restore-pending nil) (restored 0) (romacs-progress-state nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored)))))
+      (romacs-agent-kept-tests--with-workers
+        (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                  ((symbol-function 'romacs-agent--sweep) #'ignore))
+          (romacs-agent-restore-soon)
+          (with-timeout (10 (ert-fail "the restore did not step"))
+            (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+          (should (= restored 0))
+          (should (eq (plist-get (alist-get 'agents romacs-progress-state) :status) 'running))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= restored 1))
+          (should (eq (plist-get (alist-get 'agents romacs-progress-state) :status) 'done))
+          (should (= (romacs-agent-seq (romacs-agent-get romacs-agent-kept-tests--id))
+                     (length (romacs-agent-kept-tests--claude)))))))))
+
+(ert-deftest romacs-agent-kept-a-folding-session-acted-on-folds-here ()
+  ;; Attached (or resumed, launched) while a worker folds it: folded here
+  ;; first, and the worker's late answer is let go.  The worker is given
+  ;; the editor's options.
+  (romacs-agent-kept-tests--with
+    (let ((records (romacs-agent-kept-tests--claude)) (romacs-agent-approval-policy 'ask))
+      (romacs-agent-kept-tests--write dir records)
+      (romacs-agent-kept-tests--with-workers
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (eq (alist-get 'romacs-agent-approval-policy (plist-get (nth 5 (car jobs)) :bindings)) 'ask))
+          (cl-letf (((symbol-function 'romacs-agent--connect) #'ignore))
+            (romacs-agent--attach session 0))
+          (should (= (romacs-agent-seq session) (length records)))
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (let ((read nil) (future (car jobs)))
+            (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+                                       (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
+                                   (funcall (nth 1 future) (nth 2 future))))
+            (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                       ((symbol-function 'romacs-agent--record)
+                        (lambda (session record) (push record read) (funcall real session record))))
+              (funcall (nth 3 future) future)
+              (romacs-agent-kept-tests--drain))
+            (should-not read))
+          (should (= romacs-agent--fold-running 0)))))))
+
+(ert-deftest romacs-agent-kept-a-message-to-a-folding-session-folds-it-first ()
+  ;; A message sent while a worker folds the session: what it is sent as
+  ;; is decided on its folded state, not the stub's.
+  (romacs-agent-kept-tests--with
+    (let ((records (romacs-agent-kept-tests--claude)) (seen nil))
+      (romacs-agent-kept-tests--write dir records)
+      (romacs-agent-kept-tests--with-workers
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (cl-letf (((symbol-function 'romacs-agent--input)
+                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
+                    ((symbol-function 'romacs-agent--enqueue)
+                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
+                    ((symbol-function 'romacs-agent--continue) #'ignore))
+            (ignore-errors (romacs-agent-send session "again")))
+          (should (eql seen (length records)))
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding)))))))
+
+(ert-deftest romacs-agent-kept-a-whole-restore-folds-what-folds-aside ()
+  ;; A restore that ends at once (a view's first look) folds here what a
+  ;; worker folds still, before its tail; one under way stepwise is left to
+  ;; go on, its sessions known so far shown.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (let ((restored 0) (romacs-agent--restored nil) (romacs-agent--restore-pending nil) (romacs-progress-state nil))
+      (romacs-agent-kept-tests--with-workers
+        (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                  ((symbol-function 'romacs-agent--sweep) #'ignore))
+          (let ((romacs-agent-restored-hook (list (lambda () (cl-incf restored)))))
+            (clrhash romacs-agent--sessions)
+            (let ((session (romacs-agent--load dir)))
+              (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+              ;; Stepwise under way: a view's look restores nothing at once.
+              (setq romacs-agent--restoring t)
+              (romacs-agent-know-sessions)
+              (should (= restored 0))
+              (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+              ;; With nothing new to load, its tail waits for the fold.
+              (setq romacs-agent--restoring nil)
+              (romacs-agent-restore-soon)
+              (should (= restored 0))
+              (romacs-agent-restore)
+              (should (= restored 1))
+              (should-not romacs-agent--restoring)
+              (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+              (should (= (romacs-agent-seq session) (length (romacs-agent-kept-tests--claude)))))))))))
+
+(ert-deftest romacs-agent-kept-a-fold-with-no-worker-is-done-here ()
+  ;; No worker to fold it (none starts): the session still loads, from its
+  ;; journal here.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (romacs-agent-kept-tests--with-workers
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (error "No worker"))))
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (romacs-agent-kept-tests--drain)
+          (should (= (romacs-agent-seq session) (length (romacs-agent-kept-tests--claude))))
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (should (= romacs-agent--fold-running 0)))))))
 
 ;;; romacs-agent-kept-tests.el ends here
