@@ -45,7 +45,7 @@ class LispLayoutTests(unittest.TestCase):
                         self.assertNotRegex(file.read_text(), stale, 'STALE_GNU_SOURCE_ROOT')
 
     def test_packages_and_temporary_dependencies_are_in_lisp_romacs(self):
-        for relative in ('gnosis/gnosis.el', 'hermes/hermes.el', 'jabber/jabber.el',
+        for relative in ('gnosis/gnosis.el', 'jabber/jabber.el',
                          'emacs-lisp/keymap-popup.el', 'deps/fsm/fsm.el',
                          'deps/websocket/websocket.el',
                          'deps/README.md'):

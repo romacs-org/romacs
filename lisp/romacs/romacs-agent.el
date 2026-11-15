@@ -2474,16 +2474,16 @@ for the next, sent once this one is off the queue."
                     (setf (romacs-agent-dispatch session) 'busy)))))))
       (setf (romacs-agent-dispatch session) nil)))))
 
-(defun romacs-agent-send-later (session text &optional first images)
+(defun romacs-agent-send-later (session text &optional first images valid)
   "Send TEXT to SESSION, with the attached IMAGES, once its running turn
 ends, now when none runs; FIRST puts it ahead of the messages already
-waiting."
+waiting.  VALID, when given, is asked before it goes: nil drops it."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
-      (romacs-agent-send session text nil nil images)
+      (romacs-agent-send session text nil valid images)
     (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil nil images) (romacs-agent-queue session))
+        (progn (push (list text nil valid images) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
-      (romacs-agent--enqueue session (list text nil nil images)))))
+      (romacs-agent--enqueue session (list text nil valid images)))))
 
 ;;; Lifecycle
 

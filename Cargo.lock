@@ -3955,12 +3955,17 @@ dependencies = [
  "romacs-snapshot",
  "romacs-test-fonts",
  "romacs-vm",
+ "romacs-vm-gui-test-build",
  "rustix",
  "serde_json",
  "tracing",
  "tracing-subscriber",
  "wgpu",
 ]
+
+[[package]]
+name = "romacs-vm-gui-test-build"
+version = "0.0.20"
 
 [[package]]
 name = "romacs-vm-test-build"

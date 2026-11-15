@@ -15,8 +15,7 @@ expanded.  Every key is optional:
 
   init            an Elisp file of the init's blocks, each wrapped in
                   (bench-block NAME BODY...), which records a signal in
-                  `bench-init-errors' and goes on; @HERMES_URL@ in it
-                  becomes hermes_url
+                  `bench-init-errors' and goes on
   sources         [[DIR, GLOB], ...]: the packages the init loads, copied
                   read-only into one directory, byte-compiled by the pinned
                   GNU for GNU and loaded as source by Romacs
@@ -27,19 +26,13 @@ expanded.  Every key is optional:
   gnosis_db_repo  a Git repository whose only commit holds that copy
   live_gnosis_db  [PATH, ...]: live databases to refuse, besides gnosis's
                   default locations
-  hermes_url      the hermes dashboard to attach to (hermes's default)
-  hermes_sources  [[DIR, GLOB], ...]: hermes and its dependencies for
-                  hermes_parity_live.py (default: the copies in lisp/romacs/)
 
 SAFETY, enforced here whatever the config says: a live gnosis database is
-refused, and hermes never starts a dashboard: an init that sets a start
-mode other than remote is refused, the start mode is set to remote before
-and after the init, and every dashboard acquisition is made remote.
+refused.
 """
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 
@@ -47,17 +40,10 @@ from parity_live import ROMACS_DEFAULTS_OFF, ROOT, lisp_copy, lisp_string
 
 CONFIG_ENV = 'ROMACS_BENCH_PROFILE'
 PROFILES = ('stock', 'init')
-HERMES_URL = 'http://127.0.0.1:9119'  # hermes-dashboard-transport-url's default
 # Where gnosis keeps its database by default (gnosis-dir under the user's
 # Emacs directory).
 DEFAULT_LIVE_GNOSIS = ('~/.config/emacs/gnosis/gnosis.db', '~/.emacs.d/gnosis/gnosis.db')
-HERMES_SOURCES = [
-    (ROOT / 'lisp/romacs/hermes', '*.el'),
-    (ROOT / 'lisp/romacs/emacs-lisp', 'keymap-popup.el'),
-    (ROOT / 'lisp/romacs/deps/websocket', 'websocket.el'),
-]
 EXCLUDE = ('-tests.el', '-test.el', 'compat-tests.el', '-pkg.el', '-autoloads.el')
-START_MODE = re.compile(r"start-mode\s+'?:?([\w-]+)")
 
 
 def config_path(given=None):
@@ -80,9 +66,8 @@ def load(given=None):
     for key in ('init', 'org', 'gnosis_db', 'gnosis_db_repo'):
         if raw.get(key):
             out[key] = resolve(raw[key])
-    for key in ('sources', 'hermes_sources'):
-        if key in raw:
-            out[key] = [(resolve(directory), pattern) for directory, pattern in raw[key]]
+    if 'sources' in raw:
+        out['sources'] = [(resolve(directory), pattern) for directory, pattern in raw['sources']]
     out['projects'] = [resolve(p) for p in raw.get('projects', [])]
     out['live_gnosis_db'] = [resolve(p) for p in raw.get('live_gnosis_db', [])]
     return out
@@ -95,14 +80,6 @@ def collect(pairs):
 
 def sources(config):
     return collect(config.get('sources', []))
-
-
-def hermes_sources(config):
-    return collect(config.get('hermes_sources', HERMES_SOURCES))
-
-
-def hermes_url(config):
-    return config.get('hermes_url', HERMES_URL)
 
 
 def default_project(config):
@@ -120,26 +97,10 @@ def refuse_live_gnosis(db, config):
 
 
 def profile_init(config):
-    """The init's blocks, checked: no hermes start mode but remote."""
+    """The init's blocks."""
     if not config.get('init'):
         raise ValueError(f'profile init needs a profile config with "init" (--profile-config or ${CONFIG_ENV})')
-    text = Path(config['init']).read_text().replace('@HERMES_URL@', hermes_url(config))
-    modes = {m.group(1) for m in START_MODE.finditer(text)} - {'remote'}
-    if modes:
-        raise ValueError(f'refusing an init that may start hermes (start mode {", ".join(sorted(modes))})')
-    return text
-
-
-# Hermes attaches, never starts: before the init, after it, and on every
-# acquisition, whatever a command asks for.
-HERMES_REMOTE = '''(setq hermes-dashboard-transport-start-mode 'remote)
-(defun bench--hermes-attach (args)
-  "ARGS of a dashboard acquisition, made to attach."
-  (plist-put (copy-sequence args) :start-mode 'remote))
-(with-eval-after-load 'hermes-dashboard-transport
-  (setq hermes-dashboard-transport-start-mode 'remote)
-  (advice-add 'hermes-dashboard-transport-acquire :filter-args #'bench--hermes-attach))
-'''
+    return Path(config['init']).read_text()
 
 
 def gnu_settings():
@@ -192,20 +153,9 @@ def init_source(engine, lisp, port_file, token, profile, config):
             (message "bench init: %s: %s" ,name (error-message-string err)))))
 {f"(setq load-path (cons {lisp_string(str(lisp))} load-path))" if real else ""}
 {setup}(setq inhibit-startup-screen t)
-{HERMES_REMOTE if real else ""}{blocks}
-{"(setq hermes-dashboard-transport-start-mode 'remote)" if real else ""}
-(defun bench--strings (value)
-  (cond ((stringp value) (list value))
-        ((consp value) (append (bench--strings (car value)) (bench--strings (cdr value))))))
-(defun bench-secrets ()
-  "The credentials hermes holds for its dashboard."
-  (let ((auth (bound-and-true-p hermes-dashboard-transport--api-auth)))
-    (append (bench--strings (plist-get auth :discovered-token))
-            (bench--strings (plist-get auth :secrets))
-            (bench--strings (bound-and-true-p hermes-dashboard-transport--native-token-memory)))))
+{blocks}
 (load {lisp_string(str(ROOT / 'lisp/romacs/romacs-mcp.el'))} nil t)
 (load {lisp_string(str(ROOT / 'lisp/romacs/romacs-mcp-session.el'))} nil t)
-(setq romacs-mcp-session-secrets-function #'bench-secrets)
 (romacs-mcp-enable-session-tools)
 (cd "~/")
 ;; The endpoint starts here, not from `emacs-startup-hook': a session whose

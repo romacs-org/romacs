@@ -6,7 +6,7 @@ license and attribution files remain with them.
 
 | Dependency | Used for | Replacement plan |
 | --- | --- | --- |
-| websocket | WebSocket connections, including emacs-hermes | A Rust transport module with a small Elisp API for connection events and messages. |
+| websocket | WebSocket connections | A Rust transport module with a small Elisp API for connection events and messages. |
 | fsm | Jabber's state-machine support | Small, explicit state transitions in Romacs-owned code. |
 
 Replace one dependency at a time. Keep its callers working, test connection and

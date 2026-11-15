@@ -108,7 +108,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "before-init-time", gnu: "emacs.c:3587", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it once initialization is done; package.el reads it.
     CVariable { name: "after-init-time", gnu: "emacs.c:3591", kind: Kind::Lisp(Init::Nil) },
-    // C variables that GNU's preloaded Lisp and the Gnosis/emacs-hermes load
+    // C variables that GNU's preloaded Lisp and the Gnosis load
     // closure reference, with their DEFVAR site and C initial value. Each is
     // listed only when that value equals pinned GNU's batch value, so no
     // initialization done later in C (init_*) is misrepresented.
