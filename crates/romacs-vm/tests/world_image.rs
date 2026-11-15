@@ -203,7 +203,7 @@ fn launch(store: &Path) {
         Launch::Build => {
             // An input beside the store: the word "fail" in it fails the build.
             let input = store.parent().unwrap().join("input");
-            world.begin_build(&world.build_roots(vec![input.clone()])).unwrap();
+            world.begin_build().unwrap();
             // As the GUI and the runner build: steps given to World::build.
             let built = world.build(|| {
                 let flag = romacs_vm::host::read_to_string(input.join("flag")).unwrap_or_default();

@@ -46,11 +46,10 @@ const PLANS: &str = "plans";
 /// The refusal kind a layer build lists for an entry it will not hold.
 pub const REFUSAL: &str = "init-layer";
 
-/// The functions that read a secret: a declared library whose load or
-/// configuration calls one is refused, so the layer never holds what one
-/// returns, and the library keeps its first-use load, where the call
-/// happens in the session. The build's confinement already denies the
-/// files and processes behind them; this names the reason.
+/// The functions that read a secret: an entry whose load or configuration
+/// calls one is refused, declared or loaded, so the layer never holds what
+/// one returns; the library loads in the session as from source, where the
+/// call happens. The build publishes no image of the plan that called one.
 const SECRET_READERS: [&str; 17] = [
     "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
     "auth-source-user-and-password", "auth-source-pass-get", "auth-source-pass-parse-entry",
@@ -666,6 +665,7 @@ impl Vm {
         let mut refused = Vec::new();
         // What each entry loaded: the features it provided and the files.
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
+        let readers: Vec<usize> = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
         host::layer_begin();
         // As the init's libraries find the live session: interactive
         // (lisp/romacs/romacs-gui-loadup.el), with the init named before it loads
@@ -678,8 +678,8 @@ impl Vm {
             let (refusals, timers) = (host::refusals(), self.timer_count());
             let heads = self.load_heads();
             host::layer_declared(entry.declared);
-            let observed = entry.declared && !self.backtrace.observing();
-            if observed { self.backtrace.observe(); }
+            let observed = !self.backtrace.observing();
+            if observed { self.backtrace.observe_only(readers.clone()); }
             let result = self.set_load_path(&paths).and_then(|()| self.eval_source_raw(&entry.form()));
             let secret = if observed { self.secret_call() } else { None };
             for path in self.load_path_strings().unwrap_or_default() {

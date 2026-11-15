@@ -49,7 +49,7 @@ fn restored(root: &Path) -> Option<Vm> {
             Some(*vm)
         }
         Launch::Build => {
-            let built = world.begin_build(&world.build_roots(vec![root.to_owned()])).map_err(|e| e.to_string())
+            let built = world.begin_build().map_err(|e| e.to_string())
                 .and_then(|()| {
                     romacs_vm::host::end_at_dump_point();
                     world.build(|| Ok((booted(root, true), (), serde_json::Value::Null)))

@@ -295,8 +295,8 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
         }
         Launch::Build => {
             // Room for this world among its family's (its lock file there
-            // makes it the current one), before the build confines this
-            // process to reading the store; no other family's world goes.
+            // makes it the current one), before the build begins; no other
+            // family's world goes.
             match world.prune_family() {
                 Ok(deleted) if deleted.is_empty() => {}
                 Ok(deleted) => eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted})),
@@ -410,10 +410,10 @@ fn chain(dir: &Path) -> Result<Vm, String> {
     Ok(vm)
 }
 
-/// The builder: the chain in build mode up to GNU's dump point, confined
-/// to its read roots, then the world published. The image's length.
+/// The builder: the chain in build mode up to GNU's dump point, then the
+/// world published. The image's length.
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
-    world.begin_build(&world.build_roots(super::world::build_roots(dir))).map_err(|e| e.to_string())?;
+    world.begin_build().map_err(|e| e.to_string())?;
     romacs_vm::host::end_at_dump_point();
     world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
 }

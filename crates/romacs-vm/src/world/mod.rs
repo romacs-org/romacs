@@ -31,7 +31,6 @@ pub mod image;
 pub mod layer;
 pub(crate) mod pending;
 pub mod store;
-pub mod sandbox;
 pub mod safe;
 
 use crate::data::Object;
@@ -231,9 +230,11 @@ impl Vm {
     }
 
     /// After a layer's libraries, the startup function ran again: each
-    /// variable the superseded run wrote must hold the content it left,
-    /// or the libraries changed what startup computes, and the build
-    /// refuses naming it.
+    /// variable the superseded run wrote, and the libraries left as it was
+    /// (`supersede_startup`), must hold the content it left, or the
+    /// libraries changed what startup computes, and the build refuses
+    /// naming it. One the libraries wrote too (a global minor mode they
+    /// turned on joins `global-minor-modes') is theirs as much as startup's.
     pub(crate) fn world_check_startup_outputs(&mut self) {
         let Some(fence) = self.fence.as_ref() else { return };
         let previous: Vec<(usize, String)> = fence.previous_outputs.iter()
@@ -297,7 +298,9 @@ impl Vm {
         fence.seen.clear();
         fence.digests.clear();
         fence.outputs.clear();
-        fence.previous_outputs = std::mem::take(&mut fence.output_digests);
+        let previous = std::mem::take(&mut fence.output_digests);
+        let untouched = previous.into_iter().filter(|(slot, digest)| self.input_digest(Input::Variable(*slot)) == *digest).collect();
+        self.fence_mut().previous_outputs = untouched;
         for slot in earlier {
             if let Some(cell) = self.fence_mut().cells.remove(&slot) {
                 self.variable_redirects[slot] = cell.redirect;

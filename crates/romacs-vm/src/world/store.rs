@@ -804,16 +804,11 @@ impl World {
         Ok(p)
     }
 
-    /// A builder's read roots beside RECIPE's: the pinned table and the
-    /// binary's own (`sandbox::build_roots`).
-    pub fn build_roots(&self, recipe: Vec<PathBuf>) -> Vec<PathBuf> {
-        super::sandbox::build_roots(recipe, &self.store)
-    }
-
-    /// A builder, once it holds the lock: confine this thread to ROOTS,
-    /// writing only in the store, and record in build mode. The lock is
-    /// held until the process exits.
-    pub fn begin_build(&self, roots: &[PathBuf]) -> std::io::Result<()> {
+    /// A builder, once it holds the lock: record in build mode. The builder
+    /// reads what its user can; the host boundary records each read, and
+    /// nothing it cannot capture reaches the image. The lock is held until
+    /// the process exits.
+    pub fn begin_build(&self) -> std::io::Result<()> {
         // The launcher's lock, handed on; taking it again on the same open
         // file only confirms it.
         use std::os::fd::{AsRawFd, FromRawFd};
@@ -838,7 +833,6 @@ impl World {
         unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
         std::mem::forget(lock);
         self.remove_abandoned()?;
-        super::sandbox::confine_publishing(roots, &self.store)?;
         let seed = self.key[..4].try_into().expect("4 bytes");
         host::enter_build(host::Pinned { clock: host::clock(), pid: 4242, seed });
         Ok(())

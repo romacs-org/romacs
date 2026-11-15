@@ -55,9 +55,6 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
     static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
-    static CONFINED: Cell<bool> = const { Cell::new(false) };
-    static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
-        const { RefCell::new(None) };
 }
 
 pub fn mode() -> Mode {
@@ -511,19 +508,6 @@ pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
 }
 
-/// This thread is confined (`world::sandbox`): a read it is refused fails
-/// with EACCES, which the build lists as a refusal.
-pub(crate) fn note_confined() {
-    CONFINED.with(|c| c.set(true));
-}
-
-/// A read of PATH that failed with ERROR, listed when confinement refused it.
-fn confined(path: &Path, error: &io::Error) {
-    if error.raw_os_error() == Some(libc::EACCES) && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"path": path_json(path)}));
-    }
-}
-
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
 /// working directory, so its query is a P read instead.
 fn keyed_path(path: &Path, kind: &str) -> bool {
@@ -702,10 +686,7 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
     }
     let result = match result {
         Ok(data) => json!({"len": data.as_ref().len(), "sha256": sha256(data.as_ref())}),
-        Err(e) => {
-            confined(path, e);
-            errno(e)
-        }
+        Err(e) => errno(e),
     };
     if keyed_path(path, "read") {
         record("file-read", json!({"path": path_json(path), "result": result}));
@@ -1077,7 +1058,6 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
             if reseed_reads("user-file") {
                 return Err(e);
             }
-            confined(path, &e);
             if keyed_path(path, "read") {
                 record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
             }
@@ -1219,7 +1199,6 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
         Ok(entries) if keyed_path(path, "listing") => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }), named)),
         Ok(entries) => Ok(ReadDir(entries, None, named)),
         Err(e) => {
-            confined(path, &e);
             if keyed_path(path, "listing") {
                 record("dir-list", json!({"path": path_json(path), "open": errno(&e)}));
             }
@@ -1385,28 +1364,15 @@ pub fn filesystem_type(path: &Path) -> io::Result<u32> {
     let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| rustix::fs::statfs(&*name).map_err(os).map(|s| s.f_type as u32)),
                                         |r| crate::flight::outcome(r, |&t| u64::from(t)));
     if building() {
-        if let Err(e) = &result { confined(path, e); }
         probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
     }
     result
 }
 
 /// The inode flags of DIRECTORY, opened without following a symlink
-/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe. Landlock refuses a confined
-/// build a directory open outside its read roots, though the flags read
-/// nothing beneath it, so that thread asks the one `keep_flags_reader`
-/// started before it confined itself.
+/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe.
 pub fn directory_flags(directory: &Path) -> io::Result<u32> {
-    let reader = FLAGS_READER.with(|r| r.borrow().clone());
-    let result = match reader {
-        Some(reader) => {
-            let (reply, answer) = std::sync::mpsc::channel();
-            reader.send((directory.to_owned(), reply)).map_err(|_| io::Error::other("flags reader gone"))
-                .and_then(|()| answer.recv().map_err(|_| io::Error::other("flags reader gone"))?)
-        }
-        None => read_directory_flags(directory),
-    };
-    let result = crate::flight::checked("dir-flags", || bytes(directory), || result, |r| crate::flight::outcome(r, |&f| u64::from(f)));
+    let result = crate::flight::checked("dir-flags", || bytes(directory), || read_directory_flags(directory), |r| crate::flight::outcome(r, |&f| u64::from(f)));
     if building() {
         probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
     }
@@ -1436,7 +1402,6 @@ pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
         }
     })();
     if building() {
-        if let Err(e) = &result { confined(path, e); }
         let observed = match &result { Ok(Some(value)) => encoded(value), Ok(None) => json!(null), Err(e) => errno(e) };
         probed("acl", path, observed);
     }
@@ -1452,20 +1417,6 @@ fn read_directory_flags(directory: &Path) -> io::Result<u32> {
 
 fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
     std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))
-}
-
-/// Start the thread that reads directory flags for this one
-/// (`directory_flags`), before this thread confines itself: it answers that
-/// one query and makes no other.
-pub(crate) fn keep_flags_reader() -> io::Result<()> {
-    let (reader, queries) = std::sync::mpsc::channel::<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>();
-    std::thread::Builder::new().name("romacs-flags-reader".into()).spawn(move || {
-        for (directory, reply) in queries {
-            let _ = reply.send(read_directory_flags(&directory));
-        }
-    })?;
-    FLAGS_READER.with(|r| *r.borrow_mut() = Some(reader));
-    Ok(())
 }
 
 /// Set the POSIX access ACL of the file PATH names to VALUE, in its
