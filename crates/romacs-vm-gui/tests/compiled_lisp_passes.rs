@@ -1,4 +1,4 @@
-//! The file compiler's source passes (lisp/romacs/romacs-compile.el:
+//! The file compiler's source passes (lisp/emacs-lisp/romacs-compile.el:
 //! constant folding, and a literal lambda given to mapcar or mapc made a
 //! loop) through the compiled store: a file compiled with them gives
 //! what the same file gives read from source, and is compiled, not
