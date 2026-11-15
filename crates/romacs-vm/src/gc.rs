@@ -123,12 +123,14 @@ pub(crate) struct CollectionRecord {
     pub(crate) objects: usize,
     pub(crate) bytes: usize,
     /// Objects past the trigger when it began, at the collector's charge
-    /// (`collection_budget`, or a minor's `MINOR_BYTES`): mostly what allocation ran on between falling
-    /// due and the poll that took it. A trigger that moved down (a lowered
-    /// threshold or percentage, a lifted floor) or a hold that just ended
-    /// gives a large value with a prompt poll, so a consumer sizing a
-    /// nursery from it reads its upper percentiles with that in mind. A
-    /// float, as the trigger is.
+    /// (`collection_budget`): mostly what allocation ran on between falling
+    /// due and the poll that took it. A minor's is the bytes handed out past
+    /// `MINOR_BYTES` over a cons's 16 (`Vm::young_bytes`), which weigh each
+    /// object by its size: not the full's charge, object for object. A
+    /// trigger that moved down (a lowered threshold or percentage, a lifted
+    /// floor, minors allowed again) or a hold that just ended gives a large
+    /// value with a prompt poll, so a consumer sizing a nursery from it reads
+    /// its upper percentiles with that in mind. A float, as the trigger is.
     pub(crate) late: f64,
 }
 romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, minor, us, command, key, redisplay, at, objects, bytes, late });
@@ -729,7 +731,12 @@ impl Vm {
     /// out since the last collection. `gc-cons-threshold` paces fulls, by
     /// what the heap has grown since the last one, minors or not.
     pub(crate) fn minor_due(&self) -> bool {
-        self.minor_allowed() && self.allocation.allocated - self.allocation.collected_at >= MINOR_BYTES
+        self.minor_allowed() && self.young_bytes() >= MINOR_BYTES
+    }
+    /// The bytes the funnels handed out since the last collection
+    /// (`Allocation::allocated`): what makes a minor due.
+    fn young_bytes(&self) -> u64 {
+        self.allocation.allocated - self.allocation.collected_at
     }
     /// Whether this VM's automatic collections may be minors at all.
     fn minor_allowed(&self) -> bool {
@@ -824,8 +831,7 @@ impl Vm {
     /// a minor's, `MINOR_BYTES` since the last collection, or a full's.
     pub(crate) fn collection_late(&self, minor: bool) -> f64 {
         if minor {
-            let since = self.allocation.allocated - self.allocation.collected_at;
-            return since.saturating_sub(MINOR_BYTES) as f64 / CONS_BYTES as f64;
+            return self.young_bytes().saturating_sub(MINOR_BYTES) as f64 / CONS_BYTES as f64;
         }
         let (allocated, budget) = self.collection_budget();
         (allocated - budget).max(0.0)
