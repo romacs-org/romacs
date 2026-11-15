@@ -200,6 +200,10 @@ pub struct Layer {
     /// For the last usable layer standing in (`layer`): the digest of the
     /// plan it was resolved from.
     resolved_from: Option<String>,
+    /// The features of the libraries the init only declared that the layer
+    /// left to the session, in the order they load: loaded ahead of their
+    /// first use (`romacs--layer-preload`).
+    pub preload: Vec<String>,
 }
 
 impl Layer {
@@ -226,19 +230,19 @@ pub fn layer(base: &World, init: &Path) -> Option<Layer> {
         eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init changed since its plan"}));
         return None;
     }
-    let last = Plan::read_last(&base.store, init).filter(|(last, _)| last.init_digest == plan.init_digest && last.within(&plan));
-    let usable = |last: Plan, from: String| {
+    let last = Plan::read_last(&base.store, init).filter(|(last, _, _)| last.init_digest == plan.init_digest && last.within(&plan));
+    let usable = |last: Plan, from: String, preload: Vec<String>| {
         let world = base.layered(last.recipe());
-        world.ready().then(|| Layer { world, full: last.clone(), excluded: Vec::new(), plan: last, resolved_from: Some(from) })
+        world.ready().then(|| Layer { world, full: last.clone(), excluded: Vec::new(), plan: last, resolved_from: Some(from), preload })
     };
-    if let Some((last, from)) = last.clone().filter(|(_, from)| *from == plan.digest()) && let Some(layer) = usable(last, from) {
+    if let Some((last, from, preload)) = last.clone().filter(|(_, from, _)| *from == plan.digest()) && let Some(layer) = usable(last, from, preload) {
         return Some(layer);
     }
     let layer = resolve(base, plan)?;
     if layer.world.ready() {
         return Some(layer);
     }
-    match last.and_then(|(last, from)| usable(last, from)) {
+    match last.and_then(|(last, from, preload)| usable(last, from, preload)) {
         Some(previous) => {
             eprintln!("romacs-world: {}", json!({"event": "layer", "previous": true, "entries": previous.plan.entries.len()}));
             Some(previous)
@@ -250,7 +254,7 @@ pub fn layer(base: &World, init: &Path) -> Option<Layer> {
 /// LAYER is usable: keep its plan as its init's last usable layer's. Every
 /// usable layer was made so here (`build_ahead`), so a launch writes nothing.
 fn keep_last(layer: &Layer) {
-    if let Err(error) = layer.plan.write_last(&layer.world.store, &layer.full.digest()) {
+    if let Err(error) = layer.plan.write_last(&layer.world.store, &layer.full.digest(), &layer.preload) {
         eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the last layer's plan cannot be kept: {error}")}));
     }
 }
@@ -264,13 +268,18 @@ fn keep_last(layer: &Layer) {
 /// from source. None only when nothing is left.
 pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
     let mut excluded: Vec<usize> = Vec::new();
+    let mut preload: Vec<String> = Vec::new();
     for _ in 0..16 {
         let plan = full.without(&excluded);
         if plan.entries.is_empty() {
             return None;
         }
         let world = base.layered(plan.recipe());
-        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan, resolved_from: None }) };
+        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan, resolved_from: None, preload }) };
+        // A declared library refused loads ahead of its use, as it loaded.
+        for name in refusals.iter().filter(|r| r["kind"] == REFUSAL).flat_map(|r| r["features"].as_array().cloned().unwrap_or_default()) {
+            if let Some(name) = name.as_str() && !preload.iter().any(|kept| kept == name) { preload.push(name.to_owned()); }
+        }
         // The build replayed the trimmed plan: its entry indices are
         // positions among the entries kept.
         let kept: Vec<usize> = (0..full.entries.len()).filter(|i| !excluded.contains(i)).collect();
@@ -365,6 +374,15 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
         return;
     }
     build_ahead_apart(worlds, &plan.init);
+}
+
+/// The form that loads, ahead of their first use, the libraries the init
+/// only declared that the restored layer left to the session
+/// (`romacs--layer-preload`), when there are any.
+pub fn preload_form(worlds: &Worlds) -> Option<String> {
+    let layer = worlds.layer.as_ref().filter(|layer| worlds.from_layer && !layer.preload.is_empty())?;
+    let names: Vec<String> = layer.preload.iter().map(|name| format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))).collect();
+    Some(format!("(romacs--layer-preload '({}))", names.join(" ")))
 }
 
 /// INIT's layer built ahead of the next launch by a process apart from
