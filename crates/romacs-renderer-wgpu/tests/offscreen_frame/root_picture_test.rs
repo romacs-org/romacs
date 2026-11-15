@@ -357,7 +357,6 @@ fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
             None,
             None,
             None,
-            None,
         );
         let whole = read_tex(&h.renderer, &whole_texture);
         let (texture, view) = make_tex(&h.renderer, "through-picture");

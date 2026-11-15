@@ -79,7 +79,6 @@ pub(super) fn render_frame_root_glyphs(
                 hovered_scroll_bar,
                 bg_gradient,
                 pointer_selection,
-                render.compositor.current_row_damage.as_ref(),
             ),
         }
     });

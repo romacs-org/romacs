@@ -42,7 +42,6 @@ fn render_showing_two_surfaces(presentation: PresentationId) -> GuiFrameRenderSt
     );
     render.set_current_frame(
         Some(frame_with_two_surfaces(presentation)),
-        None,
         Default::default(),
         Default::default(),
     );

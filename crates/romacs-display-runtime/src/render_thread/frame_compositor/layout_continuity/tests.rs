@@ -98,7 +98,7 @@ fn resized(origin: PresentationOrigin) -> FrameGlyphBuffer {
 }
 
 fn install(render: &mut GuiFrameRenderState, frame: FrameGlyphBuffer) {
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
 }
 
 #[test]

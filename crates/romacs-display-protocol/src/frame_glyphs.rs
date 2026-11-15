@@ -1504,7 +1504,7 @@ impl FrameGlyphBuffer {
         let context =
             crate::presented_pointer::PointerMapValidationContext::from_frame_buffer(self)?;
         map.validate_against(context)?;
-        map.rebuild_damage_index(self);
+        map.rebuild_damage_bounds();
         let mut hit_index = self.presented_hit_index.clone();
         if !hit_index.is_empty() {
             hit_index.bind_pointer_regions(map.regions())?;

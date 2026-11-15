@@ -31,7 +31,9 @@ mod overlays;
 
 /// Glyph composition and rendering state for a frame window.
 pub(crate) struct FrameCompositor {
-    pub current_frame: Option<FrameGlyphBuffer>,
+    /// The presentation drawn from, shared with the draw that reads it: a
+    /// draw copies it only to change it (`take_current_frame_for_render`).
+    pub current_frame: Option<std::sync::Arc<FrameGlyphBuffer>>,
     /// Text animations drawn over the current frame at every draw.
     pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
     /// Video identities present in the root or any accepted child
@@ -43,11 +45,6 @@ pub(crate) struct FrameCompositor {
     /// renderer-owned terminal replacement both advance it, so face
     /// aggregation and retained-static rendering cannot observe stale state.
     pub current_scene_generation: u64,
-    /// Row damage paired with `current_frame` (built from the same
-    /// FrameDisplayState that frame was materialized from). Set only
-    /// together with the frame via `set_current_frame` so a summary can
-    /// never describe a different frame than the glyphs it accompanies.
-    pub current_row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
     pub child_frames: ChildFrameManager,
     hidden_child_frames: HashSet<u64>,
     pub(super) pending_child_frame_removals_to_present: Vec<u64>,
@@ -196,7 +193,6 @@ impl FrameCompositor {
             #[cfg(feature = "video")]
             visible_videos: HashSet::new(),
             current_scene_generation: 0,
-            current_row_damage: None,
             child_frames: ChildFrameManager::new(),
             hidden_child_frames: HashSet::new(),
             pending_child_frame_removals_to_present: Vec::new(),

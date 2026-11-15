@@ -51,7 +51,6 @@ fn pinned(
         None,
         None,
         None,
-        None,
     );
     drop(old);
     renderer.set_frame_sample(FrameSample::new(
@@ -74,7 +73,6 @@ fn pinned(
         render.compositor.glyph_atlas.as_mut().unwrap(),
         mapping(&after, width, H),
         false,
-        None,
         None,
         None,
         None,

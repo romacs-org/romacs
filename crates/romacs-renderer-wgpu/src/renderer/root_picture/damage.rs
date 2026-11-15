@@ -24,8 +24,23 @@ use rustc_hash::FxHashMap;
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::types::{DisplayWindowId, Rect};
 
+use super::moves::{self, Move};
+use super::reach::Reach;
+
 /// A group's name: its window (0 for glyphs of none) and its glyphs' span.
-type Key = (i64, u32, u32);
+pub(crate) type Key = (i64, u32, u32);
+
+/// Each group's runs, by position in its frame's runs.
+pub(crate) type Groups = FxHashMap<Key, Vec<usize>>;
+
+/// The two frames a plan compares, with their groups.
+pub(crate) struct Sides<'a> {
+    pub(crate) old: &'a Indexed,
+    pub(crate) before: Groups,
+    pub(crate) new: &'a FrameGlyphBuffer,
+    pub(crate) runs: &'a [Run],
+    pub(crate) after: Groups,
+}
 
 /// Consecutive glyphs of one group, and the rectangle they cover.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,9 +75,14 @@ impl Indexed {
 pub(crate) enum Plan {
     /// Nothing the picture shows changed. ROWS text rows are kept.
     Clean { rows: usize },
-    /// Repaint `regions` (logical pixels, disjoint). `rows_kept` text rows of
-    /// the next frame lie outside them.
-    Regions { regions: Vec<Rect>, rows_kept: usize },
+    /// Make `moves`, then repaint `regions` (logical pixels, disjoint).
+    /// `rows_kept` text rows of the next frame are kept or moved, outside
+    /// the regions.
+    Regions {
+        moves: Vec<Move>,
+        regions: Vec<Rect>,
+        rows_kept: usize,
+    },
     /// Repaint all of it.
     Whole,
 }
@@ -94,8 +114,9 @@ pub(crate) fn text_rows(indexed: &Indexed, kept: impl Fn(&Run) -> bool) -> usize
     keys.len()
 }
 
-/// What a picture of OLD repaints to show NEW, whose runs are `new_runs`.
-pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> Plan {
+/// What a picture of OLD does to show NEW, whose runs are `new_runs`: its
+/// ink reaches REACH past its cells, at SCALE device pixels per logical one.
+pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], reach: Reach, scale: f32) -> Plan {
     let rows = |runs: &[Run], kept: &dyn Fn(&Run) -> bool| {
         let mut keys: Vec<Key> = runs
             .iter()
@@ -109,7 +130,14 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> P
     if !old.frame.sets_glyphs_like(new) || !tables_agree(&old.frame, new) {
         return Plan::Whole;
     }
-    let (before, after) = (groups(&old.runs), groups(new_runs));
+    let sides = Sides {
+        old,
+        before: groups(&old.runs),
+        new,
+        runs: new_runs,
+        after: groups(new_runs),
+    };
+    let (before, after) = (&sides.before, &sides.after);
     // Each group compared once: the keys of those that differ, or that one
     // frame alone holds.
     let mut changed: Vec<Key> = before
@@ -123,12 +151,24 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> P
         .collect();
     changed.sort_unstable();
     let same = |key: &Key| changed.binary_search(key).is_err();
+    let moved = moves::find(&sides, &changed, reach, scale);
+    let placed = |key: &Key| moved.placed.binary_search(key).is_ok();
+    // A changed group the moves place needs no repaint; nor does one of the
+    // old frame whose ink lies inside a band a move overwrites.
     let mut damaged: Vec<Rect> = Vec::new();
-    for (groups, runs) in [(&before, &old.runs[..]), (&after, new_runs)] {
-        for (key, indices) in groups {
-            if !same(key) {
-                damaged.extend(indices.iter().map(|&i| runs[i].bounds));
-            }
+    for (key, indices) in after {
+        if !same(key) && !placed(key) {
+            damaged.extend(indices.iter().map(|&i| new_runs[i].bounds));
+        }
+    }
+    for (key, indices) in before {
+        if !same(key) {
+            damaged.extend(
+                indices
+                    .iter()
+                    .map(|&i| old.runs[i].bounds)
+                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, reach, new))),
+            );
         }
     }
     // Past this many changed runs the frame changed nearly everywhere, and
@@ -137,7 +177,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> P
         return Plan::Whole;
     }
     let regions = merge(damaged);
-    if regions.is_empty() {
+    if regions.is_empty() && moved.moves.is_empty() {
         return Plan::Clean {
             rows: rows(new_runs, &|_| true),
         };
@@ -147,9 +187,13 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run]) -> P
         return Plan::Whole;
     }
     let rows_kept = rows(new_runs, &|run| {
-        same(&run.key) && !regions.iter().any(|r| overlaps(*r, run.bounds))
+        (same(&run.key) || placed(&run.key)) && !regions.iter().any(|r| overlaps(*r, run.bounds))
     });
-    Plan::Regions { regions, rows_kept }
+    Plan::Regions {
+        moves: moved.moves,
+        regions,
+        rows_kept,
+    }
 }
 
 /// Whether RUN of FRAME holds text.
@@ -163,23 +207,17 @@ fn has_text(frame: &FrameGlyphBuffer, run: &Run) -> bool {
 pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
     for (at, glyph) in glyphs.iter().enumerate() {
-        let bounds = glyph.geometry().unwrap_or_default();
-        let text = matches!(glyph, FrameGlyph::Char { .. } | FrameGlyph::Stretch { .. });
-        let key = (
-            glyph.window_id().map_or(0, DisplayWindowId::get),
-            bounds.y.to_bits(),
-            bounds.height.to_bits(),
-        );
+        let (key, painted, text) = place(glyph);
         match out.last_mut() {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
-                run.bounds = union(run.bounds, bounds);
+                run.bounds = union(run.bounds, painted);
                 run.text |= text;
             }
             _ => out.push(Run {
                 key,
                 glyphs: at..at + 1,
-                bounds,
+                bounds: painted,
                 text,
                 row: 0,
             }),
@@ -187,6 +225,33 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     }
     assign_rows(&mut out);
     out
+}
+
+/// GLYPH's group, the rectangle it paints, and whether it is text. A row's
+/// characters and stretches take one match; an image fills its face's
+/// background over its box and slot, which can be larger than itself.
+fn place(glyph: &FrameGlyph) -> (Key, Rect, bool) {
+    match glyph {
+        FrameGlyph::Char { window_id, x, y, width, height, .. }
+        | FrameGlyph::Stretch { window_id, x, y, width, height, .. } => (
+            (window_id.get(), y.to_bits(), height.to_bits()),
+            Rect::new(*x, *y, *width, *height),
+            true,
+        ),
+        _ => {
+            let bounds = glyph.geometry().unwrap_or_default();
+            let key = (
+                glyph.window_id().map_or(0, DisplayWindowId::get),
+                bounds.y.to_bits(),
+                bounds.height.to_bits(),
+            );
+            let painted = match glyph {
+                FrameGlyph::Image { slot_rect, box_rect, .. } => union(union(bounds, *slot_rect), *box_rect),
+                _ => bounds,
+            };
+            (key, painted, false)
+        }
+    }
 }
 
 /// Give RUNS their visual rows: a sweep over each window's text runs by y
@@ -217,8 +282,8 @@ fn assign_rows(runs: &mut [Run]) {
 }
 
 /// Each group's runs, by position in RUNS.
-fn groups(runs: &[Run]) -> FxHashMap<Key, Vec<usize>> {
-    let mut groups: FxHashMap<Key, Vec<usize>> = FxHashMap::default();
+fn groups(runs: &[Run]) -> Groups {
+    let mut groups = Groups::default();
     for (at, run) in runs.iter().enumerate() {
         groups.entry(run.key).or_default().push(at);
     }
