@@ -194,6 +194,10 @@
   ;; Too tall for either side: the roomier one, no taller than it is.
   (should (equal (romacs-agent-ask-place 300 20 700 900) '(340 . 560)))
   (should (equal (romacs-agent-ask-place 700 20 800 900) '(0 . 680)))
-  (should-not (romacs-agent-ask-place nil 20 200 900)))
+  (should-not (romacs-agent-ask-place nil 20 200 900))
+  ;; Sized to the room: as many rows as fit; none, no place of its own.
+  (should (equal (romacs-agent-ask-fit 8 20 '(140 . 760)) '(140 . 8)))
+  (should (equal (romacs-agent-ask-fit 8 20 '(0 . 84)) '(0 . 3)))
+  (should-not (romacs-agent-ask-fit 8 20 (romacs-agent-ask-place 60 20 184 130))))
 
 ;;; romacs-agent-ask-tests.el ends here

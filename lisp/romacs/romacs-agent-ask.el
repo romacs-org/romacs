@@ -244,6 +244,15 @@ not in view."
             ((>= below above) (cons below-top below))
             (t (cons 0 above))))))
 
+(defun romacs-agent-ask-fit (lines line placed)
+  "LINES rows of LINE pixels in PLACED, a place (TOP . ROOM)
+\(`romacs-agent-ask-place'), with its 24 pixels of padding: (TOP . LINES)
+as many as the room holds; nil when it holds not one row, and the layer
+goes where layers go."
+  (when placed
+    (let ((most (/ (- (cdr placed) 24) line)))
+      (and (>= most 1) (cons (car placed) (min lines most))))))
+
 (defun romacs-agent-ask--row-top (place)
   "The top of PLACE's row, (WINDOW . POSITION), in its frame's pixels,
 or nil when it is not in view."
@@ -260,11 +269,12 @@ clear of PLACE, the question's row in its chat, (WINDOW . POSITION)."
          (most (max 6 (- (frame-text-lines root) 6)))
          (lines (min most (cdr size)))
          (line (frame-char-height root))
-         (placed (romacs-agent-ask-place (and place (romacs-agent-ask--row-top place)) line
-                                         (+ (* lines line) 24) (frame-text-height root)))
-         (top (car placed))
          ;; No taller than its side has room for: it scrolls instead.
-         (lines (if placed (max 3 (min lines (/ (- (cdr placed) 24) line))) lines)))
+         (fit (romacs-agent-ask-fit lines line
+                                    (romacs-agent-ask-place (and place (romacs-agent-ask--row-top place)) line
+                                                            (+ (* lines line) 24) (frame-text-height root))))
+         (top (car fit))
+         (lines (if fit (cdr fit) lines)))
     (with-current-buffer buffer (setq romacs-agent-ask--columns (car size)))
     (romacs-popup-show 'palette buffer :columns (car size) :lines lines :max-lines most
                        :anchor (and top (cons (+ (frame-internal-border-width root)
