@@ -167,12 +167,19 @@ def agents(root):
 
 # The lint.
 
-def lisp_files(names, root):
+def lisp_files(names, root, moved=()):
     """The runtime Lisp among the changed paths NAMES that ROOT still has: every .el under
-    lisp/ but the bundled packages' (the lint reports only what the change adds)."""
+    lisp/ but the bundled packages' and the MOVED ones, renamed with their text unchanged
+    (the lint reports only what the change adds, and a move adds none)."""
     packages = 'lisp/' + lisp_layout.layout(root)['packages'] + '/'
     return sorted(name for name in names if name.startswith('lisp/') and name.endswith('.el')
-                  and not name.startswith(packages) and (root / name).is_file())
+                  and not name.startswith(packages) and name not in moved and (root / name).is_file())
+
+
+def moved_unchanged(root, base):
+    """The paths ROOT's working tree has from BASE by an exact rename."""
+    done = git(root, 'diff', '-z', '--name-only', '--diff-filter=R', '-M100%', base)
+    return set(filter(None, done.stdout.split('\0')))
 
 
 def lint_stage(status, output, errors):
@@ -193,10 +200,10 @@ def lint_command(root, files, base, binary):
 def lint(root, names, trunk, binary):
     """(STATUS, SUMMARY, FINDINGS) of the lint on the Lisp among the changed paths NAMES:
     what the branch adds since its merge-base with TRUNK, the base the paths were taken from."""
-    files = lisp_files(names, root)
+    base = git(root, 'merge-base', 'HEAD', trunk).stdout.strip()
+    files = lisp_files(names, root, moved_unchanged(root, base))
     if not files:
         return 'ok', 'no runtime Lisp file changed', []
-    base = git(root, 'merge-base', 'HEAD', trunk).stdout.strip()
     done = subprocess.run(lint_command(root, files, base, binary), cwd=root, capture_output=True, text=True,
                           errors='replace', stdin=subprocess.DEVNULL)
     return lint_stage(done.returncode, done.stdout, done.stderr)

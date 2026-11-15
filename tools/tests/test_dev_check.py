@@ -101,6 +101,16 @@ class Forecast(unittest.TestCase):
         self.assertEqual(check.forecast(self.repo, 'beta')[2],
                          [check.conflict(name, 'overlap', 2)])
 
+    def test_only_exact_renames_count_as_moved(self):
+        self.commit('more', {'kept.el': '(a)\n', 'edited.el': '(b)\n(c)\n(d)\n'})
+        base = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.repo, capture_output=True, text=True).stdout.strip()
+        (self.repo / 'lisp').mkdir()
+        self.git('mv', 'kept.el', 'lisp/kept.el')
+        self.git('mv', 'edited.el', 'lisp/edited.el')
+        self.git('commit', '-q', '-m', 'move')
+        (self.repo / 'lisp/edited.el').write_text('(b)\n(c)\n(e)\n')
+        self.assertEqual(check.moved_unchanged(self.repo, base), {'lisp/kept.el'})
+
     def test_uncommitted_work_is_said_to_be_left_out(self):
         (self.repo / 'new.rs').write_text('y\n')
         self.assertIn('1 uncommitted path(s) are not in the forecast', check.forecast(self.repo, 'beta')[2][0])
@@ -111,6 +121,10 @@ class Lint(unittest.TestCase):
         names = {'lisp/emacs-lisp/romacs-lint.el', 'lisp/session/romacs-deleted-by-the-change.el', 'lisp/simple.el',
                  'lisp/session/README', 'crates/romacs-vm/src/gc.rs', 'lisp/packages/jabber/jabber.el'}
         self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el', 'lisp/simple.el'])
+
+    def test_a_file_moved_with_its_text_unchanged_is_not_linted(self):
+        names = {'lisp/simple.el', 'lisp/emacs-lisp/romacs-lint.el'}
+        self.assertEqual(check.lisp_files(names, ROOT, {'lisp/simple.el'}), ['lisp/emacs-lisp/romacs-lint.el'])
 
     def test_the_loaddefs_stage_runs_only_for_lisp_and_themes(self):
         self.assertEqual(check.loaddefs(ROOT, {'crates/romacs-vm/src/gc.rs', 'lisp/GENERATED'}),
