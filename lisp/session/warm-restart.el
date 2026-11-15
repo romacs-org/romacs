@@ -27,6 +27,8 @@
 ;;   buffer cannot be handed over now; a restart refuses until none does.
 ;; - `warm-restart-regenerable' (buffer-local) marks a view its package
 ;;   rebuilds, which is listed and not carried.
+;; - `warm-restart-left-out' (buffer-local) keeps a buffer out of every
+;;   image, unsaved edits and all; the restored session names it.
 ;; - desktop.el's `desktop-save-buffer' and `desktop-buffer-mode-handlers'
 ;;   carry a buffer as its package's own data instead of its text.
 ;; - A handler that would attach live resources checks
@@ -67,9 +69,14 @@ Each function runs in a buffer and returns nil or a string.  May be set
 buffer-locally.")
 
 (defvar-local warm-restart-regenerable nil
-  "Non-nil when this buffer is a view its package rebuilds, or a file it
-keeps out of the image.  A string is the reason listed.  A writable buffer
-with unsaved edits is carried anyway.")
+  "Non-nil when this buffer is a view its package rebuilds.
+A string is the reason listed.  A writable buffer with unsaved edits is
+carried anyway.")
+
+(defvar-local warm-restart-left-out nil
+  "A reason string when this buffer never goes into a session image,
+unsaved edits and all: a restart goes ahead without it, and the restored
+session names it if its text was unsaved (romacs-ram-files.el).")
 
 (defvar-local warm-restart-buffer-id nil
   "This buffer's identity in session images, made at its first image:
@@ -232,13 +239,11 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
         regenerable)
     (cond
      (blocker (cons 'blocked blocker))
+     ((stringp warm-restart-left-out) (cons 'dropped warm-restart-left-out))
      ((string-prefix-p " " (buffer-name)) nil)
      (base (if (memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
                (cons 'indirect (format "indirect buffer of %s" (buffer-name base)))
              (cons 'dropped (format "indirect buffer of %s, which is not carried" (buffer-name base)))))
-     ;; A file's package may keep it out of the image (romacs-ram-files.el).
-     ((and buffer-file-name warm-restart-regenerable (setq regenerable (warm-restart--regenerable)))
-      (cons 'dropped regenerable))
      (buffer-file-name (cons 'file (if (buffer-modified-p) "unsaved text carried" "visits a file")))
      ((warm-restart--handler) (cons 'handler (format "%s restores it" major-mode)))
      ((setq regenerable (warm-restart--regenerable)) (cons 'dropped regenerable))
@@ -489,7 +494,8 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                        :frames (warm-restart--frames)
                        :lost (append (cl-loop for e in (plist-get plan :buffers)
                                               when (eq (plist-get e :strategy) 'dropped)
-                                              collect (list :buffer (plist-get e :name) :reason (plist-get e :reason)))
+                                              collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
+                                                              (and (plist-get e :modified) (list :unsaved t))))
                                      (cl-loop for r in records when (plist-member r :lost)
                                               collect (list :buffer (plist-get r :lost) :reason (plist-get r :reason)))
                                      (mapcar (lambda (p) (append p (list :reason "ends with this process")))
@@ -975,14 +981,17 @@ the report."
 (defun warm-restart--announce (report)
   "Say what REPORT's restore did; a failure is a warning, which shows."
   (let ((lost (length (plist-get report :lost)))
+        (unsaved (cl-loop for entry in (plist-get report :lost)
+                          when (plist-get entry :unsaved) collect (plist-get entry :buffer)))
         (problems (length (plist-get report :problems))))
     (if (warm-restart--keep-p report)
         (display-warning 'warm-restart
                          (format "Session restore incomplete: %s; the image stays at %s (M-x warm-restart-report)"
                                  (or (plist-get report :error) (format "%d problems" problems))
                                  (plist-get report :file)))
-      (message "Session restored: %d buffers in %.2f s%s%s%s"
+      (message "Session restored: %d buffers in %.2f s%s%s%s%s"
                (plist-get report :buffers) (plist-get report :seconds)
+               (if unsaved (format "; unsaved text not carried: %s" (string-join unsaved ", ")) "")
                (if (> lost 0) (format "; %d not carried" lost) "")
                (if (> problems 0) (format "; %d problems" problems) "")
                (if (> (+ lost problems) 0) " (M-x warm-restart-report)" "")))))
