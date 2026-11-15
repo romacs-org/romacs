@@ -289,6 +289,29 @@ contents, so two equal states print the same."
             (should (= read (length records)))
             (should (equal (romacs-agent-reply again) "bye"))))))))
 
+(ert-deftest romacs-agent-kept-survives-an-added-field ()
+  ;; Kept by a build that lacked a field this one has: read back, no record
+  ;; read again, the new field at its default.
+  (romacs-agent-kept-tests--with
+    (let ((records (romacs-agent-kept-tests--claude)))
+      (romacs-agent-kept-tests--write dir records)
+      (let* ((session (romacs-agent-kept-tests--load dir))
+             (file (romacs-agent--kept-file session))
+             (kept (with-temp-buffer (insert-file-contents file) (read (current-buffer))))
+             (dropped (car (car (last (plist-get kept :fields))))))
+        (with-temp-file file
+          (let ((print-circle t) (print-length nil) (print-level nil))
+            (prin1 (plist-put (plist-put (copy-sequence kept) :layout (remq dropped (plist-get kept :layout)))
+                              :fields (assq-delete-all dropped (copy-alist (plist-get kept :fields))))
+                   (current-buffer))))
+        (let* ((read 0)
+               (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                                 ((symbol-function 'romacs-agent--record)
+                                  (lambda (session record) (cl-incf read) (funcall real session record))))
+                        (romacs-agent-kept-tests--load dir))))
+          (should (= read 0))
+          (should (equal (romacs-agent-reply again) "bye")))))))
+
 (ert-deftest romacs-agent-kept-only-what-reads-back ()
   ;; A field holding what cannot be read back: nothing is kept.
   (romacs-agent-kept-tests--with

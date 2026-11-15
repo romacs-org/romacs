@@ -3217,6 +3217,10 @@ given, is its state as its records left it."
                                                                      '(:rolling-back)))
                                                      (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
 
+(defvar romacs-agent-kept-functions nil
+  "Called with a session and its state as its records left it (or nil:
+its own) each time its state is kept (`romacs-agent--keep').")
+
 (defun romacs-agent--keep (session &optional state)
   "Write SESSION's state, as its records have folded it, to its directory:
 only the registered session's (a copy replaying them keeps nothing), and
@@ -3231,7 +3235,8 @@ its records left it (`romacs-agent--keep-soon')."
           (with-temp-file (concat file ".tmp") (insert text))
           (set-file-modes (concat file ".tmp") #o600)
           (rename-file (concat file ".tmp") file t))
-        (puthash session seq romacs-agent--kept)))))
+        (puthash session seq romacs-agent--kept)
+        (run-hook-with-args 'romacs-agent-kept-functions session state)))))
 
 (defvar romacs-agent--keeping nil
   "The sessions whose state is kept at the editor's next idle moment,
@@ -3305,16 +3310,18 @@ record SEQ (`romacs-agent--record-line-end')."
         (ignore-errors (read (current-buffer)))))))
 
 (defun romacs-agent--restore-kept (session)
-  "Put SESSION's kept state back, when this build defines the session
-record as it was written and its journal holds the record it is at:
-the byte its journal goes on from after that record.  Else nil, SESSION
-untouched."
+  "Put SESSION's kept state back, when this build's session record has
+every field it was written with and its journal holds the record it is
+at: the byte its journal goes on from after that record.  Else nil,
+SESSION untouched.  A field this build added since keeps its default: a
+new field only records can give a value must change
+`romacs-agent--kept-version'."
   (when-let* ((kept (romacs-agent--read-kept session))
               ((eql (plist-get kept :version) romacs-agent--kept-version))
-              ((equal (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
+              ((cl-subsetp (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
               ((integerp (plist-get kept :seq)))
               (from (romacs-agent--journal-after session (plist-get kept :seq))))
-    ;; The layout is this build's: each field is where it was written.
+    ;; Each field by its name, where this build has it.
     (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
       (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
     (when-let* ((forked (plist-get kept :forked)))
