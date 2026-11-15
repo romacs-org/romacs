@@ -1,4 +1,4 @@
-//! Markdown fontifying and structure (lisp/romacs/romacs-markdown.el): a
+//! Markdown fontifying and structure (lisp/textmodes/romacs-markdown.el): a
 //! region read as one document by `crate::markdown`.
 use super::Value;
 

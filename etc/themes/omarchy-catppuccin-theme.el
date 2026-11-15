@@ -7,7 +7,7 @@
 
 ;;; Commentary:
 ;; The Catppuccin palette as a Romacs theme: its base colours, from
-;; which lisp/romacs/romacs-theme.el derives every face.
+;; which lisp/ui/romacs-theme.el derives every face.
 
 ;;; Code:
 

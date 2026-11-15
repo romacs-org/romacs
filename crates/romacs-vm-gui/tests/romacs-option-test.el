@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; lisp/romacs/romacs-option.el in a `--loadup' session
+;; lisp/romacs-option.el in a `--loadup' session
 ;; (gnu_completion.rs `romacs_option_lisp_tests_pass').
 
 (require 'romacs-option)

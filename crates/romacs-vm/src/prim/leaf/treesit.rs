@@ -990,26 +990,53 @@ impl Leaf<'_> {
     /// treesit-subtree-stat: (MAX-DEPTH MAX-WIDTH COUNT) of NODE's subtree.
     pub(crate) fn ts_subtree_stat(&mut self, node: Value) -> Out {
         let n = self.ts_node(node)?.clone();
-        let mut cursor = native::Cursor::new(n.node);
-        let (mut max_depth, mut max_width, mut count, mut depth) = (1i64, 0i64, 0i64, 0i64);
-        loop {
-            count += 1;
-            while cursor.first_child() {
-                depth += 1;
-                count += 1;
-                let mut width = 1;
-                while cursor.next_sibling() { width += 1; }
-                max_width = max_width.max(width);
-                cursor.parent();
-                cursor.first_child();
+        let stat = subtree_stat(n.node, None);
+        Ok(self.ts_list(&[fixnum(stat.depth), fixnum(stat.width), fixnum(stat.count)]))
+    }
+    /// `romacs--treesit-subtree-exceeds`: whether NODE's subtree is deeper
+    /// than DEPTH or has a node with more than WIDTH children, as
+    /// `treesit-subtree-stat` would tell, without walking the rest of it
+    /// once it is.
+    pub(crate) fn ts_subtree_exceeds(&mut self, node: Value, depth: Value, width: Value) -> Out {
+        let n = self.ts_node(node)?.clone();
+        let (depth, width) = (self.ts_depth(depth)?, self.ts_depth(width)?);
+        let stat = subtree_stat(n.node, Some((depth, width)));
+        Ok(flag(stat.depth > depth || stat.width > width))
+    }
+}
+
+/// What `treesit-subtree-stat` tells of a subtree.
+struct Stat { depth: i64, width: i64, count: i64 }
+
+/// NODE's subtree's greatest depth and width and its node count, walked
+/// as GNU's treesit-subtree-stat walks it; with LIMIT (depth, width), the
+/// walk stops as soon as either is exceeded.
+fn subtree_stat(node: native::Node, limit: Option<(i64, i64)>) -> Stat {
+    let mut cursor = native::Cursor::new(node);
+    let mut stat = Stat { depth: 1, width: 0, count: 0 };
+    let mut depth = 0i64;
+    let over = |stat: &Stat| limit.is_some_and(|(d, w)| stat.depth > d || stat.width > w);
+    loop {
+        stat.count += 1;
+        while cursor.first_child() {
+            depth += 1;
+            stat.count += 1;
+            let mut width = 1;
+            while cursor.next_sibling() { width += 1; }
+            stat.width = stat.width.max(width);
+            stat.depth = stat.depth.max(depth);
+            if over(&stat) {
+                return stat;
             }
-            max_depth = max_depth.max(depth);
-            while !cursor.next_sibling() {
-                if cursor.parent() {
-                    depth -= 1;
-                } else {
-                    return Ok(self.ts_list(&[fixnum(max_depth), fixnum(max_width), fixnum(count)]));
-                }
+            cursor.parent();
+            cursor.first_child();
+        }
+        stat.depth = stat.depth.max(depth);
+        while !cursor.next_sibling() {
+            if cursor.parent() {
+                depth -= 1;
+            } else {
+                return stat;
             }
         }
     }

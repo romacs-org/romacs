@@ -28,7 +28,7 @@ pub struct Idle {
 /// busy connection never starves the workers, ripe timers, the idle
 /// auto-save (SAVE),
 /// then, on a pass where none of those ran and no message waits to be
-/// shown, whether to collect (`romacs--idle-collect', lisp/romacs/vm/keyboard.el).
+/// shown, whether to collect (`romacs--idle-collect', lisp/vm/keyboard.el).
 macro_rules! idle_form {
     ($save:literal) => {
         concat!("(let* ((notified (romacs--file-notify-idle))
@@ -45,7 +45,7 @@ macro_rules! idle_form {
 const IDLE: &str = idle_form!("nil");
 const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save))");
 
-/// With AUTO_SAVE, the idle auto-save (lisp/romacs/vm/keyboard.el) is checked
+/// With AUTO_SAVE, the idle auto-save (lisp/vm/keyboard.el) is checked
 /// too, once the command loop's Lisp half is installed, and its delay joins
 /// the timers'. A save that ran is redisplayed, as read_char's is: its
 /// hooks may change buffers. The loop leaves it out while a paint it has
@@ -148,7 +148,7 @@ mod tests {
         let failed = idle(&mut vm, true).unwrap();
         assert!(failed.ran && failed.message, "{failed:?}");
         assert_eq!(printed(&mut vm, "(current-message)"), "\"Error running timer: (error \\\"boom\\\")\"");
-        // read_char's own wait (lisp/romacs/vm/keyboard.el): a prompt idles and runs
+        // read_char's own wait (lisp/vm/keyboard.el): a prompt idles and runs
         // timers until its key comes; `read-event' with a time limit runs
         // ordinary timers only and answers nil once the limit passes.
         vm.timer_stop_idle();
@@ -313,7 +313,7 @@ mod tests {
         }
     }
 
-    /// The idle collection (lisp/romacs/vm/keyboard.el): nothing is scheduled
+    /// The idle collection (lisp/vm/keyboard.el): nothing is scheduled
     /// until enough was allocated; then one collection once the session has
     /// been idle for the delay, on a pass where nothing else ran, made by
     /// the host outside any request.
@@ -407,7 +407,7 @@ mod tests {
         crate::test_home::private_home(&mut vm, "timers-prompt-collect");
         crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
-        vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
+        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         printed(&mut vm, "(read-event nil nil 0)");
@@ -439,7 +439,7 @@ mod tests {
         let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
         crate::test_home::private_home(&mut vm, "timers-scheduled");
         crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
-        vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
+        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let schedule = "(run-with-timer 0.2 nil (lambda () (setq log (cons (list 'timer (- (float-time) start)) log))))";
         // A background command completes while C-x waits (it outlasts the

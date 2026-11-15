@@ -10,6 +10,12 @@ they stay committed with their recorder, and tools/lib/smells.py holds every
 tracked file that says a tool wrote it to its merge-base's, unless it declares
 itself with `SMELL(generated): reason`.
 
+One exception, by necessity: lisp/'s loaddefs files, which tools/lisp-loaddefs
+makes from the tree, stay committed, because loadup loads them before anything
+could make them (GNU's build commits ldefs-boot.el for the same reason).
+tools/dev-check regenerates them into a scratch copy and fails when they differ,
+and a merge conflict in one resolves by running the tool again.
+
 usage: generated_files.py check [--root ROOT]
 """
 import argparse
