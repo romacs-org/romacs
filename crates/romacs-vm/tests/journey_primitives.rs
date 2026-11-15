@@ -318,7 +318,7 @@ fn gnu_c_commands_have_gnu_interactive_forms() {
     let names: Vec<String> = String::from_utf8(output.stdout).unwrap().lines().map(str::to_owned).collect();
     assert!(names.len() > 90, "GNU lists its C commands");
     let mut vm = gnu_lisp(&[]);
-    // `signal-process' is Lisp in lisp/romacs/vm/subprocess.el, without GNU's spec yet.
+    // `signal-process' is Lisp in lisp/vm/subprocess.el, without GNU's spec yet.
     let defined: Vec<String> = names.into_iter().filter(|name| name != "signal-process" && vm
         .eval_source(&format!("(fboundp '{name})")).and_then(|v| v.display()).as_deref() == Ok("t")).collect();
     let forms: Vec<String> = defined.iter().map(|name| format!("(interactive-form '{name})")).collect();

@@ -21,7 +21,7 @@ fn dumping(_cx) {
 
 // Romacs-only. Whether this process builds a world (`host::Mode::Build`).
 // A secret reader asked in one returns no value: it signals
-// `romacs-secret-deferred' (lisp/romacs/romacs-world-layer.el), and the form
+// `romacs-secret-deferred' (lisp/session/romacs-world-layer.el), and the form
 // that asked is kept, as code, for the session, where the reader runs.
 defsubr! { name = "romacs-world-building-p", gnu = "romacs:world", effect = Reads,
 fn world_building_p(_cx) {
@@ -43,7 +43,7 @@ fn world_take_secret(_cx) {
     Ok(if crate::host::mode() == crate::host::Mode::Build && crate::host::take_secret_asked() { Value::TRUE } else { Value::NIL })
 }}
 
-// Romacs-only. lisp/romacs/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
+// Romacs-only. lisp/session/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
 // the user's init gave `eval-after-load' PRINTED for FILE (a feature, or a
 // file named by a string), not loaded yet: noted for its layer's plan
 // (`world::layer'). A no-op, returning nil, unless a recording is on and the

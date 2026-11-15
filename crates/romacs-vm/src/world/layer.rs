@@ -48,7 +48,7 @@ const PLANS: &str = "plans";
 pub const LIVE_ENTRY: &str = "init-layer";
 
 /// The functions that read a secret. In a layer build none runs: each
-/// signals `romacs-secret-deferred' (lisp/romacs/romacs-world-layer.el), as a
+/// signals `romacs-secret-deferred' (lisp/session/romacs-world-layer.el), as a
 /// credential file read fails (`host::credential_in_build`), and the
 /// smallest whole form that asked is kept, as code, for the session: a
 /// library's top-level form at restore, one form of the init's
@@ -736,14 +736,14 @@ impl Vm {
         let mut live = Vec::new();
         // What each entry loaded: the features it provided and the files.
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
-        // Each secret reader defers in this build (lisp/romacs/romacs-world-layer.el):
+        // Each secret reader defers in this build (lisp/session/romacs-world-layer.el):
         // the form that asks is kept, as code, for the session.
         let readers = SECRET_READERS.join(" ");
         let slots: Vec<usize> = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
         let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) t))"));
         host::layer_begin();
         // As the init's libraries find the live session: interactive
-        // (lisp/romacs/romacs-gui-loadup.el), with the init named before it loads
+        // (lisp/session/romacs-gui-loadup.el), with the init named before it loads
         // (romacs-vm-gui user_init.rs). The display stays the chain's.
         let directory = plan.init.parent().map(|d| format!("{}/", d.display())).unwrap_or_default();
         let _ = self.eval_source_raw(&format!("(setq noninteractive nil user-init-file {} user-emacs-directory {})",

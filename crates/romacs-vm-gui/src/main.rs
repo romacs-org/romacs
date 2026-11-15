@@ -1334,7 +1334,7 @@ fn evaluate(
     };
     if let Some(quit) = quit { vm.share_quit_signal(quit); }
     startup::mark_phase("vm");
-    // How this VM booted, which its worker isolates repeat (lisp/romacs/vm/isolate.el).
+    // How this VM booted, which its worker isolates repeat (lisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
             let compiled = romacs_vm::compiled_lisp::store_dir()
@@ -1411,7 +1411,7 @@ fn evaluate(
         };
         startup::mark_phase("session-lisp");
         if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
-        // This process's command log, from before the init (lisp/romacs/romacs-usage-log.el).
+        // This process's command log, from before the init (lisp/session/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
@@ -1428,7 +1428,7 @@ fn evaluate(
                 }
                                 // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
-                // configures, and skip the ones the layer made (lisp/romacs/romacs-loadup-bootstrap.el).
+                // configures, and skip the ones the layer made (lisp/session/romacs-loadup-bootstrap.el).
                 if worlds.is_some() {
                     vm.record_init_loads();
                     if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
@@ -1503,7 +1503,7 @@ fn evaluate(
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     // A server listens before its first window, which a client asks for
-    // (lisp/romacs/romacs-server.el); one that cannot listen ends here.
+    // (lisp/session/romacs-server.el); one that cannot listen ends here.
     if let Some(name) = &serve {
         host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
         vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
@@ -1629,7 +1629,7 @@ fn evaluate(
                     continue;
                 }
                 // A native model's event runs its special-event binding
-                // (lisp/romacs/romacs-model.el), then the frame repaints.
+                // (lisp/graphics/romacs-model.el), then the frame repaints.
                 // Its callbacks may read input: they get the keys queued
                 // ahead, as a command does.
                 if live && let InputEvent::Model { id, event } = &event {
@@ -1917,7 +1917,7 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
     terminate(vm, host, Lent { live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     // A server's window is a resource of the session: closing it ends the
-    // session only when Lisp says so (lisp/romacs/romacs-server.el).
+    // session only when Lisp says so (lisp/session/romacs-server.el).
     if host.borrow().server.is_some() {
         return lent.run(host, |live| {
             live.changed();

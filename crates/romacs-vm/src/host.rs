@@ -376,7 +376,7 @@ pub(crate) fn reseed_output() -> Option<&'static str> {
 
 /// The sites that may switch the startup phase, in order: the chain's batch
 /// steps, then an interactive session's, which supersede them.
-const STARTUP: [&str; 2] = ["/lisp/romacs/romacs-loadup-bootstrap.el", "/lisp/romacs/romacs-gui-loadup.el"];
+const STARTUP: [&str; 2] = ["/lisp/session/romacs-loadup-bootstrap.el", "/lisp/session/romacs-gui-loadup.el"];
 
 pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
@@ -773,7 +773,7 @@ const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
 /// own directory or absolute.
 pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 
-/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/), found from where the
+/// The runtime tree (lisp/, etc/), found from where the
 /// executable is, never from where it was once built:
 ///   1. `ROMACS_RUNTIME_ROOT`, said outright (the Nix wrapper sets it);
 ///   2. `share/romacs` beside the executable's `bin/` (an installation, or an
@@ -819,7 +819,7 @@ fn located_runtime() -> Result<PathBuf, String> {
         (PathBuf::from(dir), "ROMACS_RUNTIME_ROOT")
     } else if let Some(root) = exe.as_deref().and_then(installed_root) {
         (root, "share/romacs beside the executable")
-    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp/gnu"))) {
+    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp"))) {
         (root.to_path_buf(), "the executable's own directory")
     } else if let Some(root) = exe.as_deref().and_then(recorded_root) {
         (root, "named beside the executable")
@@ -834,10 +834,10 @@ fn located_runtime() -> Result<PathBuf, String> {
 }
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
-/// `lisp/gnu/` directory.
+/// `lisp/` directory.
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
-    probe(Probe::IsDir, root.join("lisp/gnu")).then_some(root)
+    probe(Probe::IsDir, root.join("lisp")).then_some(root)
 }
 
 /// The tree [`RUNTIME_RECORD`] beside EXE names, when there is such a file.
@@ -880,8 +880,8 @@ fn in_build_target(exe: &Path, tree: &Path) -> bool {
 
 /// Whether ROOT is a runtime tree of this executable's generation, or why not.
 fn runtime_tree(root: &Path) -> Result<(), String> {
-    if !probe(Probe::IsDir, root.join("lisp/gnu")) || !probe(Probe::IsDir, root.join("etc")) {
-        return Err("is not a Romacs runtime tree (it has no lisp/gnu or no etc)".into());
+    if !probe(Probe::IsDir, root.join("lisp")) || !probe(Probe::IsDir, root.join("etc")) {
+        return Err("is not a Romacs runtime tree (it has no lisp or no etc)".into());
     }
     let wanted = RUNTIME_EPOCH.trim();
     match read_to_string(root.join("etc/romacs-runtime-epoch")) {
@@ -3210,7 +3210,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("romacs-runtime-tree-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
-        std::fs::create_dir_all(dir.join("lisp/gnu")).unwrap();
+        std::fs::create_dir_all(dir.join("lisp")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
         std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
@@ -3226,7 +3226,7 @@ mod tests {
         let root = build_root();
         assert!(root.is_absolute(), "{}", root.display());
         assert!(!root.components().any(|c| matches!(c, std::path::Component::ParentDir)), "{}", root.display());
-        assert!(root.join("lisp/gnu").is_dir() && root.join("etc").is_dir(), "{}", root.display());
+        assert!(root.join("lisp").is_dir() && root.join("etc").is_dir(), "{}", root.display());
     }
     /// A world built from a checkout keys only the kinds of the tree's
     /// entries, never their times, so editing the tree leaves it valid.
@@ -3279,7 +3279,7 @@ mod tests {
         let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
         let exe = prefix.join("bin/romacs-vm-gui");
         assert_eq!(installed_root(&exe), None);
-        std::fs::create_dir_all(prefix.join("share/romacs/lisp/gnu")).unwrap();
+        std::fs::create_dir_all(prefix.join("share/romacs/lisp")).unwrap();
         assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
         std::fs::remove_dir_all(&prefix).unwrap();
     }

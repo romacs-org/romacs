@@ -28,6 +28,15 @@ import tomllib
 ENV = "ROMACS_GNU_ORACLE"
 REPO = pathlib.Path(__file__).resolve().parents[2]
 REFERENCE = REPO / "ledger/parity-reference.toml"
+# The oracle's source checkout: GNU's C and Lisp at the commit the binary was built from.
+GNU_SOURCE = os.environ.get("LISP_ORACLE_GNU", str(pathlib.Path(os.environ.get("ROMACS_GNU_SOURCE", pathlib.Path(
+    os.environ.get("GNU_ORACLE_ROOT", pathlib.Path(os.environ.get("XDG_CACHE_HOME", pathlib.Path.home() / ".cache")) / "gnu-emacs-pin"))
+    / "src")) / ""))
+
+
+def mirror_commit(root=REPO):
+    """The GNU commit the oracle binary was built from (ledger/parity-reference.toml)."""
+    return tomllib.loads((pathlib.Path(root) / "ledger/parity-reference.toml").read_text())["mirror_commit"]
 PROBE = ("(princ (json-serialize (list (cons 'revision (or emacs-repository-version \"\"))"
          " (cons 'version emacs-version))))")
 
