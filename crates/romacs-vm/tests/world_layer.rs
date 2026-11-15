@@ -163,14 +163,14 @@ fn build_libraries(name: &str, libraries: &[(&str, &str)], bootstrap: &str) -> (
     for (library, source) in libraries {
         std::fs::write(dir.join(format!("lisp/{library}.el")), format!("{source}(provide '{library})\n")).unwrap();
     }
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
     let names: Vec<&str> = libraries.iter().map(|(library, _)| *library).collect();
     let plan = plan(&dir, &names);
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     (vm, refused, trace)
@@ -212,7 +212,7 @@ fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
         (unless (and org-persist--disable-when-emacs-Q nil)\n  \
         (setq org-persist--refresh-gc-lock-timer (car (setq timer-list (cons (list 'lock (current-time)) timer-list)))))\n\
         (provide 'org-persist)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
     let paths = vec![vec![extra.display().to_string(), org.display().to_string()]];
     let plan = Plan::new(&dir.join("init.el"), vec![require("cl-extra"), require("org-persist")], paths).unwrap();
@@ -220,7 +220,7 @@ fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
