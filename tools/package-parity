@@ -101,7 +101,7 @@ def command_run(args):
     out.mkdir(parents=True, exist_ok=True)
     scratch = out / 'scratch'
     romacs = Path(args.romacs).resolve()
-    lisp_dir = romacs.parent / 'lisp/gnu'
+    lisp_dir = romacs.parent / 'lisp'
     editors = [dict(name='romacs', binary=str(romacs), lisp_dir=str(lisp_dir) if lisp_dir.is_dir() else None),
                dict(name='gnu', binary=str(Path(args.gnu).resolve()))]
     started = time.monotonic()

@@ -1,4 +1,4 @@
-//! The join of `mapconcat` (lisp/romacs/vm/prelude.el and `romacs--concat-list`)
+//! The join of `mapconcat` (lisp/vm/prelude.el and `romacs--concat-list`)
 //! against the pinned GNU: every kind of separator, the `identity` shortcut
 //! over a list and a vector, multibyte and unibyte parts, and the text
 //! properties the parts and the separator carry.

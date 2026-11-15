@@ -1,0 +1,96 @@
+# Generated files lisp/ keeps that tools/lisp-loaddefs does not make, by how each group was made.
+# They are ours, edited like any file; smells does not count their generated headers.
+# How the snapshots were first taken: Generated support, not GNU Git blobs. Every file outside the unidata-romacs group is byte-for-byte the pinned GNU build's own installed output (share/emacs/32.0.50/lisp at gnu_commit, gunzipped where installed compressed; tools/build-gnu-oracle.sh builds it); the unidata-romacs group is that output passed through tools/lib/romacs_unidata.py. SHA-256 values attest these bytes. GNU generator/rule and input references below were traced at gnu_commit; eucjp-ms's generator reads an external glibc charmap. subdirs.el is build-aux/update-subdirs output for the pinned lisp/ directories in the C locale (the bytes crates/romacs-vm-gui/src/loadup.rs update_subdirs_writes_what_gnus_script_writes records). Earlier retained snapshots predated the pinned sources: tramp-loaddefs.el autoloaded a predicate tramp-cmds.el no longer defines, loaddefs.el, cus-load.el and finder-inf.el lacked newer GNU files and also listed Romacs's own files (whose autoloads lisp/session/romacs-bundled-autoloads.el now defines as it loads), and the tit quail tables came from another GNU's conversion, which the pinned binary does not reproduce.
+
+# blocks: AWK blocks.awk over Blocks.txt and emoji-data.txt. (from admin/unidata/Makefile.in, admin/unidata/blocks.awk, admin/unidata/Blocks.txt, admin/unidata/emoji-data.txt)
+lisp/international/charscript.el
+
+# bovine: bovine-batch-make-parser; scm-by.el uses scheme.by. (from admin/grammars/Makefile.in, lisp/cedet/semantic/bovine/grammar.el, admin/grammars/c.by, admin/grammars/make.by, admin/grammars/scheme.by)
+lisp/cedet/semantic/bovine/c-by.el
+lisp/cedet/semantic/bovine/make-by.el
+lisp/cedet/semantic/bovine/scm-by.el
+
+# cp51932: cp51932.awk consumes generated etc/charsets/CP932-2BYTE.map; Makefile traces that intermediate to mapfiles/CP932.TXT via mapconv/cp932.awk. (from admin/charsets/Makefile.in, admin/charsets/cp51932.awk, admin/charsets/cp932.awk, admin/charsets/mapconv, admin/charsets/mapfiles/CP932.TXT)
+lisp/international/cp51932.el
+
+# custom: custom-deps / custom-make-dependencies scans Lisp sources. (from lisp/Makefile.in, lisp/cus-dep.el)
+lisp/cus-load.el
+
+# emoji-labels: emoji--generate-file. (from admin/unidata/Makefile.in, lisp/international/emoji.el, admin/unidata/emoji-test.txt)
+lisp/international/emoji-labels.el
+
+# emoji-zwj: AWK emoji-zwj.awk over the listed Unicode emoji data. (from admin/unidata/Makefile.in, admin/unidata/emoji-zwj.awk, admin/unidata/emoji-zwj-sequences.txt, admin/unidata/emoji-sequences.txt, admin/unidata/emoji-variation-sequences.txt, admin/unidata/emoji-test.txt)
+lisp/international/emoji-zwj.el
+
+# eucjp-ms: gunzip GLIBC_CHARMAPS/EUC-JP-MS.gz | AWK eucjp-ms.awk. The external glibc charmap and its version were not retained; no reproducible-input claim is made. (from admin/charsets/Makefile.in, admin/charsets/eucjp-ms.awk)
+lisp/international/eucjp-ms.el
+
+# finder: finder-data / finder-compile-keywords-make-dist scans Lisp source headers. (from lisp/Makefile.in, lisp/finder.el)
+lisp/finder-inf.el
+
+# leim-list: update-leim-list-file scans generated leim directory, then appends leim-ext.el through the Makefile sed rule. (from leim/Makefile.in, lisp/international/quail.el, leim/leim-ext.el)
+lisp/leim/leim-list.el
+
+# misc-dic: batch-tit-miscdic-convert / tit-miscdic-convert; cangjie tables each produce tsang-* and quick-*. (from leim/Makefile.in, lisp/international/titdic-cnv.el, leim/MISC-DIC/CTLau.html, leim/MISC-DIC/CTLau-b5.html, leim/MISC-DIC/pinyin.map, leim/MISC-DIC/ziranma.cin, leim/MISC-DIC/cangjie-table.b5, leim/MISC-DIC/cangjie-table.cns)
+lisp/leim/quail/CTLau-b5.el
+lisp/leim/quail/CTLau.el
+lisp/leim/quail/PY.el
+lisp/leim/quail/ZIRANMA.el
+lisp/leim/quail/quick-b5.el
+lisp/leim/quail/quick-cns.el
+lisp/leim/quail/tsang-b5.el
+lisp/leim/quail/tsang-cns.el
+
+# pinyin: tit-pinyin-convert / pinyin-convert. (from leim/Makefile.in, lisp/international/titdic-cnv.el, leim/MISC-DIC/pinyin.map)
+lisp/language/pinyin.el
+
+# subdirs: update-subdirs scans actual directories, not just GNU Git paths. The retained output is its result on the pinned lisp/ directories in the C locale. (from lisp/Makefile.in, build-aux/update-subdirs)
+lisp/subdirs.el
+
+# tit: batch-tit-dic-convert / tit-dic-convert, corresponding CXTERM-DIC basename. (from leim/Makefile.in, lisp/international/titdic-cnv.el, leim/CXTERM-DIC/4Corner.tit, leim/CXTERM-DIC/ARRAY30.tit, leim/CXTERM-DIC/CCDOSPY.tit, leim/CXTERM-DIC/ECDICT.tit, leim/CXTERM-DIC/ETZY.tit, leim/CXTERM-DIC/PY-b5.tit, leim/CXTERM-DIC/Punct-b5.tit, leim/CXTERM-DIC/Punct.tit, leim/CXTERM-DIC/QJ-b5.tit, leim/CXTERM-DIC/QJ.tit, leim/CXTERM-DIC/SW.tit, leim/CXTERM-DIC/TONEPY.tit, leim/CXTERM-DIC/ZOZY.tit)
+lisp/leim/quail/4Corner.el
+lisp/leim/quail/ARRAY30.el
+lisp/leim/quail/CCDOSPY.el
+lisp/leim/quail/ECDICT.el
+lisp/leim/quail/ETZY.el
+lisp/leim/quail/PY-b5.el
+lisp/leim/quail/Punct-b5.el
+lisp/leim/quail/Punct.el
+lisp/leim/quail/QJ-b5.el
+lisp/leim/quail/QJ.el
+lisp/leim/quail/SW.el
+lisp/leim/quail/TONEPY.el
+lisp/leim/quail/ZOZY.el
+
+# unidata: unidata-gen-file, unidata-gen-charprop, unidata-gen-scripts, unidata-gen-confusable and unidata-gen-idna-mapping; generated headers sometimes name the generic charprop emitter rather than the public entry point. The retained unidata bytes are the output of the pinned GNU build at gnu_commit. (from admin/unidata/Makefile.in, admin/unidata/unidata-gen.el, admin/unidata/UnicodeData.txt, admin/unidata/BidiMirroring.txt, admin/unidata/BidiBrackets.txt, admin/unidata/SpecialCasing.txt, admin/unidata/Scripts.txt, admin/unidata/ScriptExtensions.txt, admin/unidata/PropertyValueAliases.txt, admin/unidata/confusables.txt, admin/unidata/IdnaMappingTable.txt)
+lisp/international/charprop.el
+lisp/international/idna-mapping.el
+lisp/international/uni-confusable.el
+lisp/international/uni-decimal.el
+lisp/international/uni-digit.el
+lisp/international/uni-lowercase.el
+lisp/international/uni-mirrored.el
+lisp/international/uni-numeric.el
+lisp/international/uni-scripts.el
+lisp/international/uni-special-lowercase.el
+lisp/international/uni-special-titlecase.el
+lisp/international/uni-special-uppercase.el
+lisp/international/uni-titlecase.el
+lisp/international/uni-uppercase.el
+
+# unidata-romacs: The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in lisp/international/romacs-unidata.el by tools/lib/romacs_unidata.py (DIVERGENCES.md VM2-UNIDATA1). (from admin/unidata/Makefile.in, admin/unidata/unidata-gen.el, admin/unidata/UnicodeData.txt, admin/unidata/BidiMirroring.txt, admin/unidata/BidiBrackets.txt, admin/unidata/SpecialCasing.txt, admin/unidata/Scripts.txt, admin/unidata/ScriptExtensions.txt, admin/unidata/PropertyValueAliases.txt, admin/unidata/confusables.txt, admin/unidata/IdnaMappingTable.txt)
+lisp/international/uni-bidi.el
+lisp/international/uni-brackets.el
+lisp/international/uni-category.el
+lisp/international/uni-combining.el
+lisp/international/uni-comment.el
+lisp/international/uni-decomposition.el
+lisp/international/uni-name.el
+lisp/international/uni-old-name.el
+
+# wisent: wisent-batch-make-parser; javat-wy.el uses java-tags.wy and srt-wy.el uses srecode-template.wy. (from admin/grammars/Makefile.in, lisp/cedet/semantic/wisent/grammar.el, admin/grammars/grammar.wy, admin/grammars/java-tags.wy, admin/grammars/js.wy, admin/grammars/python.wy, admin/grammars/srecode-template.wy)
+lisp/cedet/semantic/grammar-wy.el
+lisp/cedet/semantic/wisent/javat-wy.el
+lisp/cedet/semantic/wisent/js-wy.el
+lisp/cedet/semantic/wisent/python-wy.el
+lisp/cedet/srecode/srt-wy.el
