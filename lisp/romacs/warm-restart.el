@@ -401,11 +401,17 @@ is not portable."
              collect (list :selected (eq frame (selected-frame))
                            :state (warm-restart--strip (window-state-get (frame-root-window frame) t))))))
 
+(defun warm-restart--secret-p (value)
+  "Whether VALUE is a secret string, which no image holds: one whose text
+starts with the `romacs-secret' property, as the password manager's do."
+  (and (stringp value) (get-text-property 0 'romacs-secret value)))
+
 (defun warm-restart--register (value)
   "Register VALUE as data: a position becomes (file-query FILE POS) in a
 file's buffer or (warm-restart-position ID POS) in another carried one.
-nil when it cannot be carried."
-  (cond ((markerp value)
+nil when it cannot be carried, or is a secret."
+  (cond ((warm-restart--secret-p value) nil)
+        ((markerp value)
          (let ((buffer (marker-buffer value)))
            (cond ((null buffer) nil)
                  ((buffer-file-name buffer) (list 'file-query (buffer-file-name buffer) (marker-position value)))
@@ -430,12 +436,14 @@ names of those that are not."
           warm-restart-history-variables))
 
 (defun warm-restart--globals ()
-  "The session-wide part of an image, and what of it is lost."
+  "The session-wide part of an image, and what of it is lost.
+The kill ring's secrets (`warm-restart--secret-p') are left out."
   (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell)))) register-alist))
         (histories (warm-restart--variables (warm-restart--history-variables)))
-        (globals (warm-restart--variables warm-restart-globals)))
-    (list :kill-ring (mapcar #'substring-no-properties kill-ring)
-          :yank-index (- (length kill-ring) (length kill-ring-yank-pointer))
+        (globals (warm-restart--variables warm-restart-globals))
+        (kills (seq-remove #'warm-restart--secret-p kill-ring)))
+    (list :kill-ring (mapcar #'substring-no-properties kills)
+          :yank-index (- (length kills) (length (seq-remove #'warm-restart--secret-p kill-ring-yank-pointer)))
           :registers (cl-remove-if-not #'cdr registers)
           :histories (car histories) :globals (car globals)
           :lost (append (cl-loop for (char . value) in registers unless value

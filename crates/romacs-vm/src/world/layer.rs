@@ -51,12 +51,12 @@ pub const REFUSAL: &str = "init-layer";
 /// returns, and the library keeps its first-use load, where the call
 /// happens in the session. The build's confinement already denies the
 /// files and processes behind them; this names the reason.
-const SECRET_READERS: [&str; 17] = [
+const SECRET_READERS: [&str; 18] = [
     "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
     "auth-source-user-and-password", "auth-source-pass-get", "auth-source-pass-parse-entry",
     "auth-source-pass--read-entry", "auth-source-pass-entries", "epg-decrypt-file", "epg-decrypt-string",
     "epg-start-decrypt", "epa-decrypt-file", "epa-decrypt-region", "epa-file-insert-file-contents",
-    "plstore-open", "secrets-get-secret", "read-passwd",
+    "plstore-open", "secrets-get-secret", "read-passwd", "romacs-pass--gpg",
 ];
 
 /// How the init asked for a load, or declared a library it loads later.
