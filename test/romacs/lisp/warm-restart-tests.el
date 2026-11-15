@@ -100,3 +100,93 @@
       (delete-directory warm-restart-directory t))))
 
 ;;; warm-restart-tests.el ends here
+
+(ert-deftest warm-restart-unseen-buffers-come-after-the-shown-and-get-their-modes-when-shown ()
+  ;; A start's restore brings back the buffers its windows show first and
+  ;; lays the windows out; the rest come after, in no mode of their own
+  ;; until a window shows them.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t)) (order nil) image)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (with-current-buffer (get-buffer-create "wr-shown") (text-mode) (insert "shown\n"))
+          (with-current-buffer (get-buffer-create "wr-unseen") (emacs-lisp-mode) (insert "(unseen)\n"))
+          (set-window-buffer nil "wr-shown")
+          (setq image (warm-restart-write))
+          (set-window-buffer nil (get-buffer-create "*scratch*"))
+          (kill-buffer "wr-shown")
+          (kill-buffer "wr-unseen")
+          (cl-letf* ((real (symbol-function 'warm-restart--restore-one))
+                     ((symbol-function 'warm-restart--restore-one)
+                      (lambda (record &rest args)
+                        (push (list (plist-get record :name) warm-restart--defer (and (get-buffer "wr-shown")
+                                                                                      (eq (window-buffer) (get-buffer "wr-shown"))))
+                              order)
+                        (apply real record args))))
+            (let ((romacs-progress-state nil))
+              (warm-restart-restore-image image t)
+              (with-timeout (20 (ert-fail "the restore did not end"))
+                (while (not (eq (plist-get (alist-get 'restore romacs-progress-state) :status) 'done))
+                  (accept-process-output nil 0.05)))))
+          (setq order (nreverse order))
+          (should (equal (assoc "wr-shown" order) '("wr-shown" nil nil)))
+          ;; Restored after the windows were laid out, its modes waiting.
+          (should (equal (assoc "wr-unseen" order) '("wr-unseen" t t)))
+          (should (< (cl-position "wr-shown" order :key #'car :test #'equal)
+                     (cl-position "wr-unseen" order :key #'car :test #'equal)))
+          (with-current-buffer "wr-unseen"
+            (should (eq major-mode 'fundamental-mode))
+            (should (equal (buffer-string) "(unseen)\n")))
+          ;; The host runs the window change functions before it redisplays.
+          (should (memq #'warm-restart--wake-shown (default-value 'window-buffer-change-functions)))
+          (set-window-buffer nil "wr-unseen")
+          (run-hook-with-args 'window-buffer-change-functions (selected-frame))
+          (with-current-buffer "wr-unseen" (should (eq major-mode 'emacs-lisp-mode)))
+          (should-not warm-restart--deferred-buffers))
+      (ignore-errors (kill-buffer "wr-shown"))
+      (ignore-errors (kill-buffer "wr-unseen"))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-an-unseen-record-waits-while-a-key-does ()
+  ;; With a key waiting, an unseen record waits for the editor to be idle;
+  ;; then it comes back, and a save gives it its modes first.
+  (let ((record (list :id "w" :name "wr-wait" :strategy 'text :blob 0 :mode 'emacs-lisp-mode :point 1
+                      :directory default-directory))
+        (buffers (make-hash-table :test #'equal)) (idle nil) (next nil) (romacs-progress-state nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest args) (push args idle) nil))
+                  ((symbol-function 'run-at-time) (lambda (&rest args) (push args next) nil)))
+          (cl-letf (((symbol-function 'input-pending-p) (lambda (&rest _) t)))
+            (warm-restart--step-unseen "image" (float-time) nil ["(wait)\n"] (list record) (list record) 0 buffers nil))
+          (should-not (get-buffer "wr-wait"))
+          (should (eq (nth 2 (car idle)) #'warm-restart--step-unseen))
+          (cl-letf (((symbol-function 'input-pending-p) (lambda (&rest _) nil)))
+            (warm-restart--step-unseen "image" (float-time) nil ["(wait)\n"] (list record) (list record) 0 buffers nil))
+          (should (eq (nth 2 (car next)) #'warm-restart--step-unseen))
+          (with-current-buffer "wr-wait"
+            (should (eq major-mode 'fundamental-mode))
+            (should (equal (buffer-string) "(wait)\n"))
+            (run-hooks 'before-save-hook)
+            (should (eq major-mode 'emacs-lisp-mode))))
+      (ignore-errors (kill-buffer "wr-wait")))))
+
+(ert-deftest warm-restart-an-unseen-file-visits-in-no-mode-until-shown ()
+  ;; An unseen file is visited with its own mode, local variables and
+  ;; `find-file-hook' waiting too; waking it runs them, then its record's.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "wake.el" dir)) (ran nil)
+         (find-file-hook (list (lambda () (push (buffer-name) ran))))
+         (record (list :id "f" :name "wake.el" :strategy 'file :file file :mode 'emacs-lisp-mode :point 1 :directory dir)))
+    (unwind-protect
+        (progn
+          (write-region "(wake)\n" nil file nil 'silent)
+          (let ((warm-restart--defer t) (warm-restart--problems nil))
+            (warm-restart--restore-buffer record [] (make-hash-table :test #'equal)))
+          (with-current-buffer (get-file-buffer file)
+            (should (eq major-mode 'fundamental-mode))
+            (should-not ran)
+            (warm-restart--wake (current-buffer))
+            (should (eq major-mode 'emacs-lisp-mode))
+            (should (equal ran '("wake.el")))
+            (should-not warm-restart--deferred)))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
