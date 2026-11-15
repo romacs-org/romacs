@@ -1749,7 +1749,8 @@ draw BUDGET turns of them, its journal read to byte END: an alist as
 claim (a fork made again takes on from where its last one took), and a
 source's own source what the fork's first part leaves."
   (let ((plan nil))
-    (dolist (note (reverse (romacs-agent--journal-notes session "fork" end)) plan)
+    ;; A fork's notes come before its first prompt: only that is read.
+    (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session end))) plan)
       (let* ((source (romacs-agent-get (gethash "from" note)))
              (after (or (romacs-agent--value (gethash "after" note)) 0))
              (upto (or (romacs-agent--value (gethash "seq" note)) 0))

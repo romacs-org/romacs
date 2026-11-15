@@ -1857,14 +1857,17 @@ passed over, unparsed."
         (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from end))
         (goto-char (point-min))
         (let ((skip (and skip (save-excursion (funcall skip)))))
+         ;; Each line's end by a newline's search: `line-end-position'
+         ;; over a journal's long lines costs many times more.
          (while (not (eobp))
-          (let ((end (line-end-position)))
-            (unless (and skip (funcall skip (point) end))
+          (let* ((start (point))
+                 (end (if (search-forward "\n" nil t) (1- (point)) (point-max))))
+            (unless (and skip (funcall skip start end))
               (let ((record (ignore-errors
-                              (json-parse-string (buffer-substring (point) end)
+                              (json-parse-string (buffer-substring start end)
                                                  :object-type 'hash-table :null-object :null :false-object :false))))
-                (when (hash-table-p record) (funcall function record)))))
-          (forward-line 1)))))))
+                (when (hash-table-p record) (funcall function record))))
+            (goto-char (min (1+ end) (point-max))))))))))
 
 (defun romacs-agent--filter (process chunk)
   "Handle the records PROCESS's supervisor sent, CHUNK the latest output.
@@ -3483,12 +3486,19 @@ sequence) would break that, and are read as raw bytes instead."
       (insert-file-contents-literally journal nil start end))
     start))
 
+(defconst romacs-agent-journal-tail-bytes (* 16 1024 1024)
+  "How far back from a journal's end its tail is looked for: a chat whose
+last turns go further back starts at the earliest turn within it, so no
+first show reads or replays more.")
+
 (defun romacs-agent--journal-tail (session turns &optional end begin)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
 between bytes BEGIN and END (its start and end by default): (FROM .
 PROMPTS), FROM the byte of a prompt that started its turn with none
 under way, at least TURNS back, or nil to replay all of it, which then
-holds PROMPTS prompts.
+holds PROMPTS prompts.  Within `romacs-agent-journal-tail-bytes' of
+END: further back, the earliest such prompt within them, fewer turns;
+none within them (one turn longer than that), all of it.
 A prompt's record is told from its line's end
 \(`romacs-agent--prompt-line-end'), looked for from END in growing
 spans, so a long journal is read only as far back as its last turns
@@ -3501,8 +3511,10 @@ go."
     (if (not (and end (file-readable-p journal))) (cons nil 0)
       (with-temp-buffer
         (while (not found)
-          (let ((start (romacs-agent--journal-span journal (max begin (- end span)) end))
-                (seen 0) (cut nil) (at nil))
+          (let* ((reach (min span romacs-agent-journal-tail-bytes))
+                 (start (romacs-agent--journal-span journal (max begin (- end reach)) end))
+                 (last (or (= start begin) (>= reach romacs-agent-journal-tail-bytes)))
+                 (seen 0) (cut nil) (at nil) (earliest nil))
             ;; Begun inside a record: its part is no line's start.
             (when (> start begin)
               (goto-char (point-min))
@@ -3515,11 +3527,35 @@ go."
                 (goto-char (pop prompts))
                 (setq seen (1+ seen))
                 (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start begin)))
-                  (setq cut seen at (+ start (1- (position-bytes (point))))))))
+                  (setq cut seen at (+ start (1- (position-bytes (point))))))
+                ;; At the budget, the earliest such prompt within it will do.
+                (when (and last (not cut) (> start begin) (romacs-agent--turn-free-p session probe nil))
+                  (setq earliest (cons (+ start (1- (position-bytes (point)))) seen)))))
             (setq found (cond ((and cut (> seen cut)) (cons at cut))
-                              ((= start begin) (cons nil seen))))
+                              ((= start begin) (cons nil seen))
+                              ;; At the budget, the journal goes on before it.
+                              ((and last cut) (cons at cut))
+                              (last (or earliest (cons nil seen)))))
             (setq span (* 4 span))))
         found))))
+
+(defun romacs-agent--journal-head (session &optional end)
+  "The byte at which SESSION's journal's first prompt starts, or END (its
+end by default) when it has none before: what comes before a session's
+first turn, read from its start in growing spans."
+  (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         (end (or end (file-attribute-size (file-attributes journal)) 0))
+         (span 65536) (found nil))
+    (if (not (file-readable-p journal)) end
+      (with-temp-buffer
+        (while (not found)
+          (let ((to (min end span)))
+            (romacs-agent--journal-span journal 0 to)
+            (setq found (or (car (last (romacs-agent--prompt-lines)))
+                            (and (>= to end) 'none))
+                  span (* 4 span))
+            (when (integerp found) (setq found (1- (position-bytes found))))))
+        (if (integerp found) found end)))))
 
 (defun romacs-agent--journal-notes (session type &optional end)
   "SESSION's journal's notes of TYPE (a string) before byte END, oldest
