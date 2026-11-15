@@ -34,7 +34,8 @@ DIRECTORIES defaults to `romacs-ram-files-directories'."
        "unsaved text of a memory-only file; save or kill it first"))
 
 (defun romacs-ram-files-keep-off-disk ()
-  "In `find-file-hook': keep a memory-only file's buffer off the disk."
+  "In `find-file-hook' and `after-change-major-mode-hook', since a mode
+clears the buffer's locals: keep a memory-only file's buffer off the disk."
   (when (and buffer-file-name (romacs-ram-files-p buffer-file-name))
     (setq-local backup-inhibited t)
     (auto-save-mode -1)

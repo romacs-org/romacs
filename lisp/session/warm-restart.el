@@ -67,9 +67,9 @@ Each function runs in a buffer and returns nil or a string.  May be set
 buffer-locally.")
 
 (defvar-local warm-restart-regenerable nil
-  "Non-nil when this buffer is a view its package rebuilds.
-A string is the reason listed.  A writable buffer with unsaved edits is
-carried anyway.")
+  "Non-nil when this buffer is a view its package rebuilds, or a file it
+keeps out of the image.  A string is the reason listed.  A writable buffer
+with unsaved edits is carried anyway.")
 
 (defvar-local warm-restart-buffer-id nil
   "This buffer's identity in session images, made at its first image:
@@ -236,6 +236,9 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
      (base (if (memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
                (cons 'indirect (format "indirect buffer of %s" (buffer-name base)))
              (cons 'dropped (format "indirect buffer of %s, which is not carried" (buffer-name base)))))
+     ;; A file's package may keep it out of the image (romacs-ram-files.el).
+     ((and buffer-file-name warm-restart-regenerable (setq regenerable (warm-restart--regenerable)))
+      (cons 'dropped regenerable))
      (buffer-file-name (cons 'file (if (buffer-modified-p) "unsaved text carried" "visits a file")))
      ((warm-restart--handler) (cons 'handler (format "%s restores it" major-mode)))
      ((setq regenerable (warm-restart--regenerable)) (cons 'dropped regenerable))

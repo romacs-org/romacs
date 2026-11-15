@@ -234,9 +234,11 @@ on before the user's init, unless started with -Q."
       (progn (romacs-defaults--apply romacs-defaults-settings)
              (add-hook 'prog-mode-hook #'romacs-defaults--line-numbers)
              (add-hook 'find-file-hook #'romacs-ram-files-keep-off-disk)
+             (add-hook 'after-change-major-mode-hook #'romacs-ram-files-keep-off-disk)
              (romacs-defaults--ensure-directories))
     (romacs-defaults--line-numbers-off)
     (remove-hook 'find-file-hook #'romacs-ram-files-keep-off-disk)
+    (remove-hook 'after-change-major-mode-hook #'romacs-ram-files-keep-off-disk)
     (romacs-defaults--restore romacs-defaults-settings)))
 
 (defun romacs-defaults-log-stop ()
