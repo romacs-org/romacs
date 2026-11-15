@@ -38,11 +38,11 @@ class AddedTest(unittest.TestCase):
     def test_a_findings_file_is_given_from_the_root_whatever_it_was_printed_from(self):
         # The host works in a private home; the judged code, maybe an older lint, prints from there.
         home, root = '/tmp/romacs-lint-x', '/w/tree'
-        line = "../../w/tree/lisp/romacs/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+        line = "../../w/tree/lisp/ui/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
         self.assertEqual(lint.named_from(line, home, root),
-                         "lisp/romacs/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it")
-        base = "../base-copy/lisp/romacs/a.el:5: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
-        self.assertEqual(lint.named_from(base, '/tmp/home', '/tmp/base-copy').split(':')[0], 'lisp/romacs/a.el')
+                         "lisp/ui/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it")
+        base = "../base-copy/lisp/ui/a.el:5: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+        self.assertEqual(lint.named_from(base, '/tmp/home', '/tmp/base-copy').split(':')[0], 'lisp/ui/a.el')
         self.assertEqual(lint.named_from('romacs-lint: 1 file, 0 errors', home, root), 'romacs-lint: 1 file, 0 errors')
 
     def test_a_file_the_base_lacks_gives_all_its_findings(self):
@@ -54,8 +54,8 @@ class AddedTest(unittest.TestCase):
         self.assertEqual(lint.added([now], [then]), [])
 
     def test_a_moved_file_is_compared_with_its_old_path(self):
-        status = 'M\0lisp/a.el\0R087\0lisp/romacs/b.el\0lisp/ui/b.el\0C100\0lisp/c.el\0lisp/d.el\0D\0lisp/e.el\0'
-        self.assertEqual(lint.renames(status), {'lisp/ui/b.el': 'lisp/romacs/b.el'})
+        status = 'M\0lisp/a.el\0R087\0lisp/b.el\0lisp/ui/b.el\0C100\0lisp/c.el\0lisp/d.el\0D\0lisp/e.el\0'
+        self.assertEqual(lint.renames(status), {'lisp/ui/b.el': 'lisp/b.el'})
 
     def test_the_summary_counts_each_level_and_names_the_base(self):
         self.assertEqual(lint.summary(2, [NEW, HINT], None, 0), 'romacs-lint: 2 files, 1 error, 0 warnings, 1 hint')
