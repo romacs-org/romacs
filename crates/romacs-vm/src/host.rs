@@ -3439,10 +3439,19 @@ pub fn note_stall(line: String) {
     let mut stalls = inspect_lock(&STALLS);
     if stalls.0.len() < STALLS_KEPT { stalls.0.push(line); } else { stalls.1 += 1; }
 }
+/// What brings the stall records up to date at once (the watchdog's look),
+/// for a take while the session ends.
+static STALL_LOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+/// Let LOOK bring the stall records up to date before the session's last
+/// take (`take_stalls').
+pub fn on_stall_take(look: fn()) { let _ = STALL_LOOK.set(look); }
+
 /// The stalls kept since the last call, oldest first, and, when the
-/// session is ENDING, the one still going last (it ends inside it), and how
-/// many were dropped meanwhile.
+/// session is ENDING, the records brought up to date first and the stall
+/// still going last (it ends inside it), and how many were dropped
+/// meanwhile.
 pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
+    if ending && let Some(look) = STALL_LOOK.get() { look(); }
     let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));
     if ending { lines.extend(inspect_lock(&ONGOING_STALL).take()); }
     (lines, dropped)

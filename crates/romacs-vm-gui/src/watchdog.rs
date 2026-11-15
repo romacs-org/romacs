@@ -42,6 +42,10 @@ static SINCE: AtomicU64 = AtomicU64::new(0);
 static THRESHOLD: AtomicU64 = AtomicU64::new(u64::MAX);
 /// The stalls that ended, (start, end), for the watchdog to record.
 static ENDED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+/// The stall being watched, and startup's span's start: the watchdog's
+/// thread looks at them, and so does the session's last take of the
+/// records (`look_now`).
+static WATCHED: Mutex<(Option<Stall>, u64)> = Mutex::new((None, 0));
 
 fn epoch() -> Instant {
     static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
@@ -156,6 +160,14 @@ fn look(stall: &mut Option<Stall>, startup: u64) {
     romacs_vm::host::note_ongoing_stall(Some(line));
 }
 
+/// One look now, from whichever thread: the stalls that ended recorded,
+/// the one going kept as it stands.
+fn look_now() {
+    let mut watched = WATCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (stall, startup) = &mut *watched;
+    look(stall, *startup);
+}
+
 /// Watch the evaluator, whose thread this is called on: it answers the
 /// watchdog's inspections, and its span of work begins now (startup).
 /// Stalls past THRESHOLD are recorded.
@@ -163,13 +175,11 @@ pub fn start(threshold: Duration) {
     THRESHOLD.store(u64::try_from(threshold.as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
     romacs_vm::host::inspect_watch();
     working();
-    let startup = SINCE.load(Ordering::Relaxed);
-    let started = std::thread::Builder::new().name("romacs-watchdog".into()).spawn(move || {
-        let mut stall = None;
-        loop {
-            std::thread::sleep(LOOK);
-            look(&mut stall, startup);
-        }
+    WATCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1 = SINCE.load(Ordering::Relaxed);
+    romacs_vm::host::on_stall_take(look_now);
+    let started = std::thread::Builder::new().name("romacs-watchdog".into()).spawn(|| loop {
+        std::thread::sleep(LOOK);
+        look_now();
     });
     if let Err(error) = started { eprintln!("romacs: stall watchdog: {error}"); }
 }
@@ -212,6 +222,24 @@ mod tests {
         let ended = std::mem::take(&mut *ENDED.lock().unwrap());
         assert_eq!(ended.len(), 1);
         assert!(ended[0].1 - ended[0].0 >= 2_000_000);
+        THRESHOLD.store(u64::MAX, Ordering::Relaxed);
+    }
+
+    /// A stall that ended just before the session does, with no look since
+    /// and the last look's record of it still kept as going: the last take
+    /// records it as it ended, and says nothing is going.
+    #[test]
+    fn the_last_take_records_a_stall_that_ended_since_the_last_look() {
+        THRESHOLD.store(1_000_000, Ordering::Relaxed);
+        romacs_vm::host::on_stall_take(look_now);
+        working();
+        std::thread::sleep(Duration::from_millis(2));
+        look_now();
+        assert!(romacs_vm::host::take_stalls(false).0.is_empty(), "nothing ended yet");
+        waiting();
+        let (lines, _) = romacs_vm::host::take_stalls(true);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(!lines[0].contains("ongoing"), "{}", lines[0]);
         THRESHOLD.store(u64::MAX, Ordering::Relaxed);
     }
 }
