@@ -2294,8 +2294,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
