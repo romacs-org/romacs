@@ -1676,6 +1676,9 @@ was Romacs's own (`romacs-agent-own-turn')."
                                                     :from (romacs-agent--value (gethash "from" note))
                                                     :to (romacs-agent--value (gethash "to" note))
                                                     :brief (gethash "brief" note))))
+                               ("attachments" (list (list :type 'attachments :id (gethash "id" note)
+                                                          :attachments (romacs-agent--attachments-of (gethash "items" note))
+                                                          :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
                                ("handoff" (list (list :type 'status
                                                       :text (format "%s: %s%s"
                                                                     (if (stringp (gethash "to" note))
@@ -1820,6 +1823,16 @@ pushing the events it raises onto EVENTS's car."
   "The request id of RECORD, a user's message written, or nil."
   (let ((in (gethash "in" record)))
     (and (hash-table-p in) (gethash "romacsRequest" in))))
+
+(defun romacs-agent--attachments-of (items)
+  "ITEMS, an attachments note's (romacs-agent-attachments.el), as an
+event carries them: plists of :path :kind (image, file or capture) :alt
+:size :sha."
+  (mapcar (lambda (item)
+            (list :path (gethash "path" item) :kind (intern (gethash "kind" item))
+                  :alt (romacs-agent--value (gethash "alt" item)) :size (romacs-agent--value (gethash "size" item))
+                  :sha (romacs-agent--value (gethash "sha" item))))
+          (append items nil)))
 
 (defun romacs-agent--note-p (record type)
   "Whether RECORD is a journal note of TYPE."
