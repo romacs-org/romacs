@@ -2555,7 +2555,8 @@ impl Vm {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
         self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
+        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
     }
 }
 
