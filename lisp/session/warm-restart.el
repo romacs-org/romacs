@@ -49,6 +49,7 @@
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 (defvar savehist-minibuffer-history-variables)
 (defvar savehist-additional-variables)
 (defvar uniquify-managed)
@@ -692,11 +693,30 @@ or nil when there is neither."
   (with-current-buffer buffer (set-buffer-modified-p nil))
   (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))
 
+(defun warm-restart--beside (record blobs existing)
+  "EXISTING, a buffer edited here before RECORD's turn in the restore came,
+which keeps its edits; RECORD's carried text goes in a new buffer beside
+it, and the problem names both."
+  (when-let* ((text (warm-restart--carried-text record blobs)))
+    (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
+      (warm-restart--put-text text (plist-get record :unibyte))
+      (setq default-directory (plist-get record :directory))
+      (push (list :buffer (plist-get record :name) :text t
+                  :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
+                                  (buffer-name existing) (buffer-name)))
+            warm-restart--problems)))
+  existing)
+
 (defun warm-restart--restore-buffer (record blobs buffers)
   "Restore RECORD; record its buffer under its id in BUFFERS.
-When it fails, a buffer the attempt made is replaced by the rescue."
+When it fails, a buffer the attempt made is replaced by the rescue.  A
+buffer it would reuse that was edited here first is left as it is
+\(`warm-restart--beside')."
   (let* ((existing (warm-restart--made-buffer record))
          (buffer
+         (if (and (buffer-live-p existing) (buffer-modified-p existing)
+                  (memq (plist-get record :strategy) '(file text)))
+             (warm-restart--beside record blobs existing)
          (condition-case condition
              (let ((buffer (pcase (plist-get record :strategy)
                              ('file (warm-restart--restore-file record blobs))
@@ -710,7 +730,7 @@ When it fails, a buffer the attempt made is replaced by the rescue."
                   (or (warm-restart--rescue record blobs condition)
                       (progn (push (list :buffer (plist-get record :name) :reason (error-message-string condition))
                                    warm-restart--problems)
-                             nil))))))
+                             nil)))))))
     (when buffer (puthash (plist-get record :id) buffer buffers))))
 
 (defun warm-restart--verify (records buffers)
@@ -935,20 +955,79 @@ it is applied."
       (error "Not a usable session image: %s" why))
     (cons form blobs)))
 
+(defun warm-restart--ordered (records)
+  "RECORDS in the order they are restored: each indirect buffer after the
+buffers it may be based on."
+  (append (cl-remove 'indirect records :key (lambda (r) (plist-get r :strategy)))
+          (cl-remove-if-not (lambda (r) (eq (plist-get r :strategy) 'indirect)) records)))
+
+(defun warm-restart--restore-one (record blobs buffers)
+  "Restore RECORD with BLOBS into BUFFERS: passively, locking nothing, and
+asking nothing, since no one may be there to answer (a prompt signals,
+and the buffer is rescued as text).  Its problems."
+  (let ((warm-restart-passive t) (create-lockfiles nil) (inhibit-interaction t)
+        (warm-restart--problems nil))
+    (warm-restart--restore-buffer record blobs buffers)
+    warm-restart--problems))
+
+(defun warm-restart--applied (form records buffers problems)
+  "The restore's state once FORM's RECORDS are back in BUFFERS with
+PROBLEMS: its globals restored, and the text checked."
+  (let ((warm-restart-passive t)) (warm-restart--restore-globals form buffers))
+  (list :form form :records records :buffers buffers
+        :problems (append (warm-restart--verify records buffers) problems)))
+
 (defun warm-restart--apply (form blobs)
   "Recreate FORM's buffers with BLOBS, and its globals.
 Return the restore's state: FORM, the records, the buffers by id, and
 the problems so far."
-  (let* ((records (plist-get form :buffers))
-         (ordered (append (cl-remove 'indirect records :key (lambda (r) (plist-get r :strategy)))
-                          (cl-remove-if-not (lambda (r) (eq (plist-get r :strategy) 'indirect)) records)))
-         (buffers (make-hash-table :test #'equal))
-         (warm-restart--problems nil))
-    (let ((warm-restart-passive t) (create-lockfiles nil))
-      (dolist (record ordered) (warm-restart--restore-buffer record blobs buffers))
-      (warm-restart--restore-globals form buffers))
-    (list :form form :records records :buffers buffers
-          :problems (append (warm-restart--verify records buffers) warm-restart--problems))))
+  (let ((records (plist-get form :buffers)) (buffers (make-hash-table :test #'equal)) (problems nil))
+    (dolist (record (warm-restart--ordered records))
+      (setq problems (nconc (warm-restart--restore-one record blobs buffers) problems)))
+    (warm-restart--applied form records buffers problems)))
+
+(defun warm-restart--restore-later (file)
+  "Restore image FILE from the command loop, a record a turn: a session's
+socket and window come first, and no large buffer holds them back or
+freezes the session.  Then lay out its windows and report.  Its progress
+is the `restore' stage of `romacs-startup-progress'."
+  (let ((start (float-time)))
+    (condition-case err
+        (pcase-let* ((`(,form . ,blobs) (progn (warm-restart--claim-pending file) (warm-restart--read file)))
+                     (records (plist-get form :buffers)))
+          (romacs-startup-progress 'restore (format "Restoring buffers 0/%d" (length records))
+                                   (list :status 'running :done 0 :of (length records) :seconds 0))
+          (warm-restart--step file start form blobs records (warm-restart--ordered records) 0
+                              (make-hash-table :test #'equal) nil))
+      ((error quit) (warm-restart--report-later file start (list :error (error-message-string err)))))))
+
+(defun warm-restart--step (file start form blobs records pending done buffers problems)
+  "Restore the first of PENDING, the records of FORM's RECORDS after the
+DONE restored, then the rest from the next turns of the command loop;
+with none left, finish the restore of FILE begun at START."
+  (condition-case err
+      (if (null pending)
+          (warm-restart--report-later file start (warm-restart--applied form records buffers problems))
+        (let ((problems (nconc (warm-restart--restore-one (car pending) blobs buffers) problems))
+              (message-log-max nil))
+          (romacs-startup-progress 'restore (format "Restoring buffers %d/%d" (1+ done) (length records))
+                                   (list :status 'running :done (1+ done) :of (length records)
+                                         :name (plist-get (car pending) :name) :seconds (- (float-time) start)))
+          (message "Restoring session: %d/%d" (1+ done) (length records))
+          (run-at-time 0 nil #'warm-restart--step file start form blobs records (cdr pending) (1+ done) buffers problems)))
+    ((error quit)
+     (warm-restart--report-later file start (list :error (format "stopped after %d of %d records: %s" done (length records)
+                                                                (error-message-string err)))))))
+
+(defun warm-restart--report-later (file start state)
+  "Finish the restore of FILE begun at START with STATE, as the
+`restore' step's end."
+  (let ((report (warm-restart--report file start state)))
+    (romacs-startup-progress 'restore (if (plist-get report :error) "Session restore failed" "Session restored")
+                             (list :status (if (plist-get report :error) 'failed 'done)
+                                   :done (plist-get report :buffers) :of (plist-get report :records)
+                                   :error (plist-get report :error) :seconds (plist-get report :seconds)))
+    report))
 
 (defun warm-restart--finish (state)
   "Lay out STATE's windows, order its buffers and activate them; return
@@ -1018,16 +1097,6 @@ Either way it names each buffer whose unsaved text the image left out."
     (warm-restart--announce report)
     report))
 
-(defun warm-restart--after-startup (function)
-  "Call FUNCTION once, from `window-setup-hook' after the startup hooks,
-or from the first timer if that hook does not run."
-  (let ((done nil) once)
-    (setq once (lambda ()
-                 (remove-hook 'window-setup-hook once)
-                 (unless done (setq done t) (funcall function))))
-    (add-hook 'window-setup-hook once 90)
-    (run-at-time 0 nil once)))
-
 (defun warm-restart-pending-file (server)
   "The file naming the image server SERVER's successor restores, while a
 restart of it is under way."
@@ -1066,19 +1135,20 @@ started by someone else (a launcher) before the restart's successor."
 ;;;###autoload
 (defun warm-restart-restore-image (file &optional startup)
   "Restore the session image FILE over this session; return the report.
-Under STARTUP, as `--restore' passes it, the windows are laid out and
-the buffers activated after the startup hooks, and the value is nil.
-The image is kept as restored.image, or left where it is when any
-carried text may not have arrived."
+Under STARTUP, as `--restore' passes it, the restore begins once the
+session serves, a record a turn of the command loop
+\=(`warm-restart--restore-later'), and the value is nil.  The image is
+kept as restored.image, or left where it is when any carried text may
+not have arrived."
   (interactive (list (read-file-name "Session image: " (warm-restart--directory) nil t)))
-  (warm-restart--claim-pending file)
-  (let* ((start (float-time))
-         (state (condition-case err
-                    (pcase-let ((`(,form . ,blobs) (warm-restart--read file)))
-                      (warm-restart--apply form blobs))
-                  (error (list :error (error-message-string err))))))
-    (if (and startup (not (plist-get state :error)))
-        (progn (warm-restart--after-startup (lambda () (warm-restart--report file start state))) nil)
+  (if startup
+      (progn (run-at-time 0 nil #'warm-restart--restore-later file) nil)
+    (warm-restart--claim-pending file)
+    (let* ((start (float-time))
+           (state (condition-case err
+                      (pcase-let ((`(,form . ,blobs) (warm-restart--read file)))
+                        (warm-restart--apply form blobs))
+                    (error (list :error (error-message-string err))))))
       (warm-restart--report file start state))))
 
 ;;;; Commands
