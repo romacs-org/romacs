@@ -159,6 +159,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         ("layer-timer", "(defvar layer-timer-set nil)\n(provide 'layer-timer)\n"),
         ("layer-if", "(defvar layer-if-value nil)\n(provide 'layer-if)\n"),
         ("layer-fn", "(provide 'layer-fn)\n"),
+        ("layer-sym", "(defun layer-sym-config () (error \"romacs-fixture: the symbol function was called\"))\n(provide 'layer-sym)\n"),
     ] {
         std::fs::write(lisp.join(format!("{name}.el")), text).unwrap();
     }
@@ -186,6 +187,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         after("layer-if", "(t if (auth-source-pass-get 'secret \"xmpp/me\") (setq layer-if-value 'then) (setq layer-if-value 'else))".into()),
         // A function given to `eval-after-load' is called, as it would be.
         after("layer-fn", "(t lambda nil (error \"romacs-fixture: the function was called\"))".into()),
+        // A function's symbol, as `#'layer-sym-config' gives it, is called too.
+        after("layer-sym", "(t . layer-sym-config)".into()),
         // A plaintext credential file read without any reader.
         after("layer-netrc", format!("(t setq layer-netrc-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", authinfo.display().to_string())),
     ];
@@ -213,6 +216,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .filter(|r| r["kind"] == "init-layer")
         .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
     assert!(why.iter().any(|(name, why)| name == "layer-fn" && why.contains("the function was called")), "{why:?}");
+    assert!(why.iter().any(|(name, why)| name == "layer-sym" && why.contains("the symbol function was called")), "{why:?}");
     for name in ["layer-secret", "layer-reader", "layer-netrc", "layer-timer", "layer-if"] {
         assert!(!why.iter().any(|(n, _)| n == name), "{name} was left out: {why:?}");
     }

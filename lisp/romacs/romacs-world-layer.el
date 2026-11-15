@@ -35,6 +35,7 @@
 (declare-function romacs--world-take-secret "world.rs" ())
 (declare-function romacs--world-refusals "world.rs" ())
 (declare-function romacs--world-forget-refusals "world.rs" (mark))
+(declare-function romacs--world-loads "world.rs" ())
 
 (put 'romacs-world-deferred 'error-conditions '(romacs-world-deferred))
 (put 'romacs-world-deferred 'error-message "Left to the session")
@@ -187,16 +188,16 @@ build's, not the form's."
   (romacs--world-take-secret)
   (let ((refusals (romacs--world-refusals))
         (timers (append timer-list timer-idle-list))
-        (loads (length load-history))
+        (loads (romacs--world-loads))
         (deferred nil) (value nil))
     (condition-case err (setq value (eval form lexical))
       (romacs-world-deferred (setq deferred t))
       (error (if (or (romacs--world-take-secret)
-                     (and (> (romacs--world-refusals) refusals) (= (length load-history) loads)))
+                     (and (> (romacs--world-refusals) refusals) (= (romacs--world-loads) loads)))
                  (setq deferred t)
                (signal (car err) (cdr err)))))
     (let ((started (romacs--layer-new-timers timers))
-          (own (= (length load-history) loads)))
+          (own (= (romacs--world-loads) loads)))
       (if (not (or (romacs--world-take-secret) deferred
                    (and own (or started (> (romacs--world-refusals) refusals)))))
           (cons t value)
@@ -231,9 +232,15 @@ which then loads at its first use."
                       (error (error "%s: the init gave a form a layer cannot replay (a closure, or one given after a secret reader ran)"
                                     library))))
              (lexical (car entry)) (form (cdr entry)) (at n))
-        ;; A function the init gave is called, as `eval-after-load' calls it.
-        (eval-after-load library (lambda () (romacs--layer-walk library at lexical (if (functionp form) `(funcall ,form) form)
-                                                               #'identity))))
+        ;; A plan may hold one call twice (merged from sessions whose
+        ;; `load-path' differed): it is registered once.  A function the
+        ;; init gave is called, as `eval-after-load' calls it.  Each run
+        ;; of it (the library loaded again) keeps what it left anew.
+        (unless (gethash (cons library at) romacs--layer-baked-after-loads)
+          (eval-after-load library
+            (lambda ()
+              (remhash (cons library at) romacs--layer-deferred-after-loads)
+              (romacs--layer-walk library at lexical (if (functionp form) `(funcall ',form) form) #'identity)))))
       (setq n (1+ n))))
   (if (symbolp library) (require library nil t) (load library t t))
   (unless (if (symbolp library) (featurep library)

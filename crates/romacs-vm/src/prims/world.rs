@@ -43,6 +43,13 @@ fn world_refusals(_cx) {
     Value::integer(crate::host::refusals() as i64).map_err(Fault::Error)
 }}
 
+// Romacs-only. `romacs--layer-try': how many loads this thread began, source
+// or compiled, failed or loading a file again (`loader::loads_begun`).
+defsubr! { name = "romacs--world-loads", gnu = "romacs:world", effect = Reads,
+fn world_loads(_cx) {
+    Value::integer(crate::loader::loads_begun() as i64).map_err(Fault::Error)
+}}
+
 // Romacs-only. `romacs--layer-walk': forget the refusals listed since there
 // were MARK, met by a form the build keeps as code (`host::forget_refusals_since`).
 defsubr! { name = "romacs--world-forget-refusals", gnu = "romacs:world", effect = Global,
