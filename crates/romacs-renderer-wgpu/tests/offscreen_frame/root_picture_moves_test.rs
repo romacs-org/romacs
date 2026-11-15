@@ -63,6 +63,10 @@ struct Extras {
     underlined: bool,
     /// The window drawn as a pane: rounded corners and an edge.
     paned: bool,
+    /// The pane's right corners just beside the rows, which end short of
+    /// the frame's edge, and a fringe bitmap whose ink reaches far past
+    /// its column on the mode line, the window's rows' fringe bitmap gone.
+    cornered: bool,
 }
 
 fn line(at: usize) -> String {
@@ -148,14 +152,15 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
                 *face_id = FaceId::new(BIG);
             }
         }
-        if at == FRINGE_LINE {
+        if at == FRINGE_LINE && !extras.cornered {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 1, FaceId::new(NORMAL), FringeSide::Left);
         }
         if extras.tiled && at == TILED_LINE {
             frame.push_fringe_bitmap(0.0, y, 2.0, h, 2, FaceId::new(NORMAL), FringeSide::Left);
         }
         let end = 2.0 + text.chars().count() as f32 * CELL;
-        frame.add_stretch(end, y, width - end, h, BG, FaceId::new(NORMAL), false);
+        let right = if extras.cornered { width - 10.0 } else { width };
+        frame.add_stretch(end, y, (right - end).max(0.0), h, BG, FaceId::new(NORMAL), false);
         if at == IMAGE_LINE {
             let x = 2.0 + 14.0 * CELL;
             frame.glyphs.push(FrameGlyph::Image {
@@ -177,11 +182,13 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         }
         y += h;
     }
-    if extras.paned {
+    if extras.paned || extras.cornered {
         // Round the window and its mode line, its corners clear of the rows,
-        // its top edge on the first row.
+        // its top edge on the first row; cornered, its right corners start
+        // where the rows end.
+        let right = if extras.cornered { width - 6.0 } else { width + 6.0 };
         frame.panes.push(romacs_display_protocol::frame_glyphs::Pane {
-            bounds: Rect::new(-6.0, 0.0, width + 12.0, body + ROW),
+            bounds: Rect::new(-6.0, 0.0, right + 6.0, body + ROW),
             radius: 4.0,
             edge: Some(Color::rgb(0.9, 0.9, 0.2)),
             dim: 0.0,
@@ -192,6 +199,9 @@ fn view_frame(view: View, scale: f32, extras: Extras) -> FrameGlyphBuffer {
         frame.add_border(width - 6.0, 0.0, 2.0, body, Color::rgb(0.8, 0.2, 0.2));
     }
     frame.set_draw_context(window, GlyphRowRole::ModeLine, None);
+    if extras.cornered {
+        frame.push_fringe_bitmap(0.0, body, 2.0, ROW, 1, FaceId::new(NORMAL), FringeSide::Left);
+    }
     frame.add_stretch(0.0, body, width, ROW, Color::rgb(0.35, 0.35, 0.4), FaceId::new(MODE), false);
     for (at, ch) in "-:-- scratch".chars().enumerate() {
         frame.add_char(ch, 2.0 + at as f32 * CELL, body, CELL, ROW, 6.0, false);
@@ -293,12 +303,12 @@ fn scrolled_through_picture_equals_whole(scale: f32, extras: Extras) {
             differing.first().map(|&i| pxb(&whole, i % W, i / W)),
             differing.first().map(|&i| pxb(&through, i % W, i / W)),
         );
-        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined || extras.paned)) {
+        if let Some(entered) = entered.filter(|_| (scale - 1.0).abs() < f32::EPSILON && !(extras.inky || extras.tiled || extras.bordered || extras.underlined || extras.paned || extras.cornered)) {
             assert!(matches!(painted, Painted::Regions(_)), "{name}: {painted:?}");
             assert_eq!(rows, entered, "{name}: the rows that entered, and no other");
         }
     }
-    if extras.paned && (scale - 1.5).abs() > f32::EPSILON {
+    if (extras.paned || extras.cornered) && (scale - 1.5).abs() > f32::EPSILON {
         assert!(call_count::of(romacs_renderer_wgpu::cost::BANDS_MOVED) > bands, "bands move under the pane's edge");
     }
 }
@@ -348,6 +358,13 @@ fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane() {
 #[test]
 fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_in_a_pane_at_a_scale_of_two() {
     scrolled_through_picture_equals_whole(2.0, Extras { paned: true, ..Extras::default() });
+}
+
+#[test]
+fn a_scrolled_frame_through_the_root_picture_equals_it_drawn_whole_beside_a_pane_s_corner() {
+    // Ink far from the rows reaches past its cell: the rows' band, drawn
+    // by its own ink, stays clear of the corner beside it, and moves.
+    scrolled_through_picture_equals_whole(1.0, Extras { cornered: true, ..Extras::default() });
 }
 
 #[test]
@@ -506,4 +523,89 @@ fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
     let old = frame([(1.0, "ab"), (4.0, "cd")]);
     let new = frame([(3.0, "ab"), (6.0, "cd")]);
     assert!(through_picture(&mut h, &[old.clone(), old, new], 7.0) > 0, "the rows move");
+}
+
+/// Two windows side by side, rows ROW tall: the left one showing lines from
+/// LEFT, the right from RIGHT, where a line "~" is an empty row holding a
+/// fringe bitmap sixteen wide in a two-pixel column, past its cells.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
+fn split_frame(left: usize, right: usize) -> FrameGlyphBuffer {
+    const LEFT: [&str; 7] = ["la", "lb", "lc", "ld", "le", "lf", "lg"];
+    const RIGHT: [&str; 7] = ["rz", "ra", "~", "rc", "rd", "re", "rf"];
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    (frame.char_width, frame.char_height) = (CELL, ROW);
+    frame.background = BG;
+    text_face(&mut frame, NORMAL, BG);
+    frame.register_fringe_bitmap(
+        1,
+        FringeBitmapData { bits: vec![0xFFFF; 8], width: 16, height: 8, period: 0, align: 0 },
+    );
+    for (window, x0, lines, first) in [(1, 0.0, LEFT, left), (2, 48.0, RIGHT, right)] {
+        frame.set_draw_context(DisplayWindowId::new(window), GlyphRowRole::Text, None);
+        frame.add_background(x0, 0.0, 46.0, 5.0 * ROW, BG);
+        for (row, line) in lines.iter().skip(first).take(5).enumerate() {
+            let y = row as f32 * ROW;
+            if *line == "~" {
+                frame.push_fringe_bitmap(x0, y, 2.0, ROW, 1, FaceId::new(NORMAL), FringeSide::Left);
+                continue;
+            }
+            for (col, ch) in line.chars().enumerate() {
+                // The right window's two cells end at 60: the bitmap reaches 64.
+                let indent = if window == 1 { 12.0 } else { 2.0 };
+                frame.add_char(ch, x0 + indent + col as f32 * CELL, y, CELL, ROW, 6.0, false);
+            }
+        }
+    }
+    frame
+}
+
+#[test]
+fn a_band_moved_beside_another_window_keeps_that_window_s_reach() {
+    // The left window scrolls over the rows where the right window's bitmap
+    // reaches past its cells; then the right window scrolls the bitmap's
+    // row down. Its band holds the bitmap's ink.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frames = [(0, 1), (0, 1), (1, 1), (1, 0)].map(|(left, right)| split_frame(left, right));
+    assert!(through_picture(&mut h, &frames, 1.0) > 0, "the windows' rows move");
+}
+
+/// One window's rows ROW tall from x 10, showing lines from FIRST, and a
+/// fringe bitmap sixteen wide in a two-pixel column at x 60 and y AT, seven
+/// tall: a row of its own, beside the text's rows, its ink past its cells.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
+fn beside_frame(first: usize, at: f32) -> FrameGlyphBuffer {
+    const LINES: [&str; 7] = ["ka", "kb", "kc", "kd", "ke", "kf", "kg"];
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    (frame.char_width, frame.char_height) = (CELL, ROW);
+    frame.background = BG;
+    text_face(&mut frame, NORMAL, BG);
+    frame.register_fringe_bitmap(
+        1,
+        FringeBitmapData { bits: vec![0xFFFF; 7], width: 16, height: 7, period: 0, align: 0 },
+    );
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_background(0.0, 0.0, W as f32, 5.0 * ROW, BG);
+    for (row, line) in LINES.iter().skip(first).take(5).enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            frame.add_char(ch, 10.0 + col as f32 * CELL, row as f32 * ROW, CELL, ROW, 6.0, false);
+        }
+    }
+    frame.push_fringe_bitmap(60.0, at, 2.0, 7.0, 1, FaceId::new(NORMAL), FringeSide::Left);
+    frame
+}
+
+#[test]
+fn a_band_moved_past_its_window_s_bitmap_keeps_the_bitmap_s_reach() {
+    // The text's rows scroll down over the heights of the bitmap beside
+    // them, which stays; then the rows and the bitmap scroll down together.
+    // The second band holds all the bitmap's ink.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frames = [(2, 16.0), (2, 16.0), (1, 16.0), (0, 24.0)].map(|(first, at)| beside_frame(first, at));
+    assert!(through_picture(&mut h, &frames, 1.0) > 0, "the rows move");
 }
