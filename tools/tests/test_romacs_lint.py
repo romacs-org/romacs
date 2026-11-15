@@ -48,6 +48,15 @@ class AddedTest(unittest.TestCase):
     def test_a_file_the_base_lacks_gives_all_its_findings(self):
         self.assertEqual(lint.added([NEW, HINT], []), [NEW, HINT])
 
+    def test_a_file_that_still_does_not_load_is_not_new(self):
+        now = 'lisp/a.el:1: error: does not load: Category a is already defined; fix: load it in a batch machine'
+        then = 'lisp/a.el:1: error: does not load: (file-missing "romacs-mule"); fix: load it in a batch machine'
+        self.assertEqual(lint.added([now], [then]), [])
+
+    def test_a_moved_file_is_compared_with_its_old_path(self):
+        status = 'M\0lisp/a.el\0R087\0lisp/romacs/b.el\0lisp/ui/b.el\0C100\0lisp/c.el\0lisp/d.el\0D\0lisp/e.el\0'
+        self.assertEqual(lint.renames(status), {'lisp/ui/b.el': 'lisp/romacs/b.el'})
+
     def test_the_summary_counts_each_level_and_names_the_base(self):
         self.assertEqual(lint.summary(2, [NEW, HINT], None, 0), 'romacs-lint: 2 files, 1 error, 0 warnings, 1 hint')
         self.assertEqual(lint.summary(1, [], 'abcdef0123456789', 3),
