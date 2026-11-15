@@ -644,22 +644,24 @@ impl Vm {
         (features, files)
     }
 
-    /// The timers an entry starts are its forms': a timer reads the clock
-    /// as it is made, so the form that made it is one restore runs again (a
-    /// re-seed definition, or a form kept as code), and starts its own. The
-    /// build cancels them, so no image holds a time of the builder's. An idle
-    /// timer keeps no time: it stays.
-    fn cancel_entry_timers(&mut self, start: bool) {
+    /// The timers an entry starts (START marks where it begins; at its end,
+    /// how many it started): no image holds one, as each holds a time of
+    /// the builder's. One a re-seed form made is made again at restore;
+    /// any other leaves its entry to the session. An idle timer keeps no
+    /// time: it stays.
+    fn cancel_entry_timers(&mut self, start: bool) -> i64 {
         let form = if start {
-            "(setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list)))"
+            "(progn (setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list))) 0)"
         } else {
-            "(when (boundp 'timer-list)
-               (let ((kept nil))
-                 (dolist (timer timer-list) (when (memq timer romacs--layer-entry-timers) (push timer kept)))
+            "(let ((kept nil) (started 0))
+               (when (boundp 'timer-list)
+                 (dolist (timer timer-list)
+                   (if (memq timer romacs--layer-entry-timers) (push timer kept) (setq started (1+ started))))
                  (setq timer-list (nreverse kept)))
-               (setq romacs--layer-entry-timers nil))"
+               (setq romacs--layer-entry-timers nil)
+               started)"
         };
-        let _ = self.eval_source_raw(form);
+        self.eval_source_raw(form).ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
     }
 
     /// How many objects hold a resource of this process (a live process, a
@@ -674,10 +676,14 @@ impl Vm {
     /// `load-path`, then `load-path` as it was, with whatever the libraries
     /// added ahead of it, then the startup function again. An entry that
     /// signals, reads a fenced fact outside a definition form or has an
-    /// effect (the build's refusals grow), or leaves a timer behind is
-    /// refused by its index and name (`REFUSAL`); the build goes on, so one
-    /// build names every such entry. A definition form that reads a
-    /// per-process fact is kept for restore instead (`world_form_done`).
+    /// effect (the build's refusals grow), holds a resource of this process,
+    /// starts a timer no re-seed form makes, or changes what the startup run
+    /// after the libraries sets back, is refused by its index and name
+    /// (`REFUSAL`): the layer is built again without it, so the image holds
+    /// nothing it did, and the init runs it in the session in its own place.
+    /// The build goes on, so one build names every such entry. A definition
+    /// form that reads a per-process fact is kept for restore instead
+    /// (`world_form_done`); a form that asks for a secret, as code.
     /// The refused entries.
     pub fn world_layer_load(&mut self, plan: &Plan, deferred: &[Entry]) -> Vec<(usize, String)> {
         let kept = self.load_path_strings().unwrap_or_default();
@@ -706,7 +712,7 @@ impl Vm {
         for (at, entry) in plan.entries.iter().enumerate() {
             let paths: Vec<PathBuf> = plan.load_paths[entry.load_path].iter().map(PathBuf::from).collect();
             let refusals = host::refusals();
-            self.cancel_entry_timers(true);
+            let _ = self.cancel_entry_timers(true);
             let resources = self.foreign_resources().0;
             let heads = self.load_heads();
             host::layer_declared(entry.declared);
@@ -729,7 +735,8 @@ impl Vm {
                 if !plan.load_paths[entry.load_path].contains(&path) && !added.contains(&path) { added.push(path); }
             }
             let within = self.innermost_function();
-            self.cancel_entry_timers(false);
+            let timers = self.cancel_entry_timers(false);
+            let remade = host::layer_timers_allowed();
             // A resource the entry left that a collection does not take is
             // the entry's: no image holds one.
             let resource = match self.foreign_resources() {
@@ -745,6 +752,7 @@ impl Vm {
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
                 Ok(_) if resource.is_some() => resource.map(|what| format!("resource: {what}")),
                 Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
+                Ok(_) if timers > 0 && !remade => Some("timer".to_owned()),
                 Ok(_) => None,
             };
             loaded.push(self.loads_since(heads));
@@ -779,9 +787,6 @@ impl Vm {
         }
         host::layer_declared(false);
         let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) nil))"));
-        // What the forms kept as code assigned goes back to what it held
-        // before them: restore runs them in this process.
-        self.world_put_back_targets();
         let restored: Vec<PathBuf> = added.iter().chain(kept.iter().filter(|p| !added.contains(p))).map(PathBuf::from).collect();
         let _ = self.set_load_path(&restored);
         // The startup function runs again after the libraries, as a
@@ -795,23 +800,24 @@ impl Vm {
         host::layer_rerun(false);
         host::layer_end();
         match rerun {
-            // An output no entry changed must be what the first run made
-            // again, or what the layer's own setup left, else the libraries
-            // changed what startup computes (no entry is named for it). One an
-            // entry changed and the run sets back (to the first run's or the
-            // setup's) is recorded, not refused: a source session keeps the
-            // library's value there, where a restored one holds startup's, but
-            // what every file read sets (`last-coding-system-used') is set
-            // back so too, and leaving an entry out for it would cost the init
-            // every entry after it. One the run leaves as the libraries made
-            // it (a global minor mode they turned on joins
-            // `global-minor-modes') is theirs as much as startup's.
-            Ok(_) => for (slot, first, _before, after) in self.world_startup_output_states() {
+            // A source session runs startup before the libraries and keeps
+            // what they leave; a restored one runs it after them. So an
+            // output an entry changed must be, after the run, what the
+            // libraries left (a global minor mode they turned on stays in
+            // `global-minor-modes'), or that entry is refused and runs in the
+            // session after startup, as from source. One no entry changed must
+            // be what the first run made again, or what the layer's own setup
+            // left, else the libraries changed what startup computes, and no
+            // entry is named for it.
+            Ok(_) => for (slot, first, before, after) in self.world_startup_output_states() {
                 let setup = before_entries.get(&slot).and_then(|d| d.as_ref().ok());
                 let symbol = self.symbol_names[slot].clone();
                 match changed_by.get(&slot) {
-                    Some(&at) if after == first || setup == Some(&after) =>
-                        host::record("startup-reset", json!({"symbol": symbol, "entry": at, "name": plan.entries[at].name})),
+                    Some(&at) if after != before => {
+                        let why = format!("startup sets {symbol} again");
+                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why}));
+                        if !refused.iter().any(|(entry, _)| *entry == at) { refused.push((at, why)); }
+                    }
                     Some(_) => {}
                     None if after != first && setup != Some(&after) =>
                         host::refuse("fence", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),

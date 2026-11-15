@@ -235,13 +235,8 @@ struct LayerState {
     /// An effect refused inside the definition form: the form is cut short
     /// and deferred whole to restore (`layer_form_cut`).
     cut: bool,
-    /// How many refusals the build had listed as the form began: what it
-    /// meets past these is its own (`layer_form_refusals_at`).
-    refusals_at: usize,
-    /// A file the form loaded left refusals its forms could not keep as
-    /// code (a definition's): the form is not kept as code, whose replay
-    /// would find the file loaded, and those refusals stand.
-    pinned: bool,
+    /// A re-seed form that starts a timer ran (`reseed_reads`).
+    timers: bool,
     rerun: bool,
     /// The entry loading is a library the init only declared
     /// (`layer::Entry::declared`): its re-seed forms may wait for their
@@ -275,26 +270,7 @@ pub(crate) fn layer_active() -> bool {
 
 /// The top-level form with HEAD begins, in a layer build.
 fn layer_form(head: &str) {
-    let refusals = refusals();
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() {
-        layer.form = definition(head);
-        layer.tainted = false;
-        layer.cut = false;
-        layer.refusals_at = refusals;
-        layer.pinned = false;
-    });
-}
-
-/// Whether a file the top-level form loading loaded left refusals of its
-/// own (`LayerState::pinned`).
-pub(crate) fn layer_form_pinned() -> bool {
-    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.pinned))
-}
-
-/// How many refusals the build had listed as the top-level form loading
-/// began, in a layer build: the refusals past it are the form's.
-pub(crate) fn layer_form_refusals_at() -> Option<usize> {
-    LAYER.with(|l| l.borrow().as_ref().map(|layer| layer.refusals_at))
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = definition(head); layer.tainted = false; layer.cut = false; });
 }
 
 /// An effect inside a layer's definition form: not done, and the form
@@ -378,8 +354,17 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
+        if what == "clock" {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
+        }
     }
     allowed
+}
+
+/// Whether a re-seed form that reads the clock ran since the last call:
+/// a timer the form left is restarted at restore, so the layer may keep it.
+pub(crate) fn layer_timers_allowed() -> bool {
+    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
@@ -504,12 +489,11 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>, usize);
+pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
 
 /// A layer build's state of the top-level form loading: the definition it
-/// is, if one, whether it read a per-process fact or an effect cut it, and
-/// where its refusals begin.
-type LayerForm = (Option<(&'static str, String)>, bool, bool, usize, bool);
+/// is, if one, and whether it read a per-process fact or an effect cut it.
+type LayerForm = (Option<(&'static str, String)>, bool, bool);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
@@ -518,16 +502,8 @@ impl Drop for SiteGuard {
         }
         // A file a form loads has forms of its own: once it is loaded, the
         // form that loaded it goes on as it was, a definition still one.
-        if let Some((form, tainted, cut, refusals_at, pinned)) = self.1.take() {
-            // What the file's forms left the build answering for pins it.
-            let left = refusals() > self.3;
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() {
-                layer.form = form;
-                layer.tainted = tainted;
-                layer.cut = cut;
-                layer.refusals_at = refusals_at;
-                layer.pinned = pinned || left;
-            });
+        if let Some((form, tainted, cut)) = self.1.take() {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
         }
         // So is whether it asked for a secret: the file's forms kept theirs.
         if let Some(asked) = self.2.take() {
@@ -547,14 +523,13 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None, None, None, 0);
+        return SiteGuard(None, None, None);
     }
     let site = Rc::new(site());
-    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut, layer.refusals_at, layer.pinned)));
+    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
     let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
-    let entered = refusals();
     layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked, entered)
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
@@ -579,18 +554,6 @@ pub(crate) fn record(kind: &str, fields: Json) {
 /// How many refusals the build has listed so far; 0 outside a build.
 pub(crate) fn refusals() -> usize {
     with_build(|b| b.refusals.len()).unwrap_or(0)
-}
-
-/// Forget the refusals listed since there were MARK: what a form the
-/// layer keeps as code for the session met in the build
-/// (`romacs--layer-walk`), which it no longer answers for. Each may be
-/// listed again by a later form.
-pub(crate) fn forget_refusals_since(mark: usize) {
-    with_build(|b| {
-        for item in b.refusals.split_off(mark.min(b.refusals.len())) {
-            b.seen.remove(&format!("true{item}"));
-        }
-    });
 }
 
 /// List a refusal: KIND with FIELDS and the current site.
