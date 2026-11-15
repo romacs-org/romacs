@@ -27,7 +27,7 @@ mod tests {
 
     const STATUSES: [&str; 3] = ["needed", "elsewhere", "absent"];
     /// The lisp/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
-    const LAZY_HALVES: [&str; 9] = ["keyboard.el", "minibuf.el", "window-change.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
+    const LAZY_HALVES: [&str; 8] = ["keyboard.el", "minibuf.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
 
     fn root() -> PathBuf { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")) }
 
