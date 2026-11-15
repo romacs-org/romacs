@@ -173,6 +173,45 @@ rolls back by the line (revert REQUEST)."
        (romacs-agent-rollback-tests--prompt 12 "c"))
       (should-not (member "--resume-session-at" (romacs-agent--claude-argv session t))))))
 
+(ert-deftest romacs-agent-rollback-claude-resume-reads-no-journal-when-spoken-since ()
+  ;; Its records folded as they came: a resume after a prompt reads none of
+  ;; them; after a rollback with nothing said since it reads them; a kept
+  ;; state from before knows nothing, and is read once to know.
+  (romacs-agent-rollback-tests--with ()
+    (let ((reads 0))
+      (cl-letf* ((records (symbol-function 'romacs-agent--journal-records))
+                 ((symbol-function 'romacs-agent--journal-records) (lambda (s) (cl-incf reads) (funcall records s)))
+                 ((symbol-function 'romacs-agent--write-json) #'ignore))
+        (dolist (record (list (romacs-agent-rollback-tests--prompt 5 "a") (romacs-agent-rollback-tests--assistant "u1")))
+          (puthash "seq" (1+ (romacs-agent-seq session)) record)
+          (romacs-agent--record session record))
+        (should-not (member "--resume-session-at" (romacs-agent--claude-argv session t)))
+        (should (= reads 0))
+        (romacs-agent-rollback-tests--journal
+         session (romacs-agent-rollback-tests--prompt 5 "a") (romacs-agent-rollback-tests--assistant "u1")
+         (romacs-agent-rollback-tests--prompt 9 "b") (romacs-agent-rollback-tests--assistant "u2"))
+        (setf (romacs-agent-seq session) 4)
+        (romacs-agent--record session (romacs-mcp--object "seq" 5 "note" (romacs-mcp--object "type" "rollback" "to" 9)))
+        (write-region (concat (romacs-agent--json (romacs-mcp--object "seq" 5 "t" 5.0 "note" (romacs-mcp--object "type" "rollback" "to" 9))) "\n")
+                      nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+        (should (equal (cadr (member "--resume-session-at" (romacs-agent--claude-argv session t))) "u1"))
+        (should (= reads 1))
+        ;; A kept state from before: read once, then known.
+        (setf (romacs-agent-driver-state session) (romacs-agent--without (romacs-agent-driver-state session) '(:rolled-back)))
+        (romacs-agent--record session (romacs-mcp--object "seq" 6 "out" (romacs-mcp--object "type" "system" "subtype" "status")))
+        (setf (romacs-agent-driver-state session) (romacs-agent--without (romacs-agent-driver-state session) '(:rolled-back)))
+        (romacs-agent--claude-argv session t)
+        (romacs-agent--claude-argv session t)
+        (should (= reads 3))
+        ;; Spoken to, then its harness ending and starting again: still
+        ;; known across the runs, nothing read.
+        (romacs-agent--record session (let ((p (romacs-agent-rollback-tests--prompt 12 "c"))) (puthash "seq" 7 p) p))
+        (romacs-agent--record session (romacs-mcp--object "seq" 8 "exit" 0))
+        (romacs-agent--record session (romacs-mcp--object "seq" 9 "note" (romacs-mcp--object "type" "run")))
+        (should (plist-member (romacs-agent-driver-state session) :rolled-back))
+        (romacs-agent--claude-argv session t)
+        (should (= reads 3))))))
+
 (ert-deftest romacs-agent-rollback-claude-to-its-start-is-a-conversation-anew ()
   (romacs-agent-rollback-tests--with ()
     (romacs-agent-rollback-tests--journal session (romacs-agent-rollback-tests--prompt 5 "a")
@@ -196,8 +235,8 @@ rolls back by the line (revert REQUEST)."
           (should-not (member "--resume" argv)))))))
 
 (ert-deftest romacs-agent-rollback-claude-resume-reads-the-journal-tail ()
-  "A resume asks only the journal's last prompt or rollback: a long
-history before them is not parsed."
+  "A resume that reads the records asks only the journal's last prompt or
+rollback: a long history before them is not parsed."
   (romacs-agent-rollback-tests--with ()
     (apply #'romacs-agent-rollback-tests--journal session
            (append (cl-loop for n from 1 to 3000
@@ -208,7 +247,7 @@ history before them is not parsed."
     (let ((parsed 0))
       (cl-letf* ((parse (symbol-function 'json-parse-string))
                  ((symbol-function 'json-parse-string) (lambda (&rest args) (cl-incf parsed) (apply parse args))))
-        (should-not (romacs-agent--claude-head session)))
+        (should-not (romacs-agent--claude-head-read session)))
       (should (< 0 parsed 10)))
     ;; The rollback last: the whole journal, for where it went back to.
     (romacs-agent-rollback-tests--journal session (romacs-agent-rollback-tests--prompt 1 "a")
@@ -216,7 +255,7 @@ history before them is not parsed."
                                           (romacs-agent-rollback-tests--prompt 2 (make-string 300000 ?y))
                                           (romacs-agent-rollback-tests--assistant "u2")
                                           (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 2)))
-    (should (equal (romacs-agent--claude-head session) "u1"))))
+    (should (equal (romacs-agent--claude-head-read session) "u1"))))
 
 (ert-deftest romacs-agent-rollback-codex-reverts-the-turn ()
   (let* ((session (romacs-agent--make :id "c" :harness 'codex :harness-session "th"))
