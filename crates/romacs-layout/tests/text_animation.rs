@@ -77,12 +77,17 @@ fn a_scene_takes_its_blocks_cells_out_and_leaves_the_rest() {
     assert_eq!(shown(&frame, 1), "");
     assert_eq!(shown(&frame, 2), "below");
     assert!(frame.glyphs.len() < before);
-    // A cell on a background of its own stays: the scene may not cover it.
-    let mut frame = romacs_layout::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
-    let id = glyph(&frame, 0, 1, face);
-    frame.faces.get_mut(&id).unwrap().background = Color::rgb(0.5, 0.0, 0.0);
-    clear(&mut frame, &logo(0, 4, 2));
-    assert!(!shown(&frame, 0).is_empty());
+    // A cell that paints something of its own (a background, a box) stays,
+    // blanked: the scene may not cover it.
+    for decorate in [|f: &mut romacs_display_protocol::Face| f.background = Color::rgb(0.5, 0.0, 0.0),
+                     |f: &mut romacs_display_protocol::Face| f.attributes |= romacs_display_protocol::FaceAttributes::BOX] {
+        let mut frame = romacs_layout::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
+        let id = glyph(&frame, 0, 1, face);
+        decorate(frame.faces.get_mut(&id).unwrap());
+        clear(&mut frame, &logo(0, 4, 2));
+        assert_eq!(shown(&frame, 0), "    ", "the block's first row, its own faces kept and blanked");
+        assert_eq!(shown(&frame, 2), "below");
+    }
 }
 
 #[test]

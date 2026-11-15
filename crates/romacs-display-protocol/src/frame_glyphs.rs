@@ -1479,6 +1479,18 @@ impl FrameGlyphBuffer {
     }
 
     /// Validated pointer metadata installed for this exact frame snapshot.
+    /// Keep the glyphs KEEP says, in order, and the presented pointer's
+    /// paint spans on those that stay (`PresentedPointerMap::remap_glyphs'):
+    /// the one place glyphs leave a laid-out frame.
+    pub fn retain_glyphs(&mut self, mut keep: impl FnMut(&FrameGlyph) -> bool) {
+        let mut next = 0u32;
+        let new_index: Vec<Option<u32>> = self.glyphs.iter().map(|glyph| keep(glyph).then(|| { next += 1; next - 1 })).collect();
+        if new_index.iter().all(Option::is_some) { return; }
+        let mut at = 0;
+        self.glyphs.retain(|_| { at += 1; new_index[at - 1].is_some() });
+        self.presented_pointer.remap_glyphs(&new_index);
+    }
+
     pub fn presented_pointer(&self) -> &crate::presented_pointer::PresentedPointerMap {
         &self.presented_pointer
     }

@@ -239,20 +239,28 @@ fn cell_of(animation: &TextAnimation, (first_row, first_col): (u32, u16), slot: 
     ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
 }
 
-/// Take from FRAME the text cells of ANIMATION's block that a scene drawn
-/// over the block covers: those whose face's background is the frame's,
-/// which draw nothing past what the frame's own background paints there.
-/// The same pixels as `paint` with blank cells, and a frame of the block's
-/// other glyphs alone, not a glyph for every one of its cells.
+/// Clear ANIMATION's block in FRAME for a scene drawn over it: a cell
+/// whose face paints nothing past the frame's own background (its
+/// background, and no box, line, inverse video, stipple or gradient) is
+/// taken out; any other is blanked, its face kept, as `paint` with blank
+/// cells does.  The same pixels as blanking every cell, and a frame of the
+/// block's other glyphs alone where its faces are plain, not a glyph for
+/// every one of its cells.
 pub fn clear(frame: &mut FrameGlyphBuffer, animation: &TextAnimation) {
+    use crate::face::FaceAttributes;
     let Some(origin) = origin(frame, animation) else { return };
+    let decorated = FaceAttributes::UNDERLINE | FaceAttributes::OVERLINE | FaceAttributes::STRIKE_THROUGH
+        | FaceAttributes::INVERSE | FaceAttributes::BOX;
+    let in_block = |glyph: &FrameGlyph| text_slot(glyph, animation).and_then(|slot| cell_of(animation, origin, &slot)).is_some();
     let background = frame.background;
-    let faces = &frame.faces;
-    frame.glyphs.retain(|glyph| {
-        let covered = text_slot(glyph, animation).and_then(|slot| cell_of(animation, origin, &slot)).is_some()
-            && face_of(glyph).and_then(|id| faces.get(&id)).is_some_and(|face| face.background == background);
-        !covered
-    });
+    let plain: std::collections::HashSet<FaceId> = frame.faces.iter()
+        .filter(|(_, face)| face.background == background && !face.attributes.intersects(decorated)
+                && face.stipple.is_none() && face.background_gradient.is_none())
+        .map(|(id, _)| *id).collect();
+    frame.retain_glyphs(|glyph| !(in_block(glyph) && face_of(glyph).is_some_and(|id| plain.contains(&id))));
+    for glyph in &mut frame.glyphs {
+        if in_block(glyph) && let FrameGlyph::Char { char, .. } = glyph { *char = ' '; }
+    }
 }
 
 fn face_of(glyph: &FrameGlyph) -> Option<FaceId> {
