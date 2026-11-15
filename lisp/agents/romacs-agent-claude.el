@@ -477,8 +477,12 @@ an approval answered."
            (append (and (stringp why) (list (list :type 'status :text why)))
                    (list (list :type 'handshake :state (list :owed (cl-remove id owed :key #'cadr :test #'equal)))))
          (remhash id (romacs-agent-approvals session))
-         (list (list :type 'answered :request-id id
-                     :behavior (gethash "behavior" (gethash "response" (gethash "response" line))))))))
+         (let ((out (gethash "response" (gethash "response" line))))
+           (list (list :type 'answered :request-id id
+                       :behavior (and (hash-table-p out) (gethash "behavior" out))
+                       ;; A question's answers, as its input carried them back.
+                       :answers (and (hash-table-p out) (hash-table-p (gethash "updatedInput" out))
+                                     (gethash "answers" (gethash "updatedInput" out)))))))))
     (_ nil)))
 
 ;;; Romacs on Claude Code's own hooks

@@ -77,6 +77,24 @@ call and result, an answer and a result a turn."
                                        "select first_seq, last_seq, prompt, reply, tools from turns where session = ? order by first_seq limit 1"
                                        (list id))))
               (should (equal rows '((2 6 "question 1" "answer 1 about zebras" "Bash · grep 1 · ok")))))
+            ;; What a chat draws: the page, newest first, each turn's items.
+            (let* ((page (romacs-agent-turns-page session nil 5)) (row (car (plist-get page :rows))))
+              (should (= (length (plist-get page :rows)) 5))
+              (should (plist-get page :more))
+              (should (= (plist-get page :after) 61))
+              (should (equal (plist-get row :status) "completed"))
+              (should (equal (mapcar (lambda (item) (gethash "kind" item)) (plist-get row :items)) '("tool" "text")))
+              (let ((tool (aref (plist-get row :items) 0)) (text (aref (plist-get row :items) 1)))
+                (should (equal (gethash "id" tool) "u12"))
+                (should (equal (gethash "state" tool) "completed"))
+                (should (equal (gethash "command" (gethash "input" tool)) "grep 12"))
+                (should (equal (gethash "output" tool) "found"))
+                (should (equal (gethash "seq" tool) [58 59]))
+                (should (equal (gethash "text" text) "answer 12 about zebras"))
+                (should (equal (gethash "message" text) "m12")))
+              (should-not (plist-get (romacs-agent-turns-page session 7 5) :more))
+              (should (equal (romacs-agent-turns-item session "u12") "found"))
+              (should-not (romacs-agent-turns-item session "nothing")))
             ;; The tail from the rows: where the journal's scan says.
             (let ((from-rows (romacs-agent--turns-tail session 3))
                   (scanned (romacs-agent--journal-file-tail session 3)))
@@ -107,6 +125,62 @@ call and result, an answer and a result a turn."
                       ((symbol-function 'princ) #'ignore))
               (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
             (should (= (romacs-agent-turns-count session) 12))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-agent-turns-an-item-keeps-a-bounded-input ()
+  ;; Long strings cut; an edit's bodies held as their sizes, at any depth.
+  (let* ((long (make-string 3000 ?a))
+         (input (romacs-mcp--object "file_path" "/x" "old_string" "é" "content" long
+                                    "edits" (vector (romacs-mcp--object "new_string" "abc"))))
+         (edit (romacs-agent-turns--bounded input t))
+         (other (romacs-agent-turns--bounded input nil)))
+    (should (equal (gethash "file_path" edit) "/x"))
+    (should (= (gethash "old_string" edit) 2))
+    (should (= (gethash "content" edit) 3000))
+    (should (= (gethash "new_string" (aref (gethash "edits" edit) 0)) 3))
+    (should (= (length (gethash "content" other)) (1+ romacs-agent-turns--cut)))
+    (should (equal (gethash "old_string" other) "é"))))
+
+(ert-deftest romacs-agent-turns-a-long-output-is-read-when-asked ()
+  ;; A tool's output over the inline size is not in its row: read from
+  ;; its records, by its id.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let* ((root (make-temp-file "romacs-turns-" t))
+         (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state") (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                      process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-turns--made nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (id "a1a1a1a1-2222-4333-8444-555566669999")
+         (dir (expand-file-name id (romacs-agent--state-root)))
+         (long (make-string 5000 ?z))
+         (records (list (romacs-mcp--object "seq" 1 "t" 10.0 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "go" "role" "user")
+                                                                                       "romacsRequest" 1 "type" "user"))
+                        (romacs-mcp--object "seq" 2 "t" 11.0 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                                                        "message" (romacs-mcp--object "id" "m1" "content" (vector (romacs-mcp--object "type" "tool_use" "id" "big" "name" "Bash" "input" (romacs-mcp--object "command" "cat"))))))
+                        (romacs-mcp--object "seq" 3 "t" 12.0 "out" (romacs-mcp--object "type" "user" "parent_tool_use_id" :null
+                                                                                        "message" (romacs-mcp--object "content" (vector (romacs-mcp--object "type" "tool_result" "tool_use_id" "big" "content" long)))))
+                        (romacs-mcp--object "seq" 4 "t" 13.0 "out" (romacs-mcp--object "type" "result" "result" "done")))))
+    (unwind-protect
+        (progn
+          (make-directory dir t)
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) records "")
+                          nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+          (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root
+                                             :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
+            (puthash id session romacs-agent--sessions)
+            (should (= (romacs-agent-turns-fill session) 1))
+            (let ((tool (aref (plist-get (car (plist-get (romacs-agent-turns-page session) :rows)) :items) 0)))
+              (should (= (gethash "output_bytes" tool) 5000))
+              (should-not (gethash "output" tool)))
+            (should (= (plist-get (car (plist-get (romacs-agent-turns-page session) :rows)) :duration) 3.0))
+            (should (equal (romacs-agent-turns-item session "big") long))
+            ;; Its records moved to SQLite: the same, by seqs.
+            (let ((romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal)))
+              (should (romacs-agent-events-import session))
+              (should (romacs-agent-events-p session))
+              (should (equal (romacs-agent-turns-item session "big") long)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
