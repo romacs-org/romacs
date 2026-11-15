@@ -216,6 +216,29 @@ fn the_libraries_an_init_declares_are_noted_once_with_their_forms() {
     assert_eq!(eval(&mut vm, "(list ordinals (romacs--init-after-load-ordinal 'lib-x))"), "((1 1 0) nil)", "no recording, no ordinal");
 }
 
+/// A library the init loads (not only declares) whose load reads a secret,
+/// here a plaintext netrc file through auth-source's parser, is refused by
+/// name: nothing confines a builder, so the reader is what keeps the
+/// secret out of the layer.
+#[test]
+fn a_loaded_library_is_refused_for_reading_a_secret() {
+    let dir = scratch("loaded-secret");
+    std::fs::write(dir.join("lisp/lib-r.el"), "(defun auth-source-netrc-parse (&rest _) (list (list :secret \"romacs-fixture-netrc-4c1d\")))\n\
+(defvar lib-r-secret (auth-source-netrc-parse :file \"~/.authinfo\"))\n(provide 'lib-r)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-a", "lib-r", "lib-v"]);
+    std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(1, "secret: auth-source-netrc-parse")], "{}", trace["refusals"]);
+}
+
 /// A declared library's definitions that read a per-process fact are kept
 /// as declared, so restore may leave them pending; one whose load or
 /// configuration reads a secret, or that connects to the network, is

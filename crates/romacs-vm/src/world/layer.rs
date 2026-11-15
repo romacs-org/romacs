@@ -50,9 +50,10 @@ pub const REFUSAL: &str = "init-layer";
 /// calls one is refused, declared or loaded, so the layer never holds what
 /// one returns; the library loads in the session as from source, where the
 /// call happens. The build publishes no image of the plan that called one.
-const SECRET_READERS: [&str; 17] = [
+const SECRET_READERS: [&str; 21] = [
     "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
-    "auth-source-user-and-password", "auth-source-pass-get", "auth-source-pass-parse-entry",
+    "auth-source-user-and-password", "auth-source-netrc-parse", "auth-source-netrc-parse-all",
+    "netrc-parse", "netrc-credentials", "auth-source-pass-get", "auth-source-pass-parse-entry",
     "auth-source-pass--read-entry", "auth-source-pass-entries", "epg-decrypt-file", "epg-decrypt-string",
     "epg-start-decrypt", "epa-decrypt-file", "epa-decrypt-region", "epa-file-insert-file-contents",
     "plstore-open", "secrets-get-secret", "read-passwd",
