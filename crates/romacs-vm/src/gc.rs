@@ -1184,7 +1184,7 @@ impl Vm {
     /// freed.
     fn check_settled(&self) {
         for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
-            assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
+            assert!(settled, "a collection left {table} with a young or dirty entry, or a log");
         }
         self.check_caches();
     }
@@ -1697,13 +1697,14 @@ impl Vm {
         self.caches_filled.clear();
     }
     /// Under verify, after any collection: no call cache names a freed
-    /// entry, which a fill no record saw would leave (`caches_filled`).
+    /// entry, which a fill no record saw would leave (`caches_filled`). An
+    /// own-obarray symbol a full reclaimed is not asked after.
     fn check_caches(&self) {
         for (i, cache) in self.caches.iter().enumerate() {
             let target = cache.target;
             if Self::image_value(target) { continue; }
             let freed = match target.tag() {
-                0 if target != Value::NIL => target.index(0).ok().and_then(|n| n.checked_sub(1)).is_none_or(|n| n >= self.objects.len() || self.objects.is_free(n)),
+                0 if target != Value::NIL => (target.payload() as usize).checked_sub(1).is_none_or(|n| n >= self.objects.len() || self.objects.is_free(n)),
                 3 => target.payload() as usize >= self.conses.len() || self.conses.is_free(target.payload() as usize),
                 4 => target.payload() as usize >= self.closures.len() || self.closures.is_free(target.payload() as usize),
                 5 => target.payload() as usize >= self.cells.len() || self.cells.is_free(target.payload() as usize),
@@ -1729,10 +1730,10 @@ impl Vm {
         for &i in &dead {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
-        self.conses.swept(swept[0].0, swept[0].1, verify);
-        self.closures.swept(swept[1].0, swept[1].1, verify);
-        self.cells.swept(swept[2].0, swept[2].1, verify);
-        self.objects.swept(swept[3].0, swept[3].1, verify);
+        self.conses.swept(swept[0].0, swept[0].1, swept[0].2, verify);
+        self.closures.swept(swept[1].0, swept[1].1, swept[1].2, verify);
+        self.cells.swept(swept[2].0, swept[2].1, swept[2].2, verify);
+        self.objects.swept(swept[3].0, swept[3].1, swept[3].2, verify);
         marking.finish(own);
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
@@ -1795,7 +1796,7 @@ impl Vm {
         // them all: a later one is young, so met if it lives, and one that
         // took the kind in place was stored into. Unknown, every object is
         // asked its kind.
-        let shared = |_: usize, object: &data::Object| shares_storage(object);
+        let shared = |object: &data::Object| shares_storage(object);
         let holders = self.shared_holders.take().unwrap_or_else(|| self.objects.iter().enumerate()
             .filter(|&(_, object)| shares_storage(object)).map(|(i, _)| i as u32).collect());
         let mut objects = self.objects.read_again();
