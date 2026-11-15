@@ -563,13 +563,16 @@ it; nil when it has none, or no row any more."
            (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (cadr call))
                                              (romacs-agent-ui--payload-output payload) (plist-get payload :failed))))
       (unless (string-empty-p (string-trim body))
-        (save-excursion
-          (goto-char mark)
-          (forward-line 1)
-          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
-                                  'invisible (and folded '(romacs-agent-output)))))
-            (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
-            (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))
+        ;; Drawn as the transcript is: no edit to undo (`romacs-agent-ui--unrecorded').
+        (romacs-agent-ui--unrecorded
+         (lambda ()
+           (save-excursion
+             (goto-char mark)
+             (forward-line 1)
+             (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
+                                     'invisible (and folded '(romacs-agent-output)))))
+               (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
+               (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))))
       t)))
 
 (defun romacs-agent-ui--open-payloads-in (start end)

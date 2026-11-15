@@ -180,6 +180,8 @@ failed, Grep (whose row counts what it found)."
      (search-forward "$ ls")
      (romacs-agent-chat-copy)
      (should (string-search "alpha é" (current-kill 0)))
+     ;; Drawn so, the outputs are no edit to undo: they stay.
+     (should-not (and (listp buffer-undo-list) (seq-some #'identity buffer-undo-list)))
      ;; Rows trimmed away take their payloads with them.
      (romacs-agent-ui--open-payloads-in (point-min) (point-max))
      (let ((romacs-agent-ui--tool-lines (make-hash-table :test #'equal)))
