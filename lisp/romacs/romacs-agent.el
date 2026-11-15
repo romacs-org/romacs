@@ -1347,8 +1347,7 @@ itself, so the turn goes on whatever becomes of this server."
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
-    (setf (romacs-agent-journal-start session)
-          (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
+    (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
     (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
                           input images))
   (setf (romacs-agent-state session) 'starting)
@@ -1785,23 +1784,34 @@ each line is decoded, so offsets are the file's own."
 at a time between the editor's other work: a long journal never holds it,
 and is read a slice at a time, never whole."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
-         (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-         ;; Read up to its end now: what it gains meanwhile is not waited for.
-         (end (file-attribute-size (file-attributes journal)))
+         ;; Its pages as they are now: what it gains meanwhile is not waited for.
+         (pager (romacs-agent--journal-pager session))
          (offset 0) (lines nil) (step nil))
     (setq step (lambda ()
                  (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
                    (dotimes (_ (or batch 200))
                      (when (and (null lines) offset)
-                       (pcase (and end (file-readable-p journal) (romacs-agent--journal-lines journal offset end))
+                       (pcase (funcall (car pager) offset)
                          (`(,read . ,next) (setq lines read offset next))
                          (_ (setq offset nil))))
                      (when lines
                        (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
                                                                        :null-object :null :false-object :false))))
                          (when (hash-table-p record) (romacs-agent--record scratch record))))))
-                 (if (or lines offset) (run-at-time 0 nil step) (funcall then (nreverse events)))))
+                 (if (or lines offset) (run-at-time 0 nil step)
+                   (funcall (cdr pager))
+                   (funcall then (nreverse events)))))
     (funcall step)))
+
+(defun romacs-agent--journal-pager (session)
+  "SESSION's records a page at a time, as they are now: (FETCH . CLOSE),
+FETCH called with a place giving (LINES . NEXT) as
+`romacs-agent--journal-lines' does, CLOSE when done."
+  (if (romacs-agent-events-p session) (romacs-agent-events-pager session)
+    (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+           (end (file-attribute-size (file-attributes journal))))
+      (cons (lambda (offset) (and end (file-readable-p journal) (romacs-agent--journal-lines journal offset end)))
+            #'ignore))))
 
 (defun romacs-agent--record-request (record)
   "The request id of RECORD, a user's message written, or nil."
@@ -1841,9 +1851,15 @@ stays.  The journal itself keeps them all."
       (push record kept))))
 
 (defun romacs-agent--read-journal (session function &optional from end)
-  "Call FUNCTION with each record of SESSION's journal, in order, from
-byte FROM (a record's start) when given, to byte END (a record's end)
-when given."
+  "Call FUNCTION with each of SESSION's records, in order, from place FROM
+\(a record's) when given, to place END (after a record) when given:
+places as its records' readers give them (bytes of a journal, seqs of
+SQLite, `romacs-agent-events-p'), passed on without looking inside."
+  (if (romacs-agent-events-p session) (romacs-agent-events-read session function from end)
+    (romacs-agent--read-journal-file session function from end)))
+
+(defun romacs-agent--read-journal-file (session function from end)
+  "`romacs-agent--read-journal' of SESSION's journal file, FROM and END bytes."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
@@ -2027,7 +2043,7 @@ while it does not yet listen; the connection it replaces is let go."
            ((> (or tries 0) 0)
             (run-at-time 0.1 nil #'romacs-agent--attach session (1- tries) steal))
            ;; Not a record from any supervisor: none ever ran.
-           ((not (file-exists-p (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+           ((not (romacs-agent--recorded-p session))
             (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session))
                                                :text "its supervisor never started"))
             nil)
@@ -2581,8 +2597,9 @@ when one runs; with none, the journal is the server's to add to."
       (let* ((seq (1+ (romacs-agent-seq session)))
              (record (romacs-mcp--object "seq" seq "t" (float-time) "note" note))
              (coding-system-for-write 'utf-8-unix))
-        (write-region (concat (romacs-agent--json record) "\n") nil
-                      (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+        (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
+          (write-region (concat (romacs-agent--json record) "\n") nil
+                        (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))
         (romacs-agent--record session record)))))
 
 (defun romacs-agent--restart (session)
@@ -3346,7 +3363,22 @@ and nothing nested can stand at a line's start or end."
         (progn (goto-char (point-max))
                (and (re-search-backward (format "^{\"seq\":%d," seq) nil t) (line-end-position))))))
 
+(defun romacs-agent--recorded-p (session)
+  "Whether SESSION has any record: a supervisor ran it."
+  (if (romacs-agent-events-p session) (> (romacs-agent-events-end session) 1)
+    (file-exists-p (expand-file-name "journal.jsonl" (romacs-agent-dir session)))))
+
+(defun romacs-agent--journal-end (session)
+  "The place after SESSION's last record (`romacs-agent--read-journal')."
+  (if (romacs-agent-events-p session) (romacs-agent-events-end session)
+    (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)))
+
 (defun romacs-agent--journal-after (session seq)
+  "The place after SESSION's record SEQ, or nil when it has none."
+  (if (romacs-agent-events-p session) (romacs-agent-events-after session seq)
+    (romacs-agent--journal-file-after session seq)))
+
+(defun romacs-agent--journal-file-after (session seq)
   "The byte at which SESSION's journal goes on after its record SEQ, looked
 for from the journal's end in growing spans; nil when no line there is
 record SEQ (`romacs-agent--record-line-end')."
@@ -3384,34 +3416,49 @@ was under way when it came.")
 
 (defun romacs-agent--turn-free-p (session probe from-start)
   "Whether the records before point (a line's start in a buffer of
-SESSION's journal bytes) leave no turn under way: the last one telling
-either ends a turn or its harness, or there is none and FROM-START says
-the buffer starts at the journal's start.  PROBE, a scratch copy of
-SESSION (`romacs-agent--scratch'), is what the harness parses them in."
+SESSION's journal bytes) leave no turn under way
+\(`romacs-agent--turn-free-records-p'), FROM-START saying the buffer
+starts at the journal's start."
   (save-excursion
-    (let ((verdict nil) (steps 0) (events (romacs-agent--harness-get session :events)))
-      (while (not verdict)
-        (if (or (bobp) (>= steps romacs-agent--turn-free-reach))
-            (setq verdict (if (and (bobp) from-start) 'free 'busy))
-          (forward-line -1)
-          (setq steps (1+ steps))
-          (let ((record (ignore-errors
-                          (json-parse-string (decode-coding-string (buffer-substring (point) (line-end-position)) 'utf-8)
-                                             :object-type 'hash-table :null-object :null :false-object :false))))
-            (when (hash-table-p record)
-              (let ((out (gethash "out" record)) (in (gethash "in" record)))
-                (cond ((gethash "exit" record) (setq verdict 'free))
-                      ;; Another prompt and no end between: this one came into its turn.
-                      ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
-                      ((hash-table-p out)
-                       (let ((types (mapcar (lambda (event) (plist-get event :type))
-                                            (ignore-errors (funcall events probe out)))))
-                         (cond ((memq 'done types) (setq verdict 'free))
-                               ((seq-intersection types '(delta thinking tool message-end approval))
-                                (setq verdict 'busy)))))))))))
-      (eq verdict 'free))))
+    (let ((records nil))
+      (while (and (not (bobp)) (< (length records) romacs-agent--turn-free-reach))
+        (forward-line -1)
+        (push (ignore-errors
+                (json-parse-string (decode-coding-string (buffer-substring (point) (line-end-position)) 'utf-8)
+                                   :object-type 'hash-table :null-object :null :false-object :false))
+              records))
+      (romacs-agent--turn-free-records-p session probe (nreverse records) (and (bobp) from-start)))))
+
+(defun romacs-agent--turn-free-records-p (session probe records all)
+  "Whether RECORDS, those before a prompt in SESSION's records, the latest
+first, leave no turn under way: the last one telling either ends a turn
+or its harness, or none tells and ALL says they are all there are.
+PROBE, a scratch copy of SESSION (`romacs-agent--scratch'), is what the
+harness parses them in."
+  (let ((verdict nil) (events (romacs-agent--harness-get session :events)))
+    (while (and (not verdict) records)
+      (let* ((record (pop records)) (out (and (hash-table-p record) (gethash "out" record)))
+             (in (and (hash-table-p record) (gethash "in" record))))
+        (when (hash-table-p record)
+          (cond ((gethash "exit" record) (setq verdict 'free))
+                ;; Another prompt and no end between: this one came into its turn.
+                ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
+                ((hash-table-p out)
+                 (let ((types (mapcar (lambda (event) (plist-get event :type))
+                                      (ignore-errors (funcall events probe out)))))
+                   (cond ((memq 'done types) (setq verdict 'free))
+                         ((seq-intersection types '(delta thinking tool message-end approval))
+                          (setq verdict 'busy)))))))))
+    (eq (or verdict (if all 'free 'busy)) 'free)))
 
 (defun romacs-agent--journal-tail (session turns &optional end begin)
+  "Where to replay SESSION's records from to draw its last TURNS prompts
+between places BEGIN and END: (FROM . PROMPTS), as
+`romacs-agent--journal-file-tail' says, of whichever holds them."
+  (if (romacs-agent-events-p session) (romacs-agent-events-tail session turns end begin)
+    (romacs-agent--journal-file-tail session turns end begin)))
+
+(defun romacs-agent--journal-file-tail (session turns &optional end begin)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
 between bytes BEGIN and END (its start and end by default): (FROM .
 PROMPTS), FROM the byte of a prompt that started its turn with none
@@ -3455,6 +3502,11 @@ go."
         found))))
 
 (defun romacs-agent--journal-notes (session type &optional end)
+  "SESSION's notes of TYPE (a string) before place END, oldest first."
+  (if (romacs-agent-events-p session) (romacs-agent-events-notes session type end)
+    (romacs-agent--journal-file-notes session type end)))
+
+(defun romacs-agent--journal-file-notes (session type &optional end)
   "SESSION's journal's notes of TYPE (a string) before byte END, oldest
 first, each a hash table: their lines are found by the type's text, which
 no string in a record can hold, and only those are parsed."
@@ -3554,7 +3606,7 @@ new field only records can give a value must change
             ;; No journal: no supervisor ever ran it; stopped here: ended.
             (setf (romacs-agent-state session)
                   (cond ((romacs-agent-stopped session) 'ended)
-                        ((or (romacs-agent--per-turn-p session) (file-exists-p (expand-file-name "journal.jsonl" dir)))
+                        ((or (romacs-agent--per-turn-p session) (romacs-agent--recorded-p session))
                          'detached)
                         (t 'unstarted)))
             (romacs-agent--changed session))
@@ -3735,4 +3787,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-tools)
 (require 'romacs-agent-watch)
 (require 'romacs-agent-store)
+(require 'romacs-agent-events)
 ;;; romacs-agent.el ends here
