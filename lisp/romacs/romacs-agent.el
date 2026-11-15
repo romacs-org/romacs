@@ -2594,6 +2594,7 @@ when one runs; with none, the journal is the server's to add to."
   (let ((connection (romacs-agent-connection session)))
     (if (romacs-agent--harness-live-p session)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
+      (romacs-agent-events-own session)
       (let* ((seq (1+ (romacs-agent-seq session)))
              (record (romacs-mcp--object "seq" seq "t" (float-time) "note" note))
              (coding-system-for-write 'utf-8-unix))
@@ -2791,11 +2792,14 @@ to it."
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
   (romacs-agent--set-stopped session nil)
+  ;; Its records move to SQLite before a supervisor writes any more of them.
+  (romacs-agent-events-own session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
          (command (append (list host "--dir" (romacs-agent-dir session)
                                 "--socket" (romacs-agent-host-socket session)
                                 ;; Journaled first: where this run's records start.
                                 "--note" "{\"type\":\"run\"}")
+                          (and (romacs-agent-events-p session) (list "--store" (romacs-agent-store--file)))
                           (and input (list "--input" input))
                           (and images (list "--input-images" (json-serialize (vconcat images))))
                           (cons "--" argv)))

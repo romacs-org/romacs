@@ -26,8 +26,10 @@
 
 (defconst romacs-agent-events--schema
   '("create table if not exists events (
-       session text not null, seq integer not null, t real, kind text, record text not null,
-       primary key (session, seq)) without rowid"
+       session text not null, seq integer not null, t real, kind text, record text not null)"
+    ;; Not unique: a journal can hold two records of one seq (a note
+    ;; written beside its supervisor's record), read in the order kept.
+    "create index if not exists events_seq on events (session, seq)"
     "create index if not exists events_kind on events (session, kind, seq)"
     "create table if not exists imported (session text primary key, at real) without rowid")
   "The records' tables, made with the database: never dropped.")
@@ -73,18 +75,24 @@ read nests."
 
 (defun romacs-agent-events-pager (session)
   "SESSION's records a page at a time, all from one snapshot: (FETCH
-. CLOSE) as `romacs-agent--journal-pager' says.  The snapshot is a read
+. CLOSE) as `romacs-agent--journal-pager' says, FETCH's place 0 for the
+first page.  The snapshot is a read
 transaction on a connection of its own, so the editor's writes meanwhile
 are not part of it; CLOSE ends it."
   (let ((db (ignore-errors (sqlite-open (romacs-agent-store--file)))) (id (romacs-agent-id session)))
     (if (not db) (cons #'ignore #'ignore)
       (sqlite-pragma db "busy_timeout = 200")
       (sqlite-execute db "begin")
+      ;; Its cursor is the last row read, (SEQ . ROWID): two records of
+      ;; one seq are never split from each other by a page's end.
       (cons (lambda (from)
-              (let ((rows (sqlite-select db "select seq, record from events where session = ? and seq >= ? order by seq limit ?"
-                                         (list id (if (eql from 0) 0 from) romacs-agent-events--page))))
+              (let* ((seq (if (consp from) (car from) -1)) (rowid (if (consp from) (cdr from) -1))
+                     (rows (sqlite-select db (concat "select seq, record, rowid from events where session = ?"
+                                                     " and (seq > ? or (seq = ? and rowid > ?)) order by seq, rowid limit ?")
+                                          (list id seq seq rowid romacs-agent-events--page))))
                 (and rows (cons (mapcar #'cadr rows)
-                                (and (= (length rows) romacs-agent-events--page) (1+ (car (car (last rows)))))))))
+                                (and (= (length rows) romacs-agent-events--page)
+                                     (let ((last (car (last rows)))) (cons (nth 0 last) (nth 2 last))))))))
             (lambda () (ignore-errors (sqlite-execute db "commit")) (ignore-errors (sqlite-close db)))))))
 
 ;;; Reading
@@ -94,7 +102,7 @@ are not part of it; CLOSE ends it."
 \(inclusive) to seq END (exclusive) when given."
   (when-let* ((db (romacs-agent-events--db)))
     (romacs-agent-events--reading db
-      (let ((rows (sqlite-select db "select record from events where session = ? and seq >= ? and seq < ? order by seq"
+      (let ((rows (sqlite-select db "select record from events where session = ? and seq >= ? and seq < ? order by seq, rowid"
                                  (list (romacs-agent-id session) (or from 0) (or end most-positive-fixnum)) 'set)))
         (unwind-protect
             (let (row)
@@ -122,7 +130,7 @@ are not part of it; CLOSE ends it."
     (delq nil (mapcar (lambda (row) (let ((record (romacs-agent-events--parse (car row))))
                                       (and (hash-table-p record) (gethash "note" record))))
                       (sqlite-select db (concat "select record from events where session = ? and kind = 'note' and seq < ?"
-                                                " and json_extract(record, '$.note.type') = ? order by seq")
+                                                " and json_extract(record, '$.note.type') = ? order by seq, rowid")
                                      (list (romacs-agent-id session) (or end most-positive-fixnum) type))))))
 
 (defun romacs-agent-events-tail (session turns &optional end begin)
@@ -166,6 +174,23 @@ them, which hold PROMPTS prompts."
 
 ;;; Importing a journal
 
+(defcustom romacs-agent-events-store nil
+  "Whether sessions' records move to SQLite: each as a supervisor is
+started for it or Romacs adds to its records.  Off, journals are written
+as before; a session already imported is read from SQLite either way."
+  :type 'boolean :group 'romacs-agent)
+
+(defun romacs-agent-events-own (session)
+  "Import SESSION before anything more is added to its records, when
+`romacs-agent-events-store' is on and no supervisor (an earlier build's,
+writing its journal) runs for it."
+  (when (and romacs-agent-events-store (romacs-agent-dir session) (not (romacs-agent-events-p session))
+             (romacs-agent-events--db)
+             (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket)))))
+    (condition-case err (romacs-agent-events-import session)
+      (error (message "romacs-agent-events: %s: %s" (romacs-agent-id session) (error-message-string err))))))
+
+
 (defun romacs-agent-events-import (session)
   "Move SESSION's journal into SQLite, once: its records (but for
 `thinking_tokens' counters, which no reader folds), each checked as
@@ -184,7 +209,7 @@ goes to the backup directory.  Non-nil when SESSION is imported."
                    session
                    (lambda (record)
                      (unless (romacs-agent-events--counter-p record)
-                       (sqlite-execute db "insert or replace into events values (?, ?, ?, ?, ?)"
+                       (sqlite-execute db "insert into events values (?, ?, ?, ?, ?)"
                                        (list id (gethash "seq" record) (gethash "t" record)
                                              (romacs-agent-events--kind record) (romacs-agent--json record)))
                        (cl-incf count)))))

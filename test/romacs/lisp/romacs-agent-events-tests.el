@@ -132,4 +132,47 @@ turns, and its journal's file; a state root of its own."
   (should-not (romacs-agent-events--counter-p
                (romacs-mcp--object "seq" 1 "out" (romacs-mcp--object "type" "system" "subtype" "init")))))
 
+(ert-deftest romacs-agent-events-a-launch-imports-first ()
+  ;; With the store on, a supervisor started for a journal's session
+  ;; writes to SQLite: the session is imported before it starts, and its
+  ;; command names the database.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events-store t) (command nil))
+    (romacs-agent-events-tests--with-session
+     2
+     (lambda (session journal)
+       (cl-letf (((symbol-function 'call-process)
+                  (lambda (_program &rest args) (setq command args) 0))
+                 ((symbol-function 'romacs-agent--route-here) #'ignore))
+         (romacs-agent--launch session '("harness")))
+       (should (romacs-agent-events-p session))
+       (should-not (file-exists-p journal))
+       (should (member "--store" command))
+       (should (member (romacs-agent-store--file) command))))))
+
+(ert-deftest romacs-agent-events-two-records-of-one-seq-are-kept ()
+  ;; A journal holding two records of one seq (a note written beside its
+  ;; supervisor's record): both imported, read in their order, a page's
+  ;; end never between them.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--page 2))
+    (romacs-agent-events-tests--with-session
+     1
+     (lambda (session journal)
+       (write-region (romacs-agent-events-tests--line 4 "note" (romacs-mcp--object "type" "selection")) nil journal t 'silent)
+       (write-region (romacs-agent-events-tests--line 4 "note" (romacs-mcp--object "type" "beside")) nil journal t 'silent)
+       (should (romacs-agent-events-import session))
+       (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3 4 4 4)))
+       (let ((pager (romacs-agent-events-pager session)) (seen nil) (at 0))
+         (while at
+           (pcase (funcall (car pager) at)
+             (`(,lines . ,next) (setq seen (append seen lines) at next))
+             (_ (setq at nil))))
+         (funcall (cdr pager))
+         (should (= (length seen) 6)))))))
+
 ;;; romacs-agent-events-tests.el ends here
