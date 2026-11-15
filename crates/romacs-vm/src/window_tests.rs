@@ -698,7 +698,7 @@ fn g3a_owned_frame_scene_from_window_tree() {
       (set-buffer (get-buffer-create "bottom")) (insert "bottom text") (set-window-buffer b (current-buffer))
       (set-window-point b 4) (set-window-start b 2) (set-window-margins b 2 3))"#,
     );
-    let frame = vm.frame_window_snapshots(640, 480);
+    let frame = vm.frame_window_snapshots(1, 640, 480);
     assert!(
         frame.is_ok(),
         "frame must consume the VM window tree: {frame:?}"
@@ -725,7 +725,7 @@ fn g3a_owned_frame_scene_from_window_tree() {
     assert!(face.pixel_size > 0.0);
     vm.collect(&mut []);
     assert_eq!(frame[0].2.text.utf8, "Ω top");
-    let after = vm.frame_window_snapshots(640, 480).unwrap();
+    let after = vm.frame_window_snapshots(1, 640, 480).unwrap();
     for (a, b) in frame.iter().zip(after.iter()) {
         assert_eq!(
             (a.0, a.1, a.2.id, a.2.text.clone()),
@@ -742,7 +742,7 @@ fn g3a_owned_frame_scene_from_window_tree() {
     );
     vm.set_collection_floor(1);
     let before = vm.heap_stats().collections;
-    let collected = vm.frame_window_snapshots(640, 480).unwrap();
+    let collected = vm.frame_window_snapshots(1, 640, 480).unwrap();
     assert!(
         vm.heap_stats().collections > before,
         "mode-line evaluation must really collect"
