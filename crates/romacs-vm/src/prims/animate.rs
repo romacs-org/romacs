@@ -20,9 +20,23 @@ fn display_animates(cx) { cx.display_animates() }}
 // with no display); and STATE, a plist (:status, :done, :of, :name,
 // :error, :seconds), kept with LABEL as STAGE's latest in
 // `romacs-progress-state' whatever the display shows, where a restart's
-// supervisor reads it over the server's socket.
+// supervisor reads it over the server's socket and the progress card after
+// the first frame does (romacs-progress-view.el).  t when the launch screen
+// showed it, its counts and failure as a bar of its own; with a STATE,
+// `romacs-gui-loadup--progress-view' is told, when it is defined (the card
+// past the screen; a failure there is said, and startup goes on).
 defsubr! { name = "romacs-startup-progress", gnu = "romacs:display", effect = Global,
-fn startup_progress(cx, stage: Value; optional label: Value, state: Value) { cx.startup_progress(stage, label, state) }}
+fn startup_progress(cx, stage: Value; optional label: Value, state: Value) -> Step {
+    let shown = cx.startup_progress(stage, label, state)?;
+    // The view runs past the screen, and for a step the screen shows that
+    // goes on (it moves to the card once the first frame is up); never for
+    // a stage with no state, as the init's loads are.
+    let running = { let key = cx.intern(":status"); let status = cx.plist_value(state, key); cx.kind(status) == Kind::Symbol && cx.symbol_name(status).is_ok_and(|s| s == "running") };
+    let view = cx.intern("romacs-gui-loadup--progress-view");
+    if (shown != Value::NIL && !running) || state == Value::NIL || !cx.fboundp(view) { return Ok(Step::Done(shown)); }
+    Ok(Step::Call { f: view, args: vec![shown], then: shown_by_view, saved: vec![shown] })
+}}
+fn shown_by_view(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
 defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
 fn pointer(cx) { cx.pointer() }}
 defsubr! { name = "romacs--native-window", gnu = "romacs:display", effect = Global,

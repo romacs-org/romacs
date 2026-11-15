@@ -374,10 +374,10 @@ impl Vm {
     pub(crate) fn collect_until_key(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
-        let late = self.collection_late();
         // An automatic collection due only by what was made since the last
         // one is a minor; whatever asks for a collection by name gets a full.
         let minor = !until_key && !self.collection_log.explicit && self.minor_chosen();
+        let late = self.collection_late(minor);
         let last = std::mem::take(&mut self.gc_times);
         let collected = if minor { self.collect_minor_rooted(roots) } else { self.collect_rooted(roots, until_key) };
         if !collected {
