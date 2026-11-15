@@ -146,6 +146,11 @@ layer is restored only for the init content its plan was recorded from.")
   (unless (load-history-filename-element (load-history-regexp file))
     (load file nil t)))
 
+(defvar romacs--layer-kept-targets nil
+  "In a layer build, what each library form kept as code assigned: each
+\(SYMBOL BOUND BEFORE BOUND AFTER), the latest first.  Put back once the
+entries have loaded (`world_put_back_targets'); nil in a world.")
+
 (defvar romacs--layer-entry-timers nil
   "The timers running as a layer build's entry began (`world::layer'):
 the ones the entry starts are cancelled at its end, as the forms that

@@ -464,8 +464,10 @@ impl Vm {
     /// for a secret, or met a fact or an effect the build refused, is kept
     /// whole, as code, for restore, the build answering for nothing it met,
     /// and the load goes on with the next form.
-    fn layer_form_finished(&mut self, evaluated: Result<()>, form: &Form, out: Out<'_>) -> Result<()> {
+    fn layer_form_finished(&mut self, evaluated: Result<()>, form: &Form, out: Out<'_>,
+                           targets: Option<(Vec<usize>, RootFrame)>) -> Result<()> {
         if crate::host::mode() != crate::host::Mode::Build {
+            if let Some((_, frame)) = targets { self.drop_frame(frame); }
             return evaluated;
         }
         let mut evaluated = evaluated;
@@ -473,15 +475,20 @@ impl Vm {
         let asked = crate::host::take_secret_asked();
         let refused_at = crate::host::layer_form_refusals_at();
         let refused = refused_at.is_some_and(|at| crate::host::refusals() > at);
-        if (asked || refused) && crate::host::layer_active() && !crate::host::layer_form_is_definition()
+        // What it met is kept as code only when its writes are known
+        // (`world::assigned`); a secret it asked always is.
+        let keepable = asked || crate::world::assigned(form).is_some();
+        if (asked || refused) && keepable && crate::host::layer_active() && !crate::host::layer_form_is_definition()
             && !crate::host::layer_form_pinned() {
             if let Some(at) = refused_at.filter(|_| refused) {
                 crate::host::forget_refusals_since(at);
             }
+            if let Some(targets) = targets { self.world_keep_targets(targets); }
             self.propagated_escape = None;
             self.record_deferred_form(form);
             return Ok(());
         }
+        if let Some((_, frame)) = targets { self.drop_frame(frame); }
         if let (Err(_), Some(name)) = (&evaluated, crate::host::layer_form_cut()) {
             self.propagated_escape = None;
             let slot = self.slot(&name);
@@ -873,8 +880,9 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
             file: path.to_string_lossy().into_owned(), line,
             head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
         });
+        let targets = m.leaf(&form, |vm, form| vm.world_snapshot_targets(form));
         let evaluated = eval_toplevel(m, gc.by_ref(), &form, 0, out);
-        let evaluated = m.leaf((evaluated, &form, out), |vm, (evaluated, form, out)| vm.layer_form_finished(evaluated, form, out));
+        let evaluated = m.leaf((evaluated, &form, out, targets), |vm, (evaluated, form, out, targets)| vm.layer_form_finished(evaluated, form, out, targets));
         drop(site);
         match evaluated {
             Ok(()) => m.leaf((step, path, line), Vm::form_done),

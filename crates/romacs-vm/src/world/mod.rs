@@ -38,30 +38,43 @@ use crate::forwarded::Fwd;
 use crate::{Value, VariableRedirect, Vm, host};
 use serde_json::json;
 
-/// The variables FORM, a top-level form, assigns by name: those of a
-/// `setq', `setq-default' or `setq-local', a `setf' of a symbol, a `set' or
-/// `set-default' of a quoted one, the place of a `push' or `pushnew', the
-/// list of an `add-to-list'; within a `progn', a `when' or an `unless' too.
-fn assigned(form: &crate::Form) -> Vec<&str> {
+/// The variables FORM, a top-level form, assigns, when they are all
+/// known by name: those of a `setq', `setq-default' or `setq-local', a
+/// `setf' of symbols, a `set', `set-default' or `add-to-list' of a quoted
+/// one, the place of a `push' or `pushnew'; a call that assigns nothing of
+/// the Lisp heap (it makes a directory, a timer or a process); and the
+/// forms of a `progn', or the body of a `when' or an `unless', each one of
+/// these. None for any other form, whose writes the build cannot name: it
+/// is never kept as code for what it met, only for a secret it asked.
+/// (A function its values call may still set another variable: a residual
+/// the layer documents.)
+pub(crate) fn assigned(form: &crate::Form) -> Option<Vec<&str>> {
     use crate::Form::{List, Sym};
+    fn symbol(f: &crate::Form) -> Option<&str> {
+        match f { Sym(name) => Some(name.as_str()), _ => None }
+    }
     fn quoted(f: &crate::Form) -> Option<&str> {
         match f {
-            crate::Form::List(items) if items.len() == 2 && matches!(&items[0], crate::Form::Sym(q) if q == "quote") => match &items[1] {
-                crate::Form::Sym(name) => Some(name.as_str()),
-                _ => None,
-            },
+            List(items) if items.len() == 2 && matches!(&items[0], Sym(q) if q == "quote") => symbol(&items[1]),
             _ => None,
         }
     }
-    let List(items) = form else { return Vec::new() };
-    let Some(Sym(head)) = items.first() else { return Vec::new() };
+    let List(items) = form else { return None };
+    let Some(Sym(head)) = items.first() else { return None };
+    fn all(forms: &[crate::Form]) -> Option<Vec<&str>> {
+        forms.iter().map(assigned).collect::<Option<Vec<_>>>().map(|lists| lists.concat())
+    }
     match head.as_str() {
-        "setq" | "setq-default" | "setq-local" | "setf" => items[1..].iter().step_by(2).filter_map(|f| match f { Sym(name) => Some(name.as_str()), _ => None }).collect(),
-        "set" | "set-default" | "add-to-list" => items.get(1).and_then(quoted).into_iter().collect(),
-        "push" | "pushnew" | "cl-pushnew" => items.get(2).and_then(|f| match f { Sym(name) => Some(name.as_str()), _ => None }).into_iter().collect(),
-        "progn" => items[1..].iter().flat_map(assigned).collect(),
-        "when" | "unless" => items.get(2..).unwrap_or_default().iter().flat_map(assigned).collect(),
-        _ => Vec::new(),
+        "setq" | "setq-default" | "setq-local" | "setf" => items[1..].iter().step_by(2).map(symbol).collect(),
+        "set" | "set-default" | "add-to-list" => items.get(1).and_then(quoted).map(|name| vec![name]),
+        "push" | "pushnew" | "cl-pushnew" => items.get(2).and_then(symbol).map(|name| vec![name]),
+        // Each assigns nothing of the heap a replay could add to again (a
+        // `put' sets its property to what it sets it to).
+        "make-directory" | "make-directory-internal" | "run-with-timer" | "run-at-time" | "run-with-idle-timer"
+        | "start-process" | "make-process" | "put" => Some(Vec::new()),
+        "progn" => all(&items[1..]),
+        "when" | "unless" => all(items.get(2..).unwrap_or_default()),
+        _ => None,
     }
 }
 
@@ -253,10 +266,72 @@ impl Vm {
     /// is kept as code too, so nothing captured holds what it left.
     pub(crate) fn record_deferred_form(&mut self, form: &crate::Form) {
         self.push_reseed_form("form", None, form, true);
-        for name in assigned(form) {
+        for name in assigned(form).unwrap_or_default() {
             let slot = self.slot(name);
             self.fence_variable(slot, Root::Tainted);
         }
+    }
+
+    /// What FORM's known targets (`assigned`) hold before it runs, rooted,
+    /// in a layer build: what a form kept as code is put back to once the
+    /// entries have loaded (`world_put_back_targets`), so restore computes
+    /// from where a source boot would and the image keeps nothing of the
+    /// builder's (a `push' adds one element, not two). None outside a layer
+    /// build or without targets.
+    pub(crate) fn world_snapshot_targets(&mut self, form: &crate::Form) -> Option<(Vec<usize>, crate::gc::RootFrame)> {
+        if self.fence.is_none() || !host::layer_active() {
+            return None;
+        }
+        let slots: Vec<usize> = assigned(form)?.into_iter().map(|name| self.slot(name)).collect();
+        if slots.is_empty() {
+            return None;
+        }
+        let values: Vec<Value> = slots.iter().map(|&slot| self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND)).collect();
+        let frame = self.root_frame(&values);
+        Some((slots, frame))
+    }
+
+    /// A form kept as code ran: its targets' values before (SNAPSHOT) and
+    /// now are kept until the entries have loaded, in
+    /// `romacs--layer-kept-targets', each (SYMBOL BOUND BEFORE BOUND AFTER).
+    /// Later forms still see what it left, as they would in a source boot,
+    /// and read it tainted.
+    pub(crate) fn world_keep_targets(&mut self, (slots, before): (Vec<usize>, crate::gc::RootFrame)) {
+        let list = self.slot("romacs--layer-kept-targets");
+        for (at, &slot) in slots.iter().enumerate() {
+            let was = self.rooted(&before, at);
+            let now = self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND);
+            let held = |v: Value| if v == Value::UNBOUND { (Value::NIL, Value::NIL) } else { (Value::TRUE, v) };
+            let ((was_bound, was), (now_bound, now)) = (held(was), held(now));
+            let symbol = Value::reference(slot + 1, 7);
+            let entry = self.list_value(&[symbol, was_bound, was, now_bound, now]);
+            let old = self.slots[list].value;
+            let old = if old == Value::UNBOUND { Value::NIL } else { old };
+            self.slots[list].value = self.alloc_cons(entry, old);
+        }
+        self.drop_frame(before);
+    }
+
+    /// The entries have loaded: each target of a form kept as code goes back
+    /// to what it held before that form ran, the latest form first, unless a
+    /// later form set it to something else since, which stays.
+    pub(crate) fn world_put_back_targets(&mut self) {
+        let list = self.slot("romacs--layer-kept-targets");
+        let mut tail = self.slots[list].value;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            let items = self.list_values(entry).unwrap_or_default();
+            if let [symbol, was_bound, was, now_bound, now] = items[..]
+                && let Some(slot) = symbol.index_if(7).and_then(|i| i.checked_sub(1)) {
+                let current = self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND);
+                let after = if now_bound == Value::NIL { Value::UNBOUND } else { now };
+                if current == after {
+                    let before = if was_bound == Value::NIL { Value::UNBOUND } else { was };
+                    let _ = self.unfenced(slot, |vm| vm.set_default_value(slot, before));
+                }
+            }
+            tail = rest;
+        }
+        self.slots[list].value = Value::NIL;
     }
 
     fn push_reseed_form(&mut self, kind: &str, name: Option<&str>, form: &crate::Form, cut: bool) {

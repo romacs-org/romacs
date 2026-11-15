@@ -180,6 +180,49 @@ fn what_a_form_kept_as_code_assigns_is_tainted() {
                "((form nil lib-q-a) (defvar lib-q-b lib-q-b) (form nil lib-q-c))");
 }
 
+/// A form whose writes the build cannot name (a `let' around them, a call)
+/// is not kept as code for what it met: its refusal stands and leaves the
+/// entry out, so nothing captured depends on a value restore recomputes.
+#[test]
+fn a_form_whose_writes_are_unknown_is_not_kept_as_code() {
+    let dir = scratch("unknown-writes");
+    std::fs::write(dir.join("lisp/lib-u2.el"), "(let ((x (car exec-path))) (setq lib-u2-a x))\n(defvar lib-u2-b lib-u2-a)\n(provide 'lib-u2)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-u2"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "fence")], "{}", trace["refusals"]);
+}
+
+/// A form kept as code leaves its targets as they were before it ran, so
+/// restore computes from where a source boot would: a `push' adds its
+/// element once.
+#[test]
+fn a_form_kept_as_code_leaves_its_targets_as_they_were() {
+    let dir = scratch("restore-targets");
+    std::fs::write(dir.join("lisp/lib-p2.el"), "(defvar lib-p2-list '(kept))\n(push (car exec-path) lib-p2-list)\n(provide 'lib-p2)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-p2"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    // The image holds the list as before the push; restore pushes this process's element once.
+    vm.world_lift();
+    assert_eq!(eval(&mut vm, "lib-p2-list"), "(kept)");
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (car (nth 2 e))) romacs--world-reseed-forms)"), "(push)");
+}
+
 /// A form that loads a file whose definition met what the build refused,
 /// and could not keep (a network lookup), is not kept as code: its replay
 /// would find the file loaded. The refusal stands and leaves the entry out.
@@ -328,7 +371,7 @@ fn a_library_s_credential_read_is_kept_as_code_for_restore() {
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
-    assert_eq!(eval(&mut vm, "(list lib-c-text lib-c-plain lib-c-after)"), "(nil nil 1)",
+    assert_eq!(eval(&mut vm, "(list lib-c-text (boundp 'lib-c-plain) lib-c-after)"), "(nil nil 1)",
                "the builder read no credential and went on with the library");
     assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (nth 1 e) (car (nth 2 e)) (nth 3 e))) (reverse romacs--world-reseed-forms))"),
                "((defvar lib-c-text defvar t) (form nil setq t))");

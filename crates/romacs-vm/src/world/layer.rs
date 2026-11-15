@@ -779,6 +779,9 @@ impl Vm {
         }
         host::layer_declared(false);
         let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) nil))"));
+        // What the forms kept as code assigned goes back to what it held
+        // before them: restore runs them in this process.
+        self.world_put_back_targets();
         let restored: Vec<PathBuf> = added.iter().chain(kept.iter().filter(|p| !added.contains(p))).map(PathBuf::from).collect();
         let _ = self.set_load_path(&restored);
         // The startup function runs again after the libraries, as a
