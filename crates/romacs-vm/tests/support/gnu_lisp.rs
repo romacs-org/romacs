@@ -10,8 +10,8 @@
 //! and user are its own, not the builder's. A world
 //! is keyed by this executable and records every file the boot read, so a
 //! rebuilt executable or an edited Lisp file builds it again. Anywhere else
-//! (another target, a process that already holds an image, a refused
-//! restore, `ROMACS_WORLD=off`) the boot runs from source, as it answers the
+//! (another target, a process that already holds an image, a restore
+//! that fails, `ROMACS_WORLD=off`) the boot runs from source, as it answers the
 //! same.
 use romacs_vm::Vm;
 use romacs_vm::world::store::World;

@@ -51,7 +51,7 @@ fn thaw_gives_a_private_mutable_copy() {
 }
 
 #[test]
-fn refusals_name_the_object_and_the_path() {
+fn uncaptured_notes_name_the_object_and_the_path() {
     let mut vm = vm();
     assert_eq!(eval(&mut vm, "(condition-case e (freeze (list 1 (vector 2 (current-buffer)))) (error (list (car e) (cadr e) (eq (caddr e) (current-buffer)) (nth 3 e))))"), "(error \"Cannot freeze\" t (cdr car (aref 1)))");
     assert_eq!(caught(&mut vm, "(freeze (lambda (x) x))").starts_with("(signalled error \"Cannot freeze\" "), true);
@@ -228,12 +228,12 @@ fn a_freeze_and_discard_loop_is_bounded() {
 }
 
 #[test]
-fn world_capture_refuses_while_a_region_is_attached() {
+fn no_world_is_captured_while_a_region_is_attached() {
     let mut vm = Vm::new();
     assert_eq!(vm.world_quiescent(), Ok(()));
     let frozen = vm.eval_source_raw("(freeze (list 1))").unwrap();
     assert!(Vm::frozen(frozen));
-    assert_eq!(vm.world_quiescent(), Err("world capture refused: regions is not at rest".into()));
+    assert_eq!(vm.world_quiescent(), Err("no world captured: regions is not at rest".into()));
     let entry = vm.compile(&Form::from_json(serde_json::json!(["quote", 1])).unwrap()).unwrap();
     assert!(vm.publish_code_image(std::path::Path::new("/nonexistent"), entry, [0; 32]).is_err());
 }
