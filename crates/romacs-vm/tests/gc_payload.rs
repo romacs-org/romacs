@@ -81,6 +81,9 @@ fn thawed_strings_are_collected_as_they_are_made() {
 #[test]
 fn a_big_kept_vector_paces_collection_by_its_size() {
     let mut vm = vm("(progn (defvar gc-payload-kept (make-vector 10000000 nil)) (garbage-collect))");
+    // Fulls, which the percentage paces; minors come with allocation alone
+    // (VM2-GC-GENERATIONS).
+    vm.set_gc_minor(false);
     let made = collections(&mut vm, "(make-string 1048576 ?x)", N);
     assert!((made as usize) <= N / 8, "{made} collections over {N} strings beside a ten-million-slot vector");
 }

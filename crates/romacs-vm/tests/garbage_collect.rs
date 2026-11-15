@@ -95,6 +95,8 @@ fn churn(vm: &mut Vm, conses: u32) -> u64 {
 fn gc_cons_threshold_and_percentage_pace_collection() {
     let mut vm = Vm::new();
     vm.set_gc_stress(0);
+    // The fulls these variables pace, counted alone (VM2-GC-GENERATIONS).
+    vm.set_gc_minor(false);
     let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
     // GNU's percentage; a 128 MiB threshold for GNU's 800000 (VM2-GC-PACING).
     assert_eq!(eval(&mut vm, "(list gc-cons-threshold gc-cons-percentage)"), "(134217728 0.1)", "Romacs's defaults");
@@ -477,10 +479,11 @@ fn a_collection_due_in_a_nested_protected_body_is_finished_soon() {
     assert_eq!(value, "(t t t)", "the finalizer and the hook ran within the loop");
 }
 
-/// The automatic collections since the last call: how far past its trigger
-/// the latest of them began, in objects (`romacs--take-collections').
+/// The automatic collections since the last call, minors among them: how
+/// far past its trigger the latest of them began, in objects
+/// (`romacs--take-collections').
 const LATEST_LATE: &str = "(let ((late 0)) (dolist (r (cdr (romacs--take-collections)) late) \
-    (when (eq (car r) 'automatic) (setq late (max late (nth 7 r))))))";
+    (when (memq (car r) '(automatic minor)) (setq late (max late (nth 7 r))))))";
 
 /// Every way a primitive returns asks for a poll once allocation has passed
 /// another step, whatever it allocated: a loop of a few big calls collects
@@ -634,6 +637,8 @@ fn a_collection_its_unwinding_made_due_is_taken_at_the_handlers_first_tick() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_gc_stress(0);
+    // The full the threshold paces, counted alone (VM2-GC-GENERATIONS).
+    vm.set_gc_minor(false);
     // GNU's threshold, which the unbinding restores: the list made under the
     // bound one is past it (VM2-GC-PACING).
     vm.eval_source("(progn (setq gc-cons-threshold 800000) (defvar lt-big nil) (fset 'lt-tick (lambda () nil)) (garbage-collect) t)").unwrap();
