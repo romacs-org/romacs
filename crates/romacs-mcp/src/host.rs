@@ -116,7 +116,7 @@ fn counter(line: &str) -> bool {
     line.contains("\"subtype\":\"thinking_tokens\"") && line.contains("\"type\":\"system\"")
 }
 
-/// The records' tables, as lisp/romacs/romacs-agent-events.el makes them.
+/// The records' tables, as lisp/agents/romacs-agent-events.el makes them.
 const EVENTS_SCHEMA: &str = "create table if not exists events (
        session text not null, seq integer not null, t real, kind text, record text not null);
      create index if not exists events_seq on events (session, seq);
@@ -146,7 +146,7 @@ impl Store {
                 db.busy_timeout(std::time::Duration::from_millis(200)).map_err(|e| e.to_string())?;
                 db.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
                 db.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
-                // As lisp/romacs/romacs-agent-events.el makes them.
+                // As lisp/agents/romacs-agent-events.el makes them.
                 db.execute_batch(EVENTS_SCHEMA).map_err(|e| e.to_string())?;
                 Ok(Store::Sqlite { db, session })
             }
