@@ -2155,6 +2155,13 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
     regular_and_blocking(file, path.as_ref().display(), how)
 }
 
+/// Make the world store directory DIR private to its user again (0700),
+/// when it is the user's and others may read it: store maintenance, as
+/// opening it is, no effect of a build's recipe.
+pub fn make_store_private(dir: &OwnedFd) -> io::Result<()> {
+    rustix::fs::fchmod(dir, rustix::fs::Mode::from_raw_mode(0o700)).map_err(os)
+}
+
 /// A world store's directory at PATH, opened, and with CREATE made with
 /// every missing directory on the way, each 0700 whatever the umask. The
 /// walk starts at `/` and opens one component at a time relative to the
