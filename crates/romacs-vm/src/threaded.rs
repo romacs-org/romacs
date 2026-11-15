@@ -3071,7 +3071,10 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         }
         let target = cache.target;
         if target == Value::UNBOUND || target == Value::NIL {
-            return raise(en, "void-function", &[Value::reference(i.b + 1, 7)]);
+            // The called symbol as `intern' gives it: nil and t are themselves.
+            let name = en.vm.symbol_names[i.b].clone();
+            let symbol = en.vm.intern(&name);
+            return raise(en, "void-function", &[symbol]);
         }
         // An autoload cell is resolved from its symbol, which it must name.
         if target.tag() == 7 || target.tag() == 3 && (en.vm.autoload_object(target) || lambda_list(en, target)) {
@@ -3080,7 +3083,9 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
         if !matches!(target.tag(), 4 | 6) {
             let condition = uncallable_condition(en, target);
-            return raise(en, condition, &[Value::reference(i.b + 1, 7)]);
+            let name = en.vm.symbol_names[i.b].clone();
+            let symbol = en.vm.intern(&name);
+            return raise(en, condition, &[symbol]);
         }
         // Refresh an invalidated speculation lazily; ineligible closures retain
         // the existing function-id cache instead of resolving on every call.
