@@ -637,7 +637,8 @@ or a repeat."
   "Draw SESSION's EVENT in its chat BUFFER, the current buffer."
       (pcase (plist-get event :type)
         ('input
-         (let ((wakes (romacs-agent-ui--wakes session (plist-get event :text))))
+         (let ((wakes (romacs-agent-ui--wakes session (plist-get event :text)))
+               (start (marker-position romacs-agent-ui--end)))
            (if wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake))
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
@@ -649,7 +650,8 @@ or a repeat."
                                         'romacs-agent-images images)
                (romacs-agent-ui--insert "\n")
                (dolist (file images)
-                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file))))))
+                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))
+           (romacs-agent-ui--mark-input start))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
@@ -1590,13 +1592,24 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
-(defun romacs-agent-ui--prompt-starts (&optional most)
-  "Where the current chat's drawn prompts start, the last first: MOST of
-them, when given."
+(defun romacs-agent-ui--mark-input (start)
+  "Mark the first character the current chat drew after START for an
+input, a prompt or a task's result arriving: what a journal's tail counts
+in turns (`romacs-agent--journal-tail'), the chat counts in its marks."
+  (save-excursion
+    (goto-char start)
+    (skip-chars-forward "\n" romacs-agent-ui--end)
+    (when (< (point) romacs-agent-ui--end)
+      (let ((inhibit-read-only t))
+        (put-text-property (point) (1+ (point)) 'romacs-agent-input t)))))
+
+(defun romacs-agent-ui--input-starts (&optional most)
+  "Where the current chat's drawn inputs start (`romacs-agent-ui--mark-input'),
+the last first: MOST of them, when given."
   (let ((at (marker-position romacs-agent-ui--end)) (starts nil) (seen 0))
     (while (and (> at (point-min)) (not (eql seen most)))
-      (setq at (previous-single-property-change at 'romacs-agent-turn nil (point-min)))
-      (when (get-text-property at 'romacs-agent-turn)
+      (setq at (previous-single-property-change at 'romacs-agent-input nil (point-min)))
+      (when (get-text-property at 'romacs-agent-input)
         (push at starts)
         (setq seen (1+ seen))))
     (nreverse starts)))
@@ -1608,7 +1621,7 @@ shows any of them or has its point there: the journal keeps them, and
 the row at the start draws them again."
   (when-let* ((turns romacs-agent-ui--turns)
               ((> turns 0))
-              (starts (romacs-agent-ui--prompt-starts (1+ (* 2 turns))))
+              (starts (romacs-agent-ui--input-starts (1+ (* 2 turns))))
               ((> (length starts) (* 2 turns)))
               (cut (nth (1- turns) starts))
               ((not (seq-some (lambda (window) (< (min (window-start window) (window-point window)) cut))
@@ -1639,11 +1652,11 @@ recorded before it would land elsewhere."
   "Draw this chat's earlier turns too, `romacs-agent-chat-turns' more,
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
-  (let ((drawn (length (romacs-agent-ui--prompt-starts))))
+  (let ((drawn (length (romacs-agent-ui--input-starts))))
     (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 30)))
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
-    (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--prompt-starts drawn)))))
+    (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
       (goto-char at)
       ;; Where it was: the turns drawn now are above.
       (dolist (window (get-buffer-window-list nil nil t))

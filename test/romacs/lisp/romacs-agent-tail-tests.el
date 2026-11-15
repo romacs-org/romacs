@@ -191,6 +191,27 @@ result."
              (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5 6 7 8))))
          (kill-buffer buffer))))))
 
+;; Tasks' results arriving are inputs too, each a turn, drawn as cards
+;; rather than prompts: the chat counts them as its journal's tail does.
+(ert-deftest romacs-agent-chat-counts-arrivals-as-turns ()
+  (romacs-agent-tail-tests--with-session
+   5 0
+   (lambda (session _journal)
+     (cl-letf (((symbol-function 'romacs-agent-ui--wakes)
+                (lambda (_session text) (and (not (equal text "question 1")) (list text))))
+               ((symbol-function 'romacs-agent-ui--arrival)
+                (lambda (session event wake)
+                  (romacs-agent-ui--line session event (concat "⇠ " wake)))))
+       (let* ((romacs-agent-chat-turns 2) (buffer (romacs-agent-tail-tests--open session)))
+         (unwind-protect
+             (with-current-buffer buffer
+               (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5)))
+               (goto-char (point-min))
+               (romacs-agent-chat-earlier)
+               (should (equal (romacs-agent-tail-tests--questions buffer) '(2 3 4 5)))
+               (should (looking-at-p "⇠ question 4")))
+           (kill-buffer buffer)))))))
+
 ;; A chat made before its supervisor wrote any journal: empty, and no row.
 (ert-deftest romacs-agent-chat-without-a-journal ()
   (romacs-agent-tail-tests--with-session
