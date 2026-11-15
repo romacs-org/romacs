@@ -1410,7 +1410,12 @@ fn evaluate(
                 }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
-                    let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
+                    // As GNU's startup says it (startup.el `startup--load-user-init-file'):
+                    // a *Warnings* buffer the first frame shows.
+                    let warned = vm.eval_source(&format!(
+                        "(display-warning 'initialization (format-message \"An error occurred while loading your init file:\\n\\n%s\\n\\nTo ensure normal operation, you should investigate and remove the cause of the error in your initialization file.\" {}) :error)",
+                        startup::lisp_string(&error)));
+                    if warned.is_err() { let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details"); }
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);

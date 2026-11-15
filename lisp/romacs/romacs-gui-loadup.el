@@ -123,6 +123,8 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
 ;; (the Rum palette, the launch font) keeps its own spec.
 (frame-set-background-mode (selected-frame))
 
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label))
+
 (defun romacs-gui-loadup--init-loaded (file)
   "Tell the launch screen the init loaded FILE (`after-load-functions')."
   (romacs-startup-progress 'init (concat "Loading your init: " (file-name-base file))))

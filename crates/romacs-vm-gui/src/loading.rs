@@ -93,16 +93,25 @@ fn report() -> std::sync::MutexGuard<'static, Option<Report>> {
     REPORT.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+impl Report {
+    fn new(expected: Profile) -> Self {
+        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned() }
+    }
+
+    /// STAGE reached, now at LABEL (empty: the words stay).
+    fn step(&mut self, stage: &str, label: &str) {
+        let count = self.counts.entry(stage.to_owned()).or_insert(0);
+        *count += 1;
+        let key = if *count == 1 { stage.to_owned() } else { format!("{stage}#{count}") };
+        self.seen.push((key, self.began.elapsed().as_secs_f64()));
+        if !label.is_empty() { label.clone_into(&mut self.label); }
+    }
+}
+
 /// Startup reached STAGE, now at LABEL (empty: the words stay).  Nothing
 /// once the screen has gone, or when none shows.
 pub fn step(stage: &str, label: &str) {
-    if let Some(report) = report().as_mut() {
-        let count = report.counts.entry(stage.to_owned()).or_insert(0);
-        *count += 1;
-        let key = if *count == 1 { stage.to_owned() } else { format!("{stage}#{count}") };
-        report.seen.push((key, report.began.elapsed().as_secs_f64()));
-        if !label.is_empty() { label.clone_into(&mut report.label); }
-    }
+    if let Some(report) = report().as_mut() { report.step(stage, label); }
 }
 
 /// What a finished startup phase (`startup::mark_phase`) leads to next,
@@ -122,6 +131,10 @@ fn after(phase: &str) -> Option<&'static str> {
 /// Startup phase PHASE ended: an event, with what comes next.
 pub fn phase(phase: &str) { step(phase, after(phase).unwrap_or("")); }
 
+impl Report {
+    fn phase(&mut self, phase: &str) { self.step(phase, after(phase).unwrap_or("")); }
+}
+
 /// The words and the bar now.
 fn view() -> Option<(String, f64)> {
     report().as_ref().map(|r| (r.label.clone(), fraction(&r.expected, &r.seen, r.began.elapsed().as_secs_f64())))
@@ -134,10 +147,11 @@ pub fn profile_path() -> Option<PathBuf> {
         .map(|state| state.join("romacs/launch-profile.json"))
 }
 
-/// The screen: [`Loading::finish`] ends it.
+/// The screen: [`Loading::finish`] hands its window to the session;
+/// dropped unfinished (startup failed first) it stops, and keeps no pace.
 pub struct Loading {
     stop: Arc<AtomicBool>,
-    thread: std::thread::JoinHandle<u64>,
+    thread: Option<std::thread::JoinHandle<u64>>,
     profile: Option<PathBuf>,
 }
 
@@ -145,10 +159,10 @@ impl Loading {
     /// End the screen; the presentation the session's own frames start
     /// at, after every one this screen may have submitted.  This launch's
     /// events become the next one's pace.
-    pub fn finish(self) -> u64 {
+    pub fn finish(mut self) -> u64 {
         self.stop.store(true, Ordering::Relaxed);
-        let presentation = self.thread.join().expect("loading painter panicked");
-        if let Some(report) = report().take() && let Some(path) = self.profile {
+        let presentation = self.thread.take().map_or(1, |thread| thread.join().expect("loading painter panicked"));
+        if let Some(report) = report().take() && let Some(path) = self.profile.take() {
             let mut events = report.seen;
             events.push(("first-frame".to_owned(), report.began.elapsed().as_secs_f64()));
             // Beside the first frame, not before it.
@@ -159,6 +173,16 @@ impl Loading {
             });
         }
         presentation
+    }
+}
+
+impl Drop for Loading {
+    /// Unfinished: the painter stops and lets the window go, and what was
+    /// reported is dropped.  After `finish`, nothing is left to do.
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() { let _ = thread.join(); }
+        report().take();
     }
 }
 
@@ -245,7 +269,7 @@ fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &
 pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<PathBuf>) -> Result<Loading, String> {
     let face = romacs_vm::Vm::new().display_default_face()?;
     let expected = profile.as_deref().map(Profile::read).unwrap_or_default();
-    *report() = Some(Report { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned() });
+    *report() = Some(Report::new(expected));
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
     let (first_tx, first) = std::sync::mpsc::channel();
@@ -312,7 +336,7 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<
         report().take();
         return Err(error);
     }
-    Ok(Loading { stop, thread, profile })
+    Ok(Loading { stop, thread: Some(thread), profile })
 }
 
 #[cfg(test)]
@@ -348,11 +372,10 @@ mod tests {
 
     #[test]
     fn repeated_stages_count_and_a_profile_round_trips() {
-        *report() = Some(Report { began: Instant::now(), expected: Profile::default(), seen: vec![], counts: HashMap::new(), label: String::new() });
-        step("init", "Loading your init: org");
-        step("init", "");
-        phase("user-init");
-        let taken = report().take().expect("a report");
+        let mut taken = Report::new(Profile::default());
+        taken.step("init", "Loading your init: org");
+        taken.step("init", "");
+        taken.phase("user-init");
         assert_eq!(taken.seen.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["init", "init#2", "user-init"]);
         assert_eq!(taken.label, "Finishing startup");
         let dir = std::env::temp_dir().join(format!("romacs-loading-{}", std::process::id()));

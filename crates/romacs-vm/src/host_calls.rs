@@ -43,6 +43,8 @@ const SIDES: &[(&str, Side)] = &[
     ("display.family_fonts", Own), ("display.font_families", Own), ("display.open_font", Own),
     ("display.char_font", Own), ("display.glyph_metrics", Own), ("display.clear_font_cache", Own),
     ("display.set_fontsets", Own), ("display.opened_def_font", Own),
+    // fonts.rs: the launch screen's report, a lock in the host's own process.
+    ("display.startup_progress", Own),
     // main.rs: hooks that call the paint sender.
     ("display.set_frame_alpha", Through), ("display.set_visual_config", Through), ("display.lose_device", Through),
     // fonts.rs: native models go to the renderer through the paint sender.
