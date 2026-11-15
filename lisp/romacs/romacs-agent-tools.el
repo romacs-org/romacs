@@ -332,17 +332,25 @@ call stays running until its answer is ready."
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
 
+(defvar romacs-agent-tools--woken-seqs (make-hash-table :test #'eq :weakness 'key)
+  "Each session's last turn end delivered to its parent, as its file was
+read or written here: an end is checked against it without reading it.")
+
 (defun romacs-agent-tools--woken (session)
   "The journal seq of SESSION's last turn end delivered to its parent."
-  (or (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--woken-file session))
-                                       (string-to-number (buffer-string))))
-      0))
+  (or (gethash session romacs-agent-tools--woken-seqs)
+      (puthash session
+               (or (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--woken-file session))
+                                                    (string-to-number (buffer-string))))
+                   0)
+               romacs-agent-tools--woken-seqs)))
 
 (defun romacs-agent-tools--mark-woken (session seq)
   "SESSION's turn ends through SEQ are delivered (never moving back): the
 parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
-    (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))))
+    (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))
+    (puthash session seq romacs-agent-tools--woken-seqs)))
 
 (defconst romacs-agent-tools--wake-limit 16000
   "The most of a child's result a wake carries: the rest is
@@ -666,6 +674,7 @@ waiting for its parent: a session with no journal has had no end but its
 launches' failures, each numbered as the first, so the next one wakes
 its parent again."
   (delete-file (romacs-agent-tools--woken-file child))
+  (remhash child romacs-agent-tools--woken-seqs)
   (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
   (remhash (romacs-agent-id child) romacs-agent-tools--answered)
   (remhash child romacs-agent-tools--handed)

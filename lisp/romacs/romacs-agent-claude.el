@@ -36,11 +36,14 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
 start; else nil."
-  (let* ((records (romacs-agent--journal-records session))
-         (said (cl-position-if #'romacs-agent--record-request records :from-end t))
-         (rolled (cl-position-if #'romacs-agent--rollback-note-p records :from-end t)))
-    (when (and rolled (or (not said) (> rolled said)))
-      (or (romacs-agent--claude-cursor (romacs-agent--live-records records)) 'fresh))))
+  ;; The journal's last prompt or rollback, read from its end: a resume
+  ;; reads only as far back as that, the whole journal only after a
+  ;; rollback.
+  (when-let* ((last (romacs-agent--journal-last
+                     session '("romacsRequest" "\"rollback\"")
+                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)))))
+              ((romacs-agent--rollback-note-p last)))
+    (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh)))
 
 (cl-defun romacs-agent--claude-rollback (session records request)
   "SESSION goes back to before prompt REQUEST by its next run: resumed at
