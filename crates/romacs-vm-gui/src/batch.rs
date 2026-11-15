@@ -148,7 +148,7 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 /// the batch world of the compile environment in the store's `worlds/`,
 /// and that world's identity keys every artifact. An interactive session
 /// never waits for a compile: a load with no artifact reads source and the
-/// session compiles the file in the background (lisp/romacs/romacs-precompile.el).
+/// session compiles the file in the background (lisp/session/romacs-precompile.el).
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
@@ -171,7 +171,6 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
-    if let Some(root) = super::startup::runtime_of(&dir) { runtime.push(root.join("lisp/romacs")); }
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
@@ -295,8 +294,8 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
         }
         Launch::Build => {
             // Room for this world among its family's (its lock file there
-            // makes it the current one), before the build confines this
-            // process to reading the store; no other family's world goes.
+            // makes it the current one), before the build begins; no other
+            // family's world goes.
             match world.prune_family() {
                 Ok(deleted) if deleted.is_empty() => {}
                 Ok(deleted) => eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted})),
@@ -410,10 +409,10 @@ fn chain(dir: &Path) -> Result<Vm, String> {
     Ok(vm)
 }
 
-/// The builder: the chain in build mode up to GNU's dump point, confined
-/// to its read roots, then the world published. The image's length.
+/// The builder: the chain in build mode up to GNU's dump point, then the
+/// world published. The image's length.
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
-    world.begin_build(&world.build_roots(super::world::build_roots(dir))).map_err(|e| e.to_string())?;
+    world.begin_build().map_err(|e| e.to_string())?;
     romacs_vm::host::end_at_dump_point();
     world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
 }

@@ -1,4 +1,4 @@
-//! The help primitives (lisp/romacs/romacs-help.el, keymap.c and syntax.c in
+//! The help primitives (lisp/romacs-help.el, keymap.c and syntax.c in
 //! GNU) against pinned GNU 32.0.50 on the loadup chain, each case's value
 //! with the text it inserted and that text's `font-lock-face' runs:
 //! `text-char-description', `internal-describe-syntax-value',

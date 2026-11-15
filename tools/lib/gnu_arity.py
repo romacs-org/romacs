@@ -14,7 +14,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from lisp_oracle import GNU_SOURCE  # noqa: E402
+import gnu_oracle  # noqa: E402
+from gnu_oracle import GNU_SOURCE  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = 'crates/romacs-vm/tests/fixtures/gnu_defun_arity.json'
@@ -28,7 +29,8 @@ PLATFORM = re.compile(r'^(w32|ns|haiku|android|msdos|dos|pgtk)')
 
 
 def pin(root):
-    return json.loads((root / 'ledger/lisp-pin.json').read_text())['gnu_commit']
+    """The GNU commit the oracle binary was built from, whose C sources this checks against."""
+    return gnu_oracle.mirror_commit(root)
 
 
 def git(gnu, *args):
