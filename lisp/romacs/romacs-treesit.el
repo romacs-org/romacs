@@ -128,14 +128,20 @@ comment pattern."
         (push token (alist-get face by-face)))
       (cons doc
             (mapcar (lambda (entry)
-                      (let ((words (seq-filter (lambda (tok) (string-match-p "\`\w" tok)) (cdr entry)))
-                            (others (seq-remove (lambda (tok) (string-match-p "\`\w" tok)) (cdr entry))))
-                        (cons (mapconcat #'identity
-                                         (delq nil (list (and words (regexp-opt words 'symbols))
-                                                         (and others (concat (regexp-opt others) "\\_>"))))
-                                         "\\|")
-                              (car entry))))
+                      (cons (romacs-treesit--tokens-regexp (cdr entry)) (car entry)))
                     by-face)))))
+
+(defun romacs-treesit--tokens-regexp (tokens)
+  "A regexp for any of TOKENS as a whole token: a symbol boundary at each
+end of a token that is a word character there."
+  (let (groups)
+    (dolist (token tokens)
+      (push token (alist-get (cons (string-match-p "\\`\\w" token)
+                                   (string-match-p "\\w\\'" token))
+                             groups nil nil #'equal)))
+    (mapconcat (pcase-lambda (`((,starts . ,ends) . ,group))
+                 (concat (and starts "\\_<") (regexp-opt group t) (and ends "\\_>")))
+               groups "\\|")))
 
 (defun romacs-treesit--stopgap (window start end)
   "Stopgap faces from START to END of WINDOW's buffer, its first parse out."
@@ -151,7 +157,11 @@ comment pattern."
           (save-excursion
             (save-match-data
               (remove-list-of-text-properties start end '(face))
-              (let ((state (syntax-ppss start)) (pos start))
+              ;; From the text's start, never `syntax-ppss': its
+              ;; `syntax-propertize' may ask the tree (c++-ts-mode's
+              ;; angle brackets), and its cache would keep states read
+              ;; without the properties.
+              (let ((state (parse-partial-sexp (point-min) start)) (pos start))
                 (while (< pos end)
                   (let ((from (nth 8 state)) (string (nth 3 state)))
                     (setq state (parse-partial-sexp pos end nil nil state 'syntax-table)
