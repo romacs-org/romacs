@@ -149,9 +149,16 @@ impl RawTable<data::Object> {
     /// `VectorPart`s go to whichever worker adopts them) and is never handed to
     /// a `&mut` visitor, and the scan for the dead runs after the mark.
     fn seen(&self, i: usize) -> Seen<'_> {
-        use data::Object::*;
         // SAFETY: as above, no `Handed` exists for I, and only plain data is read below.
-        match unsafe { self.get_unsync(i) } {
+        Seen::of(unsafe { self.get_unsync(i) })
+    }
+}
+
+impl<'a> Seen<'a> {
+    /// What the mark and the sweep may read of OBJECT.
+    fn of(object: &'a data::Object) -> Self {
+        use data::Object::*;
+        match object {
             Free => Seen::Free,
             Float(_) => Seen::Float,
             Vector(values) | Record(values) => Seen::Values(values, values.capacity() - values.len()),
@@ -289,6 +296,10 @@ pub(super) struct Marking {
     pub(super) objects: RawTable<data::Object>,
     verify: bool,
     n: usize,
+    /// Whether this process may hold threads (`threads`): then what the
+    /// sweep frees is dropped by the dropper, off the pause, however many
+    /// threads marked. A minor marks on one.
+    graves: bool,
     /// Each sweeping thread's graves, for the dropper as one batch.
     // CELL(Dead)
     batch: Mutex<Vec<Vec<Grave>>>,
@@ -365,7 +376,7 @@ impl Marking {
         let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(minor), vm.closures.raw(minor), vm.cells.raw(minor), vm.objects.raw(minor)) };
         Self {
             conses, closures, cells, objects,
-            verify: vm.gc_stress.verify, n, batch: Mutex::default(),
+            verify: vm.gc_stress.verify, n, graves: threads(vm.gc_stress.threads) > 1, batch: Mutex::default(),
             queue: Injector::new(), outstanding: AtomicUsize::new(0),
             stop: AtomicBool::new(false), parked: AtomicUsize::new(0), park: Mutex::new(()), wake: Condvar::new(),
             serial: Mutex::new(Vec::new()), census: Mutex::default(),
@@ -651,24 +662,19 @@ impl Marking {
         self.conses.holds(&vm.conses) && self.closures.holds(&vm.closures)
             && self.cells.holds(&vm.cells) && self.objects.holds(&vm.objects)
     }
-    /// The dead objects `buried' refuses in VM, found by all threads.
-    pub(super) fn dead_objects(&self, vm: &Vm, own: &mut Worker) -> Vec<u32> {
+    /// The dead objects `buried' refuses in VM: those whose end has side
+    /// effects, which the collecting thread sees to before the sweep.
+    pub(super) fn dead_objects(&self, vm: &Vm) -> Vec<u32> {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
-        let len = self.objects.len();
-        let dead = Mutex::new(Vec::new());
-        self.share_out(own, len.div_ceil(RANGE), |_, i| {
-            let mut found = Vec::new();
-            self.objects.dead_in(i * RANGE..((i + 1) * RANGE).min(len), |i| !self.objects.seen(i).buried(), &mut found);
-            if !found.is_empty() { dead.lock().unwrap().append(&mut found); }
-        });
-        dead.into_inner().unwrap()
+        vm.objects.unreached(|object| !Seen::of(object).buried())
     }
     /// Sweep VM's tables: their freed counts and ends, and the payload the
     /// freed objects held (`data::payload_bytes`), as allocation charged it.
     pub(super) fn sweep(&self, vm: &Vm, own: &mut Worker) -> Swept {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
-        // One batch waits at a time (`DROPPING'); on one thread there is none.
-        let defer = self.n > 1 && !DROPPING.load(Ordering::Acquire);
+        // One batch waits at a time (`DROPPING'); a process with no threads
+        // has none.
+        let defer = self.graves && !DROPPING.load(Ordering::Acquire);
         let lens = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         let chunks: Vec<(usize, Range<usize>)> = lens.iter().enumerate()
             .flat_map(|(table, &len)| (0..len).step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(len))))

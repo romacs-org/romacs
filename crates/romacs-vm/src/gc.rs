@@ -1311,7 +1311,7 @@ impl Vm {
         if self.gc_stress.verify {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
-        let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
+        let Marked { marking, own, doomed, local_live, code_marks, census, state } = marked;
         let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
@@ -1332,7 +1332,7 @@ impl Vm {
         if before_scan {
             let _ = self.alloc_cons(Value::NIL, Value::NIL);
         }
-        let dead = marking.dead_objects(self, &mut own);
+        let dead = marking.dead_objects(self);
         self.unanchor(&dead);
         // Dead-owner entries have been swept. Discard only their unowned
         // slot values before forwarding; every live-owner and active-binding
@@ -1734,11 +1734,11 @@ impl Vm {
         let mut lap = Lap::start();
         self.clear_collection_caches();
         let mut again: Vec<Value> = roots.to_vec();
-        again.extend(self.conses.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 3)));
-        again.extend(self.closures.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 4)));
-        again.extend(self.cells.read_again(|_, _| false).into_iter().map(|i| Value::reference(i, 5)));
+        again.extend(self.conses.read_again(None).into_iter().map(|i| Value::reference(i, 3)));
+        again.extend(self.closures.read_again(None).into_iter().map(|i| Value::reference(i, 4)));
+        again.extend(self.cells.read_again(None).into_iter().map(|i| Value::reference(i, 5)));
         let shared = |_: usize, object: &data::Object| matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_));
-        again.extend(self.objects.read_again(shared).into_iter().map(|i| Value::reference(i + 1, 0)));
+        again.extend(self.objects.read_again(Some(&shared)).into_iter().map(|i| Value::reference(i + 1, 0)));
         for table in [self.conses.logged(), self.closures.logged(), self.cells.logged(), self.objects.logged()] {
             again.extend_from_slice(table);
         }
@@ -1766,12 +1766,12 @@ impl Vm {
         if self.gc_stress.verify {
             self.check_minor(roots);
         }
-        let Marked { marking, mut own, doomed, state, .. } = marked;
+        let Marked { marking, own, doomed, state, .. } = marked;
         let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, .. } = state;
         self.settle_cell_pairs();
         self.doom(&doomed);
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
-        let dead = marking.dead_objects(self, &mut own);
+        let dead = marking.dead_objects(self);
         self.unanchor(&dead);
         self.empty_dead_caches(&symbols, &regions);
         lap.lap(&mut self.gc_times, Phase::Weak);
@@ -2312,6 +2312,23 @@ mod tests {
         let minors = vm.collection_log.records.iter().filter(|record| record.minor).count();
         assert!(minors >= 64, "512 MiB of strings, a minor each 4 MiB: {minors}");
         assert_eq!(vm.collection_log.records.len(), minors, "and no full");
+    }
+
+    /// A minor marks on one thread, yet where the process may hold threads
+    /// what it frees is the dropper's, off the pause, as a full's is.
+    #[test]
+    fn a_minor_leaves_its_dead_to_the_dropper() {
+        let _alone = gc_mark::test::alone();
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_minor(true);
+        vm.set_gc_threads(2);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000)").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(dotimes (_ 2000) (make-string 64 ?x))").unwrap();
+        let buried = vm.gc_stress.buried;
+        assert!(vm.collect_minor(&[]));
+        assert!(vm.gc_stress.buried >= buried + 2000, "the young strings went to the dropper: {} then {}", buried, vm.gc_stress.buried);
     }
 
     /// A minor inside a request, its engine suspended with code and entry

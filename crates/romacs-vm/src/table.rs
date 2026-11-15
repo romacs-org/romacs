@@ -179,15 +179,6 @@ impl<T> RawTable<T> {
         }
         (freed, last)
     }
-    /// The dead entries of RANGE that WANTED, given each index, accepts.
-    pub(crate) fn dead_in(&self, range: std::ops::Range<usize>, wanted: impl Fn(usize) -> bool, found: &mut Vec<u32>) {
-        assert!(range.end <= self.len, "a range past its table");
-        for i in range {
-            if unreached(self.color(i).load(Ordering::Relaxed), self.sticky) && wanted(i) {
-                found.push(i as u32);
-            }
-        }
-    }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
     #[inline(always)]
@@ -728,16 +719,48 @@ impl<T> Table<T> {
     /// the young; being roots, all survive, and the sweep leaves them old
     /// again. No other colour is written. A minor that ends any other way
     /// promotes everything (`Vm::promote_all`), which ages them again.
-    pub(crate) fn read_again(&mut self, whole: impl Fn(usize, &T) -> bool) -> Vec<usize> {
+    /// With no WHOLE, only stored-into entries are wanted, and a word of
+    /// eight colours with none dirty is passed at one test.
+    pub(crate) fn read_again(&mut self, whole: Option<&dyn Fn(usize, &T) -> bool>) -> Vec<usize> {
         let mut again = Vec::new();
-        for (i, (color, entry)) in self.colors.iter_mut().zip(&self.entries).enumerate() {
-            if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
-            if *color & DIRTY != 0 || whole(i, entry) {
-                *color &= !OLD;
-                again.push(i);
+        let (colors, entries) = (&mut self.colors, &self.entries);
+        for (at, entries) in entries.chunks(8).enumerate().map(|(k, chunk)| (k * 8, chunk)) {
+            let colors = &mut colors[at..at + entries.len()];
+            if whole.is_none() && let Ok(bytes) = <[u8; 8]>::try_from(&*colors)
+                && u64::from_le_bytes(bytes) & (LOW_BITS * u64::from(DIRTY)) == 0 {
+                continue;
+            }
+            for (k, (color, entry)) in colors.iter_mut().zip(entries).enumerate() {
+                if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
+                if *color & DIRTY != 0 || whole.is_some_and(|whole| whole(at + k, entry)) {
+                    *color &= !OLD;
+                    again.push(at + k);
+                }
             }
         }
         again
+    }
+    /// The entries in use that the mark standing did not reach and WANTED
+    /// accepts: the dead, before their sweep. Colours are read eight at a
+    /// time, and a word with none unreached, as most are, costs one test.
+    pub(crate) fn unreached(&self, wanted: impl Fn(&T) -> bool) -> Vec<u32> {
+        let mut found = Vec::new();
+        // OLD's bit of each byte, moved down beside its in-use bit, counts
+        // as a mark in a minor's (`sweep_range`).
+        let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
+        for (at, entries) in self.entries.chunks(8).enumerate().map(|(k, chunk)| (k * 8, chunk)) {
+            let colors = &self.colors[at..at + entries.len()];
+            if let Ok(bytes) = <[u8; 8]>::try_from(colors) {
+                let word = u64::from_le_bytes(bytes);
+                if word & LOW_BITS & !(word >> 7 | (word >> 4 & old_too)) == 0 { continue; }
+            }
+            for (k, (&color, entry)) in colors.iter().zip(entries).enumerate() {
+                if unreached(color, self.sticky) && wanted(entry) {
+                    found.push((at + k) as u32);
+                }
+            }
+        }
+        found
     }
     /// Every entry in use becomes old, as a sweep would leave it, and the log
     /// is empty: what a world image holds, whose every entry is old to the
