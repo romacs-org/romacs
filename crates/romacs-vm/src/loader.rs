@@ -461,8 +461,9 @@ impl Vm {
     /// A form's EVALUATED outcome when a world's layer is building: a definition
     /// cut short by a refused effect or a secret it asked for defines nil here
     /// and is kept whole for restore; any other top-level form that asked
-    /// for a secret is kept whole, as code, for restore, and the load goes on
-    /// with the next form.
+    /// for a secret, or met a fact or an effect the build refused, is kept
+    /// whole, as code, for restore, the build answering for nothing it met,
+    /// and the load goes on with the next form.
     fn layer_form_finished(&mut self, evaluated: Result<()>, form: &Form, out: Out<'_>) -> Result<()> {
         if crate::host::mode() != crate::host::Mode::Build {
             return evaluated;
@@ -470,7 +471,12 @@ impl Vm {
         let mut evaluated = evaluated;
         // Each form's own: a definition's is its cut (`layer_form_cut`).
         let asked = crate::host::take_secret_asked();
-        if asked && crate::host::layer_active() && !crate::host::layer_form_is_definition() {
+        let refused_at = crate::host::layer_form_refusals_at();
+        let refused = refused_at.is_some_and(|at| crate::host::refusals() > at);
+        if (asked || refused) && crate::host::layer_active() && !crate::host::layer_form_is_definition() {
+            if let Some(at) = refused_at.filter(|_| refused) {
+                crate::host::forget_refusals_since(at);
+            }
             self.propagated_escape = None;
             self.record_deferred_form(form);
             return Ok(());

@@ -100,7 +100,8 @@ pub(crate) struct Fence {
     /// after its libraries must reproduce (`layer`).
     outputs: Vec<usize>,
     output_digests: Vec<(usize, Result<String, &'static str>)>,
-    pub(super) previous_outputs: Vec<(usize, Result<String, &'static str>)>,
+    /// Each as the superseded run left it and as the next run began.
+    pub(super) previous_outputs: Vec<(usize, Result<String, &'static str>, Result<String, &'static str>)>,
 }
 
 /// A fenced variable: its root, the redirect the fence keeps, and the
@@ -241,20 +242,27 @@ impl Vm {
     }
 
     /// After a layer's libraries, the startup function ran again: each
-    /// variable the superseded run wrote, and the libraries left as it was
-    /// (`supersede_startup`), must hold the content it left, or the
-    /// libraries changed what startup computes, and the build refuses
-    /// naming it. One the libraries wrote too (a global minor mode they
-    /// turned on joins `global-minor-modes') is theirs as much as startup's.
-    pub(crate) fn world_check_startup_outputs(&mut self) {
-        let Some(fence) = self.fence.as_ref() else { return };
-        let previous: Vec<(usize, String)> = fence.previous_outputs.iter()
-            .filter_map(|(slot, digest)| Some((*slot, digest.clone().ok()?))).collect();
-        for (slot, digest) in previous {
-            if self.input_digest(Input::Variable(slot)).as_ref() != Ok(&digest) {
-                host::refuse("fence", json!({"root": Root::Input as u8, "access": "startup-output", "symbol": self.symbol_names[slot]}));
-            }
-        }
+    /// variable the superseded run wrote, with its content as that run left
+    /// it, as this run began and as it ended (`supersede_startup`), for the
+    /// layer to judge (`world_layer_load`).
+    pub(crate) fn world_startup_output_states(&mut self) -> Vec<(usize, String, String, String)> {
+        let Some(fence) = self.fence.as_ref() else { return Vec::new() };
+        let previous: Vec<(usize, String, String)> = fence.previous_outputs.iter()
+            .filter_map(|(slot, first, before)| Some((*slot, first.clone().ok()?, before.clone().ok()?))).collect();
+        previous.into_iter()
+            .filter_map(|(slot, first, before)| Some((slot, first, before, self.input_digest(Input::Variable(slot)).ok()?)))
+            .collect()
+    }
+
+    /// The variables the startup run wrote (before a later run supersedes
+    /// it): what a layer's libraries may change and the next run set back.
+    pub(crate) fn world_startup_outputs(&self) -> Vec<usize> {
+        self.fence.as_ref().map(|fence| fence.output_digests.iter().map(|(slot, _)| *slot).collect()).unwrap_or_default()
+    }
+
+    /// The content digest of the variable at SLOT, as the fence compares it.
+    pub(crate) fn world_variable_digest(&mut self, slot: usize) -> Result<String, &'static str> {
+        self.input_digest(Input::Variable(slot))
     }
 
     /// `romacs--startup-phase`: the startup function's run begins (ON) or
@@ -310,8 +318,8 @@ impl Vm {
         fence.digests.clear();
         fence.outputs.clear();
         let previous = std::mem::take(&mut fence.output_digests);
-        let untouched = previous.into_iter().filter(|(slot, digest)| self.input_digest(Input::Variable(*slot)) == *digest).collect();
-        self.fence_mut().previous_outputs = untouched;
+        let previous = previous.into_iter().map(|(slot, first)| (slot, first, self.input_digest(Input::Variable(slot)))).collect();
+        self.fence_mut().previous_outputs = previous;
         for slot in earlier {
             if let Some(cell) = self.fence_mut().cells.remove(&slot) {
                 self.variable_redirects[slot] = cell.redirect;

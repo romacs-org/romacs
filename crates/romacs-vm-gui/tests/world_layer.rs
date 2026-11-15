@@ -138,6 +138,32 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
+/// A library the init loads at startup that the layer cannot hold (here
+/// it signals) takes every later entry with it: the layer holds the entries
+/// before it, and the init loads it and the rest in its own order.
+#[test]
+fn a_startup_library_left_out_ends_capture_there() {
+    let home = Home::new("prefix");
+    let lisp = home.home.join("lisp");
+    std::fs::write(lisp.join("layer-bad.el"), "(error \"romacs-fixture: this library fails\")\n").unwrap();
+    std::fs::write(lisp.join("layer-tail.el"), "(defvar layer-tail-loaded 1)\n(provide 'layer-tail)\n").unwrap();
+    home.build();
+    let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
+    let plan = Plan::new(&home.init, vec![require("layer-lib"), require("layer-bad"), require("layer-tail")], vec![vec![lisp.display().to_string()]]).unwrap();
+    plan.write(&home.store).unwrap();
+    let said = home.build();
+    assert!(said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    let built: Vec<Vec<String>> = std::fs::read_dir(&home.store).unwrap().filter_map(|e| {
+        let path = e.unwrap().path();
+        let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+        let entries = manifest["events"]["init-layer"]["entries"].as_array()?.clone();
+        manifest["refusals"].as_array().is_none_or(|r| r.is_empty())
+            .then(|| entries.iter().map(|e| e["name"].as_str().unwrap().to_owned()).collect())
+    }).collect();
+    assert_eq!(built, [vec!["layer-lib".to_owned()]], "{said}");
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
 /// Libraries the init only declared are built into its layer after their
 /// configuration's forms. One whose configuration asks for a secret,
 /// through auth-source, straight from the password store or from a plaintext

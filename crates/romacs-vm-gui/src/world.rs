@@ -257,7 +257,8 @@ fn keep_last(layer: &Layer) {
 
 /// FULL's layer over BASE less the entries standing refusals name: each
 /// refused layer's entries are left out and the rest keyed again, until a
-/// key has no standing refusal. A refusal that names no entry (the startup
+/// key has no standing refusal. A library the init loads at startup that is
+/// left out takes every later entry with it, so the init keeps its order. A refusal that names no entry (the startup
 /// run after the libraries, the capture) leaves out the later half of the
 /// entries kept: capture ends earlier, and those load in the session as
 /// from source. None only when nothing is left.
@@ -283,6 +284,17 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
             }
             excluded.extend(later);
         } else {
+            // A library the init loads at startup that the layer cannot hold
+            // ends capture there: it and every later entry load in the
+            // session in the init's order, as from source, and so does a
+            // library declared before it that one of those names.
+            if let Some(cut) = named.iter().copied().filter(|&at| !full.entries[at].declared).min() {
+                let later: Vec<usize> = kept.iter().copied().filter(|&at| at > cut).collect();
+                let names: std::collections::HashSet<&str> = std::iter::once(cut).chain(later.iter().copied())
+                    .map(|at| full.entries[at].name.as_str()).collect();
+                let declared = kept.iter().copied().filter(|&at| at < cut && full.entries[at].declared && names.contains(full.entries[at].name.as_str()));
+                excluded.extend(later.iter().copied().chain(declared.collect::<Vec<_>>()));
+            }
             excluded.extend(named);
         }
         excluded.sort_unstable();

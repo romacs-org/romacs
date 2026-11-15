@@ -235,8 +235,9 @@ struct LayerState {
     /// An effect refused inside the definition form: the form is cut short
     /// and deferred whole to restore (`layer_form_cut`).
     cut: bool,
-    /// A re-seed form that starts a timer ran (`reseed_reads`).
-    timers: bool,
+    /// How many refusals the build had listed as the form began: what it
+    /// meets past these is its own (`layer_form_refusals_at`).
+    refusals_at: usize,
     rerun: bool,
     /// The entry loading is a library the init only declared
     /// (`layer::Entry::declared`): its re-seed forms may wait for their
@@ -270,7 +271,19 @@ pub(crate) fn layer_active() -> bool {
 
 /// The top-level form with HEAD begins, in a layer build.
 fn layer_form(head: &str) {
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = definition(head); layer.tainted = false; layer.cut = false; });
+    let refusals = refusals();
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() {
+        layer.form = definition(head);
+        layer.tainted = false;
+        layer.cut = false;
+        layer.refusals_at = refusals;
+    });
+}
+
+/// How many refusals the build had listed as the top-level form loading
+/// began, in a layer build: the refusals past it are the form's.
+pub(crate) fn layer_form_refusals_at() -> Option<usize> {
+    LAYER.with(|l| l.borrow().as_ref().map(|layer| layer.refusals_at))
 }
 
 /// An effect inside a layer's definition form: not done, and the form
@@ -354,17 +367,8 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
-        if what == "clock" {
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
-        }
     }
     allowed
-}
-
-/// Whether a re-seed form that reads the clock ran since the last call:
-/// a timer the form left is restarted at restore, so the layer may keep it.
-pub(crate) fn layer_timers_allowed() -> bool {
-    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
@@ -492,8 +496,9 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
 
 /// A layer build's state of the top-level form loading: the definition it
-/// is, if one, and whether it read a per-process fact or an effect cut it.
-type LayerForm = (Option<(&'static str, String)>, bool, bool);
+/// is, if one, whether it read a per-process fact or an effect cut it, and
+/// where its refusals begin.
+type LayerForm = (Option<(&'static str, String)>, bool, bool, usize);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
@@ -502,8 +507,13 @@ impl Drop for SiteGuard {
         }
         // A file a form loads has forms of its own: once it is loaded, the
         // form that loaded it goes on as it was, a definition still one.
-        if let Some((form, tainted, cut)) = self.1.take() {
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
+        if let Some((form, tainted, cut, refusals_at)) = self.1.take() {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() {
+                layer.form = form;
+                layer.tainted = tainted;
+                layer.cut = cut;
+                layer.refusals_at = refusals_at;
+            });
         }
         // So is whether it asked for a secret: the file's forms kept theirs.
         if let Some(asked) = self.2.take() {
@@ -526,7 +536,7 @@ pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
         return SiteGuard(None, None, None);
     }
     let site = Rc::new(site());
-    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
+    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut, layer.refusals_at)));
     let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
     layer_form(&site.head);
     SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)

@@ -146,6 +146,11 @@ layer is restored only for the init content its plan was recorded from.")
   (unless (load-history-filename-element (load-history-regexp file))
     (load file nil t)))
 
+(defvar romacs--layer-entry-timers nil
+  "The timers running as a layer build's entry began (`world::layer'):
+the ones the entry starts are cancelled at its end, as the forms that
+started them run again in each restored process.")
+
 (defvar romacs--layer-deferred-after-loads (make-hash-table :test #'equal)
   "The init's configuration forms a layer build left to the session.
 Each key is (LIBRARY . N), as in `romacs--layer-baked-after-loads'; its

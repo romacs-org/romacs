@@ -644,9 +644,30 @@ impl Vm {
         (features, files)
     }
 
-    fn timer_count(&mut self) -> i64 {
-        self.eval_source_raw("(+ (if (boundp 'timer-list) (length timer-list) 0) (if (boundp 'timer-idle-list) (length timer-idle-list) 0))")
-            .ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
+    /// The timers an entry starts are its forms': a timer reads the clock
+    /// as it is made, so the form that made it is one restore runs again (a
+    /// re-seed definition, or a form kept as code), and starts its own. The
+    /// build cancels them, so no image holds a time of the builder's. An idle
+    /// timer keeps no time: it stays.
+    fn cancel_entry_timers(&mut self, start: bool) {
+        let form = if start {
+            "(setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list)))"
+        } else {
+            "(when (boundp 'timer-list)
+               (let ((kept nil))
+                 (dolist (timer timer-list) (when (memq timer romacs--layer-entry-timers) (push timer kept)))
+                 (setq timer-list (nreverse kept)))
+               (setq romacs--layer-entry-timers nil))"
+        };
+        let _ = self.eval_source_raw(form);
+    }
+
+    /// How many objects hold a resource of this process (a live process, a
+    /// sqlite connection, a tree-sitter parser): what no image holds.
+    fn foreign_resources(&self) -> (usize, Option<&'static str>) {
+        let mut found = self.objects.iter().filter_map(crate::data::Object::foreign_resource);
+        let first = found.next();
+        (usize::from(first.is_some()) + found.count(), first)
     }
 
     /// Replay PLAN in a layer build: each entry under its recorded
@@ -676,9 +697,17 @@ impl Vm {
         let directory = plan.init.parent().map(|d| format!("{}/", d.display())).unwrap_or_default();
         let _ = self.eval_source_raw(&format!("(setq noninteractive nil user-init-file {} user-emacs-directory {})",
                                               lisp_string(&plan.init.display().to_string()), lisp_string(&directory)));
+        // The startup run's outputs, by the first entry that changed each:
+        // the one to name when the run after the libraries sets one back.
+        let outputs = self.world_startup_outputs();
+        let mut digests: Vec<_> = outputs.iter().map(|&slot| self.world_variable_digest(slot)).collect();
+        let before_entries: std::collections::HashMap<usize, Result<String, &'static str>> = outputs.iter().copied().zip(digests.iter().cloned()).collect();
+        let mut changed_by: std::collections::HashMap<usize, usize> = Default::default();
         for (at, entry) in plan.entries.iter().enumerate() {
             let paths: Vec<PathBuf> = plan.load_paths[entry.load_path].iter().map(PathBuf::from).collect();
-            let (refusals, timers) = (host::refusals(), self.timer_count());
+            let refusals = host::refusals();
+            self.cancel_entry_timers(true);
+            let resources = self.foreign_resources().0;
             let heads = self.load_heads();
             host::layer_declared(entry.declared);
             host::take_secret_asked();
@@ -700,14 +729,32 @@ impl Vm {
                 if !plan.load_paths[entry.load_path].contains(&path) && !added.contains(&path) { added.push(path); }
             }
             let within = self.innermost_function();
+            self.cancel_entry_timers(false);
+            // A resource the entry left that a collection does not take is
+            // the entry's: no image holds one.
+            let resource = match self.foreign_resources() {
+                (now, _) if now <= resources => None,
+                _ => {
+                    let _ = self.eval_source_raw("(garbage-collect)");
+                    let (now, what) = self.foreign_resources();
+                    (now > resources).then(|| what.unwrap_or("a resource of this process"))
+                }
+            };
             let why = match result {
                 _ if secret.is_some() => secret.map(|f| format!("secret: {f}")),
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
+                Ok(_) if resource.is_some() => resource.map(|what| format!("resource: {what}")),
                 Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
-                Ok(_) if self.timer_count() > timers && !host::layer_timers_allowed() => Some("timer".to_owned()),
                 Ok(_) => None,
             };
             loaded.push(self.loads_since(heads));
+            for (digest, &slot) in digests.iter_mut().zip(&outputs) {
+                let now = self.world_variable_digest(slot);
+                if now != *digest {
+                    changed_by.entry(slot).or_insert(at);
+                    *digest = now;
+                }
+            }
             if let Some(why) = why {
                 host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
                 refused.push((at, why));
@@ -745,7 +792,32 @@ impl Vm {
         host::layer_rerun(false);
         host::layer_end();
         match rerun {
-            Ok(_) => self.world_check_startup_outputs(),
+            // An output no entry changed must be what the first run made
+            // again, or the libraries changed what startup computes (unowned).
+            // One an entry changed must not be set back, to what the first run
+            // or the layer's own setup left: a source session keeps the
+            // library's value there, where a restored one would lose it. One
+            // the run leaves as the libraries made it (a global minor mode they
+            // turned on joins `global-minor-modes') is theirs as much as
+            // startup's.
+            Ok(_) => for (slot, first, _before, after) in self.world_startup_output_states() {
+                let setup = before_entries.get(&slot).and_then(|d| d.as_ref().ok());
+                let wrong = match changed_by.get(&slot) {
+                    Some(_) => after == first || setup == Some(&after),
+                    None => after != first && setup != Some(&after),
+                };
+                if !wrong { continue; }
+                let symbol = self.symbol_names[slot].clone();
+                match changed_by.get(&slot) {
+                    Some(&at) if !refused.iter().any(|(r, _)| *r == at) => {
+                        let why = format!("startup: sets {symbol}, which the startup run after the libraries sets back");
+                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why}));
+                        refused.push((at, why));
+                    }
+                    Some(_) => {}
+                    None => host::refuse("fence", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
+                }
+            },
             Err(error) => host::refuse("fence", json!({"access": "startup-rerun", "error": error})),
         }
         refused
