@@ -148,6 +148,11 @@ layer is restored only for the init content its plan was recorded from.")
 the ones the entry starts are cancelled at its end, as no image holds
 a time of the builder's.")
 
+(defvar romacs--layer-remade-timers nil
+  "At a layer build's entry's end, what restore sets again: the values
+of the variables re-seed forms set (`world::layer'), so a timer one of
+them holds is made again in each restored process.")
+
 (defvar romacs--layer-deferred-after-loads (make-hash-table :test #'equal)
   "The init's configuration forms a layer build left to the session.
 Each key is (LIBRARY . N), as in `romacs--layer-baked-after-loads'; its

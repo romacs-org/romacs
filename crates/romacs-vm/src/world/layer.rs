@@ -645,23 +645,52 @@ impl Vm {
     }
 
     /// The timers an entry starts (START marks where it begins; at its end,
-    /// how many it started): no image holds one, as each holds a time of
-    /// the builder's. One a re-seed form made is made again at restore;
-    /// any other leaves its entry to the session. An idle timer keeps no
-    /// time: it stays.
+    /// how many it started that restore does not make again): no image
+    /// holds one, as each holds a time of the builder's. One a re-seed form
+    /// keeps in its variable (org-persist's lock refresh, a definition kept
+    /// for restore) is made again as restore evaluates that form
+    /// (`remade_values`); any other leaves its entry to the session. An
+    /// idle timer keeps no time: it stays.
     fn cancel_entry_timers(&mut self, start: bool) -> i64 {
-        let form = if start {
-            "(progn (setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list))) 0)"
-        } else {
+        if start {
+            let _ = self.eval_source_raw("(setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list)))");
+            return 0;
+        }
+        let remade = self.remade_values();
+        let remade = self.list_value(&remade);
+        let slot = self.slot("romacs--layer-remade-timers");
+        self.slots[slot].value = remade;
+        self.eval_source_raw(
             "(let ((kept nil) (started 0))
                (when (boundp 'timer-list)
                  (dolist (timer timer-list)
-                   (if (memq timer romacs--layer-entry-timers) (push timer kept) (setq started (1+ started))))
+                   (cond ((memq timer romacs--layer-entry-timers) (push timer kept))
+                         ((memq timer romacs--layer-remade-timers))
+                         (t (setq started (1+ started)))))
                  (setq timer-list (nreverse kept)))
-               (setq romacs--layer-entry-timers nil)
-               started)"
-        };
-        self.eval_source_raw(form).ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
+               (setq romacs--layer-entry-timers nil romacs--layer-remade-timers nil)
+               started)").ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
+    }
+
+    /// What restore sets again: the values of the variables the built-in
+    /// re-seed forms set (`host::reseed_variables`) and of the layer's
+    /// definitions kept for restore (`romacs--world-reseed-forms`), read
+    /// past the fence, which a read of theirs would otherwise answer.
+    fn remade_values(&mut self) -> Vec<crate::Value> {
+        let mut names: Vec<String> = host::reseed_variables().map(str::to_owned).collect();
+        let list = self.slot("romacs--world-reseed-forms");
+        let mut tail = self.slots[list].value;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            if let Ok((_, after)) = self.cons_pair(entry)
+                && let Ok((symbol, _)) = self.cons_pair(after) {
+                names.extend(self.symbol_name_of(symbol));
+            }
+            tail = rest;
+        }
+        names.iter().map(|name| {
+            let slot = self.slot(name);
+            self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(crate::Value::UNBOUND)
+        }).collect()
     }
 
     /// How many objects hold a resource of this process (a live process, a
@@ -736,7 +765,6 @@ impl Vm {
             }
             let within = self.innermost_function();
             let timers = self.cancel_entry_timers(false);
-            let remade = host::layer_timers_allowed();
             // A resource the entry left that a collection does not take is
             // the entry's: no image holds one.
             let resource = match self.foreign_resources() {
@@ -752,7 +780,7 @@ impl Vm {
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
                 Ok(_) if resource.is_some() => resource.map(|what| format!("resource: {what}")),
                 Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
-                Ok(_) if timers > 0 && !remade => Some("timer".to_owned()),
+                Ok(_) if timers > 0 => Some("timer".to_owned()),
                 Ok(_) => None,
             };
             loaded.push(self.loads_since(heads));
