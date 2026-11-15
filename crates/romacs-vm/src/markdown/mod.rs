@@ -14,7 +14,7 @@
 //!
 //! The buffer side (reading a region, writing faces) is
 //! `crate::prim::leaf::markdown`; the kinds' faces are Lisp's
-//! (`romacs-markdown-faces`, lisp/romacs/romacs-markdown.el).
+//! (`romacs-markdown-faces`, lisp/textmodes/romacs-markdown.el).
 mod blocks;
 mod runs;
 mod spans;

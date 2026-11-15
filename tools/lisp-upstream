@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""What GNU Emacs changed in its Lisp since we last looked, for a lane to read and port by hand.
+
+    lisp-upstream digest [--since COMMIT] [--path GLOB] [--ours-only] [--format text|json] [--no-fetch]
+    lisp-upstream port COMMIT FILE...
+    lisp-upstream mark COMMIT
+
+The Lisp in lisp/ is ours; GNU's is a source of changes worth taking, not a pin.
+ledger/lisp-upstream.json records the GNU commit we have read up to (`reviewed_through`).
+`digest` lists GNU's commits after it that touch lisp/, oldest first, each with the files it
+changed and what each is to us: `ours` (lisp/ has a file at that path), `absent` (we have none),
+`new` (GNU added it in that commit), and `also: src test etc/NEWS` when the commit changes those too
+(a Lisp-only port may then be incomplete). Generated and build files (ldefs-boot.el, ChangeLogs,
+Makefiles) are left out. `mark` moves `reviewed_through` once a lane has read them.
+`port` takes COMMIT's change to each FILE (lisp/...) into ours with `git merge-file`: GNU's file before
+the commit is the base, after it theirs, ours is ours; conflicts are left marked, and it exits 1 when
+any are. A ported change a
+package can observe differs from the older oracle binary: record it as a divergence of kind
+"upstream, newer than the oracle" until the oracle is rebuilt past it.
+
+The tool keeps its own blobless clone of the record's repository in ROMACS_GNU_UPSTREAM (default
+$XDG_CACHE_HOME/romacs-lisp-upstream/emacs.git), made on first use and fetched by `digest` unless
+--no-fetch; the oracle's source checkout, which stays at the binary's commit, is not touched.
+"""
+import argparse
+import json
+import os
+import subprocess
+import tempfile
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+from lisp_upstream import classify, parse_log, select  # noqa: E402
+RECORD = ROOT / 'ledger/lisp-upstream.json'
+
+
+def upstream_clone(repository):
+    """The digest's own clone of GNU's repository, made on first use."""
+    cache = os.environ.get('XDG_CACHE_HOME') or str(Path.home() / '.cache')
+    clone = Path(os.environ.get('ROMACS_GNU_UPSTREAM') or Path(cache) / 'romacs-lisp-upstream/emacs.git')
+    if not clone.is_dir():
+        clone.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', 'clone', '--quiet', '--bare', '--filter=blob:none', repository, str(clone)], check=True)
+    return clone
+
+
+def git(repo, *args):
+    return subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True, text=True).stdout
+
+
+def digest(args):
+    record = json.loads(RECORD.read_text())
+    repo = upstream_clone(record.get('fetch', record['repository']))
+    since = args.since or record['reviewed_through']
+    if not args.no_fetch:
+        branch = record.get('branch', 'master')
+        git(repo, 'fetch', '--quiet', 'origin', f'+refs/heads/{branch}:refs/heads/{branch}')
+    head = 'refs/heads/' + record.get('branch', 'master')
+    log = git(repo, 'log', '--reverse', '-z', '--full-diff', '--no-renames', '--name-status',
+              '--format=commit %H\x1f%cs\x1f%s', f'{since}..{head}', '--', 'lisp/')
+    commits = select(classify(parse_log(log), lambda p: (ROOT / p).is_file()), args.path, args.ours_only)
+    if args.format == 'json':
+        print(json.dumps(dict(since=since, head=git(repo, 'rev-parse', head).strip(), commits=commits), indent=1))
+        return 0
+    for c in commits:
+        also = f"   [also: {' '.join(c['also'])}]" if c['also'] else ''
+        print(f"{c['commit'][:12]} {c['date']} {c['subject']}{also}")
+        for f in c['files']:
+            print(f"    {f['status']} {f['ours']:6} {f['path']}")
+    print(f'{len(commits)} commits touching lisp/ after {since[:12]}', file=sys.stderr)
+    return 0
+
+
+def show(repo, rev, path):
+    """PATH's bytes at REV in the clone, or b'' where it has none (an added or deleted file)."""
+    done = subprocess.run(['git', '-C', str(repo), 'show', f'{rev}:{path}'], capture_output=True)
+    return done.stdout if done.returncode == 0 else b''
+
+
+def port(args):
+    record = json.loads(RECORD.read_text())
+    repo = upstream_clone(record.get('fetch', record['repository']))
+    conflicted = False
+    for path in args.files:
+        ours = ROOT / path
+        base, theirs = show(repo, args.commit + '^', path), show(repo, args.commit, path)
+        if not ours.exists():
+            ours.parent.mkdir(parents=True, exist_ok=True)
+            ours.write_bytes(theirs)
+            print(f'{path}: new, taken whole')
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            b, t = Path(tmp) / 'base', Path(tmp) / 'theirs'
+            b.write_bytes(base)
+            t.write_bytes(theirs)
+            done = subprocess.run(['git', 'merge-file', '-L', 'ours', '-L', f'{args.commit[:12]}^', '-L', args.commit[:12],
+                                   str(ours), str(b), str(t)])
+        conflicted |= done.returncode != 0
+        print(f'{path}: ' + ('merged' if done.returncode == 0 else f'{done.returncode} conflict(s) marked'))
+    return 1 if conflicted else 0
+
+
+def mark(args):
+    record = json.loads(RECORD.read_text())
+    repo = upstream_clone(record.get('fetch', record['repository']))
+    try:
+        commit = git(repo, 'rev-parse', '--verify', args.commit + '^{commit}').strip()
+    except subprocess.CalledProcessError:
+        raise SystemExit(f'lisp-upstream: {args.commit} is no commit of {record.get("fetch", record["repository"])}')
+    branch = 'refs/heads/' + record.get('branch', 'master')
+    for ancestor, descendant, why in ((record['reviewed_through'], commit, 'does not descend from reviewed_through'),
+                                      (commit, branch, f'is not on {branch}')):
+        if subprocess.run(['git', '-C', str(repo), 'merge-base', '--is-ancestor', ancestor, descendant]).returncode:
+            raise SystemExit(f'lisp-upstream: {commit[:12]} {why}')
+    record['reviewed_through'] = commit
+    RECORD.write_text(json.dumps(record, indent=2) + '\n')
+    print(f'reviewed through {commit}')
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest='command', required=True)
+    d = sub.add_parser('digest')
+    d.add_argument('--since')
+    d.add_argument('--path', help='only files matching this glob, e.g. lisp/progmodes/*')
+    d.add_argument('--ours-only', action='store_true', help='only files we have or GNU added')
+    d.add_argument('--format', choices=('text', 'json'), default='text')
+    d.add_argument('--no-fetch', action='store_true')
+    p = sub.add_parser('port')
+    p.add_argument('commit')
+    p.add_argument('files', nargs='+')
+    m = sub.add_parser('mark')
+    m.add_argument('commit')
+    args = parser.parse_args()
+    return dict(digest=digest, port=port, mark=mark)[args.command](args)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

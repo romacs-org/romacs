@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint Lisp against a running Romacs (lisp/romacs/romacs-lint.el).
+"""Lint Lisp against a running Romacs (lisp/emacs-lisp/romacs-lint.el).
 
 The host loads each file and holds what it names to what the machine defines:
 unknown functions, wrong argument counts, untrue `declare-function`s, free and
@@ -59,7 +59,7 @@ def environment(binary, home):
     if (binary.parent / (binary.name + '.worlds')).is_dir():
         env.setdefault('ROMACS_RUNTIME_ROOT', str(binary.parent))
     else:
-        env.setdefault('ROMACS_LISP_DIR', str(ROOT / 'lisp/gnu'))
+        env.setdefault('ROMACS_LISP_DIR', str(ROOT / 'lisp'))
     return env
 
 
@@ -71,9 +71,11 @@ def findings(output):
 def key(line):
     """What makes two findings the same one: the file, the level and what is
     wrong. Not the line, which moves, nor the fix, whose suggestion follows
-    what else the machine defines."""
+    what else the machine defines, nor the error of a file that does not load,
+    which follows the first form that fails."""
     found = FINDING.match(line)
-    return (found['file'], found['level'], found['text'].split('; fix: ')[0])
+    wrong = found['text'].split('; fix: ')[0]
+    return (found['file'], found['level'], 'does not load' if wrong.startswith('does not load: ') else wrong)
 
 
 def added(candidate, base):
@@ -114,7 +116,7 @@ def lint(binary, arguments, timeout, root=ROOT):
     another version, so the launcher, not the Lisp, says where a file is.
     STATUS is None unless the lint ran to its closing line: a host that did
     not start, a file that ended the host as it loaded, a timeout."""
-    command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/romacs/romacs-lint.el'), '-f', 'romacs-lint-batch']
+    command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
             done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=home,
@@ -138,15 +140,33 @@ def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
     return [line for _, output, _ in runs for line in findings(output)], errors
 
 
+def renames(status):
+    """{NEW: OLD} of `git diff -z --name-status -M` STATUS: the paths a change moved."""
+    fields, moved, i = status.split('\0'), {}, 0
+    while i < len(fields) and fields[i]:
+        if fields[i].startswith(('R', 'C')):
+            if fields[i].startswith('R'):
+                moved[fields[i + 2]] = fields[i + 1]
+            i += 3
+        else:
+            i += 2
+    return moved
+
+
 def base_files(root, base, files, into):
-    """Write each of FILES as BASE has it under INTO, at its path from ROOT; the ones BASE has."""
+    """Write each of FILES as BASE has it under INTO, at its path from ROOT; the ones BASE has.
+    A file the change moved is BASE's file at its old path, so its findings compare as one file's."""
+    status = subprocess.run(['git', '-C', str(root), 'diff', '-z', '--name-status', '-M', base],
+                            capture_output=True, text=True, errors='replace').stdout
+    moved = renames(status)
     written = []
     for path in files:
         try:
             relative = path.relative_to(root)
         except ValueError:
             continue
-        shown = subprocess.run(['git', '-C', str(root), 'show', f'{base}:{relative.as_posix()}'], capture_output=True)
+        source = moved.get(relative.as_posix(), relative.as_posix())
+        shown = subprocess.run(['git', '-C', str(root), 'show', f'{base}:{source}'], capture_output=True)
         if shown.returncode == 0:
             (into / relative).parent.mkdir(parents=True, exist_ok=True)
             (into / relative).write_bytes(shown.stdout)

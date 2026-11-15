@@ -33,7 +33,7 @@ pub fn gnu_lisp(then: &[&str]) -> Vm {
 fn restored(root: &Path) -> Option<Vm> {
     let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
     let recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
-    World::for_test(store, &recipe, vec![root.to_owned()], || {
+    World::for_test(store, &recipe, || {
         romacs_vm::host::end_at_dump_point();
         Ok((booted(root, true), ()))
     }).map(|(vm, ())| vm)
@@ -51,7 +51,7 @@ fn booted(root: &Path, world: bool) -> Vm {
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     vm.set_load_path(&load_path(root)).unwrap();
     vm.install_lisp_prelude().unwrap();
-    load(&mut vm, root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    load(&mut vm, root, "lisp/session/romacs-loadup-bootstrap.el");
     vm
 }
 
@@ -66,12 +66,23 @@ fn load(vm: &mut Vm, root: &Path, name: &str) {
 }
 
 /// GNU's installed load-path (`test/gnu/run.py` `load_path`): the Lisp
-/// root, its subdirectories in reverse name order with obsolete last, then
-/// `lisp/romacs`.
+/// root, its GNU subdirectories in reverse name order with obsolete last,
+/// then Romacs's own directories (lisp/bundled.json): its subsystems, then
+/// each bundled package.
 fn load_path(root: &Path) -> Vec<PathBuf> {
-    let lisp = root.join("lisp/gnu");
+    let lisp = root.join("lisp");
+    let layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(lisp.join("bundled.json")).unwrap()).unwrap();
+    let names_of = |key: &str| layout[key].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    let packages = layout["packages"].as_str().unwrap().to_owned();
+    let own: Vec<String> = names_of("directories").into_iter().chain(names_of("off_path")).chain([packages.clone()]).collect();
+    let mut romacs: Vec<PathBuf> = names_of("directories").iter().map(|d| lisp.join(d)).filter(|d| d.is_dir()).collect();
+    let mut bundled: Vec<PathBuf> = std::fs::read_dir(lisp.join(&packages)).into_iter().flatten()
+        .filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+    bundled.sort();
+    romacs.extend(bundled);
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
+        .filter(|name| !own.contains(name))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
             && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
         .collect();
@@ -79,6 +90,6 @@ fn load_path(root: &Path) -> Vec<PathBuf> {
     let (obsolete, rest): (Vec<&String>, Vec<&String>) = names.iter().rev().partition(|n| *n == "obsolete");
     std::iter::once(lisp.clone())
         .chain(rest.into_iter().chain(obsolete).map(|n| lisp.join(n)))
-        .chain(std::iter::once(root.join("lisp/romacs")))
+        .chain(romacs)
         .collect()
 }
