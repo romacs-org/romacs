@@ -74,7 +74,7 @@ string, an overlay."
 
 ;; What runs before a redisplay: a batch session has no host to run it.
 (unless (fboundp 'romacs--run-window-change-functions)
-  (load (expand-file-name "vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
 
 (defun romacs-agent-header-tests--header ()
   "The chat's header as its buffer hands it to display."
