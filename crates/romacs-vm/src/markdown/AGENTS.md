@@ -9,7 +9,7 @@ face runs, block structure and table grids.
   `crates/romacs-vm/src/prim/leaf/markdown.rs`, the primitives to
   `crates/romacs-vm/src/prims/markdown.rs`.
 - Faces, and which kind of element gets which (`romacs-markdown-faces`),
-  belong to `lisp/romacs/romacs-markdown.el`.
+  belong to `lisp/textmodes/romacs-markdown.el`.
 - The dialect is `spans::options()` alone.
 - Markdown anywhere in Romacs goes through here: no second parser or regexp
   fontifier for it.
@@ -30,7 +30,7 @@ face runs, block structure and table grids.
   test/romacs/lisp/romacs-markdown-tests.el --file
   test/romacs/lisp/romacs-agent-markdown-tests.el`.
 - A new kind of element: a `Kind` variant in `Kind::ALL`, its default face
-  in `lisp/romacs/romacs-markdown.el`, and a test by kind.
+  in `lisp/textmodes/romacs-markdown.el`, and a test by kind.
 
 ## Traps
 - A partial line can turn the block it starts into the previous one's (a

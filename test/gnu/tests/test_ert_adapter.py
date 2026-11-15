@@ -22,8 +22,8 @@ class BatchAdapter(unittest.TestCase):
         import gnu_oracle
         self.binary = gnu_oracle.require(os.environ.get('ROMACS_GNU_ORACLE')
                                         or os.environ.get('ROMACS_FORCE_ORACLE_PATH'))['path']
-        self.ert = run.ROOT / 'lisp/gnu/emacs-lisp/ert.el'
-        self.adapter = run.ROOT / 'lisp/romacs/romacs-ert-batch.el'
+        self.ert = run.ROOT / 'lisp/emacs-lisp/ert.el'
+        self.adapter = run.ROOT / 'lisp/emacs-lisp/romacs-ert-batch.el'
 
     def fill(self, source):
         """SOURCE with GNU-ERT and ADAPTER replaced by the files' names in
