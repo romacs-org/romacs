@@ -35,6 +35,16 @@ class AddedTest(unittest.TestCase):
         self.assertTrue(lint.COMPLETE.search(NEW + '\nromacs-lint: 1 file, 1 error, 0 warnings, 0 hints\n'))
         self.assertFalse(lint.COMPLETE.search(NEW + '\n'))
 
+    def test_a_findings_file_is_given_from_the_root_whatever_it_was_printed_from(self):
+        # The host works in a private home; the judged code, maybe an older lint, prints from there.
+        home, root = '/tmp/romacs-lint-x', '/w/tree'
+        line = "../../w/tree/lisp/romacs/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+        self.assertEqual(lint.named_from(line, home, root),
+                         "lisp/romacs/a.el:3: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it")
+        base = "../base-copy/lisp/romacs/a.el:5: warning: in f: `x' is a free variable; fix: `defvar' it, or bind it"
+        self.assertEqual(lint.named_from(base, '/tmp/home', '/tmp/base-copy').split(':')[0], 'lisp/romacs/a.el')
+        self.assertEqual(lint.named_from('romacs-lint: 1 file, 0 errors', home, root), 'romacs-lint: 1 file, 0 errors')
+
     def test_a_file_the_base_lacks_gives_all_its_findings(self):
         self.assertEqual(lint.added([NEW, HINT], []), [NEW, HINT])
 

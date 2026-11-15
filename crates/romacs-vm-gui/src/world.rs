@@ -436,11 +436,7 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
 /// the fonts the layout engine measures with (a batch world's too,
 /// `batch::boot`, which measures none).
 pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
-    let mut roots = vec![dir.to_owned()];
-    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/romacs")));
-    // The bundled layout, which the bundled autoloads' scan reads.
-    roots.extend(startup::runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
-    roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
+    let mut roots = startup::lisp_roots(dir);
     roots.extend(crate::fonts::icon_font_dirs());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
