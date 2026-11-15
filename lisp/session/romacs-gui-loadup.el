@@ -142,7 +142,7 @@ is a step of the launch screen's progress, until
   (add-hook 'after-load-functions #'romacs-gui-loadup--init-loaded))
 
 ;; The user's init is loaded, and an error that stops it said, by
-;; lisp/romacs/romacs-init-load.el.
+;; lisp/session/romacs-init-load.el.
 (require 'romacs-init-load)
 
 (defun romacs-gui-loadup-after-init ()
