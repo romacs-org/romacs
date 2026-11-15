@@ -798,6 +798,11 @@ instances) is derived again when it changes.")
       what a whole record among them says again (Claude's `stream_event'
       deltas before their `assistant' record): a chat's replay passes over
       it unparsed (`romacs-agent--read-journal');
+  :result-summary (START END)   optional: in a buffer of journal lines,
+      the calls the line from START to END ends, read from its text
+      unparsed, when it says nothing else: a list of (:id :failed :parent
+      :bytes :seq :time), else nil.  A chat's replay draws such calls'
+      ends from it and parses their outputs only when they are opened;
   :suggestions WORDS   optional: the words its command line asks for a
       predicted next prompt by (`romacs-agent--suggestion-words'), each a
       `suggestion' event (:text) after a turn's end;
@@ -1857,14 +1862,17 @@ passed over, unparsed."
         (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from end))
         (goto-char (point-min))
         (let ((skip (and skip (save-excursion (funcall skip)))))
+         ;; Each line's end by a newline's search: `line-end-position'
+         ;; over a journal's long lines costs many times more.
          (while (not (eobp))
-          (let ((end (line-end-position)))
-            (unless (and skip (funcall skip (point) end))
+          (let* ((start (point))
+                 (end (if (search-forward "\n" nil t) (1- (point)) (point-max))))
+            (unless (and skip (funcall skip start end))
               (let ((record (ignore-errors
-                              (json-parse-string (buffer-substring (point) end)
+                              (json-parse-string (buffer-substring start end)
                                                  :object-type 'hash-table :null-object :null :false-object :false))))
-                (when (hash-table-p record) (funcall function record)))))
-          (forward-line 1)))))))
+                (when (hash-table-p record) (funcall function record))))
+            (goto-char (min (1+ end) (point-max))))))))))
 
 (defun romacs-agent--filter (process chunk)
   "Handle the records PROCESS's supervisor sent, CHUNK the latest output.

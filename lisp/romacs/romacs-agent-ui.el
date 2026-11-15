@@ -535,13 +535,18 @@ much it gave when it is big.  Point is on the row."
       ""))
 
 (defun romacs-agent-ui--ref-output (ref)
-  "The output REF points at, (:session S :id ID :from BYTE :to BYTE): the
-journal record there, parsed as its harness parses it."
+  "The output REF points at, (:session S :id ID :seq SEQ :from BYTE :to
+BYTE): the journal record there, parsed as its harness parses it.  A
+record there that is not SEQ (bytes counted wrong) is looked for by its
+seq in the whole journal."
   (when-let* ((session (plist-get ref :session))
-              (record (car (let ((records nil))
-                             (romacs-agent--read-journal session (lambda (record) (push record records))
-                                                         (plist-get ref :from) (plist-get ref :to))
-                             records)))
+              (read (lambda (from to)
+                      (let ((found nil))
+                        (romacs-agent--read-journal
+                         session (lambda (record) (when (eql (gethash "seq" record) (plist-get ref :seq)) (setq found record)))
+                         from to)
+                        found)))
+              (record (or (funcall read (plist-get ref :from) (plist-get ref :to)) (funcall read nil nil)))
               (out (gethash "out" record)))
     (plist-get (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'tool)
                                                 (equal (plist-get event :id) (plist-get ref :id))))
@@ -1258,8 +1263,11 @@ or a repeat."
          (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
            (romacs-agent-ui--note session event (format "harness exited (%s)" (plist-get event :status)))))
         (_ nil))
-      (romacs-agent-ui--composer-update)
-      (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start)))
+      ;; A replay's events are long over: its end says where the chat
+      ;; is (`romacs-agent-ui--fill').
+      (unless romacs-agent-ui--replaying
+        (romacs-agent-ui--composer-update)
+        (when (and (eq (plist-get event :type) 'input) (overlayp romacs-agent-ui--composer)) (romacs-agent-ui--tick-start))))
 
 (defvar romacs-agent-ui--turn-starts (make-hash-table :test #'eq :weakness 'key)
   "Each session's last turn start seen live: (TIME . DONE-SEQ), the turn
@@ -2298,9 +2306,13 @@ it has more."
   "Render SESSION's journal from byte FROM (a record's start, or nil for
 its start) into the current chat buffer."
   ;; A copy parses, so the live session's own state is not replayed over.
-  (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t))
+  (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t)
+        ;; Each call's tool, by id, as its start is drawn.
+        (names (make-hash-table :test #'equal)))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
+                   (when (and (eq (plist-get event :type) 'tool) (eq (plist-get event :state) 'started))
+                     (puthash (plist-get event :id) (plist-get event :name) names))
                    ;; The scratch copy's turn data, for the footers it draws.
                    (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
                    ;; With no supervisor, no event reached the session: its
@@ -2309,13 +2321,59 @@ its start) into the current chat buffer."
                    ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
-      ;; A message said whole later is drawn whole, as one delta, not
-      ;; each of its stream's (its harness's `:streamed-skip').
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from nil
-                                  (romacs-agent--harness-get session :streamed-skip))))
+                                  (romacs-agent-ui--replay-skip session scratch from names))))
   ;; A turn its journal leaves running goes on in its run; any other run
   ;; is done.
   (unless (romacs-agent-ui--running-p) (romacs-agent-ui--run-settle)))
+
+(defun romacs-agent-ui--replay-skip (session scratch from names)
+  "What SESSION's replay into SCRATCH from byte FROM passes over, as
+`romacs-agent--read-journal' takes it: a message said whole later is
+drawn whole, as one delta, not each of its stream's (its harness's
+`:streamed-skip'); a call whose row draws its end without its output is
+ended from its result's text (`:result-summary'), its output parsed
+when its row is opened.  NAMES has each call's tool by id."
+  (let ((streamed (romacs-agent--harness-get session :streamed-skip))
+        (summary (romacs-agent--harness-get session :result-summary)))
+    (and (or streamed summary)
+         (lambda ()
+           (let ((stream-skip (and streamed (funcall streamed))))
+             (lambda (start end)
+               (or (and stream-skip (funcall stream-skip start end))
+                   (and summary (romacs-agent-ui--summarized session scratch from names (funcall summary start end)
+                                                             start end)))))))))
+
+(defun romacs-agent-ui--later-p (name)
+  "Whether a call of tool NAME draws its row's end without its output:
+no renderer of its asks the output then (a card, a count, a reply, a
+body shown), and it starts no subagent."
+  (and (stringp name) (not (member name '("Agent" "Task")))
+       (let ((renderer (romacs-agent-rows-get (romacs-agent-ui--tool-name name))))
+         (not (or (plist-get renderer :ended) (plist-get renderer :card)
+                  (plist-get renderer :answers) (plist-get renderer :shown))))))
+
+(defun romacs-agent-ui--summarized (session scratch from names results start end)
+  "End the calls RESULTS (`:result-summary''s, of the line from START to
+END in a buffer of SESSION's journal read from byte FROM) in SCRATCH, as
+its record would, each output a pointer to the record; nil, and the
+line is parsed, unless every call's row draws its end without it."
+  (when (and results (cl-every (lambda (result) (romacs-agent-ui--later-p (gethash (plist-get result :id) names)))
+                               results))
+    (let* ((seq (plist-get (car results) :seq))
+           (base (or from 0))
+           (ref (list :session session :seq seq
+                      :from (+ base (1- (position-bytes start))) :to (+ base (position-bytes end)))))
+      (when (> seq (romacs-agent-seq scratch))
+        (setf (romacs-agent-seq scratch) seq)
+        (while results
+          (let ((result (pop results)))
+            (romacs-agent--raise scratch (list :type 'tool :state (if (plist-get result :failed) 'failed 'completed)
+                                               :id (plist-get result :id) :parent (plist-get result :parent)
+                                               :output-ref (append ref (list :id (plist-get result :id)))
+                                               :output-bytes (plist-get result :bytes)
+                                               :seq seq :last (null results) :time (plist-get result :time))))))
+      t)))
 
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the
