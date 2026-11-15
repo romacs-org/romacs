@@ -514,7 +514,6 @@ fn declare_stock_theme(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<()
 fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
-    install_window_change(vm)?;
     policy!(vm, root, "session/romacs-startup.el")?;
     declare_stock_theme(vm, root)?;
     policy!(vm, root, "romacs-find-file.el")?;
@@ -613,18 +612,7 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// chain (world.rs); a source boot takes them after it. Dired is GNU's
 /// dired.el here: the workspace's browser would shadow its autoloads and
 /// its `defvar` of `dired-mode-map` would keep GNU's keys out.
-/// window.c's change functions (lisp/vm/window-change.el), which every
-/// redisplay runs (host_input.rs), installed before a live launch's first
-/// one: a resize can repaint before the first key reaches the command loop
-/// that would install them. Their state is defvar'd, so that later install
-/// keeps it.
-fn install_window_change(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(include_str!("../../../lisp/vm/window-change.el"))?;
-    Ok(())
-}
-
 pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
-    install_window_change(vm)?;
     if launch == Launch::GnuOnly {
         return Ok(());
     }
