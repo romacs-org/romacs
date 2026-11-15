@@ -66,8 +66,8 @@ leaves an Emacs Lisp file which read before unreadable."
              (after (romacs-agent-gate--after tool input before)))
         (when (and after (not (and before (romacs-agent-gate--unreadable before))))
           (when-let* ((where (romacs-agent-gate--unreadable after)))
-            (format "This %s leaves %s unreadable as Emacs Lisp: the form that starts at line %d does not read (%s). \
-It is written as asked; correct it so its parentheses and strings balance."
+            (format "This %s would leave %s unreadable as Emacs Lisp: the form that starts at line %d does not read (%s). \
+Romacs lets it go on; correct it so its parentheses and strings balance."
                     tool (abbreviate-file-name file) (car where) (cdr where))))))))
 
 (provide 'romacs-agent-gate)

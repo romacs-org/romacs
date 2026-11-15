@@ -91,7 +91,7 @@
         ;; Its echo is known by its request id, not taken for another line's.
         (should (equal (romacs-agent--step-id reply) "h1"))
         (let ((paid (romacs-agent--claude-input-events session reply)))
-          (should (string-match-p "written as asked" (plist-get (cl-find 'status paid :key (lambda (e) (plist-get e :type))) :text)))
+          (should (string-match-p "Romacs lets it go on" (plist-get (cl-find 'status paid :key (lambda (e) (plist-get e :type))) :text)))
           (should-not (cl-find 'answered paid :key (lambda (e) (plist-get e :type))))
           (dolist (event paid) (romacs-agent--raise session event))))
       (should (eq (romacs-agent--claude-next session) :ready))
