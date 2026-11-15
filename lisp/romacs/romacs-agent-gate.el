@@ -1,22 +1,23 @@
-;;; romacs-agent-gate.el --- What an agent's edit would do, before it lands  -*- lexical-binding: t -*-
+;;; romacs-agent-gate.el --- What an agent's edit would do, said before it lands  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; A harness asks Romacs about an edit before it writes it (Claude Code's
 ;; PreToolUse hook).  The gate applies the edit to the file's text, in
-;; memory, and refuses one that would leave an Emacs Lisp file that read
-;; before unreadable, saying where: the model fixes its edit in the same
-;; turn, and the broken file never lands.  An edit the gate cannot apply
-;; (its old text not found) is the harness's to refuse: the gate lets it be.
+;; memory, and when it would leave an Emacs Lisp file that read before
+;; unreadable, it says where, as context for the model: the edit is
+;; written as asked (Romacs refuses an agent nothing), and the model can
+;; correct it in the same turn.  An edit the gate cannot apply (its old
+;; text not found) it says nothing of.
 
 ;;; Code:
 
 (require 'cl-lib)
 
 (defcustom romacs-agent-gate t
-  "Whether an agent's edit to an Emacs Lisp file that would leave it
-unreadable is refused before it is written."
+  "Whether an agent is told, as its edit is written, that the edit leaves
+an Emacs Lisp file unreadable, and where."
   :type 'boolean :group 'romacs-agent)
 
 (defun romacs-agent-gate--replace (text old new all)
@@ -56,8 +57,8 @@ it reads to its end."
       (scan-error (cons (line-number-at-pos (point)) (cadr err))))))
 
 (defun romacs-agent-gate-check (tool input)
-  "Nil when TOOL's INPUT may go on, else why not: an edit that leaves an
-Emacs Lisp file which read before unreadable."
+  "Nil when TOOL's INPUT has nothing to be told, else what: an edit that
+leaves an Emacs Lisp file which read before unreadable."
   (let ((file (and romacs-agent-gate (hash-table-p input) (gethash "file_path" input))))
     (when (and (stringp file) (string-match-p "\\.el\\'" file))
       (let* ((before (and (file-readable-p file)
@@ -65,8 +66,8 @@ Emacs Lisp file which read before unreadable."
              (after (romacs-agent-gate--after tool input before)))
         (when (and after (not (and before (romacs-agent-gate--unreadable before))))
           (when-let* ((where (romacs-agent-gate--unreadable after)))
-            (format "Romacs refused this %s: it would leave %s unreadable as Emacs Lisp: the form that starts at line %d does not read (%s). \
-The file is unchanged; correct the edit so its parentheses and strings balance."
+            (format "This %s leaves %s unreadable as Emacs Lisp: the form that starts at line %d does not read (%s). \
+It is written as asked; correct it so its parentheses and strings balance."
                     tool (abbreviate-file-name file) (car where) (cdr where))))))))
 
 (provide 'romacs-agent-gate)
