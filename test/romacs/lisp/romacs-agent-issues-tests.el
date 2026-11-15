@@ -23,7 +23,10 @@ delegated review task of a registered parent."
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (task (romacs-agent--make :id "tttttttt-0000-4000-8000-000000000000" :harness 'claude :title "review it"
                                     :provider "claude" :state 'running :caught-up t
+                                    ;; Its own directory: what beta's limit moves journal goes there.
+                                    :dir (expand-file-name "task" root)
                                     :options (list :parent "pppppppp-0000-4000-8000-000000000000" :role "review"))))
+     (make-directory (romacs-agent-dir task) t)
      (puthash (romacs-agent-id task) task romacs-agent--sessions)
      (unwind-protect (progn ,@body) (delete-directory root t))))
 
