@@ -96,7 +96,7 @@
   "glyphs_walked": 385,
   "font_identities": 737,
   "bytes_uploaded": 166000,
-  "own_instructions": 6720000,
+  "own_instructions": 6820000,
   "extra_frames": 0
  },
  "fontify-typed-elisp": {
@@ -120,13 +120,13 @@
   "extra_frames": 0
  },
  "scroll-line": {
-  "rows_tessellated": 38,
-  "rows_reused": 0,
-  "cursor_rows": 0,
-  "glyphs_walked": 2240,
-  "font_identities": 4470,
-  "bytes_uploaded": 869000,
-  "own_instructions": 23500000,
+  "rows_tessellated": 3,
+  "rows_reused": 35,
+  "cursor_rows": 1,
+  "glyphs_walked": 223,
+  "font_identities": 425,
+  "bytes_uploaded": 105000,
+  "own_instructions": 6170000,
   "extra_frames": 0
  }
 }

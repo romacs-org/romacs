@@ -1,6 +1,15 @@
 use std::time::{Duration, Instant};
 use romacs_display_runtime::thread_comm::InputEvent;
 
+/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
+/// and on a software rasterizer, every headless harness's, only when
+/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
+/// window has chosen its adapter.
+pub fn display_animates(sender: &romacs_display_runtime::paint_host::PaintSender) -> Option<bool> {
+    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
+    sender.software_adapter().map(|software| !software || forced())
+}
+
 /// A pass's input: the AVAILABLE events of INCOMING that arrived before it
 /// join the loop's QUEUE; later arrivals wait for the next pass, so input
 /// that keeps coming never postpones a dirty presentation.

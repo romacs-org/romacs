@@ -347,6 +347,7 @@ impl WgpuRenderer {
         // backgrounds so they sit below text — magit section fold arrows). ---
         for glyph in &frame_glyphs.glyphs {
             if let FrameGlyph::FringeBitmap {
+                window_id,
                 x,
                 y,
                 width,
@@ -372,6 +373,7 @@ impl WgpuRenderer {
                 );
                 // A bitmap wider than its column spills past it.
                 super::root_picture::reach::note_points(
+                    window_id.get(),
                     romacs_display_protocol::types::Rect::new(*x, *y, *width, *height),
                     foreground_rect_vertices[start..].iter().map(|v| v.position),
                 );
