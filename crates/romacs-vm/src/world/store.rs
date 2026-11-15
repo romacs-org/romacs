@@ -593,6 +593,62 @@ impl World {
         }
     }
 
+    /// A test's costly boot from RECIPE's world in STORE: its VM restored,
+    /// reinitialized and past `romacs-world-restart`, so the test takes the
+    /// startup steps in its own process (its environment, temporary
+    /// directory and user are its own, not the builder's), with what the
+    /// builder carried; None to boot from source. Only a process that runs
+    /// one test (`host::one_test_process`), whose global allocator is the
+    /// arena and which maps no image yet may map one: under libtest's
+    /// threads, which run many tests in one process, the mapping would be
+    /// raced, and a process maps one image. A missing or stale world is built
+    /// first by a builder that runs the same test again (this process's own
+    /// arguments); BUILD gives it the VM and the carry, in build mode. The
+    /// builder first deletes the worlds of this executable before it was
+    /// rebuilt, and exits once it has built, or failed to; the test then
+    /// boots from source.
+    ///
+    /// # Panics
+    ///
+    /// When the restored VM's `romacs-world-restart` fails: the world is
+    /// the test's to answer for.
+    #[must_use]
+    pub fn for_test<T: super::safe::SnapshotSafe + super::safe::Schema + 'static>(store: PathBuf, recipe: &[String],
+                                                            build: impl FnOnce() -> Result<(Vm, T), String>) -> Option<(Vm, T)> {
+        // Before the key, which reads this executable.
+        if !host::one_test_process() || !arena::serves_heap() || arena::mapped_image().is_some() {
+            return None;
+        }
+        // Its family (`family`) is the whole recipe's and this
+        // executable's: the worlds a build prunes are those of this
+        // executable before it was rebuilt, never another boot's.
+        let exe = host::current_exe().ok()?;
+        let world = World::new(store, vec![format!("consumer test: {}", recipe.join("; ")), format!("exe {}", exe.display())]).ok()?;
+        match world.launch::<T>(host::own_arguments, true, || {}) {
+            Launch::Restored { mut vm, carry, .. } => {
+                vm.world_reinit();
+                if let Err(error) = vm.eval_source("(romacs-world-restart)") {
+                    panic!("a restored test world: romacs-world-restart: {error}");
+                }
+                Some((*vm, carry))
+            }
+            Launch::Build => {
+                // The family's other worlds are of this executable before it
+                // was rebuilt, which nothing restores: gone before the build.
+                if let Err(error) = world.prune_family_to_current() {
+                    eprintln!("test world: prune failed: {error}");
+                }
+                let outcome = world.begin_build().map_err(|e| e.to_string())
+                    .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
+                if let Err(error) = &outcome {
+                    eprintln!("test world: {error}");
+                }
+                host::exit_at_once(i32::from(outcome.is_err()))
+            }
+            Launch::Chain { .. } => None,
+        }
+    }
+
     /// The world restored, when it is usable now, without building: for a
     /// worker isolate, which runs its spawner's exact world or nothing
     /// (lisp/romacs/vm/isolate.el `isolate-world-unavailable').
@@ -987,24 +1043,26 @@ struct Stored {
     refusal: bool,
 }
 
-/// The worlds of WORLDS to delete, family by family (`plan_family`).
-fn prune_plan(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+/// The worlds of WORLDS to delete, family by family (`plan_family`), each
+/// keeping at most MOST beside those it must.
+fn prune_plan(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let mut families: Vec<&str> = worlds.iter().map(|w| w.family.as_str()).collect();
     families.sort_unstable();
     families.dedup();
     families.into_iter()
-        .flat_map(|family| plan_family(&worlds.iter().filter(|w| w.family == family).cloned().collect::<Vec<_>>(), current, now))
+        .flat_map(|family| plan_family(&worlds.iter().filter(|w| w.family == family).cloned().collect::<Vec<_>>(), current, now, most))
         .collect()
 }
 
 /// The worlds of WORLDS, one family's, to delete, CURRENT's kept: those a
 /// builder or a restored process holds are kept too, and the others, most
 /// recently used first, while they were used within `UNUSED` and the family
-/// stays within `MOST_WORLDS` worlds and `MOST_BYTES` bytes. A refusal is
+/// stays within MOST worlds (`MOST_WORLDS` but for a test's) and
+/// `MOST_BYTES` bytes. A refusal is
 /// kept while it is within `UNUSED`, outside the bounds: forgotten, the
 /// next launch would build its refused inputs again, as an init layer's
 /// resolution does after each one it forgets.
-fn plan_family(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+fn plan_family(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
     let refusal = |w: &&Stored| w.refusal && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
     let (mut count, mut bytes) = worlds.iter().filter(kept).fold((0, 0), |(c, b), w| (c + 1, b + w.bytes));
@@ -1012,7 +1070,7 @@ fn plan_family(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
     others.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.key.cmp(&b.key)));
     let mut delete = vec![];
     for world in others {
-        if now.saturating_sub(world.used) <= UNUSED && count < MOST_WORLDS && bytes + world.bytes <= MOST_BYTES {
+        if now.saturating_sub(world.used) <= UNUSED && count < most && bytes + world.bytes <= MOST_BYTES {
             count += 1;
             bytes += world.bytes;
         } else {
@@ -1103,16 +1161,27 @@ impl World {
     /// for files no kept world or executable is, once they are a week old.
     /// The worlds deleted.
     pub fn prune(&self) -> std::io::Result<Vec<String>> {
-        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), false)
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), false, MOST_WORLDS)
     }
 
     /// `prune` within this world's family only: what a batch builder
     /// bounds, so it never deletes a GUI's world, however long unused.
     pub fn prune_family(&self) -> std::io::Result<Vec<String>> {
-        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true)
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true, MOST_WORLDS)
     }
 
-    fn prune_in(&self, home: Option<&Path>, own_family: bool) -> std::io::Result<Vec<String>> {
+    /// `prune_family` keeping no world beside this one and those in use: a
+    /// test executable's (`for_test`), whose others are of the executables
+    /// it was before it was rebuilt, which no process can restore.
+    ///
+    /// # Errors
+    ///
+    /// When the store cannot be read or a world's files removed.
+    pub fn prune_family_to_current(&self) -> std::io::Result<Vec<String>> {
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true, 0)
+    }
+
+    fn prune_in(&self, home: Option<&Path>, own_family: bool, most: usize) -> std::io::Result<Vec<String>> {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::MetadataExt;
         checked_store(&self.store, home)?;
@@ -1145,7 +1214,7 @@ impl World {
         let mine = self.family(&current);
         let worlds: Vec<Stored> = worlds.into_iter().filter(|w| !own_family || w.family == mine).collect();
         let mut deleted = vec![];
-        for key in prune_plan(&worlds, &current, now_seconds()) {
+        for key in prune_plan(&worlds, &current, now_seconds(), most) {
             // Taken now, these say no builder or restored process came since.
             let locks: Vec<std::fs::File> = ["lock", "use"].iter()
                 .filter_map(|s| host::open_store_file(self.store.join(format!("{key}.{s}")), host::StoreOpen::Write { create: false, truncate: false }).ok())
@@ -1340,7 +1409,7 @@ mod tests {
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(plain.join(format!("{key}.failed")), "{}").unwrap();
         assert!(reset_in(&plain, true, None).is_err());
-        assert!(world(&plain).prune_in(None, false).is_err());
+        assert!(world(&plain).prune_in(None, false, MOST_WORLDS).is_err());
         assert!(plain.join(format!("{key}.failed")).exists());
         // Marked, but open to others: refused.
         let open = marked_store("open");
@@ -1349,7 +1418,7 @@ mod tests {
         // The home directory, or the root, even marked: refused.
         let home = marked_store("home");
         assert!(reset_in(&home, true, Some(&home)).is_err());
-        assert!(world(&home).prune_in(Some(&home), false).is_err());
+        assert!(world(&home).prune_in(Some(&home), false, MOST_WORLDS).is_err());
         assert!(reset_in(Path::new("/"), true, None).is_err());
         // Symlinks: never followed, their targets intact.
         let outside = std::env::temp_dir().join(format!("romacs-store-{}-outside", std::process::id()));
@@ -1366,7 +1435,7 @@ mod tests {
         assert!(outside.join("1-2-3-4.5-6.7").exists() && outside.join("cwd").exists());
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         assert!(!store.join(format!("{key}.json")).exists() && store.join(MARKER).exists());
-        world(&store).prune_in(None, false).unwrap();
+        world(&store).prune_in(None, false, MOST_WORLDS).unwrap();
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         for dir in [plain, open, home, outside, store] {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
@@ -1425,7 +1494,7 @@ mod tests {
         // Nor are reset and prune led through one to a real store.
         private_store(&elsewhere.join("store")).unwrap();
         assert!(reset_in(&root.join("linked/store"), true, None).is_err());
-        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
+        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None, false, MOST_WORLDS).is_err());
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
@@ -1509,7 +1578,7 @@ mod tests {
         symlink(&target, linked.join(MARKER)).unwrap();
         assert!(private_store(&linked).is_err());
         assert!(reset_in(&linked, true, None).is_err());
-        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
+        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None, false, MOST_WORLDS).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), MARKER_TEXT);
         // A dangling one: never created through.
         let dangling = dir("dangling");
@@ -1575,7 +1644,7 @@ mod tests {
         let w = world.clone();
         assert!(bounded("the builder's log", move || w.start_builder(vec![], tempfile_lock(&w))).is_err());
         let w = world.clone();
-        bounded("pruning", move || w.prune_in(None, false)).unwrap();
+        bounded("pruning", move || w.prune_in(None, false, MOST_WORLDS)).unwrap();
         let store = dir.clone();
         bounded("reset", move || reset_in(&store, true, None)).unwrap();
         std::fs::remove_file(dir.join(STORE_LOCK)).unwrap();
@@ -1667,27 +1736,31 @@ mod tests {
         // to three worlds in all.
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
                       stored("d", 3, 300, false), stored("e", 8, 300, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("d"), key("e")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("d"), key("e")]);
         // The current world and held ones stay, whatever their age or the
         // cap; they count toward it.
         let worlds = [stored("a", 30, 300, false), stored("b", 20, 300, true), stored("c", 1, 300, false), stored("d", 0, 300, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("c")]);
         // Four GiB at most: the older of two large worlds goes.
         let worlds = [stored("a", 0, 1024, false), stored("b", 1, 2048, false), stored("c", 2, 2048, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("c")]);
         // Each family is bounded alone: three batch worlds beside three of
         // a GUI's, whichever family the current world is of.
         let batch = |k, days| Stored { family: "launch batch".into(), ..stored(k, days, 300, false) };
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
                       batch("d", 0), batch("e", 1), batch("f", 2), batch("g", 3)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("g")]);
-        assert_eq!(prune_plan(&worlds, &key("g"), now), [key("f")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("g")]);
+        assert_eq!(prune_plan(&worlds, &key("g"), now, MOST_WORLDS), [key("f")]);
         // A refusal within a week stays beside three worlds and counts toward
         // nothing; an older one goes.
         let refusal = |k, days| Stored { refusal: true, ..stored(k, days, 1, false) };
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
                       refusal("d", 0), refusal("e", 8)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("e")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("e")]);
+        // A test's family keeps none beside the current and the held
+        // (`prune_family_to_current`), however recent.
+        let worlds = [stored("a", 0, 300, false), stored("b", 0, 300, false), stored("c", 0, 300, true), refusal("d", 0)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now, 0), [key("b")]);
     }
 
     #[test]

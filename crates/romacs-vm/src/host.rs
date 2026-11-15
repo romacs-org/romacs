@@ -741,6 +741,21 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// Whether this process runs one test alone, as nextest's process per test
+/// runs each (every check runs them so): a test's world may be mapped only
+/// then (`World::for_test`).
+#[must_use]
+pub fn one_test_process() -> bool {
+    std::env::var_os("NEXTEST_EXECUTION_MODE").is_some_and(|mode| mode == "process-per-test")
+}
+
+/// This process's arguments after its executable's name: what a builder of
+/// a test's world runs this executable with, to run the same test again.
+#[must_use]
+pub fn own_arguments() -> Vec<OsString> {
+    std::env::args_os().skip(1).collect()
+}
+
 /// The generation of runtime tree this executable was built for: the tree's own
 /// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
 /// raised when the tree's layout or its contract with the executable changes
