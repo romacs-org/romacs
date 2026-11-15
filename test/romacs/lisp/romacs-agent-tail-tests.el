@@ -277,6 +277,40 @@ unless CUT, then its turn's end."
              (should (= (length streamed) 3)))
          (kill-buffer buffer))))))
 
+;; Claude writes a record as each block of a message ends: a block done
+;; does not make the next one, cut short, whole.
+(ert-deftest romacs-agent-chat-replays-a-block-cut-short ()
+  (romacs-agent-tail-tests--with-session
+   1 0
+   (lambda (session journal)
+     (let* ((stream (lambda (seq event)
+                      (romacs-agent-tail-tests--line
+                       seq "out" (romacs-mcp--object "api_message_id" "msg_9" "event" event
+                                                     "parent_tool_use_id" :null "session_id" "s"
+                                                     "type" "stream_event" "uuid" "u"))))
+            (coding-system-for-write 'utf-8-unix))
+       (write-region
+        (concat (romacs-agent-tail-tests--line
+                 2 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "question 1" "role" "user")
+                                            "romacsRequest" 1 "type" "user"))
+                (funcall stream 3 (romacs-mcp--object "delta" (romacs-mcp--object "thinking" "pondering" "type" "thinking_delta")
+                                                      "index" 0 "type" "content_block_delta"))
+                (romacs-agent-tail-tests--line
+                 4 "out" (romacs-mcp--object
+                          "message" (romacs-mcp--object
+                                     "content" (vector (romacs-mcp--object "thinking" "pondering" "type" "thinking"))
+                                     "id" "msg_9")
+                          "parent_tool_use_id" :null "type" "assistant" "uuid" "u"))
+                (funcall stream 5 (romacs-mcp--object "delta" (romacs-mcp--object "text" "unfinished reply" "type" "text_delta")
+                                                      "index" 1 "type" "content_block_delta"))
+                (romacs-agent-tail-tests--line 6 "out" (romacs-mcp--object "result" "cut" "type" "result")))
+        nil journal nil 'silent))
+     (let ((buffer (romacs-agent-tail-tests--open session)))
+       (unwind-protect
+           (with-current-buffer buffer
+             (should (string-search "unfinished reply" (buffer-string))))
+         (kill-buffer buffer))))))
+
 (ert-deftest romacs-agent-journal-tail-bytes-past-odd-lines ()
   ;; A line ending in a carriage return, one with a byte that is no
   ;; UTF-8: the tail's byte is still the prompt's.

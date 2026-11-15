@@ -545,28 +545,41 @@ answer to a hook; (:line ID MODE), a switch to permission mode MODE."
 
 (defun romacs-agent--claude-streamed-skip ()
   "In a buffer of journal lines, a function of a line's start and end
-saying whether it is a `stream_event' of a message whose `assistant'
-record, which says it whole, is among them; nil when none is.  A message
-cut short, or still streaming, has no such record: its deltas are read.
-A message's id starts its stream lines (`api_message_id') and is the
-first message id of its `assistant' line: no string can hold a quoted
+saying whether it is a `stream_event' of a content block an `assistant'
+record among them says whole; nil when none does.  Claude writes an
+`assistant' record as each of a message's blocks ends, in order, under
+the message's id: a message's first N blocks are whole when its records
+hold N.  A block cut short, or still streaming, has none: its deltas
+are read.  A stream line starts with its message's id (`api_message_id')
+and names its block by the event's `index'; no string can hold a quoted
 key."
   (let ((whole (make-hash-table :test #'equal)))
     (goto-char (point-min))
     (while (re-search-forward romacs-agent--claude-assistant-end nil t)
-      (let ((end (point)))
-        (beginning-of-line)
-        (when (re-search-forward "\"id\":\"\\(msg_[^\"]+\\)\"" end t)
-          (puthash (match-string 1) t whole))
-        (goto-char end)))
+      (let* ((end (point))
+             (record (ignore-errors (json-parse-string (buffer-substring (line-beginning-position) end)
+                                                       :object-type 'hash-table)))
+             (message (and (hash-table-p record) (hash-table-p (gethash "out" record))
+                           (gethash "message" (gethash "out" record))))
+             (id (and (hash-table-p message) (gethash "id" message)))
+             (content (and id (gethash "content" message))))
+        (when (and (stringp id) (vectorp content))
+          (puthash id (+ (gethash id whole 0) (length content)) whole))))
     (and (> (hash-table-count whole) 0)
          (lambda (start end)
            (and (eq (char-after (+ start 9)) ?a)
                 (save-excursion
                   (goto-char start)
-                  (and (looking-at "{\"out\":{\"api_message_id\":\"\\([^\"]+\\)\"")
-                       (gethash (match-string 1) whole)
-                       (progn (goto-char end) (looking-back romacs-agent--claude-stream-end (max start (- end 200)))))))))))
+                  (when-let* (((looking-at "{\"out\":{\"api_message_id\":\"\\([^\"]+\\)\""))
+                              (blocks (gethash (match-string 1) whole))
+                              ((progn (goto-char end)
+                                      (looking-back romacs-agent--claude-stream-end (max start (- end 200))))))
+                    (goto-char start)
+                    ;; A block's event says which; a message's own (its start,
+                    ;; its end) draws nothing a whole record does not.
+                    (if (re-search-forward "\"index\":\\([0-9]+\\)" end t)
+                        (< (string-to-number (match-string 1)) blocks)
+                      t))))))))
 
 (defun romacs-agent--claude-session-rules (request)
   "The permission updates allowing REQUEST's tool for the rest of the
