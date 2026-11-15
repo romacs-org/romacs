@@ -96,7 +96,9 @@ impl FrameSubmissions {
         buffers: impl IntoIterator<Item = wgpu::CommandBuffer>,
     ) -> wgpu::SubmissionIndex {
         self.queue_submits.set(self.queue_submits.get() + 1);
-        crate::diagnostics::submit(queue, buffers)
+        romacs_display_protocol::meter::spent(crate::cost::SUBMIT_INSTRUCTIONS, || {
+            crate::diagnostics::submit(queue, buffers)
+        })
     }
 }
 

@@ -21,9 +21,9 @@ impl Span {
     }
 }
 
-/// VIEW's characters FROM..TO, a unibyte string's bytes above ASCII as raw
-/// bytes.
-fn codes(view: StrView<'_>, from: usize, to: usize) -> impl Iterator<Item = u32> + '_ {
+/// VIEW's first COUNT characters, a unibyte string's bytes above ASCII as
+/// raw bytes.
+fn codes(view: StrView<'_>, count: usize) -> impl Iterator<Item = u32> + '_ {
     let (mut rest, multibyte) = (view.bytes, view.multibyte);
     let next = move || {
         let (&lead, tail) = rest.split_first()?;
@@ -35,7 +35,7 @@ fn codes(view: StrView<'_>, from: usize, to: usize) -> impl Iterator<Item = u32>
         rest = if width == 1 { tail } else { &rest[width..] };
         Some(code)
     };
-    std::iter::from_fn(next).skip(from).take(to.saturating_sub(from))
+    std::iter::from_fn(next).take(count)
 }
 
 /// How the character sequences A and B order, how many characters match
@@ -59,17 +59,18 @@ fn parting(a: impl Iterator<Item = u32>, b: impl Iterator<Item = u32>, fold: imp
 }
 
 impl Leaf<'_> {
-    /// The text a comparison reads of VALUE: a string's, or a symbol's
-    /// name (minibuf.c `Fassoc_string`).
-    fn compared_text(&self, value: Value) -> Option<StrView<'_>> {
+    /// The text a comparison reads of VALUE from character FROM: a
+    /// string's, or a symbol's name (minibuf.c `Fassoc_string`).
+    fn compared_text(&self, value: Value, from: usize) -> Option<StrView<'_>> {
         match self.kind(value) {
             Kind::Symbol => {
                 let name = if value == Value::NIL { "nil" } else if value == Value::TRUE { "t" } else {
                     self.vm.symbol_names[self.symbol_slot_of(value).ok()?].as_str()
                 };
-                Some(StrView { bytes: name.as_bytes(), chars: name.chars().count(), multibyte: true })
+                let rest = name.char_indices().nth(from).map_or("", |(at, _)| &name[at..]);
+                Some(StrView { bytes: rest.as_bytes(), chars: rest.chars().count(), multibyte: true })
             }
-            Kind::String | Kind::Bytes => self.vm.str_view(value),
+            Kind::String | Kind::Bytes => self.vm.str_view_from(value, from),
             _ => None,
         }
     }
@@ -82,9 +83,12 @@ impl Leaf<'_> {
     /// A and B's parting from character SKIP of each, as FOLD folds.
     fn text_parting(&self, a: Span, b: Span, skip: usize, fold: impl Fn(u32) -> std::result::Result<u32, Fault>)
         -> std::result::Result<(Ordering, usize, bool), Fault> {
-        let view = |span: Span| self.compared_text(span.text).ok_or(Fault::Wrong("stringp", span.text));
-        let (order, matched, differ) = parting(
-            codes(view(a)?, a.start + skip, a.end), codes(view(b)?, b.start + skip, b.end), fold)?;
+        let text = |span: Span| {
+            let from = span.start + skip;
+            let view = self.compared_text(span.text, from).ok_or(Fault::Wrong("stringp", span.text))?;
+            Ok(codes(view, span.end.saturating_sub(from)))
+        };
+        let (order, matched, differ) = parting(text(a)?, text(b)?, fold)?;
         Ok((order, skip + matched, differ))
     }
 

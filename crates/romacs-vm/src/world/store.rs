@@ -268,10 +268,26 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     // checked on the way down.
     let dir = host::open_store_dir(store, true)?;
     owned_store(&dir, store, home.as_deref())?;
-    if host::store_dir_is_empty(dir.as_fd())? {
-        return write_marker(&dir);
+    // Marked and read under a lock on the directory itself, released as it
+    // closes: processes that start at once on a new store all find it
+    // empty, and one must make and write the marker before any other reads
+    // it, or the others' exclusive creation of it fails (EEXIST).
+    rustix::fs::flock(&dir, rustix::fs::FlockOperation::LockExclusive)?;
+    // Read through the directory opened again under the lock: btrfs lists
+    // to a directory's reader only the entries it had when the reader
+    // opened it, so a marker made since would not be seen through DIR.
+    let now = host::open_store_dir(store, false)?;
+    let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
+    };
+    if identity(&now)? != identity(&dir)? {
+        return Err(std::io::Error::other(format!("world store {}: replaced while it was opened", store.display())));
     }
-    match marker_error(&dir) {
+    if host::store_dir_is_empty(now.as_fd())? {
+        return write_marker(&now);
+    }
+    match marker_error(&now) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
     }
@@ -851,7 +867,7 @@ impl World {
     /// failure leaves: a step's failure is transient, retried after a while
     /// (`retry_in`), and `finish_build` records its own. The image's
     /// length, or the failure to report.
-    pub fn build<T: super::safe::SnapshotSafe + 'static>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
+    pub fn build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
         -> Result<usize, String> {
         match steps() {
             Ok((vm, carry, events)) => self.finish_build(vm, carry, events),
@@ -900,7 +916,7 @@ impl World {
     /// printed, in its manifest. A build with any refusal publishes its
     /// manifest only, so launches boot from source until its records
     /// change. The image's length.
-    fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
+    fn finish_build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         // Kept to the end: whatever fails from here on is recorded with it.
         let trace = host::leave_build().ok_or("no world build was recording")?;
@@ -928,7 +944,7 @@ impl World {
 
     /// Capture VM and CARRY as this world's image and publish it with the
     /// manifest of TRACE and EVENTS: the image's length.
-    fn publish_world<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
+    fn publish_world<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
         let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
@@ -937,10 +953,14 @@ impl World {
             return Err("world image: the tables did not compact".into());
         }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
-        let len = image::capture(vm, carry, &file, self.key)?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        read_only(&temporary).map_err(|e| e.to_string())?;
-        host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
+        let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
+            file.sync_all().map_err(|e| e.to_string())?;
+            read_only(&temporary).map_err(|e| e.to_string())?;
+            host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string()).map(|()| len)
+        });
+        // An image not placed goes now: what it holds of a full store (in
+        // memory, a tmpfs) is not to wait for the next build's sweep.
+        let len = placed.inspect_err(|_| { let _ = host::remove_file(&temporary); })?;
         // Hashed from the file as published, which also caches it.
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| e.to_string())?;
         let digest = file_digest(&self.store, &image, true).map_err(|e| e.to_string())?;
@@ -1415,6 +1435,42 @@ mod tests {
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Launches that start at once on a new store each find it a store:
+    /// one marks it, the others read its marker once written. Its failure
+    /// on btrfs, whose reader of a directory sees only the entries it had
+    /// when opened, was a temporary directory there (the train's).
+    #[test]
+    fn a_new_store_opened_at_once_by_many_is_marked_once() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-at-once", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        let start = std::sync::Barrier::new(16);
+        let opened: Vec<std::io::Result<()>> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..16).map(|_| scope.spawn(|| { start.wait(); private_store(&store) })).collect();
+            threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        let marker = std::fs::read_to_string(store.join(MARKER));
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(opened.iter().all(Result::is_ok), "{}: {opened:?}", store.display());
+        assert_eq!(marker.unwrap(), MARKER_TEXT);
+    }
+
+    /// A build whose image cannot be written or placed leaves no image
+    /// behind in the store: here the capture refuses, as this test process's
+    /// heap is not a builder's arena.
+    #[test]
+    fn an_image_not_placed_is_removed() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-unplaced", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        private_store(&store).unwrap();
+        let world = World { store: store.clone(), key: [7; 32], recipe: vec![] };
+        let error = world.publish_world(Vm::new(), (), &json!({"refusals": []}), json!({})).unwrap_err();
+        assert!(error.contains("arena"), "{error}");
+        let left: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".rwi")).collect();
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]

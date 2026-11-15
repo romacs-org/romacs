@@ -284,6 +284,16 @@ pub(crate) enum RenderWork {
 }
 
 impl RenderWork {
+    /// The class's name in diagnostics.
+    pub(crate) fn class(self) -> &'static str {
+        match self {
+            RenderWork::None => "none",
+            RenderWork::CompositeOnly { .. } => "composite",
+            RenderWork::RepaintLayers { .. } => "repaint",
+            RenderWork::RebuildScene => "rebuild",
+        }
+    }
+
     fn from_invalidation(inv: Invalidation) -> RenderWork {
         match inv {
             Invalidation::None => RenderWork::None,

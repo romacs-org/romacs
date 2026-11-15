@@ -2,15 +2,13 @@
 """Bundled package autoloads in a native --loadup session, in a private compositor.
 
 The session launches with no font override, visiting an Emacs Lisp file.  A
-private init.el records, when init runs, whether `hermes' and
-`gnosis-dashboard' are still unloaded autoloads and the interactive
-session's runtime-dependent settings, and points hermes at a loopback port
-nothing listens on, attaching rather than spawning.  The default face must
+private init.el records, when init runs, whether `gnosis-dashboard' is
+still an unloaded autoload and the interactive session's runtime-dependent
+settings.  The default face must
 render at a readable size.  Real keys then run M-x romacs-live-elisp-state,
 which records the file's buffer as visited and after an explicit
-`font-lock-ensure', M-x gnosis-dashboard, which must load the package and
-show its buffer, and M-x hermes, which must load hermes and show its
-dashboard without reaching any service.  The echo area after each command
+`font-lock-ensure', and M-x gnosis-dashboard, which must load the package
+and show its buffer.  The echo area after each command
 is recorded.  labwc, wlr-randr, wtype and grim come from PATH (the gate's
 headless tools).
 """
@@ -30,7 +28,7 @@ INIT = '''(write-region
  (prin1-to-string
   (mapcar (lambda (name)
             (list name (autoloadp (symbol-function name)) (commandp name) (featurep name)))
-          '(hermes gnosis-dashboard)))
+          '(gnosis-dashboard)))
  nil {state})
 (write-region
  (prin1-to-string
@@ -55,9 +53,6 @@ INIT = '''(write-region
                 (and (memq 'jit-lock-function fontification-functions) t)
                 visited (funcall faces)))
          nil {elisp})))))
-(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
-      hermes-dashboard-transport-start-mode 'remote
-      hermes-dashboard-transport-command "/nonexistent/hermes")
 '''
 
 
@@ -141,7 +136,7 @@ def main():
         fio.wait(lambda: state.exists() and state.read_text(), args.timeout, 'init.el after --loadup', process)
         at_init = state.read_text()
         report['checks'].append({'init_state': at_init})
-        expected = '((hermes t t nil) (gnosis-dashboard t t nil))'
+        expected = '((gnosis-dashboard t t nil))'
         if at_init != expected:
             raise AssertionError(f'at init: {at_init}, expected {expected}')
         fio.wait(lambda: session.exists() and session.read_text(), args.timeout, 'session state after init', process)
@@ -166,7 +161,6 @@ def main():
         if not fontified.startswith('(emacs-lisp-mode t t ') or 'font-lock-keyword-face' not in fontified:
             raise AssertionError(f'Lisp buffer: {fontified}')
         run('gnosis-dashboard', '*Gnosis Dashboard*', 'Gnosis Dashboard')
-        run('hermes', '*Hermes Dashboard*', 'Hermes')
         report['status'] = 'PASS'
     print(report['status'])
     return 0 if report['status'] == 'PASS' else 1

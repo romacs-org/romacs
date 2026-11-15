@@ -47,8 +47,9 @@ pub(crate) struct State {
     /// A GPU rebuild lost every image since the evaluator last took them.
     reset: bool,
     model_renderer: bool,
-    /// Where the pointer is over the primary window, in logical pixels.
-    pointer: Option<(i32, i32)>,
+    /// The frame whose window the pointer is over, and where, in logical
+    /// pixels. The pointer is over one window at most.
+    pointer: Option<(u64, (i32, i32))>,
     key_repeats: KeyRepeatLog,
 }
 
@@ -62,7 +63,7 @@ pub(crate) struct Facts {
     /// The requests waiting for their replies, by id.
     awaiting: Mutex<HashMap<u64, Answer>>,
     rendered: Condvar,
-    /// Called when a newer presentation of the primary frame has drawn, or
+    /// Called when a newer presentation of any frame has drawn, or
     /// the renderer lost its images: the evaluator's wait for input wakes.
     wake: OnceLock<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -92,7 +93,13 @@ fn apply(state: &mut State, fact: Fact) -> Notice {
         Fact::ImageEvicted(image) => { state.evicted.push(image); Notice::Nothing }
         Fact::DisplayReset => { state.reset = true; Notice::Reset }
         Fact::ModelRenderer { live } => { state.model_renderer = live; Notice::Nothing }
-        Fact::PointerOver { at } => { state.pointer = at; Notice::Nothing }
+        // A window the pointer left forgets it only if it still holds it: a
+        // compositor may tell of entering the next window first.
+        Fact::PointerOver { frame, at: Some(at) } => { state.pointer = Some((frame, at)); Notice::Nothing }
+        Fact::PointerOver { frame, at: None } => {
+            if state.pointer.is_some_and(|(over, _)| over == frame) { state.pointer = None; }
+            Notice::Nothing
+        }
         Fact::KeyRepeatTiming(RepeatTiming::Repeat(after)) => { state.key_repeats.repeat(after); Notice::Nothing }
         Fact::KeyRepeatTiming(RepeatTiming::Held(held)) => { state.key_repeats.released(held); Notice::Nothing }
         Fact::FrameClosed(frame) => { state.rendered.remove(&frame); Notice::Nothing }
@@ -136,7 +143,7 @@ impl Facts {
         }
         let notice = apply(&mut self.state(), fact);
         if let Notice::Rendered(_) = notice { self.rendered.notify_all(); }
-        if matches!(notice, Notice::Rendered(crate::paint_host::PRIMARY_FRAME) | Notice::Reset)
+        if matches!(notice, Notice::Rendered(_) | Notice::Reset)
             && let Some(wake) = self.wake.get()
         {
             wake();
@@ -151,7 +158,7 @@ impl Facts {
 
     pub(crate) fn model_renderer(&self) -> bool { self.state().model_renderer }
 
-    pub(crate) fn pointer(&self) -> Option<(i32, i32)> { self.state().pointer }
+    pub(crate) fn pointer(&self) -> Option<(u64, (i32, i32))> { self.state().pointer }
 
     pub(crate) fn take_key_repeats(&self) -> KeyRepeatCounts { self.state().key_repeats.take() }
 
@@ -266,7 +273,7 @@ mod tests {
     #[test]
     fn facts_are_kept_and_input_passes_in_order() {
         let (input, facts, kept, out) = bridge(16);
-        for fact in [Fact::AdapterChosen { software: true }, Fact::PointerOver { at: Some((3, 4)) },
+        for fact in [Fact::AdapterChosen { software: true }, Fact::PointerOver { frame: 1, at: Some((3, 4)) },
                      Fact::ModelRenderer { live: true }, Fact::DisplayReset, Fact::ImageEvicted(7),
                      Fact::KeyRepeatTiming(RepeatTiming::Repeat(Duration::from_millis(40)))] {
             facts.send(fact).unwrap();
@@ -276,7 +283,7 @@ mod tests {
         drop(input);
         assert_eq!(out.iter().count(), 2);
         assert_eq!(kept.software_adapter(), Some(true));
-        assert_eq!(kept.pointer(), Some((3, 4)));
+        assert_eq!(kept.pointer(), Some((1, (3, 4))));
         assert!(kept.model_renderer());
         assert!(kept.images_reset_pending());
         assert_eq!(kept.take_lost_images(), (vec![7], true));
@@ -285,8 +292,8 @@ mod tests {
     }
 
     /// A wait for a render is answered per frame, by the frame's latest
-    /// presentation; the primary frame's newer ones wake the evaluator once
-    /// each, and so does a device reset.
+    /// presentation; each frame's newer ones wake the evaluator once each,
+    /// and so does a device reset.
     #[test]
     fn renders_and_resets_wake_the_waiter() {
         let kept = Facts::default();
@@ -297,16 +304,29 @@ mod tests {
         for (frame, presentation) in [(1, 1), (1, 1), (2, 5), (1, 3)] {
             kept.take(rendered(frame, presentation));
         }
-        assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), 2, "no wake for a frame drawn again or another frame");
+        assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), 3, "no wake for a frame drawn again");
         assert_eq!(kept.wait_for_render(1, 2, Duration::ZERO).unwrap().presentation, 3, "a later presentation settles an earlier one");
         assert!(kept.wait_for_render(1, 4, Duration::ZERO).is_err(), "stale samples are no evidence");
         assert_eq!(kept.wait_for_render(2, 5, Duration::ZERO).unwrap().unresolved_face_text_total, 50);
         kept.take(rendered(2, 4));
         assert_eq!(kept.wait_for_render(2, 0, Duration::ZERO).unwrap().presentation, 5, "samples only move forward");
         kept.take(Fact::DisplayReset);
-        assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), 3);
+        assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), 4);
         kept.take(Fact::FrameClosed(2));
         assert!(kept.wait_for_render(2, 0, Duration::ZERO).is_err(), "a closed window's sample goes");
+    }
+
+    /// The pointer is over one window: leaving a window it already entered
+    /// another from does not forget it.
+    #[test]
+    fn the_pointer_is_over_the_window_it_entered_last() {
+        let kept = Facts::default();
+        kept.take(Fact::PointerOver { frame: 1, at: Some((3, 4)) });
+        kept.take(Fact::PointerOver { frame: 2, at: Some((5, 6)) });
+        kept.take(Fact::PointerOver { frame: 1, at: None });
+        assert_eq!(kept.pointer(), Some((2, (5, 6))), "a late leave of the first window");
+        kept.take(Fact::PointerOver { frame: 2, at: None });
+        assert_eq!(kept.pointer(), None);
     }
 
     #[test]

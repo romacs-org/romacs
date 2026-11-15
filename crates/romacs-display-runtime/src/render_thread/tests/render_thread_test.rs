@@ -228,7 +228,7 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
     let frame = FrameGlyphBuffer::with_size(800.0, 600.0);
     assert!(frame.active_cursor().is_none());
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     render.set_dirty(false);
     let before = super::frame_stats::snapshot();
     for iteration in 0..2400 {
@@ -253,7 +253,7 @@ fn s1b_visible_cursor_poll_preserves_preedit_and_default_color_cycle() {
     let mut app = make_test_app();
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     app.refresh_frame_state();
     let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
     render.set_ime_preedit("composition".into(), Some((0, 3)));
@@ -790,7 +790,7 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
     .unwrap();
     let window = app.frame_windows.primary_window_mut().unwrap();
     let owner = window.render.emacs_frame_id;
-    window.render.compositor.current_frame = Some(frame);
+    window.render.compositor.current_frame = Some(std::sync::Arc::new(frame));
     app.menu_bar.select(
         crate::menu_bar::MenuHeading {
             frame: owner,
@@ -834,7 +834,6 @@ fn adopted_primary_pointer_target_uses_real_frame_id() {
     if let Some(ws) = app.frame_windows.primary_window_mut() {
         ws.render.set_current_frame(
             Some(FrameGlyphBuffer::with_size(800.0, 600.0)),
-            None,
             Default::default(),
             Default::default(),
         );
@@ -859,7 +858,7 @@ fn installing_frame_emits_activation_before_replaced_presentation_retirement() {
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())),
         true,
     );
-    let primary = crate::paint_host::PRIMARY_FRAME;
+    let primary = crate::paint_host::INITIAL_FRAME;
     app.frame_windows.adopt_primary_frame_id(primary);
 
     app.ingest_paint(presentation_frame(primary, 0, 41).into());
@@ -1022,7 +1021,7 @@ fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
     let mut app = RenderApp::new(render, 800, 600, "test".to_string(),
         Arc::new(crate::render_thread::ImageRenderState::default()),
         Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())), true);
-    let id = crate::paint_host::PRIMARY_FRAME;
+    let id = crate::paint_host::INITIAL_FRAME;
     let frame = |presentation: u64, blinked_off: bool| {
         let mut frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
         frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);

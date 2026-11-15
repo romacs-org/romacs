@@ -234,16 +234,15 @@ fn pane_conversion_refuses_before_motion_and_recovers_under_held_pressure() {
         draw_root(&mut renderer, &mut render, old.view(), &before);
         drop(old);
         // Seed the genuinely required native owner while the old background is applied.
-        render.compositor.current_frame = Some(before.clone());
+        render.compositor.current_frame = Some(std::sync::Arc::new(before.clone()));
         let native = native_content_target(&mut renderer, &mut render, surface, &full_plan())
             .unwrap()
             .unwrap();
         let id = native.id();
         drop(native);
-        render.compositor.current_frame = Some(after.clone());
+        render.compositor.current_frame = Some(std::sync::Arc::new(after.clone()));
         render.set_current_frame(
             Some(after.clone()),
-            None,
             Default::default(),
             Default::default(),
         );
@@ -382,7 +381,6 @@ fn wrong_size_required_native_owner_retires_before_child_under_same_pressure() {
     root.background_alpha = 0.5;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );

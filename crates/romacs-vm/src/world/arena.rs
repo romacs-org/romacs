@@ -28,20 +28,18 @@
 //! allocation stays unreserved, and under an address-space limit nothing
 //! is reserved: a range there is mapped only where nothing is, and a taken
 //! range refuses the image (`Restore::Map`), with the step and error that
-//! found it so (`map_failure`). Everything else a
-//! world process maps stays randomized, the executable too. What an image holds of the
-//! executable is read-only data that plain types of the standard library and
-//! other crates point to, such as the empty hash table group in its first
-//! segment; Romacs's own types hold no reference into the executable
-//! (romacs-snapshot admits none). A process that maps an image maps a copy of its
-//! executable's read-only segments, the first and RELRO, where the
-//! builder's had them, and nothing else there (`shadow_executable`). An image holds no code or writable
-//! static address: a VM at rest keeps no lowered code (`world_normalize`)
-//! and no host attachment (`world_quiescent`), and nothing in the VM's
-//! types holds a function pointer or a reference to a writable static.
-//! Should one appear, the rest of the builder's executable range is mapped
-//! inaccessible, so following it faults rather than running whatever now
-//! lies there. The libraries hold nothing of an image.
+//! found it so (`map_failure`). Everything else a world process maps stays
+//! randomized, the executable too, and an image holds no address of the
+//! executable or a library: no code, no static, no read-only data. A VM at
+//! rest keeps no lowered code (`world_normalize`) and no host attachment
+//! (`world_quiescent`); romacs-snapshot admits no function pointer and no
+//! reference to a static in the VM's types; and a capture gives every
+//! empty hash table, whose control bytes would be a static of the
+//! executable, an allocation of its own (`image::settle`). So a restore
+//! maps the image wherever this process's executable lies, and keeps the
+//! range the builder's executable lay in inaccessible when nothing of this
+//! process is there (`guard_executable`): an address left by mistake then
+//! faults instead of reading what lies there. A taken range is left alone.
 //!
 //! The allocator has size classes up to 32 KiB, carved from page slabs and
 //! kept on free lists, and page runs above that, kept in bins by size. One
@@ -78,7 +76,7 @@ const ALIGN: usize = 1 << 30;
 /// as a process may hold two (`adopt`).
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
-const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA3");
+const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA4");
 /// 16..=1024 by 16, then four steps per doubling to 32 KiB.
 const CLASSES: usize = 64 + 20;
 const SMALL_MAX: usize = 32768;
@@ -126,7 +124,8 @@ pub struct ImageFields {
     pub root: usize,
     /// Process-global counters the image's contents depend on.
     pub counters: [u64; 4],
-    /// Where the executable of the process that made it loaded.
+    /// Where the executable of the process that made it loaded: a restore
+    /// keeps that range inaccessible when it can (`guard_executable`).
     pub executable: usize,
     /// The world's key.
     pub key: [u8; 32],
@@ -143,6 +142,9 @@ static LOCK: AtomicBool = AtomicBool::new(false);
 static SCRUB: AtomicBool = AtomicBool::new(false);
 /// How the image this process asked for fared (`Restore`).
 static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
+/// What became of the builder's executable range in the adopting process
+/// (`Guard`).
+static GUARD: AtomicU8 = AtomicU8::new(Guard::None as u8);
 /// The chunks of the window this process reserved at its first allocation
 /// (`reserve_window`): bit N for the Nth CHUNK from the window's start.
 static RESERVED: AtomicU64 = AtomicU64::new(0);
@@ -186,8 +188,6 @@ pub enum Restore {
     Unreadable,
     /// It is no arena image of this format.
     Format,
-    /// Where the builder's executable loaded is taken here.
-    Executable,
     /// Its range could not be mapped.
     Map,
 }
@@ -571,8 +571,7 @@ unsafe fn reserve() -> Option<usize> {
 
 /// Allocate from the image in FILE from now on: map it where it was made,
 /// over this process's reservation of the window, or where nothing is when
-/// the window is not reserved (`place`), with what it addresses of the
-/// executable (`shadow_executable`), when it is a whole image of this
+/// the window is not reserved (`place`), when it is a whole image of this
 /// format. Once per process; the first arena keeps the blocks allocated
 /// before. Refused, `map_failure` says at which step and why.
 pub fn adopt(file: &std::fs::File) -> Restore {
@@ -667,10 +666,6 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
         unsafe { unplace(base, if placed == libc::MAP_FIXED { reserve } else { len }, placed) };
         return refused;
     }
-    if !unsafe { shadow_executable(image.image.executable) } {
-        unsafe { unplace(base, reserve, placed) };
-        return Restore::Executable;
-    }
     // This process's reservation, not the builder's.
     unsafe { (*(base as *mut Header)).reserve = reserve };
     // The kernel reads the file ahead while the process starts.
@@ -680,6 +675,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     BASE.store(base, Ordering::Release);
     ADOPTED.store(true, Ordering::Release);
     unlock();
+    GUARD.store(guard_executable(image.image.executable) as u8, Ordering::Release);
     start_heap_file(reserve);
     Restore::Mapped
 }
@@ -701,98 +697,6 @@ fn start_heap_file(len: usize) {
 #[must_use]
 pub fn heap_file() -> Option<Result<file_heap::Stats, file_heap::Refused>> {
     HEAP_FILE.get().map(|started| started.map(|()| file_heap::stats()))
-}
-
-/// The executable's load segments, as the kernel loaded it: where it
-/// starts, and each PT_LOAD segment's (address, file offset, file size,
-/// memory size, flags), and the RELRO range, all relative to the start.
-struct Executable {
-    base: usize,
-    loads: [(usize, usize, usize, usize, u32); 8],
-    count: usize,
-    relro: (usize, usize),
-}
-
-/// This process's executable, from its program headers, without allocating.
-unsafe fn executable() -> Option<Executable> {
-    let phdr = unsafe { libc::getauxval(libc::AT_PHDR) } as usize;
-    let count = unsafe { libc::getauxval(libc::AT_PHNUM) } as usize;
-    if phdr == 0 {
-        return None;
-    }
-    let headers = unsafe { std::slice::from_raw_parts(phdr as *const libc::Elf64_Phdr, count) };
-    let own = headers.iter().find(|h| h.p_type == libc::PT_PHDR)?;
-    let mut exe = Executable { base: phdr - own.p_vaddr as usize, loads: [(0, 0, 0, 0, 0); 8], count: 0, relro: (0, 0) };
-    for h in headers {
-        match h.p_type {
-            libc::PT_LOAD if exe.count < exe.loads.len() => {
-                exe.loads[exe.count] = (h.p_vaddr as usize, h.p_offset as usize, h.p_filesz as usize, h.p_memsz as usize, h.p_flags);
-                exe.count += 1;
-            }
-            libc::PT_LOAD => return None,
-            libc::PT_GNU_RELRO => exe.relro = (h.p_vaddr as usize, h.p_vaddr as usize + h.p_memsz as usize),
-            _ => {}
-        }
-    }
-    Some(exe)
-}
-
-/// Where this process's executable loaded.
-pub fn executable_base() -> usize {
-    unsafe { executable() }.map_or(0, |exe| exe.base)
-}
-
-/// Map, at OLD, where the builder's executable loaded, what an image may
-/// address there: the read-only segments, from the executable's file, and
-/// a read-only copy of this process's RELRO, whose pointers are this
-/// process's. The rest of the builder's executable range is reserved
-/// inaccessible. False when that range is taken.
-unsafe fn shadow_executable(old: usize) -> bool {
-    let Some(exe) = (unsafe { executable() }) else { return false };
-    if old == exe.base {
-        return true;
-    }
-    let loads = &exe.loads[..exe.count];
-    let floor = |n: usize| n / PAGE * PAGE;
-    let ceil = |n: usize| n.next_multiple_of(PAGE);
-    let Some(low) = loads.iter().map(|l| floor(l.0)).min() else { return false };
-    let high = loads.iter().map(|l| ceil(l.0 + l.3)).max().unwrap_or(low);
-    let span = high - low;
-    let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE;
-    let at = unsafe { libc::mmap((old + low) as *mut libc::c_void, span, libc::PROT_NONE, anon | libc::MAP_FIXED_NOREPLACE, -1, 0) };
-    if at != (old + low) as *mut libc::c_void {
-        if at != libc::MAP_FAILED {
-            unsafe { libc::munmap(at, span) };
-        }
-        return false;
-    }
-    let undo = || { unsafe { libc::munmap((old + low) as *mut libc::c_void, span) }; false };
-    // HOST(libc::file): the world allocator maps its own executable read-only where an image
-    // expects it; no Lisp value depends on it
-    let fd = unsafe { libc::open(c"/proc/self/exe".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return undo();
-    }
-    let mut mapped = true;
-    for &(vaddr, offset, filesz, _, flags) in loads.iter().filter(|l| l.4 & (libc::PF_W | libc::PF_X) == 0) {
-        let (start, end) = (floor(vaddr), ceil(vaddr + filesz));
-        let at = unsafe { libc::mmap((old + start) as *mut libc::c_void, end - start, libc::PROT_READ, libc::MAP_PRIVATE | libc::MAP_FIXED, fd, floor(offset) as i64) };
-        mapped &= at == (old + start) as *mut libc::c_void && flags & libc::PF_R != 0;
-    }
-    unsafe { libc::close(fd) };
-    let (start, end) = (floor(exe.relro.0), ceil(exe.relro.1));
-    if mapped && end > start {
-        let at = unsafe { libc::mmap((old + start) as *mut libc::c_void, end - start, libc::PROT_READ | libc::PROT_WRITE, anon | libc::MAP_FIXED, -1, 0) };
-        mapped = at == (old + start) as *mut libc::c_void;
-        if mapped {
-            unsafe { std::ptr::copy_nonoverlapping((exe.base + start) as *const u8, (old + start) as *mut u8, end - start) };
-            mapped = unsafe { libc::mprotect(at, end - start, libc::PROT_READ) } == 0;
-        }
-    }
-    if !mapped {
-        return undo();
-    }
-    true
 }
 
 /// Note the libraries loaded so far (`LOADED`), through dl_iterate_phdr:
@@ -935,14 +839,86 @@ fn build_id(notes: &[u8]) -> Option<&[u8]> {
     None
 }
 
+/// What a restore made of the range the builder's executable lay in. An
+/// image holds no address there (`image::settle`, `Schema::renew`); should
+/// one be left, following it faults where the range is reserved, rather
+/// than reading what this process has there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Guard {
+    /// No image was adopted.
+    None = 0,
+    /// Reserved, inaccessible.
+    Reserved,
+    /// Something of this process lies there, its own executable perhaps:
+    /// left alone, the image restores.
+    Taken,
+    /// This process's executable could not be read.
+    Unknown,
+}
+
+/// What became of the builder's executable range (`Guard`).
+pub fn executable_guard() -> Guard {
+    match GUARD.load(Ordering::Acquire) {
+        1 => Guard::Reserved,
+        2 => Guard::Taken,
+        3 => Guard::Unknown,
+        _ => Guard::None,
+    }
+}
+
+/// Where this process's executable loaded, and the span of its loaded
+/// segments from there, from its program headers, without allocating.
+fn executable() -> Option<(usize, std::ops::Range<usize>)> {
+    // SAFETY: getauxval reads the auxiliary vector the kernel gave this
+    // process; it has no precondition.
+    let (phdr, count) = unsafe { (libc::getauxval(libc::AT_PHDR) as usize, libc::getauxval(libc::AT_PHNUM) as usize) };
+    if phdr == 0 {
+        return None;
+    }
+    // SAFETY: AT_PHDR and AT_PHNUM give the address and number of this
+    // executable's program headers, which stay mapped for the process's life.
+    let headers = unsafe { std::slice::from_raw_parts(phdr as *const libc::Elf64_Phdr, count) };
+    let base = phdr - headers.iter().find(|h| h.p_type == libc::PT_PHDR)?.p_vaddr as usize;
+    let loads = || headers.iter().filter(|h| h.p_type == libc::PT_LOAD);
+    let low = loads().map(|h| h.p_vaddr as usize / PAGE * PAGE).min()?;
+    let high = loads().map(|h| (h.p_vaddr + h.p_memsz) as usize).max()?.next_multiple_of(PAGE);
+    Some((base, low..high))
+}
+
+/// Where this process's executable loaded: what a capture records.
+pub fn executable_base() -> usize {
+    executable().map_or(0, |(base, _)| base)
+}
+
+/// Reserve, inaccessible, the range the executable of the process that made
+/// the image lay in at OLD (the same binary: the image's key binds it),
+/// when nothing of this process lies there.
+fn guard_executable(old: usize) -> Guard {
+    let Some((_, span)) = executable() else { return Guard::Unknown };
+    let (at, len) = (old + span.start, span.end - span.start);
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
+    // SAFETY: an anonymous, inaccessible mapping where nothing of this
+    // process is (MAP_FIXED_NOREPLACE): it replaces nothing.
+    let mapped = unsafe { libc::mmap(at as *mut libc::c_void, len, libc::PROT_NONE, flags, -1, 0) };
+    if mapped == at as *mut libc::c_void {
+        return Guard::Reserved;
+    }
+    if mapped != libc::MAP_FAILED {
+        // A kernel that ignores MAP_FIXED_NOREPLACE placed it elsewhere.
+        // SAFETY: MAPPED is the mapping just made, which nothing refers to.
+        unsafe { libc::munmap(mapped, len) };
+    }
+    Guard::Taken
+}
+
 /// How the image this process adopted fared.
 pub fn restore_outcome() -> Restore {
     match RESTORE.load(Ordering::Acquire) {
         1 => Restore::Mapped,
         2 => Restore::Unreadable,
         3 => Restore::Format,
-        4 => Restore::Executable,
-        5 => Restore::Map,
+        4 => Restore::Map,
         _ => Restore::None,
     }
 }

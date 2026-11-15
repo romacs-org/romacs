@@ -154,35 +154,6 @@ fn inactive_primitive_paint_plan_is_fixed_capacity_and_keeps_paint_domain() {
 }
 
 #[test]
-fn active_span_invalidates_only_glyph_ranges_intersecting_its_clip() {
-    let face_id = FaceId::new(2);
-    let mut frame = FrameGlyphBuffer::with_size(40.0, 30.0);
-    frame.faces.insert(face_id, Face::new(face_id));
-    frame.add_char('a', 0.0, 0.0, 10.0, 10.0, 8.0, false);
-    frame.add_char('b', 0.0, 15.0, 10.0, 10.0, 8.0, false);
-    frame
-        .install_presented_pointer(
-            vec![],
-            vec![PresentedPointerAppearance::new(
-                vec![PresentedPaintSpan::new(
-                    PresentedPrimitiveKind::Glyph,
-                    0,
-                    2,
-                    FrameRect::new(0.0, 0.0, 10.0, 10.0).unwrap(),
-                )],
-                PointerDrawMode::Face(face_id),
-                PointerDrawMode::Face(face_id),
-            )],
-        )
-        .unwrap();
-    let resolver =
-        PointerOverrideResolver::new(&frame, Some(selection(PointerAppearancePhase::Hover)));
-
-    assert!(resolver.affects_glyph_range(&frame.glyphs, 0..1));
-    assert!(!resolver.affects_glyph_range(&frame.glyphs, 1..2));
-}
-
-#[test]
 fn face_override_changes_materialized_face_without_changing_glyph_geometry() {
     let frame = frame_with_glyph_appearance(
         PointerDrawMode::Face(FaceId::new(2)),

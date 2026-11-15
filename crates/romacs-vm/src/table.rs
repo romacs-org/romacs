@@ -349,6 +349,11 @@ impl<T: romacs_snapshot::SnapshotSafe + romacs_snapshot::Schema> romacs_snapshot
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut romacs_snapshot::Settle) {
+        // The rest are numbers and flags.
+        self.entries.settle(s);
+        self.barrier.settle(s);
+    }
 }
 
 impl<T> Index<usize> for Table<T> {

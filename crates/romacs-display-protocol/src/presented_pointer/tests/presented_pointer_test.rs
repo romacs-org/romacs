@@ -21,7 +21,7 @@ use crate::{
     Color, DisplayWindowId, FaceId, FrameRect, InteractionId, PointerAppearanceId,
     PointerAppearancePhase, PointerAppearanceSelection, PointerDrawMode, PointerImageRelief,
     PointerReliefCornerErase, PointerReliefEdges, PointerReliefMargins, PosnPointRole,
-    PresentedPaintSpan, PresentedPointerAppearance, PresentedPointerDamageRow, PresentedPointerMap,
+    PresentedPaintSpan, PresentedPointerAppearance, PresentedPointerMap,
     PresentedPointerMapError, PresentedPointerRegion, PresentedPointerSourceAppearance,
     PresentedPointerSourceMap, PresentedPrimitiveKind, PresentedSourcePaintSpan,
     PresentedTextPosition,
@@ -41,7 +41,7 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> FrameRect {
 }
 
 #[test]
-fn installed_appearance_precomputes_union_bounds_and_unique_rows() {
+fn installed_appearance_precomputes_union_bounds() {
     let face_id = FaceId::new(7);
     let window_id = crate::DisplayWindowId::new(9);
     let mut frame = crate::FrameGlyphBuffer::with_size(200.0, 100.0);
@@ -99,13 +99,6 @@ fn installed_appearance_precomputes_union_bounds_and_unique_rows() {
 
     let appearance = &frame.presented_pointer().appearances()[0];
     assert_eq!(appearance.damage_bounds(), rect(10.0, 20.0, 8.0, 30.0));
-    assert_eq!(
-        appearance.damage_rows(),
-        &[
-            PresentedPointerDamageRow::new(window_id, 2),
-            PresentedPointerDamageRow::new(window_id, 4),
-        ]
-    );
 }
 
 fn image_relief_mode(pressed: bool) -> PointerDrawMode {

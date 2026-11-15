@@ -20,14 +20,8 @@ pub struct GlyphRenderStats {
     /// GPU vertex-buffer allocations this frame (arena growth events).
     /// Zero in steady state; nonzero only while arenas grow to high water.
     pub buffers_created: usize,
-    /// Text rows tessellated from scratch this frame (includes bailed rows).
+    /// Text rows tessellated this frame.
     pub rows_tessellated: usize,
-    /// Text rows spliced verbatim from the row-reuse cache.
-    pub rows_reused_verbatim: usize,
-    /// Text rows spliced with an integral vertical shift.
-    pub rows_reused_shifted: usize,
-    /// Rows whose damage said reusable but a defensive reuse key failed.
-    pub row_reuse_bails: usize,
 }
 
 struct GlyphStatsWindow {
@@ -96,19 +90,12 @@ impl GlyphRenderStats {
         self.page_evictions = self.page_evictions.saturating_add(frame.page_evictions);
         self.buffers_created = self.buffers_created.saturating_add(frame.buffers_created);
         self.rows_tessellated = self.rows_tessellated.saturating_add(frame.rows_tessellated);
-        self.rows_reused_verbatim = self
-            .rows_reused_verbatim
-            .saturating_add(frame.rows_reused_verbatim);
-        self.rows_reused_shifted = self
-            .rows_reused_shifted
-            .saturating_add(frame.rows_reused_shifted);
-        self.row_reuse_bails = self.row_reuse_bails.saturating_add(frame.row_reuse_bails);
     }
 
     fn log_aggregate(&self, frames: usize, elapsed: Duration) {
         tracing::info!(
             "glyph-stats: total={} text={} composed={} unique_single_sum={} unique_composed_sum={} \
-             uploads={} draws={} bind_changes={} vertex_bufs={} composed_draws={} hits={} misses={} evictions={} bufs_created={} rows_tess={} rows_reused={} rows_shifted={} row_bails={} frames={} interval_ms={}",
+             uploads={} draws={} bind_changes={} vertex_bufs={} composed_draws={} hits={} misses={} evictions={} bufs_created={} rows_tess={} frames={} interval_ms={}",
             self.total_frame_glyphs,
             self.text_glyphs,
             self.composed_glyphs,
@@ -124,9 +111,6 @@ impl GlyphRenderStats {
             self.page_evictions,
             self.buffers_created,
             self.rows_tessellated,
-            self.rows_reused_verbatim,
-            self.rows_reused_shifted,
-            self.row_reuse_bails,
             frames,
             elapsed.as_millis(),
         );

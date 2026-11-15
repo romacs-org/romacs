@@ -29,7 +29,7 @@ fn drawn(h: &mut Harness, frame: &FrameGlyphBuffer) -> Vec<u8> {
     h.renderer.effects.indent_guides.color = (1.0, 0.0, 0.0, 1.0);
     h.atlas.set_current_frame_fonts(frame.font_bindings());
     let (texture, view) = make_tex(&h.renderer, "guides");
-    h.renderer.render_frame_glyphs(&view, frame, &mut h.atlas, mapping_for(frame, W, H), false, None, None, None, None, None);
+    h.renderer.render_frame_glyphs(&view, frame, &mut h.atlas, mapping_for(frame, W, H), false, None, None, None, None);
     read_tex(&h.renderer, &texture)
 }
 
