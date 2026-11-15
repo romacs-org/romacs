@@ -1730,10 +1730,10 @@ impl Vm {
         for &i in &dead {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
-        self.conses.swept(swept[0].0, swept[0].1, swept[0].2, verify);
-        self.closures.swept(swept[1].0, swept[1].1, swept[1].2, verify);
-        self.cells.swept(swept[2].0, swept[2].1, swept[2].2, verify);
-        self.objects.swept(swept[3].0, swept[3].1, swept[3].2, verify);
+        self.conses.swept(swept[0].0, swept[0].1, verify);
+        self.closures.swept(swept[1].0, swept[1].1, verify);
+        self.cells.swept(swept[2].0, swept[2].1, verify);
+        self.objects.swept(swept[3].0, swept[3].1, verify);
         marking.finish(own);
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
