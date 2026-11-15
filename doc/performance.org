@@ -39,6 +39,11 @@ examples.
    reused and rebuilt, the bands expanded, the layouts asked of the layout
    host and the frames submitted. =display_stages_live.py= (the harness
    README) holds a set of scenarios to bars on those figures.
+7. Read the render thread's side per frame. Under =ROMACS_DIAGNOSTICS=1=
+   it writes a =frame-cost= line for each frame it draws: the rows it
+   tessellated and reused, the glyphs it walked, the bytes it uploaded,
+   and its instructions in the frame, with the driver's part apart.
+   =render_stages_live.py= holds the same scenarios to bars on those.
 
 * Attack cost in order
 

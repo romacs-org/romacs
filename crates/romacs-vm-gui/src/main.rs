@@ -834,6 +834,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
                       std::sync::atomic::Ordering::Relaxed);
     // Batch and the isolates keep GNU's `noninteractive' messages on stderr.
     romacs_vm::host::set_messages_to_stderr(diagnostics());
+    // A frame's cost in instructions, said per frame on the render thread.
+    if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
+        romacs_display_protocol::meter::install(romacs_vm::host::instruction_count);
+    }
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     // Startup phases, on the clock of this process's exec, under the trace.
     let mut phases = trace_latency.then(startup::Phases::from_exec);

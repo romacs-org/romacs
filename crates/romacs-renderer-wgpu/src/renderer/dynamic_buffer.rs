@@ -107,6 +107,7 @@ impl<T: Pod> FrameVertexArena<T> {
 
         let buffer = self.buffer.as_ref().unwrap().clone();
         queue.write_buffer(&buffer, offset, bytes);
+        crate::cost::add(crate::cost::BYTES_UPLOADED, bytes.len());
         self.cursor_bytes = end;
 
         Some(VertexUpload {

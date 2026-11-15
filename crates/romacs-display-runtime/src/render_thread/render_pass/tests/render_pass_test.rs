@@ -13,7 +13,6 @@ fn render_with_frame() -> GuiFrameRenderState {
     );
     render.set_current_frame(
         Some(romacs_display_protocol::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0)),
-        None,
         Default::default(),
         Default::default(),
     );

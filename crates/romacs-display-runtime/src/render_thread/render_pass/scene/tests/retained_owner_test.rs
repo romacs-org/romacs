@@ -27,7 +27,6 @@ fn setup() -> (WgpuRenderer, GuiFrameRenderState, FrameGlyphBuffer) {
     let root = pane_frame();
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -270,7 +269,7 @@ fn snapshot(fractional: bool) {
     let (mut renderer, mut render, mut root) = setup();
     if fractional {
         root.background_alpha = 0.5;
-        render.compositor.current_frame = Some(root.clone());
+        render.compositor.current_frame = Some(std::sync::Arc::new(root.clone()));
     }
     let origin = observe_platform_now();
     renderer.set_frame_sample(FrameSample::new(origin, Duration::ZERO));
@@ -306,12 +305,12 @@ fn snapshot(fractional: bool) {
         &mut renderer,
         &mut render.compositor.transitions,
         &Default::default(),
-        &mut root,
+        &root.take_transition_hints(),
         Default::default(),
         &mut render.compositor.dirty,
     );
     assert!(render.compositor.transitions.has_active());
-    render.compositor.current_frame = Some(root.clone());
+    render.compositor.current_frame = Some(std::sync::Arc::new(root.clone()));
     // Age both ring slots away from the transition's unique old picture.
     for _ in 0..if fractional { 0 } else { 3 } {
         let pic = render
@@ -384,10 +383,9 @@ fn terminal_unique_pane_retires_without_surrendering_fractional_native() {
     let origin = observe_platform_now();
     let (before, mut after) = install_pane_change(&mut render, origin, 1);
     after.background_alpha = 0.5;
-    render.compositor.current_frame = Some(after.clone());
+    render.compositor.current_frame = Some(std::sync::Arc::new(after.clone()));
     render.set_current_frame(
         Some(after.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
