@@ -3761,14 +3761,16 @@ journal unread here."
 \(`romacs-agent--fold-batch'), while fewer than `romacs-agent-fold-jobs'
 run."
   (while (and romacs-agent--fold-queue (< romacs-agent--fold-running (max 1 romacs-agent-fold-jobs)))
-    (let ((batch nil) (bytes 0))
+    (let ((batch nil) (bytes 0) (size nil))
+      ;; A journal past the bound goes alone, as a batch's first.
       (while (and romacs-agent--fold-queue (< (length batch) (car romacs-agent--fold-batch))
-                  (or (null batch) (< bytes (cdr romacs-agent--fold-batch))))
-        (let ((entry (pop romacs-agent--fold-queue)))
-          (push entry batch)
-          (cl-incf bytes (or (file-attribute-size
-                              (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir (car entry)))))
-                             0))))
+                  (setq size (or (file-attribute-size
+                                  (file-attributes (expand-file-name "journal.jsonl"
+                                                                     (romacs-agent-dir (car (car romacs-agent--fold-queue))))))
+                                 0))
+                  (or (null batch) (<= (+ bytes size) (cdr romacs-agent--fold-batch))))
+        (push (pop romacs-agent--fold-queue) batch)
+        (cl-incf bytes size))
       (setq batch (nreverse batch))
       (cl-incf romacs-agent--fold-running)
       (let ((future (condition-case err
@@ -3821,20 +3823,23 @@ the kept states it wrote, a turn's worth at a time."
     (setq romacs-agent--fold-loading
           (append romacs-agent--fold-loading (mapcar (lambda (entry) (list (car entry) (cdr entry) failure)) batch))))
   (romacs-agent--fold-next)
-  (romacs-agent--fold-load-step))
+  (romacs-agent--fold-load-soon))
+
+(defun romacs-agent--fold-load-soon ()
+  "Load on the folded sessions waiting from the command loop, one timer
+for all."
+  (unless romacs-agent--fold-load-timer
+    (setq romacs-agent--fold-load-timer (run-at-time 0 nil #'romacs-agent--fold-load-step))))
 
 (defun romacs-agent--fold-load-step ()
   "Load on folded sessions, `romacs-agent--restore-turn' seconds of them;
-the rest a turn later."
+the rest a turn later.  Run by its timer alone (`romacs-agent--fold-load-soon')."
   (setq romacs-agent--fold-load-timer nil)
   (let ((until (+ (float-time) romacs-agent--restore-turn)))
     (while (when-let* ((entry (pop romacs-agent--fold-loading)))
              (apply #'romacs-agent--folded-one entry)
              (< (float-time) until))))
-  (if romacs-agent--fold-loading
-      (unless romacs-agent--fold-load-timer
-        (setq romacs-agent--fold-load-timer (run-at-time 0 nil #'romacs-agent--fold-load-step)))
-    (romacs-agent--restore-finish)))
+  (if romacs-agent--fold-loading (romacs-agent--fold-load-soon) (romacs-agent--restore-finish)))
 
 (defun romacs-agent--folded-one (session manifest failure)
   "SESSION, made from MANIFEST, folded by a worker (FAILURE, why its job

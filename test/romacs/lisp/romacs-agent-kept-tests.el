@@ -460,12 +460,20 @@ contents, so two equal states print the same."
                ((symbol-function 'isolate-await) (lambda (future &optional _) (nth 4 future))))
        ,@body)))
 
+(defun romacs-agent-kept-tests--drain ()
+  "Load on now what the folds that ended left waiting."
+  (when romacs-agent--fold-load-timer (cancel-timer romacs-agent--fold-load-timer))
+  (while (or romacs-agent--fold-loading romacs-agent--fold-load-timer) (romacs-agent--fold-load-step)
+         (when romacs-agent--fold-load-timer (cancel-timer romacs-agent--fold-load-timer)
+               (setq romacs-agent--fold-load-timer nil))))
+
 (defun romacs-agent-kept-tests--work (future)
-  "Run FUTURE's job as its worker would, then its callback."
+  "Run FUTURE's job as its worker would, then its callback, then load on."
   (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
                              (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
                          (funcall (nth 1 future) (nth 2 future))))
-  (funcall (nth 3 future) future))
+  (funcall (nth 3 future) future)
+  (romacs-agent-kept-tests--drain))
 
 (ert-deftest romacs-agent-kept-a-long-journal-folds-aside ()
   ;; No kept state, a journal too long to fold in the editor: a worker
@@ -492,7 +500,8 @@ contents, so two equal states print the same."
               (should (equal (nth 4 future) (list (length records))))
               (should (file-exists-p (romacs-agent--kept-file session)))
               (setq read nil)
-              (funcall (nth 3 future) future)))
+              (funcall (nth 3 future) future)
+              (romacs-agent-kept-tests--drain)))
           (should-not read)
           (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
           (romacs-agent-kept-tests--write twin records)
@@ -547,6 +556,28 @@ contents, so two equal states print the same."
           (romacs-agent-kept-tests--work (car jobs))
           (should (= (romacs-agent-seq session) 400)))))))
 
+(ert-deftest romacs-agent-kept-folds-go-in-bounded-batches-loaded-by-one-timer ()
+  ;; A batch takes journals while their bytes fit, one past the bound
+  ;; alone; folds that end together load on from one timer.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--with-workers
+      (let* ((romacs-agent--fold-batch '(8 . 100)) (romacs-agent-fold-jobs 4)
+             (made (mapcar (lambda (bytes)
+                             (let ((d (expand-file-name (format "b%d" bytes) root)))
+                               (make-directory d t)
+                               (write-region (make-string bytes ?x) nil (expand-file-name "journal.jsonl" d) nil 'silent)
+                               (cons (romacs-agent--make :id (format "b%d" bytes) :dir d) nil)))
+                           '(60 80 30))))
+        (setq romacs-agent--fold-queue made)
+        (romacs-agent--fold-next)
+        (should (equal (mapcar (lambda (job) (mapcar #'file-name-nondirectory (nth 2 job))) (reverse jobs))
+                       '(("b60") ("b80") ("b30"))))
+        (let ((timers (lambda () (cl-count #'romacs-agent--fold-load-step timer-list :key #'timer--function))))
+          (dolist (job jobs) (setf (nth 4 job) nil) (funcall (nth 3 job) job))
+          (should (= (funcall timers) 1))
+          (romacs-agent-kept-tests--drain)
+          (should (= (funcall timers) 0)))))))
+
 (ert-deftest romacs-agent-kept-a-restore-ends-after-its-folds ()
   ;; The restore's tail (attaching, sweeping, the restored hook) waits for
   ;; the sessions folded aside; its progress says running until then.
@@ -591,7 +622,8 @@ contents, so two equal states print the same."
             (cl-letf* ((real (symbol-function 'romacs-agent--record))
                        ((symbol-function 'romacs-agent--record)
                         (lambda (session record) (push record read) (funcall real session record))))
-              (funcall (nth 3 future) future))
+              (funcall (nth 3 future) future)
+              (romacs-agent-kept-tests--drain))
             (should-not read))
           (should (= romacs-agent--fold-running 0)))))))
 
@@ -652,6 +684,7 @@ contents, so two equal states print the same."
       (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (error "No worker"))))
         (clrhash romacs-agent--sessions)
         (let ((session (romacs-agent--load dir)))
+          (romacs-agent-kept-tests--drain)
           (should (= (romacs-agent-seq session) (length (romacs-agent-kept-tests--claude))))
           (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
           (should (= romacs-agent--fold-running 0)))))))
