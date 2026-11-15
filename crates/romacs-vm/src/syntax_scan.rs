@@ -40,12 +40,19 @@ pub(crate) const ST_STRING_STYLE: i32 = 256 + 2;
 /// syntax.c syntax_code_spec: the designator character of each class.
 pub(crate) const SYNTAX_CODE_SPEC: [u8; 16] = *b" .w_()'\"$\\/<>@!|";
 
+#[inline]
 pub(crate) fn comstart_first(s: i32) -> bool { (s >> 16) & 1 != 0 }
+#[inline]
 pub(crate) fn comstart_second(s: i32) -> bool { (s >> 17) & 1 != 0 }
+#[inline]
 fn comend_first(s: i32) -> bool { (s >> 18) & 1 != 0 }
+#[inline]
 fn comend_second(s: i32) -> bool { (s >> 19) & 1 != 0 }
+#[inline]
 fn comstartend_first(s: i32) -> bool { s & 0x50000 != 0 }
+#[inline]
 pub(crate) fn prefix(s: i32) -> bool { (s >> 20) & 1 != 0 }
+#[inline]
 fn nested(s: i32) -> bool { (s >> 22) & 1 != 0 }
 /// SYNTAX_FLAGS_COMMENT_STYLE: FLAGS of the main delimiter character.
 fn comment_style(flags: i32, other: i32) -> i32 {
@@ -841,9 +848,10 @@ impl<T: Text> Scanner<'_, T> {
                     At::AtComment
                 }
                 At::Top => {
-                    // Whitespace and punctuation that start no comment
-                    // lead back here.
-                    pass!(|_, s| matches!(s & 0xff, SWHITESPACE | SPUNCT) && !comstart_first(s));
+                    // Whitespace, punctuation and comment enders (out of
+                    // a comment, a newline) that start no comment lead
+                    // back here.
+                    pass!(|_, s| matches!(s & 0xff, SWHITESPACE | SPUNCT | SENDCOMMENT) && !comstart_first(s));
                     if from.char >= end { At::Done } else {
                         inc_from!(At::TopDispatch);
                         At::TopDispatch
