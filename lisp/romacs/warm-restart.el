@@ -923,8 +923,9 @@ the buffers it had shown before and after as its image saved them:
 
 (defvar warm-restart--history-names nil
   "Once a restore laid out early has every buffer back, its names
-\(`warm-restart--names'): a layout put again (`warm-restart--put-again-on-resize')
-gives its windows their histories at once.")
+\(`warm-restart--names'): a layout put again
+\(`warm-restart--put-again-on-resize') gives its windows their histories
+at once.")
 
 (defun warm-restart--put-noted (frame state saved)
   "Lay STATE out in FRAME and note the histories SAVED, its image's state,
