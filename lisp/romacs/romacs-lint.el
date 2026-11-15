@@ -612,7 +612,7 @@ each directory this machine loads from under a lisp/, where ROOT has it."
     (pcase-dolist (`(,file . ,findings) results)
       (pcase-dolist (`(,line ,level ,text) findings)
         (cl-incf (alist-get level counts))
-        (princ (format "%s:%d: %s: %s\n" (file-relative-name file romacs-lint--names-from) line level text))))
+        (princ (format "%s:%d: %s: %s\n" (file-relative-name file) line level text))))
     (princ (format "romacs-lint: %d file%s, %d error%s, %d warning%s, %d hint%s\n"
                    (length results) (if (= (length results) 1) "" "s")
                    (alist-get 'error counts) (if (= (alist-get 'error counts) 1) "" "s")
@@ -620,20 +620,15 @@ each directory this machine loads from under a lisp/, where ROOT has it."
                    (alist-get 'hint counts) (if (= (alist-get 'hint counts) 1) "" "s")))
     (+ (alist-get 'error counts) (alist-get 'warning counts))))
 
-(defvar romacs-lint--names-from nil
-  "The directory the printed file names are relative to; nil for `default-directory'.")
-
 (defun romacs-lint-batch ()
   "Lint the files named on the command line and exit: 1 when any finding
 is an error or a warning.  Before the files, `--base REVISION' names the
-git revision struct layouts are held to, `--root DIRECTORY' the source
-tree of files kept outside it, and `--names-from DIRECTORY' what the
-printed file names are relative to."
+git revision struct layouts are held to, and `--root DIRECTORY' the
+source tree of files kept outside it."
   (let (base)
-    (while (member (car command-line-args-left) '("--base" "--root" "--names-from"))
+    (while (member (car command-line-args-left) '("--base" "--root"))
       (pcase (pop command-line-args-left)
         ("--base" (setq base (pop command-line-args-left)))
-        ("--names-from" (setq romacs-lint--names-from (file-name-as-directory (expand-file-name (pop command-line-args-left)))))
         ("--root" (setq romacs-lint-root (file-name-as-directory (expand-file-name (pop command-line-args-left)))))))
     (let ((files command-line-args-left))
       (setq command-line-args-left nil)
