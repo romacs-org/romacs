@@ -1,5 +1,5 @@
 //! `romacs --restart-supervise PLAN`: a restart's supervisor, run outside
-//! the session it restarts (lisp/romacs/warm-restart.el `romacs-restart`).
+//! the session it restarts (lisp/session/warm-restart.el `romacs-restart`).
 //! The old session wrote its image and the PLAN, a JSON file, and is
 //! ending. The supervisor waits for it to end, starts the target build
 //! as the same server, through that build's own client, restoring the
