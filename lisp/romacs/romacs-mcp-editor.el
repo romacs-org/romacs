@@ -11,7 +11,6 @@
 
 ;;; Code:
 (require 'romacs-mcp)
-(require 'rx)
 
 (defconst romacs-mcp-editor-output-limit 32768
   "Maximum encoded tool-result bytes, including the escaped text envelope.
@@ -22,29 +21,6 @@ Bound extraction before serialization; this is not a peak-allocation bound.")
 Native `buffer-list' still enumerates all references and offset traversal costs
 O(offset); this does not promise O(page-size) total cost or atomic pagination.")
 (defconst romacs-mcp--editor-name-limit 256)
-
-(defun romacs-mcp--editor-credential-name-p (name)
-  "Return non-nil if NAME lexically resembles a credential file or store."
-  (and (stringp name)
-       (let ((case-fold-search t))
-         (string-match-p
-          (rx (or string-start "/")
-              (or (seq (optional (any "._")) (or "authinfo" "netrc")
-                       (or string-end "." "~" "<"))
-                  (seq (optional ".") "password-store" (or string-end "/"))))
-          name))))
-
-(defun romacs-mcp--editor-denied-p (buffer)
-  "Return non-nil if BUFFER's native metadata denies structured disclosure.
-Exclude minibuffers and their indirect aliases and credential-like
-names/paths.  Never inspect contents or resolve file paths.
-This lexical policy is not a sandbox and cannot identify renamed secret copies."
-  (with-current-buffer buffer
-    (or (minibufferp buffer)
-        (cl-some #'romacs-mcp--editor-credential-name-p
-                 (list (buffer-name) buffer-file-name buffer-file-truename))
-        (when-let* ((base (buffer-base-buffer)))
-          (romacs-mcp--editor-denied-p base)))))
 
 (defun romacs-mcp--editor-integer (arguments key minimum maximum)
   "Return ARGUMENTS' integer KEY within MINIMUM and MAXIMUM, or refuse."
@@ -76,7 +52,8 @@ byte written out)."
 (defun romacs-mcp--buffer-list (arguments)
   "Observe a bounded page of native buffer metadata for ARGUMENTS.
 OFFSET addresses native enumeration slots, including excluded entries.
-Names exceeding 256 characters, internal buffers and denied buffers are skipped.
+Names exceeding 256 characters and internal buffers (a name starting with a
+space, as a minibuffer's) are skipped.
 A page can be empty and truncated; refresh after native catalogue changes."
   (romacs-mcp--instance arguments)
   (let* ((offset (romacs-mcp--editor-integer arguments "offset" 0 most-positive-fixnum))
@@ -93,7 +70,6 @@ A page can be empty and truncated; refresh after native catalogue changes."
              (entry (and (buffer-live-p buffer) name
                          (> (length name) 0) (not (eq (aref name 0) ?\s))
                          (<= (length name) romacs-mcp--editor-name-limit)
-                         (not (romacs-mcp--editor-denied-p buffer))
                          (romacs-mcp--editor-entry buffer))))
         (when entry
           (puthash "buffers" (vconcat (reverse (cons entry entries))) result)
@@ -128,8 +104,8 @@ end-exclusive.  A name plus tick is not an enduring buffer or mutation identity.
          (expected (gethash "expectedTick" arguments :absent))
          (buffer (and (stringp name) (> (length name) 0)
                       (<= (length name) romacs-mcp--editor-name-limit) (get-buffer name))))
-    (unless (and (buffer-live-p buffer) (not (romacs-mcp--editor-denied-p buffer)))
-      (user-error "Named buffer is unavailable for structured read"))
+    (unless (buffer-live-p buffer)
+      (user-error "No buffer is named %s" name))
     (unless (or (eq expected :absent) (and (integerp expected) (>= expected 0)))
       (user-error "Invalid expected modification tick"))
     (with-current-buffer buffer
