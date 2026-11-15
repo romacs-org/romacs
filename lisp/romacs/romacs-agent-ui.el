@@ -496,6 +496,76 @@ shows while its run is folded."
 CARD's room for the state and the link its call's end adds."
   (+ indent 2 (if card 16 0)))
 
+(defvar-local romacs-agent-ui--payloads nil
+  "Each folded call's payload, by tool use id, until it is opened: a
+plist of :call (NAME INPUT), :output (its text, when it came live) or
+:ref (where its record is, `romacs-agent-ui--payload-output'), :failed
+and :bytes.  With the call's row, a summary and a pointer to the whole.")
+
+(defun romacs-agent-ui--call-body (renderer input output failed)
+  "What goes under a call's row: its RENDERER's body of INPUT and OUTPUT,
+else OUTPUT; FAILED, why it failed, a message shown kept above it."
+  (let ((made (and (plist-get renderer :body) (funcall (plist-get renderer :body) input output))))
+    (cond ((not failed) (or made output))
+          ((plist-get renderer :shown) (concat made "\n\n" output))
+          (t output))))
+
+(defconst romacs-agent-ui--big-output 8192
+  "Bytes from which a folded call's row says how much it gave.")
+
+(defun romacs-agent-ui--keep-payload (id payload)
+  "Keep call ID's PAYLOAD for its row to open, and say on the row how
+much it gave when it is big.  Point is on the row."
+  (when (or (plist-get payload :ref) (not (string-empty-p (string-trim (or (plist-get payload :output) "")))))
+    (unless romacs-agent-ui--payloads (setq romacs-agent-ui--payloads (make-hash-table :test #'equal)))
+    (puthash id payload romacs-agent-ui--payloads)
+    (let ((bytes (plist-get payload :bytes)))
+      (when (and bytes (>= bytes romacs-agent-ui--big-output))
+        (save-excursion
+          (end-of-line)
+          (insert (romacs-agent-ui--sealed
+                   (romacs-agent-ui--like (line-beginning-position)
+                                          (propertize (format " · %s" (file-size-human-readable bytes))
+                                                      'face 'romacs-agent-dim 'romacs-agent-tool id)))))))))
+
+(defun romacs-agent-ui--payload-output (payload)
+  "PAYLOAD's output: its text, or read from its journal record."
+  (or (plist-get payload :output)
+      (romacs-agent-ui--ref-output (plist-get payload :ref))
+      ""))
+
+(defun romacs-agent-ui--ref-output (ref)
+  "The output REF points at, (:session S :id ID :from BYTE :to BYTE): the
+journal record there, parsed as its harness parses it."
+  (when-let* ((session (plist-get ref :session))
+              (record (car (let ((records nil))
+                             (romacs-agent--read-journal session (lambda (record) (push record records))
+                                                         (plist-get ref :from) (plist-get ref :to))
+                             records)))
+              (out (gethash "out" record)))
+    (plist-get (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'tool)
+                                                (equal (plist-get event :id) (plist-get ref :id))))
+                           (funcall (romacs-agent--harness-get session :events) (romacs-agent--scratch session) out))
+               :output)))
+
+(defun romacs-agent-ui--open-payload (id)
+  "Draw call ID's kept payload under its row, shown, and forget it: its
+row opened.  Nil when it has none."
+  (when-let* ((payload (and romacs-agent-ui--payloads (gethash id romacs-agent-ui--payloads)))
+              (mark (gethash id romacs-agent-ui--tool-lines)))
+    (remhash id romacs-agent-ui--payloads)
+    (let* ((call (plist-get payload :call))
+           (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (cadr call))
+                                             (romacs-agent-ui--payload-output payload) (plist-get payload :failed))))
+      (unless (string-empty-p (string-trim body))
+        (save-excursion
+          (goto-char mark)
+          (forward-line 1)
+          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id)))
+            (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
+            (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))
+      t)))
+
 (defun romacs-agent-ui--tool-end (event failed)
   "EVENT ends its call, FAILED or not: the row's mark settles and the row
 recedes, a failure is loud, the renderer draws the row again from the
@@ -511,9 +581,10 @@ link."
          (card (plist-get renderer :card))
          (record (and card (romacs-agent-ui--task-record output)))
          (shown (plist-get renderer :shown))
-         (made (and (plist-get renderer :body) (funcall (plist-get renderer :body) input output)))
-         ;; A failure says why; a message shown keeps its text above it.
-         (body (cond ((not failed) (or made output)) (shown (concat made "\n\n" output)) (t output)))
+         ;; Folded, what it gave waits to be opened: its row keeps where
+         ;; it is (`romacs-agent-ui--payloads').
+         (later (and mark (not shown)))
+         (body (if later "" (romacs-agent-ui--call-body renderer input output failed)))
          ;; The row's words anew, fitted to its line.
          (again (and mark (not failed) (plist-get renderer :ended)
                      (when-let* ((words (funcall (plist-get renderer :ended) input output)))
@@ -546,6 +617,10 @@ link."
             (add-face-text-property (point) (line-end-position) (if failed 'romacs-agent-error 'romacs-agent-dim)
                                     (not failed)))
           (when record (romacs-agent-ui--card-task record id))
+          (when later
+            (romacs-agent-ui--keep-payload
+             id (list :call call :output (plist-get event :output) :ref (plist-get event :output-ref)
+                      :failed failed :bytes (or (plist-get event :output-bytes) (string-bytes output)))))
           (forward-line 1))
         (unless (string-empty-p (string-trim body))
           (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
@@ -1968,7 +2043,7 @@ keeps every turn."
   "How many of its last turns this chat draws, nil for all.")
 
 (defconst romacs-agent-ui--drawn-state
-  '(romacs-agent-ui--run romacs-agent-ui--runs
+  '(romacs-agent-ui--run romacs-agent-ui--runs romacs-agent-ui--payloads
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
     romacs-agent-ui--fills romacs-agent-ui--fitted romacs-agent-ui--asked-rows)
   "A chat's variables that describe its transcript as drawn, besides its
@@ -2330,11 +2405,13 @@ tool call on it."
     (if (get-text-property start 'romacs-agent-run-head)
         (romacs-agent-ui--run-fold start (not (romacs-agent-ui--run-folded-p start)))
       (when-let* ((id (cl-some (lambda (pos) (get-text-property pos 'romacs-agent-tool))
-                               (list (point) start (max (point-min) (1- (line-end-position))))))
-                  (output (romacs-agent-ui--output-start id start)))
-        (let ((end (next-single-property-change output 'romacs-agent-output nil (point-max))))
-          (romacs-agent-ui--hide output end 'romacs-agent-output
-                                 (not (memq 'romacs-agent-output (ensure-list (get-text-property output 'invisible))))))))))
+                               (list (point) start (max (point-min) (1- (line-end-position)))))))
+        (if-let* ((output (romacs-agent-ui--output-start id start)))
+            (let ((end (next-single-property-change output 'romacs-agent-output nil (point-max))))
+              (romacs-agent-ui--hide output end 'romacs-agent-output
+                                     (not (memq 'romacs-agent-output (ensure-list (get-text-property output 'invisible))))))
+          ;; Opened the first time: drawn from where it is kept.
+          (romacs-agent-ui--open-payload id))))))
 
 (defun romacs-agent-ui--output-start (id from)
   "Where the output of fold ID starts, from FROM on, or nil: ids are
@@ -2737,7 +2814,9 @@ what was there."
 (defun romacs-agent-ui--set-outputs (hide)
   "Fold (HIDE) or show every run's steps and every output: a run's thinking
 too where the run left no row.  An open run is left as it is: it settles
-folded."
+folded.  Shown, the outputs kept for their rows are drawn first."
+  (when (and (not hide) romacs-agent-ui--payloads)
+    (mapc #'romacs-agent-ui--open-payload (hash-table-keys romacs-agent-ui--payloads)))
   (let ((end (marker-position (if romacs-agent-ui--run (plist-get romacs-agent-ui--run :head) romacs-agent-ui--end))))
     (dolist (fold '((romacs-agent-run . romacs-agent-steps) (romacs-agent-output . romacs-agent-output)))
       (let ((position (point-min)))
