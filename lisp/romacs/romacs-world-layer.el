@@ -289,9 +289,11 @@ stops it, as a warning: the library's first use meets it again."
 
 (defun romacs--layer-preload-step (queue)
   "Load the first feature of QUEUE not loaded yet, unless a key waits,
-then go on with the rest (`romacs--layer-preload').  QUEUE is no
-`features': a parameter of that name would shadow the loaded ones."
-  (while (and queue (featurep (car queue)))
+then go on with the rest (`romacs--layer-preload').  A feature no file
+of its name provides (sasl.el's `sasl-plain') comes with the file that
+does, later in QUEUE.  QUEUE is no `features': a parameter of that name
+would shadow the loaded ones."
+  (while (and queue (or (featurep (car queue)) (not (locate-library (symbol-name (car queue))))))
     (setq queue (cdr queue)))
   (cond
    ((null queue))

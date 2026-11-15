@@ -37,6 +37,17 @@ rest at once; one already loaded is passed over."
     (should-not (featurep 'romacs-wl-tests-c))
     (should (equal armed '((at (romacs-wl-tests-c)))))))
 
+(ert-deftest romacs-world-layer-preload-loads-a-feature-with-the-file-that-provides-it ()
+  "A feature no file of its name provides is passed over: the file that
+provides it, later in the queue, brings it."
+  (romacs-world-layer-tests--preloading
+      '(("romacs-wl-tests-g" . "(provide 'romacs-wl-tests-g-plain)\n(provide 'romacs-wl-tests-g)\n"))
+    (cl-letf (((symbol-function 'input-pending-p) #'ignore))
+      (romacs--layer-preload-step '(romacs-wl-tests-g-plain romacs-wl-tests-g)))
+    (should (featurep 'romacs-wl-tests-g-plain))
+    (should (featurep 'romacs-wl-tests-g))
+    (should (equal armed '((at nil))))))
+
 (ert-deftest romacs-world-layer-preload-waits-while-a-key-waits ()
   "A waiting key loads nothing: the step waits for the next idle moment."
   (romacs-world-layer-tests--preloading
