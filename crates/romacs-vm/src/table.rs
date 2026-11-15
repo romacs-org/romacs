@@ -723,21 +723,28 @@ impl<T> Table<T> {
     /// eight colours with none dirty is passed at one test.
     pub(crate) fn read_again(&mut self, whole: Option<&dyn Fn(usize, &T) -> bool>) -> Vec<usize> {
         let mut again = Vec::new();
-        let (colors, entries) = (&mut self.colors, &self.entries);
-        for (at, entries) in entries.chunks(8).enumerate().map(|(k, chunk)| (k * 8, chunk)) {
-            let colors = &mut colors[at..at + entries.len()];
-            if whole.is_none() && let Ok(bytes) = <[u8; 8]>::try_from(&*colors)
-                && u64::from_le_bytes(bytes) & (LOW_BITS * u64::from(DIRTY)) == 0 {
-                continue;
+        let len = self.entries.len();
+        let (colors, entries) = (&mut self.colors[..len], &self.entries);
+        let mut look = |colors: &mut [u8], i: usize| {
+            let color = &mut colors[i];
+            if *color & (IN_USE | OLD) == (IN_USE | OLD)
+                && (*color & DIRTY != 0 || whole.is_some_and(|whole| whole(i, &entries[i]))) {
+                *color &= !OLD;
+                again.push(i);
             }
-            for (k, (color, entry)) in colors.iter_mut().zip(entries).enumerate() {
-                if *color & (IN_USE | OLD) != (IN_USE | OLD) { continue; }
-                if *color & DIRTY != 0 || whole.is_some_and(|whole| whole(at + k, entry)) {
-                    *color &= !OLD;
-                    again.push(at + k);
-                }
-            }
+        };
+        if whole.is_some() {
+            for i in 0..len { look(colors, i); }
+            return again;
         }
+        // Only the dirty are wanted: a word with no dirty colour is passed.
+        let dirty = LOW_BITS * u64::from(DIRTY);
+        let words = len / 8;
+        for w in 0..words {
+            let word = u64::from_le_bytes(colors[w * 8..w * 8 + 8].try_into().expect("eight colours"));
+            if word & dirty != 0 { for i in w * 8..w * 8 + 8 { look(colors, i); } }
+        }
+        for i in words * 8..len { look(colors, i); }
         again
     }
     /// The entries in use that the mark standing did not reach and WANTED
@@ -748,16 +755,16 @@ impl<T> Table<T> {
         // OLD's bit of each byte, moved down beside its in-use bit, counts
         // as a mark in a minor's (`sweep_range`).
         let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
-        for (at, entries) in self.entries.chunks(8).enumerate().map(|(k, chunk)| (k * 8, chunk)) {
-            let colors = &self.colors[at..at + entries.len()];
-            if let Ok(bytes) = <[u8; 8]>::try_from(colors) {
-                let word = u64::from_le_bytes(bytes);
-                if word & LOW_BITS & !(word >> 7 | (word >> 4 & old_too)) == 0 { continue; }
-            }
-            for (k, (&color, entry)) in colors.iter().zip(entries).enumerate() {
-                if unreached(color, self.sticky) && wanted(entry) {
-                    found.push((at + k) as u32);
-                }
+        let colors = &self.colors[..self.entries.len()];
+        let (words, _) = colors.as_chunks::<8>();
+        let skipped = words.iter().map(|&word| u64::from_le_bytes(word))
+            .map(|word| word & LOW_BITS & !(word >> 7 | (word >> 4 & old_too)) == 0);
+        // Every entry of a word with one unreached, and the last part word.
+        let looked = skipped.enumerate().filter(|&(_, none)| !none).flat_map(|(w, _)| w * 8..w * 8 + 8)
+            .chain(words.len() * 8..colors.len());
+        for i in looked {
+            if unreached(colors[i], self.sticky) && wanted(&self.entries[i]) {
+                found.push(i as u32);
             }
         }
         found
