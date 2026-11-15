@@ -228,6 +228,8 @@ struct MarkState {
     /// once, by the round that finds its list live, and those left at the
     /// fixpoint are the dead lists.
     untraced_lists: Vec<u64>,
+    /// The objects storing their own writes (`shares_storage`) the mark met.
+    shared_seen: Vec<u32>,
     /// Weak tables looked through, one per table per round (`MarkedSet`).
     #[cfg(test)]
     weak_visits: usize,
@@ -363,6 +365,13 @@ pub(crate) fn traced(v: Value, in_obarray: &[bool]) -> bool {
         7 => v.payload() >= 1 && in_obarray.get(v.payload() as usize - 1).copied().unwrap_or(false),
         _ => false,
     }
+}
+/// Whether OBJECT keeps storage whose writes no store into its entry
+/// colours: buffer text and char-table nodes, each with its own record of
+/// what was written since (`crate::epoch`), which a minor must look at for
+/// an old one as it does for a dirty entry.
+pub(crate) fn shares_storage(object: &data::Object) -> bool {
+    matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_))
 }
 /// Values an idle collection marks between its looks for a key press
 /// (`Vm::collect_marked'): a millisecond or two of marking.
@@ -1142,6 +1151,8 @@ impl Vm {
     /// its log empty, without collecting: what a world image holds, since to
     /// the process that restores it the image is the old generation.
     pub(crate) fn settle_generations(&mut self) {
+        // What becomes old here was not met by a minor.
+        self.shared_holders = None;
         self.conses.settle_old();
         self.closures.settle_old();
         self.cells.settle_old();
@@ -1312,7 +1323,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         lap.lap(&mut self.gc_times, Phase::Mark);
@@ -1737,8 +1748,20 @@ impl Vm {
         again.extend(self.conses.read_again(None).into_iter().map(|i| Value::reference(i, 3)));
         again.extend(self.closures.read_again(None).into_iter().map(|i| Value::reference(i, 4)));
         again.extend(self.cells.read_again(None).into_iter().map(|i| Value::reference(i, 5)));
-        let shared = |_: usize, object: &data::Object| matches!(object, data::Object::Buffer(_) | data::Object::ByteBuffer(_) | data::Object::CharTable(_) | data::Object::SubCharTable(_) | data::Object::MapKeymapCursor(_));
-        again.extend(self.objects.read_again(Some(&shared)).into_iter().map(|i| Value::reference(i + 1, 0)));
+        // The old objects storing their own writes, as the last minor met
+        // them all: a later one is young, so met if it lives, and one that
+        // took the kind in place was stored into. Unknown, every object is
+        // asked its kind.
+        let shared = |_: usize, object: &data::Object| shares_storage(object);
+        let objects = match self.shared_holders.take() {
+            None => self.objects.read_again(Some(&shared)),
+            Some(holders) => {
+                let mut objects = self.objects.read_again(None);
+                objects.extend(self.objects.read_again_at(&holders, &shared));
+                objects
+            }
+        };
+        again.extend(objects.into_iter().map(|i| Value::reference(i + 1, 0)));
         for table in [self.conses.logged(), self.closures.logged(), self.cells.logged(), self.objects.logged()] {
             again.extend_from_slice(table);
         }
@@ -1767,7 +1790,7 @@ impl Vm {
             self.check_minor(roots);
         }
         let Marked { marking, own, doomed, state, .. } = marked;
-        let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, .. } = state;
+        let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, mut shared_seen, .. } = state;
         self.settle_cell_pairs();
         self.doom(&doomed);
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
@@ -1783,6 +1806,10 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Sweep);
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
+        // Every live holder was met: read again as old, or young and reached.
+        shared_seen.sort_unstable();
+        shared_seen.dedup();
+        self.shared_holders = Some(shared_seen);
         self.settle_minor();
     }
     /// A minor's books: the young start again from here, and no poll is
@@ -1799,6 +1826,8 @@ impl Vm {
     }
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
+        // A full's survivors are old unmet, and a compaction moved them.
+        self.shared_holders = None;
         self.functions.settle();
         self.slots.settle();
         self.allocation.since = crate::epoch::commit_point();
@@ -2071,9 +2100,11 @@ impl Vm {
             return;
         }
         let i = v.payload() as usize - 1;
+        let object = handed.object();
+        if shares_storage(object) { state.shared_seen.push(i as u32); }
         let native_nodes = &mut state.native_nodes;
         let nodes_since = if state.reading.whole { 0 } else { state.reading.since };
-        match handed.object() {
+        match object {
             data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Obarray(t) => {
                 state.live_obarrays.push(i);
@@ -2326,6 +2357,9 @@ mod tests {
         vm.eval_source_raw("(setq gc-cons-threshold 1000000000)").unwrap();
         vm.collect(&mut []);
         vm.eval_source_raw("(dotimes (_ 2000) (make-string 64 ?x))").unwrap();
+        // The full's batch first: one waits at a time.
+        let start = std::time::Instant::now();
+        while gc_mark::dropping() && start.elapsed() < std::time::Duration::from_secs(10) { std::thread::yield_now(); }
         let buried = vm.gc_stress.buried;
         assert!(vm.collect_minor(&[]));
         assert!(vm.gc_stress.buried >= buried + 2000, "the young strings went to the dropper: {} then {}", buried, vm.gc_stress.buried);
@@ -2392,6 +2426,43 @@ mod tests {
         assert!(vm.collect_minor(&[]));
         let kept = vm.eval_source_raw("(progn (set-buffer minor-buffer) (equal (list (get-text-property 2 'minor) (get-text-property 6 'minor)) '((12) (13))))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
+        vm.collect(&mut []);
+    }
+
+    /// A minor reads the holders of storage that records its own writes from
+    /// the list the last minor left: old buffers and char tables it met, and
+    /// those made since, which it met young. What is stored into each
+    /// afterwards survives the next minor, its oracle agreeing.
+    #[test]
+    fn a_minor_reads_the_holders_the_last_minor_met() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        // Left current: switching away from a buffer stores into its entry.
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000 minor-buffer (get-buffer-create \"minor-listed\") minor-table (make-char-table 'minor))
+          (set-buffer minor-buffer) (insert \"hello world\")
+          (setq minor-indirect (make-indirect-buffer minor-buffer \"minor-listed-indirect\")) (set-buffer minor-indirect)").unwrap();
+        vm.collect(&mut []);
+        // The first minor after a full asks every object its kind.
+        assert!(vm.collect_minor(&[]));
+        assert!(vm.shared_holders.is_some(), "the minor left its list");
+        // Through the indirect buffer: the base's text is written, and
+        // nothing of the base's entry.
+        vm.eval_source_raw("(put-text-property 1 4 'minor (list 31))
+          (set-char-table-range minor-table ?a (list 32))
+          (setq minor-young (get-buffer-create \"minor-young\")) (with-current-buffer minor-young (insert \"young\"))").unwrap();
+        // Whatever else stored into the base's entry on the way: only the
+        // list can say it holds what its text was given.
+        let base = vm.eval_source_raw("minor-buffer").unwrap().index(0).unwrap() - 1;
+        vm.objects.forget_store(base);
+        assert!(vm.collect_minor(&[]));
+        // The once-young buffer, its text replaced whole, then the base's text again.
+        vm.eval_source_raw("(with-current-buffer minor-young (set-buffer-multibyte nil) (set-buffer-multibyte t) (put-text-property 1 3 'minor (list 33)))
+          (put-text-property 5 8 'minor (list 34))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        let kept = vm.eval_source_raw("(equal (list (list (get-text-property 2 'minor) (get-text-property 6 'minor))
+          (aref minor-table ?a) (with-current-buffer minor-young (get-text-property 2 'minor))) '(((31) (34)) (32) (33)))").unwrap();
+        assert_eq!(kept, Value::TRUE, "what each holder was given survives");
         vm.collect(&mut []);
     }
 

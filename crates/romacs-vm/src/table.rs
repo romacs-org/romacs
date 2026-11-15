@@ -762,6 +762,19 @@ impl<T> Table<T> {
         }
         found
     }
+    /// As `read_again`, of the entries AT alone: the old ones WHOLE asks for.
+    pub(crate) fn read_again_at(&mut self, at: &[u32], whole: &dyn Fn(usize, &T) -> bool) -> Vec<usize> {
+        let mut again = Vec::new();
+        let (colors, entries) = (&mut self.colors, &self.entries);
+        for i in at.iter().map(|&i| i as usize) {
+            let (Some(color), Some(entry)) = (colors.get_mut(i), entries.get(i)) else { continue };
+            if *color & (IN_USE | OLD) == (IN_USE | OLD) && whole(i, entry) {
+                *color &= !OLD;
+                again.push(i);
+            }
+        }
+        again
+    }
     /// Every entry in use becomes old, as a sweep would leave it, and the log
     /// is empty: what a world image holds, whose every entry is old to the
     /// process that restores it.
@@ -791,6 +804,12 @@ impl<T> Table<T> {
     #[cfg(test)]
     pub(crate) fn dirty_old(&self) -> impl Iterator<Item = usize> + '_ {
         self.colors.iter().enumerate().filter(|&(_, &color)| color & (OLD | DIRTY) == (OLD | DIRTY)).map(|(i, _)| i)
+    }
+    /// Entry I as if nothing were stored into it since the last collection:
+    /// what a store into storage the entry does not colour leaves, for a test.
+    #[cfg(test)]
+    pub(crate) fn forget_store(&mut self, i: usize) {
+        self.colors[i] &= !DIRTY;
     }
     /// The log overflows, as a native loop of puts with no poll makes it.
     #[cfg(test)]

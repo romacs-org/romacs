@@ -1360,6 +1360,11 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// The char tables read as flat rows (`char_table::flat`).
     flat_tables: char_table::FlatTables,
+    /// The objects whose storage records its own writes (`gc::shares_storage`),
+    /// as the last minor found them all, or None where no minor since a full,
+    /// a promotion or a restore knows them: the minor that needs them then
+    /// asks every object its kind (`Vm::minor`).
+    shared_holders: Option<Vec<u32>>,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1878,6 +1883,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     site_leaf,
     regexp_cache,
     flat_tables,
+    shared_holders,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1960,6 +1966,7 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             flat_tables: char_table::FlatTables::default(),
+            shared_holders: None,
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
