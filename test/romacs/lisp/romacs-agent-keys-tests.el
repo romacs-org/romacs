@@ -38,4 +38,23 @@
              (should (eq (key-binding (kbd "C-x C-a n")) 'romacs-agent-start)))
     (define-key gud-global-map (kbd "C-b") nil t)))
 
+(ert-deftest romacs-agent-keys-gud-loads-again ()
+  ;; gud loaded again over a prefix map that inherits its own: no cycle.
+  (require 'gud)
+  (let* ((gud-key-prefix (kbd "C-c d"))
+         (child (make-sparse-keymap))
+         (old (lookup-key global-map gud-key-prefix))
+         (parent (keymap-parent gud-global-map)))
+    (set-keymap-parent child gud-global-map)
+    (unwind-protect
+        (progn
+          ;; As when gud's prefix was one nothing else had bound.
+          (set-keymap-parent gud-global-map nil)
+          (global-set-key gud-key-prefix child)
+          (load "gud" nil t)
+          (should (eq (lookup-key global-map (kbd "C-c d C-l")) 'gud-refresh)))
+      (global-set-key gud-key-prefix old)
+      (set-keymap-parent gud-global-map parent)
+      (global-set-key (kbd "C-x C-a") gud-global-map))))
+
 ;;; romacs-agent-keys-tests.el ends here
