@@ -6,12 +6,14 @@
 (require 'ert)
 (require 'romacs-progress-view)
 
+(defvar romacs-progress-state)
+
 (ert-deftest romacs-progress-view-line-shows-a-step-as-it-goes ()
   "A running step: its words, its bar so far and its counts; a done one is
 checked and full; a failed one says why, in the failure's face."
-  (let ((running (romacs-progress-view--line 'restore '(:status running :done 2 :of 4 :name "init.el")))
-        (done (romacs-progress-view--line 'agents '(:status done :done 3 :of 3)))
-        (failed (romacs-progress-view--line 'restore '(:status failed :error "a damaged record"))))
+  (let ((running (romacs-progress-view--line 'restore '(:status running :done 2 :of 4 :name "init.el") 60))
+        (done (romacs-progress-view--line 'agents '(:status done :done 3 :of 3) 60))
+        (failed (romacs-progress-view--line 'restore '(:status failed :error "a damaged record") 60)))
     (should (string-match-p "Restoring buffers: init.el" running))
     (should (= (cl-count ?━ running) (/ romacs-progress-view--bar 2)))
     (should (string-suffix-p "2/4" running))
@@ -21,6 +23,17 @@ checked and full; a failed one says why, in the failure's face."
     (should (string-match-p "a damaged record" failed))
     (should (eq (get-text-property (1- (length failed)) 'face failed) 'romacs-progress-view-failed))))
 
+(ert-deftest romacs-progress-view-line-fits-its-width ()
+  "A long name and a long error are cut to the card's width; the bar and
+counts stay whole."
+  (let* ((name (make-string 200 ?x))
+         (running (romacs-progress-view--line 'restore (list :status 'running :done 1 :of 9 :name name) 50))
+         (failed (romacs-progress-view--line 'restore (list :status 'failed :error name) 50)))
+    (should (<= (string-width running) 50))
+    (should (string-suffix-p "1/9" running))
+    (should (= (+ (cl-count ?━ running) (cl-count ?─ running)) romacs-progress-view--bar))
+    (should (<= (string-width failed) 50))))
+
 (ert-deftest romacs-progress-view-takes-the-launch-screen-first ()
   "While the launch screen shows a step, no card is drawn; after it, the card."
   (let ((cards 0) (screen t))
@@ -28,9 +41,15 @@ checked and full; a failed one says why, in the failure's face."
               ((symbol-function 'romacs-progress-view--card) (lambda () (cl-incf cards)))
               ((symbol-function 'display-graphic-p) (lambda (&rest _) t))
               (noninteractive nil))
-      (romacs-progress-view-update 'agents '(:status running :done 1 :of 2))
-      (should (= cards 0))
-      (setq screen nil)
+      (let ((romacs-progress-state '((agents :status running :done 1 :of 2)))
+            (romacs-progress-view--handoff nil))
+        (romacs-progress-view-update 'agents '(:status running :done 1 :of 2))
+        (should (= cards 0))
+        ;; The screen gave way: the step still going moves to the card.
+        (should romacs-progress-view--handoff)
+        (romacs-progress-view--handoff)
+        (should (= cards 1)))
+      (setq cards 0 screen nil)
       (romacs-progress-view-update 'agents '(:status running :done 2 :of 2))
       (should (= cards 1)))))
 

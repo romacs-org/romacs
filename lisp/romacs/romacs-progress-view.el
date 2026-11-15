@@ -60,34 +60,41 @@
         (name (plist-get state :name)))
     (if (and (stringp name) (not (string-empty-p name))) (format "%s: %s" words name) words)))
 
-(defun romacs-progress-view--line (step state)
-  "STEP at STATE as a line: a glyph, its words, its bar and counts."
+(defun romacs-progress-view--line (step state width)
+  "STEP at STATE as a line at most WIDTH columns: a glyph, its words, then
+its bar and counts, or its error; the words and the error are cut to fit
+\(the error is whole in *Messages*)."
   (let* ((status (plist-get state :status))
          (done (plist-get state :done)) (of (plist-get state :of))
          (lit (if (and (natnump done) (natnump of) (> of 0))
                   (round (* romacs-progress-view--bar (/ (float (min done of)) of)))
-                (if (eq status 'done) romacs-progress-view--bar 0))))
-    (concat (pcase status
-              ('done (propertize "✓ " 'face 'romacs-progress-view-bar))
-              ('failed (propertize "✗ " 'face 'romacs-progress-view-failed))
-              (_ "  "))
-            (romacs-progress-view--words step state)
-            "  "
-            (if (eq status 'failed)
-                (propertize (format "%s" (or (plist-get state :error) "failed")) 'face 'romacs-progress-view-failed)
-              (concat (propertize (make-string lit ?━) 'face 'romacs-progress-view-bar)
-                      (propertize (make-string (- romacs-progress-view--bar lit) ?─) 'face 'romacs-progress-view-rest)
-                      (and (natnump done) (natnump of)
-                           (propertize (format "  %d/%d" done of) 'face 'romacs-progress-view-rest)))))))
+                (if (eq status 'done) romacs-progress-view--bar 0)))
+         (glyph (pcase status
+                  ('done (propertize "✓ " 'face 'romacs-progress-view-bar))
+                  ('failed (propertize "✗ " 'face 'romacs-progress-view-failed))
+                  (_ "  ")))
+         (tail (unless (eq status 'failed)
+                 (concat (propertize (make-string lit ?━) 'face 'romacs-progress-view-bar)
+                         (propertize (make-string (- romacs-progress-view--bar lit) ?─) 'face 'romacs-progress-view-rest)
+                         (and (natnump done) (natnump of)
+                              (propertize (format "  %d/%d" done of) 'face 'romacs-progress-view-rest)))))
+         (room (max 8 (- width 2 (if tail (+ 2 (string-width tail)) 0))))
+         (words (truncate-string-to-width (romacs-progress-view--words step state) room nil nil "…")))
+    (concat glyph words "  "
+            (or tail
+                (propertize (truncate-string-to-width (format "%s" (or (plist-get state :error) "failed"))
+                                                      (max 8 (- width 4 (string-width words))) nil nil "…")
+                            'face 'romacs-progress-view-failed)))))
 
 (defun romacs-progress-view--card ()
   "Show every step of `romacs-progress-state' in the card, in the frame's
 bottom-right corner; hide it a while after the last one ended."
-  (let* ((steps (reverse romacs-progress-state))
-         (lines (mapcar (lambda (entry) (romacs-progress-view--line (car entry) (cdr entry))) steps))
+  (let* ((root (romacs-layer--root-frame))
+         (room (max 24 (min 80 (- (frame-width root) 8))))
+         (steps (reverse (bound-and-true-p romacs-progress-state)))
+         (lines (mapcar (lambda (entry) (romacs-progress-view--line (car entry) (cdr entry) room)) steps))
          (buffer (get-buffer-create romacs-progress-view--name))
-         (columns (+ 2 (apply #'max 20 (mapcar #'string-width lines))))
-         (root (romacs-layer--root-frame)))
+         (columns (min room (+ 2 (apply #'max 20 (mapcar #'string-width lines))))))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -109,17 +116,30 @@ bottom-right corner; hide it a while after the last one ended."
   (setq romacs-progress-view--timer nil)
   (when (get-buffer romacs-progress-view--name) (romacs-popup-hide romacs-progress-view--name)))
 
+(defvar romacs-progress-view--handoff nil
+  "The timer that moves steps still going from the launch screen to the card.")
+
+(defun romacs-progress-view--handoff ()
+  "The launch screen gave way (timers run once the session's first frame
+is up): the steps still going go on in the card."
+  (setq romacs-progress-view--handoff nil)
+  (when (seq-some (lambda (entry) (eq (plist-get (cdr entry) :status) 'running)) (bound-and-true-p romacs-progress-state))
+    (romacs-progress-view--card)))
+
 (defun romacs-progress-view-update (step state)
   "Show STEP at STATE (`romacs-progress-functions'): on the launch screen
 while it shows, else in the frame's card; a failure in *Messages* too."
   (let ((failed (eq (plist-get state :status) 'failed)))
     (when failed
       (message "%s failed: %s" (romacs-progress-view--words step state) (or (plist-get state :error) "")))
-    (unless (and (fboundp 'romacs-startup-progress)
-                 (romacs-startup-progress step (romacs-progress-view--words step state)
-                                          (plist-get state :done) (plist-get state :of) failed))
-      (when (and (display-graphic-p) (not noninteractive))
-        (romacs-progress-view--card)))))
+    (cond ((and (fboundp 'romacs-startup-progress)
+                (romacs-startup-progress step (romacs-progress-view--words step state)
+                                         (plist-get state :done) (plist-get state :of) failed))
+           ;; A step the screen showed that goes on goes on in the card.
+           (unless romacs-progress-view--handoff
+             (setq romacs-progress-view--handoff (run-at-time 0 nil #'romacs-progress-view--handoff))))
+          ((and (display-graphic-p) (not noninteractive))
+           (romacs-progress-view--card)))))
 
 (provide 'romacs-progress-view)
 ;;; romacs-progress-view.el ends here
