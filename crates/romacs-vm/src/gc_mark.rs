@@ -131,12 +131,6 @@ enum Seen<'a> {
 }
 
 impl Seen<'_> {
-    /// Whether the sweep may take the object as it finds it: memory it owns
-    /// and no more (`Grave'). Every other kind has its side effects at a known
-    /// time, on the collecting thread, before the sweep.
-    fn buried(&self) -> bool {
-        matches!(self, Seen::Free | Seen::Float | Seen::Values(..) | Seen::Text { .. } | Seen::Memory(_))
-    }
 }
 
 impl RawTable<data::Object> {
@@ -204,7 +198,14 @@ enum Grave {
 }
 
 impl Grave {
-    /// What OBJECT, which `Seen::buried' takes, leaves to drop.
+    /// Whether the sweep may take OBJECT as it finds it: memory it owns and
+    /// no more. Every other kind has its side effects at a known time, on
+    /// the collecting thread (`Swept::dead`).
+    fn takes(object: &data::Object) -> bool {
+        use data::Object::*;
+        matches!(object, Free | Float(_) | Bignum(_) | String(_) | RawString(_) | Vector(_) | Record(_) | Bytes(..) | BoolVector(_))
+    }
+    /// What OBJECT, which `takes`, leaves to drop.
     fn of(object: data::Object) -> Option<Self> {
         use data::Object::*;
         match object {
@@ -301,7 +302,8 @@ pub(super) struct Marking {
     n: usize,
     /// Whether this process may hold threads (`threads`): then what the
     /// sweep frees is dropped by the dropper, off the pause, however many
-    /// threads marked. A minor marks on one.
+    /// threads marked. A minor marks on one. (A minor's small batch with the
+    /// dropper when a full comes makes that full drop its own in the pause.)
     graves: bool,
     /// Each sweeping thread's graves, for the dropper as one batch.
     // CELL(Dead)
@@ -677,7 +679,7 @@ impl Marking {
     /// sweep in place finds them itself (`Swept::dead`).
     pub(super) fn dead_objects(&self, vm: &Vm) -> Vec<u32> {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
-        vm.objects.unreached(|object| !Seen::of(object).buried())
+        vm.objects.unreached(|object| !Grave::takes(object))
     }
     /// Sweep VM's tables: their freed counts and ends, and the dead with
     /// side effects.
@@ -698,7 +700,11 @@ impl Marking {
             swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
             swept.dead.append(&mut dead);
         });
-        swept.into_inner().unwrap()
+        // In index order whatever the threads' chunks were: their side
+        // effects come in the same order on any number of threads.
+        let mut swept = swept.into_inner().unwrap();
+        swept.dead.sort_unstable();
+        swept
     }
     /// One range of a sweep: its freed count, the end of its last entry in
     /// use, and its dead objects with side effects, left in place. Conses
@@ -715,7 +721,7 @@ impl Marking {
                 1 => self.closures.sweep_range(range, self.verify, |_, c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
                 2 => self.cells.sweep_range(range, self.verify, |_, cell| *cell = dead),
                 _ => self.objects.sweep_range(range, self.verify, |i, object| {
-                    if !Seen::of(object).buried() { return kept.push(i as u32); }
+                    if !Grave::takes(object) { return kept.push(i as u32); }
                     if let Some(grave) = Grave::of(std::mem::replace(object, data::Object::Free)) && defer {
                         w.graves.push(grave);
                     }

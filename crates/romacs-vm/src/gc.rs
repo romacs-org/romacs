@@ -1178,13 +1178,15 @@ impl Vm {
     pub(crate) fn generations_settled(&self) -> bool {
         self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled() && self.functions.settled() && self.slots.settled()
     }
-    /// Under verify, after a full collection: every entry in use is
-    /// exactly old and no log holds anything, or the next collection would
-    /// start from generations this one did not leave.
+    /// Under verify, after a collection: every entry in use is exactly old
+    /// and no log holds anything, or the next collection would start from
+    /// generations this one did not leave; and no call cache names what it
+    /// freed.
     fn check_settled(&self) {
         for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
             assert!(settled, "a full collection left {table} with a young or dirty entry, or a log");
         }
+        self.check_caches();
     }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
@@ -1345,8 +1347,6 @@ impl Vm {
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         let pads = self.gc_stress.take_pads();
         self.drop_weak(&weak_tables, untraced_lists, &obarray_symbols_live, &region_marks);
-        // The dead with side effects go here, on this thread, on either path:
-        // markers leave their buffers, and the rest are dropped.
         // Both taken here, by the collection they were planted for.
         #[cfg(test)]
         let (before_scan, before_sweep) = (std::mem::take(&mut self.gc_stress.faults.allocate_before_scan), std::mem::take(&mut self.gc_stress.faults.allocate_before_sweep));
@@ -1681,16 +1681,35 @@ impl Vm {
     /// A minor (FILLED_ONLY) asks only the caches filled since the last
     /// collection: that one left every target alive, so old to it.
     fn empty_dead_caches(&mut self, symbols: &HashSet<usize>, regions: &[bool], filled_only: bool) {
-        let filled = std::mem::take(&mut self.caches_filled);
-        let ids: Box<dyn Iterator<Item = usize>> = if filled_only && filled.len() < CACHES_FILLED {
-            Box::new(filled.into_iter().map(|i| i as usize))
-        } else {
-            Box::new(0..self.caches.len())
-        };
-        for i in ids {
-            if i < self.caches.len() && !self.survives(symbols, regions, self.caches[i].target) {
-                self.caches[i] = Cache { version: 0, target: Value::UNBOUND };
+        let empty_if_dead = |vm: &mut Self, i: usize| {
+            if i < vm.caches.len() && !vm.survives(symbols, regions, vm.caches[i].target) {
+                vm.caches[i] = Cache { version: 0, target: Value::UNBOUND };
             }
+        };
+        if filled_only && self.caches_filled.len() < CACHES_FILLED {
+            for k in 0..self.caches_filled.len() {
+                let i = self.caches_filled[k] as usize;
+                empty_if_dead(self, i);
+            }
+        } else {
+            for i in 0..self.caches.len() { empty_if_dead(self, i); }
+        }
+        self.caches_filled.clear();
+    }
+    /// Under verify, after any collection: no call cache names a freed
+    /// entry, which a fill no record saw would leave (`caches_filled`).
+    fn check_caches(&self) {
+        for (i, cache) in self.caches.iter().enumerate() {
+            let target = cache.target;
+            if Self::image_value(target) { continue; }
+            let freed = match target.tag() {
+                0 if target != Value::NIL => target.index(0).ok().and_then(|n| n.checked_sub(1)).is_none_or(|n| n >= self.objects.len() || self.objects.is_free(n)),
+                3 => target.payload() as usize >= self.conses.len() || self.conses.is_free(target.payload() as usize),
+                4 => target.payload() as usize >= self.closures.len() || self.closures.is_free(target.payload() as usize),
+                5 => target.payload() as usize >= self.cells.len() || self.cells.is_free(target.payload() as usize),
+                _ => false,
+            };
+            assert!(!freed, "call cache {i} names a freed entry");
         }
     }
     /// Free in place what MARKING left unmarked: every survivor is left old
@@ -1703,7 +1722,8 @@ impl Vm {
         // The dead with side effects, still where they were, end here, on
         // this thread, before the books may cut a table's dead tail: markers
         // leave their buffers, the referrers index lets them go, and the
-        // rest are dropped.
+        // rest are dropped. (A panic in the sweep leaves them so, free and
+        // anchored; the VM is used again only after `promote_all`.)
         self.unanchor(&dead);
         if let Some(referrers) = &mut self.referrers { referrers.forget(&dead, &self.objects); }
         for &i in &dead {
@@ -1768,22 +1788,18 @@ impl Vm {
         let mut lap = Lap::start();
         self.clear_collection_caches();
         let mut again: Vec<Value> = roots.to_vec();
-        again.extend(self.conses.read_again(None).into_iter().map(|i| Value::reference(i, 3)));
-        again.extend(self.closures.read_again(None).into_iter().map(|i| Value::reference(i, 4)));
-        again.extend(self.cells.read_again(None).into_iter().map(|i| Value::reference(i, 5)));
+        again.extend(self.conses.read_again().into_iter().map(|i| Value::reference(i, 3)));
+        again.extend(self.closures.read_again().into_iter().map(|i| Value::reference(i, 4)));
+        again.extend(self.cells.read_again().into_iter().map(|i| Value::reference(i, 5)));
         // The old objects storing their own writes, as the last minor met
         // them all: a later one is young, so met if it lives, and one that
         // took the kind in place was stored into. Unknown, every object is
         // asked its kind.
         let shared = |_: usize, object: &data::Object| shares_storage(object);
-        let objects = match self.shared_holders.take() {
-            None => self.objects.read_again(Some(&shared)),
-            Some(holders) => {
-                let mut objects = self.objects.read_again(None);
-                objects.extend(self.objects.read_again_at(&holders, &shared));
-                objects
-            }
-        };
+        let holders = self.shared_holders.take().unwrap_or_else(|| self.objects.iter().enumerate()
+            .filter(|&(_, object)| shares_storage(object)).map(|(i, _)| i as u32).collect());
+        let mut objects = self.objects.read_again();
+        objects.extend(self.objects.read_again_at(&holders, &shared));
         // Old, and marked as the young are: what they hold is no growth.
         let old_payload: usize = objects.iter().map(|&i| data::payload_bytes(&self.objects[i])).sum();
         again.extend(objects.into_iter().map(|i| Value::reference(i + 1, 0)));
@@ -1831,9 +1847,9 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Sweep);
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
-        // Every live holder was met: read again as old, or young and reached.
+        // Every live holder was met once: read again as old, or young and
+        // reached. In index order, for the next minor's reads.
         shared_seen.sort_unstable();
-        shared_seen.dedup();
         self.shared_holders = Some(shared_seen);
         self.settle_minor();
     }
@@ -2460,6 +2476,28 @@ mod tests {
         let buried = vm.gc_stress.buried;
         assert!(vm.collect_minor(&[]));
         assert!(vm.gc_stress.buried >= buried + 2000, "the young strings went to the dropper: {} then {}", buried, vm.gc_stress.buried);
+    }
+
+    /// The dead whose end has side effects are the sweep's to find: markers
+    /// made since the last collection and dropped leave their buffer at a
+    /// minor, as at a full.
+    #[test]
+    fn a_dead_young_marker_leaves_its_buffer() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000 minor-buffer (get-buffer-create \"minor-markers\")) (set-buffer minor-buffer) (insert \"hello\")").unwrap();
+        vm.collect(&mut []);
+        let buffer = vm.eval_source_raw("minor-buffer").unwrap().index(0).unwrap() - 1;
+        let anchors = |vm: &Vm| match &vm.objects[buffer] { data::Object::Buffer(b) => b.anchors.len(), _ => unreachable!("a buffer") };
+        let before = anchors(&vm);
+        vm.eval_source_raw("(dotimes (_ 100) (copy-marker 3))").unwrap();
+        assert_eq!(anchors(&vm), before + 100, "each marker is anchored");
+        for collect in [Vm::collect_minor as fn(&mut Vm, &[Value]) -> bool, |vm, roots| vm.collect_until_key(&mut roots.to_vec(), false)] {
+            vm.eval_source_raw("(dotimes (_ 100) (copy-marker 3))").unwrap();
+            assert!(collect(&mut vm, &[]));
+            assert_eq!(anchors(&vm), before, "the dead markers left their buffer");
+        }
     }
 
     /// A minor inside a request, its engine suspended with code and entry

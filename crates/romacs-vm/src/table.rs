@@ -113,8 +113,8 @@ impl<T> RawTable<T> {
     /// this write where it must not, or free what was made after the mark; a
     /// mark begun or cleared since would make it free what this one reached.
     /// It is the table's shape and marks, not its entries' contents, which
-    /// the VM writes between a mark and its sweep (`Object::Free' for the
-    /// dead, a cell's value).
+    /// the VM writes between a mark and its sweep (a cell's value, a weak
+    /// table pruned, the dead before a compaction made `Object::Free').
     pub(crate) fn holds(&self, table: &Table<T>) -> bool {
         std::ptr::eq(self.entries, table.entries.as_ptr()) && std::ptr::eq(self.colors.cast::<u8>(), table.colors.as_ptr())
             && self.len == table.entries.len() && self.len == table.colors.len()
@@ -578,7 +578,6 @@ impl<T> Table<T> {
         self.entries.len() - self.unused()
     }
     /// Whether entry I is free or quarantined: a Value naming it is stale.
-    #[cfg(test)]
     pub(crate) fn is_free(&self, i: usize) -> bool {
         self.colors[i] & IN_USE == 0
     }
@@ -713,32 +712,25 @@ impl<T> Table<T> {
         self.barrier = Barrier::default();
     }
     /// A minor's start. To its mark every old entry counts as reached
-    /// (`raw`), but those it must read again: the ones stored into since
-    /// the last collection, and the ones WHOLE asks for whatever their
-    /// colour, given its index. Each of those is made young for this
-    /// collection and returned, for the mark to claim and read as it does
-    /// the young; being roots, all survive, and the sweep leaves them old
-    /// again. No other colour is written. A minor that ends any other way
-    /// promotes everything (`Vm::promote_all`), which ages them again.
-    /// With no WHOLE, only stored-into entries are wanted, and a word of
-    /// eight colours with none dirty is passed at one test.
-    pub(crate) fn read_again(&mut self, whole: Option<&dyn Fn(usize, &T) -> bool>) -> Vec<usize> {
+    /// (`raw`), but those it must read again, here the ones stored into
+    /// since the last collection (and `read_again_at`'s). Each of those is
+    /// made young for this collection and returned, for the mark to claim
+    /// and read as it does the young; being roots, all survive, and the
+    /// sweep leaves them old again. No other colour is written. A minor that
+    /// ends any other way promotes everything (`Vm::promote_all`), which
+    /// ages them again. A word of eight colours with none dirty is passed at
+    /// one test.
+    pub(crate) fn read_again(&mut self) -> Vec<usize> {
         let mut again = Vec::new();
         let len = self.entries.len();
-        let (colors, entries) = (&mut self.colors[..len], &self.entries);
+        let colors = &mut self.colors[..len];
         let mut look = |colors: &mut [u8], i: usize| {
             let color = &mut colors[i];
-            if *color & (IN_USE | OLD) == (IN_USE | OLD)
-                && (*color & DIRTY != 0 || whole.is_some_and(|whole| whole(i, &entries[i]))) {
+            if *color & (IN_USE | OLD | DIRTY) == (IN_USE | OLD | DIRTY) {
                 *color &= !OLD;
                 again.push(i);
             }
         };
-        if whole.is_some() {
-            for i in 0..len { look(colors, i); }
-            return again;
-        }
-        // Only the dirty are wanted: a word with no dirty colour is passed.
         let dirty = LOW_BITS * u64::from(DIRTY);
         let words = len / 8;
         for w in 0..words {
@@ -749,26 +741,11 @@ impl<T> Table<T> {
         again
     }
     /// The entries in use that the mark standing did not reach and WANTED
-    /// accepts: the dead, before their sweep. Colours are read eight at a
-    /// time, and a word with none unreached, as most are, costs one test.
+    /// accepts: the dead, before their sweep.
     pub(crate) fn unreached(&self, wanted: impl Fn(&T) -> bool) -> Vec<u32> {
-        let mut found = Vec::new();
-        // OLD's bit of each byte, moved down beside its in-use bit, counts
-        // as a mark in a minor's (`sweep_range`).
-        let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
-        let colors = &self.colors[..self.entries.len()];
-        let (words, _) = colors.as_chunks::<8>();
-        let skipped = words.iter().map(|&word| u64::from_le_bytes(word))
-            .map(|word| word & LOW_BITS & !(word >> 7 | (word >> 4 & old_too)) == 0);
-        // Every entry of a word with one unreached, and the last part word.
-        let looked = skipped.enumerate().filter(|&(_, none)| !none).flat_map(|(w, _)| w * 8..w * 8 + 8)
-            .chain(words.len() * 8..colors.len());
-        for i in looked {
-            if unreached(colors[i], self.sticky) && wanted(&self.entries[i]) {
-                found.push(i as u32);
-            }
-        }
-        found
+        self.colors.iter().zip(&self.entries).enumerate()
+            .filter(|&(_, (&color, entry))| unreached(color, self.sticky) && wanted(entry))
+            .map(|(i, _)| i as u32).collect()
     }
     /// As `read_again`, of the entries AT alone: the old ones WHOLE asks for.
     pub(crate) fn read_again_at(&mut self, at: &[u32], whole: &dyn Fn(usize, &T) -> bool) -> Vec<usize> {
