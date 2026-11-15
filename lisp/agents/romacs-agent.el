@@ -3641,12 +3641,15 @@ read.")
   "Where to replay SESSION's records from to draw its last TURNS prompts
 between places BEGIN and END: (FROM . PROMPTS), as
 `romacs-agent--journal-file-tail' says (BUDGET its), of whichever holds
-them.  Its whole records' last turns, when it has rows for them, are where
+them.  SQLite's records' last turns, when it has rows for them, are where
 its turns' rows say they begin (romacs-agent-turns): no record is read to
-find it, unless a journal's begins further back than BUDGET allows."
-  (or (and (not end) (not begin) (romacs-agent--turns-tail session turns budget))
-      (if (romacs-agent-events-p session) (romacs-agent-events-tail session turns end begin)
-        (romacs-agent--journal-file-tail session turns end begin budget))))
+find it.  A journal's tail is read from its end, within BUDGET: its rows
+would only name a seq to search the same bytes for, further back when
+they lag."
+  (if (romacs-agent-events-p session)
+      (or (and (not end) (not begin) (romacs-agent--turns-tail session turns budget))
+          (romacs-agent-events-tail session turns end begin))
+    (romacs-agent--journal-file-tail session turns end begin budget)))
 
 (defun romacs-agent--turns-tail (session turns &optional budget)
   "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
