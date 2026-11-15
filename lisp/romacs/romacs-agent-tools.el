@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-issues)
 (require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
@@ -875,6 +876,8 @@ sends nothing."
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.
              (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+             ;; It waits for the turn running: that turn's result is made before it.
+             (when busy (romacs-agent-issues-told child))
              (romacs-agent-send-later child text nil nil valid)))))
   child)
 
@@ -1204,9 +1207,12 @@ woken with it."
 (defun romacs-agent-tools--limit-on-event (session event)
   (pcase (plist-get event :type)
     ('done (romacs-agent-tools--switch-on-limit session event))
-    ;; A message after the limit: neither a wait for a move nor a resume is its.
+    ;; A message after the limit: neither a wait for a move nor a resume is
+    ;; its.  Its turn may end at the limit again: that end schedules a resume
+    ;; anew, the reset not yet used by one that fired.
     ('input (when (and (romacs-agent-caught-up session) (not (romacs-agent-pending-selection session)))
               (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+              (when (romacs-agent-resume-time session) (remhash session romacs-agent-tools--resets-used))
               (romacs-agent-tools--cancel-resume session "a message came")))
     ('settled (romacs-agent-tools--cancel-resume session "settled"))))
 
@@ -1251,10 +1257,13 @@ role and worktree."
     (romacs-agent-events-async
      task (lambda (events)
             (setcar cell (condition-case err
-                             (list :child (romacs-agent-handoff
+                             (let ((child (romacs-agent-handoff
                                            task (romacs-agent-handoff-thread task events) provider model
                                            (or next "Go on from where this thread left off.")
-                                           (and effort (list :effort effort))))
+                                           (and effort (list :effort effort)))))
+                               (romacs-agent-issues-record 'handoff task :from (romacs-agent-provider task) :to provider
+                                                           :child (romacs-agent-id child))
+                               (list :child child))
                            (error (list :error (error-message-string err)))))))
     (romacs-mcp-defer
      (lambda ()

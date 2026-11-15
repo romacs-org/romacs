@@ -94,6 +94,17 @@ name and a function of no arguments that runs it and returns its value.
 romacs-agent-tools.el records each session's calls through it.")
 (defvar romacs-mcp-peer-close-functions nil
   "Functions called with a peer whose connection is retired.")
+(defvar romacs-mcp-failure-functions nil
+  "Functions called when a tool call fails: with the peer, the tool's name,
+its arguments (a table), the error's message, and whether it was refused
+\(an unknown tool, arguments its schema does not take, a `user-error')
+rather than broken.  Errors in them are dropped: the call's answer stands.")
+
+(defun romacs-mcp--failed (peer name arguments message refused)
+  "Tell `romacs-mcp-failure-functions' that PEER's call of tool NAME failed."
+  (dolist (function romacs-mcp-failure-functions)
+    (with-demoted-errors "romacs-mcp-failure-functions: %S"
+      (funcall function peer name arguments message refused))))
 
 (define-error 'romacs-mcp-protocol-error "MCP protocol error")
 
@@ -425,8 +436,14 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
   (let* ((tool (alist-get (gethash "name" params) (romacs-mcp--available-tools)
                           nil nil #'equal))
          (arguments (gethash "arguments" params (romacs-mcp--object))))
-    (unless tool (romacs-mcp--fail -32602 "Unknown tool"))
-    (romacs-mcp--arguments (plist-get tool :schema) arguments)
+    (unless tool
+      (romacs-mcp--failed (plist-get romacs-mcp--active :peer) (gethash "name" params) arguments "Unknown tool" t)
+      (romacs-mcp--fail -32602 "Unknown tool"))
+    (condition-case failure
+        (romacs-mcp--arguments (plist-get tool :schema) arguments)
+      (romacs-mcp-protocol-error
+       (romacs-mcp--failed (plist-get romacs-mcp--active :peer) (gethash "name" params) arguments (nth 2 failure) t)
+       (signal (car failure) (cdr failure))))
     (let* ((failed nil)
            (value (condition-case failure
                       ;; Quit is the call's error (`with-local-quit' would
@@ -441,6 +458,8 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
                                  (lambda () (funcall (plist-get tool :handler) arguments))))
                     ((error quit)
                      (setq failed t)
+                     (romacs-mcp--failed (plist-get romacs-mcp--active :peer) (gethash "name" params) arguments
+                                         (error-message-string failure) (eq (car failure) 'user-error))
                      (error-message-string failure)))))
       (if (eq (car-safe value) 'romacs-mcp--deferred)
           (append value (list modern))
@@ -635,6 +654,12 @@ linear."
                            (with-local-quit (funcall poll))
                          ((error quit)
                           (setq failed t)
+                          ;; A deferred call failing is a failed call too.
+                          (let ((params (gethash "params" (plist-get request :message))))
+                            (when (hash-table-p params)
+                              (romacs-mcp--failed (plist-get request :peer) (gethash "name" params)
+                                                  (gethash "arguments" params) (error-message-string failure)
+                                                  (eq (car failure) 'user-error))))
                           (list (error-message-string failure))))))
             (if (not done)
                 (push entry kept)
