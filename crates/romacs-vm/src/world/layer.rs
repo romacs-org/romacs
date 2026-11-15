@@ -793,29 +793,26 @@ impl Vm {
         host::layer_end();
         match rerun {
             // An output no entry changed must be what the first run made
-            // again, or the libraries changed what startup computes (unowned).
-            // One an entry changed must not be set back, to what the first run
-            // or the layer's own setup left: a source session keeps the
-            // library's value there, where a restored one would lose it. One
-            // the run leaves as the libraries made it (a global minor mode they
-            // turned on joins `global-minor-modes') is theirs as much as
-            // startup's.
+            // again, or what the layer's own setup left, else the libraries
+            // changed what startup computes (no entry is named for it). One an
+            // entry changed and the run sets back (to the first run's or the
+            // setup's) is recorded, not refused: a source session keeps the
+            // library's value there, where a restored one holds startup's, but
+            // what every file read sets (`last-coding-system-used') is set
+            // back so too, and leaving an entry out for it would cost the init
+            // every entry after it. One the run leaves as the libraries made
+            // it (a global minor mode they turned on joins
+            // `global-minor-modes') is theirs as much as startup's.
             Ok(_) => for (slot, first, _before, after) in self.world_startup_output_states() {
                 let setup = before_entries.get(&slot).and_then(|d| d.as_ref().ok());
-                let wrong = match changed_by.get(&slot) {
-                    Some(_) => after == first || setup == Some(&after),
-                    None => after != first && setup != Some(&after),
-                };
-                if !wrong { continue; }
                 let symbol = self.symbol_names[slot].clone();
                 match changed_by.get(&slot) {
-                    Some(&at) if !refused.iter().any(|(r, _)| *r == at) => {
-                        let why = format!("startup: sets {symbol}, which the startup run after the libraries sets back");
-                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why}));
-                        refused.push((at, why));
-                    }
+                    Some(&at) if after == first || setup == Some(&after) =>
+                        host::record("startup-reset", json!({"symbol": symbol, "entry": at, "name": plan.entries[at].name})),
                     Some(_) => {}
-                    None => host::refuse("fence", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
+                    None if after != first && setup != Some(&after) =>
+                        host::refuse("fence", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
+                    None => {}
                 }
             },
             Err(error) => host::refuse("fence", json!({"access": "startup-rerun", "error": error})),

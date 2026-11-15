@@ -473,7 +473,8 @@ impl Vm {
         let asked = crate::host::take_secret_asked();
         let refused_at = crate::host::layer_form_refusals_at();
         let refused = refused_at.is_some_and(|at| crate::host::refusals() > at);
-        if (asked || refused) && crate::host::layer_active() && !crate::host::layer_form_is_definition() {
+        if (asked || refused) && crate::host::layer_active() && !crate::host::layer_form_is_definition()
+            && !crate::host::layer_form_pinned() {
             if let Some(at) = refused_at.filter(|_| refused) {
                 crate::host::forget_refusals_since(at);
             }

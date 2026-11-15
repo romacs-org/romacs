@@ -38,6 +38,33 @@ use crate::forwarded::Fwd;
 use crate::{Value, VariableRedirect, Vm, host};
 use serde_json::json;
 
+/// The variables FORM, a top-level form, assigns by name: those of a
+/// `setq', `setq-default' or `setq-local', a `setf' of a symbol, a `set' or
+/// `set-default' of a quoted one, the place of a `push' or `pushnew', the
+/// list of an `add-to-list'; within a `progn', a `when' or an `unless' too.
+fn assigned(form: &crate::Form) -> Vec<&str> {
+    use crate::Form::{List, Sym};
+    fn quoted(f: &crate::Form) -> Option<&str> {
+        match f {
+            crate::Form::List(items) if items.len() == 2 && matches!(&items[0], crate::Form::Sym(q) if q == "quote") => match &items[1] {
+                crate::Form::Sym(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    let List(items) = form else { return Vec::new() };
+    let Some(Sym(head)) = items.first() else { return Vec::new() };
+    match head.as_str() {
+        "setq" | "setq-default" | "setq-local" | "setf" => items[1..].iter().step_by(2).filter_map(|f| match f { Sym(name) => Some(name.as_str()), _ => None }).collect(),
+        "set" | "set-default" | "add-to-list" => items.get(1).and_then(quoted).into_iter().collect(),
+        "push" | "pushnew" | "cl-pushnew" => items.get(2).and_then(|f| match f { Sym(name) => Some(name.as_str()), _ => None }).into_iter().collect(),
+        "progn" => items[1..].iter().flat_map(assigned).collect(),
+        "when" | "unless" => items.get(2..).unwrap_or_default().iter().flat_map(assigned).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// A fenced value's root (§6.2). `Observed` is no root: a variable startup
 /// may read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,8 +248,15 @@ impl Vm {
     /// Keep a layer library's top-level FORM that is no definition and asked
     /// for a secret, for restore to evaluate whole, as code, in load order:
     /// (form nil FORM t DECLARED) (`romacs--world-reseed-form`).
+    /// Its variables (`assigned`) are fenced as tainted: a later definition
+    /// that reads one is re-seeded, and any other later form that reads one
+    /// is kept as code too, so nothing captured holds what it left.
     pub(crate) fn record_deferred_form(&mut self, form: &crate::Form) {
         self.push_reseed_form("form", None, form, true);
+        for name in assigned(form) {
+            let slot = self.slot(name);
+            self.fence_variable(slot, Root::Tainted);
+        }
     }
 
     fn push_reseed_form(&mut self, kind: &str, name: Option<&str>, form: &crate::Form, cut: bool) {

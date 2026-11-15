@@ -159,11 +159,55 @@ fn a_library_that_changes_what_startup_computes_refuses_the_build() {
     assert!(refusals(&trace, "init-layer").is_empty(), "no entry is named: {trace}");
 }
 
-/// A library that sets what startup computes, and the startup run after
-/// the libraries sets back, is named: a source session keeps the library's
-/// value, which a restored one would lose, so the entry loads in the session.
+/// A form kept as code taints what it assigns: a later definition that
+/// reads it is re-seeded and a later plain form is kept as code too, so
+/// nothing captured holds the builder's value.
 #[test]
-fn a_library_whose_value_startup_sets_back_is_named() {
+fn what_a_form_kept_as_code_assigns_is_tainted() {
+    let dir = scratch("taint");
+    std::fs::write(dir.join("lisp/lib-q.el"), "(setq lib-q-a (car exec-path))\n(defvar lib-q-b lib-q-a)\n(setq lib-q-c lib-q-a)\n(provide 'lib-q)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-q"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (nth 1 e) (nth 1 (nth 2 e)))) (reverse romacs--world-reseed-forms))"),
+               "((form nil lib-q-a) (defvar lib-q-b lib-q-b) (form nil lib-q-c))");
+}
+
+/// A form that loads a file whose definition met what the build refused,
+/// and could not keep (a network lookup), is not kept as code: its replay
+/// would find the file loaded. The refusal stands and leaves the entry out.
+#[test]
+fn a_load_over_a_refused_definition_is_not_kept_as_code() {
+    let dir = scratch("pinned");
+    std::fs::write(dir.join("lisp/lib-net.el"), "(defvar lib-net-addresses (network-lookup-address-info \"127.0.0.1\" nil 'numeric))\n(provide 'lib-net)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-wrap.el"), "(require 'lib-net)\n(provide 'lib-wrap)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-wrap"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "fence")], "{}", trace["refusals"]);
+    assert!(refusals(&trace, "effect").iter().any(|r| r["what"].as_str().is_some_and(|w| w.starts_with("resolve "))), "{trace}");
+}
+
+/// A library that sets what startup computes, and the startup run after
+/// the libraries sets back, is recorded with the entry that set it, and
+/// not refused: what every file read sets is set back the same way, and an
+/// entry left out for it would cost the init every entry after it.
+#[test]
+fn a_library_whose_value_startup_sets_back_is_recorded() {
     let dir = scratch("reset");
     std::fs::write(dir.join("lisp/lib-o.el"), "(setq fence-out 'lib-o)\n(provide 'lib-o)\n").unwrap();
     std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
@@ -175,9 +219,11 @@ fn a_library_whose_value_startup_sets_back_is_named() {
     vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
-    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
-    assert_eq!(refused, [(1, "startup: sets fence-out, which the startup run after the libraries sets back")], "{}", trace["refusals"]);
-    assert!(!refusals(&trace, "fence").iter().any(|r| r["access"] == "startup-output"), "named, not unowned: {trace}");
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert!(trace["refusals"].as_array().unwrap().is_empty(), "{}", trace["refusals"]);
+    let reset: Vec<(&str, u64)> = trace["records"].as_array().unwrap().iter().filter(|r| r["kind"] == "startup-reset")
+        .map(|r| (r["symbol"].as_str().unwrap(), r["entry"].as_u64().unwrap())).collect();
+    assert_eq!(reset, [("fence-out", 1)]);
 }
 
 #[test]

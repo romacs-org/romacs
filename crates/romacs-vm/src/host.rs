@@ -238,6 +238,10 @@ struct LayerState {
     /// How many refusals the build had listed as the form began: what it
     /// meets past these is its own (`layer_form_refusals_at`).
     refusals_at: usize,
+    /// A file the form loaded left refusals its forms could not keep as
+    /// code (a definition's): the form is not kept as code, whose replay
+    /// would find the file loaded, and those refusals stand.
+    pinned: bool,
     rerun: bool,
     /// The entry loading is a library the init only declared
     /// (`layer::Entry::declared`): its re-seed forms may wait for their
@@ -277,7 +281,14 @@ fn layer_form(head: &str) {
         layer.tainted = false;
         layer.cut = false;
         layer.refusals_at = refusals;
+        layer.pinned = false;
     });
+}
+
+/// Whether a file the top-level form loading loaded left refusals of its
+/// own (`LayerState::pinned`).
+pub(crate) fn layer_form_pinned() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.pinned))
 }
 
 /// How many refusals the build had listed as the top-level form loading
@@ -493,12 +504,12 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
+pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>, usize);
 
 /// A layer build's state of the top-level form loading: the definition it
 /// is, if one, whether it read a per-process fact or an effect cut it, and
 /// where its refusals begin.
-type LayerForm = (Option<(&'static str, String)>, bool, bool, usize);
+type LayerForm = (Option<(&'static str, String)>, bool, bool, usize, bool);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
@@ -507,12 +518,15 @@ impl Drop for SiteGuard {
         }
         // A file a form loads has forms of its own: once it is loaded, the
         // form that loaded it goes on as it was, a definition still one.
-        if let Some((form, tainted, cut, refusals_at)) = self.1.take() {
+        if let Some((form, tainted, cut, refusals_at, pinned)) = self.1.take() {
+            // What the file's forms left the build answering for pins it.
+            let left = refusals() > self.3;
             LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() {
                 layer.form = form;
                 layer.tainted = tainted;
                 layer.cut = cut;
                 layer.refusals_at = refusals_at;
+                layer.pinned = pinned || left;
             });
         }
         // So is whether it asked for a secret: the file's forms kept theirs.
@@ -533,13 +547,14 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None, None, None);
+        return SiteGuard(None, None, None, 0);
     }
     let site = Rc::new(site());
-    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut, layer.refusals_at)));
+    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut, layer.refusals_at, layer.pinned)));
     let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
+    let entered = refusals();
     layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked, entered)
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
