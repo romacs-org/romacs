@@ -125,6 +125,9 @@ impl Leaf<'_> {
             None => (format!(":memory:{}", MEMORY_COUNT.fetch_add(1, Ordering::Relaxed) + 1).into_bytes(), true),
         };
         let name = c_string(&name);
+        if crate::host::sqlite_open(name).is_err() {
+            return Ok(Value::NIL);
+        }
         let Some(connection) = Connection::open(name, readonly != Value::NIL, disable_uri == Value::NIL, memory) else {
             return Ok(Value::NIL);
         };
