@@ -22,7 +22,8 @@
 
 (defun romacs-agent-tail-tests--turn (n seq &optional padding unended)
   "Turn N's lines from SEQ: its prompt, its answer (PADDING characters
-more), its result, unless UNENDED (the next prompt steers it)."
+more, or 100001 of PADDING when it is one), its result, unless UNENDED
+\(the next prompt steers it)."
   (concat (romacs-agent-tail-tests--line
            seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
                                         "romacsRequest" n "type" "user"))
@@ -30,7 +31,9 @@ more), its result, unless UNENDED (the next prompt steers it)."
            (+ seq 1) "out" (romacs-mcp--object
                             "message" (romacs-mcp--object
                                        "content" (vector (romacs-mcp--object
-                                                          "text" (concat (format "answer %d" n) (make-string (or padding 0) ?.))
+                                                          "text" (concat (format "answer %d" n)
+                                                                         (if (characterp padding) (make-string 100001 padding)
+                                                                           (make-string (or padding 0) ?.)))
                                                           "type" "text"))
                                        "id" (format "m%d" n))
                             "parent_tool_use_id" :null "type" "assistant"))
@@ -81,7 +84,9 @@ result."
   ;; From the journal's end, as far back as its last prompts go: a span
   ;; begun inside a record (answers longer than the first span) is no
   ;; prompt's line.
-  (dolist (padding '(0 100000))
+  ;; Answers of two- and three-byte characters put spans' starts inside
+  ;; them: a byte is still a byte.
+  (dolist (padding '(0 100000 ?é ?漢))
     (romacs-agent-tail-tests--with-session
      5 padding
      (lambda (session journal)
@@ -210,6 +215,66 @@ result."
                (romacs-agent-chat-earlier)
                (should (equal (romacs-agent-tail-tests--questions buffer) '(2 3 4 5)))
                (should (looking-at-p "⇠ question 4")))
+           (kill-buffer buffer)))))))
+
+;; A message streamed, then said whole: an idle chat's replay passes over
+;; its deltas, unparsed, and draws it once; a turn under way keeps them,
+;; as no whole record says them yet.
+(defun romacs-agent-tail-tests--streamed (n seq)
+  "Turn N from SEQ, its answer streamed in two deltas before its record."
+  (let ((delta (lambda (seq text)
+                 (romacs-agent-tail-tests--line
+                  seq "out" (romacs-mcp--object
+                             "event" (romacs-mcp--object "delta" (romacs-mcp--object "text" text "type" "text_delta")
+                                                         "index" 0 "type" "content_block_delta")
+                             "parent_tool_use_id" :null "session_id" "s" "type" "stream_event" "uuid" "u")))))
+    (concat (romacs-agent-tail-tests--line
+             seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                          "romacsRequest" n "type" "user"))
+            (romacs-agent-tail-tests--line
+             (+ seq 1) "out" (romacs-mcp--object
+                              "event" (romacs-mcp--object "message" (romacs-mcp--object "id" (format "m%d" n))
+                                                          "type" "message_start")
+                              "parent_tool_use_id" :null "session_id" "s" "type" "stream_event" "uuid" "u"))
+            (funcall delta (+ seq 2) "streamed ")
+            (funcall delta (+ seq 3) (format "answer %d" n))
+            (romacs-agent-tail-tests--line
+             (+ seq 4) "out" (romacs-mcp--object
+                              "message" (romacs-mcp--object
+                                         "content" (vector (romacs-mcp--object "text" (format "streamed answer %d" n)
+                                                                               "type" "text"))
+                                         "id" (format "m%d" n))
+                              "parent_tool_use_id" :null "type" "assistant"))
+            (romacs-agent-tail-tests--line
+             (+ seq 5) "out" (romacs-mcp--object "result" "ok" "type" "result")))))
+
+(ert-deftest romacs-agent-chat-replays-a-streamed-message-whole ()
+  (romacs-agent-tail-tests--with-session
+   1 0
+   (lambda (session journal)
+     (let ((coding-system-for-write 'utf-8-unix))
+       (write-region (concat (romacs-agent-tail-tests--streamed 1 2) (romacs-agent-tail-tests--streamed 2 8))
+                     nil journal nil 'silent))
+     (dolist (state '(idle running))
+       (setf (romacs-agent-state session) state)
+       (let* ((streamed 0)
+              (record (symbol-function 'romacs-agent--record))
+              (buffer (cl-letf (((symbol-function 'romacs-agent--record)
+                                 (lambda (session line)
+                                   (let ((out (gethash "out" line)))
+                                     (when (and (hash-table-p out) (equal (gethash "type" out) "stream_event"))
+                                       (cl-incf streamed)))
+                                   (funcall record session line))))
+                        (romacs-agent-tail-tests--open session))))
+         (unwind-protect
+             (with-current-buffer buffer
+               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                 (dolist (n '(1 2))
+                   (let ((said (format "streamed answer %d" n)))
+                     (should (string-search said text))
+                     (should-not (string-search said text (1+ (string-search said text)))))))
+               ;; Idle, none parsed; under way, the last turn's three.
+               (should (= streamed (if (eq state 'idle) 0 3))))
            (kill-buffer buffer)))))))
 
 ;; A chat made before its supervisor wrote any journal: empty, and no row.

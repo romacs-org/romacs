@@ -593,6 +593,8 @@ environment."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
+  ;; Its streamed deltas: the `assistant' record that follows says them whole.
+  :streamed-line "\"type\":\"stream_event\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}"
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next
