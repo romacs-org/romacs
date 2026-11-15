@@ -20,7 +20,9 @@ fn display_animates(cx) { cx.display_animates() }}
 // with no display); and STATE, a plist (:status, :done, :of, :name,
 // :error, :seconds), kept with LABEL as STAGE's latest in
 // `romacs-progress-state' whatever the display shows, where a restart's
-// supervisor reads it over the server's socket.
+// supervisor reads it over the server's socket and the progress card after
+// the first frame does (romacs-progress-view.el).  t when the launch screen
+// showed it, its counts and failure as a bar of its own.
 defsubr! { name = "romacs-startup-progress", gnu = "romacs:display", effect = Global,
 fn startup_progress(cx, stage: Value; optional label: Value, state: Value) { cx.startup_progress(stage, label, state) }}
 defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
