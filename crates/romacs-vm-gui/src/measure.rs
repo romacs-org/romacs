@@ -322,6 +322,48 @@ mod tests {
         assert!(scrolls > 20, "{scrolls} scrolls");
     }
 
+    /// A far jump under `scroll-conservatively` 101 puts point where GNU
+    /// does, on the last whole row going down and the first going up, and
+    /// redisplay lays out a window's rows and GNU's search past its bottom
+    /// (`SCROLL_LIMIT`, 100 lines), not every line the jump passed over.
+    #[test]
+    fn a_far_jump_lays_out_the_rows_near_point_only() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil scroll-conservatively 101) (erase-buffer)
+          (let ((i 0))
+            (while (< i 3000)
+              (insert (format "line %d " i) (make-string (* 13 (% i 5)) ?x)
+                      (if (= (% i 11) 4) (propertize "BIG" 'face 'hosted-big) "") "\n")
+              (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        let whole = |h: &mut Hosted| {
+            let visible = h.eval("(pos-visible-in-window-p (point) nil t)");
+            visible != "nil" && visible.split(' ').count() == 2
+        };
+        let laid = |h: &mut Hosted| h.eval("(let ((s (romacs--display-stats))) (+ (cdr (assq 'lines-laid s)) (cdr (assq 'lines-served s))))")
+            .parse::<u64>().unwrap();
+        for (target, down) in [(2500, true), (2800, true), (900, false), (40, false), (2990, true)] {
+            h.eval(&format!("(progn (goto-char 1) (forward-line {target}) (romacs--display-stats t))"));
+            h.paint();
+            let lines = laid(&mut h);
+            assert!(whole(&mut h), "line {target}: point shows whole");
+            // 20 rows and the 101-line search: 172 (2,552 when every line passed over was laid out).
+            assert!(lines < 300, "line {target}: {lines} lines laid out to redisplay one jump");
+            let row = h.eval("(save-excursion (vertical-motion 0) (point))");
+            if down {
+                // One row more above would not show point whole (try_scrolling's
+                // amount, or past SCROLL_LIMIT the recentring that puts point
+                // on the last row).
+                let up = h.eval("(save-excursion (goto-char (window-start)) (vertical-motion -1) (point))");
+                let shown = h.eval(&format!("(let ((s (window-start))) (set-window-start nil {up} t) (prog1 (pos-visible-in-window-p (point) nil t) (set-window-start nil s t)))"));
+                assert!(shown == "nil" || shown.split(' ').count() != 2, "line {target}: start {up} shows point too: {shown}");
+            } else {
+                assert_eq!(h.eval("(window-start)"), row, "line {target}: point on the first row");
+            }
+        }
+    }
+
     /// With the pane gap's bottom divider and internal border
     /// (VM2-PANE-CHROME), moving point down a line at a time keeps the
     /// cursor on a whole row above the mode line: the visibility check lays
