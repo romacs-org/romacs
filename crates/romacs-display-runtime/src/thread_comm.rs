@@ -259,6 +259,10 @@ pub enum Fact {
     /// display answers GNU's `mouse_position_hook' with.  Nothing once the
     /// pointer left that window.
     PointerOver { frame: u64, at: Option<(i32, i32)> },
+    /// FRAME's window is now WIDTH by HEIGHT logical pixels: its resize,
+    /// told as a fact too, for a painter that draws before the evaluator
+    /// reads input (the launch screen).
+    WindowSize { frame: u64, width: u32, height: u32 },
     /// How a held key repeated, for the usage log's `repeat' record.
     KeyRepeatTiming(crate::input_bridge::RepeatTiming),
     /// The answer to the evaluator's request REQUEST (a window made, a
@@ -665,6 +669,9 @@ impl RenderComms {
     /// After converting the display event, the bridge owns notifying the
     /// evaluator's wait backend.
     pub(crate) fn send_input(&self, event: InputEvent) {
+        if let InputEvent::WindowResize { width, height, emacs_frame_id, .. } = event {
+            self.tell(Fact::WindowSize { frame: emacs_frame_id, width, height });
+        }
         self.queue_input(event, None);
     }
 

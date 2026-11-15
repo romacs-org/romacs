@@ -123,6 +123,24 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
 ;; (the Rum palette, the launch font) keeps its own spec.
 (frame-set-background-mode (selected-frame))
 
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
+
+(defvar romacs-progress-state nil
+  "Each startup stage's latest state, as (STAGE :label LABEL . STATE), kept
+by `romacs-startup-progress': STATE a plist of :status (`running', `done'
+or `failed'), :done, :of, :name, :error and :seconds.  A restart's
+supervisor reads it over the server's socket.")
+
+(defun romacs-gui-loadup--init-loaded (file)
+  "Tell the launch screen the init loaded FILE (`after-load-functions')."
+  (romacs-startup-progress 'init (concat "Loading your init: " (file-name-base file))))
+
+(defun romacs-gui-loadup-before-init ()
+  "The GUI calls this just before the user's init: each library it loads
+is a step of the launch screen's progress, until
+`romacs-gui-loadup-after-init'."
+  (add-hook 'after-load-functions #'romacs-gui-loadup--init-loaded))
+
 (defun romacs-gui-loadup-after-init ()
   "What GNU's startup does once the init file has loaded, up to the files.
 The GUI calls this after the user's init: the end of startup.el
@@ -131,6 +149,7 @@ The GUI calls this after the user's init: the end of startup.el
 start of `command-line-1' (startup.el:2736).  The GUI visits the file
 arguments next with `romacs-gui-visit-file-noselect', then calls
 `romacs-gui-loadup-command-line-1'."
+  (remove-hook 'after-load-functions #'romacs-gui-loadup--init-loaded)
   (romacs--after-init)
   (display-startup-echo-area-message))
 
