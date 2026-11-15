@@ -29,7 +29,11 @@ file `locate-library' now finds first for a loaded feature of its name
 that loaded from another file, in `load-path' order."
   (let (found)
     (dolist (dir added (nreverse found))
-      (dolist (file (and (file-directory-p dir) (directory-files dir t "\\.el\\'")))
+      ;; A nil entry is the current directory, as `load' reads it; one that
+      ;; cannot be listed shadows nothing.
+      (dolist (file (let ((dir (or dir default-directory)))
+                      (and (stringp dir) (file-directory-p dir)
+                           (condition-case nil (directory-files dir t "\\.el\\'") (file-error nil)))))
         (let* ((name (file-name-base file))
                (feature (intern-soft name))
                (first (and feature (featurep feature) (locate-library name)))
