@@ -1799,13 +1799,14 @@ stays.  The journal itself keeps them all."
           (setq kept (cdr cell))))
       (push record kept))))
 
-(defun romacs-agent--read-journal (session function &optional from)
+(defun romacs-agent--read-journal (session function &optional from end)
   "Call FUNCTION with each record of SESSION's journal, in order, from
-byte FROM (a record's start) when given."
+byte FROM (a record's start) when given, to byte END (a record's end)
+when given."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
-        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from))
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from end))
         (goto-char (point-min))
         (while (not (eobp))
           (let ((record (ignore-errors
@@ -3336,11 +3337,12 @@ SESSION (`romacs-agent--scratch'), is what the harness parses them in."
                                 (setq verdict 'busy)))))))))))
       (eq verdict 'free))))
 
-(defun romacs-agent--journal-tail (session turns &optional end)
+(defun romacs-agent--journal-tail (session turns &optional end begin)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
-before byte END (its end by default): (FROM . PROMPTS), FROM the byte
-of a prompt that started its turn with none under way, at least TURNS
-back, or nil to replay all of it, which then holds PROMPTS prompts.
+between bytes BEGIN and END (its start and end by default): (FROM .
+PROMPTS), FROM the byte of a prompt that started its turn with none
+under way, at least TURNS back, or nil to replay all of it, which then
+holds PROMPTS prompts.
 A prompt's record is told from its line's end
 \(`romacs-agent--prompt-line-end'), looked for from END in growing
 spans, so a long journal is read only as far back as its last turns
@@ -3348,17 +3350,18 @@ go."
   (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
          (end (or end (file-attribute-size (file-attributes journal))))
          (probe (romacs-agent--scratch session))
+         (begin (or begin 0))
          (span 262144) (found nil))
     (if (not (and end (file-readable-p journal))) (cons nil 0)
       (with-temp-buffer
         (set-buffer-multibyte nil)
         (while (not found)
-          (let ((start (max 0 (- end span))) (seen 0) (cut nil) (at nil))
+          (let ((start (max begin (- end span))) (seen 0) (cut nil) (at nil))
             (widen)
             (erase-buffer)
             (insert-file-contents-literally journal nil start end)
             ;; Begun inside a record: its part is no line's start.
-            (when (> start 0)
+            (when (> start begin)
               (goto-char (point-min))
               (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (goto-char (point-max))
@@ -3370,12 +3373,32 @@ go."
               (beginning-of-line)
               (when (looking-at-p "{\"in\":")
                 (setq seen (1+ seen))
-                (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start 0)))
+                (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start begin)))
                   (setq cut seen at (+ start (1- (point)))))))
             (setq found (cond ((and cut (> seen cut)) (cons at cut))
-                              ((= start 0) (cons nil seen))))
-            (setq span (* 4 span))))))
-    found))
+                              ((= start begin) (cons nil seen))))
+            (setq span (* 4 span))))
+        found))))
+
+(defun romacs-agent--journal-notes (session type &optional end)
+  "SESSION's journal's notes of TYPE (a string) before byte END, oldest
+first, each a hash table: their lines are found by the type's text, which
+no string in a record can hold, and only those are parsed."
+  (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+        (key (format "\"type\":%s" (json-serialize type))) (notes nil))
+    (when (file-readable-p journal)
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (insert-file-contents-literally journal nil 0 end)
+        (goto-char (point-min))
+        (while (search-forward key nil t)
+          (let* ((line (decode-coding-string (buffer-substring (line-beginning-position) (line-end-position)) 'utf-8))
+                 (record (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                           :null-object :null :false-object :false)))
+                 (note (and (hash-table-p record) (gethash "note" record))))
+            (when (and (hash-table-p note) (equal (gethash "type" note) type)) (push note notes)))
+          (forward-line 1))))
+    (nreverse notes)))
 
 (defun romacs-agent--read-kept (session)
   "SESSION's kept state as written, or nil when there is none it can read."

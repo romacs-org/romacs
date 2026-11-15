@@ -191,6 +191,19 @@ result."
              (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5 6 7 8))))
          (kill-buffer buffer))))))
 
+;; A chat made before its supervisor wrote any journal: empty, and no row.
+(ert-deftest romacs-agent-chat-without-a-journal ()
+  (romacs-agent-tail-tests--with-session
+   1 0
+   (lambda (session journal)
+     (delete-file journal)
+     (should (equal (romacs-agent--journal-tail session 2) '(nil . 0)))
+     (let* ((romacs-agent-chat-turns 2) (buffer (romacs-agent-tail-tests--open session)))
+       (unwind-protect
+           (with-current-buffer buffer
+             (should-not (string-search "Earlier turns" (buffer-string))))
+         (kill-buffer buffer))))))
+
 ;; A turn rolled back to, before the turns drawn: all of them dim.
 (ert-deftest romacs-agent-chat-dims-a-rollback-past-its-start ()
   (romacs-agent-tail-tests--with-session
