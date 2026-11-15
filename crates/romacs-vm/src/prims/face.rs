@@ -72,6 +72,14 @@ fn reset(cx: &mut Leaf<'_>, vector: Value) -> Out {
     Ok(vector)
 }
 
+/// `facep` (faces.el): whether FACE names a face, as `internal-lisp-face-p`
+/// with no frame answers.
+pub(super) fn facep(cx: &mut Leaf<'_>, face: Value) -> std::result::Result<bool, Fault> {
+    let face = resolve(cx, face, true)?;
+    let frame = cx.face_frame(Value::NIL, false)?;
+    Ok(lookup(cx, face, frame)? != Value::NIL)
+}
+
 defsubr! { name = "internal-lisp-face-p", gnu = "xfaces.c:3120", effect = Reads,
 fn internal_lisp_face_p(cx, face: Value; optional frame: Value) {
     let face = resolve(cx, face, true)?;
