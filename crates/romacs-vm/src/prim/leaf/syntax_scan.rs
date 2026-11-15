@@ -219,27 +219,30 @@ impl scan::Text for View<'_> {
         code
     }
     #[inline]
-    fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
-        let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
-        let len = text.len_bytes();
-        let (mut pos, mut last) = (at, None);
-        while pos.char < limit && pos.byte < len {
+    fn pass(&self, at: Pos, limit: i64, plain: impl Fn(u8, i32) -> bool) -> scan::Passed {
+        let nothing = scan::Passed { to: at, last: None, before: None };
+        let Body::Multibyte(text, ref reader) = self.body else { return nothing };
+        let accepts = |byte: u8| byte < 0x80 && plain(byte, self.table_syntax(u32::from(byte)));
+        // Most runs in code are short: one that ends at once reads no more.
+        if at.char >= limit || !self.ahead(text, at.byte).first().is_some_and(|&byte| accepts(byte)) {
+            return nothing;
+        }
+        let (mut pos, mut last, mut before) = (at, None, None);
+        while pos.char < limit {
             // Only where the table alone gives the syntax.
             let unset_until = reader.as_ref().map_or(usize::MAX, |reader| reader.unset_until(ByteOffset(pos.byte)));
             let room = (unset_until.saturating_sub(pos.byte)).min(usize::try_from(limit - pos.char).unwrap_or(usize::MAX));
-            if room == 0 {
+            let piece = self.ahead(text, pos.byte);
+            if room == 0 || piece.is_empty() {
                 break;
             }
-            let (count, whole) = {
-                let piece = text.chunk_from(pos.byte);
-                let bytes = &piece[..piece.len().min(room)];
-                let count = bytes.iter().position(|&byte| {
-                    let plain = byte < 0x80 && scan::comment_plain(self.table_syntax(u32::from(byte)));
-                    if plain { last = Some(byte); }
-                    !plain
-                });
-                (count.unwrap_or(bytes.len()), count.is_none())
-            };
+            let bytes = &piece[..piece.len().min(room)];
+            let count = bytes.iter().position(|&byte| {
+                let plain = accepts(byte);
+                if plain { (before, last) = (last, Some(byte)); }
+                !plain
+            });
+            let (count, whole) = (count.unwrap_or(bytes.len()), count.is_none());
             // ASCII: as many characters as bytes.
             pos = Pos { char: pos.char + i64::try_from(count).expect("a run inside the text"), byte: pos.byte + count };
             if !whole {
@@ -248,7 +251,8 @@ impl scan::Text for View<'_> {
         }
         #[cfg(test)]
         PASSED.with(|n| n.set(n.get() + usize::try_from(pos.char - at.char).unwrap_or(0)));
-        (pos, last.map(|byte| self.table_syntax(u32::from(byte))))
+        let syntax = |byte: Option<u8>| byte.map(|byte| self.table_syntax(u32::from(byte)));
+        scan::Passed { to: pos, last: syntax(last), before: syntax(before) }
     }
 }
 
