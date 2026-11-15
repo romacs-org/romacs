@@ -1,6 +1,6 @@
 //! fns.c's digests (`crate::digest'); `secure-hash' and `md5' choose and
 //! encode their data in Lisp, as extract_data_from_object does in C
-//! (lisp/romacs/vm/prelude.el).
+//! (lisp/vm/prelude.el).
 use super::*;
 
 // secure_hash after extract_data_from_object: BYTES is the encoded data.
