@@ -197,35 +197,35 @@ auth-source-pass finds it."
 (defun romacs-pass--write (entry text done)
   "Store TEXT as ENTRY through `pass insert', replacing what it held.
 DONE is called with nil once pass succeeds, or with its message."
-  (let* ((output (generate-new-buffer " *romacs-pass insert*"))
-         (process-environment (cons (concat "PASSWORD_STORE_DIR="
-                                            (directory-file-name (romacs-pass-directory)))
-                                    process-environment))
-         (payload (if (string-suffix-p "\n" text) text (concat text "\n")))
-         (process
-          (make-process
-           :name "romacs-pass-insert"
-           :command (list romacs-pass-program "insert" "--multiline" "--force" "--" entry)
-           :connection-type 'pipe :coding 'utf-8 :noquery t :buffer output
-           :sentinel
-           (lambda (process _event)
-             (unless (process-live-p process)
-               (let ((why (with-current-buffer output (string-trim (buffer-string)))))
-                 (kill-buffer output)
-                 (funcall done (unless (and (eq (process-status process) 'exit)
-                                            (zerop (process-exit-status process)))
-                                 (format "pass could not store %s: %s" entry why)))))))))
+  (let ((output (generate-new-buffer " *romacs-pass insert*"))
+        (process-environment (cons (concat "PASSWORD_STORE_DIR="
+                                           (directory-file-name (romacs-pass-directory)))
+                                   process-environment))
+        (payload (if (string-suffix-p "\n" text) text (concat text "\n"))))
     (unwind-protect
-        (progn (process-send-string process payload)
-               (process-send-eof process))
-      (unless (eq payload text) (clear-string payload)))
-    process))
+        (let ((process
+               (make-process
+                :name "romacs-pass-insert"
+                :command (list romacs-pass-program "insert" "--multiline" "--force" "--" entry)
+                :connection-type 'pipe :coding 'utf-8 :noquery t :buffer output
+                :sentinel
+                (lambda (process _event)
+                  (unless (process-live-p process)
+                    (let ((why (with-current-buffer output (string-trim (buffer-string)))))
+                      (kill-buffer output)
+                      (funcall done (unless (and (eq (process-status process) 'exit)
+                                                 (zerop (process-exit-status process)))
+                                      (format "pass could not store %s: %s" entry why)))))))))
+          (process-send-string process payload)
+          (process-send-eof process)
+          process)
+      (unless (eq payload text) (clear-string payload)))))
 
 (defun romacs-pass--wiping (strings function)
   "Call FUNCTION; if it signals, wipe STRINGS first and signal again."
   (condition-case err
       (funcall function)
-    (error (mapc #'clear-string (delete-dups (seq-filter #'stringp strings)))
+    (error (mapc #'clear-string (seq-filter #'stringp strings))
            (signal (car err) (cdr err)))))
 
 (defun romacs-pass--write-reported (entry text then)
