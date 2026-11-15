@@ -898,10 +898,11 @@ buffer."
   (let ((window-restore-killed-buffer-windows t))
     (window-state-put state (frame-root-window frame) 'safe)))
 
-(defun warm-restart--put-again-on-resize (frame state)
+(defun warm-restart--put-again-on-resize (frame state saved)
   "Lay STATE out in FRAME again if its size changes before the first
 command: a new window gets its size from the compositor only after
-startup, and the layout's sizes were the old frame's."
+startup, and the layout's sizes were the old frame's.  SAVED is the
+image's state, for the windows' histories (`warm-restart--put-noted')."
   (let ((size (list (frame-pixel-width frame) (frame-pixel-height frame)))
         again stop)
     (setq stop (lambda ()
@@ -911,7 +912,7 @@ startup, and the layout's sizes were the old frame's."
                   (when (and (eq changed frame) (frame-live-p frame)
                              (not (equal size (list (frame-pixel-width frame) (frame-pixel-height frame)))))
                     (funcall stop)
-                    (warm-restart--put-frame frame state))))
+                    (warm-restart--put-noted frame state saved))))
     (add-hook 'window-size-change-functions again)
     (add-hook 'pre-command-hook stop)))
 
@@ -919,6 +920,18 @@ startup, and the layout's sizes were the old frame's."
   "Each window a restore laid out before all its buffers were back, with
 the buffers it had shown before and after as its image saved them:
 \(WINDOW PREV NEXT), put back once they are (`warm-restart--restore-histories').")
+
+(defvar warm-restart--history-names nil
+  "Once a restore laid out early has every buffer back, its names
+\(`warm-restart--names'): a layout put again (`warm-restart--put-again-on-resize')
+gives its windows their histories at once.")
+
+(defun warm-restart--put-noted (frame state saved)
+  "Lay STATE out in FRAME and note the histories SAVED, its image's state,
+gave its windows; give them those now when every buffer is back."
+  (warm-restart--put-frame frame state)
+  (warm-restart--note-histories frame saved)
+  (when warm-restart--history-names (warm-restart--restore-histories warm-restart--history-names)))
 
 (defun warm-restart--leaves (tree)
   "The leaves of window state TREE, in window order."
@@ -964,9 +977,8 @@ The first frame's goes in the selected frame; another needs a new frame."
            for state = (let ((state (plist-get spec :state)))
                          (cons (car state) (warm-restart--live-tree (cdr state) names)))
            if (frame-live-p frame)
-           do (warm-restart--put-frame frame state)
-           and do (warm-restart--put-again-on-resize frame state)
-           and do (warm-restart--note-histories frame (plist-get spec :state))
+           do (warm-restart--put-noted frame state (plist-get spec :state))
+           and do (warm-restart--put-again-on-resize frame state (plist-get spec :state))
            else do (push (list :frame (1+ (length warm-restart--problems)) :reason "no frame for its windows")
                          warm-restart--problems)))
 
@@ -1148,7 +1160,7 @@ windows and all but its registers were already (`warm-restart--lay-out')."
 BUFFERS, first in the buffer list, and its kill ring, histories and
 globals; its registers wait for every buffer.  The problems."
   (let ((warm-restart--problems nil))
-    (setq warm-restart--histories nil)
+    (setq warm-restart--histories nil warm-restart--history-names nil)
     (let ((warm-restart-passive t)) (warm-restart--restore-globals form buffers 'early))
     (warm-restart--order records buffers)
     (condition-case err
@@ -1249,8 +1261,11 @@ the report."
          (buffers (plist-get state :buffers))
          (warm-restart--problems nil))
     (if (plist-get state :laid-out)
-        ;; Laid out before every buffer was back: their windows' histories now.
-        (warm-restart--restore-histories (warm-restart--names records buffers))
+        ;; Laid out before every buffer was back: their windows' histories
+        ;; now, and at any layout put again.
+        (progn (setq warm-restart--history-names (warm-restart--names records buffers))
+               (warm-restart--restore-histories warm-restart--history-names))
+      (setq warm-restart--history-names nil)
       (warm-restart--order records buffers)
       (condition-case err
           (warm-restart--restore-frames (plist-get form :frames) (warm-restart--names records buffers))

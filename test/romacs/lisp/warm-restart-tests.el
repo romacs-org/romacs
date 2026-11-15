@@ -245,3 +245,22 @@
           (should (eq (car (car (window-prev-buffers))) back))
           (should (= (marker-position (nth 2 (car (window-prev-buffers)))) 3)))
       (kill-buffer back))))
+
+(ert-deftest warm-restart-a-layout-put-again-keeps-its-histories ()
+  ;; A layout put again (the frame resized before the first command) after
+  ;; every buffer is back gives its new windows their histories at once.
+  (let ((back (get-buffer-create "wr-again")) (names (make-hash-table :test #'equal)))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (with-current-buffer back (insert "again"))
+          (puthash "old again" (cons back nil) names)
+          (let* ((state (window-state-get (frame-root-window) t))
+                 (leaf (cdr state))
+                 (saved (cons (car state) (cons 'leaf (cons '(prev-buffers ("old again" 1 4)) (cdr leaf)))))
+                 (warm-restart--history-names names) (warm-restart--histories nil))
+            (should (eq (car leaf) 'leaf))
+            (warm-restart--put-noted (selected-frame) state saved)
+            (should (eq (car (car (window-prev-buffers (frame-first-window)))) back))
+            (should-not warm-restart--histories)))
+      (kill-buffer back))))
