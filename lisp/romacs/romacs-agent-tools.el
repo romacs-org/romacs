@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-issues)
 (require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
@@ -877,6 +878,8 @@ sends nothing."
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.
              (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+             ;; It waits for the turn running: that turn's result is made before it.
+             (when busy (romacs-agent-issues-told child))
              (romacs-agent-send-later child text nil nil valid)))))
   child)
 
@@ -1257,10 +1260,13 @@ role and worktree."
     (romacs-agent-events-async
      task (lambda (events)
             (setcar cell (condition-case err
-                             (list :child (romacs-agent-handoff
+                             (let ((child (romacs-agent-handoff
                                            task (romacs-agent-handoff-thread task events) provider model
                                            (or next "Go on from where this thread left off.")
-                                           (and effort (list :effort effort))))
+                                           (and effort (list :effort effort)))))
+                               (romacs-agent-issues-record 'handoff task :from (romacs-agent-provider task) :to provider
+                                                           :child (romacs-agent-id child))
+                               (list :child child))
                            (error (list :error (error-message-string err)))))))
     (romacs-mcp-defer
      (lambda ()

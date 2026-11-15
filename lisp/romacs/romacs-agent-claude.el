@@ -535,6 +535,53 @@ answer to a hook; (:line ID MODE), a switch to permission mode MODE."
                            :notes (cl-remove-if-not #'cdr options)
                            :multi (eq (gethash "multiSelect" q) t)))))
 
+(defconst romacs-agent--claude-stream-end
+  "\"type\":\"stream_event\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}"
+  "How a `stream_event' record's line ends: keys are written sorted.")
+
+(defconst romacs-agent--claude-assistant-end
+  "\"type\":\"assistant\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
+  "How an `assistant' record's line ends.")
+
+(defun romacs-agent--claude-streamed-skip ()
+  "In a buffer of journal lines, a function of a line's start and end
+saying whether it is a `stream_event' of a content block an `assistant'
+record among them says whole; nil when none does.  Claude writes an
+`assistant' record as each of a message's blocks ends, in order, under
+the message's id: a message's first N blocks are whole when its records
+hold N.  A block cut short, or still streaming, has none: its deltas
+are read, and every message's own start and end, so a block read takes
+its message's id.  A stream line starts with its message's id
+\(`api_message_id') and names its block by the event's `index'; no
+string can hold a quoted key."
+  (let ((whole (make-hash-table :test #'equal)))
+    (goto-char (point-min))
+    (while (re-search-forward romacs-agent--claude-assistant-end nil t)
+      (let* ((end (point))
+             (record (ignore-errors (json-parse-string (buffer-substring (line-beginning-position) end)
+                                                       :object-type 'hash-table)))
+             (message (and (hash-table-p record) (hash-table-p (gethash "out" record))
+                           (gethash "message" (gethash "out" record))))
+             (id (and (hash-table-p message) (gethash "id" message)))
+             (content (and id (gethash "content" message))))
+        (when (and (stringp id) (vectorp content))
+          (puthash id (+ (gethash id whole 0) (length content)) whole))))
+    (and (> (hash-table-count whole) 0)
+         (lambda (start end)
+           (and (eq (char-after (+ start 9)) ?a)
+                (save-excursion
+                  (goto-char start)
+                  (when-let* (((looking-at "{\"out\":{\"api_message_id\":\"\\([^\"]+\\)\""))
+                              (blocks (gethash (match-string 1) whole))
+                              ((progn (goto-char end)
+                                      (looking-back romacs-agent--claude-stream-end (max start (- end 200))))))
+                    (goto-char start)
+                    ;; A block's event says which.  A message's own (its
+                    ;; start, its end) are read: a block of it still read
+                    ;; takes its id from its start.
+                    (and (re-search-forward "\"index\":\\([0-9]+\\)" end t)
+                         (< (string-to-number (match-string 1)) blocks)))))))))
+
 (defun romacs-agent--claude-session-rules (request)
   "The permission updates allowing REQUEST's tool for the rest of the
 session: what Claude Code suggests, kept to the session, else its tool."
@@ -593,6 +640,7 @@ environment."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
+  :streamed-skip #'romacs-agent--claude-streamed-skip
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next

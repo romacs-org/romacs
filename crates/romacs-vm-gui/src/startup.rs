@@ -258,8 +258,12 @@ thread_local! { static PHASES: std::cell::RefCell<Option<Phases>> = const { std:
 /// This thread's startup phases, from START; marks print only once begun
 /// (the GUI begins them under --trace-latency).
 pub fn begin_phases(start: std::time::Instant) { PHASES.with(|p| *p.borrow_mut() = Some(Phases::new(start))); }
-/// The end of PHASE on this thread's startup clock, if it keeps one.
-pub fn mark_phase(phase: &str) { PHASES.with(|p| if let Some(p) = p.borrow_mut().as_mut() { p.mark(phase) }); }
+/// Startup reached PHASE: timed under --trace-latency, and an event of the
+/// launch screen's progress (loading.rs) whatever the trace.
+pub fn mark_phase(phase: &str) {
+    crate::loading::phase(phase);
+    PHASES.with(|p| if let Some(p) = p.borrow_mut().as_mut() { p.mark(phase) });
+}
 impl Phases {
     pub fn new(start: std::time::Instant) -> Self { Self { start, last: start } }
     /// A clock of this process's exec: `main`'s now, less how long the
@@ -787,6 +791,7 @@ pub fn before_init(vm: &mut Vm, launch: Launch, quick: bool) -> Result<(), Strin
         if quick { vm.eval_source(QUICK_START)?; }
         vm.eval_source(&format!("(when (fboundp 'romacs-defaults-start) (romacs-defaults-start {}))",
                                 if quick { "t" } else { "nil" }))?;
+        vm.eval_source("(when (fboundp 'romacs-gui-loadup-before-init) (romacs-gui-loadup-before-init))")?;
     }
     Ok(())
 }
