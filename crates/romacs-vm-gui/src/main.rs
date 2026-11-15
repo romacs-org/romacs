@@ -1394,6 +1394,10 @@ fn evaluate(
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
+        // The user's settings, packages, init and what runs after it are
+        // Lisp that may not end: C-g quits it, as GNU's startup lets it
+        // (the evaluator is busy to the input thread until its first wait).
+        if live { vm.enter_busy(); }
         startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
@@ -1415,10 +1419,10 @@ fn evaluate(
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     // As GNU's startup says it (startup.el `startup--load-user-init-file'):
-                    // a *Warnings* buffer the first frame shows.
-                    let warned = vm.eval_source(&format!(
-                        "(display-warning 'initialization (format-message \"An error occurred while loading your init file:\\n\\n%s\\n\\nTo ensure normal operation, you should investigate and remove the cause of the error in your initialization file.\" {}) :error)",
-                        startup::lisp_string(&error)));
+                    // a *Warnings* buffer the first frame shows, with the
+                    // backtrace a button away, and the launch screen's init
+                    // stage failed (lisp/romacs/romacs-init-load.el).
+                    let warned = vm.eval_source(&format!("(romacs-init-failed {})", startup::lisp_string(&error)));
                     if warned.is_err() { let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details"); }
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
@@ -1442,6 +1446,7 @@ fn evaluate(
             }
             Ok(()) => echo::show_current_message(&mut vm)?,
         }
+        if live { vm.leave_busy(); }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
         if let Some(loadup) = started.loadup.as_ref().filter(|_| diagnostics()) {

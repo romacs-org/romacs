@@ -141,6 +141,10 @@ is a step of the launch screen's progress, until
 `romacs-gui-loadup-after-init'."
   (add-hook 'after-load-functions #'romacs-gui-loadup--init-loaded))
 
+;; The user's init is loaded, and an error that stops it said, by
+;; lisp/romacs/romacs-init-load.el.
+(require 'romacs-init-load)
+
 (defun romacs-gui-loadup-after-init ()
   "What GNU's startup does once the init file has loaded, up to the files.
 The GUI calls this after the user's init: the end of startup.el
