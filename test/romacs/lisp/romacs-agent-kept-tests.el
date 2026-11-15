@@ -88,6 +88,21 @@ second turn, then its exit.  Its first turn ends at seq 12."
      (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
        (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
+(defun romacs-agent-kept-tests--replay (twin)
+  "The session recorded in TWIN, loaded as a server that kept nothing of
+it does: no state kept to go on from (its id's is the other's), so every
+one of its records is read, which this checks."
+  (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (read 0)
+        (records (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" twin))
+                                   (count-lines (point-min) (point-max)))))
+    (prog1 (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                      ((symbol-function 'romacs-agent--record)
+                       (lambda (session record) (cl-incf read) (funcall real session record)))
+                      ((symbol-function 'romacs-agent-turns-fold) #'ignore)
+                      ((symbol-function 'romacs-agent-turns-fold-put) #'ignore))
+             (romacs-agent--load twin))
+      (cl-assert (= read records) t "the twin read %d of its %d records" read records))))
+
 (defun romacs-agent-kept-tests--load (dir)
   "The session recorded in DIR, loaded by a server knowing no session,
 which then goes idle: what it keeps is written."
@@ -120,8 +135,7 @@ contents, so two equal states print the same."
         ;; Only what came after its kept state was read.
         (should (equal (nreverse read) (number-sequence 13 (length records))))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (= (romacs-agent-seq restored) (length records)))
           (should (equal (romacs-agent-reply restored) "bye"))
           (should (= (romacs-agent-turns restored) 2))
@@ -140,8 +154,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir tail t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (equal (romacs-agent-kept-tests--state restored)
                          (romacs-agent-kept-tests--state replayed))))))))
 
@@ -171,8 +184,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir (nthcdr 6 records) t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (equal (romacs-agent-reply restored) "twice"))
           (should (equal (romacs-agent-kept-tests--state restored)
                          (romacs-agent-kept-tests--state replayed))))))))
@@ -235,8 +247,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir (list exit) t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin (append records (list exit)))
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should-not (romacs-agent-failed restored))
           (should (equal (romacs-agent-reply restored) "hello"))
           (should (equal (romacs-agent-kept-tests--state restored)
@@ -447,4 +458,24 @@ contents, so two equal states print the same."
       (should-not (file-exists-p (romacs-agent--kept-file session)))
       (should (equal (romacs-agent--kept-get session) "(:a 3)"))
       (should (= (caar (sqlite-select db "select count(*) from turns where session = ? and fold is not null" (list id))) 1))))))
+(ert-deftest romacs-agent-kept-a-busy-database-is-tried-again ()
+  ;; Its state not kept (the database held by another writer): tried again
+  ;; at the next idle moment, no record since, and kept then.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+      (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+      (let* ((session (romacs-agent-kept-tests--load dir)) (tries 0) (romacs-agent--keep-tries nil))
+        (remhash session romacs-agent--kept)
+        (setq romacs-agent--keeping nil)
+        (cl-letf* ((put (symbol-function 'romacs-agent--kept-put))
+                   ((symbol-function 'romacs-agent--kept-put)
+                    (lambda (s text) (and (> (cl-incf tries) 1) (funcall put s text))))
+                   ((symbol-function 'run-with-idle-timer) (lambda (&rest _) nil)))
+          (romacs-agent--keep session)
+          (should-not (gethash session romacs-agent--kept))
+          (should romacs-agent--keeping)
+          (romacs-agent--keep-pending))
+        (should (= tries 2))
+        (should (eql (gethash session romacs-agent--kept) (romacs-agent-seq session)))))))
+
 ;;; romacs-agent-kept-tests.el ends here

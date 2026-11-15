@@ -3392,10 +3392,21 @@ its records left it (`romacs-agent--keep-soon')."
     (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
                (eq (romacs-agent-get (romacs-agent-id session)) session)
                (not (eql seq (gethash session romacs-agent--kept))))
-      (when-let* ((text (romacs-agent--kept-text session state))
-                  ((romacs-agent--kept-put session text)))
-        (puthash session seq romacs-agent--kept)
-        (run-hook-with-args 'romacs-agent-kept-functions session state)))))
+      (when-let* ((text (romacs-agent--kept-text session state)))
+        (if (not (romacs-agent--kept-put session text))
+            ;; Not kept (the database another writer's a while): tried again
+            ;; at the next idle moment, a few times, as of the same record.
+            (when (< (cl-incf (alist-get session romacs-agent--keep-tries 0)) romacs-agent--keep-retries)
+              (romacs-agent--keep-soon session))
+          (setf (alist-get session romacs-agent--keep-tries nil t) nil)
+          (puthash session seq romacs-agent--kept)
+          (run-hook-with-args 'romacs-agent-kept-functions session state))))))
+
+(defconst romacs-agent--keep-retries 20
+  "How many times a session's state that could not be kept is tried again.")
+
+(defvar romacs-agent--keep-tries nil
+  "Each session whose state could not be kept, to the times it was tried.")
 
 (defvar romacs-agent--keeping nil
   "The sessions whose state is kept at the editor's next idle moment,
