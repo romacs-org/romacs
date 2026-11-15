@@ -381,7 +381,7 @@ then begins initialization, in the directory the process started in."
 (defun romacs--migrate-project-list (old new)
   "Copy the project list OLD to NEW when NEW does not exist and OLD is a readable file.
 OLD stays where it is.  The interactive startup takes this step once the
-per-user directory names NEW (lisp/romacs/romacs-gui-loadup.el); a batch
+per-user directory names NEW (lisp/session/romacs-gui-loadup.el); a batch
 session does not, as its startup also runs in a world build, which may
 write no file.  A failure is said and leaves both files as they were."
   (when (and (not (file-exists-p new))
@@ -409,7 +409,7 @@ and `after-init-time' its clock."
         ;; startup.el normal-top-level (startup.el:585-592), before
         ;; command-line: the per-user directory, which
         ;; `locate-user-emacs-file' and the delayed standard values build on.
-        ;; A GUI session then names its own (lisp/romacs/romacs-gui-loadup.el).
+        ;; A GUI session then names its own (lisp/session/romacs-gui-loadup.el).
         (setq startup--xdg-config-home-emacs
               (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
                 (if xdg-config-home
@@ -418,7 +418,7 @@ and `after-init-time' its clock."
         (setq user-emacs-directory
               (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
         ;; The frame init_display made; a window session has none
-        ;; (lisp/romacs/romacs-gui-loadup.el).
+        ;; (lisp/session/romacs-gui-loadup.el).
         (setq terminal-frame (selected-frame))
         (romacs--startup-environment)
         (let ((user-emacs-directory-warning nil))
@@ -430,7 +430,7 @@ and `after-init-time' its clock."
 (defvar romacs-startup-function #'romacs-batch-startup
   "The per-process startup steps this session took last.
 A session that takes its own after the chain's sets it to them
-\(lisp/romacs/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
+\(lisp/session/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
 (defun romacs--after-init ()
   "End initialization as startup.el `command-line' does after the init file.
 `after-init-time' takes the clock, `after-init-hook' and
@@ -533,7 +533,7 @@ definitions (`romacs--world-reseed-all')."
 ;; preloaded files are in.  Romacs does not run command-line in this
 ;; bootstrap, so it takes this one step itself, in batch.  A session that
 ;; starts in another context evaluates the same list again in its own
-;; (lisp/romacs/romacs-gui-loadup.el).
+;; (lisp/session/romacs-gui-loadup.el).
 ;; `project-list-file' is delayed for project.el, which the chain loads: a
 ;; chain that stops loading it must drop the delay, or the variable keeps nil.
 (unless (featurep 'project)

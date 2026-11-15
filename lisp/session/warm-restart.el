@@ -836,7 +836,7 @@ buffer and whether a handler rebuilt that buffer's text."
   "Buffer-local, set: lock this buffer's file at its next edit though it is
 modified.  GNU locks only at the first edit of an unmodified buffer; a
 restored buffer is modified already, so a lock another editor held at the
-restore would never be asked about.  lisp/romacs/vm/insdel.el locks while this
+restore would never be asked about.  lisp/vm/insdel.el locks while this
 is local and removes it once `lock-file' returns; a refusal refuses the
 edit and the next one asks again.  Permanent: a change of major mode
 leaves the buffer modified, so it must keep the pending lock too.")

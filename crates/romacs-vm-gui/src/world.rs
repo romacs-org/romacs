@@ -16,7 +16,7 @@
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
-//! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
+//! startup steps (lisp/session/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! refuses, so a restored launch takes them itself.
 //!
@@ -542,8 +542,8 @@ mod tests {
     /// confined build reads only inside its roots.
     #[test]
     fn a_build_reads_the_bundled_trees_and_their_layout() {
-        let roots = build_roots(std::path::Path::new("/r/lisp/gnu"));
-        for path in ["/r/lisp/gnu", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
+        let roots = build_roots(std::path::Path::new("/r/lisp"));
+        for path in ["/r/lisp", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
             assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
         }
     }

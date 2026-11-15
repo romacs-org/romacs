@@ -7,7 +7,7 @@
         by exact path, SHA-256 and pinned generator/source references. These
         are snapshots, not pristine Git blobs or a regeneration claim. No
         undeclared .el file (even ignored or without .git), or other non-ignored
-        file in a repository, may exist under lisp/gnu/. A romacs variant of a GNU file
+        file in a repository, may exist under lisp/. A romacs variant of a GNU file
         may live ONLY in lisp-overlay/, declared in lisp-overlay/MANIFEST.tsv
         and rebased on the pin blob it varies; non-GNU Lisp lives in
         lisp/romacs/ (external dependencies in lisp/romacs/deps/). Exit 1 on any violation.
@@ -40,7 +40,7 @@ GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 PIN_FILE = 'ledger/lisp-pin.json'
 GENERATED_FILE = 'ledger/lisp-generated.json'
 GNU_SOURCE = os.environ.get('LISP_ORACLE_GNU', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / ''))
-LOCAL_LISP = 'lisp/gnu'
+LOCAL_LISP = 'lisp'
 
 
 def local_path(upstream_path):
@@ -178,7 +178,7 @@ def check(root, gnu, pin):
                         f'(restore the pin blob; a variant belongs in {OVERLAY}/)')
 
     for p in absent:
-        problems.append(f'ABSENT {p}: GNU ships it at the pin; lisp/gnu/ is GNU\'s whole tree (re-extract it)')
+        problems.append(f'ABSENT {p}: GNU ships it at the pin; lisp/ is GNU\'s whole tree (re-extract it)')
 
     # ledger/lisp-pin.json records the pin and GNU's own tree id for lisp/; both must
     # agree with GNU's object store, so the record cannot drift from the pin.
@@ -255,7 +255,7 @@ def check(root, gnu, pin):
         if len(problems) > 40:
             print(f'  ... and {len(problems) - 40} more', file=sys.stderr)
         return 1
-    print('lisp_oracle: ok, every shared lisp/gnu/ path is the pin blob; declared generated support bytes verified')
+    print('lisp_oracle: ok, every shared lisp/ path is the pin blob; declared generated support bytes verified')
     return 0
 
 

@@ -65,7 +65,7 @@ def bundled_names(bases):
 def packages(bases):
     """Test directories of bundled code; GNU's own run under test/gnu."""
     names = bundled_names(bases)
-    gnu = {p.name for p in (ROOT / 'lisp/gnu').iterdir()}
+    gnu = {p.name for p in (ROOT / 'lisp').iterdir()}
     return sorted(d for tests in SUITES for d in tests.iterdir()
                   if d.is_dir() and d.name in names and d.name not in gnu)
 
@@ -98,8 +98,8 @@ def driver(path, selector):
 
 def host_environment(home, binary):
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
-    runtime = binary.parent / 'lisp/gnu'
-    env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'lisp/gnu'))
+    runtime = binary.parent / 'lisp'
+    env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'lisp'))
     env.update(HOME=str(home), TMPDIR=str(home), ROMACS_WORLD='off', ROMACS_COMPILED_LISP='off')
     for key in XDG:
         directory = home / key.lower()

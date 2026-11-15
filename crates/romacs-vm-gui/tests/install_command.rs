@@ -85,7 +85,7 @@ fn install_command_module_activates_during_initialize() {
     }
     let root = std::env::temp_dir().join(format!("romacs-install-seam-{}", std::process::id()));
     let modules = root.join("lisp/romacs/romacs-gui-extensions");
-    std::fs::create_dir_all(root.join("lisp/gnu")).unwrap();
+    std::fs::create_dir_all(root.join("lisp")).unwrap();
     std::fs::create_dir_all(&modules).unwrap();
     // A runtime tree of this build's generation, as the executable requires of the tree it is given.
     std::fs::create_dir_all(root.join("etc")).unwrap();

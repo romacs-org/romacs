@@ -40,10 +40,10 @@ frozen snapshots.
 | Faces, themes, fonts | `crates/romacs-face`, `crates/romacs-font`, `crates/romacs-font-materializer` |
 | Drawing | `crates/romacs-display-runtime` (the render thread), `romacs-renderer-wgpu`, `romacs-scene` |
 | Images and video | `crates/romacs-imaging`, `crates/romacs-video`, `crates/romacs-video-model` |
-| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/romacs/romacs-agent*.el` |
-| GNU's Lisp, pinned | `lisp/gnu/` (pin: `ledger/lisp-pin.json`) |
+| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/romacs-agent*.el` |
+| GNU's Lisp, pinned | `lisp/` (pin: `ledger/lisp-pin.json`) |
 | Romacs's own Lisp and bundled packages | `lisp/romacs/`; bundled roots in `lisp/bundled.json` |
-| What a session loads, in order | `lisp/romacs/romacs-loadup-bootstrap.el` |
+| What a session loads, in order | `lisp/session/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
 | GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
@@ -85,7 +85,7 @@ not.
 - `romacs-display-protocol`, `romacs-layout-input`, `romacs-layout`,
   `romacs-face`, `romacs-font` and `romacs-regex` hold no evaluator and are
   tested without a VM.
-- GNU's files under `lisp/gnu/` and `test/gnu/test/` are byte-identical to
+- GNU's files under `lisp/` and `test/gnu/test/` are byte-identical to
   the pin, less its declared exclusions; `tools/check-derived` verifies it.
 - A deliberate difference from GNU is one file in `ledger/divergences/`.
 

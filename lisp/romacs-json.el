@@ -23,7 +23,7 @@
 
 (require 'json)
 
-;; The loadup chain defines it (lisp/romacs/romacs-loadup-bootstrap.el).
+;; The loadup chain defines it (lisp/session/romacs-loadup-bootstrap.el).
 (defvar romacs-standard-obarray)
 
 (defvar romacs-json--lisp nil

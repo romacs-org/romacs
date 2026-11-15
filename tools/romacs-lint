@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint Lisp against a running Romacs (lisp/romacs/romacs-lint.el).
+"""Lint Lisp against a running Romacs (lisp/emacs-lisp/romacs-lint.el).
 
 The host loads each file and holds what it names to what the machine defines:
 unknown functions, wrong argument counts, untrue `declare-function`s, free and
@@ -59,7 +59,7 @@ def environment(binary, home):
     if (binary.parent / (binary.name + '.worlds')).is_dir():
         env.setdefault('ROMACS_RUNTIME_ROOT', str(binary.parent))
     else:
-        env.setdefault('ROMACS_LISP_DIR', str(ROOT / 'lisp/gnu'))
+        env.setdefault('ROMACS_LISP_DIR', str(ROOT / 'lisp'))
     return env
 
 
@@ -114,7 +114,7 @@ def lint(binary, arguments, timeout, root=ROOT):
     another version, so the launcher, not the Lisp, says where a file is.
     STATUS is None unless the lint ran to its closing line: a host that did
     not start, a file that ended the host as it loaded, a timeout."""
-    command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/romacs/romacs-lint.el'), '-f', 'romacs-lint-batch']
+    command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
             done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=home,

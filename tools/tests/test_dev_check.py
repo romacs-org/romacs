@@ -108,9 +108,9 @@ class Forecast(unittest.TestCase):
 
 class Lint(unittest.TestCase):
     def test_only_our_lisp_that_is_still_there_is_linted(self):
-        names = {'lisp/romacs/romacs-lint.el', 'lisp/romacs/romacs-deleted-by-the-change.el', 'lisp/gnu/simple.el',
+        names = {'lisp/emacs-lisp/romacs-lint.el', 'lisp/romacs/romacs-deleted-by-the-change.el', 'lisp/simple.el',
                  'lisp/romacs/README', 'crates/romacs-vm/src/gc.rs'}
-        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/romacs/romacs-lint.el'])
+        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el'])
 
     def test_the_lint_is_given_the_base_the_paths_came_from(self):
         # Left to itself the lint compares with beta, whatever trunk was asked for.

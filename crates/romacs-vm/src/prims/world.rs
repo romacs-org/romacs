@@ -19,7 +19,7 @@ fn dumping(_cx) {
     Ok(if crate::host::dumping() { Value::TRUE } else { Value::NIL })
 }}
 
-// Romacs-only. lisp/romacs/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
+// Romacs-only. lisp/session/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
 // the user's init gave `eval-after-load' PRINTED for FILE (a feature, or a
 // file named by a string), not loaded yet: noted for its layer's plan
 // (`world::layer'). A no-op, returning nil, unless a recording is on and the

@@ -1,6 +1,6 @@
 """Session profiles for the bench, perfbench and the app parity harnesses.
 
-Two profiles.  stock, the default: no one's init, only the stock lisp/gnu
+Two profiles.  stock, the default: no one's init, only the stock lisp
 and lisp/romacs, on a generic project (bench/fixture.py); GNU runs with -Q and
 loads the bench's endpoint with -l, Romacs runs --loadup with that endpoint
 as its only init (its GUI has -Q but no -l).  init: a real init, described
@@ -108,10 +108,10 @@ def gnu_settings():
     GNU's init, as the parity harnesses' GNU takes them."""
     return ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
             '(setq scroll-conservatively 101)\n'
-            f'(load {lisp_string(str(ROOT / "lisp/romacs/romacs-completion-defaults.el"))} nil t)\n')
+            f'(load {lisp_string(str(ROOT / "lisp/completion/romacs-completion-defaults.el"))} nil t)\n')
 
 
-# GNU's completion as it loads lisp/romacs/romacs-completion-defaults.el, for
+# GNU's completion as it loads lisp/completion/romacs-completion-defaults.el, for
 # Romacs in a comparison: Romacs's window-system display is its own layer
 # (romacs-complete-mode, DIVERGENCES.md VM2-MINI-COMPLETION-LAYER), which
 # takes the root window's last line, and its styles begin with fzf
@@ -154,8 +154,8 @@ def init_source(engine, lisp, port_file, token, profile, config):
 {f"(setq load-path (cons {lisp_string(str(lisp))} load-path))" if real else ""}
 {setup}(setq inhibit-startup-screen t)
 {blocks}
-(load {lisp_string(str(ROOT / 'lisp/romacs/romacs-mcp.el'))} nil t)
-(load {lisp_string(str(ROOT / 'lisp/romacs/romacs-mcp-session.el'))} nil t)
+(load {lisp_string(str(ROOT / 'lisp/agents/romacs-mcp.el'))} nil t)
+(load {lisp_string(str(ROOT / 'lisp/agents/romacs-mcp-session.el'))} nil t)
 (romacs-mcp-enable-session-tools)
 (cd "~/")
 ;; The endpoint starts here, not from `emacs-startup-hook': a session whose

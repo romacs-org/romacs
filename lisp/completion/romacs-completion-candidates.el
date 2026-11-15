@@ -5,7 +5,7 @@
 ;;; Commentary:
 
 ;; The completion styles that match natively (`orderless',
-;; lisp/romacs/romacs-orderless.el, and `fzf', lisp/romacs/romacs-fzf.el) list a
+;; lisp/completion/romacs-orderless.el, and `fzf', lisp/completion/romacs-fzf.el) list a
 ;; table's candidates here, once, and filter the list in Rust.  A file
 ;; name table's listing is kept while its directory is unchanged, so a
 ;; prompt lists a directory once rather than on every key.

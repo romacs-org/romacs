@@ -1,4 +1,4 @@
-//! The bundled packages' autoloads (lisp/romacs/romacs-bundled-autoloads.el,
+//! The bundled packages' autoloads (lisp/session/romacs-bundled-autoloads.el,
 //! which scans the directories lisp/bundled.json declares as it loads) in the
 //! GNU world the package ERT runner boots: each command is an autoload until
 //! it is called, and calling it loads the package's own file from its
@@ -37,8 +37,8 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
                (commandp '{name}) (featurep '{feature}) (and (assoc {:?} load-history) t))",
         root.join(file).to_string_lossy()));
     // A command, its package's feature (also its library) and file.
-    let commands = [("gnosis-dashboard", "gnosis-dashboard", "lisp/romacs/gnosis/gnosis-dashboard.el"),
-                    ("jabber-info", "jabber", "lisp/romacs/jabber/jabber.el")];
+    let commands = [("gnosis-dashboard", "gnosis-dashboard", "lisp/packages/gnosis/gnosis-dashboard.el"),
+                    ("jabber-info", "jabber", "lisp/packages/jabber/jabber.el")];
     let before: Vec<String> = commands.iter().map(|(name, feature, file)| state(&mut vm, name, feature, file)).collect();
     assert_eq!(before, [r#"("gnosis-dashboard" t nil nil)"#, r#"("jabber" t nil nil)"#], "autoloaded, not loaded");
     // A call first does what `autoload-do-load` does; this loads the file
@@ -59,15 +59,15 @@ fn a_world_build_records_what_the_bundled_scan_reads() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let mut vm = gnu_ert_vm::bootstrapped();
     host::enter_build(Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] });
-    let loaded = vm.load_file(&root.join("lisp/romacs/romacs-bundled-autoloads.el"));
+    let loaded = vm.load_file(&root.join("lisp/session/romacs-bundled-autoloads.el"));
     let trace = host::leave_build().expect("a build was recording");
     loaded.unwrap();
     let records = trace["records"].as_array().unwrap();
     let recorded = |kind: &str, path: &Path| records.iter().any(|r| r["kind"] == kind && r["path"] == json!(path.to_string_lossy()));
-    for dir in ["lisp/romacs", "lisp/romacs/gnosis", "lisp/romacs/jabber", "lisp/romacs/deps"] {
+    for dir in ["lisp/romacs", "lisp/packages/gnosis", "lisp/packages/jabber", "lisp/romacs/deps"] {
         assert!(recorded("dir-list", &root.join(dir)), "{dir} is listed");
     }
-    for file in ["lisp/bundled.json", "lisp/romacs/jabber/jabber.el", "lisp/romacs/gnosis/gnosis-dashboard.el"] {
+    for file in ["lisp/bundled.json", "lisp/packages/jabber/jabber.el", "lisp/packages/gnosis/gnosis-dashboard.el"] {
         assert!(recorded("file-read", &root.join(file)), "{file} is read");
     }
     assert_eq!(trace["refusals"], json!([]));
@@ -94,7 +94,7 @@ fn the_scan_yields_the_forms_loaddefs_generate_writes() {
         std::fs::write(dir.join(name), text).unwrap();
     }
     let mut vm = gnu_ert_vm::bootstrapped();
-    vm.load_file(&root.join("lisp/romacs/romacs-bundled-autoloads.el")).unwrap();
+    vm.load_file(&root.join("lisp/session/romacs-bundled-autoloads.el")).unwrap();
     let dir_name = format!("{:?}", dir.to_string_lossy());
     let found = query(&mut vm, &format!("(let* ((dir {dir_name}) (output (expand-file-name \"=loaddefs.el\" dir)))
         (loaddefs-generate dir output nil nil nil t)

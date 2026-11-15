@@ -1,4 +1,4 @@
-//! Session images (lisp/romacs/warm-restart.el) across processes: one batch
+//! Session images (lisp/session/warm-restart.el) across processes: one batch
 //! session builds a session (tests/fixtures/warm-restart-session.el) and
 //! writes its image; a fresh process restores it and must observe the same
 //! buffers (text, point, mark, mark ring, narrowing, modified flag, mode,
@@ -178,7 +178,7 @@ fn a_restored_unsaved_file_is_locked_and_another_editors_lock_asks_at_the_next_e
 
 #[test]
 fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
-    // Agent sessions outlive the editor (lisp/romacs/romacs-agent.el); a restored
+    // Agent sessions outlive the editor (lisp/agents/romacs-agent.el); a restored
     // chat is the session's view, made from its journal, never a copy.
     let dir = dir("agent");
     let session = dir.join("state/romacs/agents/0a1b2c3d-test");

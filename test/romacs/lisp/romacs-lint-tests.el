@@ -223,7 +223,7 @@ it loads into a machine already booted.  It runs in a machine of its own:
 loading that file leaves the one that loads it changed."
   (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
          (host (expand-file-name invocation-name invocation-directory))
-         (file (expand-file-name "lisp/romacs/romacs-loadup-bootstrap.el" root))
+         (file (expand-file-name "lisp/session/romacs-loadup-bootstrap.el" root))
          (status nil))
     (skip-unless (and root (file-exists-p file)))
     (with-temp-buffer

@@ -51,7 +51,7 @@ fn booted(root: &Path, world: bool) -> Vm {
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     vm.set_load_path(&load_path(root)).unwrap();
     vm.install_lisp_prelude().unwrap();
-    load(&mut vm, root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    load(&mut vm, root, "lisp/session/romacs-loadup-bootstrap.el");
     vm
 }
 
@@ -69,7 +69,7 @@ fn load(vm: &mut Vm, root: &Path, name: &str) {
 /// root, its subdirectories in reverse name order with obsolete last, then
 /// `lisp/romacs`.
 fn load_path(root: &Path) -> Vec<PathBuf> {
-    let lisp = root.join("lisp/gnu");
+    let lisp = root.join("lisp");
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
