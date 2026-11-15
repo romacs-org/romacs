@@ -44,13 +44,29 @@ pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
         Ok(_) => {},
     }
     identify(vm, path)?;
-    vm.load_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    // The loader's error names the file already (`FILE: line N form M:
+    // ...`); one that does not is named once here.
+    vm.load_file(path).map_err(|error| named(path, &error.to_string()))?;
     Ok(true)
+}
+
+/// ERROR, an error loading PATH, naming PATH once.
+fn named(path: &Path, error: &str) -> String {
+    let file = path.display().to_string();
+    if error.starts_with(&file) { error.to_owned() } else { format!("{file}: {error}") }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_init_error_names_its_file_once() {
+        let path = Path::new("/home/user/.config/romacs/init.el");
+        let loader = "/home/user/.config/romacs/init.el: line 3 form 2: (oops): (void-function oops)";
+        assert_eq!(named(path, loader), loader);
+        assert_eq!(named(path, "Permission denied"), "/home/user/.config/romacs/init.el: Permission denied");
+    }
 
     #[test]
     fn xdg_paths_follow_the_standard_fallback() {
