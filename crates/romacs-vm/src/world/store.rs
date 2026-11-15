@@ -347,8 +347,14 @@ fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) ->
     if !meta.file_type().is_dir() {
         return refuse("not a directory");
     }
-    if meta.uid() != host::euid() || meta.permissions().mode() & 0o777 != 0o700 {
-        return refuse("not private to this user (0700)");
+    if meta.uid() != host::euid() {
+        return refuse("not this user's");
+    }
+    // The user's own store, open to others: made private again, as a world
+    // maps its images and its directory holds no one else's.
+    if meta.permissions().mode() & 0o777 != 0o700
+        && host::make_store_private(dir).is_err() {
+        return refuse("open to others, and not made private (0700)");
     }
     let same = |other: &Path| host::metadata(other).is_ok_and(|m| (m.dev(), m.ino()) == (meta.dev(), meta.ino()));
     if same(Path::new("/")) || home.is_some_and(same) {
@@ -603,17 +609,17 @@ impl World {
     /// threads, which run many tests in one process, the mapping would be
     /// raced, and a process maps one image. A missing or stale world is built
     /// first by a builder that runs the same test again (this process's own
-    /// arguments), confined to ROOTS beside the binary's own; BUILD gives it
-    /// the VM and the carry, in build mode. The builder first deletes the
-    /// worlds of this executable before it was rebuilt, and exits once it
-    /// has built, or failed to; the test then boots from source.
+    /// arguments); BUILD gives it the VM and the carry, in build mode. The
+    /// builder first deletes the worlds of this executable before it was
+    /// rebuilt, and exits once it has built, or failed to; the test then
+    /// boots from source.
     ///
     /// # Panics
     ///
     /// When the restored VM's `romacs-world-restart` fails: the world is
     /// the test's to answer for.
     #[must_use]
-    pub fn for_test<T: super::safe::SnapshotSafe + super::safe::Schema + 'static>(store: PathBuf, recipe: &[String], roots: Vec<PathBuf>,
+    pub fn for_test<T: super::safe::SnapshotSafe + super::safe::Schema + 'static>(store: PathBuf, recipe: &[String],
                                                             build: impl FnOnce() -> Result<(Vm, T), String>) -> Option<(Vm, T)> {
         // Before the key, which reads this executable.
         if !host::one_test_process() || !arena::serves_heap() || arena::mapped_image().is_some() {
@@ -634,12 +640,11 @@ impl World {
             }
             Launch::Build => {
                 // The family's other worlds are of this executable before it
-                // was rebuilt, which nothing restores: gone before the build
-                // confines this process to reading the store.
+                // was rebuilt, which nothing restores: gone before the build.
                 if let Err(error) = world.prune_family_to_current() {
                     eprintln!("test world: prune failed: {error}");
                 }
-                let outcome = world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())
+                let outcome = world.begin_build().map_err(|e| e.to_string())
                     .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
                 if let Err(error) = &outcome {
                     eprintln!("test world: {error}");
@@ -652,7 +657,7 @@ impl World {
 
     /// The world restored, when it is usable now, without building: for a
     /// worker isolate, which runs its spawner's exact world or nothing
-    /// (lisp/romacs/vm/isolate.el `isolate-world-unavailable').
+    /// (lisp/vm/isolate.el `isolate-world-unavailable').
     pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
         if !arena::active() {
             return Err(json!("no arena"));
@@ -861,16 +866,11 @@ impl World {
         Ok(p)
     }
 
-    /// A builder's read roots beside RECIPE's: the pinned table and the
-    /// binary's own (`sandbox::build_roots`).
-    pub fn build_roots(&self, recipe: Vec<PathBuf>) -> Vec<PathBuf> {
-        super::sandbox::build_roots(recipe, &self.store)
-    }
-
-    /// A builder, once it holds the lock: confine this thread to ROOTS,
-    /// writing only in the store, and record in build mode. The lock is
-    /// held until the process exits.
-    pub fn begin_build(&self, roots: &[PathBuf]) -> std::io::Result<()> {
+    /// A builder, once it holds the lock: record in build mode. The builder
+    /// reads what its user can; the host boundary records each read, and
+    /// nothing it cannot capture reaches the image. The lock is held until
+    /// the process exits.
+    pub fn begin_build(&self) -> std::io::Result<()> {
         // The launcher's lock, handed on; taking it again on the same open
         // file only confirms it.
         use std::os::fd::{AsRawFd, FromRawFd};
@@ -895,7 +895,6 @@ impl World {
         unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
         std::mem::forget(lock);
         self.remove_abandoned()?;
-        super::sandbox::confine_publishing(roots, &self.store)?;
         let seed = self.key[..4].try_into().expect("4 bytes");
         host::enter_build(host::Pinned { clock: host::clock(), pid: 4242, seed });
         Ok(())
@@ -1418,10 +1417,11 @@ mod tests {
         assert!(reset_in(&plain, true, None).is_err());
         assert!(world(&plain).prune_in(None, false, MOST_WORLDS).is_err());
         assert!(plain.join(format!("{key}.failed")).exists());
-        // Marked, but open to others: refused.
+        // Marked and the user's, but open to others: made private, then reset.
         let open = marked_store("open");
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(reset_in(&open, true, None).is_err());
+        assert!(reset_in(&open, true, None).is_ok());
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o700);
         // The home directory, or the root, even marked: refused.
         let home = marked_store("home");
         assert!(reset_in(&home, true, Some(&home)).is_err());

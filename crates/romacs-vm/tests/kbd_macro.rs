@@ -1,4 +1,4 @@
-//! Keyboard macros and the command loop (prims/keyboard.rs, lisp/romacs/vm/keyboard.el)
+//! Keyboard macros and the command loop (prims/keyboard.rs, lisp/vm/keyboard.el)
 //! against pinned GNU 32.0.50 in batch: the same cases, evaluated in order in
 //! one GNU process and in one VM on GNU's loadup chain, must print the same.
 //! Every case binds its keys in a private global map and empties *scratch*.

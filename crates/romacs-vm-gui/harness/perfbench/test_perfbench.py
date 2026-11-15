@@ -757,9 +757,9 @@ class Table(unittest.TestCase):
 
 class Store(unittest.TestCase):
     def test_a_load_no_artifact_ran_is_named(self):
-        samples = [{'loaded': ['/r/lisp/gnu/org.el', '/r/lisp/gnu/ox.el'], 'compiled': {'/r/lisp/gnu/org.el'}, 'published': 0},
-                   {'loaded': ['/r/lisp/gnu/org.el', '/r/lisp/gnu/ox.el'],
-                    'compiled': {'/r/lisp/gnu/org.el', '/r/lisp/gnu/ox.el'}, 'published': 0}]
+        samples = [{'loaded': ['/r/lisp/org.el', '/r/lisp/ox.el'], 'compiled': {'/r/lisp/org.el'}, 'published': 0},
+                   {'loaded': ['/r/lisp/org.el', '/r/lisp/ox.el'],
+                    'compiled': {'/r/lisp/org.el', '/r/lisp/ox.el'}, 'published': 0}]
         self.assertEqual(pb.store_note(samples), 'Romacs: compiled store, 1 of 2 loads compiled, read as source: ox.el')
 
     def test_every_load_compiled_and_no_load_at_all_say_so(self):

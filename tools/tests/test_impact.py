@@ -26,7 +26,7 @@ def workspace(root):
         'crates/romacs-vm/tests/quit_async.rs': '',
         'crates/romacs-vm/tests/status_bar.rs': '#[path = "support/gui_probe.rs"]\nmod gui_probe;\n',
         'crates/romacs-vm/tests/support/gui_probe.rs': '#[path = "gnu_lisp.rs"]\nmod gnu_lisp;\n',
-        'crates/romacs-vm/tests/support/gnu_lisp.rs': 'fn f() { root.join("lisp/romacs/x.el"); }\n',
+        'crates/romacs-vm/tests/support/gnu_lisp.rs': 'fn f() { root.join("lisp/session/x.el"); }\n',
         'crates/romacs-vm/tests/plain.rs': '',
         'crates/romacs-vm/tests/support/pinned_gnu.rs': '',
         'crates/romacs-vm/tests/filelock.rs': 'include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/pinned_gnu.rs"));\n',
@@ -137,9 +137,9 @@ class Select(unittest.TestCase):
                          {'romacs-vm-gui::scaling'})
 
     def test_runtime_lisp_reaches_its_readers_the_editor_and_the_lisp_tier(self):
-        found = self.select('lisp/romacs/x.el')
+        found = self.select('lisp/session/x.el')
         self.assertEqual(set(found['packages']), {'romacs-vm', 'romacs-vm-gui'})
-        self.assertEqual(found['lisp'], ['lisp/romacs/x.el'])
+        self.assertEqual(found['lisp'], ['lisp/session/x.el'])
         self.assertEqual(set(found['harnesses']), set(impact.HARNESSES))
 
     def test_a_rule_adds_its_harness(self):
