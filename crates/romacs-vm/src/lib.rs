@@ -1360,6 +1360,10 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// The char tables read as flat rows (`char_table::flat`).
     flat_tables: char_table::FlatTables,
+    /// The call caches filled since the last collection, up to
+    /// `gc::CACHES_FILLED` (`Vm::empty_dead_caches`): only these may name
+    /// what a minor frees.
+    caches_filled: Vec<u32>,
     /// The objects whose storage records its own writes (`gc::shares_storage`),
     /// as the last minor found them all, or None where no minor since a full,
     /// a promotion or a restore knows them: the minor that needs them then
@@ -1884,6 +1888,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     regexp_cache,
     flat_tables,
     shared_holders,
+    caches_filled,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1967,6 +1972,7 @@ impl Vm {
             regexp_cache: regexp::PatternCache::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
+            caches_filled: Vec::new(),
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),

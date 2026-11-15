@@ -366,6 +366,9 @@ pub(crate) fn traced(v: Value, in_obarray: &[bool]) -> bool {
         _ => false,
     }
 }
+/// Call caches filled since the last collection that `Vm::caches_filled`
+/// records; a minor after more asks every cache.
+pub(crate) const CACHES_FILLED: usize = 1 << 16;
 /// Whether OBJECT keeps storage whose writes no store into its entry
 /// colours: buffer text and char-table nodes, each with its own record of
 /// what was written since (`crate::epoch`), which a minor must look at for
@@ -1151,8 +1154,10 @@ impl Vm {
     /// its log empty, without collecting: what a world image holds, since to
     /// the process that restores it the image is the old generation.
     pub(crate) fn settle_generations(&mut self) {
-        // What becomes old here was not met by a minor.
+        // What becomes old here was not met by a minor, and every cache's
+        // target is old.
         self.shared_holders = None;
+        self.caches_filled.clear();
         self.conses.settle_old();
         self.closures.settle_old();
         self.cells.settle_old();
@@ -1377,7 +1382,7 @@ impl Vm {
                 t.reclaim_removed(&obarray_symbols_live);
             }
         }
-        self.empty_dead_caches(&obarray_symbols_live, &region_marks);
+        self.empty_dead_caches(&obarray_symbols_live, &region_marks, false);
         let compacting = self.compacts();
         lap.lap(&mut self.gc_times, Phase::Census);
         if !compacting {
@@ -1666,9 +1671,17 @@ impl Vm {
     /// emptied while the marks are whole, so that no cache names a freed
     /// entry once this collection is over: the next may cut that entry off
     /// its table, or compact and rewrite every reference it keeps.
-    fn empty_dead_caches(&mut self, symbols: &HashSet<usize>, regions: &[bool]) {
-        for i in 0..self.caches.len() {
-            if !self.survives(symbols, regions, self.caches[i].target) {
+    /// A minor (FILLED_ONLY) asks only the caches filled since the last
+    /// collection: that one left every target alive, so old to it.
+    fn empty_dead_caches(&mut self, symbols: &HashSet<usize>, regions: &[bool], filled_only: bool) {
+        let filled = std::mem::take(&mut self.caches_filled);
+        let ids: Box<dyn Iterator<Item = usize>> = if filled_only && filled.len() < CACHES_FILLED {
+            Box::new(filled.into_iter().map(|i| i as usize))
+        } else {
+            Box::new(0..self.caches.len())
+        };
+        for i in ids {
+            if i < self.caches.len() && !self.survives(symbols, regions, self.caches[i].target) {
                 self.caches[i] = Cache { version: 0, target: Value::UNBOUND };
             }
         }
@@ -1796,7 +1809,7 @@ impl Vm {
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
         let dead = marking.dead_objects(self);
         self.unanchor(&dead);
-        self.empty_dead_caches(&symbols, &regions);
+        self.empty_dead_caches(&symbols, &regions, true);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         // The payload the young dead held was charged to the next full, which
@@ -2233,6 +2246,27 @@ mod tests {
             assert!(vm.gc_census.vector_slots + 5000 <= slots, "the old callee's vector died (moving: {moving})");
             assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
         }
+    }
+
+    /// A call cache filled since the last collection may name what a minor
+    /// frees: the minor asks the caches filled, as a full asks them all,
+    /// and no cache is left naming a freed closure.
+    #[test]
+    fn a_minor_empties_a_cache_whose_young_target_died() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold 1000000000) (fset 'cache-caller #'(lambda () (cache-callee)))").unwrap();
+        vm.collect(&mut []);
+        vm.eval_source_raw("(fset 'cache-callee (let ((held (make-vector 50 0))) #'(lambda () held)))").unwrap();
+        let callee = vm.eval_source_raw("(symbol-function 'cache-callee)").unwrap();
+        vm.eval_source_raw("(cache-caller)").unwrap();
+        assert!(vm.caches.iter().any(|c| c.target == callee), "the call filled a cache with the young closure");
+        vm.eval_source_raw("(fset 'cache-callee #'(lambda () nil))").unwrap();
+        assert!(vm.collect_minor(&[]));
+        assert!(vm.closures.is_free(callee.payload() as usize), "the young closure died");
+        assert!(vm.caches.iter().all(|c| c.target != callee), "no cache names it");
+        assert_eq!(vm.eval_source_raw("(cache-caller)").unwrap(), Value::NIL, "and the site calls the new one");
     }
 
     /// A collection leaves every survivor old and no log; Lisp's stores into
