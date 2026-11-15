@@ -38,31 +38,34 @@ journal one turn long."
            (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
            (delete-directory root t))))))
 
-(ert-deftest romacs-agent-store-fills-the-unsaved ()
-  ;; Each session with no kept state gets it and a row, its journal folded
-  ;; once; one whose supervisor runs is its server's to load; filled, none
-  ;; is unsaved, and the rows say what the kept states say.
+(ert-deftest romacs-agent-store-fills-from-the-records ()
+  ;; A session with no row gets one from its manifest, and its kept state
+  ;; when it has one, its journal never read; filled, none is missing.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
     (record "aaaaaaaa-0000-4000-8000-000000000001" "one")
     (record "aaaaaaaa-0000-4000-8000-000000000002" "two")
-    (record "aaaaaaaa-0000-4000-8000-000000000003" "live" t)
-    (should (= (length (romacs-agent-store--unsaved)) 2))
-    (should (= (romacs-agent-store-fill) 2))
-    (should-not (romacs-agent-store--unsaved))
-    (dolist (id '("aaaaaaaa-0000-4000-8000-000000000001" "aaaaaaaa-0000-4000-8000-000000000002"))
-      (should (file-exists-p (expand-file-name "state.eld" (expand-file-name id root)))))
-    ;; Filled sessions are not left loaded: the batch process holds none.
+    (with-temp-file (expand-file-name "aaaaaaaa-0000-4000-8000-000000000002/state.eld" root)
+      (prin1 (list :version 1 :layout nil :seq 2 :fields '((state . idle) (cost . 0.5) (last-time . 101.0) (title . "two kept")))
+             (current-buffer)))
+    (cl-letf (((symbol-function 'romacs-agent--read-journal) (lambda (&rest _) (error "A journal read"))))
+      (should (= (romacs-agent-store-fill) 2)))
+    (should-not (romacs-agent-store--missing))
     (should (= (hash-table-count romacs-agent--sessions) 0))
-    (let ((rows (sqlite-select (romacs-agent-store--open)
-                               "select id, title, cwd, seq from sessions order by id")))
-      (should (equal rows '(("aaaaaaaa-0000-4000-8000-000000000001" "one" "/p/one/" 2)
-                            ("aaaaaaaa-0000-4000-8000-000000000002" "two" "/p/one/" 2)))))))
+    (should (equal (sqlite-select (romacs-agent-store--open)
+                                  "select id, title, cwd, state, cost, last_time from sessions order by id")
+                   `(("aaaaaaaa-0000-4000-8000-000000000001" "one" "/p/one/" "detached" nil
+                      ,(float-time (file-attribute-modification-time
+                                    (file-attributes (expand-file-name "aaaaaaaa-0000-4000-8000-000000000001/journal.jsonl" root)))))
+                     ("aaaaaaaa-0000-4000-8000-000000000002" "two kept" "/p/one/" "idle" 0.5 101.0))))
+    ;; Filled again: nothing to do.
+    (should (= (romacs-agent-store-fill) 0))))
 
 (ert-deftest romacs-agent-store-row-follows-the-kept-state ()
   ;; A kept state writes its session's row, a later one replacing it.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
+    (ignore #'record)
     (let ((session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000001" :harness 'claude
                                        :title "first" :cwd "/p/two/" :dir (expand-file-name "b" root) :seq 3)))
       (make-directory (romacs-agent-dir session))
@@ -70,7 +73,7 @@ journal one turn long."
       (romacs-agent--keep session 'idle)
       (setf (romacs-agent-title session) "second" (romacs-agent-seq session) 4)
       (romacs-agent--keep session 'idle)
-      (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, seq from sessions")
-                     '(("second" "idle" 4)))))))
+      (should (equal (sqlite-select (romacs-agent-store--open) "select title, state from sessions")
+                     '(("second" "idle")))))))
 
 ;;; romacs-agent-store-tests.el ends here

@@ -1,41 +1,41 @@
-;;; romacs-agent-store.el --- Agent sessions listed from one SQLite database  -*- lexical-binding: t -*-
+;;; romacs-agent-store.el --- One table of the agent sessions, for listing them  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Every recorded agent session has a row in sessions.sqlite, in the
-;; agents' state root: what a list of the sessions shows (title, project,
-;; harness, state, parent, last activity, its reply's start), so that
-;; listing them reads no journal.  The database is in WAL mode, each
-;; write one short transaction: several Romacs processes, and a batch
-;; process filling it, share it.
+;; sessions.sqlite, in the agents' state root, has one row a session: what
+;; a list of the sessions shows (its harness, provider and model, title,
+;; directory, parent, state, last activity, cost) and the path of the
+;; harness's own transcript.  It is a cache: made again from the sessions'
+;; records whenever it is gone, deleting it loses nothing but speed.
+;; Each row is replaced in place, one statement at a time, in WAL mode.
 ;;
-;; A session's row is written as its state is kept (`romacs-agent--keep',
-;; through `romacs-agent-kept-functions'), so the row says what the kept
-;; state says.  `romacs-agent-store-fill' writes the rows, and the kept
-;; state, of the sessions that have none: a batch process runs it
-;; (`romacs-agent-store-fill-soon'), off the editor, as their journals
-;; are long.
+;; A loaded session's row is written each time its state is kept
+;; (`romacs-agent--keep', through `romacs-agent-kept-functions').  A
+;; session no process has loaded gets its row from its manifest and kept
+;; state (`romacs-agent-store-fill'), no journal read: a batch process
+;; does it once (`romacs-agent-store-fill-soon').
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'romacs-agent)
 
+(declare-function romacs-agent-history--get "romacs-agent-history" (harness key))
+
+(defconst romacs-agent-store--columns
+  '(id dir harness provider model title cwd parent state last_time cost transcript)
+  "The table's columns, in order.")
+
 (defconst romacs-agent-store--schema
   '("create table if not exists sessions (
-       id text primary key, dir text not null, title text, cwd text,
-       harness text, provider text, model text, state text, parent text,
-       last_time real, seq integer, done_seq integer, input_seq integer,
-       failed integer, reply text, written real)"
+       id text primary key, dir text not null, harness text, provider text, model text,
+       title text, cwd text, parent text, state text, last_time real, cost real, transcript text)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
     "create index if not exists sessions_parent on sessions (parent)")
-  "The database's tables and indexes, made when it is opened.")
-
-(defconst romacs-agent-store--reply-chars 2000
-  "The most of a session's reply its row keeps: what a preview shows.")
+  "The table and its indexes, made when the database is opened.")
 
 (defvar romacs-agent-store--db nil
   "The open database, as (FILE . DB), or nil.")
@@ -62,71 +62,125 @@ this build has no SQLite or it cannot be opened."
               db)
           (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))))
 
-(defun romacs-agent-store--row (session)
-  "SESSION's row, its values in the table's column order."
-  (let ((reply (romacs-agent-reply session)))
-    (list (romacs-agent-id session) (romacs-agent-dir session) (romacs-agent-title session)
-          (romacs-agent-cwd session) (symbol-name (romacs-agent-harness session))
-          (romacs-agent-provider session) (romacs-agent-model session)
-          (symbol-name (or (romacs-agent-state session) 'detached))
-          (plist-get (romacs-agent-options session) :parent)
-          (romacs-agent-last-time session) (romacs-agent-seq session) (romacs-agent-done-seq session)
-          (romacs-agent-input-seq session) (if (romacs-agent-failed session) 1 0)
-          (and (stringp reply) (substring reply 0 (min (length reply) romacs-agent-store--reply-chars)))
-          (float-time))))
+(defvar romacs-agent-store--transcripts nil
+  "While a fill runs, each harness home's transcripts, listed once: a table
+from (HARNESS . HOME) to a table from conversation id to path.")
+
+(defun romacs-agent-store--listed (harness home)
+  "HOME's transcripts of HARNESS by conversation id, listed once a fill."
+  (let ((key (cons harness home)))
+    (or (gethash key romacs-agent-store--transcripts)
+        (puthash key (let ((table (make-hash-table :test #'equal)))
+                       (pcase-dolist (`(,path . ,_) (ignore-errors (funcall (romacs-agent-history--get harness :files)
+                                                                           home most-positive-fixnum)))
+                         ;; Claude's file is named by the id; Codex's rollout ends with it.
+                         (when (string-match "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'" path)
+                           (puthash (match-string 1 path) path table)))
+                       table)
+                 romacs-agent-store--transcripts))))
+
+(defun romacs-agent-store--transcript (harness config-dir native)
+  "The path of HARNESS's own transcript of conversation NATIVE, kept in
+CONFIG-DIR (nil: its default), or nil."
+  (when (stringp native)
+    (require 'romacs-agent-history)
+    (let ((home (romacs-agent--home harness config-dir)))
+      (ignore-errors
+        (if romacs-agent-store--transcripts
+            (gethash native (romacs-agent-store--listed harness home))
+          (funcall (romacs-agent-history--get harness :find) home native))))))
+
+(defun romacs-agent-store-write (row)
+  "Put ROW, a plist of the columns' values (`romacs-agent-store--columns',
+as keywords), in place of its session's; quietly nothing when the
+database cannot be written."
+  (when-let* ((db (romacs-agent-store--open)))
+    (condition-case err
+        (sqlite-execute db (format "insert or replace into sessions values (%s)"
+                                   (mapconcat (lambda (_) "?") romacs-agent-store--columns ","))
+                        (mapcar (lambda (column) (plist-get row (intern (format ":%s" column))))
+                                romacs-agent-store--columns))
+      (error (message "romacs-agent-store: %s" (error-message-string err))))))
 
 (defun romacs-agent-store-put (session &optional state)
-  "Write SESSION's row, its state STATE when given (as its records left it);
-quietly nothing when the database cannot be written."
-  (when-let* ((db (romacs-agent-store--open)))
-    (let ((row (romacs-agent-store--row session)))
-      (when state (setf (nth 7 row) (symbol-name state)))
-      (condition-case err
-          (sqlite-execute db (concat "insert or replace into sessions values ("
-                                     (mapconcat #'identity (make-list (length row) "?") ",") ")")
-                          row)
-        (error (message "romacs-agent-store: %s" (error-message-string err)))))))
-
-(defun romacs-agent-store-ids ()
-  "The ids of the sessions that have a row."
-  (when-let* ((db (romacs-agent-store--open)))
-    (mapcar #'car (sqlite-select db "select id from sessions"))))
+  "Write SESSION's row, its state STATE when given (as its records left it)."
+  (romacs-agent-store-write
+   (list :id (romacs-agent-id session) :dir (romacs-agent-dir session)
+         :harness (symbol-name (romacs-agent-harness session)) :provider (romacs-agent-provider session)
+         :model (romacs-agent-model session) :title (romacs-agent-title session) :cwd (romacs-agent-cwd session)
+         :parent (plist-get (romacs-agent-options session) :parent)
+         :state (symbol-name (or state (romacs-agent-state session) 'detached))
+         :last_time (romacs-agent-last-time session) :cost (romacs-agent-cost session)
+         :transcript (romacs-agent-store--transcript (romacs-agent-harness session) (romacs-agent-config-dir session)
+                                                     (romacs-agent-harness-session session)))))
 
 ;;; Filling it
 
-(defun romacs-agent-store--unsaved ()
-  "The directories of recorded sessions with no kept state or no row, whose
-supervisor is not running: what `romacs-agent-store-fill' folds."
+(defun romacs-agent-store--recorded-row (dir)
+  "The row of the session recorded in DIR, from its manifest and its kept
+state (`romacs-agent--kept-text'); no journal is read.  Nil with no
+manifest."
+  (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
+    (let* ((kept (let ((file (expand-file-name "state.eld" dir)))
+                   (and (file-readable-p file)
+                        (with-temp-buffer
+                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                          (ignore-errors (plist-get (read (current-buffer)) :fields))))))
+           (field (lambda (slot) (cdr (assq slot kept))))
+           (options (gethash "options" manifest))
+           (harness (gethash "harness" manifest))
+           (transcript (romacs-agent-store--transcript (intern harness) (gethash "configDir" manifest)
+                                                       (gethash "harnessSession" manifest)))
+           (journal (expand-file-name "journal.jsonl" dir)))
+      (list :id (gethash "id" manifest) :dir dir :harness harness
+            :provider (or (gethash "provider" manifest) harness)
+            :model (or (funcall field 'model) (and (hash-table-p options) (romacs-agent--value (gethash "model" options))))
+            :title (or (funcall field 'title) (gethash "title" manifest)) :cwd (gethash "cwd" manifest)
+            :parent (and (hash-table-p options) (romacs-agent--value (gethash "parent" options)))
+            ;; A turn under way when it was kept, with no supervisor now
+            ;; to go on with it: detached.
+            :state (let ((state (funcall field 'state)))
+                     (cond ((file-exists-p (expand-file-name "cancelled" dir)) "ended")
+                           ((and state (not (memq state '(running starting waiting-approval))))
+                            (symbol-name state))
+                           ((and state (file-exists-p (romacs-agent--host-socket (gethash "id" manifest))))
+                            (symbol-name state))
+                           (t "detached")))
+            :last_time (or (funcall field 'last-time)
+                           (let ((file (or transcript journal)))
+                             (and (file-exists-p file)
+                                  (float-time (file-attribute-modification-time (file-attributes file))))))
+            :cost (funcall field 'cost) :transcript transcript))))
+
+(defun romacs-agent-store--missing ()
+  "The directories of recorded sessions that have no row."
   (let ((rows (make-hash-table :test #'equal)))
-    (dolist (id (romacs-agent-store-ids)) (puthash id t rows))
-    (cl-remove-if (lambda (dir)
-                    (let ((id (file-name-nondirectory dir)))
-                      (or (not (file-exists-p (expand-file-name "manifest.json" dir)))
-                          (file-exists-p (romacs-agent--host-socket id))
-                          (and (gethash id rows) (file-exists-p (expand-file-name "state.eld" dir))))))
+    (when-let* ((db (romacs-agent-store--open)))
+      (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t rows)))
+    (cl-remove-if (lambda (dir) (gethash (file-name-nondirectory dir) rows))
                   (and (file-directory-p (romacs-agent--state-root))
                        (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))))
 
 (defun romacs-agent-store-fill ()
-  "Fold each unsaved session's journal (`romacs-agent-store--unsaved') once,
-and keep its state and row: a batch process's work, as journals are long.
-Return how many were filled."
-  (let ((count 0))
-    (dolist (dir (romacs-agent-store--unsaved) count)
-      (condition-case err
-          (progn
-            (romacs-agent--load dir)
-            (when-let* ((session (romacs-agent-get (file-name-nondirectory dir))))
-              (romacs-agent--keep session)
-              (romacs-agent-store-put session)
-              (remhash (romacs-agent-id session) romacs-agent--sessions)
+  "Write the row of each recorded session that has none, from its records
+(`romacs-agent-store--recorded-row'); return how many were written."
+  (let ((count 0) (db (romacs-agent-store--open))
+        (romacs-agent-store--transcripts (make-hash-table :test #'equal)))
+    (when db
+      ;; One transaction: hundreds of rows are one write.
+      (sqlite-transaction db)
+      (unwind-protect
+          (dolist (dir (romacs-agent-store--missing))
+            (when-let* ((row (condition-case err (romacs-agent-store--recorded-row dir)
+                               (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil))))
+              (romacs-agent-store-write row)
               (cl-incf count)))
-        (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)))))))
+        (sqlite-commit db)))
+    count))
 
 (defun romacs-agent-store-fill-batch ()
   "`romacs-agent-store-fill' in a batch process, its count printed."
-  (let ((romacs-agent-event-functions nil))
-    (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill)))))
+  (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill))))
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
 
@@ -134,10 +188,9 @@ Return how many were filled."
   "Run once a batch process has filled the database.")
 
 (defun romacs-agent-store-fill-soon ()
-  "Fill the database in a batch process of this build, when any session is
-unsaved and no fill runs; `romacs-agent-store-filled-hook' runs once it is."
-  (when (and (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open)
-             (romacs-agent-store--unsaved))
+  "Fill the database in a batch process of this build, off the editor, when
+no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
+  (when (and (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open))
     (setq romacs-agent-store--filling
           (make-process
            :name "romacs-agent-store-fill" :noquery t :connection-type 'pipe
