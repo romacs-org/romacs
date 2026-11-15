@@ -35,7 +35,19 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
 (defun romacs-agent--claude-head (session)
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
-start; else nil."
+start; else nil.  Its records are read only when it was rolled back since
+it was last spoken to, which its fold keeps (`:rolled-back'); a session
+whose kept state predates that is read once to know."
+  (let ((state (romacs-agent-driver-state session)))
+    (if (plist-member state :rolled-back)
+        (and (plist-get state :rolled-back) (romacs-agent--claude-head-read session))
+      (let ((head (romacs-agent--claude-head-read session)))
+        (setf (romacs-agent-driver-state session)
+              (plist-put (romacs-agent-driver-state session) :rolled-back (and head t)))
+        head))))
+
+(defun romacs-agent--claude-head-read (session)
+  "`romacs-agent--claude-head', from all of SESSION's records."
   (let* ((records (romacs-agent--journal-records session))
          (said (cl-position-if #'romacs-agent--record-request records :from-end t))
          (rolled (cl-position-if #'romacs-agent--rollback-note-p records :from-end t)))
