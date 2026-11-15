@@ -727,6 +727,7 @@ or a repeat."
         ('done (when-let* ((reason (plist-get event :reason)))
                  (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
                (romacs-agent-ui--footer session event)
+               (unless romacs-agent-ui--replaying (romacs-agent-ui--trim))
                (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ;; Its supervisor never came up: an end, failed, seen as `done' is.
         ('unstarted
@@ -1509,6 +1510,32 @@ and a running turn's live rule ticks."
 back): its journal is replayed the first time a window shows it, and no
 event is drawn in it before.")
 
+(defcustom romacs-agent-chat-turns 30
+  "How many of its last turns a chat draws, or nil for all of them.  The
+turns before are a key away (RET on the chat's first row), and a chat
+that grows past twice as many drops its oldest at a turn's end: a day's
+chat opens, scrolls and redisplays as a short one does.  The journal
+keeps every turn."
+  :type '(choice (const :tag "All" nil) natnum)
+  :group 'romacs-agent)
+
+(defvar-local romacs-agent-ui--turns nil
+  "How many of its last turns this chat draws, nil for all.")
+
+(defconst romacs-agent-ui--drawn-state
+  '(romacs-agent-ui--thinkings romacs-agent-ui--thinking romacs-agent-ui--thinking-tail
+    romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
+    romacs-agent-ui--fills romacs-agent-ui--fitted romacs-agent-ui--tool)
+  "A chat's variables that describe its transcript as drawn, besides its
+tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
+
+(defun romacs-agent-ui--reset ()
+  "Make the current chat's record of what its transcript draws empty."
+  (dolist (variable romacs-agent-ui--drawn-state) (kill-local-variable variable))
+  (setq romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+        romacs-agent-ui--tasks (make-hash-table :test #'equal)
+        romacs-agent-ui--messages (make-hash-table :test #'equal)))
+
 (defun romacs-agent-ui--make-chat (session)
   "SESSION's chat buffer, made empty: its composer, no transcript yet
 \(`romacs-agent-ui--fill')."
@@ -1519,9 +1546,8 @@ event is drawn in it before.")
     (with-current-buffer buffer
       (romacs-agent-chat-mode)
       (setq romacs-agent-ui--session session romacs-agent-ui--unfilled t
-            romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-            romacs-agent-ui--tasks (make-hash-table :test #'equal)
-            romacs-agent-ui--messages (make-hash-table :test #'equal))
+            romacs-agent-ui--turns romacs-agent-chat-turns)
+      (romacs-agent-ui--reset)
       (let ((inhibit-read-only t)) (erase-buffer))
       (setq romacs-agent-ui--end (point-marker))
       (set-marker-insertion-type romacs-agent-ui--end nil)
@@ -1547,6 +1573,80 @@ event is drawn in it before.")
       ;; What the replay drew, seen here, and the rows just made: its
       ;; events went to the replay alone.
       (romacs-agent-ui--header-show))))
+
+(defvar romacs-agent-ui--earlier-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map romacs-agent-chat-transcript-map)
+    (define-key map (kbd "RET") #'romacs-agent-chat-earlier)
+    (define-key map [mouse-1] #'romacs-agent-chat-earlier)
+    map)
+  "Keys of the row above a chat's drawn turns.")
+
+(defun romacs-agent-ui--earlier-row ()
+  "Put the row that draws earlier turns at the current chat's start."
+  (romacs-agent-ui--insert-at
+   (point-min)
+   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 30))
+               'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
+               'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
+
+(defun romacs-agent-ui--prompt-starts (&optional most)
+  "Where the current chat's drawn prompts start, the last first: MOST of
+them, when given."
+  (let ((at (marker-position romacs-agent-ui--end)) (starts nil) (seen 0))
+    (while (and (> at (point-min)) (not (eql seen most)))
+      (setq at (previous-single-property-change at 'romacs-agent-turn nil (point-min)))
+      (when (get-text-property at 'romacs-agent-turn)
+        (push at starts)
+        (setq seen (1+ seen))))
+    (nreverse starts)))
+
+(defun romacs-agent-ui--trim ()
+  "Drop the current chat's oldest turns when it draws more than twice
+the `romacs-agent-ui--turns' it keeps, down to those, unless a window
+shows any of them or has its point there: the journal keeps them, and
+the row at the start draws them again."
+  (when-let* ((turns romacs-agent-ui--turns)
+              ((> turns 0))
+              (starts (romacs-agent-ui--prompt-starts (1+ (* 2 turns))))
+              ((> (length starts) (* 2 turns)))
+              (cut (nth (1- turns) starts))
+              ((not (seq-some (lambda (window) (< (min (window-start window) (window-point window)) cut))
+                              (get-buffer-window-list nil nil t))))
+              ((>= (point) cut)))
+    (let ((inhibit-read-only t))
+      (delete-region (point-min) cut))
+    ;; What pointed into them points nowhere now.
+    (dolist (table (list romacs-agent-ui--tool-lines romacs-agent-ui--tasks))
+      (maphash (lambda (id marker) (when (= marker (point-min)) (set-marker marker nil) (remhash id table)))
+               (copy-hash-table table)))
+    (setq romacs-agent-ui--fills
+          (seq-filter (lambda (marker) (or (> marker (point-min)) (set-marker marker nil))) romacs-agent-ui--fills))
+    (romacs-agent-ui--earlier-row)))
+
+(defun romacs-agent-chat-earlier ()
+  "Draw this chat's earlier turns too, `romacs-agent-chat-turns' more,
+point at the first turn it drew before."
+  (interactive nil romacs-agent-chat-mode)
+  (let* ((starts (romacs-agent-ui--prompt-starts))
+         (request (and starts (get-text-property (car (last starts)) 'romacs-agent-turn))))
+    (setq romacs-agent-ui--turns (+ (length starts) (or romacs-agent-chat-turns 30)))
+    (romacs-agent-ui--redraw)
+    (when-let* ((at (and request (text-property-any (point-min) romacs-agent-ui--end 'romacs-agent-turn request))))
+      (goto-char at)
+      ;; Where it was: the turns drawn now are above.
+      (dolist (window (get-buffer-window-list nil nil t))
+        (set-window-point window at)
+        (set-window-start window at)))))
+
+(defun romacs-agent-ui--redraw ()
+  "Draw the current chat's transcript again from its journal, its
+composer as it is."
+  (let ((inhibit-read-only t)) (delete-region (point-min) romacs-agent-ui--end))
+  (dolist (marker romacs-agent-ui--fills) (set-marker marker nil))
+  (romacs-agent-ui--reset)
+  (setq romacs-agent-ui--unfilled t)
+  (romacs-agent-ui--fill (current-buffer)))
 
 (defun romacs-agent-show (session)
   "Show SESSION's chat buffer, made from its journal when new."
@@ -1599,10 +1699,19 @@ chat that was open, and reads no journal for one not looked at."
 
 (defun romacs-agent-ui--replay (session)
   "Render SESSION's journal into the current chat buffer, after the
-harness's own transcript it was imported from, when it was."
-  (when (romacs-agent-imported session)
-    (require 'romacs-agent-history)
-    (romacs-agent-history-draw session (romacs-agent-imported session)))
+harness's own transcript it was imported from, when it was: its last
+`romacs-agent-ui--turns' turns, under a row that draws earlier ones, when
+it has more."
+  (let ((from (and romacs-agent-ui--turns (romacs-agent--journal-tail session romacs-agent-ui--turns))))
+    (cond (from (romacs-agent-ui--earlier-row))
+          ((romacs-agent-imported session)
+           (require 'romacs-agent-history)
+           (romacs-agent-history-draw session (romacs-agent-imported session))))
+    (romacs-agent-ui--replay-from session from)))
+
+(defun romacs-agent-ui--replay-from (session from)
+  "Render SESSION's journal from byte FROM (a record's start, or nil for
+its start) into the current chat buffer."
   ;; A copy parses, so the live session's own state is not replayed over.
   (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t))
     (let ((romacs-agent-event-functions
@@ -1615,7 +1724,7 @@ harness's own transcript it was imported from, when it was."
                    ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
-      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
+      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from))))
 
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the
