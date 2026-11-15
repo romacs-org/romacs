@@ -80,6 +80,23 @@
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 10))
     (should (string-search "⇠ child  Completed  thread  done" (romacs-agent-cards-tests--visible)))))
 
+(ert-deftest romacs-agent-wake-marks-where-its-rows-start ()
+  ;; A wake settles a card above as it draws its own row: the input it is
+  ;; marks its row's start, where a chat cuts its oldest turns.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--delegate session)
+    (setf (romacs-agent-children-rows child) (list (list :key 'working :state "running" :title "check")))
+    (romacs-agent-cards-tests--draw session :type 'input :seq 9
+                                    :text (romacs-agent-tools--wake-text child '(7 "waiting on the check" nil)))
+    (setf (romacs-agent-children-rows child) nil)
+    (romacs-agent-cards-tests--draw session :type 'input :seq 10
+                                    :text (romacs-agent-tools--wake-text child '(8 "done" nil)))
+    (let ((starts (romacs-agent-ui--input-starts)))
+      (should (= (length starts) 2))
+      (dolist (at starts)
+        (goto-char at)
+        (should (looking-at-p "  ⇠ child"))))))
+
 (ert-deftest romacs-agent-wake-settles-the-card-and-is-no-prompt ()
   (romacs-agent-cards-tests--with-chat session
     (romacs-agent-cards-tests--delegate session)
