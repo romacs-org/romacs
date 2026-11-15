@@ -176,6 +176,10 @@ own session)."
           (when (consp local) (funcall keep (cdr local)))))
       records))
 
+  (defun romacs-agent--load-warning (format-string &rest args)
+    "Warn of a live load's hazard, FORMAT-STRING with ARGS: the load goes on."
+    (display-warning 'romacs-agent (apply #'format-message format-string args) :warning))
+
   (defun romacs-agent--defstruct-slots (doc-and-slots)
     "The field names of a record definition's DOC-AND-SLOTS."
     (mapcar (lambda (slot) (if (consp slot) (car slot) slot))
@@ -185,19 +189,25 @@ own session)."
     "The fields of record TYPE as defined now, or nil when it is none."
     (ignore-errors (mapcar #'car (cdr (cl-struct-slot-info type)))))
 
+  (defvar romacs-agent--layout-warned nil
+    "The (TYPE . SLOTS) `romacs-agent--layout-check' warned of last.")
+
   (defun romacs-agent--layout-check (type slots old)
-    "Refuse, with an error naming the change, to define record TYPE with
-SLOTS while records of it alive now hold another layout: OLD, the layout
+    "Warn, naming the change, when record TYPE is defined with SLOTS
+while records of it alive now hold another layout: OLD, the layout
 defined until now, differs from SLOTS in any way (a field added, removed
 or moved), or a record's length does.  Every accessor would fail on such
 a record, or read another field.  A record cannot grow in place, and its
 references (closures among them) cannot all be found to swap a new one
-in: such a change takes a restart, which carries the sessions over."
+in: a restart carries the sessions over.  The definition goes on: loading
+it is the user's call."
     (let ((held (cl-count-if (lambda (record) (or (and old (not (equal old slots)))
                                                   (/= (length record) (1+ (length slots)))))
                              (romacs-agent--records-of type))))
-      (when (> held 0)
-        (error "Loading this changes the fields of `%s' (%s) while %d live records hold the old layout, which would \
+      (when (and (> held 0) (not (equal romacs-agent--layout-warned (cons type slots))))
+        ;; Expansion and run check the same definition: one warning.
+        (setq romacs-agent--layout-warned (cons type slots))
+        (romacs-agent--load-warning "Loading this changes the fields of `%s' (%s) while %d live records hold the old layout, which would \
 break them: restart Romacs to load it (romacs_restart_request; sessions carry over)"
                type (let ((added (cl-set-difference slots old)) (removed (cl-set-difference old slots)))
                       (cond ((or added removed)
@@ -208,11 +218,11 @@ break them: restart Romacs to load it (romacs_restart_request; sessions carry ov
                held)))))
 
 (defmacro romacs-agent--defstruct (name &rest doc-and-slots)
-  "`cl-defstruct' NAME, DOC-AND-SLOTS, loadable into a live editor only
-with its records' layout (`romacs-agent--layout-check'): checked as it is
-expanded, against the class defined until then, and as it runs (a compiled
-load), against the layout its last definition recorded (the class is
-registered anew while its definition is expanded)."
+  "`cl-defstruct' NAME, DOC-AND-SLOTS, warning when it changes the layout
+of records alive in the editor (`romacs-agent--layout-check'): checked as
+it is expanded, against the class defined until then, and as it runs (a
+compiled load), against the layout its last definition recorded (the class
+is registered anew while its definition is expanded)."
   (declare (indent 1) (doc-string 2))
   (let ((type (if (consp name) (car name) name))
         (names (romacs-agent--defstruct-slots doc-and-slots)))
@@ -228,8 +238,8 @@ registered anew while its definition is expanded)."
 ;; whose connection dropped stayed detached).
 
 (defvar romacs-agent-load-unchecked nil
-  "Non-nil: load a romacs-agent.el over the live one without
-`romacs-agent--load-check'.  For a person who knows what it replaces.")
+  "Non-nil: load a romacs-agent.el over the live one without the warnings
+of `romacs-agent--load-check'.")
 
 (defun romacs-agent--checkout-commit (file)
   "The commit checked out where FILE lies, or nil: outside a Git
@@ -268,10 +278,10 @@ when through `romacs-agent--defstruct'; nil when it defines none."
 
 (defun romacs-agent--load-check (file &optional _noerror _nomessage nosuffix must-suffix)
   "Before `load' reads FILE, another romacs-agent.el over the live one:
-refuse one from a checkout without the commit the live one came from (it
-would undo changes), and, while sessions are alive, one whose session
+warn of one from a checkout without the commit the live one came from (it
+would undo changes), and, while sessions are alive, of one whose session
 record is not the live one's or that predates this check (it would break
-them).  `romacs-agent-load-unchecked' skips it."
+them).  The load goes on.  `romacs-agent-load-unchecked' silences it."
   (when-let* (((not romacs-agent-load-unchecked))
               ((featurep 'romacs-agent))
               ((stringp file))
@@ -288,20 +298,20 @@ them).  `romacs-agent-load-unchecked' skips it."
     (when (romacs-agent--records-of 'romacs-agent)
       (let ((layout (romacs-agent--file-layout path)))
         (cond ((not (car layout))
-               (user-error "%s predates the session layout guard: loading it over live sessions can break them; \
+               (romacs-agent--load-warning "%s predates the session layout guard: loading it over live sessions can break them; \
 restart Romacs on a build with it instead" path))
               ((not (equal (cdr layout) (romacs-agent--slot-names 'romacs-agent)))
-               (user-error "%s defines another session record than the live one (%d fields, live %d): restart \
+               (romacs-agent--load-warning "%s defines another session record than the live one (%d fields, live %d): restart \
 Romacs to load it (romacs_restart_request; sessions carry over)"
                            path (length (cdr layout)) (length (romacs-agent--slot-names 'romacs-agent)))))))
     (when-let* ((loaded romacs-agent--loaded-from)
                 (commit (romacs-agent--checkout-commit path))
                 ((not (equal commit loaded)))
-                ;; Lacking it, or Git cannot tell: either refuses.
+                ;; Lacking it, or Git cannot tell: either warns.
                 (doubt (pcase (romacs-agent--descends-p path loaded) ('t nil) ('unknown 'unknown) (_ 'lacking))))
-      (user-error (if (eq doubt 'unknown)
+      (romacs-agent--load-warning (if (eq doubt 'unknown)
                       "%s comes from a checkout where Git cannot tell whether it holds commit %s, which the live \
-romacs-agent.el was loaded from: refused, as it might undo that one's changes"
+romacs-agent.el was loaded from: it might undo that one's changes"
                     "%s comes from a checkout without commit %s, which the live romacs-agent.el was loaded from: \
 loading it would undo that one's changes; merge it first")
                   path (substring loaded 0 (min 12 (length loaded)))))))
