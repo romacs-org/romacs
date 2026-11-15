@@ -3,6 +3,8 @@
 use romacs_vm_gui::{command, startup};
 use romacs_vm::{CommandEvent, TerminalHost, TerminalSnapshot, Vm};
 use std::{cell::RefCell, rc::Rc};
+#[path = "support/home.rs"]
+mod home;
 
 #[derive(Default)]
 struct State { sent: Vec<Vec<u8>>, alternate: bool, bracketed: bool }
@@ -49,6 +51,7 @@ fn a_terminal_over_gnu_lisp_routes_keys_and_keeps_the_minibuffer_s() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         vm.set_terminal_host(Some(Box::new(Host(state.clone())))).unwrap();
+        home::private_home(&mut vm, "terminal-loadup");
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(setq inhibit-startup-screen t)").unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();

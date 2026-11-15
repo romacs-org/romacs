@@ -9,7 +9,9 @@ use crate::thread_comm::{
 };
 use romacs_display_protocol::FrameGlyphBuffer;
 
-pub const PRIMARY_FRAME: u64 = 1;
+/// The id of the evaluator's initial frame, `F1`: the frame a session's
+/// first window shows. Every other frame has the id the evaluator gave it.
+pub const INITIAL_FRAME: u64 = 1;
 
 pub use crate::input_bridge::PaintDiagnostic;
 
@@ -22,10 +24,14 @@ pub struct PaintHost {
 }
 
 pub struct PaintSender {
-    comms: EmacsComms,
+    commands: crate::thread_comm::CommandSender,
+    /// The render thread's input, as the input bridge passes it on.
+    input: crossbeam_channel::Receiver<crate::thread_comm::InputEvent>,
     proxy: render_thread::RenderEventLoopProxy,
     /// What the render thread reported, as the input bridge keeps it.
     facts: std::sync::Arc<crate::input_bridge::Facts>,
+    /// The last request id issued (`InputEvent::Reply`).
+    requests: std::sync::atomic::AtomicU64,
 }
 
 impl PaintHost {
@@ -40,7 +46,7 @@ impl PaintHost {
         Self::wayland_with(socket, width, height, title, false)
     }
 
-    /// A server's host: no window until [`PaintSender::show_primary`] asks
+    /// A server's host: no window until [`PaintSender::realize`] asks
     /// for one, and the session outlives each window it shows. The GPU
     /// starts with the first window and stays for the next.
     #[cfg(target_os = "linux")]
@@ -70,17 +76,15 @@ impl PaintHost {
         let lifetime = reply
             .ready(InitialWindowSize { width, height })
             .ok_or("initial window receiver closed")?;
-        let (EmacsComms { cmd_tx, input_rx, frame_opacity }, mut render) = ThreadComms::new().split();
+        let (EmacsComms { cmd_tx, input_rx, facts_rx }, mut render) = ThreadComms::new().split();
         // The evaluator reads the render thread's events through its bridge.
-        let (facts, input_rx) = crate::input_bridge::spawn(input_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
+        let (facts, input_rx) = crate::input_bridge::spawn(input_rx, facts_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
             .map_err(|error| format!("input bridge: {error}"))?;
-        let comms = EmacsComms { cmd_tx, input_rx, frame_opacity };
         render.keep_alive_without_frames = server;
         if !server {
-            comms
-                .cmd_tx
+            cmd_tx
                 .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
-                    frame: FrameRef::Frame(PRIMARY_FRAME),
+                    frame: FrameRef::Frame(INITIAL_FRAME),
                 }))
                 .map_err(|error| error.to_string())?;
         }
@@ -93,9 +97,11 @@ impl PaintHost {
                 title,
             },
             PaintSender {
-                comms,
+                commands: cmd_tx,
+                input: input_rx,
                 proxy,
                 facts,
+                requests: std::sync::atomic::AtomicU64::new(0),
             },
         ))
     }
@@ -179,8 +185,12 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
-    /// Call WAKE, from the input bridge, when a presentation of the primary
-    /// frame newer than any before it has rendered: a paint's completion then ends a wait
+    fn next_request(&self) -> u64 {
+        self.requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
+    /// Call WAKE, from the input bridge, when a presentation of any frame
+    /// newer than any before it has rendered: a paint's completion then ends a wait
     /// for input itself. One waiter per sender: a second registration
     /// would leave its wait unwoken, and is refused.
     ///
@@ -205,11 +215,13 @@ impl PaintSender {
     /// on the render thread. Absence of text is distinct from transport errors.
     pub fn clipboard_text(&self) -> Result<Option<String>, String> {
         romacs_display_protocol::call_count::count("sender.clipboard_text");
-        self.clipboard_request(|expires_at, reply| ClipboardCommand::GetText {
-            selection: ClipboardSelection::Clipboard,
-            expires_at,
-            reply,
-        })
+        self.clipboard_request(
+            |expires_at, request| ClipboardCommand::GetText { selection: ClipboardSelection::Clipboard, expires_at, request },
+            |reply| match reply {
+                crate::thread_comm::Reply::Text(text) => text,
+                other => Err(format!("clipboard read answered {other:?}")),
+            },
+        )
     }
 
     /// Publish owned CLIPBOARD text through the same worker. A timeout is not
@@ -217,27 +229,35 @@ impl PaintSender {
     /// already started may finish later; queued expired requests are rejected.
     pub fn set_clipboard_text(&self, text: &str) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_clipboard_text");
-        self.clipboard_request(|expires_at, reply| ClipboardCommand::SetText {
-            selection: ClipboardSelection::Clipboard,
-            text: Some(text.to_owned()),
-            expires_at,
-            reply,
-        })
+        self.clipboard_request(
+            |expires_at, request| ClipboardCommand::SetText {
+                selection: ClipboardSelection::Clipboard,
+                text: Some(text.to_owned()),
+                expires_at,
+                request,
+            },
+            |reply| match reply {
+                crate::thread_comm::Reply::Done(done) => done,
+                other => Err(format!("clipboard write answered {other:?}")),
+            },
+        )
     }
 
-    fn clipboard_request<T>(
+    /// A clipboard request by id, answered within a second: COMMAND made
+    /// with its deadline and id, its reply read by ANSWER.
+    fn clipboard_request<T: Send + 'static>(
         &self,
-        command: impl FnOnce(
-            std::time::Instant,
-            crossbeam_channel::Sender<Result<T, String>>,
-        ) -> ClipboardCommand,
+        command: impl FnOnce(std::time::Instant, u64) -> ClipboardCommand,
+        answer: fn(crate::thread_comm::Reply) -> Result<T, String>,
     ) -> Result<T, String> {
         let expires_at = std::time::Instant::now() + std::time::Duration::from_secs(1);
         let (reply, response) = crossbeam_channel::bounded(1);
-        self.comms
-            .cmd_tx
-            .try_send(RenderCommand::Clipboard(command(expires_at, reply)))
-            .map_err(|error| format!("clipboard request could not be queued: {error}"))?;
+        let request = self.next_request();
+        self.facts.expect(request, Box::new(move |done| { let _ = reply.send(answer(done)); }));
+        if let Err(error) = self.commands.try_send(RenderCommand::Clipboard(command(expires_at, request))) {
+            self.facts.forget(request);
+            return Err(format!("clipboard request could not be queued: {error}"));
+        }
         self.proxy.wake_up();
         response.recv_deadline(expires_at).map_err(|error| match error {
             crossbeam_channel::RecvTimeoutError::Timeout => "clipboard request timed out".to_owned(),
@@ -245,30 +265,33 @@ impl PaintSender {
         })?
     }
 
-    /// Wait for a successfully rendered primary presentation, not merely ingress
-    /// activation: PRESENTATION or a later one, since this bounded snapshot
-    /// retains only the latest. No sample exists before the first successful render.
+    /// Wait for a successfully rendered presentation of FRAME, not merely
+    /// ingress activation: PRESENTATION or a later one, since this bounded
+    /// snapshot retains only the latest. No sample exists before the frame's
+    /// first successful render.
     pub fn wait_for_render(
         &self,
+        frame: u64,
         presentation: u64,
         timeout: std::time::Duration,
     ) -> Result<PaintDiagnostic, String> {
         romacs_display_protocol::call_count::count(if timeout.is_zero() { "sender.render_poll" } else { "sender.wait_for_render" });
-        self.facts.wait_for_render(PRIMARY_FRAME, presentation, timeout)
+        self.facts.wait_for_render(frame, presentation, timeout)
     }
 
-    /// Queue one complete frame, including `fonts` and `char_fonts`. Returns
-    /// backpressure rather than silently dropping a repaint. The producer must
-    /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
+    /// Queue one complete top-level frame, including `fonts` and
+    /// `char_fonts`. Returns backpressure rather than silently dropping a
+    /// repaint. The producer must use a fresh nonzero presentation ID for
+    /// every revision.
     pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
         self.submit_scene(frame, Vec::new(), Vec::new())
     }
 
-    /// Queue a frame, the child frames shown over it, lowest first, and the
-    /// text animations drawn over it, as one paint: each child names
-    /// PRIMARY_FRAME as its parent and carries the frame's presentation. A
-    /// child or an animation the last scene showed and this one does not is
-    /// removed.
+    /// Queue a top-level frame, the child frames shown over it, lowest
+    /// first, and the text animations drawn over it, as one paint: each
+    /// child's parent is the frame or a child before it, and each carries
+    /// the frame's presentation. A child or an animation the frame's last
+    /// scene showed and this one does not is removed.
     pub fn submit_scene(
         &self,
         frame: FrameGlyphBuffer,
@@ -279,9 +302,7 @@ impl PaintSender {
         validate_frame(&frame)?;
         validate_children(&frame, &children)?;
         let scene = crate::thread_comm::PaintScene { root: frame, children, text_animations };
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Paint(Box::new(scene)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -396,7 +417,7 @@ impl PaintSender {
 
     /// Send asset COMMAND unless LIMIT commands already wait.
     fn send_asset_within(&self, command: crate::thread_comm::AssetCommand, limit: usize) -> Result<bool, String> {
-        let result = match self.comms.cmd_tx.try_send_within(RenderCommand::Asset(command), limit) {
+        let result = match self.commands.try_send_within(RenderCommand::Asset(command), limit) {
             Ok(()) => Ok(true),
             Err(crossbeam_channel::TrySendError::Full(_)) => Ok(false),
             Err(error) => Err(error.to_string()),
@@ -405,56 +426,69 @@ impl PaintSender {
         result
     }
 
-    /// Apply FRAME's `alpha' setter, the primary frame's or a child's: ALPHA
+    /// Apply FRAME's `alpha' setter, a top-level frame's or a child's: ALPHA
     /// while active and inactive (negative leaves its opacity alone),
     /// raised to LIMIT.
     pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_frame_alpha");
-        self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(frame, alpha, limit);
-        let result = self
-            .comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+        // Never refused for room (`exempt_from_capacity`): the display owns
+        // the state, so a dropped command would be a lost setting.
+        let result = self.commands
+            .try_send(RenderCommand::Window(WindowCommand::SetFrameAlpha { frame, alpha, limit }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
     }
 
-    /// A server's window for the primary frame, WIDTH by HEIGHT: made
-    /// when none shows, asked for the focus when one does. The receiver
-    /// answers once the window and its surface exist (or failed), within
-    /// 30 s; paint the frame after that.
-    pub fn show_primary(
+    /// A server's window for FRAME, WIDTH by HEIGHT: made when none shows,
+    /// asked for the focus when one does. The receiver answers once the
+    /// window and its surface exist (or failed), within 30 s; paint the
+    /// frame after that.
+    pub fn realize(
         &self,
+        frame: u64,
         width: u32,
         height: u32,
         title: String,
     ) -> Result<crossbeam_channel::Receiver<Result<(), String>>, String> {
-        romacs_display_protocol::call_count::count("sender.show_primary");
+        romacs_display_protocol::call_count::count("sender.realize");
         let (reply, ready) = crossbeam_channel::bounded(1);
+        let request = self.next_request();
+        // A window made after its waiter gave up is destroyed, not left.
+        let (commands, proxy) = (self.commands.clone(), self.proxy.clone());
+        self.facts.expect(request, Box::new(move |answer| {
+            let made = match answer {
+                crate::thread_comm::Reply::Done(made) => made,
+                other => Err(format!("window realization answered {other:?}")),
+            };
+            if reply.send(made.clone()).is_err() && made.is_ok() {
+                let _ = commands.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(frame) }));
+                proxy.wake_up();
+            }
+        }));
         let none = crate::host_types::GuiFrameGeometryHints {
             base_width: 0, base_height: 0, min_width: 0, min_height: 0, width_inc: 0, height_inc: 0,
         };
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Window(WindowCommand::RealizeFrame {
-                frame: FrameRef::Frame(PRIMARY_FRAME),
+                frame: FrameRef::Frame(frame),
                 width,
                 height,
                 title,
                 geometry_hints: none,
                 visual: None,
                 adopt_primary: true,
-                reply: Some(reply),
+                request: Some(request),
             }))
             .map_err(|error| error.to_string());
+        if result.is_err() { self.facts.forget(request); }
         self.proxy.wake_up();
         result.map(|()| ready)
     }
 
-    /// Where the pointer is over the primary window, if it is.
-    pub fn pointer(&self) -> Option<(i32, i32)> {
+    /// The frame whose window the pointer is over, and where in it, if it
+    /// is over one.
+    pub fn pointer(&self) -> Option<(u64, (i32, i32))> {
         romacs_display_protocol::call_count::count("sender.pointer");
         self.facts.pointer()
     }
@@ -466,25 +500,21 @@ impl PaintSender {
         self.facts.take_key_repeats()
     }
 
-    /// Title the primary window (xdisp.c gui_consider_frame_title).
-    pub fn set_title(&self, title: String) -> Result<(), String> {
+    /// Title FRAME's window (xdisp.c gui_consider_frame_title).
+    pub fn set_title(&self, frame: u64, title: String) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_title");
-        let result = self
-            .comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { title }))
+        let result = self.commands
+            .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { frame: FrameRef::Frame(frame), title }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
     }
 
-    /// Close a server's primary window; the render loop and the GPU stay.
-    pub fn hide_primary(&self) -> Result<(), String> {
-        romacs_display_protocol::call_count::count("sender.hide_primary");
-        let result = self
-            .comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Primary }))
+    /// Close a server's window of FRAME; the render loop and the GPU stay.
+    pub fn hide(&self, frame: u64) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.hide");
+        let result = self.commands
+            .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(frame) }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
@@ -495,22 +525,18 @@ impl PaintSender {
     /// configuration would leave an option silently without effect.
     pub fn set_visual_config(&self, config: romacs_display_protocol::VisualConfig) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.set_visual_config");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .send(RenderCommand::Config(crate::thread_comm::ConfigCommand::SetVisualConfig(config)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
     }
 
-    /// Ask the compositor to bring the primary window to the user.
-    pub fn raise_primary(&self) -> Result<(), String> {
-        romacs_display_protocol::call_count::count("sender.raise_primary");
-        let result = self
-            .comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+    /// Ask the compositor to bring FRAME's window to the user.
+    pub fn raise(&self, frame: u64) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.raise");
+        let result = self.commands
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: FrameRef::Frame(frame), urgent: false }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
@@ -518,14 +544,12 @@ impl PaintSender {
 
     pub fn input(&self) -> &crossbeam_channel::Receiver<crate::thread_comm::InputEvent> {
         romacs_display_protocol::call_count::count("sender.input");
-        &self.comms.input_rx
+        &self.input
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
         romacs_display_protocol::call_count::count("sender.shutdown");
-        let result = self
-            .comms
-            .cmd_tx
+        let result = self.commands
             .try_send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
@@ -539,25 +563,31 @@ impl Drop for PaintSender {
     }
 }
 
-/// Children of ROOT, distinct and none the primary frame.
+/// Children of ROOT, distinct and none ROOT itself, each parented to ROOT
+/// or to a child before it: the scene lists them lowest first, and a
+/// child is drawn above its parent.
 pub(crate) fn validate_children(root: &FrameGlyphBuffer, children: &[FrameGlyphBuffer]) -> Result<(), String> {
+    let root_id = root.frame_placement.frame().get();
     let mut ids = std::collections::HashSet::new();
     for child in children {
         let placement = child.frame_placement;
         let id = placement.frame().get();
-        if id == PRIMARY_FRAME
+        let parented = placement.parent().map(|p| p.get()).is_some_and(|p| p == root_id || ids.contains(&p));
+        if id == root_id
+            || !parented
             || !ids.insert(id)
-            || placement.parent().map(|p| p.get()) != Some(PRIMARY_FRAME)
             || child.presentation_id != root.presentation_id
             || placement.presentation() != root.presentation_id
             || !(child.width.is_finite() && child.height.is_finite() && child.width > 0.0 && child.height > 0.0)
         {
-            return Err("paint host requires distinct child frames of the primary presentation".into());
+            return Err("paint host requires distinct child frames of the root presentation".into());
         }
     }
     Ok(())
 }
 
+/// ROOT is a top-level frame: no parent, at its own origin, a positive
+/// size, and a nonzero presentation it carries.
 pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {
     let rect = frame.frame_placement.outer_in_parent();
     if !frame.width.is_finite()
@@ -571,12 +601,11 @@ pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {
     {
         return Err("paint host requires coherent positive root geometry".into());
     }
-    if frame.frame_placement.frame().get() != PRIMARY_FRAME
-        || frame.frame_placement.parent().is_some()
+    if frame.frame_placement.parent().is_some()
         || frame.presentation_id.get() == 0
         || frame.frame_placement.presentation() != frame.presentation_id
     {
-        return Err("paint host requires coherent nonzero primary presentation".into());
+        return Err("paint host requires a coherent nonzero top-level presentation".into());
     }
     Ok(())
 }

@@ -170,3 +170,19 @@ fn raw_bytes_in_source_symbols_keep_their_characters() {
         "((114 97 119 4194303) t t t (114 97 119 4194303) (40 114 97 119 4194303 32 34 114 92 51 55 55 34 32 64976 120 41) (114 97 119 4194303) (64976 120) t (97 4194303) nil t)");
     std::fs::remove_dir_all(dir).unwrap();
 }
+/// lread.c openp expands the file name against each `load-path' entry, so
+/// an entry under `~' (as `use-package' `:load-path' leaves it) finds files
+/// under the home directory.  The loader once joined the entry raw and
+/// looked in a directory literally named `~'.
+#[test]
+fn a_load_path_entry_under_home_is_expanded() {
+    let dir = scratch("tilde");
+    std::fs::write(dir.join("tilde-dep.el"), "(setq tilde-loaded 'yes) (provide 'tilde-dep)").unwrap();
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let entry = format!("~/{}/", dir.strip_prefix(&home).unwrap().display());
+    let mut vm = Vm::new();
+    vm.eval_source(&format!("(setq load-path (list {entry:?}))")).unwrap();
+    assert!(vm.eval_source("(eq (require 'tilde-dep) 'tilde-dep)").unwrap().is_t());
+    assert!(vm.eval_source("(eq tilde-loaded 'yes)").unwrap().is_t());
+    std::fs::remove_dir_all(dir).unwrap();
+}

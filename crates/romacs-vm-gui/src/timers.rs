@@ -109,6 +109,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-timers");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The idle collection has its own test below.
@@ -264,6 +265,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-first-wait");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         // As the session does once its Lisp is ready (main.rs).
         crate::echo::install(&mut vm).unwrap();
@@ -329,6 +331,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-command-end");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         vm.eval_source("(read-event nil nil 0)").unwrap();
@@ -351,6 +354,7 @@ mod tests {
         vm.set_gc_stress(0);
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-idle-collect");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
@@ -411,6 +415,7 @@ mod tests {
         vm.set_gc_stress(0);
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-prompt-collect");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
@@ -444,6 +449,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-scheduled");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
@@ -485,6 +491,7 @@ mod tests {
     fn rescheduling_body() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-rescheduling");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
@@ -536,6 +543,7 @@ mod tests {
         assert_eq!(expected, "(nil (\"open\") (\"hi\") t)", "pinned GNU");
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-process");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         vm.set_host_input(Some(Box::new(Waiting(vec![]))));
@@ -574,6 +582,7 @@ mod tests {
     fn streaming_body() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-streaming");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil bytes 0)");
@@ -676,6 +685,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_echo_area_host(true);
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::test_home::private_home(&mut vm, "timers-quit-left");
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         vm.eval_source("(setq timer-list nil timer-idle-list nil romacs-gc-idle-delay nil)
                         (run-with-idle-timer 0 nil (lambda () (with-local-quit (signal 'quit nil))))").unwrap();

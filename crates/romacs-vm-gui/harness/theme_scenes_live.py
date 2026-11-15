@@ -183,7 +183,7 @@ def session(engine, binary, theme, args, out):
             # The packages Romacs bundles (gnosis among them), on GNU's
             # `load-path' with Romacs's bundled autoloads, as
             # gnosis_parity_live.py gives them.
-            bundled = ' '.join(f'"{ROOT / "lisp/romacs" / d}"' for d in ('gnosis', 'emacs-lisp', '', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket'))
+            bundled = ' '.join(f'"{ROOT / "lisp/romacs" / d}"' for d in ('gnosis', 'emacs-lisp', '', 'deps/fsm', 'deps/markdown-mode'))
             packages = (f'(setq load-path (append (list {bundled}) load-path))\n'
                         f'(load "{ROOT / "lisp/romacs/romacs-bundled-autoloads.el"}" nil t)\n') if args.gnosis_db else ''
             (home / 'init.el').write_text(GNU_RUM % {'inputs': INPUTS} + packages + SCENES)

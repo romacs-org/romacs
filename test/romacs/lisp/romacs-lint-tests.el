@@ -217,6 +217,22 @@ file, or a line of nothing, is not."
             (should (string-match-p "pins a line of crates/a/src/lib.rs" (nth 2 (car pins))))))
       (delete-directory root t))))
 
+(ert-deftest romacs-lint-tests-the-loadup-bootstrap ()
+  "The lint gives its findings on the file that boots the machine, which
+it loads into a machine already booted.  It runs in a machine of its own:
+loading that file leaves the one that loads it changed."
+  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+         (host (expand-file-name invocation-name invocation-directory))
+         (file (expand-file-name "lisp/romacs/romacs-loadup-bootstrap.el" root))
+         (status nil))
+    (skip-unless (and root (file-exists-p file)))
+    (with-temp-buffer
+      (setq status (call-process host nil t nil "-Q" "--batch" "-L" (expand-file-name "lisp/romacs" root)
+                                 "-l" "romacs-lint" "-f" "romacs-lint-batch" file))
+      (should (memq status '(0 1)))
+      (goto-char (point-min))
+      (should (re-search-forward "^romacs-lint: 1 file, " nil t)))))
+
 (ert-deftest romacs-lint-tests-arglist-arity ()
   "An argument list's arity, as `func-arity' would give its function's."
   (should (equal (romacs-lint--arglist-arity '(a b)) '(2 . 2)))

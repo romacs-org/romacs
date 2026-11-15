@@ -736,7 +736,7 @@ write or continue from a callback or after cancellation reentry."
            (header header-line-format)
            (waiting (replace-regexp-in-string
                      "%" "%%"
-                     (concat (propertize " Adjusting next question… " 'face 'warning)
+                     (concat (propertize (concat " Adjusting next question" (truncate-string-ellipsis) " ") 'face 'warning)
                              (substitute-command-keys "\\[keyboard-quit] Pause")) t t))
            (deadline (+ (float-time) gnosis-agent-eval-timeout))
            (valid (lambda ()

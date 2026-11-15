@@ -250,7 +250,9 @@ impl Vm {
     /// `redisplay-adhoc-scroll-in-resize-mini-windows' is nil; when the
     /// text does not fit, that variable shows its end instead. True when
     /// the mini-window's height changed.
-    pub(crate) fn resize_mini_window(&mut self, mini: Value) -> Result<bool> {
+    /// MINI is top-level frame ROOT's mini-window; ROOT's native height
+    /// bounds it.
+    pub(crate) fn resize_mini_window(&mut self, root: Value, mini: Value) -> Result<bool> {
         let value = |vm: &mut Self, name: &str| { let slot = vm.slot(name); vm.variable_value(slot) };
         let mode = value(self, "resize-mini-windows")?;
         if value(self, "inhibit-redisplay")? != Value::NIL { return Ok(false); }
@@ -263,7 +265,7 @@ impl Vm {
         if mode == Value::NIL || mode == Value::UNBOUND { return Ok(false); }
         let spliced = self.splice_overlay_strings(mini, buffer, &text)?;
         let unit = self.window_state.line.max(1);
-        let total = self.window_state.height;
+        let total = self.top_geometry(root)?.height;
         let limit = value(self, "max-mini-window-height")?;
         let max = match self.object_if(limit) {
             Some(Object::Float(f)) => (f * f64::from(total)) as i64,
@@ -299,12 +301,12 @@ impl Vm {
             self.set_window_start_if_moved(marker, buffer, start)?;
         }
         let height = lines.min(max_lines).max(1) as u32;
-        let old = self.window_state.mini_lines;
+        let old = self.top_geometry(root)?.mini_lines;
         // grow-only's shrink to one line, then the next cycle's growth
         // (window.c shrink_mini_window), in one step.
         let exact = mode != self.display_symbol("grow-only") || empty || !self.minibuffer_active();
         if height > old || (exact && height != old) {
-            self.window_state.mini_lines = height;
+            self.top_geometry_mut(root)?.mini_lines = height;
             return Ok(true);
         }
         Ok(false)

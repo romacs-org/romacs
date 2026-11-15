@@ -234,13 +234,13 @@ thread at work, while the board shows."
     (propertize share 'face 'romacs-agent-context)))
 
 (defun romacs-agent-board-instance (row)
-  "ROW's provider and model."
+  "ROW's harness and model; its account on hover."
   (let ((session (plist-get row :session)))
-    (propertize (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
+    (propertize (romacs-agent-ui--instance (symbol-name (romacs-agent-harness session)) (romacs-agent-harness session)
                                            (or (romacs-agent-model session)
                                                (plist-get (romacs-agent-options session) :model))
                                            nil)
-                'face 'romacs-agent-model)))
+                'face 'romacs-agent-model 'help-echo (format "account %s" (romacs-agent-provider session)))))
 
 (defun romacs-agent-board--span (seconds)
   "SECONDS, compactly."
@@ -305,7 +305,7 @@ takes what the others and the gaps between them leave."
                       (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
-                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (or (plist-get item :provider) "")
+                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
                                                      "  " (romacs-agent-ui--ago (plist-get item :mtime)))
                                              width)
                             'face 'romacs-agent-dim)))
@@ -493,8 +493,7 @@ window; with none, or no room, hide the card."
   (let* ((session (plist-get (romacs-agent-board--row) :session))
          (reply (and romacs-agent-board-preview session (romacs-agent-reply session)))
          (place (and reply (romacs-agent-board--preview-place)))
-         ;; Its plain text, no more than the card holds: a reply may be
-         ;; long, and formatting Markdown costs tens of milliseconds a key.
+         ;; Its plain text, no more than the card holds: a reply may be long.
          (text (and place (substring reply 0 (min (length reply) (* (nth 2 place) (nth 3 place)))))))
     (if (not (and text (string-match-p "[^[:space:]]" text)))
         (romacs-agent-board--preview-hide)

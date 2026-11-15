@@ -1154,13 +1154,14 @@ running job's worker, and is ignored from anyone else."
                        jabber-mam-sync--changed)))))
 
 (ert-deftest jabber-test-mam-sync-indicates-while-a-job-runs ()
-  "\"syncing history…\" is in the mode line while a job runs, not after."
+  "\"syncing history...\" is in the mode line while a job runs, not after:
+its dots are the session's ellipsis, three in a GUI session."
   (jabber-test-mam-sync--with-session
-    (let ((global-mode-string nil))
+    (let ((global-mode-string nil) (truncate-string-ellipsis "..."))
       (jabber-mam-maybe-catchup jc)
       (jabber-mam-sync--start jabber-test-mam-sync--account)
       (should (member jabber-mam-sync--mode-line-entry global-mode-string))
-      (should (equal " syncing history…" (eval (cadr jabber-mam-sync--mode-line-entry) t)))
+      (should (equal " syncing history..." (eval (cadr jabber-mam-sync--mode-line-entry) t)))
       (setq summary '(:archives nil :peers nil))
       (funcall done)
       (should-not (member jabber-mam-sync--mode-line-entry global-mode-string)))))

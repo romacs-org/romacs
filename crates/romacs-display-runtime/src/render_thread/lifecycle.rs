@@ -145,6 +145,7 @@ impl RenderApp {
                     if self.clipboard.is_err() {
                         self.clipboard = crate::clipboard::ClipboardService::for_display(
                             event_loop.owned_display_handle(),
+                            self.comms.facts_tx.clone(),
                         );
                         if let Err(err) = &self.clipboard {
                             tracing::error!("Failed to initialize clipboard service: {err}");
@@ -788,7 +789,7 @@ impl RenderApp {
             // their pixels. Color remains a function of elapsed presentation
             // time, not the number of ticks.
             let cycle_frame = if dynamic_effects_allowed {
-                window_state.render.compositor.current_frame.as_ref()
+                window_state.render.compositor.current_frame.as_deref()
             } else {
                 None
             };

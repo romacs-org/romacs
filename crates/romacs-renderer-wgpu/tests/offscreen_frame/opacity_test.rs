@@ -231,7 +231,6 @@ fn native_inset_clear_matches_completed_content_opacity() {
                 None,
                 None,
                 None,
-                None,
             );
             for alpha in [1.0, 0.5, 0.25] {
                 let placement =
@@ -301,7 +300,6 @@ fn render(h: &mut Harness, frame: &FrameGlyphBuffer, view: &wgpu::TextureView) {
         &mut h.atlas,
         mapping_for(frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -398,7 +396,6 @@ fn child_background_alpha_and_lifecycle_opacity_apply_once() {
                 &mut h.atlas,
                 mapping_for(&parent, W, H),
                 false,
-                None,
                 None,
                 None,
                 None,

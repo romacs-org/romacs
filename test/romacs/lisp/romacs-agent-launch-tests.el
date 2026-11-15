@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -15,9 +16,11 @@
 
 (defmacro romacs-agent-launch-tests--with (&rest body)
   "BODY with the idle session `parent' and its task `child', which has a
-directory under `root' and no supervisor; `delivered' collects wakes."
+directory under `root' and no supervisor, its socket's under `run' (short
+whatever TMPDIR is); `delivered' collects wakes."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-launch-" t))
+          (run (romacs-test-socket-directory "launch-"))
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-tools--pending (make-hash-table :test #'equal))
@@ -28,7 +31,7 @@ directory under `root' and no supervisor; `delivered' collects wakes."
                                       :dir (expand-file-name "parent" root)))
           (child (romacs-agent--make :id "cccccccc-0000-4000-8000-000000000000" :harness 'claude :title "janitor"
                                      :dir (expand-file-name "child" root) :cwd root
-                                     :host-socket (expand-file-name "run/host.sock" root)
+                                     :host-socket (expand-file-name "host.sock" run)
                                      :options (list :parent "pppppppp-0000-4000-8000-000000000000")))
           (delivered nil))
      (make-directory (romacs-agent-dir child) t)
@@ -37,7 +40,7 @@ directory under `root' and no supervisor; `delivered' collects wakes."
      (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
                 (lambda (_session text done &optional _valid) (push text delivered) (funcall done)))
                ((symbol-function 'run-at-time) #'ignore))
-       (unwind-protect (progn ,@body) (delete-directory root t)))))
+       (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
 (ert-deftest romacs-agent-launch-a-missing-companion-is-an-error ()
   (let ((invocation-directory (file-name-as-directory (make-temp-file "romacs-bin-" t)))
@@ -67,7 +70,7 @@ directory under `root' and no supervisor; `delivered' collects wakes."
     (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :state) "failed"))
     ;; One that ran once is detached, as before.
     (let ((ran (romacs-agent--make :id "dddddddd-0000-4000-8000-000000000000" :harness 'claude
-                                   :dir (expand-file-name "ran" root) :host-socket (expand-file-name "run/x.sock" root))))
+                                   :dir (expand-file-name "ran" root) :host-socket (expand-file-name "x.sock" run))))
       (make-directory (romacs-agent-dir ran))
       (write-region "" nil (expand-file-name "journal.jsonl" (romacs-agent-dir ran)))
       (romacs-agent--attach ran 0)
@@ -115,7 +118,7 @@ directory under `root' and no supervisor; `delivered' collects wakes."
       (romacs-agent--write-json (expand-file-name "manifest.json" dir)
                                 (romacs-mcp--object "id" "eeeeeeee-0000-4000-8000-000000000000" "harness" "claude"
                                                     "cwd" root "title" "janitor"
-                                                    "hostSocket" (expand-file-name "run/none.sock" root)))
+                                                    "hostSocket" (expand-file-name "none.sock" run)))
       (let ((loaded (romacs-agent--load dir)))
         (should (eq (romacs-agent-state loaded) 'unstarted))
         (should (equal (romacs-agent-tools--status loaded) "failed"))))))

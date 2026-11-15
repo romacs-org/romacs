@@ -6,6 +6,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod gpu_policy;
+pub mod cost;
 pub mod diagnostics;
 pub(crate) mod frame_post;
 pub mod glyph_atlas;
@@ -38,9 +39,9 @@ pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
 pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
-    BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudgetOwner, PaneBlit,
-    PaneSource, RendererFrameEffects, SnapshotLease, SnapshotSize, UnpooledTexture, WgpuRenderer,
-    texture_bytes,
+    BudgetExceeded, CompositionRing, FullFrameTexture, GpuBudgetOwner, PaneBlit,
+    PaintTarget, Painted, PaneSource, RendererFrameEffects, RootPicture, SnapshotLease, SnapshotSize,
+    UnpooledTexture, WgpuRenderer, texture_bytes,
 };
 pub use shader_surface::{
     ShaderValidationError, SurfaceContract, SurfaceUniformInit, compose_surface_wgsl,

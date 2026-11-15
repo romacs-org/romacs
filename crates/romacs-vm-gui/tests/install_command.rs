@@ -1,5 +1,10 @@
+#[path = "../../romacs-vm/tests/support/own_test.rs"]
+mod own_test;
+
 use romacs_vm_gui::{command, presentation, startup};
 use romacs_vm::{CommandEvent, Vm};
+#[path = "support/home.rs"]
+mod home;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).unwrap().display().unwrap()
@@ -40,6 +45,7 @@ fn install_command_after_gnu_loadup() {
     std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        home::private_home(&mut vm, "install-command");
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();
         assert_eq!(printed(&mut vm, "(lookup-key (current-global-map) [24 6])"), "find-file");
@@ -88,7 +94,7 @@ fn install_command_module_activates_during_initialize() {
     std::fs::write(modules.join("20-probe.el"), "(romacs-gui-install-command [24 57345] '(defun romacs-gui-module-probe () (interactive) (insert romacs-gui-module-text)))").unwrap();
     std::fs::write(modules.join("ignored.txt"), "(error \"must not load\")").unwrap();
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "install_command_module_activates_during_initialize", "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), "install_command_module_activates_during_initialize"), "--nocapture"])
         .env("ROMACS_INSTALL_SEAM_CHILD", "1")
         .env("ROMACS_RUNTIME_ROOT", &root)
         .env_remove("ROMACS_LISP_DIR")

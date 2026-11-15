@@ -1166,6 +1166,13 @@ impl Vm {
         // while the search borrows the VM.
         let found = {
             let input = self.regexp_subject(string)?;
+            // The string's own cursor places FROM (GNU string_char_to_byte),
+            // so a scan at increasing STARTs walks no prefix again.
+            if !input.bytewise && from < chars {
+                let all = input.bytes.len();
+                let rest = self.str_view_from(string, from).map_or(0, |view| view.bytes.len());
+                input.remember(all - rest, from);
+            }
             let compiled = compiled.borrow();
             let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(from);
