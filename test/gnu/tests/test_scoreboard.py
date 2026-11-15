@@ -11,34 +11,34 @@ import run
 
 
 class Scoreboard(unittest.TestCase):
-    def test_real_lisp_uses_declared_support_verifier(self):
+    def test_the_harness_is_gnus_ert_at_the_pinned_commit(self):
         import subprocess
-        with patch.object(run.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as command:
-            run.verify_real_lisp(run.PIN_COMMIT)
+        import tempfile
+        done = subprocess.CompletedProcess([], 0, b';;; ert.el --- GNU', b'')
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(run.subprocess, 'run', return_value=done) as command:
+            path = run.pristine_gnu_file('lisp/emacs-lisp/ert.el', pathlib.Path(tmp))
+            self.assertEqual(path.read_bytes(), b';;; ert.el --- GNU')
         self.assertEqual(command.call_args.args[0], [
-            sys.executable, str(run.ROOT / 'tools/lib/lisp_oracle.py'), 'check',
-            '--root', str(run.ROOT), '--gnu', str(run.GNU_MIRROR), '--pin', run.PIN_COMMIT])
+            'git', '-C', str(run.GNU_MIRROR), 'show', f'{run.PIN_COMMIT}:lisp/emacs-lisp/ert.el'])
 
-    def test_real_lisp_validation_fails_closed(self):
+    def test_an_unreadable_harness_refuses(self):
         import subprocess
-        for failure in [OSError('missing verifier'),
-                        subprocess.CompletedProcess([], 1, 'MODIFIED pristine', ''),
-                        subprocess.CompletedProcess([], 1, '', 'ABSENT SUPPORT'),
-                        subprocess.CompletedProcess([], 1, 'UNDECLARED file', '')]:
-            with self.subTest(failure=failure):
-                kwargs = {'side_effect': failure} if isinstance(failure, OSError) else {'return_value': failure}
-                with patch.object(run.subprocess, 'run', **kwargs), self.assertRaises(run.Refusal) as caught:
-                    run.verify_real_lisp(run.PIN_COMMIT)
-                self.assertEqual(caught.exception.status, 3)
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(run.subprocess, 'run', side_effect=subprocess.CalledProcessError(128, 'git')), \
+                self.assertRaises(run.Refusal) as caught:
+            run.pristine_gnu_file('lisp/emacs-lisp/ert.el', pathlib.Path(tmp))
+        self.assertEqual(caught.exception.status, 3)
 
     def test_ert_bootstrap_is_explicit_and_separate(self):
         from types import SimpleNamespace
         self.assertIs(run.source_bootstrap_chain(SimpleNamespace()), run.BOOTSTRAP_CHAIN)
         self.assertEqual(run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert')),
-                         ['lisp/romacs/romacs-loadup-bootstrap.el', 'lisp/gnu/help-fns.el',
-                          'lisp/romacs/romacs-cl-print.el'])
+                         ['lisp/session/romacs-loadup-bootstrap.el', 'lisp/help-fns.el',
+                          'lisp/emacs-lisp/romacs-cl-print.el'])
         self.assertEqual(run.source_bootstrap_chain(SimpleNamespace(bootstrap='ert', harness='mini')),
-                         ['lisp/romacs/romacs-loadup-bootstrap.el'])
+                         ['lisp/session/romacs-loadup-bootstrap.el'])
         for harness in ('mini', 'real'):
             with self.assertRaisesRegex(run.Refusal, 'requires --engine romacs'):
                 run.cmd_run(SimpleNamespace(bootstrap='ert', harness=harness, engine='gnu',
@@ -120,7 +120,7 @@ class Scoreboard(unittest.TestCase):
                                       jobs=1, out=str(pathlib.Path(tmp) / 'report'),
                                       harness_fidelity=False, engine='gnu', bin=None, setup_timeout=10)
             with (patch.object(run, 'verify_pin', return_value={'gnu_commit': run.PIN_COMMIT}),
-                  patch.object(run, 'verify_real_lisp'),
+                  patch.object(run, 'pristine_gnu_file', return_value=pathlib.Path('/pinned/ert.el')),
                   patch.object(run, 'normalize', side_effect=lambda name: name),
                   patch.object(gnu_oracle, 'require', return_value={'path': '/pinned/emacs'}),
                   patch.object(run, 'load_ledger', return_value={}),
