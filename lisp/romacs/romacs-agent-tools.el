@@ -1204,9 +1204,12 @@ woken with it."
 (defun romacs-agent-tools--limit-on-event (session event)
   (pcase (plist-get event :type)
     ('done (romacs-agent-tools--switch-on-limit session event))
-    ;; A message after the limit: neither a wait for a move nor a resume is its.
+    ;; A message after the limit: neither a wait for a move nor a resume is
+    ;; its.  Its turn may end at the limit again: that end schedules a resume
+    ;; anew, the reset not yet used by one that fired.
     ('input (when (and (romacs-agent-caught-up session) (not (romacs-agent-pending-selection session)))
               (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+              (when (romacs-agent-resume-time session) (remhash session romacs-agent-tools--resets-used))
               (romacs-agent-tools--cancel-resume session "a message came")))
     ('settled (romacs-agent-tools--cancel-resume session "settled"))))
 

@@ -216,6 +216,36 @@ a time, `allow' marks it allowed."
           (should-not (romacs-agent-resume-time session))
           (should-not (gethash "resumeAt" (romacs-agent--read-json (expand-file-name "manifest.json" dir)))))))))
 
+(ert-deftest romacs-agent-pools-a-message-at-the-limit-keeps-the-resume ()
+  ;; A delegated task stopped at its limit, every account spent: a message
+  ;; from its parent cancels the resume, its turn ends at the limit again,
+  ;; and the resume is scheduled again for the same reset.
+  (romacs-agent-pools-tests--with
+    (let* ((dir (make-temp-file "s" t))
+           (session (romacs-agent--make :id "c" :harness 'claude :provider "claude3" :state 'idle :caught-up t
+                                        :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude3")
+                                        :options '(:parent "p" :role "implementation")))
+           (soon (+ (float-time) 600))
+           (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent-tools--moving (make-hash-table :test #'equal))
+           (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
+      (puthash "c" session romacs-agent--sessions)
+      (romacs-agent--manifest session nil)
+      (spend "claude" soon) (spend "claude2" (+ soon 600)) (spend "claude3" (+ soon 900))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) 'timer))
+                ((symbol-function 'cancel-timer) #'ignore)
+                ((symbol-function 'romacs-agent-tools--wake) #'ignore))
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should (= (romacs-agent-resume-time session) (+ soon 1)))
+        ;; Its parent's message: the resume is cancelled.
+        (romacs-agent-tools--limit-on-event session '(:type input))
+        (should-not (romacs-agent-resume-time session))
+        ;; Its turn ends at the limit again: scheduled again.
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should (= (romacs-agent-resume-time session) (+ soon 1)))
+        (should (= (gethash "resumeAt" (romacs-agent--read-json (expand-file-name "manifest.json" dir))) (+ soon 1)))))))
+
 (ert-deftest romacs-agent-pools-a-wait-is-its-limits-alone ()
   (romacs-agent-pools-tests--with
     (let* ((dir (make-temp-file "w" t))
