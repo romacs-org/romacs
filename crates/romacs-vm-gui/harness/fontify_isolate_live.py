@@ -4,7 +4,7 @@
 Each session is a fresh private headless labwc and a fresh `--loadup`
 launch (perkey_live.Session), which visits a private copy of FILE through
 `M-: (find-file COPY)` once the variant is set: `isolate' (`romacs-fontify-isolate' t:
-lisp/romacs/romacs-fontify.el snapshots the buffer and a worker fontifies it,
+lisp/romacs-fontify.el snapshots the buffer and a worker fontifies it,
 streaming its properties) or `session' (nil: jit-lock fontifies each
 shown chunk in the session, as GNU's redisplay does).  After --wait
 seconds the harness types --keys F9 keys --gap seconds apart, each moving
@@ -40,7 +40,7 @@ import time
 import perkey_live as perkey
 
 ROOT = Path(__file__).resolve().parents[3]
-FILES = [ROOT / 'test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/gnu/subr.el']
+FILES = [ROOT / 'test/gnu/test/manual/etags/c-src/emacs/src/keyboard.c', ROOT / 'lisp/subr.el']
 
 # F9 moves point 50 lines: redisplay scrolls to show it and fontifies what
 # comes into view.  (Romacs's `scroll-up-command' refuses text with form
