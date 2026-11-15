@@ -29,15 +29,14 @@ const FIRST_REACH: usize = 128;
 /// apart, one seam per BATCH elements of such a line.
 const BATCH: usize = 16384;
 
-/// Whether C continues the composed sequence SHOWN ends in, which the
-/// layout measures as one glyph (`romacs_layout_input::cluster`): it joins
-/// the last character, or it completes a flag, a run's odd regional
-/// indicator being the first of its pair.
+/// Whether a composed sequence the layout measures as one glyph may run
+/// on from SHOWN's last character into C (`romacs_layout_input::cluster`):
+/// within one, each character joins the one before, or both are regional
+/// indicators (a flag). Only where neither holds is a cut never inside one.
 fn continues(shown: &[(char, FaceKey)], c: char) -> bool {
     let Some(&(last, _)) = shown.last() else { return false };
     let indicator = |ch: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&ch);
-    let run = shown.iter().rev().take_while(|&&(ch, _)| indicator(ch)).count();
-    romacs_layout_input::cluster::joins(last, c) || indicator(c) && run % 2 == 1
+    romacs_layout_input::cluster::joins(last, c) || indicator(last) && indicator(c)
 }
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }

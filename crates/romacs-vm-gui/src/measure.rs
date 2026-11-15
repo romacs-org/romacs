@@ -403,12 +403,15 @@ mod tests {
         let width = |h: &mut Hosted, text: &str| h.eval(&format!(
             "(progn (setq truncate-lines t) (erase-buffer) (insert {text}) (car (window-text-pixel-size nil 1 nil 100000000)))"))
             .parse::<i64>().unwrap();
-        let long = "(make-string 16384 ?a)";
-        let flag = "\"\u{1F1EC}\u{1F1F7}\"";
-        let (alone, flagged) = (width(&mut h, long), width(&mut h, flag));
-        // The batches of the line after "x\n" put their cut where the flag is.
-        for lead in ["\"x\\n\"", "\"\""] {
-            assert_eq!(width(&mut h, &format!("{lead} {long} {flag} \"\\n\"")), alone + flagged, "after {lead}");
+        // A flag; and a man, ZWJ and an indicator that compose, then a flag
+        // of the next two, which the layout pairs past the first's run.
+        for (n, composed) in [(16384, "\"\u{1F1EC}\u{1F1F7}\""), (16381, "\"\u{1F468}\u{200D}\u{1F1E6}\u{1F1EC}\u{1F1E7}\"")] {
+            let long = format!("(make-string {n} ?a)");
+            let (alone, cluster) = (width(&mut h, &long), width(&mut h, composed));
+            // The batches of the line after "x\n" put their cut inside it.
+            for lead in ["\"x\\n\"", "\"\""] {
+                assert_eq!(width(&mut h, &format!("{lead} {long} {composed} \"\\n\"")), alone + cluster, "{n} after {lead}");
+            }
         }
     }
 
