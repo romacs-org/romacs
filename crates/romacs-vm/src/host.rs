@@ -489,7 +489,7 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>);
+pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
 
 /// A layer build's state of the top-level form loading: the definition it
 /// is, if one, and whether it read a per-process fact or an effect cut it.
@@ -505,6 +505,10 @@ impl Drop for SiteGuard {
         if let Some((form, tainted, cut)) = self.1.take() {
             LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
         }
+        // So is whether it asked for a secret: the file's forms kept theirs.
+        if let Some(asked) = self.2.take() {
+            CREDENTIAL_READ.with(|c| c.set(asked));
+        }
     }
 }
 
@@ -519,12 +523,13 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None, None);
+        return SiteGuard(None, None, None);
     }
     let site = Rc::new(site());
     let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
+    let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
     layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer)
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
@@ -549,6 +554,18 @@ pub(crate) fn record(kind: &str, fields: Json) {
 /// How many refusals the build has listed so far; 0 outside a build.
 pub(crate) fn refusals() -> usize {
     with_build(|b| b.refusals.len()).unwrap_or(0)
+}
+
+/// Forget the refusals listed since there were MARK: what a form the
+/// layer keeps as code for the session met in the build
+/// (`romacs--layer-walk`), which it no longer answers for. Each may be
+/// listed again by a later form.
+pub(crate) fn forget_refusals_since(mark: usize) {
+    with_build(|b| {
+        for item in b.refusals.split_off(mark.min(b.refusals.len())) {
+            b.seen.remove(&format!("true{item}"));
+        }
+    });
 }
 
 /// List a refusal: KIND with FIELDS and the current site.

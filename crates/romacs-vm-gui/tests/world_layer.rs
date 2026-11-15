@@ -156,6 +156,9 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         ("layer-closure", "(provide 'layer-closure)\n"),
         ("layer-withheld", "(provide 'layer-withheld)\n"),
         ("layer-netrc", "(defvar layer-netrc-value nil)\n(provide 'layer-netrc)\n"),
+        ("layer-timer", "(defvar layer-timer-set nil)\n(provide 'layer-timer)\n"),
+        ("layer-if", "(defvar layer-if-value nil)\n(provide 'layer-if)\n"),
+        ("layer-fn", "(provide 'layer-fn)\n"),
     ] {
         std::fs::write(lisp.join(format!("{name}.el")), text).unwrap();
     }
@@ -176,6 +179,13 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         // A `with-eval-after-load' closure, and a form withheld after a secret reader ran.
         after("layer-closure", "(t . #<interpreted-function>)".into()),
         after("layer-withheld", "#<after a secret reader>".into()),
+        // A configuration form that starts a timer: kept as code, the
+        // forms beside it captured.
+        after("layer-timer", "(t progn (setq layer-timer-set 'built) (run-with-timer 60 nil #'ignore))".into()),
+        // A secret asked in an `if''s test: the whole `if' is kept.
+        after("layer-if", "(t if (auth-source-pass-get 'secret \"xmpp/me\") (setq layer-if-value 'then) (setq layer-if-value 'else))".into()),
+        // A function given to `eval-after-load' is called, as it would be.
+        after("layer-fn", "(t lambda nil (error \"romacs-fixture: the function was called\"))".into()),
         // A plaintext credential file read without any reader.
         after("layer-netrc", format!("(t setq layer-netrc-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", authinfo.display().to_string())),
     ];
@@ -202,7 +212,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .flat_map(|m| m["refusals"].as_array().cloned().unwrap_or_default())
         .filter(|r| r["kind"] == "init-layer")
         .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
-    for name in ["layer-secret", "layer-reader", "layer-netrc"] {
+    assert!(why.iter().any(|(name, why)| name == "layer-fn" && why.contains("the function was called")), "{why:?}");
+    for name in ["layer-secret", "layer-reader", "layer-netrc", "layer-timer", "layer-if"] {
         assert!(!why.iter().any(|(n, _)| n == name), "{name} was left out: {why:?}");
     }
     for name in ["layer-closure", "layer-withheld"] {
@@ -212,7 +223,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .filter(|m| m["events"]["init-layer"].is_object() && m["refusals"].as_array().is_none_or(|r| r.is_empty()))
         .map(|m| m["events"]["init-layer"]["entries"].clone()).collect();
     let names: Vec<Vec<&str>> = built.iter().map(|entries| entries.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect()).collect();
-    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-netrc"]), "{names:?}");
+    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-timer", "layer-if", "layer-netrc"]), "{names:?}");
     // No file the store holds contains the secret: images, manifests, plans.
     let mut files = vec![home.home.join("cache")];
     while let Some(path) = files.pop() {

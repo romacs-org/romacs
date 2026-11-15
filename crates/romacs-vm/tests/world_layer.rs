@@ -287,6 +287,29 @@ fn a_definition_stays_one_across_a_load_it_makes() {
     assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (nth 1 e)) romacs--world-reseed-forms)"), "(lib-outer-path)");
 }
 
+/// The form that asked for a secret is the one kept, though a library it
+/// loads afterwards has forms of its own: their ends do not take its ask.
+#[test]
+fn a_form_keeps_its_ask_across_a_load_it_makes() {
+    let dir = scratch("nested-ask");
+    std::fs::write(dir.join(".netrc"), "machine example login me password romacs-fixture-netrc-9a1f\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-inner2.el"), "(defvar lib-inner2-x 1)\n(setq lib-inner2-y 2)\n(provide 'lib-inner2)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-asks.el"), format!(
+        "(progn (condition-case nil (with-temp-buffer (insert-file-contents {:?})) (error nil)) (require 'lib-inner2))\n(provide 'lib-asks)\n",
+        dir.join(".netrc").display().to_string())).unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-asks"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (car (nth 2 e)))) romacs--world-reseed-forms)"), "((form progn))");
+}
+
 /// A declared library's definitions that read a per-process fact are kept
 /// as declared, so restore may leave them pending; one whose load or
 /// configuration reads a secret, or that connects to the network, is

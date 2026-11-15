@@ -36,6 +36,21 @@ fn world_secret_asked(_cx) {
     Ok(Value::NIL)
 }}
 
+// Romacs-only. `romacs--layer-walk': how many refusals a world build has
+// listed so far (`host::refusals`); 0 elsewhere.
+defsubr! { name = "romacs--world-refusals", gnu = "romacs:world", effect = Reads,
+fn world_refusals(_cx) {
+    Value::integer(crate::host::refusals() as i64).map_err(Fault::Error)
+}}
+
+// Romacs-only. `romacs--layer-walk': forget the refusals listed since there
+// were MARK, met by a form the build keeps as code (`host::forget_refusals_since`).
+defsubr! { name = "romacs--world-forget-refusals", gnu = "romacs:world", effect = Global,
+fn world_forget_refusals(_cx, mark: Integer) {
+    crate::host::forget_refusals_since(usize::try_from(mark.0).unwrap_or(0));
+    Ok(Value::NIL)
+}}
+
 // Romacs-only. `romacs--layer-walk': whether the form that ran last asked
 // for a secret in a world build, forgetting it. Nil elsewhere.
 defsubr! { name = "romacs--world-take-secret", gnu = "romacs:world", effect = Global,
