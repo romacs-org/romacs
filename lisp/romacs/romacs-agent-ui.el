@@ -848,7 +848,8 @@ quiet call.  The row keeps RUN, for a late failure to count again."
                          clock)))
       (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
       (concat (propertize text 'romacs-agent-run-head run 'mouse-face 'highlight
-                          'help-echo "TAB: show the steps")
+                          'help-echo (substitute-command-keys
+                                      "\\<romacs-agent-chat-transcript-map>\\[romacs-agent-chat-toggle]: show the steps"))
               "\n"))))
 
 (defun romacs-agent-ui--run-settle ()
@@ -930,7 +931,9 @@ name and a marker at its reply hint, nil where nothing can answer it.")
 REPLY's row, a marker, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
               'romacs-agent-reply t
-              'help-echo (cond (reply "Answered: RET goes to the reply") (answered "Answered") (t "Not answered yet"))
+              'help-echo (cond (reply (substitute-command-keys
+                                       "Answered: \\<romacs-agent-ui--reply-link-map>\\[romacs-agent-chat-goto-reply] goes to the reply"))
+                                (answered "Answered") (t "Not answered yet"))
               'keymap (and reply romacs-agent-ui--reply-link-map)
               'mouse-face (and reply 'highlight) 'romacs-agent-reply-at reply))
 
@@ -2124,7 +2127,9 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
   "Put the row that draws earlier turns at the current chat's start."
   (romacs-agent-ui--insert-at
    (point-min)
-   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 12))
+   (propertize (format (substitute-command-keys
+                        "▴ Earlier turns: \\<romacs-agent-ui--earlier-map>\\[romacs-agent-chat-earlier] draws %d more\n")
+                       (or romacs-agent-chat-turns 12))
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
