@@ -58,16 +58,17 @@ fn sha3(bytes: &[u8], out: usize) -> Vec<u8> {
 
 /// RFC 2104 HMAC under digest D, whose block size is BLOCK, keyed once:
 /// the keyed pads are hashed when it is made, and each message reuses them.
+/// The key's copies and the pads are wiped once hashed.
 struct Hmac<D> { inner: D, outer: D }
 
 impl<D: sha2::Digest + Clone> Hmac<D> {
     fn new(block: usize, key: &[u8]) -> Self {
-        let key = if key.len() > block { D::digest(key).to_vec() } else { key.to_vec() };
+        let key = zeroize::Zeroizing::new(if key.len() > block { D::digest(key).to_vec() } else { key.to_vec() });
         let keyed = |pad: u8| {
-            let mut bytes = key.clone();
-            bytes.resize(block, 0);
+            let mut bytes = zeroize::Zeroizing::new(vec![0; block]);
+            bytes[..key.len()].copy_from_slice(&key);
             bytes.iter_mut().for_each(|byte| *byte ^= pad);
-            D::new().chain_update(bytes)
+            D::new().chain_update(&*bytes)
         };
         Self { inner: keyed(0x36), outer: keyed(0x5c) }
     }

@@ -41,9 +41,8 @@ fn romacs_pass_otp(cx, text: Value, unix_seconds: Value) {
     let now = unix_seconds.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", unix_seconds))?;
     let text = Zeroizing::new(cx.string_text(text)?);
     let Some(uri) = crate::pass::entry::otp_uri(&text) else { return Ok(Value::NIL) };
-    let mut totp = crate::pass::otp::parse(uri).map_err(|why| Fault::Error(format!("Bad otpauth URI: {why}")))?;
+    let totp = crate::pass::otp::parse(uri).map_err(|why| Fault::Error(format!("Bad otpauth URI: {why}")))?;
     let (code, valid) = crate::pass::otp::code(&totp, now);
-    zeroize::Zeroize::zeroize(&mut totp.key);
     let code = Zeroizing::new(code);
     let code = cx.string(&code);
     Ok(cx.cons(code, i64::try_from(valid).ok().and_then(|n| Value::integer(n).ok()).expect("a period's seconds")))

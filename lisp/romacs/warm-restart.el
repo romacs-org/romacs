@@ -402,9 +402,10 @@ is not portable."
                            :state (warm-restart--strip (window-state-get (frame-root-window frame) t))))))
 
 (defun warm-restart--secret-p (value)
-  "Whether VALUE is a secret string, which no image holds: one whose text
-starts with the `romacs-secret' property, as the password manager's do."
-  (and (stringp value) (get-text-property 0 'romacs-secret value)))
+  "Whether VALUE is a string holding a secret, which no image holds: text
+with the `romacs-secret' property anywhere, as the password manager
+marks its secrets."
+  (and (stringp value) (text-property-not-all 0 (length value) 'romacs-secret nil value) t))
 
 (defun warm-restart--register (value)
   "Register VALUE as data: a position becomes (file-query FILE POS) in a

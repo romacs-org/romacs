@@ -775,6 +775,12 @@ mod leaf {
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
+            // The old text is wiped where it lies, not only replaced.
+            match self.object_mut(value)? {
+                data::Object::String(string) | data::Object::RawString(string) => string.wipe(),
+                data::Object::Bytes(old) => zeroize::Zeroize::zeroize(old),
+                _ => {}
+            }
             *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }

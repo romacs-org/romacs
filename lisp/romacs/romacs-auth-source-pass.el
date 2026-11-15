@@ -35,13 +35,19 @@ should wipe it with `clear-string'."
   "Return an alist of the data associated with ENTRY.
 ENTRY is the name of a password-store entry.  The data is
 \((secret . SECRET) (KEY . VALUE)...), each value a secret string;
-nil when ENTRY cannot be read."
+nil when ENTRY cannot be read.  A one-time code's seed (an `otpauth'
+field, or a value that is an otpauth URI) is left out: auth-source
+keeps what it finds, and no auth-source caller asks for one."
   (let ((text (ignore-errors (romacs-pass-read entry))))
     (when text
       (unwind-protect
-          (mapcar (lambda (cell)
-                    (if (stringp (cdr cell)) (cons (car cell) (romacs-pass--secret (cdr cell))) cell))
-                  (romacs-pass--parse text))
+          (seq-keep (lambda (cell)
+                      (cond ((not (stringp (cdr cell))) cell)
+                            ((or (equal (car cell) "otpauth") (string-prefix-p "otpauth:" (cdr cell)))
+                             (clear-string (cdr cell))
+                             nil)
+                            (t (cons (car cell) (romacs-pass--secret (cdr cell))))))
+                    (romacs-pass--parse text))
         (clear-string text)))))
 
 (defun auth-source-pass-entries ()

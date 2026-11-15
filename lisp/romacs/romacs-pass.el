@@ -34,7 +34,11 @@
 ;;
 ;; Wiping is best effort: a collection may have copied a string before
 ;; it was cleared, and a buffer's text leaves no copy behind only as far
-;; as its storage is reused.
+;; as its storage is reused.  The desktop's clipboard is not yet told a
+;; copy is a password (no `x-kde-passwordManagerHint'), so a clipboard
+;; history keeps it.  auth-source keeps what it found for
+;; `auth-source-cache-expiry', and the strings it hands its callers are
+;; theirs.
 
 ;;; Code:
 
@@ -43,6 +47,8 @@
 
 (defvar auth-source-pass-filename)
 (defvar warm-restart-blocker-functions)
+(defvar yank-menu)
+(declare-function romacs-pass "romacs-pass-menu" ())
 
 (defgroup romacs-pass nil
   "Passwords in the password store, pass(1)'s."
@@ -69,6 +75,11 @@ pass(1) clears its own copies after 45."
 (defcustom romacs-pass-autotype-program "wtype"
   "The program `romacs-pass-autotype' types with: wtype(1) on Wayland."
   :type 'string)
+
+(defcustom romacs-pass-autotype-delay 3
+  "Seconds `romacs-pass-autotype' waits for the target window to be focused.
+Typing is refused if a Romacs frame still has the focus then."
+  :type 'number)
 
 ;;;; The store
 
@@ -122,7 +133,7 @@ entry."
      :sentinel
      (lambda (process _event)
        (unless (process-live-p process)
-         (let ((raw (apply #'concat (nreverse chunks)))
+         (let ((raw (apply #'concat (setq chunks (nreverse chunks))))
                (why (and (buffer-live-p errors)
                          (string-trim (with-current-buffer errors (buffer-string))))))
            (mapc #'clear-string chunks)
@@ -159,11 +170,14 @@ For callers that must answer at once, as auth-source's do.  \\[keyboard-quit]
 stops the wait and gpg."
   (let* ((answer nil)
          (process (romacs-pass--gpg entry (lambda (text why) (setq answer (cons text why))))))
+    ;; A timer or a process filter (jabber reconnecting) runs with
+    ;; `inhibit-quit'; C-g still ends this wait.
     (unwind-protect
-        (while (not answer)
-          (accept-process-output (and (process-live-p process) process) 0.05))
+        (with-local-quit
+          (while (not answer)
+            (accept-process-output (and (process-live-p process) process) 0.05)))
       (unless answer (delete-process process)))
-    (or (car answer) (error "%s" (cdr answer)))))
+    (or (car answer) (error "%s" (or (cdr answer) (format "Stopped decrypting %s" entry))))))
 
 (defun romacs-pass--field (data field)
   "FIELD of DATA, an entry parsed by `romacs-pass--parse'.
@@ -187,6 +201,7 @@ DONE is called with nil once pass succeeds, or with its message."
          (process-environment (cons (concat "PASSWORD_STORE_DIR="
                                             (directory-file-name (romacs-pass-directory)))
                                     process-environment))
+         (payload (if (string-suffix-p "\n" text) text (concat text "\n")))
          (process
           (make-process
            :name "romacs-pass-insert"
@@ -200,41 +215,69 @@ DONE is called with nil once pass succeeds, or with its message."
                  (funcall done (unless (and (eq (process-status process) 'exit)
                                             (zerop (process-exit-status process)))
                                  (format "pass could not store %s: %s" entry why)))))))))
-    (process-send-string process (if (string-suffix-p "\n" text) text (concat text "\n")))
-    (process-send-eof process)
+    (unwind-protect
+        (progn (process-send-string process payload)
+               (process-send-eof process))
+      (unless (eq payload text) (clear-string payload)))
     process))
+
+(defun romacs-pass--wiping (strings function)
+  "Call FUNCTION; if it signals, wipe STRINGS first and signal again."
+  (condition-case err
+      (funcall function)
+    (error (mapc #'clear-string (delete-dups (seq-filter #'stringp strings)))
+           (signal (car err) (cdr err)))))
 
 (defun romacs-pass--write-reported (entry text then)
   "Store TEXT as ENTRY, wipe TEXT, then call THEN with no arguments.
 A failure is reported in the echo area instead."
-  (romacs-pass--write entry text
-                      (lambda (why)
-                        (clear-string text)
-                        (if why (message "%s" why) (funcall then)))))
+  (romacs-pass--wiping
+   (list text)
+   (lambda ()
+     (romacs-pass--write entry text
+                         (lambda (why)
+                           (clear-string text)
+                           (if why (message "%s" why) (funcall then)))))))
 
 ;;;; Copies
+
+(defvar romacs-pass--copies nil
+  "The copies in the kill ring and clipboard not yet forgotten, newest first.")
 
 (defun romacs-pass--copy (secret what)
   "Put a copy of SECRET in the kill ring and clipboard for a while.
 WHAT names it in the message.  The copy leaves both, and is wiped,
-after `romacs-pass-clear-seconds'."
+after `romacs-pass-clear-seconds', or when Romacs exits before then."
   (let ((copy (romacs-pass--secret (copy-sequence secret)))
         (kill-do-not-save-duplicates nil))
     (kill-new copy)
+    (push copy romacs-pass--copies)
+    (add-hook 'kill-emacs-hook #'romacs-pass--forget-all)
     (run-at-time romacs-pass-clear-seconds nil #'romacs-pass--forget copy)
     (message "Copied %s; cleared in %s s" what romacs-pass-clear-seconds)))
 
+(defun romacs-pass--forget-all ()
+  "Forget every copy not yet forgotten: Romacs exits, and its timers with it."
+  (mapc #'romacs-pass--forget romacs-pass--copies))
+
 (defun romacs-pass--forget (copy)
-  "Take COPY out of the kill ring, and the clipboard while it holds it.
-Then wipe it."
+  "Take COPY out of the clipboard while it holds it, the kill ring and the
+Edit menu's yank list.  Then wipe it, and the menu's title for it."
+  (setq romacs-pass--copies (delq copy romacs-pass--copies))
+  (when (and interprogram-cut-function
+             (equal (ignore-errors (gui-get-selection 'CLIPBOARD 'UTF8_STRING)) copy))
+    (funcall interprogram-cut-function ""))
   (when (eq (car kill-ring-yank-pointer) copy)
     (setq kill-ring-yank-pointer (cdr kill-ring-yank-pointer)))
   (setq kill-ring (delq copy kill-ring))
   (unless (memq (car kill-ring-yank-pointer) kill-ring)
     (setq kill-ring-yank-pointer kill-ring))
-  (when (and interprogram-cut-function
-             (equal (ignore-errors (gui-get-selection 'CLIPBOARD 'UTF8_STRING)) copy))
-    (funcall interprogram-cut-function ""))
+  (when (consp (bound-and-true-p yank-menu))
+    (let ((items (seq-filter (lambda (item) (eq (car-safe item) copy)) (cdr yank-menu))))
+      (setcdr yank-menu (seq-difference (cdr yank-menu) items #'eq))
+      ;; A title is the copy itself when it is short, else a piece of it.
+      (dolist (item items)
+        (when (stringp (car-safe (cdr item))) (clear-string (cadr item))))))
   (clear-string copy))
 
 ;;;; Reading names
@@ -294,9 +337,31 @@ on its standard input, never its command line."
                        (secret (romacs-pass--field data 'secret)))
                    (if (null secret)
                        (message "%s has no password" entry)
-                     (romacs-pass--type user secret)))
+                     (romacs-pass--type-later (copy-sequence user) (copy-sequence secret))))
                (romacs-pass--wipe-data data)))))
   nil)
+
+(defun romacs-pass--focused-p ()
+  "Whether a Romacs frame has the focus, or may have it: one no focus
+change reached yet counts as focused."
+  (seq-some (lambda (frame)
+              (let ((update (assq 'last-focus-update (frame-parameters frame))))
+                (or (null update) (cdr update))))
+            (frame-list)))
+
+(defun romacs-pass--type-later (user secret)
+  "Type USER, Tab and SECRET after `romacs-pass-autotype-delay', unless a
+Romacs frame has the focus then: what is typed goes to the focused
+window, and must not land in a buffer.  Both strings are wiped."
+  (message "Typing into the window focused in %s s" romacs-pass-autotype-delay)
+  (run-at-time romacs-pass-autotype-delay nil
+               (lambda ()
+                 (unwind-protect
+                     (if (romacs-pass--focused-p)
+                         (message "Romacs has the focus: nothing typed")
+                       (romacs-pass--type user secret))
+                   (clear-string user)
+                   (clear-string secret)))))
 
 (defun romacs-pass--type (user secret)
   "Type USER, Tab and SECRET with `romacs-pass-autotype-program'."
@@ -340,28 +405,34 @@ gives it.  An existing entry keeps its other lines: only its password
 is replaced, after confirmation."
   (interactive (list (romacs-pass-read-entry "Generate entry: " t)
                      (and current-prefix-arg (prefix-numeric-value current-prefix-arg))))
-  (let ((exists (romacs-pass-entry-p entry))
-        (password (romacs-pass--generate (or length romacs-pass-generate-length) (romacs-pass-alphabet))))
-    (if (not exists)
-        (romacs-pass--store-generated entry password password)
+  (let ((length (or length romacs-pass-generate-length))
+        (generate (lambda (length) (romacs-pass--generate length (romacs-pass-alphabet)))))
+    (when (< length 1) (user-error "A password needs at least one character"))
+    (if (not (romacs-pass-entry-p entry))
+        (let ((password (funcall generate length)))
+          (romacs-pass--store-generated entry password password))
       (unless (yes-or-no-p (format "Replace %s's password? " entry))
-        (clear-string password)
         (user-error "Kept %s" entry))
       (romacs-pass-with-entry
        entry (lambda (text)
-               (romacs-pass--store-generated
-                entry password (concat password (substring text (or (string-search "\n" text) (length text))))))))
+               (let ((password (funcall generate length)))
+                 (romacs-pass--store-generated
+                  entry password
+                  (concat password (substring text (or (string-search "\n" text) (length text)))))))))
     nil))
 
 (defun romacs-pass--store-generated (entry password text)
-  "Store TEXT as ENTRY, then copy its PASSWORD and wipe it."
-  (romacs-pass--write entry text
-                      (lambda (why)
-                        (unless (eq text password) (clear-string text))
-                        (unwind-protect
-                            (if why (message "%s" why)
-                              (romacs-pass--copy password (format "%s's new password" entry)))
-                          (clear-string password)))))
+  "Store TEXT as ENTRY, then copy its PASSWORD; both are wiped."
+  (romacs-pass--wiping
+   (list password text)
+   (lambda ()
+     (romacs-pass--write entry text
+                         (lambda (why)
+                           (unless (eq text password) (clear-string text))
+                           (unwind-protect
+                               (if why (message "%s" why)
+                                 (romacs-pass--copy password (format "%s's new password" entry)))
+                             (clear-string password)))))))
 
 ;;;; Editing
 
@@ -379,6 +450,8 @@ by a session image."
   (setq-local buffer-auto-save-file-name nil
               backup-inhibited t)
   (auto-save-mode -1)
+  ;; Text taken out of the buffer (a kill, a copy, a register) is a secret.
+  (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-pass--secret)
   (add-hook 'kill-buffer-hook #'romacs-pass--wipe-buffer nil t)
   (add-hook 'warm-restart-blocker-functions #'romacs-pass--restart-blocker nil t)
   (setq header-line-format
@@ -387,15 +460,22 @@ by a session image."
 
 ;;;###autoload
 (defun romacs-pass-edit (entry)
-  "Edit ENTRY in a buffer, created if the store lacks it."
+  "Edit ENTRY in a buffer, created if the store lacks it.
+A buffer already editing ENTRY with changes is shown as it is."
   (interactive (list (romacs-pass-read-entry "Edit entry: " t)))
-  (if (romacs-pass-entry-p entry)
-      (romacs-pass-with-entry entry (lambda (text) (romacs-pass--edit-buffer entry text)))
-    (romacs-pass--edit-buffer entry "")))
+  (let ((buffer (get-buffer (romacs-pass--edit-name entry))))
+    (cond ((and buffer (buffer-modified-p buffer)) (pop-to-buffer buffer))
+          ((romacs-pass-entry-p entry)
+           (romacs-pass-with-entry entry (lambda (text) (romacs-pass--edit-buffer entry text))))
+          (t (romacs-pass--edit-buffer entry "")))))
+
+(defun romacs-pass--edit-name (entry)
+  "The name of the buffer editing ENTRY."
+  (format "*pass: %s*" entry))
 
 (defun romacs-pass--edit-buffer (entry text)
   "Show a buffer editing ENTRY, holding a copy of TEXT."
-  (let ((buffer (get-buffer-create (format "*pass: %s*" entry))))
+  (let ((buffer (get-buffer-create (romacs-pass--edit-name entry))))
     (with-current-buffer buffer
       (romacs-pass-edit-mode)
       (let ((inhibit-read-only t)) (erase-buffer) (insert text))
@@ -406,14 +486,27 @@ by a session image."
     (pop-to-buffer buffer)))
 
 (defun romacs-pass-edit-save ()
-  "Store the buffer's text as its entry, and kill the buffer."
+  "Store the buffer's text as its entry, and kill the buffer.
+The buffer is read-only while pass stores it, so what is stored is
+what it shows."
   (interactive nil romacs-pass-edit-mode)
   (let ((buffer (current-buffer))
-        (entry romacs-pass--edited))
-    (romacs-pass--write-reported entry (buffer-substring-no-properties (point-min) (point-max))
-                                 (lambda ()
-                                   (when (buffer-live-p buffer) (kill-buffer buffer))
-                                   (message "Stored %s" entry)))))
+        (entry romacs-pass--edited)
+        (text (buffer-substring-no-properties (point-min) (point-max))))
+    (romacs-pass--wiping
+     (list text)
+     (lambda ()
+       (romacs-pass--write
+        entry text
+        (lambda (why)
+          (clear-string text)
+          (cond ((not why) (when (buffer-live-p buffer) (kill-buffer buffer))
+                 (message "Stored %s" entry))
+                (t (when (buffer-live-p buffer)
+                     (with-current-buffer buffer (setq buffer-read-only nil)))
+                   (message "%s" why)))))))
+    ;; pass has started: its answer comes after this command.
+    (setq buffer-read-only t)))
 
 (defun romacs-pass-edit-cancel ()
   "Kill the buffer, leaving its entry unchanged."

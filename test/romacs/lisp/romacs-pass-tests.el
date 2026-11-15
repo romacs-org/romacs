@@ -98,21 +98,44 @@ finds nothing in it, without an error."
 ;;;; Copies
 
 (ert-deftest romacs-pass-copy-leaves-after-its-time ()
-  "A copied password is a secret in the kill ring, which leaves it and is
-wiped after `romacs-pass-clear-seconds'; the command returns nil, so its
-caller never sees the secret."
+  "A copied password is a secret in the kill ring, the clipboard and the
+Edit menu's yank list, which all lose it after
+`romacs-pass-clear-seconds', and it is wiped; the command returns nil,
+so its caller never sees the secret."
   (romacs-pass-tests--with-store romacs-pass-tests--entries
-    (let ((romacs-pass-clear-seconds 0.5)
-          (kill-ring (list "older"))
-          (kill-ring-yank-pointer nil))
-      (setq kill-ring-yank-pointer kill-ring)
-      (should-not (romacs-pass-copy "email/work"))
-      (romacs-pass-tests--wait (lambda () (equal (car kill-ring) "hunter2")))
-      (let ((copy (car kill-ring)))
-        (should (get-text-property 0 'romacs-secret copy))
-        (romacs-pass-tests--wait (lambda () (equal kill-ring '("older"))))
-        (should (eq kill-ring-yank-pointer kill-ring))
-        (should (romacs-pass-tests--wiped-p copy))))))
+    (let* ((romacs-pass-clear-seconds 0.5)
+           (kill-ring (list "older"))
+           (kill-ring-yank-pointer kill-ring)
+           (yank-menu (list "Select Yank"))
+           (clipboard nil)
+           (interprogram-cut-function (lambda (text) (setq clipboard (copy-sequence text))))
+           (interprogram-paste-function #'ignore))
+      (cl-letf (((symbol-function 'gui-get-selection) (lambda (&rest _) clipboard)))
+        (should-not (romacs-pass-copy "email/work"))
+        (romacs-pass-tests--wait (lambda () (equal (car kill-ring) "hunter2")))
+        (let ((copy (car kill-ring)))
+          (should (get-text-property 0 'romacs-secret copy))
+          (should (equal clipboard "hunter2"))
+          (when (fboundp 'menu-bar-update-yank-menu)
+            (should (seq-some (lambda (item) (eq (car-safe item) copy)) (cdr yank-menu))))
+          (romacs-pass-tests--wait (lambda () (equal kill-ring '("older"))))
+          (should (equal clipboard ""))
+          (should (eq kill-ring-yank-pointer kill-ring))
+          (should (romacs-pass-tests--wiped-p copy))
+          (should-not (memq copy romacs-pass--copies))
+          (should-not (cdr yank-menu)))))))
+
+(ert-deftest romacs-pass-autotype-refuses-a-focused-romacs ()
+  "Typing waits for another window to have the focus: with a Romacs frame
+focused, nothing is typed and the strings are wiped."
+  (let ((romacs-pass-autotype-delay 0)
+        (user (copy-sequence "me")) (secret (copy-sequence "hunter2")) (typed nil))
+    (cl-letf (((symbol-function 'romacs-pass--focused-p) #'always)
+              ((symbol-function 'romacs-pass--type) (lambda (&rest _) (setq typed t))))
+      (romacs-pass--type-later user secret)
+      (romacs-pass-tests--wait (lambda () (romacs-pass-tests--wiped-p secret))))
+    (should-not typed)
+    (should (romacs-pass-tests--wiped-p user))))
 
 (ert-deftest romacs-pass-otp-copies-the-current-code ()
   "The one-time code is the entry's TOTP code now, six digits."
@@ -147,7 +170,8 @@ stored, and a new password for an existing entry keeps its fields."
         (romacs-pass-generate "email/work" 12))
       (romacs-pass-tests--wait (lambda () (= (length (car kill-ring)) 12)))
       (should (equal (romacs-pass-read "email/work")
-                     (concat (car kill-ring) "\nuser: me@example.org\nurl: https://mail.example.org\n"))))))
+                     (concat (car kill-ring) "\nuser: me@example.org\nurl: https://mail.example.org\n")))
+      (should-error (romacs-pass-generate "new/empty" 0) :type 'user-error))))
 
 (ert-deftest romacs-pass-edit-stores-the-buffer ()
   "An entry is edited in a buffer that makes no auto-save and refuses a
@@ -160,10 +184,15 @@ warm restart while modified; storing it writes the text and kills it."
       (should-not buffer-file-name)
       (should-not buffer-auto-save-file-name)
       (should-not (romacs-pass--restart-blocker))
+      (should (get-text-property 0 'romacs-secret (filter-buffer-substring 1 8)))
       (goto-char (point-max))
       (insert "note: changed\n")
       (should (romacs-pass--restart-blocker))
-      (romacs-pass-edit-save))
+      ;; Asking again shows the changed buffer as it is.
+      (romacs-pass-edit "email/work")
+      (should (string-suffix-p "note: changed\n" (buffer-string)))
+      (romacs-pass-edit-save)
+      (should buffer-read-only))
     (romacs-pass-tests--wait (lambda () (not (get-buffer "*pass: email/work*"))))
     (should (string-suffix-p "note: changed\n" (romacs-pass-read "email/work")))
     (romacs-pass-edit "new/edited")
@@ -183,6 +212,8 @@ auth-source-pass's naming, with no configuration but the store."
     (should (equal (jabber-read-password "thanos@chat.example.org") "jabber-secret"))
     (should (equal (auth-source-pass-get 'secret "email/work") "hunter2"))
     (should (equal (auth-source-pass-get "user" "email/work") "me@example.org"))
+    ;; auth-source keeps what it finds: a one-time code's seed is not part of it.
+    (should (equal (auth-source-pass-parse-entry "web/otp") '((secret . "web-secret"))))
     (let ((found (car (auth-source-search :host "chat.example.org" :user "thanos" :port "xmpp"
                                           :max 1 :require '(:secret)))))
       (should (equal (auth-info-password found) "jabber-secret")))))
@@ -273,7 +304,9 @@ is open."
   (require 'warm-restart)
   (let* ((kill-ring (list "plain" (romacs-pass--secret (copy-sequence "secret")) "older"))
          (kill-ring-yank-pointer (cddr kill-ring))
-         (register-alist (list (cons ?s (romacs-pass--secret (copy-sequence "secret")))))
+         (register-alist (list (cons ?s (romacs-pass--secret (copy-sequence "secret")))
+                               ;; A secret appended to ordinary text, as `append-to-register' makes it.
+                               (cons ?t (concat "plain " (romacs-pass--secret (copy-sequence "secret"))))))
          (globals (warm-restart--globals)))
     (should (equal (plist-get globals :kill-ring) '("plain" "older")))
     (should (equal (plist-get globals :yank-index) 1))

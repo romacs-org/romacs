@@ -383,6 +383,12 @@ impl LispString {
         self.cursors[1].set((self.chars, self.bytes.len()));
         Ok(())
     }
+    /// Overwrite the text's storage with zeros, spare capacity included:
+    /// `clear-string` replaces the object afterwards, and dropping the old
+    /// bytes unwiped would leave the text in freed memory.
+    pub(crate) fn wipe(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.bytes);
+    }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
         size_of::<Self>()
             + self.properties.storage_bytes()

@@ -3,12 +3,15 @@
 //! `secret` in base32 (RFC 4648), and `algorithm` (SHA1, SHA256 or
 //! SHA512), `digits` (6 to 10) and `period` (seconds) with their usual
 //! defaults.  Counter-based HOTP is refused: its counter lives in the
-//! entry and moves at every use, which a read cannot do.
+//! entry and moves at every use, which a read cannot do.  The key and
+//! its decoded copies are wiped when dropped, on every path.
+
+use zeroize::Zeroizing;
 
 /// What a URI asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Totp {
-    pub key: Vec<u8>,
+    pub key: Zeroizing<Vec<u8>>,
     pub algorithm: &'static str,
     pub digits: u32,
     pub period: u64,
@@ -24,7 +27,7 @@ pub(crate) fn parse(uri: &str) -> Result<Totp, String> {
         other => return Err(format!("unknown otpauth type: {other}")),
     }
     let query = rest.split_once('?').map_or("", |(_, query)| query);
-    let mut totp = Totp { key: Vec::new(), algorithm: "sha1", digits: 6, period: 30 };
+    let mut totp = Totp { key: Zeroizing::new(Vec::new()), algorithm: "sha1", digits: 6, period: 30 };
     let mut secret = None;
     for (name, value) in query.split('&').filter_map(|pair| pair.split_once('=')) {
         let value = percent_decoded(value);
@@ -34,7 +37,7 @@ pub(crate) fn parse(uri: &str) -> Result<Totp, String> {
                 "SHA1" => "sha1",
                 "SHA256" => "sha256",
                 "SHA512" => "sha512",
-                _ => return Err(format!("unknown algorithm: {value}")),
+                _ => return Err(format!("unknown algorithm: {}", value.as_str())),
             },
             "digits" => totp.digits = value.parse().ok().filter(|d| (6..=10).contains(d)).ok_or("digits is not 6 to 10")?,
             "period" => totp.period = value.parse().ok().filter(|&p| p > 0).ok_or("period is not a positive number of seconds")?,
@@ -56,9 +59,10 @@ pub(crate) fn code(totp: &Totp, unix_seconds: u64) -> (String, u64) {
     (format!("{code:0width$}", width = totp.digits as usize), totp.period - unix_seconds % totp.period)
 }
 
-/// RFC 4648 base32, any case, padding and spaces ignored.
-fn base32(text: &str) -> Option<Vec<u8>> {
-    let (mut out, mut buffer, mut bits) = (Vec::new(), 0u64, 0u32);
+/// RFC 4648 base32, any case, padding and spaces ignored.  The output is
+/// sized first, so it never moves and leaves a copy behind.
+fn base32(text: &str) -> Option<Zeroizing<Vec<u8>>> {
+    let (mut out, mut buffer, mut bits) = (Zeroizing::new(Vec::with_capacity(text.len() * 5 / 8 + 1)), 0u64, 0u32);
     for c in text.chars().filter(|c| !matches!(c, '=' | ' ' | '-')) {
         let value = match c.to_ascii_uppercase() {
             c @ 'A'..='Z' => c as u64 - 'A' as u64,
@@ -77,9 +81,9 @@ fn base32(text: &str) -> Option<Vec<u8>> {
 }
 
 /// TEXT with its `%XX` escapes decoded, and `+` as a space.
-fn percent_decoded(text: &str) -> String {
+fn percent_decoded(text: &str) -> Zeroizing<String> {
     let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
+    let mut out = Zeroizing::new(Vec::with_capacity(bytes.len()));
     let mut i = 0;
     while i < bytes.len() {
         let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
@@ -89,7 +93,13 @@ fn percent_decoded(text: &str) -> String {
             (byte, _) => { out.push(byte); i += 1; }
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    match String::from_utf8(std::mem::take(&mut *out)) {
+        Ok(text) => Zeroizing::new(text),
+        Err(error) => {
+            let bytes = Zeroizing::new(error.into_bytes());
+            Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -111,7 +121,7 @@ mod tests {
         ];
         for (time, sha1, sha256, sha512) in cases {
             for (algorithm, size, expected) in [("sha1", 20, sha1), ("sha256", 32, sha256), ("sha512", 64, sha512)] {
-                let totp = Totp { key: seed(size), algorithm, digits: 8, period: 30 };
+                let totp = Totp { key: Zeroizing::new(seed(size)), algorithm, digits: 8, period: 30 };
                 assert_eq!(code(&totp, time).0, expected, "{algorithm} at {time}");
             }
         }
@@ -120,7 +130,7 @@ mod tests {
     #[test]
     fn a_uri_gives_its_parameters_and_defaults() {
         let totp = parse("otpauth://totp/Example:alice%40example.org?secret=JBSWY3DPEHPK3PXP&issuer=Example").unwrap();
-        assert_eq!(totp, Totp { key: b"Hello!\xde\xad\xbe\xef".to_vec(), algorithm: "sha1", digits: 6, period: 30 });
+        assert_eq!(totp, Totp { key: Zeroizing::new(b"Hello!\xde\xad\xbe\xef".to_vec()), algorithm: "sha1", digits: 6, period: 30 });
         let totp = parse("otpauth://totp/x?secret=jbsw%20y3dp&algorithm=SHA512&digits=8&period=60").unwrap();
         assert_eq!((totp.key.as_slice(), totp.algorithm, totp.digits, totp.period), (&b"Hello"[..], "sha512", 8, 60));
         assert_eq!(code(&totp, 61).1, 59);
