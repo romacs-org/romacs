@@ -1,12 +1,12 @@
 //! `--world-trace OUT.json` (DESIGN-M1 §5, §13 step 2): run the recipe, the
 //! preloads, harness and adapter, as a world build would, and write its read
 //! trace. The process re-executes itself with the pinned per-process
-//! environment, confined, in build mode; the child lists every refusal
+//! environment, in build mode; the child lists every refusal
 //! rather than stopping at the first, writes the trace to OUT and exits 1 if
 //! there was any.
 use romacs_vm::host::{self, Pinned};
 use romacs_vm::world::store::{self, Launch, World};
-use romacs_vm::{Vm, world::sandbox};
+use romacs_vm::Vm;
 use serde_json::json;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -73,14 +73,8 @@ pub fn trace(out: &Path) -> ! {
     }
 }
 
-/// The child, before the VM is made: confine to the RECIPE's roots, the
-/// pinned table under DIR and the binary's own, writing only OUT; then
-/// record.
-pub fn begin(recipe: Vec<PathBuf>, out: &Path, dir: &Path) {
-    if let Err(e) = sandbox::confine(&sandbox::build_roots(recipe, dir), &[out.to_owned()]) {
-        crate::emit(json!({"event": "setup", "ok": false, "phase": "world-confine", "error": e.to_string()}));
-        std::process::exit(3);
-    }
+/// The child, before the VM is made: record in build mode.
+pub fn begin() {
     host::enter_build(Pinned { clock: host::clock(), pid: PID, seed: SEED });
 }
 
@@ -106,7 +100,7 @@ pub fn world_preloads(preload: &[PathBuf]) -> usize {
 }
 
 /// The tree the world's preloads are in: the runtime root of the bootstrap
-/// preload, `<root>/lisp/romacs/romacs-loadup-bootstrap.el`.
+/// preload, `<root>/lisp/session/romacs-loadup-bootstrap.el`.
 fn world_root(preload: &[PathBuf]) -> Option<&Path> {
     preload.first()
         .filter(|p| p.file_name().is_some_and(|n| n == "romacs-loadup-bootstrap.el"))
@@ -219,11 +213,10 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
     }
 }
 
-/// The builder: run the world's preloads in build mode, confined, then
-/// publish the world and exit, 0 when it was published.
+/// The builder: run the world's preloads in build mode, then publish the
+/// world and exit, 0 when it was published.
 fn build(world: &World, args: &crate::Args, count: usize) -> ! {
-    let roots = world.build_roots(world_load_path(&args.load_path, &args.preload).into_iter().chain(args.preload[..count].iter().cloned()).collect());
-    if let Err(e) = world.begin_build(&roots) {
+    if let Err(e) = world.begin_build() {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
         std::process::exit(3);
     }
@@ -257,28 +250,28 @@ mod tests {
     #[test]
     fn the_world_holds_the_bootstrap_and_its_tree() {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let tree = paths(&["/r/lisp/romacs/romacs-loadup-bootstrap.el", "/r/lisp/gnu/help-fns.el", "/r/lisp/romacs/romacs-cl-print.el", "/case/setup.el", "/r/lisp/romacs/x.el"]);
+        let tree = paths(&["/r/lisp/session/romacs-loadup-bootstrap.el", "/r/lisp/help-fns.el", "/r/lisp/emacs-lisp/romacs-cl-print.el", "/case/setup.el", "/r/lisp/session/x.el"]);
         assert_eq!(world_preloads(&tree), 3);
-        assert_eq!(world_preloads(&paths(&["/r/lisp/romacs/x.el"])), 0);
+        assert_eq!(world_preloads(&paths(&["/r/lisp/session/x.el"])), 0);
         assert_eq!(world_preloads(&[]), 0);
     }
 
     #[test]
     fn the_world_keys_on_its_trees_load_path_only_before_the_runs_own() {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let preload = paths(&["/r/lisp/romacs/romacs-loadup-bootstrap.el"]);
+        let preload = paths(&["/r/lisp/session/romacs-loadup-bootstrap.el"]);
         // run.py's layout: the tree's entries, then the test's directory.
-        assert_eq!(world_load_path(&paths(&["/r/lisp/gnu", "/r/lisp/romacs", "/t/run-1"]), &preload), paths(&["/r/lisp/gnu", "/r/lisp/romacs"]));
+        assert_eq!(world_load_path(&paths(&["/r/lisp", "/r/lisp/session", "/t/run-1"]), &preload), paths(&["/r/lisp", "/r/lisp/session"]));
         // Another layout keys on the whole path, whose order a restore keeps.
-        let before = paths(&["/t/run-1", "/r/lisp/gnu", "/r/lisp/romacs"]);
+        let before = paths(&["/t/run-1", "/r/lisp", "/r/lisp/session"]);
         assert_eq!(world_load_path(&before, &preload), before);
-        let between = paths(&["/r/lisp/gnu", "/t/run-1", "/r/lisp/romacs"]);
+        let between = paths(&["/r/lisp", "/t/run-1", "/r/lisp/session"]);
         assert_eq!(world_load_path(&between, &preload), between);
         // A tree entry given twice: where the run's own go is unclear.
         let twice = paths(&["/r/a", "/r/b", "/r/a", "/t/run-1"]);
         assert_eq!(world_load_path(&twice, &preload), twice);
         // No bootstrap preload, no world tree: the whole path.
-        assert_eq!(world_load_path(&paths(&["/r/lisp/gnu", "/t"]), &[]), paths(&["/r/lisp/gnu", "/t"]));
+        assert_eq!(world_load_path(&paths(&["/r/lisp", "/t"]), &[]), paths(&["/r/lisp", "/t"]));
     }
 
     #[test]
