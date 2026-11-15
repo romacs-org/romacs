@@ -574,6 +574,17 @@ characters they encode, to put in a buffer, a string or more JSON."
     (set-file-modes temporary #o600)
     (rename-file temporary file t)))
 
+(defun romacs-agent--keep-json (file object)
+  "Write OBJECT as JSON to FILE as `romacs-agent--write-json' does, unless
+FILE holds it already: a file written again at every launch costs the
+editor a write and a rename, which a loaded disk makes long."
+  (let ((text (romacs-agent--json object)))
+    (unless (and (file-readable-p file)
+                 (equal text (with-temp-buffer
+                               (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                               (buffer-string))))
+      (romacs-agent--write-json file object))))
+
 (defun romacs-agent--read-json (file)
   (when (file-readable-p file)
     (with-temp-buffer
@@ -4102,9 +4113,10 @@ opens."
 
 (declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 
-(defconst romacs-agent--restore-turn 0.2
+(defconst romacs-agent--restore-turn 0.05
   "Seconds of loading `romacs-agent-restore-soon' does in one turn of the
-command loop, past the turn's first session.")
+command loop, past the turn's first session: short enough that a key
+waits for no step.")
 
 (defvar romacs-agent--restore-pending nil
   "The session directories `romacs-agent-restore-soon' has still to load.")
