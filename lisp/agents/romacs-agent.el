@@ -3643,18 +3643,20 @@ record, from its turns' rows; nil when it has fewer rows than that, none
 earlier (all of it is then drawn), or for a journal when it begins more
 than BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
 by default; `none', no bound)."
-  (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
-              (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
-              ;; One turn more than drawn: what is before it is earlier turns.
-              ((> (length seqs) turns))
-              (seq (nth (1- turns) seqs))
-              (from (if (romacs-agent-events-p session) seq
-                      (romacs-agent--journal-file-after session seq nil t)))
-              ;; Bounded as the journal's own tail is (`none', not at all).
-              (bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes)))
-              ((or (romacs-agent-events-p session) (not bound)
-                   (<= (- (romacs-agent--journal-end session) from) bound))))
-    (cons from turns)))
+  ;; Bounded as the journal's own tail is (`none', not at all): looked for
+  ;; only within the bound's bytes.
+  (let ((bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes))))
+    (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
+                (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+                ;; One turn more than drawn: what is before it is earlier turns.
+                ((> (length seqs) turns))
+                (seq (nth (1- turns) seqs))
+                (from (if (romacs-agent-events-p session) seq
+                        (romacs-agent--journal-file-after session seq bound t)))
+                ((integerp from))
+                ((or (romacs-agent-events-p session) (not bound)
+                     (<= (- (romacs-agent--journal-end session) from) bound))))
+      (cons from turns))))
 
 (defun romacs-agent--journal-file-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
