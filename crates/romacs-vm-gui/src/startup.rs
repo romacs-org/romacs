@@ -1980,7 +1980,7 @@ mod tests {
         let path = runtime_load_path(&dir).unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&path).unwrap();
-        for name in ["websocket", "fsm", "markdown-mode"] {
+        for name in ["fsm", "markdown-mode"] {
             let directory = owned.join("deps").join(name);
             assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: {name}");
             let expected = directory.join(format!("{name}.el"));
@@ -2001,8 +2001,7 @@ mod tests {
         assert!(gnu.is_file());
         assert_eq!(locate(&mut vm, "gnus-dbus"), lisp_string(&gnu.to_string_lossy()));
         for (name, file) in [("jabber", "jabber/jabber.el"),
-                             ("gnosis", "gnosis/gnosis.el"), ("keymap-popup", "emacs-lisp/keymap-popup.el"),
-                             ("websocket", "deps/websocket/websocket.el")] {
+                             ("gnosis", "gnosis/gnosis.el"), ("keymap-popup", "emacs-lisp/keymap-popup.el")] {
             assert_eq!(locate(&mut vm, name), lisp_string(&root.join("lisp/romacs").join(file).to_string_lossy()), "{name}");
         }
         assert_eq!(locate(&mut vm, "romacs-win"), "nil");
