@@ -524,3 +524,50 @@ fn a_band_moved_to_a_dimmed_pane_s_edge_at_seven_times_equals_it_drawn_whole() {
     let new = frame([(3.0, "ab"), (6.0, "cd")]);
     assert!(through_picture(&mut h, &[old.clone(), old, new], 7.0) > 0, "the rows move");
 }
+
+/// Two windows side by side, rows ROW tall: the left one showing lines from
+/// LEFT, the right from RIGHT, where a line "~" is an empty row holding a
+/// fringe bitmap sixteen wide in a two-pixel column, past its cells.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
+fn split_frame(left: usize, right: usize) -> FrameGlyphBuffer {
+    const LEFT: [&str; 7] = ["la", "lb", "lc", "ld", "le", "lf", "lg"];
+    const RIGHT: [&str; 7] = ["rz", "ra", "~", "rc", "rd", "re", "rf"];
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    (frame.char_width, frame.char_height) = (CELL, ROW);
+    frame.background = BG;
+    text_face(&mut frame, NORMAL, BG);
+    frame.register_fringe_bitmap(
+        1,
+        FringeBitmapData { bits: vec![0xFFFF; 8], width: 16, height: 8, period: 0, align: 0 },
+    );
+    for (window, x0, lines, first) in [(1, 0.0, LEFT, left), (2, 48.0, RIGHT, right)] {
+        frame.set_draw_context(DisplayWindowId::new(window), GlyphRowRole::Text, None);
+        frame.add_background(x0, 0.0, 46.0, 5.0 * ROW, BG);
+        for (row, line) in lines.iter().skip(first).take(5).enumerate() {
+            let y = row as f32 * ROW;
+            if *line == "~" {
+                frame.push_fringe_bitmap(x0, y, 2.0, ROW, 1, FaceId::new(NORMAL), FringeSide::Left);
+                continue;
+            }
+            for (col, ch) in line.chars().enumerate() {
+                // The right window's two cells end at 60: the bitmap reaches 64.
+                let indent = if window == 1 { 12.0 } else { 2.0 };
+                frame.add_char(ch, x0 + indent + col as f32 * CELL, y, CELL, ROW, 6.0, false);
+            }
+        }
+    }
+    frame
+}
+
+#[test]
+fn a_band_moved_beside_another_window_keeps_that_window_s_reach() {
+    // The left window scrolls over the rows where the right window's bitmap
+    // reaches past its cells; then the right window scrolls the bitmap's
+    // row down. Its band holds the bitmap's ink.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frames = [(0, 1), (0, 1), (1, 1), (1, 0)].map(|(left, right)| split_frame(left, right));
+    assert!(through_picture(&mut h, &frames, 1.0) > 0, "the windows' rows move");
+}

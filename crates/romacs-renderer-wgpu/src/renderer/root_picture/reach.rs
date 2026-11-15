@@ -81,9 +81,11 @@ impl Rows {
         }
     }
 
-    /// SELF after the rows within FROM's height were copied DY away: what
-    /// was drawn where they land is gone, and theirs reaches there too (and
-    /// still where they were, whose pixels the copy leaves).
+    /// SELF after the rows within FROM's height were copied DY away: theirs
+    /// reaches where they land too, and still where they were, whose pixels
+    /// the copy leaves. Nothing is forgotten: rows are keyed by height alone,
+    /// so a row where they land may be another window's, untouched; a reach
+    /// only overstates until the next whole repaint.
     pub(crate) fn moved(&mut self, from: Rect, dy: f32) {
         let within = |(y, h): (u32, u32), top: f32| {
             let (y, h) = (f32::from_bits(y), f32::from_bits(h));
@@ -95,7 +97,6 @@ impl Rows {
             .filter(|(row, _)| within(**row, from.y))
             .map(|(&(y, h), &reach)| (((f32::from_bits(y) + dy).to_bits(), h), reach))
             .collect();
-        self.0.retain(|row, _| !within(*row, from.y + dy));
         self.merge(Rows(carried.into_iter().collect()));
     }
 }
@@ -219,10 +220,11 @@ mod tests {
         assert_eq!(rows.of(Rect::new(50.0, 0.0, 5.0, 10.0)), right, "a row's own");
         assert_eq!(rows.of(Rect::new(0.0, 10.0, 5.0, 10.0)), Reach::default(), "none drawn there");
         assert_eq!(rows.of(Rect::new(0.0, 5.0, 5.0, 30.0)), right.max(left), "every row it overlaps");
-        // The rows of 0..20 are copied down 30: the row at 30 is overwritten,
-        // and the row at 0 keeps its pixels until it is drawn again.
+        // The rows of 0..20 are copied down 30: the row at 30 takes theirs
+        // and keeps its own (it may be another window's), and the row at 0
+        // keeps its pixels until it is drawn again.
         rows.moved(Rect::new(0.0, 0.0, 10.0, 20.0), 30.0);
-        assert_eq!(rows.of(Rect::new(0.0, 30.0, 5.0, 10.0)), right);
+        assert_eq!(rows.of(Rect::new(0.0, 30.0, 5.0, 10.0)), right.max(left));
         assert_eq!(rows.of(Rect::new(0.0, 0.0, 5.0, 10.0)), right);
     }
 }
