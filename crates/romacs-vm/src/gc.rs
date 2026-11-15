@@ -2447,6 +2447,7 @@ mod tests {
             // one, which would promote the string while it is still held.
             let mut vm = Vm::new();
             vm.install_lisp_prelude().unwrap();
+            vm.set_gc_minor(false);
             vm.eval_source_raw(&format!("(setq gc-cons-threshold 1000000000 n {N} minor-kept nil minor-dead nil)")).unwrap();
             vm.collect(&mut []);
             // A global, not a lexical: a minor keeps what a lexical pair
