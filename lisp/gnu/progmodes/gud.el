@@ -93,16 +93,6 @@ pdb (Python), and jdb."
 (defvar-keymap gud-global-map
   "C-l" #'gud-refresh)
 
-;; Romacs: a keymap already on the prefix (the agents' on C-x C-a) is
-;; kept under gud's own, not replaced: see LISP-GUD-PREFIX.
-(let ((there (lookup-key global-map gud-key-prefix)))
-  (when (and (keymapp there) (not (keymap-parent gud-global-map))
-             ;; Not one that is gud's own map or inherits it (gud loaded again).
-             (not (let ((map there) (found nil))
-                    (while (and map (not found))
-                      (setq found (eq map gud-global-map) map (keymap-parent map)))
-                    found)))
-    (set-keymap-parent gud-global-map there)))
 (global-set-key gud-key-prefix gud-global-map)
 
 (defvar gud-marker-filter nil)
