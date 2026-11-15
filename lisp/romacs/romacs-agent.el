@@ -3426,10 +3426,10 @@ and nothing nested can stand at a line's start or end."
   (if (romacs-agent-events-p session) (romacs-agent-events-after session seq)
     (romacs-agent--journal-file-after session seq)))
 
-(defun romacs-agent--journal-file-after (session seq)
-  "The byte at which SESSION's journal goes on after its record SEQ, looked
-for from the journal's end in growing spans; nil when no line there is
-record SEQ (`romacs-agent--record-line-end')."
+(defun romacs-agent--journal-file-after (session seq &optional at)
+  "The byte at which SESSION's journal goes on after its record SEQ (with
+AT, the byte it begins at), looked for from the journal's end in growing
+spans; nil when no line there is record SEQ (`romacs-agent--record-line-end')."
   (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
          (size (file-attribute-size (file-attributes journal)))
          (span 16384) (found nil))
@@ -3446,7 +3446,7 @@ record SEQ (`romacs-agent--record-line-end')."
               (goto-char (point-min))
               (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (setq found (let ((end (romacs-agent--record-line-end seq)))
-                          (cond (end (min size (+ start end)))
+                          (cond (end (min size (if at (+ start (line-beginning-position) -1) (+ start end))))
                                 ((= start 0) 'none))))
             (setq span (* 4 span))))))
     (and (integerp found) found)))
@@ -3546,9 +3546,25 @@ sequence) would break that, and are read as raw bytes instead."
 (defun romacs-agent--journal-tail (session turns &optional end begin)
   "Where to replay SESSION's records from to draw its last TURNS prompts
 between places BEGIN and END: (FROM . PROMPTS), as
-`romacs-agent--journal-file-tail' says, of whichever holds them."
-  (if (romacs-agent-events-p session) (romacs-agent-events-tail session turns end begin)
-    (romacs-agent--journal-file-tail session turns end begin)))
+`romacs-agent--journal-file-tail' says, of whichever holds them.  Its
+whole records' last turns, when it has rows for them, are where its turns'
+rows say they begin (romacs-agent-turns): no record is read to find it."
+  (or (and (not end) (not begin) (romacs-agent--turns-tail session turns))
+      (if (romacs-agent-events-p session) (romacs-agent-events-tail session turns end begin)
+        (romacs-agent--journal-file-tail session turns end begin))))
+
+(defun romacs-agent--turns-tail (session turns)
+  "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
+record, from its turns' rows; nil when it has fewer rows than that, or
+none earlier (all of it is then drawn)."
+  (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
+              (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+              ;; One turn more than drawn: what is before it is earlier turns.
+              ((> (length seqs) turns))
+              (seq (nth (1- turns) seqs))
+              (from (if (romacs-agent-events-p session) seq
+                      (romacs-agent--journal-file-after session seq t))))
+    (cons from turns)))
 
 (defun romacs-agent--journal-file-tail (session turns &optional end begin)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
@@ -3874,4 +3890,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-watch)
 (require 'romacs-agent-store)
 (require 'romacs-agent-events)
+(require 'romacs-agent-turns)
 ;;; romacs-agent.el ends here

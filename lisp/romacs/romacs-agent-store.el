@@ -233,7 +233,7 @@ manifest."
 (defun romacs-agent-store-fill-soon ()
   "Fill the database in a batch process of this build, off the editor, when
 no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
-  (when (and (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open))
+  (when (and (not noninteractive) (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open))
     (setq romacs-agent-store--filling
           (make-process
            :name "romacs-agent-store-fill" :noquery t :connection-type 'pipe
