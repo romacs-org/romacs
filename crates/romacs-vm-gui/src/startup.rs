@@ -1996,13 +1996,11 @@ mod tests {
         let path = runtime_load_path(&dir).unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&path).unwrap();
-        for name in ["fsm"] {
-            let directory = dir.join("packages").join(name);
-            assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: {name}");
-            let expected = directory.join(format!("{name}.el"));
-            assert_eq!(printed(&mut vm, &format!("(locate-file-internal {} load-path '(\".el\"))", lisp_string(name))),
-                lisp_string(&expected.to_string_lossy()));
-        }
+        // fsm: jabber's dependency, bundled as a package of its own.
+        let directory = dir.join("packages/fsm");
+        assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: fsm");
+        assert_eq!(printed(&mut vm, "(locate-file-internal \"fsm\" load-path '(\".el\"))"),
+            lisp_string(&directory.join("fsm.el").to_string_lossy()));
         assert!(!path.contains(&dir.join("vm")), "VM helpers are compile-time inputs, not public libraries");
     }
 

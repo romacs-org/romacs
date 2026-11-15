@@ -112,8 +112,8 @@ fn the_scan_yields_the_forms_loaddefs_generate_writes() {
     assert!(parts[4].parse::<usize>().unwrap() < parts[5].parse::<usize>().unwrap(), "foo before foo-bar: {found}");
 }
 
-/// The scan and tools/lisp-loaddefs split the tree between them by one rule: the files the
-/// library scans are the ones tools/lib/lisp_layout.py `scanned_files` leaves out of the loaddefs
+/// The scan and `tools/lisp-loaddefs` split the tree between them by one rule: the files the
+/// library scans are the ones `tools/lib/lisp_layout.py` `scanned_files` leaves out of the loaddefs
 /// files (the library itself aside, which scans everything but itself), so no file's autoloads are
 /// in both holders or in neither.
 #[test]
