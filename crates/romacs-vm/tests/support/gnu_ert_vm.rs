@@ -5,5 +5,5 @@ use romacs_vm::Vm;
 mod gnu_lisp;
 
 pub fn bootstrapped() -> Vm {
-    gnu_lisp::gnu_lisp(&["lisp/gnu/help-fns.el", "lisp/romacs/romacs-cl-print.el", "lisp/gnu/emacs-lisp/ert.el"])
+    gnu_lisp::gnu_lisp(&["lisp/help-fns.el", "lisp/emacs-lisp/romacs-cl-print.el", "lisp/emacs-lisp/ert.el"])
 }
