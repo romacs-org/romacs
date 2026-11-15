@@ -22,7 +22,7 @@ const NAME: &str = "a_world_restores_randomized_and_refuses_a_damaged_image";
 const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
 const FAILED: &str = "a_failed_build_is_retried_after_a_backoff";
 const PUBLISH: &str = "a_build_that_fails_to_publish_records_its_failure";
-const REFUSED: &str = "a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset";
+const UNCAPTURED: &str = "an_uncaptured_build_stays_so_until_its_inputs_change_or_a_reset";
 const FOREIGN: &str = "a_launch_on_a_directory_that_is_no_store_boots_from_source_and_says_why";
 const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const PAUSED_BUILDER: &str = "pruning_waits_for_a_builder_between_opening_and_locking";
@@ -216,7 +216,7 @@ fn launch(store: &Path) {
                 let mut vm = Vm::new();
                 if flag.trim() == "sqlite" {
                     // A resource of this process, which a build does not
-                    // open (`host::sqlite_open'): the build refuses it.
+                    // open (`host::sqlite_open'): the build notes it as not captured.
                     vm.eval_source("(defvar world-image-db (sqlite-open))").unwrap();
                 }
                 vm.world_begin();
@@ -862,30 +862,30 @@ fn a_build_that_fails_to_publish_records_its_failure() {
 }
 
 #[test]
-fn a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset() {
+fn an_uncaptured_build_stays_so_until_its_inputs_change_or_a_reset() {
     if act_in_role() {
         return;
     }
-    let scratch = scratch(REFUSED);
+    let scratch = scratch(UNCAPTURED);
     let store = scratch.join("store");
     std::fs::create_dir_all(scratch.join("input")).unwrap();
     std::fs::write(scratch.join("input/flag"), "sqlite").unwrap();
-    let first = outcome(&mut child_of(REFUSED, "launch", &store));
+    let first = outcome(&mut child_of(UNCAPTURED, "launch", &store));
     assert!(first.contains(r#""mode":"source""#), "{first}");
-    assert!(failure(&store).is_none(), "a refusal is no transient failure");
+    assert!(failure(&store).is_none(), "what a build cannot capture is no transient failure");
     // However long since: no retry while the inputs hold.
     let before = files(&store);
-    let second = outcome(&mut child_of(REFUSED, "launch", &store));
-    assert!(second.contains("refused") && second.contains("open sqlite database") && !second.contains("retry_in"), "{second}");
+    let second = outcome(&mut child_of(UNCAPTURED, "launch", &store));
+    assert!(second.contains("uncaptured") && second.contains("open sqlite database") && !second.contains("retry_in"), "{second}");
     assert_eq!(files(&store), before, "no builder ran");
-    // A reset forgets the refusal: the next launch builds again.
+    // A reset forgets what was not captured: the next launch builds again.
     assert_eq!(romacs_vm::world::store::reset(&store, false).unwrap(), 1);
-    let third = outcome(&mut child_of(REFUSED, "launch", &store));
-    assert!(third.contains("refused"), "{third}");
+    let third = outcome(&mut child_of(UNCAPTURED, "launch", &store));
+    assert!(third.contains("uncaptured"), "{third}");
     assert_ne!(files(&store), before, "a builder ran");
     // Another input: built and booted from.
     std::fs::write(scratch.join("input/flag"), "ok").unwrap();
-    assert_eq!(outcome(&mut child_of(REFUSED, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(UNCAPTURED, "launch", &store)), restored());
     // Every world and cache goes with `all`, and only the store's own
     // files: the marker, the store's lock and directories, and a stranger stay.
     std::fs::write(store.join("unrelated"), "kept").unwrap();

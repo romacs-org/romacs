@@ -377,4 +377,57 @@ unless CUT, then its turn's end."
              (should (memq 'romacs-agent-dim (ensure-list (get-text-property (point) 'face)))))
          (kill-buffer buffer))))))
 
+;; A journal whose last turns reach further back than the budget: the
+;; tail starts at the earliest turn within it.
+(ert-deftest romacs-agent-journal-tail-keeps-to-its-budget ()
+  (romacs-agent-tail-tests--with-session
+   5 100000
+   (lambda (session journal)
+     (let ((romacs-agent-journal-tail-bytes 250000))
+       ;; Twelve turns asked, about two fit: the earliest within it.
+       (let ((tail (romacs-agent--journal-tail session 12)))
+         (should (car tail))
+         (should (>= (car tail) (- (file-attribute-size (file-attributes journal)) 250000)))
+         (should (memq (cdr tail) '(2 3)))
+         ;; Asked for by hand, earlier turns are past it.
+         (should (equal (romacs-agent--journal-tail session 12 nil nil 'none) '(nil . 5))))
+       ;; In a chat: its first show keeps to it, its earlier row pages past.
+       (let* ((romacs-agent-chat-turns 12) (buffer (romacs-agent-tail-tests--open session)))
+         (unwind-protect
+             (with-current-buffer buffer
+               (should (memq (length (romacs-agent-tail-tests--questions buffer)) '(2 3)))
+               (romacs-agent-chat-earlier)
+               (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5))))
+           (kill-buffer buffer)))))))
+
+;; What comes before a session's first prompt (its fork notes): only that.
+(ert-deftest romacs-agent-journal-head-is-before-the-first-prompt ()
+  (romacs-agent-tail-tests--with-session
+   3 0
+   (lambda (session journal)
+     (should (= (romacs-agent--journal-head session) (romacs-agent-tail-tests--byte-of journal "\"question 1\"")))
+     (delete-file journal)
+     (write-region "{\"note\":{\"type\":\"run\"},\"seq\":1,\"t\":1}\n" nil journal nil 'silent)
+     (should (= (romacs-agent--journal-head session) (file-attribute-size (file-attributes journal)))))))
+
+;; A restored chat a window shows replays its tail, never the whole
+;; journal.
+(ert-deftest romacs-agent-chat-shown-again-replays-its-tail ()
+  (romacs-agent-tail-tests--with-session
+   5 0
+   (lambda (session _journal)
+     (let* ((romacs-agent-chat-turns 2) (froms nil)
+            (read (symbol-function 'romacs-agent--read-journal))
+            (buffer (romacs-agent-ui--make-chat session)))
+       (unwind-protect
+           (cl-letf (((symbol-function 'romacs-agent--read-journal)
+                      (lambda (session function &optional from &rest rest)
+                        (push from froms)
+                        (apply read session function from rest))))
+             (with-current-buffer buffer (romacs-agent-ui--shown-again))
+             (should froms)
+             (should (cl-every #'integerp froms))
+             (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5))))
+         (kill-buffer buffer))))))
+
 ;;; romacs-agent-tail-tests.el ends here

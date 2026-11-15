@@ -170,7 +170,7 @@ impl Vm {
                     return Ok(());
                 };
                 // A global variable's set_internal reports again.
-                if self.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
+                if self.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Tracked(_))) {
                     reported(self, self.rooted(frame, 0), "set", Value::NIL)?;
                 }
                 self.set_forwarded_default(slot, fwd, self.rooted(frame, 0), crate::forwarded::SetFlag::Set)
