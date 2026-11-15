@@ -12,8 +12,9 @@
 ;; guess from `auto-mode-alist', which a file's local variables or magic
 ;; can overrule: a wrong one only costs the thread its work.
 ;;
-;; Until the tree lands, redisplay shows the text plain and keys run: its
-;; landing brings the faces (`treesit_parse_pending' in display.rs).  What
+;; Until the tree lands, redisplay shows the text with stopgap faces (see
+;; below) and keys run: its landing brings the tree's faces
+;; (`treesit_parse_pending' in display.rs).  What
 ;; runs by itself must not ask for the tree meanwhile, or it waits for the
 ;; parse with the keys behind it.  Two things do: tree-sitter's own
 ;; `pre-redisplay-functions' entry, which the frame the landing wakes runs
@@ -73,6 +74,100 @@ A parse no parser came for is abandoned, its thread left to end."
           (when (and enable-multibyte-characters
                      (not (treesit-parser-list nil nil t)))
             (romacs--treesit-parse-early nil)))))))
+
+;;; Stopgap faces
+
+;; A window whose buffer's first parse has not landed shows lexical faces
+;; meanwhile: strings and comments as the syntax table finds them, and
+;; the keyword tokens the mode's enabled font-lock queries capture by
+;; their text.  Nothing of it asks for the tree.  The landing's
+;; fontification replaces it, so the only change it makes to these faces
+;; is the structural ones it adds (names, types).
+
+(defvar-local romacs-treesit--stopgap-rules 'unknown
+  "The current buffer's stopgap: (DOC-REGEXP . KEYWORDS), KEYWORDS a list
+of (REGEXP . FACE); `unknown' until the first stopgap reads the mode's
+font-lock settings.")
+
+(defvar-local romacs-treesit--stopgapped nil
+  "The (START . END) the last stopgap covered, which the next skips.")
+
+(defun romacs-treesit--stopgap-patterns (source)
+  "The keyword tokens and doc-comment regexp of query SOURCE, a sexp.
+Each a string or vector of strings captured by a face at the top of a
+pattern list; a doc regexp is the `:match' of a `font-lock-doc-face'
+comment pattern."
+  (let (tokens doc)
+    (when (listp source)
+      (while source
+        (let ((item (pop source)) (capture (car source)))
+          (cond
+           ((and (or (stringp item) (vectorp item)) (symbolp capture)
+                 (string-prefix-p "@" (symbol-name capture)))
+            (pop source)
+            (let ((face (intern (substring (symbol-name capture) 1))))
+              (when (facep face)
+                (dolist (token (if (stringp item) (list item) (append item nil)))
+                  (when (stringp token) (push (cons token face) tokens))))))
+           ((and (consp item) (equal (car item) '(comment))
+                 (eq (nth 1 item) '@font-lock-doc-face))
+            (let ((match (assq :match (seq-filter #'consp (cddr item)))))
+              (when (stringp (nth 1 match)) (setq doc (nth 1 match)))))))))
+    (cons doc tokens)))
+
+(defun romacs-treesit--stopgap-read-rules ()
+  "The current buffer's stopgap rules, from its enabled font-lock settings."
+  (let (doc tokens)
+    (dolist (setting (bound-and-true-p treesit-font-lock-settings))
+      (when (nth 1 setting)
+        (pcase-let ((`(,d . ,ts) (romacs-treesit--stopgap-patterns
+                                  (treesit-query-source (nth 0 setting)))))
+          (setq doc (or doc d) tokens (append ts tokens)))))
+    (let (by-face)
+      (pcase-dolist (`(,token . ,face) tokens)
+        (push token (alist-get face by-face)))
+      (cons doc
+            (mapcar (lambda (entry)
+                      (let ((words (seq-filter (lambda (tok) (string-match-p "\`\w" tok)) (cdr entry)))
+                            (others (seq-remove (lambda (tok) (string-match-p "\`\w" tok)) (cdr entry))))
+                        (cons (mapconcat #'identity
+                                         (delq nil (list (and words (regexp-opt words 'symbols))
+                                                         (and others (concat (regexp-opt others) "\\_>"))))
+                                         "\\|")
+                              (car entry))))
+                    by-face)))))
+
+(defun romacs-treesit--stopgap (window start end)
+  "Stopgap faces from START to END of WINDOW's buffer, its first parse out."
+  (with-current-buffer (window-buffer window)
+    (unless (and romacs-treesit--stopgapped
+                 (<= (car romacs-treesit--stopgapped) start)
+                 (>= (cdr romacs-treesit--stopgapped) end))
+      (when (eq romacs-treesit--stopgap-rules 'unknown)
+        (setq romacs-treesit--stopgap-rules (romacs-treesit--stopgap-read-rules)))
+      (setq romacs-treesit--stopgapped (cons start end))
+      (let ((doc (car romacs-treesit--stopgap-rules)) (case-fold-search nil))
+        (with-silent-modifications
+          (save-excursion
+            (save-match-data
+              (remove-list-of-text-properties start end '(face))
+              (let ((state (syntax-ppss start)) (pos start))
+                (while (< pos end)
+                  (let ((from (nth 8 state)) (string (nth 3 state)))
+                    (setq state (parse-partial-sexp pos end nil nil state 'syntax-table)
+                          pos (point))
+                    (when from
+                      (put-text-property
+                       (max start from) pos 'face
+                       (cond (string 'font-lock-string-face)
+                             ((and doc (save-excursion (goto-char from) (looking-at-p (string-remove-prefix "\\`" doc))))
+                              'font-lock-doc-face)
+                             (t 'font-lock-comment-face)))))))
+              (pcase-dolist (`(,regexp . ,face) (cdr romacs-treesit--stopgap-rules))
+                (goto-char start)
+                (while (re-search-forward regexp end t)
+                  (unless (get-text-property (match-beginning 0) 'face)
+                    (put-text-property (match-beginning 0) (match-end 0) 'face face)))))))))))
 
 (defun romacs-treesit--no-parse-p (&rest _)
   "Whether the current buffer's tree is there to ask for."
