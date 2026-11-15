@@ -215,7 +215,8 @@ fn launch(store: &Path) {
                 }
                 let mut vm = Vm::new();
                 if flag.trim() == "sqlite" {
-                    // A resource of this process: the capture refuses it.
+                    // A resource of this process, which a build does not
+                    // open (`host::sqlite_open'): the build refuses it.
                     vm.eval_source("(defvar world-image-db (sqlite-open))").unwrap();
                 }
                 vm.world_begin();
@@ -875,7 +876,7 @@ fn a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset() {
     // However long since: no retry while the inputs hold.
     let before = files(&store);
     let second = outcome(&mut child_of(REFUSED, "launch", &store));
-    assert!(second.contains("refused") && second.contains("a live sqlite object") && !second.contains("retry_in"), "{second}");
+    assert!(second.contains("refused") && second.contains("open sqlite database") && !second.contains("retry_in"), "{second}");
     assert_eq!(files(&store), before, "no builder ran");
     // A reset forgets the refusal: the next launch builds again.
     assert_eq!(romacs_vm::world::store::reset(&store, false).unwrap(), 1);
