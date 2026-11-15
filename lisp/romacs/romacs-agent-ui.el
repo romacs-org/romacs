@@ -828,7 +828,9 @@ name and a marker at its reply hint, nil where nothing can answer it.")
 REPLY's row, a marker, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
               'romacs-agent-reply t
-              'help-echo (cond (reply "Answered: RET goes to the reply") (answered "Answered") (t "Not answered yet"))
+              'help-echo (cond (reply (substitute-command-keys
+                                       "Answered: \\<romacs-agent-ui--reply-link-map>\\[romacs-agent-chat-goto-reply] goes to the reply"))
+                                (answered "Answered") (t "Not answered yet"))
               'keymap (and reply romacs-agent-ui--reply-link-map)
               'mouse-face (and reply 'highlight) 'romacs-agent-reply-at reply))
 
