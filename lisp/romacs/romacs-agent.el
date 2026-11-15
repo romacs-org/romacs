@@ -3393,12 +3393,31 @@ untouched."
 hash table), once it is known: what is kept there besides the session's
 own fields is taken back.")
 
+(defvar romacs-agent--restored nil
+  "The session table (`romacs-agent--sessions') the recorded sessions were
+restored into (`romacs-agent-restore'), once: another table, as a test
+binds, is restored anew.")
+
+(defun romacs-agent--load-new ()
+  "Load each session recorded since this process knew the others: a
+directory named by no known session's id, its records not read for one
+that is."
+  (when (file-directory-p (romacs-agent--state-root))
+    (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
+      (unless (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+        (romacs-agent--load dir)))))
+
+(defun romacs-agent-know-sessions ()
+  "Know every recorded session, cheaply after the first time: restored
+\(attached, swept) once in this process, then only those recorded since
+loaded, none attached again.  What a view of the sessions calls as it
+opens."
+  (if (eq romacs-agent--restored romacs-agent--sessions) (romacs-agent--load-new) (romacs-agent-restore)))
+
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
 A server runs this at its start, so sessions survive it."
-  (when (file-directory-p (romacs-agent--state-root))
-    (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
-      (romacs-agent--load dir)))
+  (romacs-agent--load-new)
   ;; Known and detached, its supervisor still listening: attached again.
   (dolist (session (hash-table-values romacs-agent--sessions))
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
@@ -3412,6 +3431,7 @@ A server runs this at its start, so sessions survive it."
                  (hash-table-values romacs-agent--sessions))
     (romacs-agent--endpoint))
   (romacs-agent--sweep)
+  (setq romacs-agent--restored romacs-agent--sessions)
   (run-hooks 'romacs-agent-restored-hook))
 
 ;; At startup, cheaply, without loading this library unless a supervisor
