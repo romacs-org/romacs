@@ -26,6 +26,7 @@
 (require 'romacs-mcp-dev)
 (require 'romacs-agent)
 (require 'romacs-agent-worktree)
+(require 'romacs-agent-issues)
 (require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
@@ -875,12 +876,15 @@ sends nothing."
              ;; One starting is going on already: attaching it again would take its
              ;; supervisor from the attachment under way.
              (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+             ;; It waits for the turn running: that turn's result is made before it.
+             (when busy (romacs-agent-issues-told child))
              (romacs-agent-send-later child text nil nil valid)))))
   child)
 
-(defconst romacs-agent-tools--send-modes '("queue" "steer" "replace" "interrupt")
-  "How romacs_task_send delivers: after the running turn, into it, in place
-of what the sender has waiting, or cutting the turn short.")
+(defconst romacs-agent-tools--send-modes '("queue" "replace" "interrupt")
+  "How romacs_task_send delivers, as its schema names them: after the running
+turn (into it with steer), in place of what the sender has waiting, or
+cutting the turn short.  `steer' is taken as a mode too, as it was one.")
 
 (defvar romacs-agent-tools--generations (make-hash-table :test #'equal)
   "(TASK-ID . SENDER-ID) to the generation of the sender's messages to the
@@ -912,11 +916,15 @@ another task of the caller's parent, its parent then copied."
          (sibling (romacs-agent-tools--sibling-p task caller))
          (child (if sibling task (romacs-agent-tools--own task caller "send it messages (or another of its parent's tasks)")))
          (message (or (gethash "message" arguments) ""))
+         (steer (eq (gethash "steer" arguments) t))
          (mode (or (gethash "mode" arguments) "queue")))
     (when (string-empty-p (string-trim message))
       (user-error "message is empty"))
-    (unless (member mode romacs-agent-tools--send-modes)
+    (unless (member mode (cons "steer" romacs-agent-tools--send-modes))
       (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
+    (when steer
+      (unless (equal mode "queue") (user-error "steer goes with mode queue, not %s" mode))
+      (setq mode "steer"))
     (let* ((key (cons (romacs-agent-id child) caller))
            (generation (if (equal mode "replace")
                            (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
@@ -1204,9 +1212,12 @@ woken with it."
 (defun romacs-agent-tools--limit-on-event (session event)
   (pcase (plist-get event :type)
     ('done (romacs-agent-tools--switch-on-limit session event))
-    ;; A message after the limit: neither a wait for a move nor a resume is its.
+    ;; A message after the limit: neither a wait for a move nor a resume is
+    ;; its.  Its turn may end at the limit again: that end schedules a resume
+    ;; anew, the reset not yet used by one that fired.
     ('input (when (and (romacs-agent-caught-up session) (not (romacs-agent-pending-selection session)))
               (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+              (when (romacs-agent-resume-time session) (remhash session romacs-agent-tools--resets-used))
               (romacs-agent-tools--cancel-resume session "a message came")))
     ('settled (romacs-agent-tools--cancel-resume session "settled"))))
 
@@ -1251,10 +1262,13 @@ role and worktree."
     (romacs-agent-events-async
      task (lambda (events)
             (setcar cell (condition-case err
-                             (list :child (romacs-agent-handoff
+                             (let ((child (romacs-agent-handoff
                                            task (romacs-agent-handoff-thread task events) provider model
                                            (or next "Go on from where this thread left off.")
-                                           (and effort (list :effort effort))))
+                                           (and effort (list :effort effort)))))
+                               (romacs-agent-issues-record 'handoff task :from (romacs-agent-provider task) :to provider
+                                                           :child (romacs-agent-id child))
+                               (list :child child))
                            (error (list :error (error-message-string err)))))))
     (romacs-mcp-defer
      (lambda ()
@@ -1646,17 +1660,19 @@ last result."
 
 (romacs-mcp-register-tool
  "romacs_task_send"
- "Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
-parent gets a copy with its next wake, never woken for it); any other session is refused. mode queue (default): at \
-once when the task is idle, after its running turn when it is busy, resuming its harness when it had ended; steer: \
-into its running turn; replace: in place of your messages still waiting for it; interrupt: its turn cut short, \
-then this first. A task's next turn end wakes its parent with its reply by its wake rule: end your turn then, do \
+ "Delivery: queued until the task's turn ends unless steer is true, which reaches a running task at its next tool \
+boundary. Send a message to a task you delegated, or to another task of your own parent (it is told who sent it, and your \
+parent gets a copy with its next wake, never woken for it); any other session is refused. An idle task gets it at \
+once; one whose harness ended is resumed for it. mode queue (default); replace: in place of your messages still \
+waiting for it; interrupt: its turn cut short, then this first. A task's next turn end wakes its parent with its reply by its wake rule: end your turn then, do \
 not poll. Answers its task record."
  (romacs-mcp--object
   "type" "object"
   "properties" (romacs-mcp--object
                 "instance" (romacs-mcp--object "type" "string") "taskId" (romacs-mcp--object "type" "string")
                 "message" (romacs-mcp--object "type" "string")
+                "steer" (romacs-mcp--object "type" "boolean"
+                                            "description" "Into the running turn, at its next tool boundary (default false).")
                 "mode" (romacs-mcp--object "type" "string" "enum" (vconcat romacs-agent-tools--send-modes)))
   "required" ["taskId" "message"] "additionalProperties" :false)
  #'romacs-agent-tools--send)

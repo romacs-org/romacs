@@ -1,0 +1,406 @@
+//! The launch screen: from the window's first moment until the session's
+//! first frame, the Romacs logo (romacs_logo) as the *Romacs* landing draws
+//! it, what startup is doing, and a bar of how far it got.  The host paints
+//! it on a thread of its own before any VM can.  Its light sweeps at 25
+//! frames a second where the display animates
+//! (`presentation::display_animates`); elsewhere (every headless harness) the
+//! screen is painted again only when its words or its bar change.
+//!
+//! Progress is reported, never guessed.  Every startup phase
+//! (`startup::mark_phase`) and every step Lisp reports
+//! (`romacs-startup-progress`: the init's loads, the agents a server
+//! restores, a restart's buffers) is an event.  The bar is paced by the
+//! last launch's events, which `launch-profile.json` in the user's Romacs
+//! state directory keeps.  The bar sits between the times the last launch
+//! reached the newest event seen and the one after it, and moves with the
+//! clock in between.  It never passes an event before that event happens,
+//! and an event the last launch did not have holds it still.  Nothing is
+//! hidden or refused: the screen only shows what startup says it does.
+use romacs_display_runtime::paint_host::PaintSender;
+use romacs_layout_input::{Face, FaceHandle, FaceRun, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// What a first launch says while it builds its world.
+pub const FIRST_START: &str = "Preparing Romacs (first start)…";
+
+/// The screen's frame interval.
+const PERIOD: Duration = Duration::from_millis(40);
+/// How often a screen that does not animate looks for news.
+const STILL_PERIOD: Duration = Duration::from_millis(100);
+/// The bar's end until the session's first frame takes over.
+const CAP: f64 = 0.97;
+/// With no launch measured yet, the seconds at which the bar is half full:
+/// it then nears its end and never reaches it.
+const FIRST_GUESS: f64 = 4.0;
+/// The bar's width at most, in columns.
+const BAR: usize = 48;
+
+/// One launch's events in order: each key (a stage, `#N` after it when it
+/// came N times) and its time in seconds since the screen began.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Profile {
+    pub events: Vec<(String, f64)>,
+}
+
+impl Profile {
+    fn read(path: &std::path::Path) -> Self {
+        let parsed = std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        let events = parsed.as_ref().and_then(|value| value.get("events")).and_then(serde_json::Value::as_array)
+            .map(|events| events.iter().filter_map(|event| Some((event.get(0)?.as_str()?.to_owned(), event.get(1)?.as_f64()?))).collect())
+            .unwrap_or_default();
+        Self { events }
+    }
+
+    fn write(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let json = serde_json::json!({"events": self.events.iter().map(|(key, at)| serde_json::json!([key, (at * 1000.0).round() / 1000.0])).collect::<Vec<_>>()});
+        let staged = path.with_extension("json.new");
+        if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
+        std::fs::write(&staged, json.to_string())?;
+        std::fs::rename(staged, path)
+    }
+}
+
+/// Where the bar is, 0 to [`CAP`], ELAPSED seconds into a launch that saw
+/// SEEN, paced by EXPECTED (the last launch's events).
+pub fn fraction(expected: &Profile, seen: &[(String, f64)], elapsed: f64) -> f64 {
+    let Some(total) = expected.events.last().map(|event| event.1.max(0.1)) else {
+        return (elapsed / (elapsed + FIRST_GUESS)).min(CAP);
+    };
+    let reached = seen.iter().rev().find_map(|(key, _)| expected.events.iter().position(|(k, _)| k == key));
+    let (low, high) = match reached {
+        Some(i) => (expected.events[i].1, expected.events.get(i + 1).map_or(total, |event| event.1)),
+        None => (0.0, expected.events.first().map_or(total, |event| event.1)),
+    };
+    (elapsed.clamp(low, high.max(low)) / total).min(CAP)
+}
+
+/// What startup reported so far, while the screen shows.
+struct Report {
+    began: Instant,
+    expected: Profile,
+    seen: Vec<(String, f64)>,
+    counts: HashMap<String, u32>,
+    label: String,
+}
+
+static REPORT: Mutex<Option<Report>> = Mutex::new(None);
+
+fn report() -> std::sync::MutexGuard<'static, Option<Report>> {
+    REPORT.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Report {
+    fn new(expected: Profile) -> Self {
+        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned() }
+    }
+
+    /// STAGE reached, now at LABEL (empty: the words stay).
+    fn step(&mut self, stage: &str, label: &str) {
+        let count = self.counts.entry(stage.to_owned()).or_insert(0);
+        *count += 1;
+        let key = if *count == 1 { stage.to_owned() } else { format!("{stage}#{count}") };
+        self.seen.push((key, self.began.elapsed().as_secs_f64()));
+        if !label.is_empty() { label.clone_into(&mut self.label); }
+    }
+}
+
+/// Startup reached STAGE, now at LABEL (empty: the words stay).  Nothing
+/// once the screen has gone, or when none shows.
+pub fn step(stage: &str, label: &str) {
+    if let Some(report) = report().as_mut() { report.step(stage, label); }
+}
+
+/// What a finished startup phase (`startup::mark_phase`) leads to next,
+/// in the user's words; None keeps the words.
+fn after(phase: &str) -> Option<&'static str> {
+    Some(match phase {
+        "world-open" => "Restoring the world",
+        "world-restored" | "world-none" => "Starting Lisp",
+        "session-lisp" => "Loading your init",
+        "user-init" => "Finishing startup",
+        "finish-loadup" => "Starting the session",
+        "server" => "Drawing",
+        _ => return None,
+    })
+}
+
+/// Startup phase PHASE ended: an event, with what comes next.
+pub fn phase(phase: &str) {
+    if let Some(report) = report().as_mut() { report.phase(phase); }
+}
+
+impl Report {
+    fn phase(&mut self, phase: &str) { self.step(phase, after(phase).unwrap_or("")); }
+}
+
+/// The words and the bar now.
+fn view() -> Option<(String, f64)> {
+    report().as_ref().map(|r| (r.label.clone(), fraction(&r.expected, &r.seen, r.began.elapsed().as_secs_f64())))
+}
+
+/// The user's Romacs state directory's profile of launches.
+pub fn profile_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .map(|state| state.join("romacs/launch-profile.json"))
+}
+
+/// The screen: [`Loading::finish`] hands its window to the session;
+/// dropped unfinished (startup failed first) it stops, and keeps no pace.
+pub struct Loading {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<u64>>,
+    profile: Option<PathBuf>,
+}
+
+impl Loading {
+    /// End the screen; the presentation the session's own frames start
+    /// at, after every one this screen may have submitted.  This launch's
+    /// events become the next one's pace.
+    pub fn finish(mut self) -> u64 {
+        self.stop.store(true, Ordering::Relaxed);
+        let presentation = self.thread.take().map_or(1, |thread| thread.join().expect("loading painter panicked"));
+        if let Some(report) = report().take() && let Some(path) = self.profile.take() {
+            let mut events = report.seen;
+            events.push(("first-frame".to_owned(), report.began.elapsed().as_secs_f64()));
+            // Beside the first frame, not before it.
+            std::thread::spawn(move || {
+                if let Err(error) = (Profile { events }).write(&path) {
+                    eprintln!("romacs: launch profile {}: {error}", path.display());
+                }
+            });
+        }
+        presentation
+    }
+}
+
+impl Drop for Loading {
+    /// Unfinished: the painter stops and lets the window go, and what was
+    /// reported is dropped.  After `finish`, nothing is left to do.
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() { let _ = thread.join(); }
+        report().take();
+    }
+}
+
+/// The colour of COLOUR (0xRRGGBB).
+fn rgb(colour: u32) -> [u8; 3] { [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8] }
+
+/// Halfway between A and B.
+fn between(a: [u8; 3], b: [u8; 3]) -> [u8; 3] { [0, 1, 2].map(|i| ((u16::from(a[i]) + u16::from(b[i])) / 2) as u8) }
+
+/// What one frame of the screen shows.
+struct Shown<'a> {
+    /// Seconds into the logo's motion.
+    t: f64,
+    /// The logo's share (at most 1) of the rows the words leave it.
+    scale: f64,
+    /// What startup is doing.
+    label: &'a str,
+    /// How full the bar is, 0 to 1.
+    filled: f64,
+}
+
+/// SHOWN in a WIDTH by HEIGHT window of CELL (line height, character
+/// width) cells: the logo, and under it the words over the bar.
+fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &Shown<'_>) -> FrameSnapshot {
+    let Shown { t, scale, label, filled } = *shown;
+    let (line, char_width) = (cell.0.max(1), cell.1.max(1));
+    let (columns, lines) = ((width / char_width) as usize, (height / line) as usize);
+    let view = romacs_logo::View {
+        cols: columns.saturating_sub(1).clamp(1, 400),
+        rows: ((lines.saturating_sub(5) as f64 * scale) as usize).clamp(1, 200),
+        cell_aspect: (f64::from(char_width) / f64::from(line)).clamp(0.05, 2.0),
+    };
+    let cells = romacs_logo::frame(view, t);
+    // A face per colour, like the default one.
+    let mut faces = vec![face.clone()];
+    let mut face_runs: Vec<FaceRun> = vec![];
+    let handle = |faces: &mut Vec<Face>, foreground: [u8; 3]| match faces.iter().position(|f| f.foreground == foreground) {
+        Some(index) if index > 0 => FaceHandle(index as u32),
+        _ => { faces.push(Face { foreground, ..face.clone() }); FaceHandle((faces.len() - 1) as u32) }
+    };
+    let run = |runs: &mut Vec<FaceRun>, bytes: std::ops::Range<usize>, face: FaceHandle| match runs.last_mut() {
+        Some(last) if last.face == face && last.bytes.end == bytes.start => last.bytes.end = bytes.end,
+        _ => runs.push(FaceRun { bytes, face }),
+    };
+    let mut at = 0;
+    for (i, &(c, colour)) in cells.iter().enumerate() {
+        if i > 0 && i % view.cols == 0 { at += 1; }
+        let end = at + c.len_utf8();
+        if let Some(colour) = colour {
+            let face = handle(&mut faces, rgb(colour));
+            run(&mut face_runs, at..end, face);
+        }
+        at = end;
+    }
+    let centred = |text_width: usize| " ".repeat(view.cols.saturating_sub(text_width) / 2);
+    let mut utf8 = format!("{}\n\n{}{label}\n", romacs_logo::text(&cells, view.cols), centred(label.chars().count()));
+    let bar = BAR.min(view.cols.saturating_sub(4)).max(1);
+    let full = ((filled.clamp(0.0, 1.0) * bar as f64).round() as usize).min(bar);
+    utf8.push_str(&centred(bar));
+    let accent = romacs_logo::mark_paths().first().map_or(face.foreground, |(colour, _)| rgb(*colour));
+    let (lit, dim) = (handle(&mut faces, accent), handle(&mut faces, between(face.foreground, face.background)));
+    let start = utf8.len();
+    utf8.push_str(&"━".repeat(full));
+    run(&mut face_runs, start..utf8.len(), lit);
+    let rest = utf8.len();
+    utf8.push_str(&"─".repeat(bar - full));
+    run(&mut face_runs, rest..utf8.len(), dim);
+    FrameSnapshot {
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width, height,
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
+            id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
+            text: TextSlice { extends: vec![], utf8, face_runs, raw: vec![] }, mode_line: None,
+            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8,
+            wrap: Default::default(), cursor_off: true, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces,
+        } }],
+    }
+}
+
+/// Show the screen as presentation 1, before any VM can, laid out by an
+/// engine of its own on a thread of its own; it keeps reporting until
+/// [`Loading::finish`].  Painted means submitted: the first frame never
+/// waits for the GPU to start.  PROFILE paces the bar, and this launch's
+/// events are written there when it ends.
+pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<PathBuf>) -> Result<Loading, String> {
+    let face = romacs_vm::Vm::new().display_default_face()?;
+    let expected = profile.as_deref().map(Profile::read).unwrap_or_default();
+    *report() = Some(Report::new(expected));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let (first_tx, first) = std::sync::mpsc::channel();
+    let thread = std::thread::Builder::new().name("romacs-loading".into()).spawn(move || {
+        let mut engine = None;
+        // The logo's share of its rows, by window size: its braille rows
+        // may stand taller than the face's cell, so the words and the bar
+        // under it are laid out again until they show.
+        let mut scales: HashMap<(u32, u32), f64> = HashMap::new();
+        let mut paint = |presentation: u64, (width, height): (u32, u32), t: f64, label: &str, filled: f64| -> Result<(), String> {
+            let engine = match &mut engine { Some(engine) => engine, None => engine.insert(romacs_layout::LayoutEngine::new()?) };
+            let cell = engine.frame_metrics(&face)?;
+            let scale = scales.entry((width, height)).or_insert(1.0);
+            let mut tries = 0;
+            loop {
+                let screen = snapshot(&face, (width, height), cell, &Shown { t, scale: *scale, label, filled });
+                let length = screen.windows[0].snapshot.text.utf8.len();
+                let (frame, ends) = engine.layout_frame(&screen, presentation, None)?;
+                tries += 1;
+                if tries > 5 || ends.first().is_none_or(|end| end.visible_end > length) { return sender.submit(frame); }
+                *scale *= 0.88;
+            }
+        };
+        // The window's size as the compositor made it, once it says.
+        let size = || sender.window_size(romacs_display_runtime::paint_host::INITIAL_FRAME).unwrap_or((width, height));
+        let (mut t, mut presentation, mut shown) = (0.0, 1, size());
+        let (mut label, mut filled) = view().unwrap_or_default();
+        let painted = paint(presentation, shown, t, &label, filled);
+        let failed = painted.is_err();
+        let _ = first_tx.send(painted);
+        if failed { return presentation; }
+        let mut last = Instant::now();
+        while !stopped.load(Ordering::Relaxed) {
+            let animates = crate::presentation::display_animates(&sender);
+            std::thread::sleep(if animates == Some(true) { PERIOD } else { STILL_PERIOD }.saturating_sub(last.elapsed()));
+            // The adapter is chosen as the first frame paints.
+            if animates.is_none() { last = Instant::now(); continue; }
+            let dt = last.elapsed().min(Duration::from_millis(80)).as_secs_f64();
+            last = Instant::now();
+            let (now_label, now_filled, now_size) = view().map_or_else(|| (String::new(), 0.0, size()), |(l, f)| (l, f, size()));
+            let cells = |f: f64| (f * BAR as f64).round() as usize;
+            if animates == Some(true) {
+                t += dt;
+            } else if now_label == label && cells(now_filled) == cells(filled) && now_size == shown {
+                continue;
+            }
+            (label, filled, shown) = (now_label, now_filled, now_size);
+            // Counted before it is painted: a frame submitted and not
+            // rendered in time still holds its presentation.
+            presentation += 1;
+            if paint(presentation, shown, t, &label, filled).is_err() { break; }
+            // Paced by the renderer: the next frame waits for this one, a
+            // slow one only slows the motion. In slices, so a stop (the
+            // session's first frame) ends the wait at once rather than
+            // after a frame's second.
+            let end = Instant::now() + Duration::from_secs(1);
+            while !stopped.load(Ordering::Relaxed)
+                && sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::from_millis(20)).is_err()
+                && Instant::now() < end {}
+        }
+        presentation + 1
+    }).map_err(|e| e.to_string())?;
+    if let Err(error) = first.recv().map_err(|_| "loading painter stopped".to_owned()).and_then(|painted| painted) {
+        report().take();
+        return Err(error);
+    }
+    Ok(Loading { stop, thread: Some(thread), profile })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(events: &[(&str, f64)]) -> Profile {
+        Profile { events: events.iter().map(|(k, t)| ((*k).to_owned(), *t)).collect() }
+    }
+
+    fn seen(events: &[(&str, f64)]) -> Vec<(String, f64)> { profile(events).events }
+
+    #[test]
+    fn the_bar_moves_with_the_clock_between_the_events_it_reached() {
+        let last = profile(&[("world-open", 1.0), ("init", 2.0), ("init#2", 3.0), ("first-frame", 4.0)]);
+        assert_eq!(fraction(&last, &[], 0.5), 0.125, "before any event: the clock, up to the first");
+        assert_eq!(fraction(&last, &[], 3.0), 0.25, "and no further than the first event's time");
+        assert_eq!(fraction(&last, &seen(&[("world-open", 0.2)]), 0.2), 0.25, "an event early: its place at once");
+        assert_eq!(fraction(&last, &seen(&[("world-open", 1.0), ("init", 1.5)]), 2.5), 0.625);
+        assert_eq!(fraction(&last, &seen(&[("world-open", 1.0), ("init", 1.5)]), 9.0), 0.75, "late: held at the next event");
+    }
+
+    #[test]
+    fn an_event_the_last_launch_lacked_holds_the_bar_and_it_never_fills() {
+        let last = profile(&[("a", 1.0), ("b", 2.0)]);
+        let before = fraction(&last, &seen(&[("a", 1.0)]), 1.5);
+        assert_eq!(fraction(&last, &seen(&[("a", 1.0), ("new", 1.5)]), 1.5), before);
+        assert_eq!(fraction(&last, &seen(&[("a", 1.0), ("b", 2.0)]), 60.0), CAP);
+        let first = |elapsed| fraction(&Profile::default(), &[], elapsed);
+        assert_eq!(first(FIRST_GUESS), 0.5, "a first launch paces by a guess");
+        assert!(first(20.0) < first(40.0) && first(40.0) < CAP, "and never fills");
+    }
+
+    #[test]
+    fn repeated_stages_count_and_a_profile_round_trips() {
+        let mut taken = Report::new(Profile::default());
+        taken.step("init", "Loading your init: org");
+        taken.step("init", "");
+        taken.phase("user-init");
+        assert_eq!(taken.seen.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["init", "init#2", "user-init"]);
+        assert_eq!(taken.label, "Finishing startup");
+        let dir = std::env::temp_dir().join(format!("romacs-loading-{}", std::process::id()));
+        let path = dir.join("launch-profile.json");
+        let written = profile(&[("world-open", 0.25), ("first-frame", 1.5)]);
+        written.write(&path).expect("written");
+        assert_eq!(Profile::read(&path), written);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_screen_says_what_startup_does_over_its_bar() {
+        let face = romacs_vm::Vm::new().display_default_face().expect("a default face");
+        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: "Loading your init: org", filled: 0.5 });
+        let text = &frame.windows[0].snapshot.text.utf8;
+        assert!(text.contains("Loading your init: org"));
+        assert_eq!(text.matches('━').count(), BAR / 2);
+        assert_eq!(text.matches('─').count(), BAR - BAR / 2);
+        let cell = romacs_layout::LayoutEngine::new().unwrap().frame_metrics(&face).unwrap();
+        for (width, height) in [(1280, 900), (800, 600), (1600, 1000), (640, 1400)] {
+            let frame = snapshot(&face, (width, height), cell, &Shown { t: 0.0, scale: 1.0, label: "x", filled: 0.0 });
+            let rows = frame.windows[0].snapshot.text.utf8.lines().count();
+            assert!(rows as u32 * cell.0 <= height, "{width}x{height}: {rows} rows of {} px", cell.0);
+        }
+    }
+}
