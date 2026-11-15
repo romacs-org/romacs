@@ -1025,6 +1025,14 @@ impl Vm {
         if p == CurrentBuffer {
             return Ok(self.slots[self.buffer_slot].value);
         }
+        // A labeled restriction bounds narrowing and widening
+        // (prim/leaf/labeled_restrictions.rs).
+        let (p, n, args) = if matches!(p, Narrow | Widen) {
+            let (p, args) = self.labeled_bounds_call(index, p, args)?;
+            (p, args.len(), args)
+        } else {
+            (p, n, args)
+        };
         if matches!(p, Insert | DeleteRegion) {
             self.ensure_buffer_writable()?;
         }

@@ -255,10 +255,10 @@ pub enum Fact {
     AdapterChosen { software: bool },
     /// Whether a GPU renderer is live, so a native model can be drawn.
     ModelRenderer { live: bool },
-    /// Where the pointer is over the primary window, in logical pixels:
-    /// what a display answers GNU's `mouse_position_hook' with.  Nothing
-    /// while the pointer is elsewhere.
-    PointerOver { at: Option<(i32, i32)> },
+    /// Where the pointer is over FRAME's window, in logical pixels: what a
+    /// display answers GNU's `mouse_position_hook' with.  Nothing once the
+    /// pointer left that window.
+    PointerOver { frame: u64, at: Option<(i32, i32)> },
     /// How a held key repeated, for the usage log's `repeat' record.
     KeyRepeatTiming(crate::input_bridge::RepeatTiming),
     /// The answer to the evaluator's request REQUEST (a window made, a
@@ -332,8 +332,8 @@ pub(crate) enum WindowCommand {
     /// LIMIT (`frame-alpha-lower-limit'): the display applies it now and
     /// on every focus change.
     SetFrameAlpha { frame: u64, alpha: [f32; 2], limit: f32 },
-    /// Set the window title
-    SetWindowTitle { title: String },
+    /// Set a top-level frame's window title
+    SetWindowTitle { frame: FrameRef, title: String },
     /// Update geometry hints for a specific GUI frame window.
     /// `frame.raw_id() == 0` also targets the adopted primary window.
     SetFrameGeometryHints {
@@ -366,7 +366,7 @@ pub(crate) enum WindowCommand {
     /// Destroy an OS window for a top-level Emacs frame
     DestroyWindow { frame: FrameRef },
     /// Request window attention (urgency hint / taskbar flash)
-    RequestAttention { urgent: bool },
+    RequestAttention { frame: FrameRef, urgent: bool },
 }
 
 

@@ -112,11 +112,6 @@ and its comparison policy in its docstring:
   and tags, review, adding and editing a thema), each engine on its own copy
   of a Gnosis database (`--db`, or a profile config's; a live database is
   refused).
-* `hermes_parity_live.py`: hermes (lisp/romacs's copy, or a profile config's
-  `hermes_sources`), read-only against a running dashboard (hermes's
-  default URL, or the profile's `hermes_url`), never started (dashboard, session browser and
-  search, a session's history), its token discovered by hermes and never
-  reported.
 * `notmuch_parity_live.py`: the real notmuch package (the system's
   site-lisp) through a user's mail settings as a Romacs init holds them
   (`--snippet`): notmuch-hello, a saved search, tagging and archiving,
@@ -162,8 +157,8 @@ Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init
 profile, described by a JSON profile config kept outside the repository
 (`--profile-config FILE` or `ROMACS_BENCH_PROFILE`): the init's blocks, the
-package sources it loads, the project to clone, an org file, a gnosis
-database copy and the hermes dashboard URL; `real_init.py`'s docstring
+package sources it loads, the project to clone, an org file, and a gnosis
+database copy; `real_init.py`'s docstring
 lists the keys.  Both
 profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
@@ -205,12 +200,7 @@ Data safety: the project is a `git clone --no-hardlinks` copy and the org
 file a copy, both in the private HOME.  The gnosis database is a reflink copy
 of the copy named by `--gnosis-db` or the profile config, never the live
 database: gnosis's default locations and the profile's `live_gnosis_db` are
-refused.  Hermes attaches to a running dashboard and never starts one: an
-init that sets another start mode is refused, and every acquisition is made
-remote.  A key that sends a hermes prompt
-must carry `effect=hermes-prompt`.  The bench allows one per engine per
-session, and replay skips such keys unless `--allow-effect hermes-prompt` is
-given.
+refused.
 
 ```sh
 # in the project environment (pinned GNU, ROMACS_GNU_SOURCE)

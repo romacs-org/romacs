@@ -728,8 +728,11 @@ one that was already shown waits for an idle moment, as a merge does."
   "The `global-mode-string' entry of `jabber-mam-sync--indicate'.")
 
 (defun jabber-mam-sync--mode-line ()
-  "\" syncing history…\" while a background catch-up runs, else nothing."
-  (if (jabber-mam-sync--any-busy-p) " syncing history…" ""))
+  "\" syncing history\" and the session's ellipsis while a background
+catch-up runs, else nothing: three dots in a GUI session (VM2-ELLIPSIS),
+as a `…' some fonts draw two cells wide would push the status bar's next
+segment."
+  (if (jabber-mam-sync--any-busy-p) (concat " syncing history" (truncate-string-ellipsis)) ""))
 
 (defun jabber-mam-sync--indicate ()
   "Show the indicator in `global-mode-string' while a job runs, not after."
