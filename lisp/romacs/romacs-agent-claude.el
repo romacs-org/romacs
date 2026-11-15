@@ -35,7 +35,19 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
 (defun romacs-agent--claude-head (session)
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
-start; else nil."
+start; else nil.  Its records are read only when it was rolled back since
+it was last spoken to, which its fold keeps (`:rolled-back'); a session
+whose kept state predates that is read once to know."
+  (let ((state (romacs-agent-driver-state session)))
+    (if (plist-member state :rolled-back)
+        (and (plist-get state :rolled-back) (romacs-agent--claude-head-read session))
+      (let ((head (romacs-agent--claude-head-read session)))
+        (setf (romacs-agent-driver-state session)
+              (plist-put (romacs-agent-driver-state session) :rolled-back (and head t)))
+        head))))
+
+(defun romacs-agent--claude-head-read (session)
+  "`romacs-agent--claude-head', from all of SESSION's records."
   (let* ((records (romacs-agent--journal-records session))
          (said (cl-position-if #'romacs-agent--record-request records :from-end t))
          (rolled (cl-position-if #'romacs-agent--rollback-note-p records :from-end t)))
@@ -457,9 +469,9 @@ an approval answered."
             (owed (plist-get (romacs-agent-driver-state session) :owed))
             (why (let ((out (gethash "response" (gethash "response" line))))
                    (and (hash-table-p out) (hash-table-p (gethash "hookSpecificOutput" out))
-                        (gethash "permissionDecisionReason" (gethash "hookSpecificOutput" out))))))
+                        (gethash "additionalContext" (gethash "hookSpecificOutput" out))))))
        (if (cl-find id owed :key #'cadr :test #'equal)
-           ;; A reply it owed, written: owed no more; a refusal is shown.
+           ;; A reply it owed, written: owed no more; what it told is shown.
            (append (and (stringp why) (list (list :type 'status :text why)))
                    (list (list :type 'handshake :state (list :owed (cl-remove id owed :key #'cadr :test #'equal)))))
          (remhash id (romacs-agent-approvals session))
@@ -472,7 +484,7 @@ an approval answered."
 (defconst romacs-agent--claude-hooks
   (romacs-mcp--object "PreToolUse" (vector (romacs-mcp--object "matcher" "Edit|Write|MultiEdit"
                                                                "hookCallbackIds" ["romacs-gate"])))
-  "The hooks Romacs takes on each run: Claude Code asks it about every
+  "The hooks Romacs takes on each run: Claude Code tells it of every
 edit before writing it (`romacs-agent-gate-check').")
 
 (defun romacs-agent--claude-next (session)
@@ -494,15 +506,15 @@ run's initialize, with Romacs's hooks; ready once that is answered."
               "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
 
 (defun romacs-agent--claude-hook (request)
-  "The answer to hook REQUEST: the gate's refusal of an edit, else nothing
-to say.  Judged as it is written, on the file as it is then."
+  "The answer to hook REQUEST: what the gate tells the model of an edit,
+as context, the edit going on under the session's own permission mode;
+else nothing to say.  Judged as it is written, on the file as it is then."
   (let* ((input (gethash "input" request))
          (why (and (hash-table-p input) (equal (gethash "hook_event_name" input) "PreToolUse")
                    (romacs-agent-gate-check (gethash "tool_name" input) (gethash "tool_input" input)))))
     (if why
         (romacs-mcp--object "hookSpecificOutput"
-                            (romacs-mcp--object "hookEventName" "PreToolUse" "permissionDecision" "deny"
-                                                "permissionDecisionReason" why))
+                            (romacs-mcp--object "hookEventName" "PreToolUse" "additionalContext" why))
       (romacs-mcp--object))))
 
 (defun romacs-agent--claude-reply (_session owed)
@@ -534,6 +546,53 @@ answer to a hook; (:line ID MODE), a switch to permission mode MODE."
                            :options (mapcar #'car options)
                            :notes (cl-remove-if-not #'cdr options)
                            :multi (eq (gethash "multiSelect" q) t)))))
+
+(defconst romacs-agent--claude-stream-end
+  "\"type\":\"stream_event\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}"
+  "How a `stream_event' record's line ends: keys are written sorted.")
+
+(defconst romacs-agent--claude-assistant-end
+  "\"type\":\"assistant\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
+  "How an `assistant' record's line ends.")
+
+(defun romacs-agent--claude-streamed-skip ()
+  "In a buffer of journal lines, a function of a line's start and end
+saying whether it is a `stream_event' of a content block an `assistant'
+record among them says whole; nil when none does.  Claude writes an
+`assistant' record as each of a message's blocks ends, in order, under
+the message's id: a message's first N blocks are whole when its records
+hold N.  A block cut short, or still streaming, has none: its deltas
+are read, and every message's own start and end, so a block read takes
+its message's id.  A stream line starts with its message's id
+\(`api_message_id') and names its block by the event's `index'; no
+string can hold a quoted key."
+  (let ((whole (make-hash-table :test #'equal)))
+    (goto-char (point-min))
+    (while (re-search-forward romacs-agent--claude-assistant-end nil t)
+      (let* ((end (point))
+             (record (ignore-errors (json-parse-string (buffer-substring (line-beginning-position) end)
+                                                       :object-type 'hash-table)))
+             (message (and (hash-table-p record) (hash-table-p (gethash "out" record))
+                           (gethash "message" (gethash "out" record))))
+             (id (and (hash-table-p message) (gethash "id" message)))
+             (content (and id (gethash "content" message))))
+        (when (and (stringp id) (vectorp content))
+          (puthash id (+ (gethash id whole 0) (length content)) whole))))
+    (and (> (hash-table-count whole) 0)
+         (lambda (start end)
+           (and (eq (char-after (+ start 9)) ?a)
+                (save-excursion
+                  (goto-char start)
+                  (when-let* (((looking-at "{\"out\":{\"api_message_id\":\"\\([^\"]+\\)\""))
+                              (blocks (gethash (match-string 1) whole))
+                              ((progn (goto-char end)
+                                      (looking-back romacs-agent--claude-stream-end (max start (- end 200))))))
+                    (goto-char start)
+                    ;; A block's event says which.  A message's own (its
+                    ;; start, its end) are read: a block of it still read
+                    ;; takes its id from its start.
+                    (and (re-search-forward "\"index\":\\([0-9]+\\)" end t)
+                         (< (string-to-number (match-string 1)) blocks)))))))))
 
 (defun romacs-agent--claude-session-rules (request)
   "The permission updates allowing REQUEST's tool for the rest of the
@@ -593,6 +652,7 @@ environment."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
+  :streamed-skip #'romacs-agent--claude-streamed-skip
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next

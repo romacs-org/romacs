@@ -374,4 +374,35 @@ contents, so two equal states print the same."
               (should (eq (romacs-agent-state session) 'ended))))
         (delete-process server)))))
 
+(ert-deftest romacs-agent-kept-a-dead-socket-is-removed-and-the-session-kept ()
+  ;; A supervisor its unit stopped leaves its socket: the session loads from
+  ;; its journal as one with no socket does, never attaching there, keeps
+  ;; what it folded, and the dead socket goes, so the next start reads from
+  ;; the kept state.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (let ((socket (romacs-agent--host-socket romacs-agent-kept-tests--id)))
+      (make-directory (file-name-directory socket) t)
+      (delete-process (make-network-process :name "romacs-kept-dead" :family 'local :service socket :server t))
+      (should (file-exists-p socket))
+      (let ((session (cl-letf (((symbol-function 'romacs-agent--attach)
+                                (lambda (&rest _) (ert-fail "attached where nothing answers"))))
+                       (romacs-agent-kept-tests--load dir))))
+        (should (eq (romacs-agent-state session) 'ended))
+        (should (file-exists-p (romacs-agent--kept-file session)))
+        (should-not (file-exists-p socket))))))
+
+(ert-deftest romacs-agent-kept-a-live-socket-is-left-and-attached ()
+  ;; A socket its supervisor answers at is never removed.
+  (romacs-agent-kept-tests--with
+    (let* ((socket (romacs-agent--host-socket romacs-agent-kept-tests--id))
+           (server (progn (make-directory (file-name-directory socket) t)
+                          (make-network-process :name "romacs-kept-live" :family 'local :service socket
+                                                :server t :noquery t))))
+      (unwind-protect
+          (progn (should (romacs-agent--supervisor-listens-p (romacs-agent--make :id romacs-agent-kept-tests--id
+                                                                                 :host-socket socket)))
+                 (should (file-exists-p socket)))
+        (delete-process server)))))
+
 ;;; romacs-agent-kept-tests.el ends here

@@ -15,8 +15,9 @@ as a source boot's.  So are its language and coding systems: with LANG
 unset, C or en_US.UTF-8 (which the world reads as keyed facts, so a
 changed one has it built again), a restored launch's are a source boot's
 and pinned GNU's (ROMACS_GNU_ORACLE, batch) under that LANG.  Each launch must reach its first frame. The binary's own lines say which:
-`romacs-world: {"mode": ...}`, `{"event": "preparing"...}`, `{"event":
-"pruned"...}`.
+`romacs-world: {"mode": ...}`, `{"event": "loading-frame"...}` (the launch
+screen, every launch), `{"event": "preparing"...}` (a world build, which the
+screen says), `{"event": "pruned"...}`.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set. labwc and wlr-randr come from
@@ -157,7 +158,7 @@ def main():
                         try:
                             if name == 'first':
                                 # The window while the world builds, for review.
-                                fio.wait(lambda: '"event":"preparing-frame"' in log_path.read_text(errors='replace'),
+                                fio.wait(lambda: '"event":"preparing"' in log_path.read_text(errors='replace'),
                                          args.timeout, f'{name}: preparing', process)
                                 time.sleep(1.5)
                                 fio.shot(output / 'preparing.png', env, report)
@@ -177,7 +178,8 @@ def main():
                                 process.wait()
                     text = log_path.read_text(errors='replace')
                     entry = {'launch': name, 'seconds': round(seconds, 3), 'world': world_line(text),
-                             'preparing': events(text, 'preparing-frame'), 'pruned': events(text, 'pruned')}
+                             'loading': events(text, 'loading-frame'), 'preparing': events(text, 'preparing'),
+                             'pruned': events(text, 'pruned')}
                     report['launches'].append(entry)
                     return entry
 
@@ -188,8 +190,9 @@ def main():
                       and any(n.endswith('.rwi') for n in built) and any(n.endswith('.json') for n in built), first)
                 check('the default store is private', store.exists() and store.stat().st_mode & 0o777 == 0o700,
                       oct(store.stat().st_mode & 0o777) if store.exists() else None)
-                check('a first launch says it prepares, and paints that, before it waits',
-                      [p['painted'] for p in first['preparing']] == [True], first['preparing'])
+                check('a first launch paints its launch screen, and says there that it prepares',
+                      [p['painted'] for p in first['loading']] == [True] and len(first['preparing']) == 1,
+                      [first['loading'], first['preparing']])
                 # A world of another build, unused for a week.
                 old = 'e' * 64
                 week_ago = time.time() - 8 * 86400
@@ -202,6 +205,7 @@ def main():
                 after = store_state(store)
                 check('a later launch restores the world without building, and says nothing of preparing',
                       (later['world'] or {}).get('mode') == 'restored' and not later['preparing']
+                      and [p['painted'] for p in later['loading']] == [True]
                       and {k: v for k, v in after.items() if k in built and not k.startswith(old)}
                       == {k: v for k, v in built.items() if not k.startswith(old) and not k.endswith('.use')} | {k: after[k] for k in after if k.endswith('.use')},
                       {'launch': later})
