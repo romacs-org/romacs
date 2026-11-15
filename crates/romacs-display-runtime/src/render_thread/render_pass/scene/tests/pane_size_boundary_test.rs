@@ -243,7 +243,6 @@ fn pane_conversion_refuses_before_motion_and_recovers_under_held_pressure() {
         render.compositor.current_frame = Some(after.clone());
         render.set_current_frame(
             Some(after.clone()),
-            None,
             Default::default(),
             Default::default(),
         );
@@ -382,7 +381,6 @@ fn wrong_size_required_native_owner_retires_before_child_under_same_pressure() {
     root.background_alpha = 0.5;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );

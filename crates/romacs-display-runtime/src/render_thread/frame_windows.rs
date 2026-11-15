@@ -626,7 +626,6 @@ impl GuiFrameRenderState {
         if child_changed {
             self.compositor.current_scene_generation =
                 crate::render_thread::frame_state::next_scene_generation();
-            self.compositor.current_row_damage = None;
         }
         if changed || child_changed {
             self.compositor.dirty = true;
@@ -919,25 +918,6 @@ impl GuiFrameRenderState {
         Some(PendingPointerDamage::new(key, rect))
     }
 
-    fn invalidate_pointer_damage_rows(&mut self, damage: PendingPointerDamage) {
-        let key = damage.key();
-        if key.frame_id() != 0 && key.frame_id() != self.emacs_frame_id {
-            return;
-        }
-        let (Some(frame), Some(row_damage)) = (
-            self.compositor.current_frame.as_ref(),
-            self.compositor.current_row_damage.as_mut(),
-        ) else {
-            return;
-        };
-        if frame.presentation_id != key.presentation() {
-            return;
-        }
-        if let Some(appearance) = frame.presented_pointer().appearance(key.appearance()) {
-            row_damage.invalidate_pointer_rows(appearance.damage_rows());
-        }
-    }
-
     /// Records pointer repaint needs after a child-frame edit changed what the
     /// pointer overlaps. Paired with `active_pointer_damage`.
     pub(in crate::render_thread) fn record_pointer_paint_transition(
@@ -945,12 +925,6 @@ impl GuiFrameRenderState {
         before: Option<PendingPointerDamage>,
     ) {
         let after = self.active_pointer_damage();
-        if let Some(damage) = before {
-            self.invalidate_pointer_damage_rows(damage);
-        }
-        if let Some(damage) = after {
-            self.invalidate_pointer_damage_rows(damage);
-        }
 
         if self.pending_pointer_damage.iter().all(Option::is_none) {
             self.pending_pointer_damage[0] = before.or(after);
@@ -1213,7 +1187,6 @@ impl GuiFrameRenderState {
     pub(super) fn set_current_frame(
         &mut self,
         frame: Option<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
-        row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
         scroll_anchors: super::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: super::frame_compositor::ReflowImprintsByWindow,
     ) -> Option<ActivePresentationTransition> {
@@ -1277,7 +1250,6 @@ impl GuiFrameRenderState {
             false
         };
         self.compositor.current_scene_generation = super::frame_state::next_scene_generation();
-        self.compositor.current_row_damage = row_damage;
         if appearance_changed {
             self.record_pointer_paint_transition(before);
             self.compositor.dirty = true;
@@ -2530,8 +2502,8 @@ impl GuiFrameWindowManager {
     }
 
     /// Drop every GPU-resident object owned by per-window render state after
-    /// the wgpu device was lost. CPU state — `current_frame`, row damage,
-    /// child frames, overlays, cursors, floating-WebView rects — is kept: the
+    /// the wgpu device was lost. CPU state — `current_frame`, child frames,
+    /// overlays, cursors, floating-WebView rects — is kept: the
     /// next redraw re-renders the same scene on the rebuilt device.
     pub(super) fn clear_gpu_resident_state(&mut self) {
         self.for_each_top_level_window_mut(|window_state| {

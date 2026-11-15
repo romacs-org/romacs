@@ -39,7 +39,7 @@ pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
 pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
-    BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudgetOwner, PaneBlit,
+    BudgetExceeded, CompositionRing, FullFrameTexture, GpuBudgetOwner, PaneBlit,
     PaintTarget, Painted, PaneSource, RendererFrameEffects, RootPicture, SnapshotLease, SnapshotSize,
     UnpooledTexture, WgpuRenderer, texture_bytes,
 };

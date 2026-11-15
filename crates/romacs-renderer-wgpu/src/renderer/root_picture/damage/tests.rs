@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
 use romacs_display_protocol::types::{Color, DisplayWindowId, FaceId, Rect};
 
+use super::super::reach::Reach;
 use super::{Indexed, Plan, agree, merge, nested_agree, plan, repeats, runs};
 
 const ROW: f32 = 20.0;
@@ -47,7 +48,7 @@ fn frame(left: &[&str], right: &[&str]) -> FrameGlyphBuffer {
 }
 
 fn planned(old: &FrameGlyphBuffer, new: &FrameGlyphBuffer) -> Plan {
-    plan(&Indexed::new(old.clone()), new, &runs(&new.glyphs))
+    plan(&Indexed::new(old.clone()), new, &runs(&new.glyphs), Reach::default(), 1.0)
 }
 
 fn regions(plan: Plan) -> Vec<Rect> {
@@ -91,6 +92,7 @@ fn a_character_typed_repaints_its_row_of_its_window_alone() {
     assert_eq!(
         planned(&old, &new),
         Plan::Regions {
+            moves: Vec::new(),
             regions: vec![Rect::new(0.0, 40.0, 60.0, 20.0)],
             rows_kept: 19
         }

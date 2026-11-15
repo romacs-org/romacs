@@ -195,71 +195,6 @@ pub(crate) fn resolved_glyph_stream_identity(
     ResolvedGlyphStreamIdentity(hasher.finish())
 }
 
-/// Identity of the complete font projection installed for one frame draw.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct FrameFontBindingsIdentity(pub(crate) u64);
-
-fn frame_font_bindings_identity(
-    faces: &FrameFaceMap,
-    fonts: &ResolvedFontTable,
-    char_fonts: &CharFontTable,
-    shaped_clusters: &ShapedClusterTable,
-) -> FrameFontBindingsIdentity {
-    let mut hasher = DefaultHasher::new();
-
-    let mut face_entries: Vec<_> = faces.iter().collect();
-    face_entries.sort_unstable_by_key(|(face_id, _)| face_id.get());
-    for (face_id, face) in face_entries {
-        face_id.hash(&mut hasher);
-        face.default_resolved_font_id.hash(&mut hasher);
-    }
-
-    let mut font_entries: Vec<_> = fonts.iter().collect();
-    font_entries.sort_unstable_by_key(|(id, _)| **id);
-    for (id, font) in font_entries {
-        id.hash(&mut hasher);
-        font.identity.hash(&mut hasher);
-        font.replay.hash(&mut hasher);
-        font.family.hash(&mut hasher);
-        font.weight.hash(&mut hasher);
-        font.slant.hash(&mut hasher);
-        font.width.hash(&mut hasher);
-        font.pixel_size.to_bits().hash(&mut hasher);
-        font.ascent_px.to_bits().hash(&mut hasher);
-        font.descent_px.to_bits().hash(&mut hasher);
-        font.space_advance_px.to_bits().hash(&mut hasher);
-        font.glyph_advance.hash(&mut hasher);
-    }
-
-    let mut char_faces: Vec<_> = char_fonts.iter().collect();
-    char_faces.sort_unstable_by_key(|(face_id, _)| face_id.get());
-    for (face_id, by_char) in char_faces {
-        face_id.hash(&mut hasher);
-        let mut chars: Vec<_> = by_char.iter().collect();
-        chars.sort_unstable_by_key(|(ch, _)| **ch);
-        for (ch, glyph) in chars {
-            ch.hash(&mut hasher);
-            glyph.resolved_font_id.hash(&mut hasher);
-            glyph.glyph_id.hash(&mut hasher);
-            glyph.advance_px.to_bits().hash(&mut hasher);
-        }
-    }
-
-    let mut shaped_faces: Vec<_> = shaped_clusters.iter().collect();
-    shaped_faces.sort_unstable_by_key(|(face_id, _)| face_id.get());
-    for (face_id, by_text) in shaped_faces {
-        face_id.hash(&mut hasher);
-        let mut clusters: Vec<_> = by_text.iter().collect();
-        clusters.sort_unstable_by_key(|(start, _)| *start);
-        for (text, glyphs) in clusters {
-            text.hash(&mut hasher);
-            resolved_glyph_stream_identity(glyphs).hash(&mut hasher);
-        }
-    }
-
-    FrameFontBindingsIdentity(hasher.finish())
-}
-
 /// Whether a face asking for REQUESTED weight, set in a font of ACTUAL
 /// weight, needs a faux bold: it asks for semi-bold or more and the font is
 /// lighter than semi-bold.
@@ -602,11 +537,6 @@ pub struct WgpuGlyphAtlas {
     pub(crate) page_evictions_this_frame: usize,
     /// Font identities hashed since the last `count_font_identities`.
     font_identities: std::cell::Cell<usize>,
-    /// Monotonic count of UV-invalidating events (page eviction/reset and
-    /// whole-atlas clears). Cached vertices embed atlas UVs, so any consumer
-    /// caching tessellated output MUST key on this and drop its cache when it
-    /// moves (row-reuse's mandatory atlas-generation key).
-    eviction_generation: u64,
     /// Submission epoch whose passes hold the current page pins.
     pin_epoch: u64,
     /// Layout-resolved font table for the frames this atlas draws, installed
@@ -622,7 +552,6 @@ pub struct WgpuGlyphAtlas {
     /// glyphs`). Consulted before re-shaping cluster text. Cleared per
     /// render pass like `frame_char_fonts` (face-id keyed).
     frame_shaped_clusters: ShapedClusterTable,
-    frame_font_bindings_identity: FrameFontBindingsIdentity,
     /// Last layout catalog generation installed into this atlas.
     font_catalog_generation: Option<FontCatalogGeneration>,
     /// Cache: resolved font identity → this FontSystem's fontdb face id.
@@ -753,7 +682,6 @@ impl WgpuGlyphAtlas {
             frame_fonts: ResolvedFontTable::default(),
             frame_char_fonts: CharFontTable::default(),
             frame_shaped_clusters: ShapedClusterTable::default(),
-            frame_font_bindings_identity: FrameFontBindingsIdentity::default(),
             font_catalog_generation: None,
             resolved_fontdb_ids: HashMap::new(),
             resolved_fonts_by_fontdb: HashMap::new(),
@@ -767,7 +695,6 @@ impl WgpuGlyphAtlas {
             cache_misses_this_frame: 0,
             page_evictions_this_frame: 0,
             font_identities: std::cell::Cell::new(0),
-            eviction_generation: 0,
             pin_epoch: 0,
         }
     }
@@ -1636,7 +1563,6 @@ impl WgpuGlyphAtlas {
     pub(crate) fn begin_frame_fonts(&mut self) {
         self.frame_char_fonts.clear();
         self.frame_shaped_clusters.clear();
-        self.frame_font_bindings_identity = FrameFontBindingsIdentity::default();
     }
 
     /// Install a frame's layout-resolved font tables before its text draws.
@@ -1671,8 +1597,6 @@ impl WgpuGlyphAtlas {
                 entry.entry(text.clone()).or_insert_with(|| glyphs.clone());
             }
         }
-        self.frame_font_bindings_identity =
-            frame_font_bindings_identity(faces, fonts, char_fonts, shaped_clusters);
     }
 
     /// Upsert one frame's resolved fonts, and classify which of them carry a
@@ -1836,10 +1760,6 @@ impl WgpuGlyphAtlas {
             .get(&face.id)?
             .get(text)
             .map(|glyphs| resolved_glyph_stream_identity(glyphs))
-    }
-
-    pub(crate) fn frame_font_bindings_identity(&self) -> FrameFontBindingsIdentity {
-        self.frame_font_bindings_identity
     }
 
     /// Build cosmic Attrs that replay a layout-resolved font verbatim: the
@@ -2093,21 +2013,6 @@ impl WgpuGlyphAtlas {
         // render-side generation reset. Keep successful fontdb registrations,
         // but let the shared materializer retry only its failed observations.
         self.font_file_cache.retry_failed_exact_faces();
-        self.eviction_generation = self.eviction_generation.wrapping_add(1);
-    }
-
-    /// Monotonic generation that advances whenever any atlas UVs may have
-    /// been invalidated (page eviction/reset, atlas clear).
-    pub(crate) fn eviction_generation(&self) -> u64 {
-        self.eviction_generation
-    }
-
-    /// Revalidate a previously returned entry and pin its page for this
-    /// frame. Returns false when the entry's page was evicted/reset since the
-    /// entry was created — its UVs are stale and any cached vertices built
-    /// from it must be re-tessellated.
-    pub(crate) fn revalidate_and_pin(&mut self, entry: AnyAtlasEntry) -> bool {
-        self.pin_entry_page(entry).is_ok()
     }
 
     /// Map a layout-resolved font identity to this FontSystem's own fontdb
@@ -2504,7 +2409,6 @@ impl WgpuGlyphAtlas {
         );
         self.remove_alpha_page_entries(evicted_id);
         self.page_evictions_this_frame += 1;
-        self.eviction_generation = self.eviction_generation.wrapping_add(1);
         self.atlas_pages
             .allocate_alpha(
                 size,
@@ -2554,7 +2458,6 @@ impl WgpuGlyphAtlas {
 
         self.remove_subpixel_page_entries(evicted_id);
         self.page_evictions_this_frame += 1;
-        self.eviction_generation = self.eviction_generation.wrapping_add(1);
         self.atlas_pages
             .allocate_subpixel(
                 size,
@@ -2604,7 +2507,6 @@ impl WgpuGlyphAtlas {
 
         self.remove_color_page_entries(evicted_id);
         self.page_evictions_this_frame += 1;
-        self.eviction_generation = self.eviction_generation.wrapping_add(1);
         self.atlas_pages
             .allocate_color(
                 size,

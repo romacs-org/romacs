@@ -8,26 +8,26 @@ TYPED = {'name': 'typed'}
 
 
 def frame(scenes=1, result='Submitted', **counts):
-    """A `frame-cost' line: a scene frame of 46 rows, all tessellated, of
+    """A `frame-cost' line: a scene frame of 46 rows tessellated, of
     900 instructions in its draw, 400 of them the driver's, and 100 in its
     scene's ingestion, unless COUNTS say otherwise."""
     line = {'diagnostic': 'frame-cost', 'presentation': 1, 'work': 'rebuild', 'result': result, 'scenes': scenes,
             'ingest_instructions': 100, 'frame_instructions': 900, 'acquire_instructions': 50, 'submit_instructions': 300,
-            'present_instructions': 50, 'rows': 46, 'rows_tessellated': 46, 'rows_reused': 0, 'rows_unmarked': 46, 'cursor_rows': 1,
+            'present_instructions': 50, 'rows_tessellated': 46, 'rows_reused': 0, 'cursor_rows': 1,
             'glyphs_walked': 3000, 'font_identities': 6000, 'bytes_uploaded': 800_000}
     return {**line, **counts}
 
 
 def stderr(*lines, start=True):
     """A session's stderr: other diagnostics, the start mark, then LINES."""
-    head = [{'diagnostic': 'paint', 'presentation': 0}, frame(rows=1)] + ([{'stages': 'start'}] if start else [])
+    head = [{'diagnostic': 'paint', 'presentation': 0}, frame(rows_tessellated=1)] + ([{'stages': 'start'}] if start else [])
     return 'a line of text\n' + '\n'.join(json.dumps(line) for line in head + list(lines)) + '\n{not json\n'
 
 
 class Frames(unittest.TestCase):
     def test_frames_are_the_cost_lines_after_the_start_mark_that_reached_the_surface(self):
-        drawn = r.frames(stderr(frame(), {'diagnostic': 'paint'}, frame(result='Occluded'), frame(scenes=0), {'stages': 'end'}, frame(rows=47)))
-        self.assertEqual([(f['rows'], f['scenes']) for f in drawn], [(46, 1), (46, 0), (47, 1)])
+        drawn = r.frames(stderr(frame(), {'diagnostic': 'paint'}, frame(result='Occluded'), frame(scenes=0), {'stages': 'end'}, frame(rows_tessellated=47)))
+        self.assertEqual([(f['rows_tessellated'], f['scenes']) for f in drawn], [(46, 1), (46, 0), (47, 1)])
         self.assertEqual(r.frames(stderr(frame(), start=False)), [])
 
     def test_a_session_without_a_start_mark_after_a_good_one_has_no_frames(self):
@@ -37,8 +37,8 @@ class Frames(unittest.TestCase):
         self.assertEqual(len(r.frames(r.since(earlier, 0))), 30)
 
     def test_an_earlier_session_in_the_same_stderr_is_not_counted(self):
-        both = stderr(*[frame()] * 30) + stderr(frame(rows=47))
-        self.assertEqual([f['rows'] for f in r.frames(both)], [47])
+        both = stderr(*[frame()] * 30) + stderr(frame(rows_tessellated=47))
+        self.assertEqual([f['rows_tessellated'] for f in r.frames(both)], [47])
 
     def test_own_instructions_are_the_ingestion_and_the_draw_less_the_drivers_part(self):
         self.assertEqual((r.own(frame()), r.driver(frame())), (600, 400))
@@ -49,7 +49,7 @@ class Figures(unittest.TestCase):
         heavy = frame(rows_tessellated=90, frame_instructions=5000)
         extra = frame(scenes=0, ingest_instructions=0, frame_instructions=700)
         held, said = r.figures([frame()] * 3 + [heavy] * 2 + [extra] * 2, 5)
-        self.assertEqual((held['rows'], held['rows_tessellated'], held['own_instructions'], held['bytes_uploaded']), (46, 46, 600, 800_000))
+        self.assertEqual((held['rows_tessellated'], held['cursor_rows'], held['own_instructions'], held['bytes_uploaded']), (46, 1, 600, 800_000))
         self.assertEqual((held['extra_frames'], said['scene_frames'], said['driver_instructions'], said['extra_own_instructions']), (4, 5, 400, 300))
         self.assertEqual(r.figures([frame()], 1)[1]['extra_own_instructions'], 0)
 
@@ -78,9 +78,9 @@ class Bars(unittest.TestCase):
         self.assertEqual((row['status'], row['off'], len(row['frames'])), ('PASS', [], 2))
 
     def test_rows_are_held_as_counted_and_costs_with_a_margin(self):
-        self.assertEqual((self.bars['rows'], self.bars['rows_tessellated'], self.bars['rows_reused'], self.bars['cursor_rows']), (46, 46, 0, 1))
+        self.assertEqual((self.bars['rows_tessellated'], self.bars['rows_reused'], self.bars['cursor_rows']), (46, 0, 1))
         self.assertEqual((self.bars['own_instructions'], self.bars['glyphs_walked'], self.bars['extra_frames']), (660, 3300, 0))
-        self.assertEqual((r.ceiling('own_instructions', 5_234_567), r.ceiling('rows', 46), r.ceiling('bytes_uploaded', 0)), (5_760_000, 46, 0))
+        self.assertEqual((r.ceiling('own_instructions', 5_234_567), r.ceiling('rows_tessellated', 46), r.ceiling('bytes_uploaded', 0)), (5_760_000, 46, 0))
 
     def test_a_row_count_off_its_bar_fails_either_way_and_a_cheaper_cost_passes(self):
         more = r.verdict(TYPED, self.text, 2, {'typed': {**self.bars, 'rows_tessellated': 1}})
@@ -106,8 +106,8 @@ class Bars(unittest.TestCase):
 
     def test_the_table_shows_figures_or_the_reason(self):
         text = r.table([r.verdict(TYPED, self.text, 2, {'typed': self.bars}), r.verdict({'name': 'gone'}, '', 2, {})])
-        self.assertIn('| typed | 46 | 46 | 0 | 1 | 3000 | 6000 | 781K | 0.00M | 0.00M | 0.0/step | 0.00M | PASS |', text)
-        self.assertIn('| gone | - | - | - | - | - | - | - | - | - | - | - | FAIL — 0 scene frames for 2 steps |', text)
+        self.assertIn('| typed | 46 | 0 | 1 | 3000 | 6000 | 781K | 0.00M | 0.00M | 0.0/step | 0.00M | PASS |', text)
+        self.assertIn('| gone | - | - | - | - | - | - | - | - | - | - | FAIL — 0 scene frames for 2 steps |', text)
 
 
 if __name__ == '__main__':

@@ -15,9 +15,8 @@ any other frame that reached it is an extra (an animation's, the window
 system's).  A scenario's figures are medians over its scene frames (the
 upper of two middle ones):
 
-  rows              text rows the root frame's glyph passes met
-  rows_tessellated  of those, rows tessellated from their glyphs
-  rows_reused       rows of the frame drawn from an earlier frame's work
+  rows_tessellated  text rows the root frame's glyph passes tessellated
+  rows_reused       rows of the frame kept from an earlier frame's pixels
   cursor_rows       rows tessellated to draw a cursor over the root picture
   glyphs_walked     glyph records handed to glyph passes
   font_identities   font identities hashed, one per glyph looked up
@@ -73,9 +72,9 @@ SCENARIOS = (stages.SCENARIOS, HERE / 'render_stages.el')
 BARS = HERE / 'render_stages_bars.json'
 # The figures that are a line's count as it is, the stretches inside a draw
 # that are the surface's and the driver's, and the figures held exactly.
-COUNTS = ('rows', 'rows_tessellated', 'rows_reused', 'cursor_rows', 'glyphs_walked', 'font_identities', 'bytes_uploaded')
+COUNTS = ('rows_tessellated', 'rows_reused', 'cursor_rows', 'glyphs_walked', 'font_identities', 'bytes_uploaded')
 DRIVER = ('acquire_instructions', 'submit_instructions', 'present_instructions')
-EXACT = ('rows', 'rows_tessellated', 'rows_reused', 'cursor_rows')
+EXACT = ('rows_tessellated', 'rows_reused', 'cursor_rows')
 MARGIN_PERCENT = 110
 SCENES = 0.9
 
@@ -182,15 +181,15 @@ def bars_of(rows):
 
 def table(rows):
     """The report as a Markdown table, instructions in millions."""
-    lines = ['| scenario | rows | tessellated | reused | cursor | glyphs | identities | uploaded | own | driver | extra frames | extra own | status |',
-             '|---|---|---|---|---|---|---|---|---|---|---|---|---|']
+    lines = ['| scenario | tessellated | reused | cursor | glyphs | identities | uploaded | own | driver | extra frames | extra own | status |',
+             '|---|---|---|---|---|---|---|---|---|---|---|---|']
     for row in rows:
         f, said = row.get('figures'), row.get('said')
         millions = lambda count: f'{count / 1e6:.2f}M'  # noqa: E731
-        cells = ([f['rows'], f['rows_tessellated'], f['rows_reused'], f['cursor_rows'], f['glyphs_walked'], f['font_identities'],
+        cells = ([f['rows_tessellated'], f['rows_reused'], f['cursor_rows'], f['glyphs_walked'], f['font_identities'],
                   f"{f['bytes_uploaded'] / 1024:.0f}K", millions(f['own_instructions']), millions(said['driver_instructions']),
                   f"{f['extra_frames'] / 10:.1f}/step", millions(said['extra_own_instructions'])]
-                 if f else ['-'] * 11)
+                 if f else ['-'] * 10)
         note = f" — {row['reason']}" if row.get('reason') else ''
         lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
     return '\n'.join(lines) + '\n'

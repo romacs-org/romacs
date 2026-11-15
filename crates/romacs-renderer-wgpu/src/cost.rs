@@ -4,15 +4,13 @@
 //! (romacs-display-runtime `frame_cost`); they are plain adds, always on.
 use romacs_display_protocol::call_count;
 
-/// Text rows of the root frame's glyph passes: buffer rows and chrome rows.
-pub const ROWS: &str = "render.rows";
-/// Of those, rows tessellated from their glyphs.
+/// Text rows tessellated by the root frame's glyph passes: buffer rows and
+/// chrome rows.
 pub const ROWS_TESSELLATED: &str = "render.rows-tessellated";
-/// Of those, rows drawn from what an earlier frame tessellated.
+/// Text rows the root picture kept from an earlier frame instead.
 pub const ROWS_REUSED: &str = "render.rows-reused";
-/// Of the rows tessellated, those the pass had no damage record for: rows
-/// reuse could not consider.
-pub const ROWS_UNMARKED: &str = "render.rows-unmarked";
+/// Bands of rows the root picture moved, copied a distance away.
+pub const BANDS_MOVED: &str = "render.bands-moved";
 /// Rows tessellated to draw a cursor over the root picture: the glyphs
 /// under it, which it paints in its own colours. Counted apart from the
 /// rows above, which are the frame's.
@@ -28,11 +26,10 @@ pub const BYTES_UPLOADED: &str = "render.bytes-uploaded";
 pub const SUBMIT_INSTRUCTIONS: &str = "render.submit-instructions";
 
 /// Every count above.
-pub const COUNTS: [&str; 9] = [
-    ROWS,
+pub const COUNTS: [&str; 8] = [
     ROWS_TESSELLATED,
     ROWS_REUSED,
-    ROWS_UNMARKED,
+    BANDS_MOVED,
     CURSOR_ROWS,
     GLYPHS_WALKED,
     FONT_IDENTITIES,
@@ -59,14 +56,7 @@ pub(crate) fn for_cursor<T>(work: impl FnOnce() -> T) -> T {
     value
 }
 
-/// Count a text pass that met ROWS rows and tessellated TESSELLATED of
-/// them, UNMARKED of those for want of a damage record.
-pub(crate) fn add_rows(rows: usize, tessellated: usize, unmarked: usize) {
-    if FOR_CURSOR.get() {
-        add(CURSOR_ROWS, tessellated);
-        return;
-    }
-    add(ROWS, rows);
-    add(ROWS_TESSELLATED, tessellated);
-    add(ROWS_UNMARKED, unmarked);
+/// Count a text pass that tessellated ROWS rows.
+pub(crate) fn add_rows(rows: usize) {
+    add(if FOR_CURSOR.get() { CURSOR_ROWS } else { ROWS_TESSELLATED }, rows);
 }

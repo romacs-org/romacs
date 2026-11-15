@@ -45,7 +45,6 @@ fn draw_root(
         None,
         None,
         None,
-        None,
     );
 }
 fn linear_second() -> MotionSpec {
@@ -143,7 +142,6 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
     root.background_alpha = 0.0;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -454,7 +452,7 @@ fn expired_child_lifecycle_needs_no_scratch_under_unchanged_pressure() {
             false,
             1.0,
         );
-        render.set_current_frame(Some(root), None, Default::default(), Default::default());
+        render.set_current_frame(Some(root), Default::default(), Default::default());
         assert!(
             render
                 .compositor
@@ -653,7 +651,6 @@ fn missing_child_scratch_returns_retry_without_drawing_and_recovers() {
     root.background = Color::BLUE;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );

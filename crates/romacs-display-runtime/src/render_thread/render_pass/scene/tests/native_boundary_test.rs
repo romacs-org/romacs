@@ -45,7 +45,6 @@ fn obsolete_native_owner_retires_before_required_child_under_same_pressure() {
     root.background_alpha = 1.0;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -202,7 +201,6 @@ fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls
         let surface = mapping(&new_frame, W, H).surface();
         render.set_current_frame(
             Some(new_frame.clone()),
-            None,
             Default::default(),
             Default::default(),
         );
