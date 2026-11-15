@@ -18,6 +18,10 @@ pub(crate) const PROCESS_PRELUDE: &str = include_str!("../../../../lisp/vm/subpr
 pub(crate) const INOTIFY_PRELUDE: &str = include_str!("../../../../lisp/vm/inotify.el");
 /// T3 tier: isolates' spawning, futures, delivery and the worker's loop over prims/isolate.rs.
 pub(crate) const ISOLATE_PRELUDE: &str = include_str!("../../../../lisp/vm/isolate.el");
+/// T3 tier: window.c's change functions and its old-state accessors
+/// (`run-window-configuration-change-hook', `window-old-buffer', ...), which
+/// redisplay runs (host_input.rs) and any session may call.
+pub(crate) const WINDOW_CHANGE_PRELUDE: &str = include_str!("../../../../lisp/vm/window-change.el");
 
 // Compile-fail probes for the T1 boundary. `tests/primitive_gc_boundary.rs`
 // checks this crate with `--cfg vm2_gc_probe="..."`, which places a fixture
