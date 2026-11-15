@@ -293,6 +293,51 @@ fn a_frame_waits_for_no_first_parse() {
     assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
 }
 
+/// Romacs's `treesit-font-lock-fontify-region` (`romacs-treesit-font-lock.el`),
+/// one query for all of a language's settings, writes the faces and calls
+/// the functions GNU's, read from treesit.el, does, in the same order: every
+/// override, a function capture, a `#pred?` predicate, and nodes that reach
+/// past the region on either side.
+#[test]
+fn fontify_applies_captures_as_gnus_loop() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (set-buffer (get-buffer-create \"fontify\")) \
+        (insert \"int alpha = 1;\\nint beta = alpha + 22;\\nchar *gamma(int delta) {{ return 0; }}\\n\") \
+        (setq-local treesit-primary-parser (treesit-parser-create 'c)) \
+        (defalias 'tf-call (lambda (node override start end) (push (list 'call (treesit-node-type node) override start end) tf-order))) \
+        (defalias 'tf-pred (lambda (node) (push (list 'pred (treesit-node-text node t)) tf-order) (not (equal (treesit-node-text node t) \"beta\")))) \
+        (setq-local treesit-font-lock-settings \
+          (treesit-font-lock-rules \
+            :language 'c :feature 'a '((identifier) @font-lock-variable-name-face) \
+            :language 'c :feature 'b :override t '((number_literal) @font-lock-constant-face) \
+            :language 'c :feature 'c :override 'append '((primitive_type) @font-lock-type-face) \
+            :language 'c :feature 'd :override 'prepend '((primitive_type) @bold) \
+            :language 'c :feature 'e :override 'keep '((identifier) @italic) \
+            :language 'c :feature 'f '((declaration declarator: (_) @tf-call)) \
+            :language 'c :feature 'g '(((identifier) @font-lock-keyword-face (:pred tf-pred @font-lock-keyword-face))))) \
+        (defalias 'tf-run (lambda () \
+          (setq tf-order nil) \
+          (with-silent-modifications (remove-text-properties (point-min) (point-max) '(face nil))) \
+          (treesit-font-lock-fontify-region 5 40) \
+          (list (format \"%S\" (buffer-string)) (reverse tf-order)))))");
+    vm.eval_source(&setup).unwrap();
+    let run = |vm: &mut Vm| vm.eval_source("(tf-run)").and_then(romacs_vm::Local::display).unwrap();
+    let ours = run(&mut vm);
+    assert_eq!(vm.eval_source("(and (string-match-p \"romacs-treesit-font-lock\" (symbol-file 'treesit-font-lock-fontify-region)) t)")
+        .and_then(romacs_vm::Local::display).unwrap(), "t", "Romacs's definition ran first");
+    vm.eval_source("(dolist (name '(treesit-font-lock-fontify-region treesit--font-lock-fontify-region-1)) \
+        (let ((form (with-temp-buffer \
+          (insert-file-contents (locate-library \"treesit.el\")) \
+          (re-search-forward (concat \"^(defun \" (regexp-quote (symbol-name name)) \" \")) (goto-char (match-beginning 0)) \
+          (read (current-buffer))))) \
+          (defalias name (eval (cons 'lambda (cddr form)) t))))").unwrap();
+    let gnus = run(&mut vm);
+    assert_eq!(ours, gnus);
+    assert!(ours.contains("(call \"init_declarator\" nil 5 40)") && ours.contains("(bold font-lock-type-face)"), "the run exercised what it names: {ours}");
+}
+
 /// romacs-treesit-code.el: a code block takes its language's faces in front
 /// of the faces it has, as a buffer of its own would give them, so an
 /// unclosed brace in one block leaves the next alone; a block that grows
