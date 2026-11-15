@@ -183,16 +183,19 @@ that it waits."
 
 (defun romacs-agent-ask--rows-of (line columns)
   "How many rows LINE takes wrapped at words in COLUMNS, as the layer
-wraps it: a word too long for a row starts its own and runs on."
-  (let ((rows 1) (used 0))
-    (dolist (word (split-string line " "))
+wraps it: its indent counts, a row's last column is the wrap's, and a
+word too long for a row starts its own and runs on."
+  (let* ((room (max 1 (1- columns)))
+         (indent (- (length line) (length (string-trim-left line " +"))))
+         (rows 1) (used indent) (first t))
+    (dolist (word (split-string (substring line indent) " " t))
       (let ((width (string-width word)))
-        (cond ((= used 0) (setq used width))
-              ((<= (+ used 1 width) columns) (setq used (+ used 1 width)))
+        (cond (first (setq used (+ used width) first nil))
+              ((<= (+ used 1 width) room) (setq used (+ used 1 width)))
               (t (setq rows (1+ rows) used width)))
         ;; A word wider than a row takes rows of its own.
-        (while (> used columns)
-          (setq rows (1+ rows) used (- used columns)))))
+        (while (> used room)
+          (setq rows (1+ rows) used (- used room)))))
     rows))
 
 (defun romacs-agent-ask-size (text most)

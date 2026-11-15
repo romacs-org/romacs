@@ -158,7 +158,11 @@
   (should (equal (romacs-agent-ask-size "abc\nde\n" 40) '(5 . 2)))
   (should (equal (romacs-agent-ask-size (concat (make-string 90 ?x) "\nshort\n") 40) '(40 . 4)))
   ;; At words: five 41-column words in 80 columns take five rows.
-  (should (equal (romacs-agent-ask-size (string-join (make-list 5 (make-string 41 ?w)) " ") 80) '(80 . 5))))
+  (should (equal (romacs-agent-ask-size (string-join (make-list 5 (make-string 41 ?w)) " ") 80) '(80 . 5)))
+  ;; An option's indent counts, and a row's last column is the wrap's.
+  (should (= (romacs-agent-ask--rows-of (concat " 1 ○ " (string-join (make-list 15 "word") " ")) 80) 1))
+  (should (= (romacs-agent-ask--rows-of (concat "    " (make-string 76 ?x)) 80) 2))
+  (should (= (romacs-agent-ask--rows-of "abcd efgh" 9) 2)))
 
 (ert-deftest romacs-agent-ask-replay-leaves-live-layers ()
   ;; A turn replayed (paging back) ends long ago: today's layer stays,
