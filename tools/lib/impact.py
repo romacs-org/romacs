@@ -129,7 +129,7 @@ def test_file(binary):
     alone = f'binary_id({binary})'
     if package not in test_modules.PACKAGES:
         return alone
-    folded = ' | '.join(f'binary_id({package}::{target})' for target in (test_modules.ALL, test_modules.GNU))
+    folded = ' | '.join(f'binary_id({package}::{target})' for target in test_modules.FOLDED[package])
     return f'{alone} | (({folded}) & test(/^{file}::/))'
 
 
@@ -282,7 +282,9 @@ def runs(answer, root, leave=()):
     def flags(package):
         if package in test_modules.PACKAGES:
             return test_modules.targets(root, package)
-        return ['--lib', '--bins', '--tests']
+        # Every target that has tests, the library and binaries among them
+        # where the package has them: --lib refuses a package with none.
+        return ['--tests']
     return [(package, flags(package), ' | '.join(found)) for package, found in sorted(terms.items())]
 
 

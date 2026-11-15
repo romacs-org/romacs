@@ -65,9 +65,9 @@ impl Leaf<'_> {
                 return Err(Fault::Error("string-width of composed text (the `composition' property) is not implemented".into()));
             }
         }
-        let view = self.vm.str_view(string).expect("string-width takes a string");
-        let chars: Vec<u32> = if view.multibyte { view.chars().skip(from).take(to - from).collect() }
-            else { view.bytes[from..to].iter().map(|&b| u32::from(b)).collect() };
+        let view = self.vm.str_view_from(string, from).expect("string-width takes a string");
+        let chars: Vec<u32> = if view.multibyte { view.chars().take(to - from).collect() }
+            else { view.bytes[..to - from].iter().map(|&b| u32::from(b)).collect() };
         let display = self.display_table()?;
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let mut width = 0i64;

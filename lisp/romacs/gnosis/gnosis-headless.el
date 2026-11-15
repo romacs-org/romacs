@@ -7,7 +7,7 @@
 
 ;;; Commentary:
 
-;; Practice away from the desk.  A chat agent (Hermes over XMPP, say)
+;; Practice away from the desk.  A chat agent (one reached over XMPP, say)
 ;; calls these functions in the learner's running Emacs, one call per chat
 ;; turn, and relays plain text.  There is no buffer, no recursive input and
 ;; no second database.

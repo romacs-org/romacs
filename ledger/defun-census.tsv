@@ -123,7 +123,6 @@ funcall-with-delayed-message	needed	lane A (editing, windows, frames, minibuffer
 gap-position	absent	no shipped Lisp calls it and it is no command
 garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
 get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
-get-display-property	needed	lane A (editing, windows, frames, minibuffer readers, display)
 get-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 get-unused-iso-final-char	absent	no shipped Lisp calls it and it is no command
 gfile-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
@@ -172,8 +171,6 @@ int86	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal--hash-table-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--hash-table-histogram	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--hash-table-index-size	absent	GNU hash-table and obarray internals: Romacs's differ
-internal--labeled-narrow-to-region	needed	lane A (editing, windows, frames, minibuffer readers, display)
-internal--labeled-widen	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal--obarray-buckets	absent	GNU hash-table and obarray internals: Romacs's differ
 internal--set-buffer-modified-tick	absent	no shipped Lisp calls it and it is no command
 internal--track-mouse	needed	lane A (editing, windows, frames, minibuffer readers, display)

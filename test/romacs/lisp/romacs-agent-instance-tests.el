@@ -22,6 +22,8 @@ codex, and `session', an ended Claude Code session under claude whose
 conversation is in `one'; `told' collects what a task is told."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-switch-" t))
+          ;; Its reports kept here, never in the real state root.
+          (process-environment (cons (concat "XDG_STATE_HOME=" root "/state") process-environment))
           (one (expand-file-name "one" root)) (two (expand-file-name "two" root))
           (codex-home (expand-file-name "codex" root))
           (romacs-agent-providers (list (cons "claude" one) (cons "claude2" two) (cons "codex" codex-home)))

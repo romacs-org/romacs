@@ -6,7 +6,7 @@
   "glyphs_walked": 99,
   "font_identities": 185,
   "bytes_uploaded": 61300,
-  "own_instructions": 4650000,
+  "own_instructions": 4430000,
   "extra_frames": 0
  },
  "chat-cursor": {
@@ -16,7 +16,7 @@
   "glyphs_walked": 76,
   "font_identities": 137,
   "bytes_uploaded": 53500,
-  "own_instructions": 4890000,
+  "own_instructions": 4670000,
   "extra_frames": 0
  },
  "cursor-move": {
@@ -26,7 +26,7 @@
   "glyphs_walked": 97,
   "font_identities": 179,
   "bytes_uploaded": 51300,
-  "own_instructions": 3740000,
+  "own_instructions": 3580000,
   "extra_frames": 0
  },
  "typed": {
@@ -36,7 +36,7 @@
   "glyphs_walked": 196,
   "font_identities": 370,
   "bytes_uploaded": 95600,
-  "own_instructions": 5140000,
+  "own_instructions": 5000000,
   "extra_frames": 0
  },
  "typed-elements": {
@@ -46,7 +46,7 @@
   "glyphs_walked": 190,
   "font_identities": 357,
   "bytes_uploaded": 93400,
-  "own_instructions": 5010000,
+  "own_instructions": 4850000,
   "extra_frames": 0
  },
  "chat-stream-1k": {
@@ -56,7 +56,7 @@
   "glyphs_walked": 128,
   "font_identities": 231,
   "bytes_uploaded": 84800,
-  "own_instructions": 5330000,
+  "own_instructions": 5140000,
   "extra_frames": 0
  },
  "chat-stream-10k": {
@@ -66,7 +66,7 @@
   "glyphs_walked": 128,
   "font_identities": 231,
   "bytes_uploaded": 84800,
-  "own_instructions": 5410000,
+  "own_instructions": 5190000,
   "extra_frames": 0
  },
  "fontify-open-org-folded": {
@@ -76,7 +76,7 @@
   "glyphs_walked": 88,
   "font_identities": 154,
   "bytes_uploaded": 53800,
-  "own_instructions": 2780000,
+  "own_instructions": 2750000,
   "extra_frames": 0
  },
  "fontify-typed-org-folded": {
@@ -86,7 +86,7 @@
   "glyphs_walked": 92,
   "font_identities": 161,
   "bytes_uploaded": 54300,
-  "own_instructions": 2810000,
+  "own_instructions": 2800000,
   "extra_frames": 0
  },
  "fontify-unfold-org": {
@@ -96,7 +96,7 @@
   "glyphs_walked": 385,
   "font_identities": 737,
   "bytes_uploaded": 166000,
-  "own_instructions": 6850000,
+  "own_instructions": 6720000,
   "extra_frames": 0
  },
  "fontify-typed-elisp": {
@@ -106,7 +106,7 @@
   "glyphs_walked": 193,
   "font_identities": 363,
   "bytes_uploaded": 92600,
-  "own_instructions": 7550000,
+  "own_instructions": 7190000,
   "extra_frames": 0
  },
  "typed-three-windows": {
@@ -116,17 +116,17 @@
   "glyphs_walked": 201,
   "font_identities": 370,
   "bytes_uploaded": 127000,
-  "own_instructions": 6190000,
+  "own_instructions": 5970000,
   "extra_frames": 0
  },
  "scroll-line": {
-  "rows_tessellated": 3,
-  "rows_reused": 35,
-  "cursor_rows": 1,
-  "glyphs_walked": 223,
-  "font_identities": 425,
-  "bytes_uploaded": 105000,
-  "own_instructions": 6250000,
+  "rows_tessellated": 38,
+  "rows_reused": 0,
+  "cursor_rows": 0,
+  "glyphs_walked": 2240,
+  "font_identities": 4470,
+  "bytes_uploaded": 869000,
+  "own_instructions": 23500000,
   "extra_frames": 0
  }
 }

@@ -849,18 +849,16 @@ two separator newlines after each body; they are not part of its value.
 Removing or blanking Rubric prevents an agent-eval save; it never reuses a
 hidden rubric from an older draft.
 
-The default ~gnosis-agent-eval-function~ is ~gnosis-agent-eval-hermes~.
-Install =emacs-hermes= with =hermes-request= support to use it.  Gnosis loads
-that optional integration only when evaluation is requested; ordinary authoring
-and other thema types do not require Hermes.  Customize
-~gnosis-agent-eval-hermes-profile~ to select the evaluator profile (default
-="default"=).  The profile owns its model, credentials and instructions.
-~gnosis-agent-eval-hermes-backend-url~ optionally selects a dedicated backend;
-its default nil uses Hermes's configured transport.  This selection does not
-change your default backend or current chat.  The chosen backend must provide
-the selected profile.
+The default ~gnosis-agent-eval-function~ is ~gnosis-agent-eval-romacs~, which
+evaluates in one isolated Romacs agent session per request.  Gnosis loads it
+only when evaluation is requested; ordinary authoring and other thema types do
+not start an agent.  Customize ~gnosis-agent-romacs-provider~ to select the
+provider instance (default nil: ~romacs-agent-default-provider~, or the
+provider picker), and ~gnosis-agent-romacs-model~ and
+~gnosis-agent-romacs-effort~ to override the instance's model and effort.
+This selection does not change your default provider or any open chat.
 Requests contain the question, reference answer, rubric and your response;
-choose a profile/provider suitable for that content.
+choose a provider suitable for that content.
 
 During review the question and hints stay in the review buffer.  Write your
 response in the separate native text-mode response buffer, then press

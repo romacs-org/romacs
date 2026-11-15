@@ -34,6 +34,7 @@ def workspace(root):
         'crates/romacs-vm-gui/Cargo.toml': '[package]\nname = "romacs-vm-gui"\nversion = "0.0.0"\nedition = "2021"\n'
                                            '[dependencies]\nromacs-vm = { path = "../romacs-vm" }\n',
         'crates/romacs-vm-gui/src/main.rs': 'fn main() {}\n',
+        'crates/romacs-vm-gui/tests/all/standalone.txt': '',
         'crates/romacs-vm-gui/tests/scaling.rs': 'const H: &str = "harness/scaling_live.py";\n',
         'crates/romacs-vm-gui/tests/fixtures/sample.el': '',
         'crates/romacs-vm-gui/tests/samples.rs': 'const F: &str = "tests/fixtures/sample.el";\n',
@@ -84,6 +85,12 @@ class Select(unittest.TestCase):
         self.assertEqual((found['packages'], set(found['files'])), ({}, {'romacs-vm::quit_async'}))
         self.assertIn(impact.test_file('romacs-vm::quit_async'), found['filter'])
 
+    def test_a_test_file_is_named_in_its_packages_folded_targets_only(self):
+        self.assertEqual(impact.test_file('romacs-vm-gui::samples'),
+                         'binary_id(romacs-vm-gui::samples) | ((binary_id(romacs-vm-gui::all)) & test(/^samples::/))')
+        self.assertIn('binary_id(romacs-vm::gnu)', impact.test_file('romacs-vm::plain'))
+        self.assertEqual(impact.test_file('romacs-display-runtime::x'), 'binary_id(romacs-display-runtime::x)')
+
     def test_a_support_file_reaches_the_tests_that_include_it_through_another(self):
         found = self.select('crates/romacs-vm/tests/support/gnu_lisp.rs')
         self.assertEqual(set(found['files']), {'romacs-vm::status_bar'})
@@ -97,10 +104,15 @@ class Select(unittest.TestCase):
     def test_runs_give_one_run_a_package_with_its_own_terms(self):
         runs = impact.runs(self.select('crates/romacs-vm-gui/src/main.rs', 'crates/romacs-vm/tests/quit_async.rs'), self.root)
         found = {package: (flags, terms) for package, flags, terms in runs}
-        self.assertEqual(found['romacs-vm-gui'], (['--lib', '--bins', '--tests'], 'package(romacs-vm-gui)'))
+        self.assertEqual(found['romacs-vm-gui'], (['--lib', '--bins', '--test', 'all'], 'package(romacs-vm-gui)'))
         self.assertIn(impact.test_file('romacs-vm::quit_async'), found['romacs-vm'][1])
         self.assertNotIn('romacs-vm-gui', found['romacs-vm'][1])
         self.assertIsNone(impact.runs(self.select('Cargo.lock'), self.root))
+
+    def test_a_package_without_folded_targets_runs_its_test_targets(self):
+        # --lib refuses a package that has no library (romacs-gnu-tests); --tests takes what it has.
+        runs = {package: flags for package, flags, _ in impact.runs(self.select('crates/romacs-display-runtime/src/lib.rs'), self.root)}
+        self.assertEqual(runs['romacs-display-runtime'], ['--tests'])
 
     def test_runs_can_leave_rules_out(self):
         slow = impact.test_file('romacs-vm::compile_boundaries')

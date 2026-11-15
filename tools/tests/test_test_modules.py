@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """tools/lib/test_modules.py: the modules are the directory's files less the
-standalone ones, those that boot GNU's Lisp in `gnu` and the rest in `all`,
-and `equal` passes only when each holds exactly the tests of its files."""
+standalone ones, in romacs-vm those that boot GNU's Lisp in `gnu` and the rest
+in `all`, and `equal` passes only when each holds exactly the tests of its
+files."""
 import shutil
 import sys
 import tempfile
@@ -38,6 +39,21 @@ class TestModulesTest(unittest.TestCase):
                          ({'a': 'all', 'b': 'all', 'g': 'gnu'}, {'alone': 'it has an allocator of its own'}))
         self.assertEqual(test_modules.targets(self.root, 'romacs-vm'),
                          ['--lib', '--bins', '--test', 'all', '--test', 'gnu', '--test', 'alone'])
+
+    def test_a_package_without_gnu_folds_every_module_into_all(self):
+        tests = self.root / 'crates/romacs-vm-gui/tests'
+        (tests / 'all').mkdir(parents=True)
+        (tests / 'a.rs').write_text('')
+        # GNU_LISP names romacs-vm's support files: here they are no reason to leave `all`.
+        (tests / 'g.rs').write_text('#[path = "support/gnu_lisp.rs"]\nmod gnu_lisp;\n')
+        (tests / 'alone.rs').write_text('')
+        (tests / 'all/standalone.txt').write_text('alone: why\n')
+        self.assertEqual(test_modules.package(self.root, 'romacs-vm-gui'), ({'a': 'all', 'g': 'all'}, {'alone': 'why'}))
+        self.assertEqual(test_modules.targets(self.root, 'romacs-vm-gui'), ['--lib', '--bins', '--test', 'all', '--test', 'alone'])
+        apart = [suite(name, ['one'], package='romacs-vm-gui') for name in ('a', 'g', 'alone')]
+        whole = suite('all', ['a::one', 'g::one'], package='romacs-vm-gui')
+        self.assertEqual(test_modules.equal(inventory(*apart, whole), 'romacs-vm-gui', {'a': 'all', 'g': 'all'}, {'alone': 'why'}),
+                         (2, []))
 
     def test_a_standalone_entry_needs_a_file_and_a_reason(self):
         (self.tests / 'all/standalone.txt').write_text('gone: it was here\n')

@@ -103,7 +103,7 @@ impl Language {
 // CELL(Plain)
 pub(crate) struct Tree(RefCell<tree_sitter::Tree>, OnceCell<Rc<tree_sitter::Tree>>);
 
-/// A tree no thread holds yet, on its way from the one that parsed it.
+/// A tree no thread holds yet, on its way to or from the one that parses.
 pub(crate) struct Loose(tree_sitter::Tree);
 impl Loose {
     pub(crate) fn tree(self) -> Tree {
@@ -134,6 +134,11 @@ impl Tree {
     /// This tree, new from a parse, to send to another thread.
     pub(crate) fn loose(self) -> Loose {
         Loose(self.0.into_inner())
+    }
+    /// `ts_tree_copy` for another thread to parse from: a tree of its own,
+    /// sharing this one's subtrees. No node is made of it here.
+    pub(crate) fn share(&self) -> Loose {
+        Loose(self.0.borrow().clone())
     }
     /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
     /// until the edits part them, so O(1) in the tree's size. Only an
@@ -167,6 +172,16 @@ pub(crate) trait Source {
     fn read(&self, offset: usize) -> Chunk<'_>;
 }
 
+thread_local! {
+    /// The parses this thread ran (`parses_on_this_thread`).
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// How many parses the calling thread has run: what tells a parse the
+/// evaluator paid for from one a parse thread ran for it.
+pub fn parses_on_this_thread() -> usize {
+    PARSES.with(std::cell::Cell::get)
+}
+
 pub(crate) struct Parser(tree_sitter::Parser);
 impl Parser {
     pub(crate) fn new() -> Self {
@@ -187,6 +202,11 @@ impl Parser {
         }).collect();
         self.0.set_included_ranges(&ranges).is_ok()
     }
+    /// `ts_parser_included_ranges`, as `set_included_ranges` takes them.
+    pub(crate) fn included_ranges(&self) -> Vec<(u32, u32)> {
+        let byte = |offset: usize| u32::try_from(offset).unwrap_or(u32::MAX);
+        self.0.included_ranges().iter().map(|range| (byte(range.start_byte), byte(range.end_byte))).collect()
+    }
     /// Whether its included ranges show all of a text of LENGTH bytes: the
     /// runtime's default, or one range that covers it.
     pub(crate) fn sees_all(&self, length: u32) -> bool {
@@ -195,6 +215,7 @@ impl Parser {
     /// ts_parser_parse of SOURCE, reusing OLD's unchanged subtrees.
     pub(crate) fn parse(&mut self, old: Option<&Tree>, source: &dyn Source) -> Option<Tree> {
         let old = old.map(|tree| tree.0.borrow());
+        PARSES.with(|n| n.set(n.get() + 1));
         let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), None)?;
         Some(Tree(RefCell::new(tree), OnceCell::new()))
     }

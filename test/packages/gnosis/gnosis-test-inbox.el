@@ -26,7 +26,7 @@
                      :parathema "Rate-limiting step of heme synthesis."
                      :tags '("biochemistry")
                      :kind "lecture" :source (gnosis-test-inbox--pdf) :page 13
-                     :agent "hermes/test" :reason "slide 13 step 1")))
+                     :agent "claude/test" :reason "slide 13 step 1")))
     (cl-loop for (key value) on overrides by #'cddr
              do (setq draft (plist-put draft key value)))
     draft))
@@ -71,7 +71,7 @@
         (dolist (entry entries)
           (should (eq (plist-get entry :state) 'pending))
           (should-not (plist-get entry :error))
-          (should (equal (plist-get entry :agent) "hermes/test")))
+          (should (equal (plist-get entry :agent) "claude/test")))
         (should (equal (nth 4 (plist-get (car entries) :thema)) '("glycine" "mitochondria")))
         (should (equal (nth 3 (plist-get (cadr entries) :thema))
                        '("ALA dehydratase" "ALA synthase" "Ferrochelatase")))
@@ -316,7 +316,7 @@
            (results (gnosis-inbox-propose-rework
                      target (list (list :type "basic" :keimenon "Short card 1" :answer '("a"))
                                   (list :type "basic" :keimenon "Short card 2" :answer '("b")))
-                     :kind "rework-split" :agent "hermes/tutor" :reason "5 lapses")))
+                     :kind "rework-split" :agent "claude/tutor" :reason "5 lapses")))
       (should (equal (gnosis-test-inbox--statuses results) '(added added)))
       (gnosis-test-inbox--ui
         (should (string-match-p "replaces #" (buffer-string)))

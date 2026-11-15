@@ -242,3 +242,21 @@ fn text_runs_that_overlap_in_one_window_share_a_row_and_nothing_else_does() {
     let backgrounds: Vec<usize> = runs.iter().filter(|run| !run.text).map(|run| run.row).collect();
     assert!(backgrounds.iter().all(|row| runs.iter().filter(|run| run.row == *row).count() == 1));
 }
+
+#[test]
+fn a_run_s_bounds_are_its_glyphs_bit_for_bit() {
+    // A lone glyph's run is its rectangle exactly, at coordinates whose
+    // width a rebuild from its edges would round (15.719279 to 15.719238);
+    // a longer run is the rectangles joined one by one.
+    let mut frame = FrameGlyphBuffer::with_size(2000.0, 100.0);
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    let (x, width) = (1_480.890_5, 15.719_279);
+    frame.add_char('a', x, 0.0, width, ROW, 15.0, false);
+    frame.add_char('b', 10.3, 40.0, 7.7, ROW, 15.0, false);
+    frame.add_char('c', 18.0, 40.0, 7.7, ROW, 15.0, false);
+    let runs = runs(&frame.glyphs);
+    let bits = |r: Rect| [r.x, r.y, r.width, r.height].map(f32::to_bits);
+    assert_eq!(bits(runs[0].bounds), bits(Rect::new(x, 0.0, width, ROW)));
+    let joined = super::union(Rect::new(10.3, 40.0, 7.7, ROW), Rect::new(18.0, 40.0, 7.7, ROW));
+    assert_eq!(bits(runs[1].bounds), bits(joined));
+}

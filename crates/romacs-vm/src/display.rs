@@ -705,8 +705,17 @@ impl Vm {
         let top = if start <= window_start { -lines } else { lines };
         Ok((top, -top < rows as i32 && top < window_rows as i32))
     }
-    /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
+    /// Freeze every live leaf and the inactive minibuffer of the selected
+    /// frame's top-level frame, WIDTH by HEIGHT; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
+        self.ensure_windows()?;
+        let frame = self.frame(self.selected_top_frame())?.id;
+        self.frame_snapshot_of(frame, width, height)
+    }
+    /// Freeze every live leaf and the inactive minibuffer of the top-level
+    /// frame whose id is FRAME, WIDTH by HEIGHT. The frame is named by its
+    /// id, and found again after each step that runs Lisp.
+    pub(crate) fn frame_snapshot_of(&mut self, frame: u64, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
         // redisplay_internal's order: prepare_menu_bars, then the window
         // change functions.
         if !self.redisplay_inhibited()? {
@@ -718,33 +727,32 @@ impl Vm {
         }
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
-        let mut windows = self.frame_window_snapshots(width, height)?;
+        let mut windows = self.frame_window_snapshots(frame, width, height)?;
         // The bar is laid out around once more when its row's height changed.
-        let mut status_bar = self.status_bar_snapshot()?;
-        if self.refit_status_bar(status_bar.as_ref())? {
-            windows = self.frame_window_snapshots(width, height)?;
-            status_bar = self.status_bar_snapshot()?;
+        let mut status_bar = self.status_bar_snapshot(frame)?;
+        if self.refit_status_bar(self.frame_of_id(frame)?, status_bar.as_ref())? {
+            windows = self.frame_window_snapshots(frame, width, height)?;
+            status_bar = self.status_bar_snapshot(frame)?;
         }
-        let status_bar = self.status_bar_shown(status_bar);
+        let status_bar = self.status_bar_shown(self.frame_of_id(frame)?, status_bar);
         let windows = windows.into_iter().map(place).collect();
-        let children = self.child_frame_snapshots();
+        let children = self.child_frame_snapshots(frame);
         // Child windows measured with their own sizes; the frame's stand.
         self.display_state.width = width;
         self.display_state.height = height;
-        let background_alpha = self.frame_background_alpha()?;
-        let tab_bar = self.tab_bar_snapshot()?;
-        let chrome = self.pane_chrome()?;
+        let background_alpha = self.frame_background_alpha(self.frame_of_id(frame)?)?;
+        let tab_bar = self.tab_bar_snapshot(frame)?;
+        let chrome = self.pane_chrome(self.frame_of_id(frame)?)?;
         let no_font = self.no_font_display();
         Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, fontsets: self.fontset_state(), width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
     }
-    /// The host frame's pane chrome, from its `romacs-pane-radius',
+    /// Top-level frame FRAME's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
     /// (lisp/romacs/romacs-chrome.el) and the `romacs-pane-focus' and
     /// `romacs-pane-border' faces' foregrounds: the window with the focus edge
     /// is the one the status bar shows (`status_bar_owner'), whether or
     /// not the frame shows one (VM2-PANE-CHROME).
-    fn pane_chrome(&mut self) -> Result<romacs_layout_input::FrameChrome> {
-        let frame = self.host_frame_peek();
+    fn pane_chrome(&mut self, frame: Value) -> Result<romacs_layout_input::FrameChrome> {
         let radius = self.frame_parameter_of(frame, "romacs-pane-radius")?
             .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
         let dim = match self.frame_parameter_of(frame, "romacs-pane-dim")? {
@@ -759,10 +767,10 @@ impl Vm {
         } else { (None, None) };
         let cursor = self.frame_colour_parameter(frame, "cursor-color")?;
         let style = self.frame_style(frame)?;
-        let selected = self.status_bar_owner()?.0;
+        let selected = self.status_bar_owner(frame)?.0;
         let selected = self.window(selected)?.id;
-        let minibuffer = self.window(self.mini_window())?.id;
-        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, cursor, selected, minibuffer , style})
+        let minibuffer = self.window(self.frame(frame)?.minibuffer)?.id;
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(frame), radius, dim, focus, border, cursor, selected, minibuffer , style})
     }
     /// FRAME's parameter NAME, if it has one.
     pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
@@ -838,16 +846,16 @@ impl Vm {
         let hex = text.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()));
         Ok(hex.map(|h| std::array::from_fn(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())))
     }
-    /// Every shown child frame, lowest first: a visible frame whose
-    /// ancestors are visible, placed in the host frame. Frames are named by
-    /// their ids: a window's redisplay runs Lisp, which may collect and
-    /// move them, or delete one.
-    fn child_frame_snapshots(&mut self) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
-        let root = self.host_frame_peek();
+    /// Every shown descendant of the top-level frame whose id is TOP,
+    /// lowest first: a visible frame whose ancestors are visible, placed in
+    /// TOP. Frames are named by their ids: a window's redisplay runs Lisp,
+    /// which may collect and move them, or delete one.
+    fn child_frame_snapshots(&mut self, top: u64) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
+        let root = self.frame_of_id(top)?;
         let style = self.frame_style(root)?;
         let by_style = self.intern("t");
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
-        let ids: Vec<u64> = self.child_frames_bottom_up().into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
+        let ids: Vec<u64> = self.child_frames_bottom_up(root).into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
         let mut children = vec![];
         for id in ids {
             let Some(frame) = self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|f| f.id == id)) else { continue };
@@ -903,7 +911,7 @@ impl Vm {
             let fade = self.intern("fade");
             let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
             let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
-            // The hosted mini-window is placed in the host frame; drawn in this one.
+            // The hosted mini-window is placed in the top-level frame; drawn in this one.
             if hosts {
                 let mini = self.window(self.mini_window())?.id;
                 let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
@@ -1226,7 +1234,7 @@ impl Vm {
                 }
                 self.window_vscroll_of(next, pixels)
             }
-            // The host frame's is the size it was last displayed at; a child
+            // The top-level frame's is the size it was last displayed at; a child
             // frame's its own.
             FramePixelWidth | FramePixelHeight if self.frame(argument)?.parent == Value::NIL => Value::integer(i64::from(
                 if p == FramePixelWidth { self.display_state.width } else { self.display_state.height })),
@@ -2161,7 +2169,7 @@ impl Vm {
         let w = self.window(window)?;
         let (buffer, start, x, hscroll, vscroll) = (w.buffer, w.start, w.x, w.hscroll, w.vscroll_px);
         let (min_hscroll, suspended) = (w.min_hscroll, w.suspend_auto_hscroll);
-        let root = self.window_root_peek(crate::window::ROOT);
+        let root = self.frame(self.top_frame(w.frame)).map_or(Value::UNBOUND, |f| f.root);
         let root = self.window(root).map_or((0, 0), |r| (r.x, r.width));
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1);
         let modiff = self.buffer_state(buffer)?.modiff;
@@ -2202,8 +2210,8 @@ impl Vm {
             min_hscroll,
             suspended,
             chrome: {
-                let host = self.host_frame_peek();
-                let pane = self.frame_parameter_of(host, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
+                let top = self.top_frame(self.window(window)?.frame);
+                let pane = self.frame_parameter_of(top, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
                 let w = self.window(window)?;
                 (self.window_fringe_widths(window)?, [w.left_margin, w.right_margin], w.fringes_outside_margins, pane)
             },
@@ -2575,6 +2583,14 @@ impl Vm {
         let id = self.window(self.slots[root].value)?.id;
         let buffer = self.slots[buffer_slot].value;
         let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
+        // A reparse on its thread: the window keeps the faces it has, and
+        // the landing wakes the frame that fontifies it (`land_treesit').
+        if self.treesit_deferred.is_some() && self.treesit_ahead_running(buffer)? {
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+            return Ok(true);
+        }
         let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
         if text.treesit.small_edit_due(limit) {
             self.treesit_deferred.as_mut().expect("a deferred frame").push(id);
@@ -2593,7 +2609,7 @@ impl Vm {
         Ok(pending)
     }
     /// BUFFER's text, its base's for an indirect one; none for a killed buffer.
-    fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
+    pub(crate) fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
         let base = match self.object(buffer)? {
             Object::Buffer(b) if b.base != Value::NIL => b.base,
             Object::Buffer(_) => buffer,
@@ -2618,20 +2634,33 @@ impl Vm {
     /// ask for the parse, and fontification wait for the next frame. That
     /// frame always parses, so a run of keys cannot starve the faces, and
     /// tells the hooks every change since the last frame that ran them.
+    ///
+    /// Where the session can be woken, the parse of such an edit starts on
+    /// a thread here (`treesit::ahead`), and frames keep being built this
+    /// way until it lands: the parse then costs the evaluator nothing, and
+    /// no key waits for it.
     pub fn defer_parse(&mut self) -> Result<()> {
-        if std::mem::take(&mut self.treesit_parse_owed) {
-            return Ok(());
-        }
+        use crate::treesit::ahead::State;
         let limit = self.treesit_show_limit();
+        let (mut running, mut small) = (false, false);
         for window in self.displayed_windows() {
             let buffer = self.window(window)?.buffer;
-            if self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit)) {
-                self.treesit_deferred = Some(Vec::new());
-                let shown = self.display_state.shown.clone();
-                self.display_state.hooked.get_or_insert(shown);
-                break;
+            let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
+            match self.treesit_run_ahead(buffer, due)? {
+                State::Running => running = true,
+                // The trees are there: this frame's parsers take them.
+                State::Landed => {}
+                State::None => small |= due,
             }
         }
+        // The frame after one that showed an edit unparsed parses it, unless
+        // its parse is still on a thread.
+        if !running && (std::mem::take(&mut self.treesit_parse_owed) || !small) {
+            return Ok(());
+        }
+        self.treesit_deferred = Some(Vec::new());
+        let shown = self.display_state.shown.clone();
+        self.display_state.hooked.get_or_insert(shown);
         Ok(())
     }
     /// `redisplay' ran the hooks: they have been told what changed so far.
@@ -2642,6 +2671,10 @@ impl Vm {
     /// must then parse and fontify what it left.
     pub fn deferred_parse_done(&mut self) -> bool {
         let Some(windows) = self.treesit_deferred.take() else { return false };
+        // Windows waiting for a thread's parse are woken by its landing.
+        if windows.is_empty() {
+            return false;
+        }
         for id in windows {
             self.display_state.repaint_window(id);
         }
@@ -2904,7 +2937,8 @@ impl Vm {
         };
         let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
-        let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
+        let frame_width = self.top_geometry(self.top_frame(self.window(window)?.frame))?.width;
+        let frame_cols = (frame_width / self.window_state.column.max(1)).max(1) as usize;
         // keyboard.el's Frecursive_edit keeps it.
         let command_loop_level = self.names.get("romacs--command-loop-level")
             .and_then(|&slot| self.slots[slot].value.integer_value())
@@ -2976,10 +3010,10 @@ impl Vm {
         self.mode_line_face_name(window)
     }
     /// The frame whose faces the display paints: a child frame shows its
-    /// root's (VM2-CHILD-FRAME), and the host frame is the one root.
+    /// top-level frame's (VM2-CHILD-FRAME), and the selected frame's
+    /// top-level frame is the one painted.
     fn painted_frame(&self) -> Value {
-        let host = self.host_frame_peek();
-        if host == Value::UNBOUND { self.frame_value_peek() } else { host }
+        self.selected_top_frame()
     }
     /// The lface vector FACE paints from, without touching the tables.
     fn painted_lface(&self, face: Value) -> Option<Value> {

@@ -36,6 +36,92 @@ pub trait Schema: 'static {
     fn walk(&self, w: &mut Walk<'_>);
     /// This value for an observer, or None when it is unsized.
     fn any(&self) -> Option<&dyn Any>;
+    /// Make this value hold nothing of the executable (`Settle`): settle
+    /// each field, element or pointee it holds, and give each empty hash
+    /// table of its own an allocation.
+    fn settle(&mut self, s: &mut Settle);
+    /// Remake each at-rest field as this process makes it (`Default`): an
+    /// image holds them at rest, and whatever they hold, an empty table's
+    /// static for one, is the builder's. Only a listing names at-rest fields.
+    fn renew(&mut self) {}
+}
+
+/// A pass that makes an image's values hold nothing of the executable,
+/// run on the VM a capture writes.
+///
+/// The one reference into the executable a listed type can hold is an
+/// empty standard hash table's (or JSON map's): its control bytes are a
+/// static of the executable, which another process has elsewhere. Settled,
+/// each such table has an allocation of its own, which an image carries;
+/// it is empty still. What cannot be changed in place, a value shared
+/// through an `Rc` or `Arc` with another owner, a hash table's key or
+/// hasher, a heap's element, is walked instead (`Walk`), and an empty table
+/// found there, or a cell or lock taken whose contents the walk cannot see,
+/// is named (`unsettled`), which refuses the capture.
+pub struct Settle {
+    /// The empty tables given an allocation.
+    settled: u64,
+    /// The shared allocations already checked, by address.
+    shared: FxHashSet<usize>,
+    /// The type of each value out of reach that holds an empty table.
+    unsettled: Vec<&'static str>,
+    /// The walk that checks values out of reach.
+    check: Walk<'static>,
+}
+
+impl Default for Settle {
+    fn default() -> Self {
+        fn unobserved(_: &dyn Any, _: &mut Notes) {}
+        Self { settled: 0, shared: FxHashSet::default(), unsettled: Vec::new(), check: Walk::new(Box::leak(Box::new(unobserved))) }
+    }
+}
+
+impl Settle {
+    /// An empty table, for which RESERVE makes an allocation of its own.
+    pub fn empty_table(&mut self, reserve: impl FnOnce()) {
+        reserve();
+        self.settled += 1;
+    }
+
+    /// VALUE, which cannot be changed in place: checked, by a walk, for an
+    /// empty table it holds.
+    pub fn unreachable<T: Schema + ?Sized>(&mut self, value: &T) {
+        if T::LEAF {
+            return;
+        }
+        let noted = |check: &Walk<'_>| check.noted(EMPTY_HASH_TABLE) + check.noted(TAKEN);
+        let before = noted(&self.check);
+        self.check.value(value);
+        // An empty table, or a cell or lock taken, whose contents are unknown.
+        if noted(&self.check) > before {
+            self.unsettled.push(type_name::<T>());
+        }
+    }
+
+    /// VALUE, shared with another owner, at ADDRESS: checked once.
+    pub fn shared<T: Schema + ?Sized>(&mut self, address: usize, value: &T) {
+        if self.first(address) {
+            self.unreachable(value);
+        }
+    }
+
+    /// Whether the shared allocation at ADDRESS is met here first: a value
+    /// several owners reach is settled or checked once.
+    pub fn first(&mut self, address: usize) -> bool {
+        self.shared.insert(address)
+    }
+
+    /// How many empty tables were given an allocation.
+    #[must_use]
+    pub fn settled(&self) -> u64 {
+        self.settled
+    }
+
+    /// The types of the values out of reach that hold an empty table.
+    #[must_use]
+    pub fn unsettled(&self) -> &[&'static str] {
+        &self.unsettled
+    }
 }
 
 /// The notes an observer counts, by name.
@@ -183,6 +269,12 @@ impl<'o> Walk<'o> {
     /// Count one NOTE.
     pub fn note(&mut self, note: &'static str) {
         self.notes.add(note, 1);
+    }
+
+    /// How many NOTE the walk has counted.
+    #[must_use]
+    pub fn noted(&self, note: &str) -> u64 {
+        self.notes.0.get(note).copied().unwrap_or(0)
     }
 
     /// The census: every kind met, the largest first, with its layouts; the
