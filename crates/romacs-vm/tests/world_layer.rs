@@ -307,6 +307,20 @@ fn lisp_a_leaf_reaches_sees_the_leafs_frame() {
     assert_eq!(eval(&mut vm, "(progn (setq seen nil) (mapbacktrace (lambda (_e function _a _f) (if (eq function 'buffer-local-value) (setq seen t)))) seen)"), "nil");
 }
 
+/// A pending variable is the world's, not the process's: renewing what a
+/// restore remakes (`Schema::renew`) leaves it pending, and its first
+/// access still forces it.
+#[test]
+fn a_pending_variable_outlives_a_restores_renewal() {
+    use romacs_vm::world::safe::Schema;
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().expect("prelude");
+    eval(&mut vm, "(progn (defun romacs--world-force (_i) (set-default 'pr 'forced)) (defvar pr 'stale))");
+    assert_eq!(eval(&mut vm, "(romacs--world-pend 'pr 0)"), "t");
+    vm.renew();
+    assert_eq!(eval(&mut vm, "pr"), "forced");
+}
+
 /// A debug-on-exit flag on the leaf's frame leaves with the frame, as it does
 /// from any primitive's: the caller's return does not stop for it.
 #[test]

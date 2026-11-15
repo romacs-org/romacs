@@ -12,7 +12,7 @@ import real_init
 class RealInitTest(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix='real-init-'))
-        (self.dir / 'init.el').write_text('(bench-block "hermes" (setq hermes-instances \'(("l" . "@HERMES_URL@"))))\n')
+        (self.dir / 'init.el').write_text('(bench-block "tally" (setq tally-width 4))\n')
 
     def config(self, **keys):
         path = self.dir / 'profile.json'
@@ -33,8 +33,8 @@ class RealInitTest(unittest.TestCase):
             real_init.profile_init({})
 
     def test_environment_names_the_config(self):
-        with mock.patch.dict(os.environ, {real_init.CONFIG_ENV: str(self.config(hermes_url='http://h:1'))}):
-            self.assertEqual(real_init.hermes_url(real_init.load(None)), 'http://h:1')
+        with mock.patch.dict(os.environ, {real_init.CONFIG_ENV: str(self.config(org='notes.org'))}):
+            self.assertEqual(real_init.load(None)['org'], (self.dir / 'notes.org').resolve())
 
     def test_live_gnosis_databases_are_refused(self):
         live = self.dir / 'live/gnosis.db'
@@ -49,28 +49,14 @@ class RealInitTest(unittest.TestCase):
         copy = self.dir / 'copy/gnosis.db'
         self.assertEqual(real_init.refuse_live_gnosis(copy, config), copy.resolve())
 
-    def test_an_init_that_may_start_hermes_is_refused(self):
-        for setting in ("(setq hermes-dashboard-transport-start-mode 'spawn)",
-                        "(setopt hermes-dashboard-transport-start-mode 'auto)",
-                        "(list :start-mode 'spawn)"):
-            (self.dir / 'init.el').write_text(setting)
-            with self.assertRaises(ValueError, msg=setting):
-                real_init.profile_init(real_init.load(self.config()))
-        (self.dir / 'init.el').write_text("(setq hermes-dashboard-transport-start-mode 'remote)")
-        real_init.profile_init(real_init.load(self.config()))
-
-    def test_init_session_attaches_hermes_around_the_blocks(self):
-        config = real_init.load(self.config(hermes_url='http://h:1'))
+    def test_init_session_runs_the_blocks_before_the_endpoint(self):
+        config = real_init.load(self.config())
         source = real_init.init_source('romacs', self.dir, self.dir / 'port', 'tok', 'init', config)
-        blocks = source.index('(bench-block "hermes"')
-        self.assertIn('"http://h:1"', source)
-        self.assertLess(source.index(real_init.HERMES_REMOTE), blocks)
-        self.assertGreater(source.rindex("(setq hermes-dashboard-transport-start-mode 'remote)"), blocks)
+        self.assertLess(source.index('(bench-block "tally"'), source.index('romacs-mcp-enable-session-tools'))
 
     def test_stock_session_loads_no_profile(self):
         source = real_init.init_source('gnu', None, self.dir / 'port', 'tok', 'stock', {})
         self.assertNotIn('bench-block "', source)
-        self.assertNotIn('hermes-dashboard-transport-start-mode', source)
 
 
 if __name__ == '__main__':

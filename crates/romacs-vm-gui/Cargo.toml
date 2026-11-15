@@ -33,6 +33,8 @@ rustix = { workspace = true, features = ["process"] }
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-test-fonts.workspace = true
 wgpu.workspace = true
+# The `all` target's module list (tests/all/main.rs), made when the tests build.
+romacs-vm-gui-test-build = { path = "../romacs-vm-gui-test-build" }
 
 [lints]
 workspace = true

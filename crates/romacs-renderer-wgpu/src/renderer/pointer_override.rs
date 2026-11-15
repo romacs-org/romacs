@@ -298,31 +298,6 @@ impl PointerOverrideResolver {
         })
     }
 
-    pub(super) fn affects_glyph_range(
-        &self,
-        glyphs: &[romacs_display_protocol::FrameGlyph],
-        range: std::ops::Range<usize>,
-    ) -> bool {
-        let Some(entries) = self.overrides.get(range.clone()) else {
-            return false;
-        };
-        let Some(glyphs) = glyphs.get(range) else {
-            return false;
-        };
-        entries.iter().zip(glyphs).any(|(entry, glyph)| {
-            let Some((PresentedPrimitiveKind::Glyph, paint)) = entry else {
-                return false;
-            };
-            let Some((x, y, width, height)) = glyph.cell_rect() else {
-                return false;
-            };
-            let bounds = Rect::new(x, y, width, height);
-            let clip = paint.clip();
-            let clip = Rect::new(clip.x(), clip.y(), clip.width(), clip.height());
-            intersect_rect(&bounds, &clip).is_some()
-        })
-    }
-
     #[cfg(test)]
     pub(super) fn glyph_clip(&self, index: usize, base: Option<&Rect>) -> Option<Rect> {
         self.effective_clip(PresentedPrimitiveKind::Glyph, index, base)

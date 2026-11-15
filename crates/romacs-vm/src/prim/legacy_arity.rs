@@ -95,7 +95,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | OverlayGet
         | OverlaysIn
         | Remhash
-        | Maphash
         | HashTableContainsP
         | HashNext
         | HashKeyAt

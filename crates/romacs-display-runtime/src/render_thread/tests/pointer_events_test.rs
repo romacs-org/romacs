@@ -41,7 +41,7 @@ fn native_titlebar_is_not_a_menu_hit_and_popup_anchor_stays_frame_local() {
         false,
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     let SurfaceState::Drawable(surface) =
         SurfaceState::from_device_size(1600, 1200, DeviceScale::new(2.0).unwrap()).unwrap()
     else {

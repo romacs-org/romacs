@@ -1,4 +1,4 @@
-//! C primitives and variables emacs-hermes reaches, against pinned GNU:
+//! C primitives and variables bundled packages reach, against pinned GNU:
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer

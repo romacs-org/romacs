@@ -651,7 +651,7 @@ mod tests {
     /// xfaces.c Fface_font: on the display every face names the font
     /// painting draws it with, from the face's family and pixel size, and
     /// that font opens, so `window-font-width' (font.c `font-info' of
-    /// `face-font'), by which hermes sizes its tables in `fixed-pitch',
+    /// `face-font'), by which a chat sizes its tables in `fixed-pitch',
     /// measures a face other than `default' instead of signalling. A face
     /// the display theme does not hold paints, and so names, the default
     /// face's font.

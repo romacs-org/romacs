@@ -3,7 +3,6 @@
 (require 'romacs-truncate)
 (require 'romacs-attach)
 (require 'romacs-layer)
-(require 'hermes-chat-buffer)
 
 (defconst romacs-truncate-tests--long "abcdefghijklmnop.txt")
 
@@ -27,13 +26,6 @@
       (should (<= (string-width (romacs-attach--elide "abcdef.txt" width)) width))
       (should (<= (string-width (romacs-attach--elide romacs-truncate-tests--long width)) width)))
     (should (equal (romacs-attach--elide romacs-truncate-tests--long 14) "abcd...nop.txt"))))
-
-(ert-deftest romacs-truncate-a-left-cut-keeps-what-fits ()
-  (let ((truncate-string-ellipsis "..."))
-    (should (equal (hermes-chat--truncate-left "/a/b/c/d" 2) "/d"))
-    (should (equal (hermes-chat--truncate-left "/a/b/c/d" 5) ".../d"))
-    (dotimes (width 10)
-      (should (<= (string-width (hermes-chat--truncate-left "/a/b/c/d/e/f" width)) width)))))
 
 (ert-deftest romacs-truncate-a-toast-stays-within-its-columns ()
   (let ((truncate-string-ellipsis "...") (romacs-layer-toast-lines 1))

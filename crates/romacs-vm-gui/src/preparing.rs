@@ -117,7 +117,7 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32) -> Result<Prepar
             // wait at once rather than after a frame's second.
             let end = Instant::now() + Duration::from_secs(1);
             while !stopped.load(Ordering::Relaxed)
-                && sender.wait_for_render(presentation, Duration::from_millis(20)).is_err()
+                && sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::from_millis(20)).is_err()
                 && Instant::now() < end {}
         }
         presentation + 1

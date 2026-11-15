@@ -504,7 +504,6 @@
       (should (= 5 (gnosis-review-state-reviewed state)))
       (should-not (gnosis-review--work-p state))
       (should-not unread-command-events)
-      (should-not (featurep 'hermes))
       (should-not (seq-find (lambda (q) (equal (plist-get q :id) "stale"))
                             (plist-get (gnosis-agent-review--data state) :questions)))
       (gnosis-test-linked--empty-evidence))))

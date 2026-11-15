@@ -513,10 +513,11 @@ fn render_command_image_retire() {
 #[test]
 fn render_command_set_window_title() {
     let cmd = RenderCommand::Window(WindowCommand::SetWindowTitle {
+        frame: FrameRef::Frame(1),
         title: "Romacs - main.rs".to_string(),
     });
     match cmd {
-        RenderCommand::Window(WindowCommand::SetWindowTitle { title }) => {
+        RenderCommand::Window(WindowCommand::SetWindowTitle { title, .. }) => {
             assert_eq!(title, "Romacs - main.rs");
         }
         other => panic!("Expected SetWindowTitle, got {:?}", other),
@@ -551,9 +552,9 @@ fn render_command_set_frame_geometry_hints() {
 
 #[test]
 fn render_command_request_attention() {
-    let cmd = RenderCommand::Window(WindowCommand::RequestAttention { urgent: true });
+    let cmd = RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: true });
     match cmd {
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent }) => assert!(urgent),
+        RenderCommand::Window(WindowCommand::RequestAttention { urgent, .. }) => assert!(urgent),
         other => panic!("Expected RequestAttention, got {:?}", other),
     }
 }
@@ -823,7 +824,7 @@ fn cross_thread_command_delivery() {
     let handle = std::thread::spawn(move || {
         let cmd = render.cmd_rx.recv().unwrap();
         match cmd {
-            RenderCommand::Window(WindowCommand::SetWindowTitle { title }) => {
+            RenderCommand::Window(WindowCommand::SetWindowTitle { title, .. }) => {
                 assert_eq!(title, "test-title");
             }
             other => panic!("Expected SetWindowTitle, got {:?}", other),
@@ -833,6 +834,7 @@ fn cross_thread_command_delivery() {
     emacs
         .cmd_tx
         .send(RenderCommand::Window(WindowCommand::SetWindowTitle {
+        frame: FrameRef::Frame(1),
             title: "test-title".to_string(),
         }))
         .unwrap();
@@ -848,14 +850,14 @@ fn thread_comms_cmd_channel_bounded_capacity() {
     for _ in 0..COMMAND_CHANNEL_CAPACITY {
         comms
             .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
             .unwrap();
     }
 
     // Next ordinary try_send should fail (channel full)
     let result = comms
         .cmd_tx
-        .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }));
+        .try_send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }));
     assert!(
         result.is_err(),
         "cmd channel should be full after {} sends",
@@ -873,7 +875,7 @@ fn channel_sends_multiple_commands_in_order() {
         .unwrap();
     comms
         .cmd_tx
-        .send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
+        .send(RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }))
         .unwrap();
     comms
         .cmd_tx
@@ -887,7 +889,7 @@ fn channel_sends_multiple_commands_in_order() {
         other => panic!("Expected Shutdown, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {
-        RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }) => {}
+        RenderCommand::Window(WindowCommand::RequestAttention { frame: crate::thread_comm::FrameRef::Frame(1), urgent: false }) => {}
         other => panic!("Expected RefreshFrameOpacity, got {:?}", other),
     }
     match comms.cmd_rx.try_recv().unwrap() {

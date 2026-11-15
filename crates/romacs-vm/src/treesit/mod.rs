@@ -108,6 +108,7 @@ impl romacs_snapshot::Schema for Registry {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
 }
 
 /// The most first parses running at once, whatever a session visits.

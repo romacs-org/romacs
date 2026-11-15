@@ -322,6 +322,13 @@ def run_batch_probe(binary, home, store, probe, timeout):
     return verdict(probe, small, large)
 
 
+def compositor_env():
+    """What ROMACS_HARNESS_WLR_ENV adds to a private compositor's
+    environment: `NAME=VALUE' pairs that put it on the host's GPU, where
+    Romacs then draws too.  Nothing without it: a software compositor."""
+    return dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
+
+
 class Gui:
     """A private headless labwc for --wayland sessions."""
 
@@ -336,8 +343,8 @@ class Gui:
                                       'LIBSEAT_BACKEND': 'noop'})
         labwc = shutil.which(os.environ.get('ROMACS_TEST_LABWC', 'labwc'), path=self.env['PATH'])
         self.log = (home / 'compositor.log').open('w')
-        self.compositor = subprocess.Popen([labwc or 'labwc', '-C', str(runtime / 'config')], env=self.env,
-                                           stdout=self.log, stderr=self.log)
+        self.compositor = subprocess.Popen([labwc or 'labwc', '-C', str(runtime / 'config')],
+                                           env=self.env | compositor_env(), stdout=self.log, stderr=self.log)
         deadline = time.monotonic() + timeout
         while not any(p.is_socket() for p in runtime.glob('wayland-*')):
             if self.compositor.poll() is not None or time.monotonic() > deadline:
