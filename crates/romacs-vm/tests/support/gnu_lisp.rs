@@ -33,7 +33,7 @@ pub fn gnu_lisp(then: &[&str]) -> Vm {
 fn restored(root: &Path) -> Option<Vm> {
     let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
     let recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
-    World::for_test(store, &recipe, vec![root.to_owned()], || {
+    World::for_test(store, &recipe, || {
         romacs_vm::host::end_at_dump_point();
         Ok((booted(root, true), ()))
     }).map(|(vm, ())| vm)

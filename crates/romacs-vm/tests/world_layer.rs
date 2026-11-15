@@ -216,6 +216,100 @@ fn the_libraries_an_init_declares_are_noted_once_with_their_forms() {
     assert_eq!(eval(&mut vm, "(list ordinals (romacs--init-after-load-ordinal 'lib-x))"), "((1 1 0) nil)", "no recording, no ordinal");
 }
 
+/// A library the init loads (not only declares) whose load calls a secret
+/// reader the build could not make defer (no romacs-world-layer.el here, so
+/// the reader runs) is left out by name: the observed call is the net.
+#[test]
+fn a_loaded_library_is_refused_for_reading_a_secret() {
+    let dir = scratch("loaded-secret");
+    std::fs::write(dir.join("lisp/lib-r.el"), "(defun auth-source-netrc-parse (&rest _) (list (list :secret \"romacs-fixture-netrc-4c1d\")))\n\
+(defvar lib-r-secret (auth-source-netrc-parse :file \"~/.authinfo\"))\n(provide 'lib-r)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-a", "lib-r", "lib-v"]);
+    std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(1, "secret: auth-source-netrc-parse")], "{}", trace["refusals"]);
+}
+
+/// A library the init loads that reads a credential file itself, not
+/// through a reader: the read fails in the build, and the form that made it
+/// is kept, as code, for restore to evaluate, a definition or not; the
+/// library's other forms are captured, and the entry is not left out.
+#[test]
+fn a_library_s_credential_read_is_kept_as_code_for_restore() {
+    let dir = scratch("credential-file");
+    std::fs::write(dir.join(".authinfo"), "machine example login me password romacs-fixture-authinfo-5e2b\n").unwrap();
+    let read = format!("(condition-case nil (with-temp-buffer (insert-file-contents {:?}) (buffer-string)) (error nil))",
+                       dir.join(".authinfo").display().to_string());
+    std::fs::write(dir.join("lisp/lib-c.el"), format!(
+        "(defvar lib-c-text {read})\n(setq lib-c-plain {read})\n(defvar lib-c-after 1)\n(provide 'lib-c)\n")).unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-c"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(list lib-c-text lib-c-plain lib-c-after)"), "(nil nil 1)",
+               "the builder read no credential and went on with the library");
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (nth 1 e) (car (nth 2 e)) (nth 3 e))) (reverse romacs--world-reseed-forms))"),
+               "((defvar lib-c-text defvar t) (form nil setq t))");
+}
+
+/// A definition that loads another file before it reads a per-process
+/// fact is still a definition once that file is loaded: it is re-seeded at
+/// restore, not refused (the file's own forms are judged as theirs).
+#[test]
+fn a_definition_stays_one_across_a_load_it_makes() {
+    let dir = scratch("nested");
+    std::fs::write(dir.join("lisp/lib-inner.el"), "(defvar lib-inner-x 1)\n(setq lib-inner-y 2)\n(provide 'lib-inner)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-outer.el"), "(defvar lib-outer-path (progn (require 'lib-inner) (car exec-path)))\n(provide 'lib-outer)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-outer"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (nth 1 e)) romacs--world-reseed-forms)"), "(lib-outer-path)");
+}
+
+/// The form that asked for a secret is the one kept, though a library it
+/// loads afterwards has forms of its own: their ends do not take its ask.
+#[test]
+fn a_form_keeps_its_ask_across_a_load_it_makes() {
+    let dir = scratch("nested-ask");
+    std::fs::write(dir.join(".netrc"), "machine example login me password romacs-fixture-netrc-9a1f\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-inner2.el"), "(defvar lib-inner2-x 1)\n(setq lib-inner2-y 2)\n(provide 'lib-inner2)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-asks.el"), format!(
+        "(progn (condition-case nil (with-temp-buffer (insert-file-contents {:?})) (error nil)) (require 'lib-inner2))\n(provide 'lib-asks)\n",
+        dir.join(".netrc").display().to_string())).unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-asks"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (car (nth 2 e)))) romacs--world-reseed-forms)"), "((form progn))");
+}
+
 /// A declared library's definitions that read a per-process fact are kept
 /// as declared, so restore may leave them pending; one whose load or
 /// configuration reads a secret, or that connects to the network, is
