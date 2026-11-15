@@ -2,8 +2,8 @@ use romacs_vm::Vm;
 
 /// keyboard.c Fevent_convert_list against the pinned GNU: characters with
 /// shift and control folded in as make_ctrl_char does, symbols prefixed in
-/// apply_modifiers' order with the click bit printing nothing, and both
-/// refusals. mouse.el's `mouse--click-1-maybe-follows-link' calls it on
+/// apply_modifiers' order with the click bit printing nothing, nil as a
+/// base like any symbol, and both refusals. mouse.el's `mouse--click-1-maybe-follows-link' calls it on
 /// every mouse-1 that `key-translation-map' sees.
 #[test]
 fn event_convert_list_matches_gnu() {
@@ -11,7 +11,8 @@ fn event_convert_list_matches_gnu() {
     let expression = "(mapcar (lambda (desc) (condition-case err (event-convert-list desc) (error (list 'error (car (cdr err))))))
         '((a) (control a) (shift a) (control shift a) (meta control x) (control ?\\s) (control ??) (control ?1)
           (super hyper ?x) (control ?é) (down click mouse-1) (double mouse-1) (control meta shift mouse-3)
-          (triple down mouse-2) (drag mouse-1) (up mouse-1) (alt wheel-up) (control f1) (control) (a b)))";
+          (triple down mouse-2) (drag mouse-1) (up mouse-1) (alt wheel-up) (control f1) (control) (a b)
+          nil (nil a) (control nil) (a nil) (meta t)))";
     let output = std::process::Command::new(oracle)
         .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])
         .output().unwrap();

@@ -419,7 +419,7 @@ impl Vm {
             }
         }
         name.push_str(base);
-        self.keymap_symbol(&name)
+        self.intern(&name)
     }
     fn canonical_key_event_symbol(&mut self, event: Value) -> Result<Value> {
         // GNU keymap.c:338,762 reorder both stored and looked-up symbols.
@@ -433,14 +433,19 @@ impl Vm {
     pub(crate) fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
         // the base, so (shift control a) and (control shift a) agree.
+        // A symbol naming a modifier is one unless it is last; any other
+        // element is the base, and a second one is refused. nil is a base
+        // like any symbol, so (nil a) is a and nil itself is nil.
         let parts = self.list_values(event)?;
-        let Some((&last, modifiers)) = parts.split_last() else { return Err("Invalid base event".into()); };
-        let mut mask = 0;
-        for &modifier in modifiers {
-            mask |= self.key_event_name(modifier).and_then(Self::key_event_modifier)
-                .ok_or("Two bases given in one event")?;
+        let (mut mask, mut base) = (0, Value::NIL);
+        for (i, &item) in parts.iter().enumerate() {
+            let modifier = if i + 1 < parts.len() { self.key_event_name(item).and_then(Self::key_event_modifier) } else { None };
+            match modifier {
+                Some(bit) => mask |= bit,
+                None if base != Value::NIL => return Err("Two bases given in one event".into()),
+                None => base = item,
+            }
         }
-        let mut base = last;
         if let Some(name) = self.key_event_name(base) {
             if name.chars().count() == 1 {
                 // event-convert-list uses SREF, the first byte, even for a
