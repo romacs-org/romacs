@@ -25,7 +25,7 @@ fn diagnostic_line(value: &serde_json::Value) {
     let _ = std::io::stderr().lock().write_all(&line);
 }
 
-use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
+use romacs_vm_gui::{command, echo, fonts, grammars, loading, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
 mod title;
 mod prompt;
@@ -37,7 +37,6 @@ mod timers;
 mod world;
 mod isolate_worker;
 mod exit;
-mod preparing;
 mod quit;
 mod client;
 #[cfg(test)]
@@ -920,6 +919,17 @@ fn run() -> Result<Option<exit::Exit>, String> {
         if let Some(start) = start { startup::begin_phases(start); }
         let sender = std::sync::Arc::new(sender);
         let mut first_presentation = 1;
+        // The launch screen, from the window's first moment until the
+        // session's first frame (loading.rs); a server shows it in the
+        // window a client asked for at its start.
+        let loading = if live && (!serving || serve_frame) {
+            let started = loading::start(sender.clone(), width, height, loading::profile_path());
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "loading-frame", "painted": started.is_ok(),
+                                                               "error": started.as_ref().err()}));
+            // A first frame that failed may still have been submitted.
+            if started.is_err() { first_presentation = 2; }
+            started.ok()
+        } else { None };
         let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
             Ok(world) => Some(world),
             Err(reason) => {
@@ -934,20 +944,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
-        let mut preparing = None;
         let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
-            // Said first, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": preparing::MESSAGE}));
-            // A server has no window to show it in.
-            if serving { return; }
-            let painted = preparing::start(sender.clone(), width, height);
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
-                                                               "error": painted.as_ref().err()}));
-            // A first frame that failed may still have been submitted.
-            if painted.is_err() { first_presentation = 2; }
-            preparing = painted.ok();
+            // Said on stderr too, so a launcher sees it whether or not a window can.
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START}));
+            loading::step("world-build", loading::FIRST_START);
         })));
-        if let Some(preparing) = preparing { first_presentation = preparing.finish(); }
         // The world this launch booted from, which its worker isolates adopt.
         let booted = world.as_ref().map(|base| if from_layer { &layer.as_ref().unwrap().world } else { base });
         let isolate_world = booted.map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
@@ -963,7 +964,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, quit, prune, serve, serve_landing, early_window)
+                     isolate_world, worlds, first_presentation, loading, quit, prune, serve, serve_landing, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1289,6 +1290,7 @@ fn evaluate(
     isolate_world: Option<(std::path::PathBuf, String)>,
     worlds: Option<world::Worlds>,
     first_presentation: u64,
+    loading: Option<loading::Loading>,
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
     serve: Option<String>,
@@ -1457,6 +1459,7 @@ fn evaluate(
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
     host.borrow_mut().presentation = first_presentation;
+    host.borrow_mut().loading = loading;
     let last_presentation = || host.borrow().presentation;
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
@@ -1472,6 +1475,7 @@ fn evaluate(
         if serve_landing && let Err(error) = vm.eval_source("(romacs-server--landing)") {
             eprintln!("romacs: landing: {error}");
         }
+        startup::mark_phase("server");
     }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
@@ -1483,6 +1487,8 @@ fn evaluate(
     let early = early_window.map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string()).and_then(|r| r));
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
+    // The session's first paint takes the window from the launch screen.
+    host.borrow_mut().end_loading();
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
         Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {

@@ -169,6 +169,7 @@ impl DisplayHost for Counted<Box<dyn DisplayHost>> {
         fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32);
         fn set_visual_config(&mut self, config: &romacs_display_protocol::VisualConfig);
         fn lose_device(&mut self) -> bool;
+        fn startup_progress(&mut self, stage: &str, label: &str);
         fn decode_image(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
         fn release_image(&mut self, id: u64);
         fn begin_decode(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
