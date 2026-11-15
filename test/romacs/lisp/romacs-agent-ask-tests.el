@@ -162,7 +162,9 @@
   ;; An option's indent counts, and a row's last column is the wrap's.
   (should (= (romacs-agent-ask--rows-of (concat " 1 ○ " (string-join (make-list 15 "word") " ")) 80) 1))
   (should (= (romacs-agent-ask--rows-of (concat "    " (make-string 76 ?x)) 80) 2))
-  (should (= (romacs-agent-ask--rows-of "abcd efgh" 9) 2)))
+  (should (= (romacs-agent-ask--rows-of "abcd efgh" 9) 2))
+  ;; Two spaces before a note are two columns.
+  (should (= (romacs-agent-ask--rows-of (concat " 1 ○ " (make-string 69 ?x) "  note") 80) 2)))
 
 (ert-deftest romacs-agent-ask-replay-leaves-live-layers ()
   ;; A turn replayed (paging back) ends long ago: today's layer stays,

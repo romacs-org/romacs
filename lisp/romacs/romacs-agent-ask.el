@@ -207,7 +207,8 @@ word too long for a row starts its own and runs on."
   (let* ((room (max 1 (1- columns)))
          (indent (- (length line) (length (string-trim-left line " +"))))
          (rows 1) (used indent) (first t))
-    (dolist (word (split-string (substring line indent) " " t))
+    ;; Split at each space: two in a row are an empty word, a column.
+    (dolist (word (split-string (substring line indent) " "))
       (let ((width (string-width word)))
         (cond (first (setq used (+ used width) first nil))
               ((<= (+ used 1 width) room) (setq used (+ used 1 width)))
