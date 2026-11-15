@@ -52,7 +52,7 @@ fn bundled_commands_are_autoloads_that_load_their_package_when_called() {
 
 /// The --loadup world loads the library (romacs-vm-gui's startup), so what
 /// its scan reads keys the world: each bundled directory's listing and each
-/// package file is a record of the build, and the scan refuses nothing.
+/// package file is a record of the build, and the scan leaves nothing uncaptured.
 #[test]
 fn a_world_build_records_what_the_bundled_scan_reads() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
@@ -70,7 +70,7 @@ fn a_world_build_records_what_the_bundled_scan_reads() {
                  "lisp/agents/romacs-attach.el"] {
         assert!(recorded("file-read", &root.join(file)), "{file} is read");
     }
-    assert_eq!(trace["refusals"], json!([]));
+    assert_eq!(trace["uncaptured"], json!([]));
 }
 
 /// The scan defines what `loaddefs-generate' writes for the same directory,

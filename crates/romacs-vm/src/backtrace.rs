@@ -391,12 +391,12 @@ impl Vm {
             let local = self.declaration_hash_get(self.slots[base].local, owner)?.ok_or("missing local binding")?;
             return Ok(self.slots[local.index(7)? - 1].value);
         }
-        self.fence_binding(slot, at, owner);
+        self.tracked_binding(slot, at, owner);
         match successor {
             // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
             // let's own, never the root's
             Some(next) => Ok(self.dynamic[next].1),
-            None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
+            None => self.untracked(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
     }
     /// Activation INDEX's own bindings, live ones only, as (SYMBOL . VALUE)
@@ -508,7 +508,7 @@ impl Vm {
     /// (SET_INTERNAL_THREAD_SWITCH). What it swapped, for
     /// `backtrace_rewind`, which swaps it back in the other order.
     pub(super) fn backtrace_unrewind(&mut self, index: usize) -> Result<[usize; 4]> {
-        if self.fence.is_some() {
+        if self.tracking.is_some() {
             return Err("backtrace-eval while a world is built".into());
         }
         let span = [
@@ -573,7 +573,7 @@ impl Vm {
     /// so it becomes a binding of nothing (GNU SPECPDL_NOP).
     fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
-        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+        // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
         let (slot, saved, owner, default) = self.dynamic[at];
         let symbol = self.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
@@ -601,7 +601,7 @@ impl Vm {
         let [current] = self.release_frame(frame);
         restored?;
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
-        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+        // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
         self.dynamic[at].1 = current;
         Ok(())
     }
@@ -613,7 +613,7 @@ impl Vm {
         let nothing = self.intern(INERT_BINDING);
         let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
         // HOST(dynamic:saved): backtrace-eval's unrewind makes a binding whose buffer lost its
-        // local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
+        // local inert (eval.c SPECPDL_NOP); not done while a world is built, so no tracking sees it
         self.dynamic[at] = (slot, Value::NIL, Value::NIL, false);
         if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
             self.backtrace.bindings[i].1 = nothing;
